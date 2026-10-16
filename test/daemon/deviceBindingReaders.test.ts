@@ -25,15 +25,17 @@ describe("device binding readers", () => {
   });
 
   test("statusOf preserves every status", () => {
-    for (const status of ["idle", "busy", "error"] as const) {
+    for (const status of ["idle", "busy"] as const) {
       expect(statusOf({ status })).toBe(status);
+      expect(statusOf({ status, health: "ok" })).toBe(status);
+      expect(statusOf({ status, health: "error" })).toBe("error");
     }
   });
 
   test("isIdle compares status and rejects nullish devices", () => {
     expect(isIdle({ status: "idle" })).toBe(true);
     expect(isIdle({ status: "busy" })).toBe(false);
-    expect(isIdle({ status: "error" })).toBe(false);
+    expect(isIdle({ status: "busy", health: "error" })).toBe(false);
     expect(isIdle(null)).toBe(false);
     expect(isIdle(undefined)).toBe(false);
   });
@@ -41,7 +43,7 @@ describe("device binding readers", () => {
   test("isBusy compares status and rejects nullish devices", () => {
     expect(isBusy({ status: "idle" })).toBe(false);
     expect(isBusy({ status: "busy" })).toBe(true);
-    expect(isBusy({ status: "error" })).toBe(false);
+    expect(isBusy({ status: "busy", health: "error" })).toBe(false);
     expect(isBusy(null)).toBe(false);
     expect(isBusy(undefined)).toBe(false);
   });
@@ -49,24 +51,27 @@ describe("device binding readers", () => {
   test("isErrored compares status and rejects nullish devices", () => {
     expect(isErrored({ status: "idle" })).toBe(false);
     expect(isErrored({ status: "busy" })).toBe(false);
-    expect(isErrored({ status: "error" })).toBe(true);
+    expect(isErrored({ status: "busy", health: "error" })).toBe(true);
     expect(isErrored(null)).toBe(false);
     expect(isErrored(undefined)).toBe(false);
   });
 
   const assertReaders = (device: BindingFields) => {
     expect(holderOf(device)).toBe(device.sessionId);
-    expect(statusOf(device)).toBe(device.status);
-    expect(isIdle(device)).toBe(device.status === "idle");
-    expect(isBusy(device)).toBe(device.status === "busy");
-    expect(isErrored(device)).toBe(device.status === "error");
-    expect(!isIdle(device)).toBe(device.status !== "idle");
+    const effective = device.health === "error" ? "error" : device.status;
+    expect(statusOf(device)).toBe(effective);
+    expect(isIdle(device)).toBe(effective === "idle");
+    expect(isBusy(device)).toBe(effective === "busy");
+    expect(isErrored(device)).toBe(effective === "error");
+    expect(!isIdle(device)).toBe(effective !== "idle");
   };
 
-  test("readers equal raw reads across all nine binding tuples", () => {
-    for (const status of ["idle", "busy", "error"] as const) {
-      for (const sessionId of [null, "", "a"]) {
-        assertReaders({ status, sessionId });
+  test("readers equal raw reads across all binding and health tuples", () => {
+    for (const status of ["idle", "busy"] as const) {
+      for (const health of [undefined, "ok", "error"] as const) {
+        for (const sessionId of [null, "", "a"]) {
+          assertReaders({ status, health, sessionId });
+        }
       }
     }
   });
@@ -75,7 +80,8 @@ describe("device binding readers", () => {
     fc.assert(
       fc.property(
         fc.record({
-          status: fc.constantFrom("idle" as const, "busy" as const, "error" as const),
+          status: fc.constantFrom("idle" as const, "busy" as const),
+          health: fc.constantFrom(undefined, "ok" as const, "error" as const),
           sessionId: fc.oneof(fc.constant(null), fc.string({ maxLength: 32 })),
         }),
         assertReaders,

@@ -1,3 +1,4 @@
+import { bindDevice, markDeviceError, statusOf } from "../../src/daemon/deviceBinding";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { MissingDeviceLiveness } from "../../src/daemon/missingDeviceLiveness";
@@ -37,7 +38,9 @@ const image: DeviceInfo = {
 function binding(device: PooledDevice) {
   return {
     sessionId: device.sessionId,
-    status: device.status,
+    status: statusOf(device),
+    bindingStatus: device.status,
+    health: device.health,
     errorCount: device.errorCount,
     assignmentCount: device.assignmentCount,
     lastUsedAt: device.lastUsedAt,
@@ -124,7 +127,7 @@ describe("device binding writers current behavior (#11802)", () => {
     for (const device of pool.getAllDevices()) {
       const sessionId = manager.getSessionForDevice(device.id);
       expect(device.sessionId).toBe(sessionId);
-      if (device.status !== "error") {
+      if (statusOf(device) !== "error") {
         expect(device.status === "busy").toBe(sessionId !== null);
       }
       if (sessionId) {
@@ -142,6 +145,8 @@ describe("device binding writers current behavior (#11802)", () => {
   const initial: Binding = {
     sessionId: null,
     status: "idle",
+    bindingStatus: "idle",
+    health: "ok",
     errorCount: 0,
     assignmentCount: 0,
     lastUsedAt: 1000,
@@ -149,6 +154,8 @@ describe("device binding writers current behavior (#11802)", () => {
   const owned: Binding = {
     sessionId: "owner",
     status: "busy",
+    bindingStatus: "busy",
+    health: "ok",
     errorCount: 0,
     assignmentCount: 1,
     lastUsedAt: 1001,
@@ -180,10 +187,12 @@ describe("device binding writers current behavior (#11802)", () => {
           ...owned,
           sessionId: null,
           status: "idle",
+          bindingStatus: "idle",
+          health: "ok",
         });
         expect(changes.map((change) => change.binding)).toEqual([
           owned,
-          { ...owned, sessionId: null, status: "idle" },
+          { ...owned, sessionId: null, status: "idle", bindingStatus: "idle", health: "ok" },
         ]);
       },
     },
@@ -215,14 +224,20 @@ describe("device binding writers current behavior (#11802)", () => {
             image,
           );
           await handoff.validatePreservedSession();
-          expect(binding(captured)).toEqual({ ...owned, sessionId: null, status: "idle" });
+          expect(binding(captured)).toEqual({
+            ...owned,
+            sessionId: null,
+            status: "idle",
+            bindingStatus: "idle",
+            health: "ok",
+          });
           const rebound = { ...owned, lastUsedAt: 1002 };
           expect(binding(pool.getDevice(replacement.deviceId)!)).toEqual(rebound);
           expect(manager.getDeviceForSession("owner")).toBe(replacement.deviceId);
           expect(changes.map((change) => change.binding)).toEqual([
             owned,
             { ...owned, errorCount: 1 },
-            { ...owned, sessionId: null, status: "idle" },
+            { ...owned, sessionId: null, status: "idle", bindingStatus: "idle", health: "ok" },
             rebound,
           ]);
         } finally {
@@ -248,6 +263,8 @@ describe("device binding writers current behavior (#11802)", () => {
           ...owned,
           sessionId: null,
           status: "idle",
+          bindingStatus: "idle",
+          health: "ok",
         });
         expect(binding(pool.getDevice(bystander.deviceId)!)).toEqual({
           ...owned,
@@ -271,7 +288,7 @@ describe("device binding writers current behavior (#11802)", () => {
         expect(pool.getDevice(original.deviceId)?.autolockSessionId).toBeUndefined();
         expect(changes.map((change) => change.binding)).toEqual([
           locked,
-          { ...owned, sessionId: null, status: "idle" },
+          { ...owned, sessionId: null, status: "idle", bindingStatus: "idle", health: "ok" },
         ]);
       },
     },
@@ -288,6 +305,8 @@ describe("device binding writers current behavior (#11802)", () => {
           ...owned,
           sessionId: null,
           status: "idle",
+          bindingStatus: "idle",
+          health: "ok",
           errorCount: 1,
         });
         expect(pool.getDevice(original.deviceId)).toBeNull();
@@ -356,6 +375,25 @@ describe("device binding writers current behavior (#11802)", () => {
     assertAgreement();
   });
 
+  test.each(["idle", "busy"] as const)(
+    "rollback preserves raw %s binding under a health error",
+    (status) => {
+      const device = pool.getDevice(original.deviceId)!;
+      if (status === "busy") {
+        bindDevice(device, "owner");
+      }
+      markDeviceError(device);
+      const before = binding(device);
+      const snapshot = pool["snapshotSessionAssignment"](device);
+      expect(snapshot).toMatchObject({ status, health: "error", sessionId: device.sessionId });
+      bindDevice(device, "tentative");
+      device.errorCount = 17;
+      pool["restoreSessionAssignment"](device, snapshot);
+      expect(binding(device)).toEqual(before);
+      expect(statusOf(device)).toBe("error");
+    },
+  );
+
   test("stale expectedSessionId release preserves all fields and stays silent", async () => {
     // devicePool.test.ts already pins refusal; this pins the untouched tuple/event.
     await bindOwner();
@@ -375,7 +413,14 @@ describe("device binding writers current behavior (#11802)", () => {
     await manager.releaseSession("owner");
     changes.length = 0;
     await pool.bindOrReuseDeviceSession("next-owner", original.deviceId, "android");
-    const departed = { ...owned, sessionId: null, status: "idle", errorCount: 1 };
+    const departed = {
+      ...owned,
+      sessionId: null,
+      status: "idle",
+      bindingStatus: "idle",
+      health: "ok",
+      errorCount: 1,
+    };
     const rebound = {
       ...owned,
       sessionId: "next-owner",
@@ -398,7 +443,12 @@ describe("device binding writers current behavior (#11802)", () => {
       for (let error = 0; error < 5; error++) {
         pool.recordDeviceError(original.deviceId);
       }
-      const failed = { ...(bound ? owned : initial), status: "error", errorCount: 5 };
+      const failed = {
+        ...(bound ? owned : initial),
+        status: "error",
+        health: "error",
+        errorCount: 5,
+      };
       expect(binding(pool.getDevice(original.deviceId)!)).toEqual(failed);
       expect(changes.map((change) => change.binding)).toEqual([failed]);
       assertAgreement();
@@ -421,7 +471,14 @@ describe("device binding writers current behavior (#11802)", () => {
     changes.length = 0;
     const session = manager.getSession("owner")!;
     expect(pool["detachSessionForAndroidRecovery"](captured, "owner", session)).toBe(true);
-    const detached = { ...owned, sessionId: null, status: "idle", errorCount: 1 };
+    const detached = {
+      ...owned,
+      sessionId: null,
+      status: "idle",
+      bindingStatus: "idle",
+      health: "ok",
+      errorCount: 1,
+    };
     expect(binding(captured)).toEqual(detached);
     expect(manager.getSessionForDevice(original.deviceId)).toBe("owner");
     expect(changes.map((change) => change.binding)).toEqual([detached]);
@@ -459,7 +516,7 @@ describe("device binding writers current behavior (#11802)", () => {
     utils.setBootedDevices("android", [bystander]);
     await liveness.evictMissingPooledDevice(captured, "absent");
     const detached = { ...owned, sessionId: null, errorCount: 1 };
-    const removed = { ...detached, status: "idle" };
+    const removed = { ...detached, status: "idle", bindingStatus: "idle", health: "ok" };
     expect(changes.map((change) => change.binding)).toEqual([detached, removed]);
     expect(binding(captured)).toEqual(removed);
     expect(manager.getSessionForDevice(original.deviceId)).toBeNull();
@@ -486,9 +543,14 @@ describe("device binding writers current behavior (#11802)", () => {
       const checking = liveness.ensurePooledDevicePresent(captured, detached, false, !detached);
       try {
         await incidentStarted.promise;
-        expect(binding(captured)).toEqual({ ...initial, status: "error", errorCount: 1 });
+        expect(binding(captured)).toEqual({
+          ...initial,
+          status: "error",
+          health: "error",
+          errorCount: 1,
+        });
         expect(changes.map((change) => change.binding)).toEqual([
-          { ...initial, status: "error", errorCount: 1 },
+          { ...initial, status: "error", health: "error", errorCount: 1 },
         ]);
         assertAgreement();
       } finally {
@@ -511,6 +573,7 @@ describe("device binding writers current behavior (#11802)", () => {
       expect(binding(captured)).toEqual({
         ...initial,
         status: detached ? "idle" : "error",
+        health: detached ? "ok" : "error",
         errorCount: 1,
       });
       expect(changes).toHaveLength(detached ? 2 : 1);

@@ -1,3 +1,4 @@
+import { statusOf } from "../../src/daemon/deviceBinding";
 import { describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -57,7 +58,7 @@ describe("DevicePool state-change listener", () => {
       for (let i = 0; i < 10 && seen.length === 0; i++) {
         pool.recordDeviceError(handset.deviceId);
       }
-      expect(pool.getDevice(handset.deviceId)?.status).toBe("error");
+      expect(statusOf(pool.getDevice(handset.deviceId)!)).toBe("error");
       expect(seen).toEqual([handset.deviceId]);
     } finally {
       sessions.stopCleanupTimer();

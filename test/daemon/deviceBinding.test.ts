@@ -3,6 +3,8 @@ import {
   bindDevice,
   clearDeviceError,
   holderOf,
+  statusOf,
+  snapshotBinding,
   markDeviceError,
   restoreBinding,
   unbindDevice,
@@ -17,62 +19,95 @@ describe("device binding owner", () => {
     expect(holderOf({ sessionId: "" })).toBe("");
   });
 
-  test("bind writes both fields and leaves unrelated bookkeeping intact", () => {
+  test("bind clears a health error and leaves unrelated bookkeeping intact", () => {
     const device = {
       sessionId: null,
-      status: "error",
+      status: "busy",
+      health: "error",
       assignmentCount: 7,
     } satisfies BindingFields & {
       assignmentCount: number;
     };
     bindDevice(device, "owner");
-    expect(device).toEqual({ sessionId: "owner", status: "busy", assignmentCount: 7 });
+    expect(statusOf(device)).toBe("busy");
+    expect(device).toEqual({
+      sessionId: "owner",
+      status: "busy",
+      health: "ok",
+      assignmentCount: 7,
+    });
     bindDevice(device, "next");
     expect(holderOf(device)).toBe("next");
   });
 
   test("unbind defaults to idle, including an already unbound error", () => {
-    const device: BindingFields = { sessionId: "owner", status: "error" };
+    const device: BindingFields = { sessionId: "owner", status: "busy", health: "error" };
     expect(unbindDevice(device)).toBe(true);
-    expect(device).toEqual({ sessionId: null, status: "idle" });
+    expect(statusOf(device)).toBe("idle");
+    expect(device).toEqual({ sessionId: null, status: "idle", health: "ok" });
     markDeviceError(device);
     expect(unbindDevice(device, { status: "idle" })).toBe(true);
-    expect(device).toEqual({ sessionId: null, status: "idle" });
+    expect(device).toEqual({ sessionId: null, status: "idle", health: "ok" });
   });
 
   test("expected holder mismatch, including null, changes nothing", () => {
-    const device: BindingFields = { sessionId: "owner", status: "error" };
+    const device: BindingFields = { sessionId: "owner", status: "busy", health: "error" };
     expect(unbindDevice(device, { expectedSessionId: "stale" })).toBe(false);
     expect(unbindDevice(device, { expectedSessionId: null, status: "keep" })).toBe(false);
-    expect(device).toEqual({ sessionId: "owner", status: "error" });
+    expect(device).toEqual({ sessionId: "owner", status: "busy", health: "error" });
     expect(unbindDevice(device, { expectedSessionId: "owner" })).toBe(true);
     expect(unbindDevice(device, { expectedSessionId: "owner" })).toBe(false);
     expect(unbindDevice(device, { expectedSessionId: null })).toBe(true);
-    expect(device).toEqual({ sessionId: null, status: "idle" });
+    expect(device).toEqual({ sessionId: null, status: "idle", health: "ok" });
   });
 
   test.each(["idle", "busy", "error"] as const)("keep preserves %s on detach", (status) => {
-    const device: BindingFields = { sessionId: "owner", status };
+    const fields: BindingFields = {
+      sessionId: "owner",
+      status: status === "error" ? "busy" : status,
+      health: status === "error" ? "error" : "ok",
+    };
+    const device = { ...fields };
     expect(unbindDevice(device, { expectedSessionId: "owner", status: "keep" })).toBe(true);
-    expect(device).toEqual({ sessionId: null, status });
+    expect(statusOf(device)).toBe(status);
+    expect(device).toEqual({ ...fields, sessionId: null });
   });
 
-  test("rollback restores both fields verbatim, including legacy intermediate tuples", () => {
+  test.each(["idle", "busy"] as const)(
+    "keep preserves raw %s with absent or error health",
+    (status) => {
+      for (const health of [undefined, "error"] as const) {
+        const device: BindingFields = { sessionId: "owner", status, health };
+        const before = statusOf(device);
+        expect(unbindDevice(device, { status: "keep" })).toBe(true);
+        expect(statusOf(device)).toBe(before);
+        expect(device).toEqual({ sessionId: null, status, health });
+      }
+    },
+  );
+
+  test("rollback restores binding and health verbatim, including legacy intermediate tuples", () => {
     const device: BindingFields = { sessionId: "new", status: "busy" };
-    const snapshot: BindingFields = { sessionId: "old", status: "error" };
+    const snapshot: BindingFields = { sessionId: "old", status: "busy", health: "error" };
     restoreBinding(device, snapshot);
+    expect(statusOf(device)).toBe("error");
+    expect(snapshotBinding(device)).toEqual(snapshot);
     expect(device).toEqual(snapshot);
     restoreBinding(device, { sessionId: null, status: "busy" });
-    expect(device).toEqual({ sessionId: null, status: "busy" });
-    expect(snapshot).toEqual({ sessionId: "old", status: "error" });
+    expect(statusOf(device)).toBe("busy");
+    expect(device.status).toBe("busy");
+    expect(device.health).toBeUndefined();
+    expect(snapshot).toEqual({ sessionId: "old", status: "busy", health: "error" });
   });
 
   test.each([null, "owner"])("health verdicts preserve holder %s", (sessionId) => {
     const device: BindingFields = { sessionId, status: "busy" };
     markDeviceError(device);
-    expect(device).toEqual({ sessionId, status: "error" });
+    expect(statusOf(device)).toBe("error");
+    expect(device).toEqual({ sessionId, status: "busy", health: "error" });
     clearDeviceError(device);
-    expect(device).toEqual({ sessionId, status: "idle" });
+    expect(statusOf(device)).toBe("idle");
+    expect(device).toEqual({ sessionId, status: "idle", health: "ok" });
   });
 
   test.each([1, 7, 23, 11802, 0xdeadbeef])("seed %s interleaves binding and rollback", (seed) => {
@@ -105,9 +140,9 @@ describe("device binding owner", () => {
       }
       // The sessionId-only "keep" detach and health-only clear have intentional
       // intermediate tuples; their verbatim contracts are covered above.
-      expect(device.status === "busy").toBe(model.holder !== null && !model.errored);
+      expect(statusOf(device) === "busy").toBe(model.holder !== null && !model.errored);
       expect(holderOf(device)).toBe(model.holder);
-      expect(device.status === "error").toBe(model.errored);
+      expect(statusOf(device) === "error").toBe(model.errored);
       history.push({ fields: { ...device }, model: { ...model } });
     }
   });

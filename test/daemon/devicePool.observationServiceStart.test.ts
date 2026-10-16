@@ -1,3 +1,4 @@
+import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { observationServiceStartHarness } from "../helpers/observationServiceStartHarness";
 import { daemonObservationServiceOwnershipGuard } from "../../src/features/observe/ObservationReadServiceStart";
@@ -228,7 +229,7 @@ test("observation declines bound/busy/error rows before collecting recovery fact
     device.sessionId = null;
     device.status = "busy";
     expect(h.safe()).toBe(false);
-    device.status = "error";
+    markDeviceError(device);
     expect(h.safe()).toBe(false);
     expect(recovery).not.toHaveBeenCalled();
   } finally {

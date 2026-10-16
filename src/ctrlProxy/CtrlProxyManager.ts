@@ -28,6 +28,7 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../utils/logger";
+import { isPathInside } from "../utils/filesystem/pathContainment";
 import { packageListingContains } from "../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../utils/shellQuote";
 import { registerDeviceIncarnationListener } from "../utils/deviceIncarnation";
@@ -2766,11 +2767,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       const tempRoot = path.resolve(os.tmpdir());
       const tempDir = path.resolve(path.dirname(apkPath));
       const tempBase = path.basename(tempDir);
-      const relativeTempDir = path.relative(tempRoot, tempDir);
       const isTempDir =
-        Boolean(relativeTempDir) &&
-        !relativeTempDir.startsWith("..") &&
-        !path.isAbsolute(relativeTempDir) &&
+        isPathInside(tempRoot, tempDir, { allowEqual: false }) &&
         tempBase.startsWith("auto-mobile-");
 
       await fs.rm(apkPath, { force: true });

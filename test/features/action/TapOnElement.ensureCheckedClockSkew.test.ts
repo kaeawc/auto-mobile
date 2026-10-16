@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { IosTapStrategy } from "../../../src/features/action/strategies/IosTapStrategy";
 import type {
   BootedDevice,
   Element,
@@ -124,6 +125,8 @@ async function runEnsureChecked(
     strategy: {
       isAccessibilityServiceEnabled: async () => false,
       shouldRunPreTapStability: () => false,
+      clipNavigationTapBounds: (...args: Parameters<IosTapStrategy["clipNavigationTapBounds"]>) =>
+        new IosTapStrategy({ ...device, platform }).clipNavigationTapBounds(...args),
     },
     executeAndroidTap: dispatchTap,
     executeiOSTap: dispatchTap,

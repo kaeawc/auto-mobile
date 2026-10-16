@@ -10,6 +10,13 @@ import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import { RealSettleObserve } from "../observe/SettleObserve";
 import type { TapEffect } from "../../models/TapOnElementResult";
 import { AwaitIdle } from "../observe/AwaitIdle";
+import type { UiStabilityState } from "../observe/interfaces/AwaitIdle";
+import type {
+  ObservedActionResult,
+  ObservedChangeOptions,
+  ObservedEnvelope,
+} from "./observedInteractionTypes";
+export type { ObservedActionResult, ObservedChangeOptions, ObservedEnvelope };
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../observe/DeviceHierarchyCapture";
 import { hasWrongWindowEvidence } from "../observe/observationFreshness";
@@ -153,66 +160,6 @@ function sessionRenderedDisplayRevision(deviceId: string): number | undefined {
  */
 export const FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS = 4;
 
-interface ObservedChangeOptions {
-  changeExpected: boolean;
-  /** Retire pre-action trees before the post-action capture, including partial dispatch failures. */
-  foregroundAppMayChange?: boolean;
-  /**
-   * A non-retryable failed block that reports `partialApplication` (a boomerang whose return leg
-   * failed after the forward swipe landed) still gets the post-action observation on iOS, as on
-   * Android, so the caller sees where the content ended up. Unconfirmed text, which also reports
-   * `retryable: false`, keeps returning before any post-action read.
-   */
-  observePartialApplication?: boolean;
-  /** Hardware navigation and URL dispatch do not resolve coordinates from the prior tree. */
-  usesObservationForResolution?: boolean;
-  /**
-   * The block resolves its target from a selector against the pre-action read, never from
-   * coordinates the caller chose. When the caller last saw an older display generation, an
-   * unscoped action (no `display`, `previousObservation` or `skipPreviousObserve`) takes one
-   * fresh read and proceeds only if that read is at the current display revision, instead of
-   * refusing every retry until a manual observe (#9847). A `previousObservation` the action read
-   * itself during this call stands in for that read when it was recorded at the current display
-   * revision, so the block's coordinates come from it (#10710). Raw-coordinate actions must not
-   * set it.
-   */
-  resolvesTargetFromRead?: boolean;
-  /** Bind pre/post captures to the panel prepared by the action. */
-  display?: string;
-  previousObservation?: ObserveResult;
-  /** Per-call capture seam for actions that must validate every post-action poll. */
-  postActionObserveScreen?: ObserveScreen;
-  timeoutMs?: number;
-  packageName?: string;
-  progress?: ProgressCallback;
-  tolerancePercent?: number;
-  queryOptions?: ViewHierarchyQueryOptions;
-  perf?: PerformanceTracker;
-  /** Internal gesture coordinates come from the current observation inside the block.
-   * Skips only the caller-revision fence; preparing and dispatch fences remain.
-   */
-  skipCallerDisplayFence?: boolean;
-  skipPreviousObserve?: boolean;
-  skipUiStability?: boolean;
-  observationTimestampProvider?: () => number | undefined;
-  /**
-   * Host-clock time (`timer.now()`) at which the action's input was dispatched.
-   * Converted to the device clock with the skew measured once at action start
-   * (`actionStartTime` minus the host time of that read), so no second device
-   * read is needed after the input (#9879). Ignored when
-   * `observationTimestampProvider` yields a value.
-   */
-  observationHostTimestampProvider?: () => number | undefined;
-  overrideMinTimestamp?: number;
-  signal?: AbortSignal;
-  deferPredictionOutcome?: boolean;
-  deferPostActionScreenshot?: boolean;
-  predictionContext?: {
-    toolName: string;
-    toolArgs: Record<string, any>;
-  };
-}
-
 interface PostActionCapture {
   observation: ObserveResult;
   readFailed: boolean;
@@ -342,10 +289,13 @@ export class BaseVisualChange {
    * @param block - Block of code to execute which should have a visual change.
    * @param options - Options controlling observation behavior
    */
-  async observedInteraction(
-    block: (observeResult: ObserveResult, fence?: DisplayFence) => Promise<any>,
+  async observedInteraction<R extends ObservedActionResult>(
+    block: (
+      observeResult: ObserveResult,
+      fence?: DisplayFence,
+    ) => Promise<R | ObservedActionResult>,
     options: ObservedChangeOptions,
-  ): Promise<any> {
+  ): Promise<R & ObservedEnvelope> {
     if (!options.observePartialApplication) {
       return this.runObservedInteraction(block, options);
     }
@@ -363,10 +313,13 @@ export class BaseVisualChange {
     }
   }
 
-  private async runObservedInteraction(
-    block: (observeResult: ObserveResult, fence?: DisplayFence) => Promise<any>,
+  private async runObservedInteraction<R extends ObservedActionResult>(
+    block: (
+      observeResult: ObserveResult,
+      fence?: DisplayFence,
+    ) => Promise<R | ObservedActionResult>,
     options: ObservedChangeOptions,
-  ): Promise<any> {
+  ): Promise<R & ObservedEnvelope> {
     await beginPostActionCaptureAction();
     const timeoutMs = options.timeoutMs || 12000;
     const progress = options.progress;
@@ -563,7 +516,8 @@ export class BaseVisualChange {
       !(options.observePartialApplication && blockResult.partialApplication === true)
     ) {
       perf.end();
-      return blockResult;
+      // Returned before any post-action read, so `observation` is absent (see ObservedEnvelope).
+      return blockResult as R & ObservedEnvelope;
     }
 
     if (options.display !== undefined) {
@@ -618,7 +572,7 @@ export class BaseVisualChange {
     }
 
     // Start UI stability tracking if we have a package name (skip if requested)
-    let initState: any = null;
+    let initState: UiStabilityState | null = null;
     let gfxMetrics: GfxMetrics | null = null;
 
     if (options.skipUiStability) {
@@ -704,7 +658,10 @@ export class BaseVisualChange {
    * lock state (so an agent can branch on `secure`) plus a human-readable
    * warning. Android-only: `deviceLock` is only collected on Android observe.
    */
-  protected annotateDeviceLock(result: any, previousObserveResult: ObserveResult | null): void {
+  protected annotateDeviceLock(
+    result: ObservedEnvelope,
+    previousObserveResult: ObserveResult | null,
+  ): void {
     if (!result || this.device.platform !== "android") {
       return;
     }
@@ -1086,8 +1043,8 @@ export class BaseVisualChange {
     }
   }
 
-  private async takeObservation(
-    blockResult: any,
+  private async takeObservation<R extends ObservedActionResult>(
+    blockResult: R | ObservedActionResult,
     previousObserveResult: ObserveResult | null,
     options: {
       changeExpected: boolean;
@@ -1102,7 +1059,7 @@ export class BaseVisualChange {
       signal?: AbortSignal;
       deferPostActionScreenshot?: boolean;
     },
-  ): Promise<any> {
+  ): Promise<R & ObservedEnvelope> {
     const perf = options.perf ?? new NoOpPerformanceTracker();
     const observeScreen = options.postActionObserveScreen ?? this.observeScreen;
 
@@ -1179,8 +1136,10 @@ export class BaseVisualChange {
       );
       latestObservation = captured.observation;
     }
+    // The same object the block returned, which the pipeline fills in below.
+    const mutable: ObservedActionResult & ObservedEnvelope = blockResult;
     if (captured.staleDisplay) {
-      blockResult.staleDisplay = captured.staleDisplay;
+      mutable.staleDisplay = captured.staleDisplay;
     }
 
     // Compare content fingerprints, not object identity: every observe returns a
@@ -1190,19 +1149,19 @@ export class BaseVisualChange {
       : null;
     if (visualChange !== null) {
       // Don't override an explicit failure from the inner block — the action itself failed
-      if (blockResult.success !== false) {
-        blockResult.success = visualChange;
-        if (!blockResult.success) {
-          blockResult.error = "No visual change observed";
+      if (mutable.success !== false) {
+        mutable.success = visualChange;
+        if (!mutable.success) {
+          mutable.error = "No visual change observed";
         }
       }
     } else {
       if (blockResult && "error" in blockResult && blockResult.error !== undefined) {
-        blockResult.success = false;
+        mutable.success = false;
       } else if (blockResult && !("success" in blockResult)) {
-        blockResult.success = true;
+        mutable.success = true;
       } else if (blockResult && "success" in blockResult && blockResult.success === undefined) {
-        blockResult.success = true;
+        mutable.success = true;
       }
     }
 
@@ -1219,7 +1178,7 @@ export class BaseVisualChange {
       }
     }
 
-    blockResult.observation = latestObservation;
+    mutable.observation = latestObservation;
 
     if (options.predictionContext) {
       await this.predictionAnalyzer.recordOutcomeForAction(
@@ -1229,7 +1188,9 @@ export class BaseVisualChange {
       );
     }
 
-    return blockResult;
+    // Same object as the block returned. Its declared result type `R` is trusted: blocks also
+    // return bare `{ success: false, error }` failures that lack `R`'s required fields.
+    return mutable as R & ObservedEnvelope;
   }
 
   private buildPredictionContext(

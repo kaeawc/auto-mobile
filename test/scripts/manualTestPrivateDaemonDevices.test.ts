@@ -556,7 +556,7 @@ test("F2 fallback still reports unprotected snapshot devices held by another dae
   });
   expect(killFrames(f)).toEqual([]);
 });
-test.each(["other_daemon", "session_broker", "future_holder", ""])(
+test.each(["other_daemon", "future_holder", ""])(
   "F2 second view's hold %s is retained",
   async (heldBy) => {
     const f = await deviceFixture();
@@ -581,6 +581,30 @@ test.each(["other_daemon", "session_broker", "future_holder", ""])(
     expect(killFrames(f)).toEqual([]);
   },
 );
+test("a session_broker hold without ledger or broker-name evidence does not classify a plain emulator as broker-held", async () => {
+  const f = await deviceFixture();
+  inventoryRows(f, [{ ...row(), runtime: { ...row().runtime, heldBy: "session_broker" } }]);
+  expect(
+    await runPrivateDaemonCommand(
+      command("shutdown-devices", "--dry-run", "--device", "emulator-5556"),
+      f.deps,
+    ),
+  ).toBe(0);
+  expect(document(f).results[0].outcome).not.toBe("broker-held");
+  // A broker-named device with the same hold stays broker-held, and nothing is ever force-stopped.
+  inventoryRows(f, [
+    {
+      ...row("emulator-5556", "ambroker-held"),
+      runtime: { ...row().runtime, heldBy: "session_broker" },
+    },
+  ]);
+  await runPrivateDaemonCommand(
+    command("shutdown-devices", "--dry-run", "--device", "emulator-5556"),
+    f.deps,
+  );
+  expect(document(f).results[0].outcome).toBe("broker-held");
+  expect(killFrames(f)).toEqual([]);
+});
 test("F2 unknown snapshot hold is parsed and never suggests stopping by PID", async () => {
   const f = await deviceFixture();
   inventoryRows(f, [{ ...row(), runtime: { ...row().runtime, heldBy: "future_holder" } }]);
@@ -593,7 +617,7 @@ test("F2 unknown snapshot hold is parsed and never suggests stopping by PID", as
   expect(document(f).results[0].message).not.toContain("PID");
   expect(killFrames(f)).toEqual([]);
 });
-test.each(["session_broker", "managed_slot", "future_holder", ""])(
+test.each(["managed_slot", "future_holder", ""])(
   "F2 any broker hold %s is parsed and refused without a stop frame",
   async (heldBy) => {
     const f = await deviceFixture();

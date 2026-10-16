@@ -5,13 +5,17 @@ import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
 import { logger } from "../../../src/utils/logger";
 import { FakeProcFs } from "../../fakes/FakeProcFs";
 
-const STATUS = readFileSync(
-  new URL(
-    "../../fixtures/android-boot-admission/proc-status-upstream-man-proc_pid_status.txt",
-    import.meta.url,
-  ),
-  "utf8",
-);
+function capture(name: string, file: "status.txt" | "cmdline.bin"): string {
+  // latin1 maps bytes 1:1, so NUL separators and raw bytes survive the string seam.
+  return readFileSync(
+    new URL(`../../fixtures/android-boot-admission/proc-${name}-${file}`, import.meta.url),
+    "latin1",
+  );
+}
+const NORMAL = {
+  status: capture("alpine-normal", "status.txt"),
+  cmdline: capture("alpine-normal", "cmdline.bin"),
+};
 const PS = readFileSync(
   new URL(
     "../../fixtures/android-boot-admission/ps-snapshot-one-running-emulator.txt",
@@ -24,45 +28,54 @@ const COMMAND = parsePsSnapshot(PS).rows.find((row) =>
 )!.command;
 const CMDLINE = COMMAND.split(" ").join("\0") + "\0"; // argv derived from the captured qemu row.
 
+/** Captured status (alpine sleep, pid 13) paired with a qemu argv, repeated under distinct pids. */
 function populated(count = 1): FakeProcFs {
   const fs = new FakeProcFs();
   fs.entries = Array.from({ length: count }, (_, i) => String(17248 + i));
   for (const pid of fs.entries) {
-    fs.files.set(`/proc/${pid}/status`, STATUS);
+    fs.files.set(`/proc/${pid}/status`, NORMAL.status);
     fs.files.set(`/proc/${pid}/cmdline`, CMDLINE);
   }
   return fs;
 }
 
-// Other pids and kernel threads are structured edits of upstream documentation, not captures.
-function editStatus(edits: Record<string, string>, dropMemory = false): string {
-  return STATUS.split("\n")
-    .flatMap((line) => {
-      const colon = line.indexOf(":");
-      const key = line.slice(0, colon);
-      if (dropMemory && (key.startsWith("Vm") || key.startsWith("Rss"))) {
-        return [];
-      }
-      return [key in edits ? `${key}:\t${edits[key]}` : line];
-    })
-    .join("\n");
+function single(name: string, pid: string): FakeProcFs {
+  const fs = new FakeProcFs();
+  fs.entries = [pid];
+  fs.files.set(`/proc/${pid}/status`, capture(name, "status.txt"));
+  fs.files.set(`/proc/${pid}/cmdline`, capture(name, "cmdline.bin"));
+  return fs;
 }
 
-test("proc: upstream status and captured argv produce the narrow Android row", async () => {
-  expect(await readProcProcessTable(populated())).toEqual([
-    { pid: 17248, ppid: 17200, rssBytes: 13484 * 1024, command: COMMAND },
+test("proc: captured alpine sleep produces its row from real kernel bytes", async () => {
+  expect(await readProcProcessTable(single("alpine-normal", "13"))).toEqual([
+    { pid: 13, ppid: 1, rssBytes: 1008 * 1024, command: "sleep 60" },
   ]);
 });
 
-test("proc: kernel thread derived from upstream status has zero RSS and bracketed Name", async () => {
-  const fs = populated();
-  fs.files.set(
-    "/proc/17248/status",
-    editStatus({ Name: "kthreadd", Pid: "17248", PPid: "0" }, true),
-  );
-  fs.files.set("/proc/17248/cmdline", "");
-  expect(await readProcProcessTable(fs)).toEqual([
-    { pid: 17248, ppid: 0, rssBytes: 0, command: "[kthreadd]" },
+test("proc: captured status with a qemu argv produces the narrow Android row", async () => {
+  expect(await readProcProcessTable(populated())).toEqual([
+    { pid: 17248, ppid: 1, rssBytes: 1008 * 1024, command: COMMAND },
+  ]);
+});
+
+test.each([
+  ["alpine-pid1", { pid: 1, ppid: 0, rssBytes: 1144 * 1024, command: "sh -s" }],
+  ["debian-pid1", { pid: 1, ppid: 0, rssBytes: 1820 * 1024, command: "sh -s" }],
+  // Name is `my (proc) x`; the row command comes from argv, not comm.
+  [
+    "alpine-comm-name",
+    { pid: 126, ppid: 1, rssBytes: 904 * 1024, command: "/bin/sh /tmp/my (proc) x" },
+  ],
+  // exec -a changes argv[0] only; Name stays `sleep`.
+  ["debian-argv0-spoof", { pid: 21, ppid: 1, rssBytes: 1752 * 1024, command: "my (proc) x 60" }],
+])("proc: captured %s parses to its row", async (name, expected) => {
+  expect(await readProcProcessTable(single(name, String(expected.pid)))).toEqual([expected]);
+});
+
+test("proc: captured zombie has no VmRSS and an empty cmdline, so it is bracketed by Name", async () => {
+  expect(await readProcProcessTable(single("alpine-zombie", "144"))).toEqual([
+    { pid: 144, ppid: 142, rssBytes: 0, command: "[sleep]" },
   ]);
 });
 
@@ -85,7 +98,8 @@ test.each(["ENOENT", "ESRCH"])(
 
 test("proc: counts malformed PPid and rejects zero rows as unparseable", async () => {
   const fs = populated();
-  fs.files.set("/proc/17248/status", editStatus({ PPid: "17200 junk" }));
+  // Synthetic parser-robustness case (not a capture): a captured status with PPid corrupted.
+  fs.files.set("/proc/17248/status", NORMAL.status.replace(/^PPid:.*$/m, "PPid:\t1 junk"));
   await expect(readProcProcessTable(fs)).rejects.toThrow(
     "no parseable processes (1 unparseable rows)",
   );

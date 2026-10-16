@@ -371,7 +371,7 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
     use; the matrix's default "tool call" is a control call. A heartbeat renews the owner lease and never the idle deadline
     (#10656). Exception (#11340, owner decision 2026-10-12): only managed-execution
     sessions with a non-lapsed owner lease (live or suspect) are idle-exempt. A hung
-    but alive owner with a healthy proxy heartbeat holds its slot indefinitely.
+    but alive owner with a healthy proxy heartbeat holds its session indefinitely.
     Heartbeat loss, owner exit and explicit release still end it; recovery ignores
     persisted idle expiry and retains awaiting-owner and fixed restart bounds. Every change to a liveness path ships a two-sided test: each
     "kept while X" assertion is paired with "released when Y", driven by the
@@ -395,7 +395,7 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
     A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
     A sessionless read that names a running device nobody holds may ready it in order to answer: on Android it may
     install the CtrlProxy APK, write the accessibility settings, and force-stop and rebind the service; on an iOS
-    simulator it may install and launch the runner. The exception never applies to a device held, slot-assigned or
+    simulator it may install and launch the runner. The exception never applies to a device held or
     reserved by another session: those reads use what is already installed and never run readiness.
     (Owner decision 2026-10-12, #11964.) Reads skip appearance sync and current-device pins.
     A recording stops and finalizes on its session's release, about 120 s at most

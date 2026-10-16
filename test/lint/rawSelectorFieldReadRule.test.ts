@@ -512,3 +512,29 @@ test("the sanctioned accessor module is out of scope, and its callers read no ra
     ),
   ).toEqual([]);
 });
+
+test("raw accessor imports are rejected outside the allow-list", () => {
+  const code = 'import { rawText } from "../utility/elementProperties";';
+  expect(check(code, "src/features/action/TapOnElement.ts")).toHaveLength(1);
+  expect(check(code, "src/server/interactionTools.ts")).toHaveLength(1);
+  expect(
+    check(
+      'import { rawNodeValue as v, isTruthyFlag } from "../utility/elementProperties";',
+      "src/features/debug/Search.ts",
+    ),
+  ).toHaveLength(1);
+  expect(check(code, "src/features/systemTray/notificationHints.ts")).toEqual([]);
+  expect(check(code, "src/features/action/LongPressMetadataDetector.ts")).toEqual([]);
+  expect(
+    check(
+      'import { isTruthyFlag } from "../utility/elementProperties";',
+      "src/features/action/TapOnElement.ts",
+    ),
+  ).toEqual([]);
+  expect(
+    check(
+      'import type { RawNodeProperties } from "../utility/elementProperties";',
+      "src/features/action/TapOnElement.ts",
+    ),
+  ).toEqual([]);
+});

@@ -22,7 +22,7 @@ import captured from "../fixtures/session-broker/fake-lifecycle.json";
 
 const scenarios = brokerScenarios.filter((s) => s.class === "device");
 /** Logic tests only: scripted proxy, identity and native views do not prove device behavior. */
-function fixture(clientCount = 2) {
+function fixture(clientCount = 2, timeoutCode = "timeout") {
   const timer = new FakeTimer();
   const files = new Map<string, string>();
   const fs = {
@@ -130,7 +130,7 @@ function fixture(clientCount = 2) {
       ) {
         result = fail(c, "capability_disabled");
       } else if (c.config.preparationTimeoutMs === 1) {
-        result = fail(c, "timeout", true);
+        result = fail(c, timeoutCode, true);
       } else if (resources.filter((r) => r.state === "active").length >= 2) {
         result = fail(c, "capacity_exhausted");
       } else {
@@ -239,6 +239,28 @@ describe("device scenario logic with fake proxy/native/daemon operations (no dev
       expect(bytes).not.toMatch(/startDevice|provisionDevice|killDevice/);
     },
   );
+  test.each(["timeout", "daemon_unavailable", "provision_failed"])(
+    "#12452 prep timeout accepts the documented retryable code %s and still proves no leak",
+    async (code) => {
+      const f = fixture(2, code);
+      const summary = await runBrokerScenario(
+        scenarios.find((s) => s.name === "#12452-prep-timeout")!,
+        f.context,
+        { device: true },
+      );
+      expect(summary.error).toBeUndefined();
+      expect(summary.outcome).toBe("passed");
+    },
+  );
+  test("#12452 prep timeout rejects an undocumented or non-retryable code", async () => {
+    const f = fixture(2, "capacity_exhausted");
+    const summary = await runBrokerScenario(
+      scenarios.find((s) => s.name === "#12452-prep-timeout")!,
+      f.context,
+      { device: true },
+    );
+    expect(summary.outcome).not.toBe("passed");
+  });
   test("crash restart destroys the old resource, replays terminal receipt and acquires anew", async () => {
     const f = fixture();
     const summary = await runBrokerScenario(
@@ -435,6 +457,42 @@ describe("device scenario safety and failure logic with fakes", () => {
       expect(result.error).toContain("Missing expected rejection");
     },
   );
+  test("parallel-acquire fails when one client's release ends a sibling's grant", async () => {
+    const f = fixture();
+    const release = f.client.release;
+    f.client.release = async (id, token) => {
+      const receipt = await release(id, token);
+      for (const [requestId, other] of f.receipts) {
+        if (other.sessionUuid !== id) {
+          f.receipts.set(requestId, { ...other, outcome: "released" });
+        }
+      }
+      return receipt;
+    };
+    const result = await runBrokerScenario(
+      scenarios.find((s) => s.name === "parallel-acquire")!,
+      f.context,
+      { device: true },
+    );
+    expect(result.outcome).toBe("failed");
+    expect(result.error).toMatch(/broker_session_ended|lost its grant/);
+  });
+  test("multi-client-crash-isolation fails when the owner death also ends the sibling", async () => {
+    const f = fixture();
+    const kill = f.deviceOps.ownerKill;
+    f.deviceOps.ownerKill = async (c) => {
+      await kill(c);
+      for (const [requestId, receipt] of f.receipts) {
+        f.receipts.set(requestId, { ...receipt, outcome: "failed" });
+      }
+    };
+    const result = await runBrokerScenario(
+      scenarios.find((s) => s.name === "multi-client-crash-isolation")!,
+      f.context,
+      { device: true },
+    );
+    expect(result.outcome).toBe("failed");
+  });
   test("evidence redacts tokens embedded in operation errors", async () => {
     const f = fixture();
     f.deviceOps.observe = async () => {
@@ -464,7 +522,7 @@ describe("device scenario CLI routing with injected fake contexts", () => {
     expect(f.calls.some((c) => c.startsWith("permit:"))).toBe(true);
   });
   test.each([
-    ["parallel-acquire"],
+    ["daemon-restart-with-live-sessions"],
     ["parallel-acquire", "--device", "--max-devices", "5"],
     ["parallel-acquire", "--device", "--crash"],
     ["parallel-acquire", "--device", "--device"],

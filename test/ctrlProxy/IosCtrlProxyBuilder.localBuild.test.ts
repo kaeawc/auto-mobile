@@ -42,13 +42,18 @@ describe("authoritative iOS local builds", () => {
     originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
     Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
     IosCtrlProxyBuilder.resetInstances();
-    IosCtrlProxyBuilder.setUseLocalBuildForTesting(true);
-    IosCtrlProxyBuilder.setExpectedChecksumForTesting("release-checksum");
-    IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("release-sha", "xctest");
-    IosCtrlProxyBuilder.setTimerForTesting(new FakeTimer());
-    IosCtrlProxyBuilder.setCodesignVerifierForTesting(new FakeCtrlProxyCodesignVerifier());
-    IosCtrlProxyBuilder.setIosPrerequisiteDetectorForTesting({
-      hasIosPrerequisites: async () => true,
+    IosCtrlProxyBuilder.configure({ useLocalBuild: true });
+    IosCtrlProxyBuilder.configure({ expectedChecksum: "release-checksum" });
+    IosCtrlProxyBuilder.configure({
+      expectedRunnerChecksum: "release-sha",
+      expectedRunnerChecksumTarget: "xctest",
+    });
+    IosCtrlProxyBuilder.configure({ timer: new FakeTimer() });
+    IosCtrlProxyBuilder.configure({ codesignVerifier: new FakeCtrlProxyCodesignVerifier() });
+    IosCtrlProxyBuilder.configure({
+      prerequisiteDetector: {
+        hasIosPrerequisites: async () => true,
+      },
     });
     tempDir = scratch.next();
     derivedDataPath = path.join(tempDir, "Derived Data's");
@@ -60,7 +65,7 @@ describe("authoritative iOS local builds", () => {
     downloader.checksum = "release-checksum";
     downloader.runnerChecksum = "local-sha";
     builder = IosCtrlProxyBuilder.getInstance({ derivedDataPath, bundleCacheDir }, { downloader });
-    IosCtrlProxyBuilder.setPrefetchBuilderForTesting(builder);
+    IosCtrlProxyBuilder.configure({ prefetchBuilder: builder });
   });
 
   afterEach(async () => {
@@ -95,7 +100,10 @@ describe("authoritative iOS local builds", () => {
     async (target) => {
       await placeLocalProducts();
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET = target;
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: null,
+        expectedRunnerChecksumTarget: null,
+      });
       downloader.runnerChecksum = downloader.legacyRunnerChecksum = "a".repeat(64);
       const runnerApp = path.join(
         productsDir,
@@ -179,7 +187,10 @@ describe("authoritative iOS local builds", () => {
 
   test("an explicit SHA stays enforced after a local rebuild without re-pinning", async () => {
     await placeLocalProducts();
-    IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+    IosCtrlProxyBuilder.configure({
+      expectedRunnerChecksum: null,
+      expectedRunnerChecksumTarget: null,
+    });
     downloader.runnerChecksum = "a".repeat(64);
     process.env.AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256 = downloader.runnerChecksum;
     process.env.AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET = "xctest";
@@ -211,7 +222,10 @@ describe("authoritative iOS local builds", () => {
     "device %s validates and pins on first launch, re-pins a rebuild, and preserves the simulator pin",
     async (target) => {
       await placeLocalProducts(true);
-      IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+      IosCtrlProxyBuilder.configure({
+        expectedRunnerChecksum: null,
+        expectedRunnerChecksumTarget: null,
+      });
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET = target;
       const runnerApp = path.join(productsDir, "Debug-iphoneos", "CtrlProxyUITests-Runner.app");
       const binary =
@@ -265,7 +279,10 @@ describe("authoritative iOS local builds", () => {
 
   test("an explicit device SHA mismatch refuses first launch", async () => {
     await placeLocalProducts(true);
-    IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting(null);
+    IosCtrlProxyBuilder.configure({
+      expectedRunnerChecksum: null,
+      expectedRunnerChecksumTarget: null,
+    });
     process.env.AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256 = "a".repeat(64);
     process.env.AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET = "xctest";
     downloader.runnerChecksum = "b".repeat(64);
@@ -287,7 +304,7 @@ describe("authoritative iOS local builds", () => {
   test.each([true, false])(
     "xctestrun discovery refreshes only in local mode (%s)",
     async (localMode) => {
-      IosCtrlProxyBuilder.setUseLocalBuildForTesting(localMode);
+      IosCtrlProxyBuilder.configure({ useLocalBuild: localMode });
       await placeLocalProducts();
       await fs.utimes(xctestrunPath, originalTimestamp, originalTimestamp);
       expect(await builder.getXctestrunPath("simulator")).toBe(xctestrunPath);
@@ -500,8 +517,11 @@ describe("authoritative iOS local builds", () => {
   });
 
   test("released mode still downloads and extracts once with an empty cache", async () => {
-    IosCtrlProxyBuilder.setUseLocalBuildForTesting(false);
-    IosCtrlProxyBuilder.setExpectedRunnerChecksumForTesting("");
+    IosCtrlProxyBuilder.configure({ useLocalBuild: false });
+    IosCtrlProxyBuilder.configure({
+      expectedRunnerChecksum: "",
+      expectedRunnerChecksumTarget: null,
+    });
     expect(await builder.needsRebuild()).toBe(true);
     expect((await builder.build("simulator")).success).toBe(true);
     expect(downloader.downloadedUrls).toHaveLength(1);

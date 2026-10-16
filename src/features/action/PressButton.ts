@@ -19,6 +19,7 @@ import { HomeScreen } from "./HomeScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 export function unsupportedIosButtonResult(button: string, error: string): PressButtonResult {
   return {
@@ -93,9 +94,9 @@ export class PressButton extends BaseVisualChange {
         );
       },
       {
+        ...OBSERVED_INTERACTION_PROFILES.noTreeResolution,
         changeExpected: isNavigationButton,
-        usesObservationForResolution: false,
-        timeoutMs: 2000,
+        timeoutMs: SETTLE_BUDGET_MS.navigation,
         progress,
         signal,
         perf,

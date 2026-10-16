@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { PressButton } from "../../src/features/action/PressButton";
 import type { DaemonRequest } from "../../src/daemon/types";
+import { inputRouteFor } from "../../src/daemon/inputRoutes";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { androidDevice, createFakeDaemonState } from "./helpers/inputSocketHarness";
@@ -127,11 +128,7 @@ async function drive(route: Route, options: Parameters<typeof harness>[0] = {}) 
   const request = { id: "1", type: "mcp_request", method: route.method, params: route.params };
   try {
     await server["dispatchInputRoute"](
-      {
-        method: route.method,
-        handler: handlerFor(route.method),
-        gestureKind: kindFor(route.method),
-      },
+      inputRouteFor(route.method)!,
       request as DaemonRequest,
       "socket-session",
       {},
@@ -142,15 +139,6 @@ async function drive(route: Route, options: Parameters<typeof harness>[0] = {}) 
     press.press = originalPress;
   }
   return events;
-}
-
-function handlerFor(method: string) {
-  return method.startsWith("input/gesture") ? "gesture" : method.slice("input/".length);
-}
-function kindFor(method: string) {
-  return method.startsWith("input/gesture")
-    ? method.slice("input/gesture".length).toLowerCase()
-    : undefined;
 }
 
 const SUCCESS_ORDER: Record<string, string[]> = {
@@ -260,5 +248,25 @@ describe("input/* route step order (#11813)", () => {
       "dispatch:typeText",
       "dispatching",
     ]);
+  });
+
+  test("an owner that left is refused before the frame and budget checks", async () => {
+    const { server, events } = harness();
+    server["runTrackedKeyedDeviceInput"] = async (method, _device, operation) => {
+      events.push(`keyed:${method}`);
+      const controller = new AbortController();
+      controller.abort(new Error("owner left"));
+      return await operation(controller.signal, () => events.push("dispatching"));
+    };
+    const request = {
+      id: "1",
+      type: "mcp_request",
+      method: "input/tap",
+      params: { ...BASE, ...FRAME, x: 1, y: 2 },
+    };
+    await expect(
+      server["dispatchInputRoute"](inputRouteFor("input/tap")!, request as DaemonRequest, "s", {}),
+    ).rejects.toThrow("owner left");
+    expect(events).toEqual(["resolve:input/tap:false", "keyed:input/tap"]);
   });
 });

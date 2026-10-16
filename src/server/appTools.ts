@@ -1,3 +1,4 @@
+import { defineDeviceTool } from "./defineTool";
 import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
 import {
   getAppPermissionsResultSchema,
@@ -59,7 +60,6 @@ import {
   notifyInstalledAppResourceUpdated,
   queryInstalledApps,
   type AppsQueryResourceContent,
-  type AppsQueryType,
 } from "./appResources";
 import { logger } from "../utils/logger";
 import { isDeviceLostError } from "./deviceLossOutcome";
@@ -567,27 +567,41 @@ const expectedSigningSha256Schema = z
   .min(1)
   .max(16);
 
-export const installAppSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
-      expectedSigningSha256: expectedSigningSha256Schema
-        .optional()
-        .describe(
-          "Android: complete signer set (SHA-256 of every signing certificate) an already " +
-            "installed copy must have before it is replaced; any other signer set, or signers " +
-            "that cannot be read, refuses the install. See inspectPackageSigning.",
-        ),
-      allowDestructiveRecovery: z
-        .boolean()
-        .optional()
-        .describe(
-          "Android: false refuses the uninstall-and-reinstall recovery after " +
-            "INSTALL_FAILED_VERSION_DOWNGRADE (default true)",
-        ),
-    })
-    .strict(),
-);
+const installAppInput = z.object({
+  artifactPath: z.string().describe("App artifact path (.apk, .app, or .ipa)"),
+  expectedSigningSha256: expectedSigningSha256Schema
+    .optional()
+    .describe(
+      "Android: complete signer set (SHA-256 of every signing certificate) an already " +
+        "installed copy must have before it is replaced; any other signer set, or signers " +
+        "that cannot be read, refuses the install. See inspectPackageSigning.",
+    ),
+  allowDestructiveRecovery: z
+    .boolean()
+    .optional()
+    .describe(
+      "Android: false refuses the uninstall-and-reinstall recovery after " +
+        "INSTALL_FAILED_VERSION_DOWNGRADE (default true)",
+    ),
+});
+
+export const installAppTool = defineDeviceTool({
+  name: "installApp",
+  description: "Install app on device (.apk, .app, or .ipa)",
+  input: installAppInput,
+  options: {
+    defaultEnabled: true,
+    // Installation is a platform package-manager operation. Requiring
+    // accessibility automation here creates a dependency cycle on iOS:
+    // a freshly erased/booted simulator cannot install the app because its
+    // CtrlProxy runner is still starting, even though simctl install itself
+    // does not use CtrlProxy.
+    deviceReadiness: "booted",
+    replacesProcess: true,
+  },
+});
+
+export const installAppSchema = installAppTool.schema;
 
 export const uninstallAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
@@ -750,47 +764,63 @@ export const resetKeychainSchema = withAppIdAliases(
 // its runtime schema must reject undeclared arguments too. Without `.strict()`
 // a call such as `listApps({ appId: "com.example" })` had the unsupported
 // filter silently dropped and returned the full unfiltered listing.
-export const listAppsSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      type: z
-        .enum(["launchable", "user", "system", "all"])
-        .optional()
-        .describe(
-          "Filter by app type. Defaults to 'launchable': every app with a launcher entry point, " +
-            "user-installed or preinstalled, so the apps a human names (Contacts, Clock, Settings) " +
-            "are visible while content providers and RRO overlays are not. 'user' and 'system' " +
-            "keep their meaning and must be asked for explicitly; 'all' returns every installed " +
-            "package. The default degrades to 'user' when the device reports no launchability " +
-            "signal, and an explicit 'launchable' is then rejected rather than silently empty. " +
-            "On a physical iOS device, where user/system classification is unavailable (devicectl " +
-            "reports no such signal), an omitted type returns every app (reported as 'all') and an " +
-            "explicit 'user' or 'system' filter is rejected rather than silently honored.",
-        ),
-      search: z
-        .string()
-        .optional()
-        .describe(
-          "Filter by a case-insensitive substring of the package name/bundle id or of the app's " +
-            "display label ('contacts' matches both com.android.contacts and an app labelled " +
-            "Contacts). Android labels require the installed CtrlProxy APK; without it only the " +
-            "package name is matched.",
-        ),
-      profile: z
-        .number()
-        .int()
-        .min(0)
-        .optional()
-        .describe("Filter to apps visible to this user profile id."),
-    })
-    .strict(),
-);
+const listAppsInput = z.object({
+  type: z
+    .enum(["launchable", "user", "system", "all"])
+    .optional()
+    .describe(
+      "Filter by app type. Defaults to 'launchable': every app with a launcher entry point, " +
+        "user-installed or preinstalled, so the apps a human names (Contacts, Clock, Settings) " +
+        "are visible while content providers and RRO overlays are not. 'user' and 'system' " +
+        "keep their meaning and must be asked for explicitly; 'all' returns every installed " +
+        "package. The default degrades to 'user' when the device reports no launchability " +
+        "signal, and an explicit 'launchable' is then rejected rather than silently empty. " +
+        "On a physical iOS device, where user/system classification is unavailable (devicectl " +
+        "reports no such signal), an omitted type returns every app (reported as 'all') and an " +
+        "explicit 'user' or 'system' filter is rejected rather than silently honored.",
+    ),
+  search: z
+    .string()
+    .optional()
+    .describe(
+      "Filter by a case-insensitive substring of the package name/bundle id or of the app's " +
+        "display label ('contacts' matches both com.android.contacts and an app labelled " +
+        "Contacts). Android labels require the installed CtrlProxy APK; without it only the " +
+        "package name is matched.",
+    ),
+  profile: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("Filter to apps visible to this user profile id."),
+});
 
-export interface ListAppsArgs {
-  type?: AppsQueryType;
-  search?: string;
-  profile?: number;
-}
+export const listAppsTool = defineDeviceTool({
+  name: "listApps",
+  description:
+    "List installed apps on a device, with optional display label and launchable fields when " +
+    "reported by the platform or transport. The label is typically omitted on Android when " +
+    "the installed CtrlProxy APK lacks label support; launchable is typically omitted for " +
+    "physical iOS/devicectl records. Filters by type (default: launchable — every app with a launcher entry point, " +
+    "preinstalled ones included), search (package name or label), and profile.",
+  input: listAppsInput,
+  options: {
+    defaultEnabled: true,
+    // Listing installed apps only needs adb/simctl/devicectl — never CtrlProxy
+    // automation — so it should not pay for (or trigger) automation-readiness
+    // setup on the target device (#6216 review).
+    deviceReadiness: "booted",
+    // Reads only; a non-holder watches a held device through the read-only path (#10830).
+    deviceReadOnly: true,
+    outputSchema: listAppsResultSchema,
+  },
+});
+
+export const listAppsSchema = listAppsTool.schema;
+
+type ListAppsArgs = z.output<typeof listAppsTool.schema>;
+type InstallAppArgs = z.output<typeof installAppTool.schema>;
 
 // Export interfaces for type safety
 export interface AppActionArgs {
@@ -843,12 +873,6 @@ function redactLaunchError(error: unknown, token: string | undefined): unknown {
   return token && String(error).includes(token)
     ? new Error(redactLaunchMessage(String(error), token))
     : error;
-}
-
-export interface InstallAppArgs {
-  artifactPath: string;
-  expectedSigningSha256?: string[];
-  allowDestructiveRecovery?: boolean;
 }
 
 export interface UninstallAppArgs {
@@ -1573,22 +1597,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     { defaultEnabled: true, outputSchema: appLifecycleResultSchema },
   );
 
-  ToolRegistry.registerDeviceAware(
-    "installApp",
-    "Install app on device (.apk, .app, or .ipa)",
-    installAppSchema,
-    installAppHandler,
-    {
-      defaultEnabled: true,
-      // Installation is a platform package-manager operation. Requiring
-      // accessibility automation here creates a dependency cycle on iOS:
-      // a freshly erased/booted simulator cannot install the app because its
-      // CtrlProxy runner is still starting, even though simctl install itself
-      // does not use CtrlProxy.
-      deviceReadiness: "booted",
-      replacesProcess: true,
-    },
-  );
+  installAppTool.register(ToolRegistry, installAppHandler);
 
   ToolRegistry.registerDeviceAware(
     "uninstallApp",
@@ -1637,24 +1646,5 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     { defaultEnabled: false },
   );
 
-  ToolRegistry.registerDeviceAware(
-    "listApps",
-    "List installed apps on a device, with optional display label and launchable fields when " +
-      "reported by the platform or transport. The label is typically omitted on Android when " +
-      "the installed CtrlProxy APK lacks label support; launchable is typically omitted for " +
-      "physical iOS/devicectl records. Filters by type (default: launchable — every app with a launcher entry point, " +
-      "preinstalled ones included), search (package name or label), and profile.",
-    listAppsSchema,
-    listAppsHandler,
-    {
-      defaultEnabled: true,
-      // Listing installed apps only needs adb/simctl/devicectl — never CtrlProxy
-      // automation — so it should not pay for (or trigger) automation-readiness
-      // setup on the target device (#6216 review).
-      deviceReadiness: "booted",
-      // Reads only; a non-holder watches a held device through the read-only path (#10830).
-      deviceReadOnly: true,
-      outputSchema: listAppsResultSchema,
-    },
-  );
+  listAppsTool.register(ToolRegistry, listAppsHandler);
 }

@@ -5,9 +5,9 @@
 1752	src/ctrlProxy/RunnerReadinessService.ts
 1183	src/daemon/cli/runDaemonCommand.ts
 1540	src/daemon/client.ts
-5442	src/daemon/daemon.ts
+5392	src/daemon/daemon.ts
 6025	src/daemon/daemonMcpProxy.ts
-1691	src/daemon/daemonRequestHandlers.ts
+1730	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8458	src/daemon/devicePool.ts
 1011	src/daemon/deviceRuntimeIdentity.ts

@@ -8,11 +8,11 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import {
+  StartDeviceArgs,
   getStartDevicePool,
   isUnknownAndroidRuntimeName,
   runWithinShutdownDeadline,
-} from "./deviceTools";
-import type { StartDeviceArgs } from "./deviceTools";
+} from "../features/deviceLifecycle/deviceLifecycleCore";
 
 /**
  * A `deviceId`-targeted acquisition owns exactly one AVD, so it must not take the

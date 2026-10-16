@@ -25,33 +25,6 @@ import { logger } from "../utils/logger";
 import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { ProgressCallback } from "./toolRegistry";
-import {
-  acceptancePresentationOrder,
-  acquisitionLifecycleTimeoutError,
-  cancelUnownedColdBootUnlessRetryable,
-  describeStartDeviceRequest,
-  getAndroidSchema,
-  getAppleSchema,
-  getDeviceToolsDependencies,
-  initializedDevicePool,
-  reserveAndroidStartupLease,
-  reserveStableDeviceLifecycle,
-  resolveAndroidStartStableDeviceLifecycleTarget,
-  runWithinShutdownDeadline,
-  setAcquisitionStage,
-  validateRequestedAndroidIdentifiersBeforeBoot,
-} from "./deviceTools";
-import type {
-  AcquisitionStage,
-  DevicePreparationBudgets,
-  DeviceToolsDependencies,
-  GetAndroidArgs,
-  GetAppleArgs,
-  StableDeviceTarget,
-  StartDeviceArgs,
-} from "./deviceTools";
-import type { createStartDeviceHandlers } from "./deviceToolsStartDevice";
-import { admitRestartReservedStart } from "./deviceToolsStartDevice";
 import { lifecycleRequester } from "./lifecycleDeviceOwnership";
 import { TerminalSessionError } from "../daemon/sessionManager";
 import {
@@ -59,6 +32,31 @@ import {
   resolveLiveTransportDeadlineGetter,
   resolveLiveTransportDeadlineSubscriber,
 } from "./formTools";
+import { reserveAndroidStartupLease } from "./deviceToolsStartupLease";
+import type { createStartDeviceHandlers } from "./deviceToolsStartDevice";
+import {
+  AcquisitionStage,
+  DevicePreparationBudgets,
+  DeviceToolsDependencies,
+  GetAndroidArgs,
+  GetAppleArgs,
+  StableDeviceTarget,
+  StartDeviceArgs,
+  acceptancePresentationOrder,
+  acquisitionLifecycleTimeoutError,
+  admitRestartReservedStart,
+  cancelUnownedColdBootUnlessRetryable,
+  describeStartDeviceRequest,
+  getAndroidSchema,
+  getAppleSchema,
+  getDeviceToolsDependencies,
+  initializedDevicePool,
+  reserveStableDeviceLifecycle,
+  resolveAndroidStartStableDeviceLifecycleTarget,
+  runWithinShutdownDeadline,
+  setAcquisitionStage,
+  validateRequestedAndroidIdentifiersBeforeBoot,
+} from "../features/deviceLifecycle/deviceLifecycleCore";
 
 // Match the cancellation settlement grace in RunnerReadinessService and DeviceBootService.
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;

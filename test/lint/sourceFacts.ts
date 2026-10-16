@@ -3,6 +3,8 @@ import { unwrapCallee } from "./astGuard";
 
 /** Syntactic facts about one parsed module, for guards that must not read source text. */
 export interface SourceFacts {
+  /** Every string literal (and substitution-free template) in the module, comments excluded. */
+  stringLiterals: string[];
   /** Every module specifier: static import, re-export, `import()` and `require()`. */
   moduleSpecifiers: string[];
   /** Value imports as `exportedName@specifier`; `*` for a namespace, `default` for a default. */
@@ -95,6 +97,7 @@ export function collectSourceFacts(
   const inScope = (node: { start: number; end: number }) =>
     !range || (node.start >= range.start && node.end <= range.end);
   const facts: SourceFacts = {
+    stringLiterals: [],
     moduleSpecifiers: [],
     importedNames: [],
     declaredNames: [],
@@ -110,6 +113,18 @@ export function collectSourceFacts(
     }
   };
   new Visitor({
+    Literal(node) {
+      if (typeof node.value === "string") {
+        facts.stringLiterals.push(node.value);
+      }
+    },
+    TemplateLiteral(node) {
+      for (const quasi of node.quasis) {
+        if (quasi.value.cooked) {
+          facts.stringLiterals.push(quasi.value.cooked);
+        }
+      }
+    },
     ImportDeclaration(node) {
       if (!inScope(node)) {
         return;

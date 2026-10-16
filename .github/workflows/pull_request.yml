@@ -1036,7 +1036,8 @@ jobs:
   # PR that touches no shell input finishes in seconds with "nothing to validate",
   # so the stable context name below always reports.
   shell-changed-gate:
-    timeout-minutes: 15
+    # The dependency helper alone may use its full 15-minute retry budget.
+    timeout-minutes: 25
     name: "Shell Changed Files"
     runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     steps:
@@ -1055,7 +1056,8 @@ jobs:
         shell: bash
         background: true
         id: install-bats
-        timeout-minutes: 10
+        # The helper budgets its retried operations for up to 870 s.
+        timeout-minutes: 15
         run: |
           scripts/ci/install-fast-validation-deps.sh
           if ! command -v shellcheck &>/dev/null; then

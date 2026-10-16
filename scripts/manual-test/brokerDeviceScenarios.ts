@@ -271,6 +271,20 @@ async function parallel(ctx: BrokerScenarioContext) {
   }
   for (const [i, c] of ctx.clients.entries()) {
     await release(ctx, c, results[i]);
+    // Release frees only the releasing client's device; every sibling keeps its own grant.
+    await assertSiblingsHeld(ctx, ctx.clients.slice(i + 1), results.slice(i + 1));
+  }
+}
+async function assertSiblingsHeld(
+  ctx: BrokerScenarioContext,
+  clients: readonly BrokerScenarioClient[],
+  grants: readonly SessionBrokerResult[],
+) {
+  for (const [i, c] of clients.entries()) {
+    await observe(ctx, c);
+    const current = await status(ctx, c);
+    assert.equal(current?.outcome, "ready", `${c.name} lost its grant to a sibling's end.`);
+    assert.equal(current.sessionUuid, grants[i].sessionUuid);
   }
 }
 async function releaseDestroy(ctx: BrokerScenarioContext) {
@@ -303,6 +317,19 @@ async function ownerDeath(ctx: BrokerScenarioContext) {
   await poll(ctx, "Proxy self-shutdown", () => ops(ctx).proxyClosed(c), Boolean);
   await terminal(ctx, c, grant, "session_owner_exited");
   return { c, grant };
+}
+/** One client's owner dies; its sibling keeps a working, unchanged grant on its own device. */
+async function crashIsolation(ctx: BrokerScenarioContext) {
+  assert(ctx.clients.length >= 2, "multi-client-crash-isolation needs at least two clients.");
+  const [victim, survivor] = ctx.clients;
+  const victimGrant = await acquire(ctx, victim, true);
+  const survivorGrant = await acquire(ctx, survivor);
+  assert.notEqual(uuid(victimGrant), uuid(survivorGrant));
+  await ctx.record("proxy/owner-kill", { client: victim.name }, () => ops(ctx).ownerKill(victim));
+  await poll(ctx, "Proxy self-shutdown", () => ops(ctx).proxyClosed(victim), Boolean);
+  await terminal(ctx, victim, victimGrant, "session_owner_exited");
+  await assertSiblingsHeld(ctx, [survivor], [survivorGrant]);
+  await release(ctx, survivor, survivorGrant);
 }
 async function ownerAbandon(ctx: BrokerScenarioContext) {
   const { c } = await ownerDeath(ctx);
@@ -487,6 +514,7 @@ export const brokerDeviceScenarios: readonly BrokerScenario[] = [
   entry("capacity-refusal-and-replay", 1, capacity),
   entry("release-destroy-verification", 1, releaseDestroy),
   entry("owner-death-and-abandon", 1, ownerAbandon),
+  entry("multi-client-crash-isolation", 2, crashIsolation),
   entry("daemon-restart-with-live-sessions", 1, restart),
   entry("#12451-restart-handoff", 1, restart),
   entry("#12452-prep-timeout", 1, timeout),

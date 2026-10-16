@@ -21,18 +21,33 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import type { BindingProcessIdentity } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { FAKE_BROKER_OWNER, FakeNativePort } from "./fakeSessionBrokerDevicePort";
 
 /** Real durable broker semantics; all storage is :memory: and native I/O is fake. */
 export async function createFakeBrokerDaemon(
-  options: { capacity?: number; timer?: FakeTimer; ids?: FakeIdGenerator } = {},
+  options: {
+    capacity?: number;
+    timer?: FakeTimer;
+    ids?: FakeIdGenerator;
+    /** A file path makes the registry durable so a second host can model a daemon restart. */
+    dbPath?: string;
+    /** The broker process identity; a restarted daemon differs from its predecessor. */
+    owner?: BindingProcessIdentity;
+    /** First fake session UUID ordinal, so a restarted host never reissues a predecessor's UUID. */
+    sessionIdBase?: number;
+    /** Wire the daemon's real disposition: a grant whose session left the SessionManager is gone. */
+    liveDisposition?: boolean;
+    /** Whether a predecessor broker process still runs; defaults to live (no takeover). */
+    isOwnerLive?: (owner: BindingProcessIdentity) => boolean;
+  } = {},
 ) {
   const timer = options.timer ?? new FakeTimer();
   const ids = options.ids ?? new FakeIdGenerator();
   const registry = await openSqliteBindingRegistry({
-    dbPath: ":memory:",
+    dbPath: options.dbPath ?? ":memory:",
     timer,
-    isExecOwnerLive: () => true,
+    isExecOwnerLive: options.isOwnerLive ?? (() => true),
   });
   const scope = await registry.ensureScope({
     managedHostScope: "scenario",
@@ -47,16 +62,21 @@ export async function createFakeBrokerDaemon(
   const sessionIds = new FakeIdGenerator(
     Array.from(
       { length: 32 },
-      (_, i) => `00000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
+      (_, i) =>
+        `00000000-0000-4000-8000-${String(i + 1 + (options.sessionIdBase ?? 0)).padStart(12, "0")}`,
     ),
   );
-  const devices = new FakeNativePort(registry, sessionIds);
+  const owner = options.owner ?? FAKE_BROKER_OWNER;
+  const devices = new FakeNativePort(registry, sessionIds, owner);
   const store = registry.sessionBrokerStore(scope.scope.scopeKey, ids);
   let unavailable = false;
   const broker = new SessionBroker({
     store,
     devices,
-    owner: FAKE_BROKER_OWNER,
+    owner,
+    sessionDisposition: options.liveDisposition
+      ? (sessionUuid) => (sessions.peekSession(sessionUuid) ? "live" : "gone")
+      : undefined,
     limits: {
       totalDeviceCap: options.capacity ?? 1,
       sessionCap: options.capacity ?? 1,
@@ -245,8 +265,15 @@ export async function createFakeBrokerDaemon(
     store,
     devices,
     scopes,
+    sessions,
+    state,
     timer,
     ids,
+    /** Process death: no broker shutdown release runs, only the storage handle goes away. */
+    crash: async () => {
+      sessions.stopCleanupTimer();
+      await registry.close();
+    },
     close: async () => {
       try {
         await broker.close();

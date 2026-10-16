@@ -1657,14 +1657,29 @@ the Android package name or iOS bundle ID. `clearKeyValueFile.fileName` and
 
 On iOS Simulator, a stored TCC Photos grant is not proof of effective full
 read/write authorization. `getAppPermissions` reports it as `unknown` with
-`verified: false`; `setAppPermissions` reports a dispatched Photos grant as
-success with `applied: true`, `verified: false`, and a warning. Verification is
-unavailable from the host without app instrumentation: launch the app and check
+`verified: false`; by default `setAppPermissions` returns a non-fatal unverified
+success with `success: true`, `applied: true`, `verified: false`, a warning, and
+`code: "PHOTOS_FULL_ACCESS_UNVERIFIED"` after dispatching a full Photos grant.
+An unobservable verifier or a verifier/TCC-readback exception keeps this outcome;
+the warning is aggregated in `warnings` and the operation counts as changed.
+Only an app-level verifier reporting `authorized` yields `verified: true`, with
+no code or warning. A positive `limited`, `denied`, `notDetermined`, or `addOnly`
+observation yields `success: false`, `applied: true`, `verified: false`,
+`PHOTOS_FULL_ACCESS_NOT_ESTABLISHED`, and an actionable error. For `all`, this
+keeps the successful `all` dispatch operation and adds a separate failed `photos`
+operation; only the Photos entry counts as failed. Each operation exposes its
+own permission in `stepId`, its result, and any code, including non-fatal codes.
+A real verifier needs target-app instrumentation (design option C, still a follow-up):
+launch the app and check
 `PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite`. Add-only access is
 insufficient. Results include `accessLevel` (`readWrite` for Photos and
 `addOnly` for photos-add); an unverified stored Photos grant includes
-`evidence: "storedTccGrant"`. Effective native status still requires app
-instrumentation. On simulator runtimes iOS 27 and later, a full stored Photos
+`evidence: "storedTccGrant"`. Granting `photos-add` remains a dispatch success with
+`accessLevel: "addOnly"` and does not establish full access. No simulator/runtime
+combination is currently verified to give effective full access through
+`simctl privacy grant`; simulator verification with the Playground probe is still
+owed. This behavior is not device-verified.
+On simulator runtimes iOS 27 and later, a full stored Photos
 grant (`auth_value: 2`) implies add-only access: photos-add reports `granted` with `evidence: "impliedByFullPhotosGrant"`
 when its own row is missing or not granted. A stale PhotosAdd row remains in
 `raw` and `authValue` for transparency; an already granted PhotosAdd row is

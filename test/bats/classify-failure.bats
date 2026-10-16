@@ -967,6 +967,17 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
   done
 }
 
+@test "reruns suspected runner starvation before the plain timeout signature for both Node jobs" {
+  for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)"; do
+    runner_shutdown_fixture "$job"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" \
+      FAKE_RUNNER_LOG=$'TIMEOUT: unit shard 0 exceeded its wall-clock budget after a retry\nRUNNER-STARVED-SUSPECTED: all 3 unit shards hit the 720 s wall-clock budget on both attempts (worst probe slowdown 2x); every shard being slow on a retried runner points at a starved runner, not a code regression.' bash "$SCRIPT" 123
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — every shard timed out on both attempts, treat as runner starvation; rerun the job once on a fresh runner; if it recurs on the rerun, investigate"* ]]
+    [[ "$output" != *"INVESTIGATE"* ]]
+  done
+}
+
 @test "investigates a unit shard that timed out on both attempts of its infra retry" {
   runner_shutdown_fixture "Node Unit Tests (ubuntu-latest)"
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'RETRY: unit shard 2 hit its 720s wall-clock budget (exit 124) after 721s; retrying once with the same budget\nTIMEOUT: unit shard 2 exceeded its wall-clock budget after a retry\ntest-ts: unit shards total wall=1450s status=124 retried=1' bash "$SCRIPT" 123

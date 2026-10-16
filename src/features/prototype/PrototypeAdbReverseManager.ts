@@ -79,6 +79,8 @@ interface DeviceState {
   report: Map<string, PrototypeReverseReport>;
   /** Serialises operations on one device so list-then-add cannot interleave. */
   tail: Promise<unknown>;
+  /** Tasks queued or running on this device, so a release can tell whether anything waits behind it. */
+  pending: number;
 }
 
 /**
@@ -204,11 +206,12 @@ export class PrototypeAdbReverseManager {
         });
       }
       state.report.clear();
+      // Forgetting the device is part of the serialized queue: work queued behind this release
+      // runs after it, and still finds the same state object (see `pending`).
+      if (state.pending === 1 && this.devices.get(deviceId) === state) {
+        this.devices.delete(deviceId);
+      }
     });
-    // A sync queued behind this release may have created reverses again: keep tracking those.
-    if (state.owned.size === 0) {
-      this.devices.delete(deviceId);
-    }
   }
 
   async dispose(): Promise<void> {
@@ -232,7 +235,7 @@ export class PrototypeAdbReverseManager {
   private stateFor(deviceId: string, adb: PrototypeReverseAdb): DeviceState {
     let state = this.devices.get(deviceId);
     if (state === undefined) {
-      state = { adb, owned: new Map(), report: new Map(), tail: Promise.resolve() };
+      state = { adb, owned: new Map(), report: new Map(), tail: Promise.resolve(), pending: 0 };
       this.devices.set(deviceId, state);
     } else {
       state.adb = adb;
@@ -241,7 +244,10 @@ export class PrototypeAdbReverseManager {
   }
 
   private enqueue<T>(state: DeviceState, task: () => Promise<T>): Promise<T> {
-    const run = state.tail.then(task, task);
+    state.pending++;
+    const run = state.tail.then(task, task).finally(() => {
+      state.pending--;
+    });
     state.tail = run.catch(() => undefined);
     return run;
   }

@@ -185,4 +185,30 @@ describe("createPrototypeReverseAdb", () => {
       "reverse --remove tcp:8080",
     ]);
   });
+
+  test("work queued behind releaseAll keeps its state and is removed by a later releaseAll", async () => {
+    const adb = new FakeReverseAdb();
+    const manager = new PrototypeAdbReverseManager();
+    await manager.sync("dev", "a", spec("http://localhost:1/"), adb);
+    let openGate!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+    const removeReverse = adb.removeReverse.bind(adb);
+    adb.removeReverse = async (port) => {
+      await gate;
+      await removeReverse(port);
+    };
+    const releasing = manager.releaseAll("dev");
+    const staging = manager.stage("dev", "b", spec("http://localhost:2/"), adb);
+    openGate();
+    await releasing;
+    const staged = await staging;
+    await staged.commit();
+    expect(manager.ownedPorts("dev")).toEqual([2]);
+    expect(adb.existing.has(2)).toBe(true);
+    await manager.releaseAll("dev");
+    expect(manager.ownedPorts("dev")).toEqual([]);
+    expect(adb.existing.size).toBe(0);
+  });
 });

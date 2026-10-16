@@ -1,10 +1,6 @@
 import { DeviceState } from "../../src/features/utility/DeviceState";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
-  setLaunchAppToolDependencies,
-  resetLaunchAppToolDependencies,
-  setTerminateAppToolDependencies,
-  resetTerminateAppToolDependencies,
   setInstalledAppResourceRefresh,
   resetInstalledAppResourceRefresh,
 } from "../../src/server/appTools";
@@ -44,6 +40,9 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { logger, LogLevel } from "../../src/utils/logger";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { createAppToolsHarness } from "../helpers/appToolsHarness";
+
+const appTools = createAppToolsHarness();
 
 isolateToolRegistry();
 
@@ -421,8 +420,6 @@ describe("device lifecycle ordinary-client structured output", () => {
     resetSetPostureFactory();
     resetPressButtonFactory();
     resetWakeAndUnlockFactory();
-    resetLaunchAppToolDependencies();
-    resetTerminateAppToolDependencies();
     resetInstalledAppResourceRefresh();
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
   });
@@ -466,12 +463,12 @@ describe("device lifecycle ordinary-client structured output", () => {
           unlocked: true,
         }),
       }));
-      setLaunchAppToolDependencies({
+      appTools.configure("launchApp", {
         createLaunchApp: () => ({
           execute: async () => ({ success: true, packageName: "com.example" }),
         }),
       });
-      setTerminateAppToolDependencies({
+      appTools.configure("terminateApp", {
         createTerminateApp: () => ({
           execute: async () => ({
             success: true,

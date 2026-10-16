@@ -733,6 +733,10 @@ those values per prototype id across shows, requires `prototype_storage_v1` with
 and is reported by `inspect` as `storage` per prototype. Stored values replace the spec's on the next
 show of the same id unless `version` changed; `clearStorage {id}` wipes them and `deleteSaved` also
 clears them; see [storage](design-docs/plat/android/prototype-ux.md#storage-12522).
+`request` actions (an HTTP call to any http(s) URL from a tap, written into `/data` with a
+`statusKey` lifecycle, `onSuccess` / `onError` lists and a `prototype_request` emit event) require
+`prototype_network_v1`, and `prototype_network_device_v1` as well for `via: "device"`, with the same
+refusal; see [the request action](design-docs/plat/android/prototype-ux.md#request-action-12523).
 Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve
 once per show on the device; `status` remembers shown data beside state, `inspect` reports and
 adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).

@@ -1,17 +1,8 @@
 import { isEmulatorStopDispatchedError } from "../utils/android-cmdline-tools/EmulatorProcessStop";
-import { deviceLossCancellationReason } from "../daemon/emulatorLossIncident";
 import { createStructuredToolResponse } from "../utils/toolUtils";
-import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { ActionableError, type BootedDevice, type SomePlatform } from "../models";
-import { DeviceShutdownTimeoutError } from "../models/DeviceShutdownTimeoutError";
-import type {
-  DeviceShutdownOptions,
-  BootedDeviceDiscovery,
-  PlatformDeviceManager,
-} from "../devices/deviceUtils";
+import type { DeviceShutdownOptions, PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
-import { fixedBackoff } from "../utils/Backoff";
-import { getAbortSignal } from "../utils/AbortContext";
 import { DaemonState } from "../daemon/daemonState";
 import type {
   DevicePool,
@@ -19,8 +10,7 @@ import type {
   ShutdownForeignClaim,
   RestartStopIdentity,
 } from "../daemon/devicePool";
-import type { Session, SessionManager } from "../daemon/sessionManager";
-import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
+import type { Session } from "../daemon/sessionManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
@@ -28,10 +18,6 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
-import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
-import { stopSegmentedVideoRecordingsForDevice } from "./videoRecordingTools";
-import { executionTracker } from "./executionTracker";
-import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import {
   resolveDirectSessionDevice,
   unregisterDirectSessionsForDevice,
@@ -43,27 +29,48 @@ import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDevic
 import { isIosSimulatorAlreadyStoppedError } from "../utils/ios-cmdline-tools/simulatorStateErrors";
 import {
   DEVICE_ALREADY_STOPPED_ERROR_CODE,
-  DEVICE_SHUTDOWN_TIMEOUT_MS,
+  DEVICE_SHUTDOWN_POLL_INTERVAL_MS,
+  DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
+  DeviceToolsDependencies,
+  KillDeviceArgs,
+  PooledAvdIdentityError,
+  PooledAvdKillIdentity,
+  ShutdownDeadlineContext,
+  ShutdownDiscoveryContext,
+  ShutdownOwnershipContext,
+  confirmPooledAvdIdentity,
   createToolErrorResponse,
+  findDiscoveredDevice,
+  getShutdownDiscovery,
+  hasUnresolvedEmulatorRuntimeName,
+  isShutdownTimeoutError,
+  isUnknownAndroidRuntimeName,
   notifyResourcesAfterShutdown,
+  pooledAvdNameRefusalMessage,
+  retireShutdownOwnership,
   runWithinShutdownDeadline,
   settleWithin,
-  confirmPooledAvdIdentity,
-  isUnknownAndroidRuntimeName,
-  pooledAvdNameRefusalMessage,
-  PooledAvdIdentityError,
-} from "./deviceTools";
-import type { DeviceToolsDependencies, KillDeviceArgs, PooledAvdKillIdentity } from "./deviceTools";
+  shouldClearIntentionalShutdownAfterFailure,
+  shouldPropagateShutdownPreparationError,
+  shutdownTimeoutError,
+  stopVideoRecordingsBeforeShutdown,
+  waitForDeviceShutdown,
+} from "../features/deviceLifecycle/deviceLifecycleCore";
+export {
+  DEVICE_SHUTDOWN_POLL_INTERVAL_MS,
+  isShutdownTimeoutError,
+  shutdownTimeoutError,
+  getShutdownInitiatingExecutionId,
+  DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
+  retireShutdownOwnership,
+  waitForDeviceShutdown,
+  type ShutdownDiscoveryContext,
+  stopVideoRecordingsBeforeShutdown,
+  type ShutdownDeadlineContext,
+  shouldClearIntentionalShutdownAfterFailure,
+} from "../features/deviceLifecycle/deviceLifecycleCore";
 
-export const DEVICE_SHUTDOWN_POLL_INTERVAL_MS = 1_000;
-const DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS = 1_000;
 const IOS_SHUTDOWN_CONFIRMATION_MIN_MS = 2_000;
-const DEVICE_SHUTDOWN_DISCOVERY_RECHECK_BACKOFF = fixedBackoff(1_000);
-export const DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES = 2;
-
-export function getShutdownInitiatingExecutionId(): string | undefined {
-  return getToolSelectionContext()?.execution?.executionId;
-}
 
 function isAlreadyStoppedDeviceError(
   platform: SomePlatform,
@@ -127,90 +134,10 @@ async function clearInstalledAppsAfterShutdown(
   }
 }
 
-export interface ShutdownDeadlineContext {
-  device: BootedDevice;
-  timer: Timer;
-  deadlineMs: number;
-  timeoutMs: number;
-  requestAbortSignal: AbortSignal | undefined;
-  retainReservationUntil?: (operation: Promise<unknown>, releaseAfterFailure?: boolean) => void;
-}
-
 interface AndroidObserverShutdownState {
   hadActiveObserver: boolean;
   boundSessionId: string | null;
   deviceIdentity: BootedDevice | null;
-}
-
-function shouldPropagateShutdownPreparationError(
-  error: unknown,
-  requestAbortSignal: AbortSignal | undefined,
-): boolean {
-  return isShutdownTimeoutError(error) || requestAbortSignal?.aborted === true;
-}
-
-async function stopVideoRecordingBeforeShutdown(
-  recordingId: string,
-  context: ShutdownDeadlineContext,
-): Promise<void> {
-  try {
-    await runWithinShutdownDeadline(
-      context.device,
-      context.timer,
-      context.deadlineMs,
-      "video recording teardown did not complete",
-      {
-        requestAbortSignal: context.requestAbortSignal,
-        operation: async () => await stopVideoRecording(recordingId),
-        timeoutMs: context.timeoutMs,
-      },
-    );
-  } catch (error) {
-    if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
-      throw error;
-    }
-    logger.warn(`[DeviceTools] Failed to stop recording ${recordingId} before shutdown: ${error}`);
-  }
-}
-
-export async function stopVideoRecordingsBeforeShutdown(
-  context: ShutdownDeadlineContext,
-  perf: ReturnType<typeof createPerformanceTracker>,
-): Promise<void> {
-  perf.startOperation("stopRecordings");
-  try {
-    await runWithinShutdownDeadline(
-      context.device,
-      context.timer,
-      context.deadlineMs,
-      "segmented video recording teardown did not complete",
-      {
-        requestAbortSignal: context.requestAbortSignal,
-        operation: async () => await stopSegmentedVideoRecordingsForDevice(context.device),
-        timeoutMs: context.timeoutMs,
-      },
-    );
-    const activeRecordings = await runWithinShutdownDeadline(
-      context.device,
-      context.timer,
-      context.deadlineMs,
-      "recording discovery did not complete",
-      {
-        requestAbortSignal: context.requestAbortSignal,
-        operation: async () =>
-          await listActiveVideoRecordings({
-            deviceId: context.device.deviceId,
-            platform: context.device.platform,
-          }),
-        timeoutMs: context.timeoutMs,
-      },
-    );
-    for (const recording of activeRecordings) {
-      await stopVideoRecordingBeforeShutdown(recording.recordingId, context);
-    }
-  } finally {
-    perf.endOperation("stopRecordings");
-  }
 }
 
 async function stopIosCtrlProxyBeforeShutdown(
@@ -307,36 +234,6 @@ async function stopAndroidCtrlProxyBeforeShutdown(
     perf.endOperation("stopAndroidCtrlProxy");
   }
   return observerState;
-}
-
-export function shutdownTimeoutError(
-  device: BootedDevice,
-  detail: string,
-  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
-  // Not every deadline-bounded phase is a device disappearing (System UI ANR
-  // recovery lists AVD images and issues a kill command under this same
-  // deadline), so callers can name their own phase. The "Timed out waiting for"
-  // prefix is load-bearing: `isShutdownTimeoutError` classifies on it.
-  phase = "to disappear",
-): ActionableError {
-  return new DeviceShutdownTimeoutError(
-    `Timed out waiting for ${device.platform} device '${device.name}' (${device.deviceId}) ` +
-      `${phase} after ${timeoutMs}ms: ${detail}. ` +
-      "Verify the platform shutdown state and retry.",
-  );
-}
-
-export function isShutdownTimeoutError(error: unknown): error is ActionableError {
-  return (
-    error instanceof ActionableError && String(error.message).startsWith("Timed out waiting for")
-  );
-}
-
-export function shouldClearIntentionalShutdownAfterFailure(
-  platform: SomePlatform,
-  requestAbortSignal: AbortSignal | undefined,
-): boolean {
-  return platform === "android" && !requestAbortSignal?.aborted;
 }
 
 async function resumeCtrlProxyAfterFailedKill(device: BootedDevice): Promise<void> {
@@ -451,15 +348,6 @@ function invalidateAndroidObserver(observer: AndroidCtrlProxyClient, deviceId: s
       `[DeviceTools] Failed to clean up invalidated Android observer for ${deviceId}: ${error}`,
     );
   });
-}
-
-export interface ShutdownDiscoveryContext {
-  deviceManager: PlatformDeviceManager;
-  device: BootedDevice;
-  timer: Timer;
-  deadlineMs: number;
-  requestAbortSignal: AbortSignal | undefined;
-  timeoutMs: number;
 }
 
 interface ShutdownObserverRecoveryContext {
@@ -681,63 +569,6 @@ async function runPostShutdownStep(
   }
 }
 
-/**
- * `skipAndroidNameEnrichment` is the shutdown-confirmation half of the same
- * `force` fast path `readTeardownTargetDiscovery` already gives target
- * RESOLUTION (#6864): a forced kill still confirms its target's disappearance
- * by discovery, and unforced discovery enriches every attached emulator with
- * `emu avd name`, sequentially, budgeting 2s each. Wedged peer consoles can
- * burn a whole forced teardown deadline confirming a kill that itself
- * completed instantly, reporting a shutdown timeout even though the platform
- * kill succeeded
- * ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review). A
- * serial-only scan is enough here: `findDiscoveredDevice` matches by
- * `deviceId`, so the target's disappearance is confirmed without a name, and
- * an unresolved `Unknown (<serial>)` name on a still-present serial already
- * reads as "not yet a confirmed replacement" via
- * {@link isConfirmedDeviceReplacement}'s unresolved-name guard, the same
- * conservative "keep waiting" outcome an unforced caller gets from a
- * momentarily wedged console.
- */
-async function getShutdownDiscovery(
-  context: ShutdownDiscoveryContext,
-  skipAndroidNameEnrichment = false,
-) {
-  const { deviceManager, device, timer, deadlineMs, requestAbortSignal, timeoutMs } = context;
-  return await runWithinShutdownDeadline(
-    device,
-    timer,
-    deadlineMs,
-    "platform discovery did not complete",
-    {
-      requestAbortSignal: requestAbortSignal ?? getAbortSignal(),
-      operation: async () => {
-        const discovery = await deviceManager.getBootedDevicesDetailed(device.platform, {
-          bypassAndroidDeviceListCache: true,
-          ...(device.platform === "ios" ? { bypassIosDeviceListCache: true } : {}),
-          ...(skipAndroidNameEnrichment ? { skipAndroidNameEnrichment: true } : {}),
-        });
-        // FUNNEL 1: the kill/teardown preflight decides whether the pooled AVD
-        // label may be acted on destructively, so the pool must see this
-        // observation before that decision (#6863 review).
-        await reconcileDiscoveryObservation(discovery.devices, "shutdown-preflight", {
-          // This kill IS the discovering execution. Entering the quarantine
-          // cancels the pooled session's in-flight work, and without this
-          // exemption that includes the kill awaiting this very observation: it
-          // would lose the `runWithinShutdownDeadline` signal race and report a
-          // device-loss failure instead of reaching confirm-or-refuse
-          // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-          excludeExecutionId: getShutdownInitiatingExecutionId(),
-          signal: getAbortSignal(),
-          namesResolved: !skipAndroidNameEnrichment,
-        });
-        return discovery;
-      },
-      timeoutMs: timeoutMs,
-    },
-  );
-}
-
 async function getCompleteShutdownDiscovery(context: ShutdownObserverRecoveryContext) {
   const { device, timer, shutdownDeadlineMs, timeoutMs } = context;
   for (;;) {
@@ -748,102 +579,6 @@ async function getCompleteShutdownDiscovery(context: ShutdownObserverRecoveryCon
     const remainingMs = shutdownDeadlineMs - timer.now();
     if (remainingMs <= 0) {
       throw shutdownTimeoutError(device, "platform discovery did not complete", timeoutMs);
-    }
-    await timer.sleep(Math.min(DEVICE_SHUTDOWN_POLL_INTERVAL_MS, remainingMs));
-  }
-}
-
-/**
- * The online-only discovery cannot see an emulator whose adb transport is
- * `offline`: the serial vanishes from it while the process keeps running
- * (#10074). Before an Android serial's absence counts as disappearance, ask adb
- * whether the serial is still attached in that state. Returns why disappearance
- * is NOT yet confirmed, or undefined when the serial is gone from `adb devices`.
- * A manager without the probe keeps the previous online-only behaviour.
- */
-async function androidOfflineHoldDetail(
-  context: ShutdownDiscoveryContext,
-): Promise<string | undefined> {
-  const { deviceManager, device, timer, deadlineMs, requestAbortSignal, timeoutMs } = context;
-  const probe = deviceManager.getAndroidOfflineDeviceIds?.bind(deviceManager);
-  if (device.platform !== "android" || !probe) {
-    return undefined;
-  }
-  try {
-    const offline = await runWithinShutdownDeadline(
-      device,
-      timer,
-      deadlineMs,
-      "adb device-state read did not complete",
-      {
-        requestAbortSignal: requestAbortSignal ?? getAbortSignal(),
-        operation: async (signal, remainingMs) =>
-          await probe([device.deviceId], { signal, timeoutMs: remainingMs }),
-        timeoutMs,
-      },
-    );
-    return offline.has(device.deviceId) ? "adb still lists the device as offline" : undefined;
-  } catch (error) {
-    if (isShutdownTimeoutError(error) || requestAbortSignal?.aborted) {
-      throw error;
-    }
-    // An unreadable state list cannot prove the serial left `adb devices`; keep
-    // polling until the deadline rather than retire ownership of a live emulator.
-    logger.warn(
-      `[DeviceTools] adb device-state probe failed while confirming ${device.deviceId} stopped: ${errorMessage(error)}`,
-      error,
-    );
-    return "adb device states could not be read to confirm the serial is gone";
-  }
-}
-
-type ShutdownDiscoveryJudgement =
-  | { settled: true; replacement: BootedDevice | undefined }
-  | { settled: false; detail: string };
-
-async function judgeShutdownDiscovery(
-  context: ShutdownDiscoveryContext,
-  discovery: BootedDeviceDiscovery,
-): Promise<ShutdownDiscoveryJudgement> {
-  const { device } = context;
-  const platformWasDiscovered = discovery.succeededPlatforms.has(device.platform);
-  const matchingDevice = findDiscoveredDevice(discovery, device);
-  if (platformWasDiscovered && !matchingDevice) {
-    const offlineHoldDetail = await androidOfflineHoldDetail(context);
-    return offlineHoldDetail === undefined
-      ? { settled: true, replacement: undefined }
-      : { settled: false, detail: offlineHoldDetail };
-  }
-  if (matchingDevice && isConfirmedDeviceReplacement(device, matchingDevice)) {
-    return { settled: true, replacement: matchingDevice };
-  }
-  return {
-    settled: false,
-    detail: platformWasDiscovered
-      ? "the device is still reported as booted"
-      : "platform discovery did not succeed",
-  };
-}
-
-export async function waitForDeviceShutdown(
-  context: ShutdownDiscoveryContext,
-  skipAndroidNameEnrichment = false,
-): Promise<BootedDevice | undefined> {
-  const { device, timer, deadlineMs, timeoutMs } = context;
-  let lastDiscoveryDetail = "platform discovery did not complete";
-  for (;;) {
-    if (timer.now() >= deadlineMs) {
-      throw shutdownTimeoutError(device, lastDiscoveryDetail, timeoutMs);
-    }
-    const discovery = await getShutdownDiscovery(context, skipAndroidNameEnrichment);
-    const judgement = await judgeShutdownDiscovery(context, discovery);
-    if (judgement.settled) {
-      return judgement.replacement;
-    }
-    lastDiscoveryDetail = judgement.detail;
-    const remainingMs = deadlineMs - timer.now();
-    if (remainingMs <= 0) {
-      throw shutdownTimeoutError(device, lastDiscoveryDetail, timeoutMs);
     }
     await timer.sleep(Math.min(DEVICE_SHUTDOWN_POLL_INTERVAL_MS, remainingMs));
   }
@@ -881,468 +616,10 @@ function isSameBootedDeviceIdentity(device: BootedDevice, candidate: BootedDevic
   );
 }
 
-/**
- * Whether a device rediscovered on a serial is positive evidence that a
- * DIFFERENT runtime now holds it -- the REPLACEMENT question, asked by the
- * shutdown wait before it stops waiting and rebuilds the pool around the
- * newcomer.
- *
- * Only a RESOLVED, different name declares a replacement. While an emulator
- * shuts down, `adb devices` can keep listing its serial after the console has
- * stopped answering `avd name`, so the device that is still present gets
- * labelled `Unknown (<serial>)`; classifying that as a replacement would end the
- * shutdown wait before disappearance and retirement, releasing the session and
- * rebuilding the pool around a device that is still going away (#6863 review).
- *
- * This is NOT the negation of {@link isSameBootedDeviceIdentity}: an unresolved
- * name answers neither question, so both predicates return false for it.
- */
-function isConfirmedDeviceReplacement(device: BootedDevice, candidate: BootedDevice): boolean {
-  if (device.platform !== candidate.platform || device.deviceId !== candidate.deviceId) {
-    return false;
-  }
-  if (hasUnresolvedEmulatorRuntimeName(device) || hasUnresolvedEmulatorRuntimeName(candidate)) {
-    return false;
-  }
-  return device.name !== candidate.name;
-}
-
-/**
- * Whether this observation's name is the `Unknown (<serial>)` placeholder rather
- * than a name read from the runtime. Guarded by {@link isAndroidEmulatorSerial}:
- * a handset's name is `ro.product.model`, which is not unique and carries no
- * identity anyway, so handsets keep serial-only identity.
- */
-function hasUnresolvedEmulatorRuntimeName(device: BootedDevice): boolean {
-  return (
-    device.platform === "android" &&
-    isAndroidEmulatorSerial(device.deviceId) &&
-    isUnknownAndroidRuntimeName(device)
-  );
-}
-
-function findDiscoveredDevice(
-  discovery: BootedDeviceDiscovery,
-  device: BootedDevice,
-): BootedDevice | undefined {
-  if (!discovery.succeededPlatforms.has(device.platform)) {
-    return undefined;
-  }
-  return discovery.devices.find(
-    (candidate) => candidate.platform === device.platform && candidate.deviceId === device.deviceId,
-  );
-}
-
-async function rebuildSameIdReplacement(
-  device: BootedDevice,
-  expectedPooledDevice: PooledDevice,
-  replacement: BootedDevice,
-  daemonState: DaemonState,
-  stopPerformanceMonitoring: (deviceId: string) => void,
-): Promise<void> {
-  const devicePool = daemonState.getDevicePool();
-  const rebuilt = await devicePool.replaceDeviceForShutdown(
-    expectedPooledDevice,
-    replacement,
-    () => stopPerformanceMonitoring(device.deviceId),
-    { excludeExecutionId: getShutdownInitiatingExecutionId() },
-  );
-  if (!rebuilt) {
-    return;
-  }
-}
-
-function shutdownRecheckDeadlineMs(
-  timer: Timer,
-  deadlineMs: number,
-  strictDeadline: boolean,
-): number {
-  if (strictDeadline) {
-    return deadlineMs;
-  }
-  return Math.max(deadlineMs, timer.now() + DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS);
-}
-
-async function findReplacementAfterSessionRelease(
-  context: ShutdownOwnershipContext,
-  strictDeadline = false,
-  timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
-  skipAndroidNameEnrichment = false,
-): Promise<BootedDevice | undefined> {
-  const { deviceManager, device, timer, deadlineMs, requestAbortSignal } = context;
-  // The absence observation only proves the old incarnation was gone before
-  // session release. A same-ID replacement can appear while that release
-  // awaits persistence, so ordinary shutdown keeps a short, bounded recheck
-  // even after the disappearance deadline was consumed.
-  // Under force, a replacement can only be confirmed by a DIFFERING resolved
-  // name (see `isConfirmedDeviceReplacement`), so this serial-only recheck
-  // reports no confirmed replacement quickly instead of probing every peer's
-  // console -- the same conservative trade-off as the pre-release scan (#6864).
-  const recheckDeadlineMs = shutdownRecheckDeadlineMs(timer, deadlineMs, strictDeadline);
-  const discovery = await getShutdownDiscovery(
-    { deviceManager, device, timer, deadlineMs: recheckDeadlineMs, requestAbortSignal, timeoutMs },
-    skipAndroidNameEnrichment,
-  );
-  const replacement = findDiscoveredDevice(discovery, device);
-  if (
-    replacement &&
-    (device.platform === "ios" || isConfirmedDeviceReplacement(device, replacement))
-  ) {
-    return replacement;
-  }
-  if (!replacement && discovery.succeededPlatforms.has(device.platform)) {
-    return undefined;
-  }
-  return await waitForDeviceShutdown(
-    { deviceManager, device, timer, deadlineMs: recheckDeadlineMs, requestAbortSignal, timeoutMs },
-    skipAndroidNameEnrichment,
-  );
-}
-
-interface ShutdownOwnershipContext {
-  sessionManager?: SessionManager;
-  sessionId?: string;
-  device: BootedDevice;
-  expectedPooledDevice: PooledDevice | null;
-  expectedSession: Session | undefined;
-  deviceManager: PlatformDeviceManager;
-  timer: Timer;
-  deadlineMs: number;
-  requestAbortSignal: AbortSignal | undefined;
-  stopPerformanceMonitoring: (deviceId: string) => void;
-  retainReservationUntil: (retirement: Promise<void>) => void;
-}
-
-type ShutdownSessionOwnershipContext = ShutdownOwnershipContext & {
-  sessionManager: SessionManager;
-  sessionId: string;
-};
-
 type ShutdownEntryContext = Pick<
   ShutdownOwnershipContext,
   "device" | "timer" | "deadlineMs" | "requestAbortSignal" | "stopPerformanceMonitoring"
 >;
-
-interface ShutdownRetirementOptions {
-  retryAfterDiscoveryFailure?: boolean;
-  strictDeadline?: boolean;
-  timeoutMs?: number;
-  terminalReleaseRetriesRemaining?: number;
-  skipAndroidNameEnrichment?: boolean;
-}
-
-function finishLateShutdownRetirement(
-  context: ShutdownOwnershipContext,
-  release: Promise<string | null>,
-  observedReplacement: BootedDevice | undefined,
-  terminalReleaseRetriesRemaining: number,
-  skipAndroidNameEnrichment: boolean,
-  disappearanceConfirmed: boolean,
-): void {
-  const { device, timer, retainReservationUntil } = context;
-  const continueRetirement = async () => {
-    await retireShutdownOwnership(
-      { ...context, requestAbortSignal: undefined },
-      observedReplacement,
-      disappearanceConfirmed,
-      {
-        retryAfterDiscoveryFailure: true,
-        strictDeadline: false,
-        timeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
-        terminalReleaseRetriesRemaining: DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
-        skipAndroidNameEnrichment,
-      },
-    );
-  };
-  const retryRetirement = async (error: unknown) => {
-    if (terminalReleaseRetriesRemaining <= 0) {
-      throw error;
-    }
-    await timer.sleep(DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS);
-    await retireShutdownOwnership(
-      { ...context, requestAbortSignal: undefined },
-      observedReplacement,
-      disappearanceConfirmed,
-      {
-        retryAfterDiscoveryFailure: false,
-        strictDeadline: false,
-        timeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
-        terminalReleaseRetriesRemaining: terminalReleaseRetriesRemaining - 1,
-        skipAndroidNameEnrichment,
-      },
-    );
-  };
-  const lateRetirement = release.then(continueRetirement, retryRetirement);
-  lateRetirement.catch((lateError) => {
-    logger.warn(
-      `[DeviceTools] Failed to finish late shutdown retirement for ${device.deviceId}: ${lateError}`,
-    );
-  });
-  retainReservationUntil(lateRetirement);
-}
-
-async function findReplacementOrRetainShutdownReservation(
-  context: ShutdownOwnershipContext,
-  observedReplacement: BootedDevice | undefined,
-  retryAfterFailure: boolean,
-  disappearanceConfirmed: boolean,
-  strictDeadline: boolean,
-  options: { timeoutMs: number; skipAndroidNameEnrichment: boolean },
-): Promise<BootedDevice | undefined> {
-  const { timeoutMs, skipAndroidNameEnrichment } = options;
-  const { device, expectedPooledDevice, timer, stopPerformanceMonitoring, retainReservationUntil } =
-    context;
-  try {
-    return (
-      observedReplacement ??
-      (await findReplacementAfterSessionRelease(
-        context,
-        strictDeadline,
-        timeoutMs,
-        skipAndroidNameEnrichment,
-      ))
-    );
-  } catch (error) {
-    // Only this post-release discovery operation is retried. A failure from
-    // releaseSessionOwnership never reaches this catch and still retains the
-    // reservation until persistence succeeds.
-    logger.warn(`[DeviceTools] Post-release discovery failed for ${device.deviceId}: ${error}`);
-    if (!disappearanceConfirmed) {
-      // Teardown has not confirmed disappearance. A failed recheck cannot
-      // authorize retirement. Ownership release has settled, so let the
-      // caller's finally release the reservation while leaving the entry intact.
-      throw error;
-    }
-    if (retryAfterFailure) {
-      const retirement = timer
-        .sleep(DEVICE_SHUTDOWN_DISCOVERY_RECHECK_BACKOFF.delayForAttempt(1))
-        .then(async () => {
-          await retireShutdownOwnership(
-            { ...context, requestAbortSignal: undefined, retainReservationUntil: () => undefined },
-            observedReplacement,
-            disappearanceConfirmed,
-            {
-              retryAfterDiscoveryFailure: false,
-              strictDeadline: false,
-              timeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
-              terminalReleaseRetriesRemaining: DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
-              skipAndroidNameEnrichment,
-            },
-          );
-        });
-      retirement.catch((lateError) => {
-        logger.warn(
-          `[DeviceTools] Retaining shutdown reservation after retirement failed for ${device.deviceId}: ${lateError}`,
-        );
-      });
-      retainReservationUntil(retirement);
-      throw error;
-    }
-    // Disappearance was already confirmed and ownership released. The exact
-    // captured incarnation guard makes retirement safe after a second failed
-    // recheck, while preserving a newer same-serial pool entry.
-    const ownership = captureCurrentShutdownPooledOwnership(device, expectedPooledDevice);
-    if (
-      ownership &&
-      (await ownership.devicePool.retireDeviceForShutdown(ownership.expectedPooledDevice, {
-        excludeExecutionId: getShutdownInitiatingExecutionId(),
-      }))
-    ) {
-      stopPerformanceMonitoring(device.deviceId);
-    }
-    return undefined;
-  }
-}
-
-function preserveLateShutdownRetirement(
-  context: ShutdownSessionOwnershipContext,
-  error: unknown,
-  release: Promise<string | null>,
-  observedReplacement: BootedDevice | undefined,
-  options: {
-    terminalReleaseRetriesRemaining: number;
-    skipAndroidNameEnrichment: boolean;
-    disappearanceConfirmed: boolean;
-  },
-): void {
-  const { device, requestAbortSignal, sessionManager, sessionId } = context;
-  const { terminalReleaseRetriesRemaining, skipAndroidNameEnrichment, disappearanceConfirmed } =
-    options;
-  if (
-    !isShutdownTimeoutError(error) &&
-    !requestAbortSignal?.aborted &&
-    sessionManager.getSessionForDevice(device.deviceId) === sessionId &&
-    !sessionManager.getTerminalReleaseSnapshot(sessionId)
-  ) {
-    return;
-  }
-  // Session release either removed its in-memory mapping or terminally fenced
-  // the UUID before a durable write failed. It cannot be cancelled safely, so
-  // keep the captured shutdown reservation until the late release finishes its
-  // identity-guarded retirement. Otherwise a stopped device could remain as a
-  // busy ghost in the pool.
-  finishLateShutdownRetirement(
-    context,
-    release,
-    observedReplacement,
-    terminalReleaseRetriesRemaining,
-    skipAndroidNameEnrichment,
-    disappearanceConfirmed,
-  );
-}
-
-async function releaseShutdownSessionOwnership(
-  context: ShutdownOwnershipContext,
-  daemonState: DaemonState,
-  observedReplacement: BootedDevice | undefined,
-  strictDeadline: boolean,
-  options: {
-    timeoutMs: number;
-    terminalReleaseRetriesRemaining: number;
-    disappearanceConfirmed: boolean;
-    skipAndroidNameEnrichment: boolean;
-  },
-): Promise<void> {
-  const { device, expectedSession, timer, deadlineMs, requestAbortSignal } = context;
-  const {
-    timeoutMs,
-    terminalReleaseRetriesRemaining,
-    disappearanceConfirmed,
-    skipAndroidNameEnrichment,
-  } = options;
-  const sessionManager = daemonState.getSessionManager();
-  const sessionId = expectedSession?.sessionId;
-  if (!sessionId || expectedSession.assignedDevice !== device.deviceId) {
-    return;
-  }
-
-  await executionTracker.cancelSessionUuidExecutions(
-    sessionId,
-    deviceLossCancellationReason(device.deviceId),
-    { excludeExecutionId: getShutdownInitiatingExecutionId() },
-  );
-  const release = sessionManager.releaseSessionIfOwned(
-    sessionId,
-    expectedSession,
-    device.deviceId,
-    "device-killed",
-  );
-  try {
-    await runWithinShutdownDeadline(
-      device,
-      timer,
-      shutdownRecheckDeadlineMs(timer, deadlineMs, strictDeadline),
-      "session ownership retirement did not complete",
-      {
-        requestAbortSignal: requestAbortSignal,
-        operation: async () => await release,
-        timeoutMs: timeoutMs,
-      },
-    );
-  } catch (error) {
-    preserveLateShutdownRetirement(
-      { ...context, sessionManager, sessionId },
-      error,
-      release,
-      observedReplacement,
-      { terminalReleaseRetriesRemaining, skipAndroidNameEnrichment, disappearanceConfirmed },
-    );
-    throw error;
-  }
-}
-
-function captureCurrentShutdownPooledOwnership(
-  device: BootedDevice,
-  expectedPooledDevice: PooledDevice | null,
-):
-  | { daemonState: DaemonState; devicePool: DevicePool; expectedPooledDevice: PooledDevice }
-  | undefined {
-  if (!expectedPooledDevice) {
-    return undefined;
-  }
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
-    return undefined;
-  }
-  const devicePool = daemonState.getDevicePool();
-  // A fast reboot can reuse a serial. Do not release or remove a later pool
-  // incarnation that happens to use the same device ID.
-  if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
-    return undefined;
-  }
-  return { daemonState, devicePool, expectedPooledDevice };
-}
-
-export async function retireShutdownOwnership(
-  context: ShutdownOwnershipContext,
-  observedReplacement: BootedDevice | undefined,
-  disappearanceConfirmed: boolean,
-  options: ShutdownRetirementOptions = {},
-): Promise<void> {
-  const { device, expectedPooledDevice, stopPerformanceMonitoring } = context;
-  const {
-    retryAfterDiscoveryFailure = true,
-    strictDeadline = false,
-    timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
-    terminalReleaseRetriesRemaining = DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
-    skipAndroidNameEnrichment = false,
-  } = options;
-  const ownership = captureCurrentShutdownPooledOwnership(device, expectedPooledDevice);
-  if (!ownership) {
-    return;
-  }
-  const { daemonState, devicePool, expectedPooledDevice: capturedPooledDevice } = ownership;
-
-  await releaseShutdownSessionOwnership(
-    { ...context, expectedPooledDevice: capturedPooledDevice },
-    daemonState,
-    observedReplacement,
-    strictDeadline,
-    {
-      timeoutMs,
-      terminalReleaseRetriesRemaining,
-      disappearanceConfirmed,
-      skipAndroidNameEnrichment,
-    },
-  );
-  if (devicePool.getDevice(device.deviceId) !== capturedPooledDevice) {
-    return;
-  }
-
-  // A same-ID replacement can boot while releasing the old session. If so,
-  // retire only the captured incarnation, then immediately rediscover the
-  // replacement so it owns a fresh pool and registry epoch. Once shutdown was
-  // observed, a bounded post-release recheck protects against a replacement
-  // that boots at the disappearance deadline.
-  const replacement = await findReplacementOrRetainShutdownReservation(
-    { ...context, expectedPooledDevice: capturedPooledDevice },
-    observedReplacement,
-    retryAfterDiscoveryFailure,
-    disappearanceConfirmed,
-    strictDeadline,
-    { timeoutMs, skipAndroidNameEnrichment },
-  );
-  if (replacement) {
-    await rebuildSameIdReplacement(
-      device,
-      capturedPooledDevice,
-      replacement,
-      daemonState,
-      stopPerformanceMonitoring,
-    );
-    return;
-  }
-  if (devicePool.getDevice(device.deviceId) !== capturedPooledDevice) {
-    return;
-  }
-  if (
-    await devicePool.retireDeviceForShutdown(capturedPooledDevice, {
-      excludeExecutionId: getShutdownInitiatingExecutionId(),
-    })
-  ) {
-    stopPerformanceMonitoring(device.deviceId);
-  }
-}
 
 /**
  * Resolve the device the platform kill command is actually issued against.

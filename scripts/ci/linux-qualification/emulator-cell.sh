@@ -271,7 +271,7 @@ else
   touch "$CELL_DIR/host-unavailable"
   bash "$here/classify-exit.sh" "$CELL_DIR"
 fi
-if find "$CELL_DIR" -name heartbeat-failed | grep -q .; then
+if [[ -n "$(find "$CELL_DIR" -name heartbeat-failed -print -quit)" ]]; then
   jq '.heartbeat_failed=true' "$CELL_DIR/result.json" > "$CELL_DIR/result.tmp"; mv "$CELL_DIR/result.tmp" "$CELL_DIR/result.json"
 fi
 if [[ $(jq -r .outcome "$CELL_DIR/result.json") == crash ]]; then echo '::warning::Real emulator crash captured'; fi

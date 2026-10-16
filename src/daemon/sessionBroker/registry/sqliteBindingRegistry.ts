@@ -536,7 +536,9 @@ export class SqliteBindingRegistry implements BindingRegistry {
           revived: false,
         };
       }
-      if (existing) {
+      // Only a scope an older build's abandoned-scope sweep marked is revivable; any other
+      // invalidation is permanent for this incarnation.
+      if (existing && existing.invalidationReason !== "abandoned") {
         return { kind: "scope_invalidated", scope: existing };
       }
       const live = await trx
@@ -549,6 +551,21 @@ export class SqliteBindingRegistry implements BindingRegistry {
         .executeTakeFirst();
       if (live) {
         return { kind: "incarnation_conflict", current: toScope(live) };
+      }
+      if (existing) {
+        const revived = await trx
+          .updateTable("slot_scopes")
+          .set({
+            state: "valid",
+            invalidation_reason: null,
+            invalidating_at_ms: null,
+            invalidated_at_ms: null,
+            last_acquired_at_ms: nowMs,
+          })
+          .where("scope_key", "=", scopeKey)
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        return { kind: "ready", scope: toScope(revived), created: false, revived: true };
       }
       const row: ScopeRow = {
         scope_key: scopeKey,

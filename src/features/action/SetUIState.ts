@@ -30,6 +30,7 @@ import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
+import type { ActionCall, TapOnCall } from "./ActionCall";
 
 // Dropdown controls need time to open before selection.
 export const DROPDOWN_OPEN_SETTLE_MS = 200;
@@ -52,9 +53,7 @@ interface TapOnElementLike {
       action: string;
       container?: { text?: string; elementId?: string };
     },
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-    recovery?: { throwOnKeyboardOcclusion?: boolean },
+    call?: TapOnCall,
   ): Promise<{
     success: boolean;
     element?: Element;
@@ -110,7 +109,7 @@ interface SwipeOnLike {
       lookFor?: { text?: string; elementId?: string };
       scrollToFind?: boolean;
     },
-    progress?: ProgressCallback,
+    call?: ActionCall,
   ): Promise<{
     success: boolean;
     found?: boolean;
@@ -612,7 +611,7 @@ export class SetUIState extends BaseVisualChange {
             // Search direction describes content to reveal, not finger movement.
             await this.getSwipeOn().execute(
               { direction: searchState.currentDirection, gestureType: "scrollTowardsDirection" },
-              this.withRearmOnTick(fieldProgress(processed.size), onTick),
+              { progress: this.withRearmOnTick(fieldProgress(processed.size), onTick) },
             );
 
             // Re-observe after scroll
@@ -1576,9 +1575,7 @@ export class SetUIState extends BaseVisualChange {
         target["resource-id"]
           ? { elementId: target["resource-id"], action: "focus" }
           : this.buildTapOptions(fieldSpec.selector, "focus"),
-        progress,
-        signal,
-        { throwOnKeyboardOcclusion: true },
+        { progress, signal, recovery: { throwOnKeyboardOcclusion: true } },
       );
     try {
       return await focus(element);
@@ -1597,7 +1594,7 @@ export class SetUIState extends BaseVisualChange {
       recovery.occlusionError = error;
       logger.debug("[SetUIState] Text field is covered by the IME; closing the keyboard", error);
       try {
-        const dismissal = await this.getKeyboard().execute("close", signal);
+        const dismissal = await this.getKeyboard().execute("close", { signal });
         throwIfAborted(signal);
         if (!dismissal.success) {
           throw error;
@@ -1811,8 +1808,7 @@ export class SetUIState extends BaseVisualChange {
     if (isChecked !== fieldSpec.selected) {
       const tapResult = await tapOnElement.execute(
         this.buildTapOptions(fieldSpec.selector, "tap"),
-        progress,
-        signal,
+        { progress, signal },
       );
       if (!tapResult.success) {
         return { success: false, error: `Failed to tap checkbox/toggle: ${tapResult.error}` };
@@ -1833,11 +1829,10 @@ export class SetUIState extends BaseVisualChange {
     }
 
     // Tap to open dropdown
-    const openResult = await tapOnElement.execute(
-      this.buildTapOptions(fieldSpec.selector, "tap"),
+    const openResult = await tapOnElement.execute(this.buildTapOptions(fieldSpec.selector, "tap"), {
       progress,
       signal,
-    );
+    });
     if (!openResult.success) {
       return { success: false, error: `Failed to open dropdown: ${openResult.error}` };
     }
@@ -1848,8 +1843,7 @@ export class SetUIState extends BaseVisualChange {
     // Tap on the desired value
     const selectResult = await tapOnElement.execute(
       { text: fieldSpec.value, action: "tap" },
-      progress,
-      signal,
+      { progress, signal },
     );
     if (!selectResult.success) {
       return {

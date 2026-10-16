@@ -329,7 +329,9 @@ describe("Explore", () => {
         );
 
         expect(fakeGraph.getMethodCallCount("getStats")).toBe(1);
-        expect(fakeGraph.getMethodCallCount("exportGraph")).toBe(2);
+        // The recorded event names its app, so the final report exports that app's graph.
+        expect(fakeGraph.getMethodCallCount("exportGraph")).toBe(1);
+        expect(fakeGraph.getMethodCallCount("exportGraphForApp")).toBe(1);
         expect(progressMessages).toContain("Explored 1 new screens (1/1 interactions)");
         expect(result.screensDiscovered).toBe(1);
       });

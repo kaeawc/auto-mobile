@@ -1,3 +1,4 @@
+import type { FaultPlan } from "./FaultPlan";
 import { ignoresManagedExecutionIdleDeadline } from "../../src/daemon/sessionBroker/provisioning/executionLiveness";
 import {
   isReissuableByNameReleaseReason,
@@ -25,12 +26,19 @@ import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts"
 import type { DeviceSession, DeviceSessionStatus } from "../../src/db/types";
 
 export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
+  faultPlan?: FaultPlan;
   failure: "create" | "release" | null = null;
   createFailureOnAttempt: number | null = null;
   private createAttempts = 0;
   private readonly rows = new Map<string, DeviceSession>();
   async getSession(sessionUuid: string): Promise<DeviceSession | undefined> {
-    return this.rows.get(sessionUuid);
+    const fault = this.faultPlan?.enter("getSession");
+    if (fault?.pause) {
+      await fault.pause;
+    }
+    const row = this.rows.get(sessionUuid);
+    this.faultPlan?.finish(fault);
+    return row;
   }
 
   /** Mirrors the repository's claimed-row precondition: the incarnation and a re-issuable reason. */
@@ -78,6 +86,10 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
     _nowMs?: number,
     options: UpsertActiveSessionOptions = {},
   ): Promise<number> {
+    const fault = this.faultPlan?.enter("upsertActiveSession");
+    if (fault?.pause) {
+      await fault.pause;
+    }
     this.createAttempts++;
     if (this.failure === "create" || this.createFailureOnAttempt === this.createAttempts) {
       throw new Error("persist create failed");
@@ -146,6 +158,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       created_at: existing?.created_at ?? new Date(record.createdAtMs).toISOString(),
       updated_at: new Date(record.lastUsedAtMs).toISOString(),
     });
+    this.faultPlan?.finish(fault);
     return this.rows.get(record.sessionUuid)!.stable_identity_generation ?? 0;
   }
 
@@ -195,6 +208,10 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
   }
 
   async recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void> {
+    const fault = this.faultPlan?.enter("recordActivity");
+    if (fault?.pause) {
+      await fault.pause;
+    }
     const row = this.rows.get(sessionUuid);
     if (!row || row.status !== "active") {
       // Mirrors DeviceSessionRepository: zero matched rows is a failure (#11129).
@@ -217,6 +234,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       pre_cli_heartbeat_timeout_source: update.preCliHeartbeatTimeoutSource ?? null,
       pre_cli_session_timeout_ms: update.preCliSessionTimeoutMs ?? null,
     });
+    this.faultPlan?.finish(fault);
   }
 
   async recordRestartRecoveryActivity(sessionUuid: string, activityAtMs: number): Promise<void> {
@@ -250,78 +268,86 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
     reason: string,
     options: MarkReleasedOptions = {},
   ): Promise<void> {
-    if (this.failure === "release") {
-      throw new Error("persist release failed");
+    const fault = this.faultPlan?.enter("markReleased");
+    if (fault?.pause) {
+      await fault.pause;
     }
-    const row = this.rows.get(sessionUuid);
-    if (options.unlessDaemonShutdown && (!row || row.release_reason === "daemon-shutdown")) {
-      throw new DeviceSessionRowNotReleasableError(sessionUuid);
-    }
-    const guarded = options.unlessTerminalOrOwnedByLivePeer;
-    if (
-      guarded &&
-      (!row ||
-        (row.release_reason !== null &&
-          isTerminalReleaseReason(row.release_reason) &&
-          !guarded.supersededReasons?.includes(row.release_reason)) ||
-        (row.daemon_session_id !== null &&
-          (guarded.livePeerDaemonSessionIds.includes(row.daemon_session_id) ||
-            (guarded.ownDaemonSessionId !== undefined &&
-              row.daemon_session_id !== guarded.ownDaemonSessionId))))
-    ) {
-      if (
-        options.unlessDaemonShutdown ||
-        options.expectedRowGeneration === undefined ||
-        guarded.reportRefusal ||
-        guarded.ownDaemonSessionId !== undefined
-      ) {
+    try {
+      if (this.failure === "release") {
+        throw new Error("persist release failed");
+      }
+      const row = this.rows.get(sessionUuid);
+      if (options.unlessDaemonShutdown && (!row || row.release_reason === "daemon-shutdown")) {
         throw new DeviceSessionRowNotReleasableError(sessionUuid);
       }
-      return;
-    }
-    if (!row) {
-      return;
-    }
-    if (
-      (options.expectedRowGeneration !== undefined &&
-        (row.stable_identity_generation ?? 0) !== options.expectedRowGeneration) ||
-      // A terminal reason is never replaced by a weaker one.
-      !releaseReasonMayReplace(reason, row.release_reason) ||
-      (options.onlyIfRecoverable &&
-        !(row.release_reason && isRecoverableDaemonReleaseReason(row.release_reason))) ||
-      // Like the repository's statement: a deadline extended past the instant is not released.
-      (options.onlyIfRestartRecoveryHandoff !== undefined &&
-        (!row.release_reason ||
-          !isDeviceRestartReleaseReason(row.release_reason) ||
-          row.released_at_ms === null ||
-          row.released_at_ms > options.onlyIfRestartRecoveryHandoff.releasedAtOrBeforeMs ||
-          (!ignoresManagedExecutionIdleDeadline(row.liveness_policy) &&
-            row.expires_at_ms <=
-              row.released_at_ms + options.onlyIfRestartRecoveryHandoff.recoveryWindowMs))) ||
-      (options.onlyIfExpiredAtMs !== undefined &&
-        (ignoresManagedExecutionIdleDeadline(row.liveness_policy) ||
-          row.expires_at_ms > options.onlyIfExpiredAtMs)) ||
-      (options.onlyIfOwnedByDaemon !== undefined &&
-        row.daemon_session_id !== options.onlyIfOwnedByDaemon)
-    ) {
-      if (options.unlessDaemonShutdown) {
-        throw new DeviceSessionRowNotReleasableError(sessionUuid);
-      }
+      const guarded = options.unlessTerminalOrOwnedByLivePeer;
       if (
         guarded &&
-        (options.expectedRowGeneration === undefined ||
-          guarded.reportRefusal ||
-          guarded.ownDaemonSessionId !== undefined)
+        (!row ||
+          (row.release_reason !== null &&
+            isTerminalReleaseReason(row.release_reason) &&
+            !guarded.supersededReasons?.includes(row.release_reason)) ||
+          (row.daemon_session_id !== null &&
+            (guarded.livePeerDaemonSessionIds.includes(row.daemon_session_id) ||
+              (guarded.ownDaemonSessionId !== undefined &&
+                row.daemon_session_id !== guarded.ownDaemonSessionId))))
       ) {
-        throw new DeviceSessionRowNotReleasableError(sessionUuid);
+        if (
+          options.unlessDaemonShutdown ||
+          options.expectedRowGeneration === undefined ||
+          guarded.reportRefusal ||
+          guarded.ownDaemonSessionId !== undefined
+        ) {
+          throw new DeviceSessionRowNotReleasableError(sessionUuid);
+        }
+        return;
       }
-      return;
-    }
-    row.status = status;
-    row.released_at_ms = releasedAtMs;
-    row.release_reason = reason;
-    if (!isRecoverableDaemonReleaseReason(reason)) {
-      row.liveness_owner_token = null;
+      if (!row) {
+        return;
+      }
+      if (
+        (options.expectedRowGeneration !== undefined &&
+          (row.stable_identity_generation ?? 0) !== options.expectedRowGeneration) ||
+        // A terminal reason is never replaced by a weaker one.
+        !releaseReasonMayReplace(reason, row.release_reason) ||
+        (options.onlyIfRecoverable &&
+          !(row.release_reason && isRecoverableDaemonReleaseReason(row.release_reason))) ||
+        // Like the repository's statement: a deadline extended past the instant is not released.
+        (options.onlyIfRestartRecoveryHandoff !== undefined &&
+          (!row.release_reason ||
+            !isDeviceRestartReleaseReason(row.release_reason) ||
+            row.released_at_ms === null ||
+            row.released_at_ms > options.onlyIfRestartRecoveryHandoff.releasedAtOrBeforeMs ||
+            (!ignoresManagedExecutionIdleDeadline(row.liveness_policy) &&
+              row.expires_at_ms <=
+                row.released_at_ms + options.onlyIfRestartRecoveryHandoff.recoveryWindowMs))) ||
+        (options.onlyIfExpiredAtMs !== undefined &&
+          (ignoresManagedExecutionIdleDeadline(row.liveness_policy) ||
+            row.expires_at_ms > options.onlyIfExpiredAtMs)) ||
+        (options.onlyIfOwnedByDaemon !== undefined &&
+          row.daemon_session_id !== options.onlyIfOwnedByDaemon)
+      ) {
+        if (options.unlessDaemonShutdown) {
+          throw new DeviceSessionRowNotReleasableError(sessionUuid);
+        }
+        if (
+          guarded &&
+          (options.expectedRowGeneration === undefined ||
+            guarded.reportRefusal ||
+            guarded.ownDaemonSessionId !== undefined)
+        ) {
+          throw new DeviceSessionRowNotReleasableError(sessionUuid);
+        }
+        return;
+      }
+      row.status = status;
+      row.released_at_ms = releasedAtMs;
+      row.release_reason = reason;
+      if (!isRecoverableDaemonReleaseReason(reason)) {
+        row.liveness_owner_token = null;
+      }
+    } finally {
+      this.faultPlan?.finish(fault);
     }
   }
 

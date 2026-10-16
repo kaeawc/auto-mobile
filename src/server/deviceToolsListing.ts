@@ -24,7 +24,13 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { describeDisplayRequirements, matchesDeviceCriteria } from "../utils/deviceMatcher";
 import { hydrateRequiredDisplayInventories } from "../devices/DisplayInventoryProvider";
+import { AndroidTransportAliases } from "../utils/androidSerial";
+import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
+import type { TransitionalHold } from "./inventoryDeviceDescription";
+import { describeBootCapacity } from "../features/bootAdmission/sharedBootAdmissionGates";
 import {
+  ListDeviceImagesArgs,
+  ListDevicesArgs,
   acceptancePresentationOrder,
   androidProvenanceByAvdName,
   availableDeviceResourceNote,
@@ -33,12 +39,7 @@ import {
   getDeviceToolsDependencies,
   initializedDevicePool,
   listDevicePayloads,
-} from "./deviceTools";
-import type { ListDeviceImagesArgs, ListDevicesArgs } from "./deviceTools";
-import { AndroidTransportAliases } from "../utils/androidSerial";
-import { adbOfflineHeldDevices, transitionalHeldSimulators } from "./adbOfflineHeldDevices";
-import type { TransitionalHold } from "./inventoryDeviceDescription";
-import { describeBootCapacity } from "../features/bootAdmission/sharedBootAdmissionGates";
+} from "../features/deviceLifecycle/deviceLifecycleCore";
 
 /** Held Android devices adb lists offline and held simulators simctl lists Booting / Shutting Down. */
 async function transitionalHeldListing(input: {

@@ -6,6 +6,12 @@ export function deadIdentity(): { deref(): object | undefined } {
 }
 
 export class FakeLegacyLifecycleView implements LegacyLifecycleView {
+  readonly releasingSessions = new WeakSet<object>();
+
+  isReleasing(session: object): boolean {
+    return this.releasingSessions.has(session);
+  }
+
   readonly sessions = new Map<string, object>();
   readonly pendingAssignments = new Map<string, unknown>();
   readonly pendingCreations = new Map<string, unknown>();

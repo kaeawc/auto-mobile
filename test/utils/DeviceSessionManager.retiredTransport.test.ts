@@ -31,7 +31,7 @@ describe("DeviceSessionManager retired transport tombstones (#11134)", () => {
       layoutSeqSum: 0,
     });
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl() as never, { window }),
+      new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl(), { window }),
     );
     return { manager, fence };
   }

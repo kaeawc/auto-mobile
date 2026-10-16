@@ -714,7 +714,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       state: "Booted",
       isAvailable: true,
     });
-    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any);
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl);
     const manager = createTestSessionManager(provider);
 
     await expect(
@@ -749,7 +749,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
 
     const observeCache = new FakeObserveScreenCache();
 
-    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any, {
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl, {
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,
       observeScreenCache: observeCache,
@@ -797,12 +797,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       iosCtrlProxyClient: makeClient(callbacksA),
       observeScreenCache: new FakeObserveScreenCache(),
     };
-    const provider = new FakeDeviceClientProvider(
-      fakeAdb,
-      fakeDeviceUtils,
-      fakeSimctl as any,
-      options,
-    );
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl, options);
     const manager = createTestSessionManager(provider);
 
     await manager.verifyIosDevice(deviceId);
@@ -841,7 +836,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       verifyServiceReady,
       onPushUpdate: () => () => {},
     } as unknown as IOSCtrlProxy;
-    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any, {
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl, {
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,
     });
@@ -890,7 +885,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     const simctl = Object.assign(fakeSimctl, {
       openSimulatorApp: async () => true,
     });
-    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, simctl as never, {
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, simctl, {
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,
     });
@@ -997,7 +992,7 @@ describe("DeviceSessionManager legacy iOS auto-start readiness", () => {
     const iosManager = new FakeIOSCtrlProxyManager();
     const iosClient = new FakeIOSCtrlProxy();
     iosClient.setConnected(true);
-    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as never, {
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl, {
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,
     });
@@ -1144,7 +1139,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
     const provider = new FakeDeviceClientProvider(
       new FakeAdbExecutor(),
       new FakeDeviceUtils(),
-      fakeSimctl as never,
+      fakeSimctl,
       { iosCtrlProxyManager: new FakeIOSCtrlProxyManager(), iosCtrlProxyClient: iosClient },
     );
     return createTestSessionManager(provider, undefined, {
@@ -1206,7 +1201,7 @@ describe("DeviceSessionManager iOS presentation policy", () => {
     const provider = new FakeDeviceClientProvider(
       new FakeAdbExecutor(),
       new FakeDeviceUtils(),
-      fakeSimctl as never,
+      fakeSimctl,
       { iosCtrlProxyManager: new FakeIOSCtrlProxyManager(), iosCtrlProxyClient: iosClient },
     );
     const manager = createTestSessionManager(provider);
@@ -1279,7 +1274,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     const fakeIosClient = new FakeIOSCtrlProxy();
     fakeIosClient.setConnected(true);
 
-    return new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any, {
+    return new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl, {
       window: fakeWindow,
       ctrlProxyManager: fakeCtrlProxy,
       ctrlProxyClient: stubAndroidCtrlProxy({

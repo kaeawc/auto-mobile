@@ -13,7 +13,6 @@ import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 
 const config: AppearanceConfig = {
   syncWithHost: true,
@@ -65,7 +64,7 @@ function harness(
   });
   const dependencies = { isSyncEnabled, getConfig, resolveMode, apply };
   const manager = DeviceSessionManager.createInstance(
-    new FakeDeviceClientProvider(adb, devices, simctl as unknown as SimCtlClient, {
+    new FakeDeviceClientProvider(adb, devices, simctl, {
       window,
       ctrlProxyManager,
       ctrlProxyClient,

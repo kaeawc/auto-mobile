@@ -201,16 +201,6 @@ src/features/webrtc/webrtcStreamingConfig.ts	AUTOMOBILE_WEBRTC_WHIP_TOKEN
 src/index.ts	AUTOMOBILE_APPEARANCE_SYNC
 src/index.ts	AUTOMOBILE_DISABLED_TOOLS
 src/index.ts	AUTOMOBILE_ENABLED_TOOLS
-<<<<<<< HEAD
-src/index.ts	AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER
-src/index.ts	AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER
-||||||| 03ff690376
-src/index.ts	AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER
-src/index.ts	AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER
-src/models/managedSlotConfig.ts	AUTOMOBILE_MANAGED_SLOT_CONFIG
-=======
-src/models/managedSlotConfig.ts	AUTOMOBILE_MANAGED_SLOT_CONFIG
->>>>>>> work/12495-harness-broker
 src/server/appFileService.ts	AUTOMOBILE_APP_FILE_BACKUP
 src/server/appFileService.ts	AUTOMOBILE_APP_FILE_DESTINATION_IS_DIRECTORY
 src/server/planHealthSummary.ts	AUTOMOBILE_PLAN_HEALTH_DIR

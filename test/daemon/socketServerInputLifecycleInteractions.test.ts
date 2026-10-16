@@ -1,8 +1,9 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
-import { mcpRequestFailureDetails, UnixSocketServer } from "../../src/daemon/socketServer";
+import { mcpRequestFailureDetails, type UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
@@ -138,7 +139,7 @@ beforeEach(() => {
   sockets = [];
   PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
   installClient();
-  server = new UnixSocketServer(
+  server = createTestUnixSocketServer(
     "unused",
     "http://localhost:0/mcp",
     { isInitialized: () => false } as DaemonStateAccess,
@@ -301,7 +302,7 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
   function useSessionState(assignedDevice: string): void {
     const session = createFakeSession("session-c", assignedDevice, "android");
     const state = createFakeDaemonState(new Map([["session-c", session]]));
-    const stateServer = new UnixSocketServer(
+    const stateServer = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       state,

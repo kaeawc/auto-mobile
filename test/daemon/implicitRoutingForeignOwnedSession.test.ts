@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DAEMON_BOUND_SESSION_PARAM,
@@ -9,7 +10,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { type UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -179,7 +180,7 @@ describe("the implicit routing session of a call that names none", () => {
     });
     registerDeviceTools();
     registerToolSelectionTools();
-    server = new UnixSocketServer(
+    server = createTestUnixSocketServer(
       "/fake/implicit-routing.sock",
       "http://localhost:0/mcp",
       DaemonState.getInstance(),

@@ -1,9 +1,9 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PressButton } from "../../src/features/action/PressButton";
 import { resolveAndroidKeyCode } from "../../src/features/action/pressButtonPolicy";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { createFakeDaemonState } from "../daemon/helpers/inputSocketHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -11,7 +11,7 @@ const doc = readFileSync(
   join(import.meta.dir, "../../docs/using/screen-control.md"),
   "utf8",
 ).replace(/\r\n?/g, "\n");
-const server = new UnixSocketServer(
+const server = createTestUnixSocketServer(
   "/fake/screen-control-docs.sock",
   "http://localhost:0/mcp",
   createFakeDaemonState(),

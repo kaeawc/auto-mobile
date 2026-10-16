@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { describe, expect, test } from "bun:test";
 import {
   resolveSocketAdmissionLane,
@@ -8,7 +9,6 @@ import {
   DAEMON_OWNED_SESSIONS_PARAM,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
 } from "../../src/daemon/constants";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import type { DaemonResponse } from "../../src/daemon/types";
@@ -187,7 +187,7 @@ test.each([undefined, "device:a"])(
   async (lane) => {
     const timer = new FakeTimer();
     const socket = new FakeSocket();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       {} as DaemonStateAccess,

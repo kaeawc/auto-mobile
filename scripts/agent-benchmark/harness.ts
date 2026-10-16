@@ -210,23 +210,35 @@ async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDep
   await deps.timer.sleep(definition.preflight.settleSeconds * 1000);
   const durationSeconds = (deps.timer.now() - preflightStart) / 1000;
   deps.fs.writeFile(join(runDirectory, "preflight.log"), `${log.join("\n")}\n`);
-  const paths: ServerPaths = {
-    runtime: options.runtime,
-    serverEntry: options.serverEntry,
-    auxSocketDir: deps.fs.makeTempDir("amb-"),
-    dbDir: join(runDirectory, "db"),
-    logDir: join(runDirectory, "logs"),
+  // runSuite's cleanup only covers a fully prepared run, so undo a partial setup here.
+  const tempDirs: string[] = [];
+  const makeTempDir = (prefix: string) => {
+    const dir = deps.fs.makeTempDir(prefix);
+    tempDirs.push(dir);
+    return dir;
   };
-  deps.fs.mkdir(paths.dbDir);
-  deps.fs.mkdir(paths.logDir);
-  const prepared: PreparedRun = {
-    runDirectory,
-    claudeCwd: deps.fs.makeTempDir("amb-cwd-"),
-    paths,
-    serial,
-    preflight: { log, durationSeconds, appBuild },
-  };
-  return { startedAt, prepared };
+  try {
+    const paths: ServerPaths = {
+      runtime: options.runtime,
+      serverEntry: options.serverEntry,
+      auxSocketDir: makeTempDir("amb-"),
+      dbDir: join(runDirectory, "db"),
+      logDir: join(runDirectory, "logs"),
+    };
+    deps.fs.mkdir(paths.dbDir);
+    deps.fs.mkdir(paths.logDir);
+    const prepared: PreparedRun = {
+      runDirectory,
+      claudeCwd: makeTempDir("amb-cwd-"),
+      paths,
+      serial,
+      preflight: { log, durationSeconds, appBuild },
+    };
+    return { startedAt, prepared };
+  } catch (error) {
+    tempDirs.forEach((dir) => deps.fs.remove(dir));
+    throw error;
+  }
 }
 
 async function launchClaude(

@@ -12,12 +12,9 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
 
-import {
-  DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS,
-  MAX_PROTOTYPE_EVENT_TIMEOUT_MS,
-} from "./prototypeEventTimeout";
+import { DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS } from "./prototypeEventTimeout";
 
-export { DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS, MAX_PROTOTYPE_EVENT_TIMEOUT_MS };
+export { DEFAULT_PROTOTYPE_EVENT_TIMEOUT_MS };
 export interface PrototypeEventSource {
   onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void;
 }

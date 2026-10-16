@@ -4,7 +4,10 @@ import type {
   VideoRecordingQuery,
   VideoRecordingRecord,
 } from "../../src/db/videoRecordingRepository";
-import { ownerVisibleInScope } from "../../src/db/videoRecordingRepository";
+import {
+  FINISHED_VIDEO_RECORDING_STATUSES,
+  ownerVisibleInScope,
+} from "../../src/db/videoRecordingRepository";
 
 /**
  * Mirror the repository's owner scoping (issue #4752, #11533): a scoped read sees rows it
@@ -32,7 +35,7 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
     // Mirror the real upsert: an overwrite preserves the original created_at (#3498).
     const existing = this.records.get(record.recordingId);
     this.records.set(record.recordingId, {
-      ...record,
+      ...structuredClone(record),
       createdAt: existing?.createdAt ?? record.createdAt,
     });
   }
@@ -43,7 +46,7 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
       return;
     }
     const updated = { ...existing };
-    for (const [key, value] of Object.entries(update)) {
+    for (const [key, value] of Object.entries(structuredClone(update))) {
       if (value !== undefined || key === "captureTeardown") {
         (updated as Record<string, unknown>)[key] = value;
       }
@@ -59,7 +62,7 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
     if (record && !ownerVisible(record, scope)) {
       return null;
     }
-    return record;
+    return record ? structuredClone(record) : null;
   }
 
   async listRecordings(query: VideoRecordingQuery = {}): Promise<VideoRecordingRecord[]> {
@@ -105,12 +108,12 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
       results = results.slice(0, query.limit);
     }
 
-    return results;
+    return results.map((record) => structuredClone(record));
   }
 
   async getLatestRecording(): Promise<VideoRecordingRecord | null> {
     const results = await this.listRecordings({
-      status: ["completed", "interrupted"],
+      status: FINISHED_VIDEO_RECORDING_STATUSES,
       orderByStartedAt: "desc",
       limit: 1,
     });

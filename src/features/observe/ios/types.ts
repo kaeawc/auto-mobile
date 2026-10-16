@@ -102,7 +102,6 @@ export interface XCTestHierarchy {
   error?: string;
 }
 
-export type CtrlProxyHierarchyShape = XCTestHierarchy;
 export type CtrlProxyHierarchy = XCTestHierarchy;
 
 /**

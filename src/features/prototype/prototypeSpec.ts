@@ -239,13 +239,11 @@ const colorValueSchema = z.union([
   z.enum(PROTOTYPE_COLOR_ROLES),
   z.object({ light: colorTokenSchema, dark: colorTokenSchema }).strict(),
 ]);
-export type PrototypeColorValue = z.infer<typeof colorValueSchema>;
 /** An uploaded image asset id, or a `{light, dark}` pair of ids (#11218). */
 const imageAssetSchema = z.union([
   z.string().min(1),
   z.object({ light: z.string().min(1), dark: z.string().min(1) }).strict(),
 ]);
-export type PrototypeImageAsset = z.infer<typeof imageAssetSchema>;
 const borderSchema = z
   .object({
     width: z.number().finite().min(0).max(10000),

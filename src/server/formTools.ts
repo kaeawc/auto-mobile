@@ -236,8 +236,6 @@ export function createSetUIStateHandler({
   };
 }
 
-export const setUIStateHandler = createSetUIStateHandler();
-
 /**
  * Register form-related tools with the tool registry
  */

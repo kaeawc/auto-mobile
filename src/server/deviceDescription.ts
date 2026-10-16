@@ -15,10 +15,7 @@ import type {
   DeviceServiceStatusLike,
 } from "../models/deviceDescription";
 export type {
-  DeviceReadinessState,
   DeviceHeldBy,
-  DevicePoolStatus,
-  DeviceSessionOwnership,
   DeviceDescription,
   DeviceServiceStatusLike,
   ConfiguredImage,

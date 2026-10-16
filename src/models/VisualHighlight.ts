@@ -1,6 +1,3 @@
-/** The sole highlight presentation is a red, animated hand-drawn circle. */
-export type HighlightShapeType = "circle";
-
 export interface HighlightBounds {
   x: number;
   y: number;

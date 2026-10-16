@@ -61,12 +61,34 @@ export function runConfigRepositoryContract<TConfig>(
         expect(await repository.getConfig()).toEqual(samples.first);
       }));
 
-    test("the returned config does not alias stored state", () =>
+    test("neither the stored nor the returned config aliases the caller's objects, at any depth", () =>
       withRepository(async (repository) => {
-        await repository.setConfig(samples.first);
+        const input = structuredClone(samples.second);
+        await repository.setConfig(input);
+        mutateDeep(input);
+        expect(await repository.getConfig()).toEqual(samples.second);
         const read = await repository.getConfig();
-        (read as Record<string, unknown>).__mutated = true;
-        expect(await repository.getConfig()).toEqual(samples.first);
+        mutateDeep(read);
+        expect(await repository.getConfig()).toEqual(samples.second);
       }));
   });
+}
+
+/** Flip every leaf and add a key at each object level, so any shared reference shows up. */
+function mutateDeep(value: unknown): void {
+  if (typeof value !== "object" || value === null) {
+    return;
+  }
+  const record = value as Record<string, unknown>;
+  for (const key of Object.keys(record)) {
+    const child = record[key];
+    if (typeof child === "object" && child !== null) {
+      mutateDeep(child);
+    } else if (typeof child === "number") {
+      record[key] = child + 1;
+    } else if (typeof child === "boolean") {
+      record[key] = !child;
+    }
+  }
+  record.__mutated = true;
 }

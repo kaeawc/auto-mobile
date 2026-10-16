@@ -77,7 +77,6 @@ export {
   IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS,
   resolveIosScreenCaptureHelperPath,
 };
-export type { IosScreenCaptureHelperPathResolverOptions } from "../screen-stream/screenCaptureHelperPath";
 
 export const IOS_WEBRTC_FFMPEG_ENV = "AUTOMOBILE_IOS_WEBRTC_FFMPEG";
 export const IOS_WEBRTC_FFMPEG_ENV_ALIAS = "AUTO_MOBILE_IOS_WEBRTC_FFMPEG";

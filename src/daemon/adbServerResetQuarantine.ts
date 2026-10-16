@@ -1,3 +1,4 @@
+import { unbindDevice } from "./deviceBinding";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type DeviceInfo } from "../models";
 import type { Session, SessionManager } from "./sessionManager";
@@ -147,8 +148,7 @@ export class AdbServerResetQuarantine {
           this.pool.getAdbServerResetTrackedProcesses().set(device, trackedProcess);
         }
         this.reserveAdbServerResetRecovery(device);
-        device.sessionId = null;
-        device.status = "idle";
+        unbindDevice(device);
         this.pool.noteDeviceStateChanged?.(device);
         await this.pool.removeDevice(device.id, false, device);
         detached.push(device);

@@ -1,3 +1,4 @@
+import { bindDevice } from "./deviceBinding";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type Platform } from "../models";
 import { getAbortSignal, runWithAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
@@ -940,8 +941,7 @@ export class DeviceAllocation {
     }
     const existingSession = this.port.sessionManager.getSession(sessionId);
     const assignmentSnapshot = this.port.snapshotSessionAssignment(device);
-    device.sessionId = sessionId;
-    device.status = "busy";
+    bindDevice(device, sessionId);
     device.lastUsedAt = this.port.nextLastUsedAt();
     device.assignmentCount++;
     device.errorCount = 0;

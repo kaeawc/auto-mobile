@@ -1,3 +1,4 @@
+import { clearDeviceError, markDeviceError, restoreBinding, unbindDevice } from "./deviceBinding";
 import {
   deviceHold,
   genericAvailabilityOf,
@@ -2559,7 +2560,7 @@ export class DevicePool {
       // A successful (re)boot of an errored, idle device clears its failure state so
       // criteria autoboot can hand it out instead of failing with "no devices match".
       if (existing.status === "error" && !existing.sessionId) {
-        existing.status = "idle";
+        clearDeviceError(existing);
         existing.errorCount = 0;
         existing.iosVersion = device.iosVersion ?? existing.iosVersion;
         existing.simulatorType =
@@ -4202,7 +4203,7 @@ export class DevicePool {
       return false;
     }
     this.discardReleasedCapture(sessionId, device.id);
-    device.sessionId = null;
+    unbindDevice(device, { status: "keep" });
     this.notifyDeviceStateChanged(device);
     return true;
   }
@@ -4925,8 +4926,7 @@ export class DevicePool {
     }
     // Keep the session manager's old routing until the ready replacement is
     // proven. removeDevice requires an unassigned pool entry.
-    device.sessionId = null;
-    device.status = "idle";
+    unbindDevice(device);
     this.notifyDeviceStateChanged(device);
     return true;
   }
@@ -5979,7 +5979,9 @@ export class DevicePool {
     device: PooledDevice,
     snapshot: SessionAssignmentSnapshot,
   ): void {
-    Object.assign(device, snapshot);
+    const { sessionId, status, ...otherFields } = snapshot;
+    restoreBinding(device, { sessionId, status });
+    Object.assign(device, otherFields);
   }
 
   private async createSessionOrRestore(
@@ -6170,8 +6172,7 @@ export class DevicePool {
     }
 
     const sessionId = device.sessionId;
-    device.sessionId = null;
-    device.status = "idle";
+    unbindDevice(device);
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
     device.errorCount = 0;
@@ -8152,7 +8153,7 @@ export class DevicePool {
     device.errorCount++;
 
     if (device.errorCount >= this.MAX_DEVICE_ERRORS) {
-      device.status = "error";
+      markDeviceError(device);
       logger.error(
         `Device ${deviceId} marked as error ` + `(${device.errorCount} consecutive errors)`,
       );

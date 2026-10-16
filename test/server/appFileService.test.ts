@@ -37,6 +37,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import * as iosProcessState from "../../src/features/action/CrashApp";
 import * as androidProcessState from "../../src/utils/android-cmdline-tools/androidProcessState";
 import { shellQuote } from "../../src/utils/shellQuote";
+import { executeCommandOptionsOf } from "../fakes/executeCommandOptionsOf";
 
 const documentsTarget = {
   domain: "app_containers" as const,
@@ -258,7 +259,8 @@ describe("AppFileService", () => {
         ambient: AbortSignal | undefined;
       }> = [];
       spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
-        const [command, , , , signal] = args;
+        const [command] = args;
+        const { signal } = executeCommandOptionsOf(args);
         if (command.includes(" cp ") && command.includes("c.txt")) {
           controller.abort(new Error("request cancelled"));
           controller.signal.throwIfAborted();
@@ -446,7 +448,8 @@ describe("AppFileService", () => {
         const adb = new FakeAdbExecutor();
         const execute = adb.executeCommand.bind(adb);
         spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
-          const [command, , , , signal] = args;
+          const [command] = args;
+          const { signal } = executeCommandOptionsOf(args);
           options.beforeCommand?.(command, signal);
           if (command.includes(" cp ") && command.includes(options.failing)) {
             throw new Error("copy failed");
@@ -714,7 +717,8 @@ describe("AppFileService", () => {
         const cleanupSignals: Array<{ aborted: boolean; ambient: AbortSignal | undefined }> = [];
         const execute = adb.executeCommand.bind(adb);
         spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
-          const [command, , , , signal] = args;
+          const [command] = args;
+          const { signal } = executeCommandOptionsOf(args);
           const effectiveSignal = signal ?? getAbortSignal();
           if (command.startsWith("shell rm -f")) {
             cleanupSignals.push({
@@ -800,7 +804,8 @@ describe("AppFileService", () => {
     let cleanupSignal: AbortSignal | undefined;
     const execute = adb.executeCommand.bind(adb);
     spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
-      const [command, , , , signal] = args;
+      const [command] = args;
+      const { signal } = executeCommandOptionsOf(args);
       if (command.startsWith("shell rm -f")) {
         cleanupSignal = signal;
         started.resolve();

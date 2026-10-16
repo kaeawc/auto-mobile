@@ -1110,11 +1110,12 @@ export class PerformanceMonitor {
       // The 'reset' flag clears stats after reading, so next read reflects only new frames
       const { stdout } = await adb.executeCommand(
         `shell dumpsys gfxinfo ${shellQuote(device.packageName)} reset`,
-        PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
-        DUMPSYS_MAX_BUFFER,
-        undefined,
-        signal,
-        true,
+        {
+          timeoutMs: PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+          signal,
+          waitForProcessSettlementAfterAbort: true,
+        },
       );
 
       return this.parseGfxMetrics(stdout);
@@ -1203,11 +1204,11 @@ export class PerformanceMonitor {
       // Get the process ID
       const { stdout: pidOut } = await adb.executeCommand(
         `shell pidof ${shellQuote(device.packageName)}`,
-        PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
-        undefined,
-        undefined,
-        signal,
-        true,
+        {
+          timeoutMs: PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
+          signal,
+          waitForProcessSettlementAfterAbort: true,
+        },
       );
       const pid = pidOut.trim().split(/\s+/)[0]; // Take first PID if multiple
       if (!pid) {
@@ -1217,11 +1218,11 @@ export class PerformanceMonitor {
       // Get CPU stats from /proc/stat
       const { stdout: statOut } = await adb.executeCommand(
         `shell cat /proc/${shellQuote(pid)}/stat`,
-        PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
-        undefined,
-        undefined,
-        signal,
-        true,
+        {
+          timeoutMs: PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
+          signal,
+          waitForProcessSettlementAfterAbort: true,
+        },
       );
       const fields = statOut
         .slice(statOut.lastIndexOf(")") + 1)
@@ -1231,14 +1232,11 @@ export class PerformanceMonitor {
       const stime = parseInt(fields[12] || "0", 10);
 
       // Get system uptime
-      const { stdout: uptimeOut } = await adb.executeCommand(
-        "shell cat /proc/uptime",
-        PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
-        undefined,
-        undefined,
+      const { stdout: uptimeOut } = await adb.executeCommand("shell cat /proc/uptime", {
+        timeoutMs: PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
         signal,
-        true,
-      );
+        waitForProcessSettlementAfterAbort: true,
+      });
       const uptime = parseFloat(uptimeOut.split(" ")[0] || "0");
 
       const processTicks = utime + stime;
@@ -1292,11 +1290,12 @@ export class PerformanceMonitor {
 
       const { stdout } = await adb.executeCommand(
         `shell dumpsys meminfo ${shellQuote(device.packageName)}`,
-        PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
-        DUMPSYS_MAX_BUFFER,
-        undefined,
-        signal,
-        true,
+        {
+          timeoutMs: PerformanceMonitor.ANDROID_COMMAND_TIMEOUT_MS,
+          maxBuffer: DUMPSYS_MAX_BUFFER,
+          signal,
+          waitForProcessSettlementAfterAbort: true,
+        },
       );
 
       // App Summary "TOTAL PSS:" line (present since API 21).

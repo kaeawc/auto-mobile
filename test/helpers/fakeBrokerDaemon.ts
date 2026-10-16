@@ -8,6 +8,7 @@ import { openSqliteBindingRegistry } from "../../src/daemon/sessionBroker/regist
 import { BrokerConnectionScopes } from "../../src/daemon/sessionBroker/connectionScope";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { SessionBroker } from "../../src/daemon/sessionBroker/broker";
+import type { SessionLiveness } from "../../src/daemon/sessionBroker/sessionDisposition";
 import { bindBrokerRegistration } from "../../src/daemon/sessionBroker/handlers";
 import { SessionBrokerService } from "../../src/daemon/sessionBroker/service";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -70,6 +71,7 @@ export async function createFakeBrokerDaemon(
   const devices = new FakeNativePort(registry, sessionIds, owner);
   const store = registry.sessionBrokerStore(scope.scope.scopeKey, ids);
   let unavailable = false;
+  let disposition: SessionLiveness = "live";
   const broker = new SessionBroker({
     store,
     devices,
@@ -83,6 +85,7 @@ export async function createFakeBrokerDaemon(
       idlePoolCap: 0,
     },
     reuseCleanDevices: false,
+    sessionDisposition: () => disposition,
     catalog: async () =>
       iosCatalog(
         unavailable
@@ -253,6 +256,9 @@ export async function createFakeBrokerDaemon(
         await server.close();
         await proxy.close();
       }
+    },
+    setSessionDisposition: (value) => {
+      disposition = value;
     },
     recover: () => broker.recover(),
     cleanup: () => broker.close(),

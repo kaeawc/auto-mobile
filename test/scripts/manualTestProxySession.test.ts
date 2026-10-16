@@ -1214,6 +1214,28 @@ posixTest("broker close waits for released status and records driver close evide
   });
   expect(broker.calls.map((c) => c.method)).toEqual(["status", "status"]);
 });
+posixTest("broker close with a dead driver falls back to the release path", async () => {
+  const f = brokerFixture();
+  await f.up();
+  const broker = new FakeBrokerDaemonClient();
+  f.deps.brokerDaemonClient = broker;
+  broker.releaseResults = [{ sessionUuid: "own-session", outcome: "released" }];
+  broker.statusResults = [{ ...f.session, outcome: "released" }];
+  f.deps.isPidAlive = (pid) => pid !== 1234;
+  const code = await runProxySessionCommand(parsed(["close", "--client", "a-phone"]), f.deps);
+  expect(code).toBe(0);
+  expect(broker.calls.map((c) => c.method)).toEqual(["release", "status"]);
+  expect(f.files.get("/batch/evidence/ledger.jsonl")).toContain('"kind":"released"');
+});
+posixTest("broker close with a dead driver and no grant still exits 2", async () => {
+  const f = brokerFixture("failed");
+  await f.up();
+  const broker = new FakeBrokerDaemonClient();
+  f.deps.brokerDaemonClient = broker;
+  f.deps.isPidAlive = (pid) => pid !== 1234;
+  expect(await runProxySessionCommand(parsed(["close", "--client", "a-phone"]), f.deps)).toBe(2);
+  expect(broker.calls).toEqual([]);
+});
 posixTest(
   "broker live status is included per client and connection failure stays diagnostic",
   async () => {

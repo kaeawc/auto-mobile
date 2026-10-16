@@ -196,6 +196,7 @@ export function archiveBrokerAttempt(
     "owner.pid",
     "owner-identity",
     "init.json",
+    "info.json",
     "driver.pid",
     "proxy.pid",
     "closed.json",

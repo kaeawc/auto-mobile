@@ -82,7 +82,8 @@ they can still affect results:
   `CLAUDE_CODE_MAX_TURNS`, `MCP_TOOL_TIMEOUT`), plus the prompt-caching switches
   (`DISABLE_PROMPT_CACHING*`, `ENABLE_PROMPT_CACHING*`, `FORCE_PROMPT_CACHING*`) and every
   `CLAUDE_*`, `API_*`, `MCP_*`, or `BASH_*` timeout or watchdog override (`API_TIMEOUT_MS`,
-  `CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS`, ...). The full list is `RUN_SHAPING_CLAUDE_VARIABLES` and
+  `CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS`, ...) and API beta control (`ANTHROPIC_BETAS`,
+  `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`). The full list is `RUN_SHAPING_CLAUDE_VARIABLES` and
   `isRunShapingClaudeVariable` in `scripts/agent-benchmark/invocation.ts`. Auth, provider,
   and proxy variables are kept, including `ANTHROPIC_MODEL`, which Bedrock and Vertex need; the
   observed model is recorded in every result.

@@ -314,7 +314,7 @@ describe("agent benchmark transcript audit", () => {
     const base = new TranscriptBuilder().init().build();
     const result = JSON.stringify({ type: "result", subtype: "success", is_error: "true" });
     const audit = auditTranscript(`${base}${result}\n`, NO_PATTERNS);
-    expect(audit.parseErrors).toEqual(["result event has a non-boolean is_error"]);
+    expect(audit.parseErrors).toEqual(["result event has a missing or non-boolean is_error"]);
   });
 
   test("empty model and version strings stay unknown", () => {
@@ -351,6 +351,23 @@ describe("agent benchmark transcript audit", () => {
     expect(
       auditTranscript(result({ num_turns: 0, total_cost_usd: 0 }), NO_PATTERNS).parseErrors,
     ).toEqual([]);
+  });
+
+  test("a terminal result without is_error fails the transcript", () => {
+    const result = JSON.stringify({ type: "result", subtype: "success", result: "done" });
+    const audit = auditTranscript(`${INIT}${result}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual(["result event has a missing or non-boolean is_error"]);
+  });
+
+  test("an event without a type fails the transcript; an unknown type is skipped", () => {
+    const untyped = JSON.stringify({ message: { content: [] } });
+    const blank = JSON.stringify({ type: " " });
+    const future = JSON.stringify({ type: "future_event_kind" });
+    const audit = auditTranscript(`${INIT}${untyped}\n${blank}\n${future}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual([
+      "line 4: event without a type",
+      "line 5: event without a type",
+    ]);
   });
 
   test("a non-string final answer fails the transcript", () => {

@@ -244,9 +244,11 @@ final class PrototypeAgent: NSObject {
             device: PrototypeURLSessionClient()
         ) { [weak self] frame in
             guard let self, connectedClients > 0, let server else { return false }
-            server.sendToHost(frame)
+            server.sendToHost(frame, requestId: frame["requestId"] as? String ?? "")
             return true
         }
+        driver.onHostSettled = { [weak self] requestId in self?.server?.hostRequestFinished(requestId) }
+        server?.onHostRequestsLost = { [weak driver] ids in driver?.hostRequestsLost(ids) }
         driver.onComplete = { [weak model] requestId, response in
             model?.completeRequest(requestId, response)
         }

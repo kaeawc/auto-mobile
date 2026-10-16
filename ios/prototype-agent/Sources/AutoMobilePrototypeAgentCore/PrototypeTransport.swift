@@ -25,39 +25,47 @@ struct PrototypeTransportWriter: Sendable {
         case hello(Int, PrototypeTransportJSON)
         case frame(Int, PrototypeTransportJSON)
         case broadcast(PrototypeTransportJSON)
-        case toHost(PrototypeTransportJSON)
+        case toHost(String, PrototypeTransportJSON)
+        case hostFinished(String)
         case removed(Int)
         case flush(CheckedContinuation<Void, Never>)
     }
 
     private let continuation: AsyncStream<Operation>.Continuation
 
-    init() {
+    /// `onHostRequestsLost` gets the host requests whose connection closed (or that had none).
+    init(onHostRequestsLost: @escaping @Sendable ([String]) -> Void = { _ in }) {
         let output = AsyncStream<Operation>.makeStream()
         continuation = output.continuation
         Task.detached {
             var sinks: [Int: Sink] = [:]
-            var authenticated = PrototypeConnectionRegistry<Int>()
+            var routing = PrototypeHostRouting<Int>()
             for await operation in output.stream {
                 switch operation {
                 case let .accepted(id, sink): sinks[id] = sink
                 case let .hello(id, json):
                     await Self.write(json, to: sinks[id])
-                    authenticated.register(id)
+                    routing.authenticate(id)
                 case let .frame(id, json):
                     await Self.write(json, to: sinks[id])
                 case let .broadcast(json):
                     if let data = Self.encode(json.object) {
-                        for id in authenticated.all {
+                        for id in routing.all {
                             await sinks[id]?(data)
                         }
                     }
-                case let .toHost(json):
-                    // Exactly one connection: the most recently authenticated.
-                    if let id = authenticated.current { await Self.write(json, to: sinks[id]) }
+                case let .toHost(requestId, json):
+                    // Exactly one connection: the most recently authenticated, remembered as owner.
+                    if let id = routing.route(requestId) {
+                        await Self.write(json, to: sinks[id])
+                    } else {
+                        onHostRequestsLost([requestId])
+                    }
+                case let .hostFinished(requestId): routing.finish(requestId)
                 case let .removed(id):
-                    authenticated.unregister(id)
+                    let lost = routing.disconnect(id)
                     sinks[id] = nil
+                    if !lost.isEmpty { onHostRequestsLost(lost) }
                 case let .flush(done): done.resume()
                 }
             }
@@ -81,9 +89,12 @@ struct PrototypeTransportWriter: Sendable {
     }
 
     /// A host request: written to the most recently authenticated connection only.
-    func sendToHost(_ message: [String: Any]) {
-        continuation.yield(.toHost(PrototypeTransportJSON(object: message)))
+    func sendToHost(_ message: [String: Any], requestId: String) {
+        continuation.yield(.toHost(requestId, PrototypeTransportJSON(object: message)))
     }
+
+    /// The host request ended; its owner is forgotten.
+    func hostRequestFinished(_ requestId: String) { continuation.yield(.hostFinished(requestId)) }
 
     func remove(_ id: Int) { continuation.yield(.removed(id)) }
 
@@ -113,6 +124,7 @@ actor PrototypeTransport {
     fileprivate enum Delivery: Sendable {
         case request(Int, PrototypeTransportJSON)
         case count(Int)
+        case hostRequestsLost([String])
         case flush(CheckedContinuation<Void, Never>)
     }
 
@@ -128,7 +140,7 @@ actor PrototypeTransport {
     private var tracker = PrototypeClientTracker<Int>()
     private var nextID = 0
     private var closed = false
-    fileprivate let writer = PrototypeTransportWriter()
+    fileprivate let writer: PrototypeTransportWriter
     private let token: String
     private let capabilities: [String]
     private let maxAuthenticatedClients: Int?
@@ -149,6 +161,8 @@ actor PrototypeTransport {
         let stream = AsyncStream<Delivery>.makeStream()
         deliveries = stream.stream
         delivery = stream.continuation
+        let lost = stream.continuation
+        writer = PrototypeTransportWriter { lost.yield(.hostRequestsLost($0)) }
     }
 
     @discardableResult
@@ -275,6 +289,8 @@ final class PrototypeTransportDelivery {
     private let writer: PrototypeTransportWriter
     private let handler: Handler
     var onClientCountChanged: ((Int) -> Void)?
+    /// Host requests whose connection closed, in order with the count changes.
+    var onHostRequestsLost: (([String]) -> Void)?
     private var consumer: Task<Void, Never>?
 
     init(transport: PrototypeTransport, handler: @escaping Handler) {
@@ -293,6 +309,7 @@ final class PrototypeTransportDelivery {
             let writer = writer
             handler(json.object) { writer.send($0, on: id) }
         case let .count(count): onClientCountChanged?(count)
+        case let .hostRequestsLost(ids): onHostRequestsLost?(ids)
         case let .flush(done):
             await writer.flush()
             done.resume()
@@ -302,7 +319,11 @@ final class PrototypeTransportDelivery {
     func broadcast(_ message: [String: Any]) { writer.broadcast(message) }
 
     /// Sends to the most recently authenticated connection only (host-proxied requests).
-    func sendToHost(_ message: [String: Any]) { writer.sendToHost(message) }
+    func sendToHost(_ message: [String: Any], requestId: String) {
+        writer.sendToHost(message, requestId: requestId)
+    }
+
+    func hostRequestFinished(_ requestId: String) { writer.hostRequestFinished(requestId) }
 
     deinit { consumer?.cancel() }
 }

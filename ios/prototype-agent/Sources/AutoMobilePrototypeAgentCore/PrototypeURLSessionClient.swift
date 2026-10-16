@@ -240,6 +240,13 @@ final class PrototypeURLSessionCall: @unchecked Sendable {
                     )
                     return (continuation, .failure(PrototypeHttpFailure(error: mapped, durationMs: durationMs)))
                 }
+                // `null` means "empty body" downstream, so a JSON `null` body cannot be stored.
+                if (200 ..< 300).contains(status), !body.isEmpty, PrototypeHttpBody.decode(body) == .null {
+                    let literalNull = PrototypeRequestError(
+                        .invalidResponse, "A response body of JSON null cannot be stored in /data."
+                    )
+                    return (continuation, .failure(PrototypeHttpFailure(error: literalNull, durationMs: durationMs)))
+                }
                 return (continuation, .success(PrototypeHttpResponse(
                     status: status, headers: headers, body: body, durationMs: durationMs
                 )))

@@ -21,3 +21,37 @@ struct PrototypeConnectionRegistry<ID: Hashable>: Equatable {
         order.removeAll { $0 == id }
     }
 }
+
+/// Which connection each host-proxied request went to. A request is routed to the registry's
+/// `current` connection and remembered, so when that connection closes its requests fail at once
+/// (`network`) instead of waiting for a watchdog, while requests owned by other connections are
+/// untouched.
+struct PrototypeHostRouting<ID: Hashable>: Equatable {
+    private var registry = PrototypeConnectionRegistry<ID>()
+    private var owners: [String: ID] = [:]
+
+    /// Every authenticated connection, oldest first.
+    var all: [ID] { registry.all }
+
+    mutating func authenticate(_ id: ID) { registry.register(id) }
+
+    /// The connection `requestId` is sent to and now belongs to; `nil` when none is authenticated.
+    mutating func route(_ requestId: String) -> ID? {
+        guard let id = registry.current else { return nil }
+        owners[requestId] = id
+        return id
+    }
+
+    /// The request ended (answered, timed out or cancelled): forget its owner.
+    mutating func finish(_ requestId: String) { owners[requestId] = nil }
+
+    /// The connection closed: the requests it owned, sorted, which can no longer be answered.
+    mutating func disconnect(_ id: ID) -> [String] {
+        registry.unregister(id)
+        let lost = owners.filter { $0.value == id }.map(\.key).sorted()
+        for requestId in lost {
+            owners[requestId] = nil
+        }
+        return lost
+    }
+}

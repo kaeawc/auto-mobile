@@ -177,6 +177,15 @@ describe("FetchPrototypeHttpExecutor", () => {
     expect(called).toBe(false);
   });
 
+  test("a 2xx JSON null body is invalid_response; an empty body is still null", async () => {
+    const literal = executorFor(async () => body("null")).executor;
+    expect(failureCode(await literal.execute(request, signal()))).toBe("invalid_response");
+    const empty = executorFor(async () => body("")).executor;
+    expect(await empty.execute(request, signal())).toMatchObject({ ok: true, body: null });
+    const word = executorFor(async () => body("too_large")).executor;
+    expect(await word.execute(request, signal())).toMatchObject({ ok: true, body: "too_large" });
+  });
+
   test("returns connection_refused as a typed error, not a throw", async () => {
     const { executor } = executorFor(async () => {
       throw Object.assign(new Error("Unable to connect"), { code: "ConnectionRefused" });

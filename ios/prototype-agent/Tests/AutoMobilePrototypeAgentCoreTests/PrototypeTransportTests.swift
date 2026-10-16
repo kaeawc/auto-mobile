@@ -219,13 +219,15 @@ final class PrototypeTransportTests: XCTestCase {
         let clock = TransportDeadline()
         let transport = PrototypeTransport(token: token, sleep: { _ in await clock.sleep() })
         let delivery = PrototypeTransportDelivery(transport: transport) { _, _ in }
+        let lost = TransportLog()
+        delivery.onHostRequestsLost = { lost.append("lost:" + $0.joined(separator: ",")) }
         let first = TransportSocket()
         let second = TransportSocket()
         let firstID = await transport.accept(first.connection)
         let secondID = await transport.accept(second.connection)
         try await transport.receive(hello(), on: firstID)
         try await transport.receive(hello(), on: secondID)
-        delivery.sendToHost(["type": "prototype_request", "requestId": "r1"])
+        delivery.sendToHost(["type": "prototype_request", "requestId": "r1"], requestId: "r1")
         await transport.flush()
         XCTAssertEqual(try first.frames().compactMap { $0["type"] as? String }, ["hello_result"])
         XCTAssertEqual(
@@ -233,7 +235,10 @@ final class PrototypeTransportTests: XCTestCase {
             ["hello_result", "prototype_request"]
         )
         await transport.disconnected(secondID)
-        delivery.sendToHost(["type": "prototype_request", "requestId": "r2"])
+        // The request the closed connection owned fails at once; the older connection stays.
+        await lost.waitFor(1)
+        XCTAssertEqual(lost.turns, ["lost:r1"])
+        delivery.sendToHost(["type": "prototype_request", "requestId": "r2"], requestId: "r2")
         await transport.flush()
         XCTAssertEqual(try first.frames().last?["requestId"] as? String, "r2")
         await transport.close()

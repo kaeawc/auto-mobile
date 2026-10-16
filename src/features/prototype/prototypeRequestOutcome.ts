@@ -19,7 +19,7 @@ import {
  */
 
 /** Errors the response handling adds to the host's transport codes. */
-export const PROTOTYPE_REQUEST_RESPONSE_ERROR_CODES = ["http_error", "invalid_response"] as const;
+export const PROTOTYPE_REQUEST_RESPONSE_ERROR_CODES = ["http_error"] as const;
 export const PROTOTYPE_REQUEST_META_ERROR_CODES = [
   ...PROTOTYPE_REQUEST_ERROR_CODES,
   ...PROTOTYPE_REQUEST_RESPONSE_ERROR_CODES,

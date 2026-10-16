@@ -588,7 +588,7 @@ deterministic:
   (`prototypeRequestMessageSchema`) to exactly one connection, the most recently authenticated one
   (`PrototypeConnectionRegistry.current`, as Android's `WebSocketServer.sendToHost`), so a
   reconnecting daemon replaces the one it superseded and a side-effecting call never runs twice
-  (events still broadcast to every authenticated connection). The host's
+  (events still broadcast to every authenticated connection). The owning connection of each pending call is remembered (`PrototypeHostRouting`), so when that connection closes its calls end at once as `network` even while an older connection remains. The host's
   `prototype_response` frame arrives as an ordinary request line that the agent routes to the driver and
   never replies to. The host has no cancel frame, so a cancelled call is forgotten and its late response
   ignored. A host that stays silent for `timeoutMs` plus 2 s ends as `timeout`; no connected host, or

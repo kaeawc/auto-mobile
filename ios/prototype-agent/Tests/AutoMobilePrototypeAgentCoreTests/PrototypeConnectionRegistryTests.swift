@@ -41,3 +41,37 @@ final class PrototypeConnectionRegistryTests: XCTestCase {
         XCTAssertEqual(registry.all, [2, 1])
     }
 }
+
+final class PrototypeHostRoutingTests: XCTestCase {
+    func testARequestIsOwnedByTheNewestConnectionAndFailsWhenItCloses() {
+        var routing = PrototypeHostRouting<Int>()
+        routing.authenticate(1)
+        routing.authenticate(2)
+        XCTAssertEqual(routing.route("r1"), 2)
+        XCTAssertEqual(routing.disconnect(2), ["r1"])
+        // The older connection stays, and is now the host for new requests.
+        XCTAssertEqual(routing.route("r2"), 1)
+    }
+
+    func testClosingAnotherConnectionLeavesTheRequestRunning() {
+        var routing = PrototypeHostRouting<Int>()
+        routing.authenticate(1)
+        routing.authenticate(2)
+        XCTAssertEqual(routing.route("r1"), 2)
+        XCTAssertEqual(routing.disconnect(1), [])
+        XCTAssertEqual(routing.disconnect(2), ["r1"])
+    }
+
+    func testAFinishedRequestIsNotLost() {
+        var routing = PrototypeHostRouting<Int>()
+        routing.authenticate(1)
+        XCTAssertEqual(routing.route("r1"), 1)
+        routing.finish("r1")
+        XCTAssertEqual(routing.disconnect(1), [])
+    }
+
+    func testNoConnectionRoutesNowhere() {
+        var routing = PrototypeHostRouting<Int>()
+        XCTAssertNil(routing.route("r1"))
+    }
+}

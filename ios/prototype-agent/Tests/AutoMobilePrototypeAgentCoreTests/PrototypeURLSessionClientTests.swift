@@ -207,6 +207,15 @@ final class PrototypeURLSessionClientTests: XCTestCase {
         XCTAssertEqual(meta.status, 500)
     }
 
+    func testALiteralNullBodyIsAnInvalidResponseButAnEmptyBodyIsNot() async throws {
+        StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: [Data("null".utf8)]) }
+        let failed = await failure { try await client().perform(call()) }
+        XCTAssertEqual(failed?.error.code, .invalidResponse)
+        StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: []) }
+        let empty = try await client().perform(call())
+        XCTAssertEqual(empty.body, Data())
+    }
+
     // MARK: Size cap
 
     func testABodyOverTheCapFailsAsTooLargeAsItArrives() async {

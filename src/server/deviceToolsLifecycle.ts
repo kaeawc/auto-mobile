@@ -32,8 +32,19 @@ import {
 } from "./lifecycleDeviceOwnership";
 import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
 import {
+  commitStoppedRestartHold,
+  createKillDeviceResponse,
+  shutdownDevice,
+} from "./deviceToolsShutdown";
+import {
   DEVICE_SHUTDOWN_TIMEOUT_MS,
+  DeviceToolsDependencies,
+  KillDeviceArgs,
   PooledAvdIdentityError,
+  TeardownContext,
+  TeardownDeviceArgs,
+  TeardownResolvedTarget,
+  TeardownToolResponse,
   capturePooledAvdIdentity,
   checkForRestartedTeardownTarget,
   createTeardownFailureResponse,
@@ -49,24 +60,11 @@ import {
   resolveKillDeviceStableTarget,
   resolveTeardownTarget,
   retireStoppedTeardownOwnership,
+  shutdownTimeoutError,
   stopSegmentedVideoRecordingsBeforeDestroy,
   teardownDeadlineDevice,
   verifyTeardownAbsence,
-} from "./deviceTools";
-import {
-  commitStoppedRestartHold,
-  createKillDeviceResponse,
-  shutdownDevice,
-  shutdownTimeoutError,
-} from "./deviceToolsShutdown";
-import type {
-  DeviceToolsDependencies,
-  KillDeviceArgs,
-  TeardownContext,
-  TeardownDeviceArgs,
-  TeardownResolvedTarget,
-  TeardownToolResponse,
-} from "./deviceTools";
+} from "../features/deviceLifecycle/deviceLifecycleCore";
 
 function teardownDeadlineFailure(
   phase: DeviceTeardownPhase,

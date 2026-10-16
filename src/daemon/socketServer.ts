@@ -166,7 +166,7 @@ import {
   brokerConnectionHostMutationRefusal,
 } from "./sessionBroker/connectionScope";
 import { provisionCancellationOutcomes } from "../server/provisionCancellationOutcomes";
-import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../server/deviceTools";
+import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../features/deviceLifecycle/deviceLifecycleCore";
 
 /** Slack after the handler's settlement wait for it to finish rollback and build its result. */
 const PROVISION_CANCELLATION_OUTCOME_GRACE_MS = 2_000;

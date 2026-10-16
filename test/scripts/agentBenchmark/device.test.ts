@@ -163,11 +163,16 @@ describe("agent benchmark preflight", () => {
       .onAdb("pm path", { stdout: pmPath })
       .onAdb("pm clear", { stdout: "Success\n" })
       .onAdb("sha256sum", { exitCode: 127, stderr: "sha256sum: not found" });
-    const unverified = await runPreflight(
-      noSha,
-      preflightSpec({ apkPath: "/repo/app.apk", apkDigest: digest }),
-    );
-    expect(unverified.log).toContain("could not verify the installed APK: sha256sum exited 127");
+    // Fail closed: an unverified install could be a stale app under this APK's digest.
+    await expect(
+      runPreflight(noSha, preflightSpec({ apkPath: "/repo/app.apk", apkDigest: digest })),
+    ).rejects.toThrow(/Cannot verify .* \(sha256sum exited 127: sha256sum: not found\)/);
+    expect(noSha.adbCalls().some((call) => call.includes("pm clear"))).toBe(false);
+
+    const noBase = new FakeCommandRunner().onAdb("pm path", { stdout: "package:/x/app.apk\n" });
+    await expect(
+      runPreflight(noBase, preflightSpec({ apkPath: "/repo/app.apk", apkDigest: digest })),
+    ).rejects.toThrow(/pm path listed no base.apk/);
   });
 
   test("a pm clear that does not report Success stops the run before seeding", async () => {

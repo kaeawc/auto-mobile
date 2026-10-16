@@ -89,7 +89,9 @@ Each run is isolated so earlier runs and your own setup cannot change the result
   `AUTOMOBILE_DISABLED_TOOLS` would quietly change the agent's toolset. The one exception is
   `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` (and its legacy `AUTO_MOBILE_` spelling), kept so a
   resident daemon's device claims are still respected. It is also written into the MCP config's
-  `env`, so it survives `CLAUDE_CODE_MCP_ALLOWLIST_ENV=1`. Before preflight touches the device,
+  `env`, with the adb endpoint (`ADB_SERVER_SOCKET`, `ANDROID_ADB_SERVER_ADDRESS`,
+  `ANDROID_ADB_SERVER_PORT`) and SDK location (`ANDROID_HOME`, `ANDROID_SDK_ROOT`), so the server
+  reaches the same adb server even under `CLAUDE_CODE_MCP_ALLOWLIST_ENV=1`. Before preflight touches the device,
   the harness runs the same ownership check daemons use (forwarding lease, current and legacy
   claims, unreadable claims) and refuses a device another AutoMobile session holds.
 - Exactly one Android device must be online. Nothing pins the MCP server to a serial, so with
@@ -145,7 +147,6 @@ claude:
   disallowedTools: [Bash] # default
   maxBudgetUsd: 2 # optional hard spend cap per run
   timeoutSeconds: 600 # default 900
-  extraArgs: [] # extra claude flags (not --model, --resume, or --continue)
 verify:
   answerIncludes: ["EXPECTED_COUNT: 3"]
   screenIncludes: ["Expected count: 3"]
@@ -185,11 +186,19 @@ The snippet also records the app build fingerprint (`baseline.appBuild`): `versi
 SHA-256 prefix of the APK (preflight reinstalls it every run, which resets the install time). If a
 later run's installed app differs, the report flags that its deltas compare different app builds.
 With `app.apkPath`, preflight also checks that the installed base APK has the same SHA-256, so an
-APK built for a different package fails the run instead of benchmarking a stale app.
+APK built for a different package fails the run instead of benchmarking a stale app. If the
+device cannot hash the installed APK (no `sha256sum`), preflight also stops; install the app
+yourself and remove `app.apkPath` to run without the check.
 
 It also records `baseline.suiteDigest`, a digest of the prompt, every suite setting other than
 the baseline itself, and the requested model. If the prompt, preflight, tool permissions, failure
 patterns, or timeout change, the report flags that the baseline measured a different task.
+Finally it records `baseline.observedModel`, the model Claude reported running. Suites without
+`claude.model` use whatever model your environment selects, so a run on a different model is
+flagged too.
+
+Suites have no free-form Claude flags. Any flag could undo run isolation (`--settings`,
+`--resume`, `--plugin-dir`), so each supported option is its own typed `claude` field.
 
 ## Artifacts
 

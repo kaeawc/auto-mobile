@@ -54,19 +54,14 @@ describe("agent benchmark claude invocation", () => {
     ]);
   });
 
-  test("the CLI model override wins over the suite model; extra args come last", () => {
-    const configured = suite({
-      model: "suite-model",
-      maxBudgetUsd: 1.5,
-      extraArgs: ["--effort", "low"],
-    });
+  test("the CLI model override wins over the suite model", () => {
+    const configured = suite({ model: "suite-model", maxBudgetUsd: 1.5 });
     const args = buildClaudeArgs(configured, "/c.json", "S", "cli-model");
     expect(args.slice(args.indexOf("--model"), args.indexOf("--model") + 2)).toEqual([
       "--model",
       "cli-model",
     ]);
     expect(args).toContain("1.5");
-    expect(args.slice(-2)).toEqual(["--effort", "low"]);
     expect(buildClaudeArgs(configured, "/c.json", "S")).toContain("suite-model");
   });
 
@@ -95,10 +90,18 @@ describe("agent benchmark claude invocation", () => {
       AUTOMOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/claims",
       AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/legacy",
       AUTOMOBILE_DB_PATH: "/resident.db",
+      ADB_SERVER_SOCKET: "tcp:remote:5037",
+      ANDROID_ADB_SERVER_ADDRESS: "remote",
+      ANDROID_ADB_SERVER_PORT: "5038",
+      ANDROID_HOME: "/sdk",
     }) as { mcpServers: Record<string, { env: Record<string, string> }> };
     const env = config.mcpServers["auto-mobile"].env;
     expect(env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR).toBe("/shared/claims");
     expect(env.AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR).toBe("/shared/legacy");
+    expect(env.ADB_SERVER_SOCKET).toBe("tcp:remote:5037");
+    expect(env.ANDROID_ADB_SERVER_ADDRESS).toBe("remote");
+    expect(env.ANDROID_ADB_SERVER_PORT).toBe("5038");
+    expect(env.ANDROID_HOME).toBe("/sdk");
     expect(env.PATH).toBeUndefined();
     expect(env.AUTOMOBILE_DB_PATH).toBeUndefined();
     expect(env.AUTOMOBILE_DB_DIR).toBe("/run/db");

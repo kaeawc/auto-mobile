@@ -20,6 +20,7 @@ const SCREEN =
   '<hierarchy><node package="dev.example" text="Expected count: 3"/>' +
   '<node package="dev.example" content-desc="A &amp; B"/></hierarchy>';
 // The harness builds paths with path.join, so expectations do too (Windows unit lane).
+const APK_DIGEST = `a1b2c3d4e5f60718${"0".repeat(48)}`;
 const RUN_DIR = join("/out", "demo", "20261016T010203Z-run-1");
 const artifact = (...parts: string[]) => join(RUN_DIR, ...parts);
 
@@ -49,8 +50,8 @@ class MemoryFs implements HarnessFs {
   remove(path: string) {
     this.removed.push(path);
   }
-  sha256(path: string) {
-    return `${path.length.toString(16).padStart(4, "0")}deadbeefcafef00d0123456789`;
+  sha256(_path: string) {
+    return APK_DIGEST;
   }
 }
 
@@ -221,9 +222,13 @@ describe("agent benchmark harness", () => {
       stdout:
         "versionCode=7 minSdk=26\n    versionName=1.0\n    lastUpdateTime=2026-10-16 10:00:00\n",
     });
+    runner
+      .onAdb("pm path", { stdout: "package:/data/app/x/base.apk\n" })
+      .onAdb("sha256sum", { stdout: `${APK_DIGEST}  /data/app/x/base.apk\n` });
     const suite = { ...loadedSuite(), apkPath: "/repo/app.apk" };
     const result = await runSuite(suite, options, deps);
-    expect(result.preflight.appBuild).toBe("versionName=1.0 versionCode=7 sha256=000ddeadbeefcafe");
+    expect(result.preflight.appBuild).toBe("versionName=1.0 versionCode=7 sha256=a1b2c3d4e5f60718");
+    expect(result.preflight.log).toContain("verified dev.example is /repo/app.apk");
   });
 
   test("no screen dump is taken when the suite has no screen checks", async () => {

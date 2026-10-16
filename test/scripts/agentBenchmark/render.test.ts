@@ -25,6 +25,7 @@ function result(
     sequence?: string[];
     baselineAppBuild?: string;
     baselineSuiteDigest?: string;
+    baselineModel?: string;
   } = {},
 ): BenchmarkResult {
   const audit = auditTranscript(builder.build(), {
@@ -57,6 +58,7 @@ function result(
         costUsd: 0.01,
         appBuild: options.baselineAppBuild,
         suiteDigest: options.baselineSuiteDigest,
+        observedModel: options.baselineModel,
       },
       options.sequence,
       { appBuild: "versionName=1.0 versionCode=7", suiteDigest: "suite0123456789a" },
@@ -147,6 +149,7 @@ describe("agent benchmark rendering", () => {
       tools: { observe: 1, tapOn: 1 },
       appBuild: "versionName=1.0 versionCode=7",
       suiteDigest: "suite0123456789a",
+      observedModel: "claude-test-model",
     });
     expect(suite.baselineToolSequence).toEqual(["observe", "tapOn"]);
   });
@@ -179,5 +182,19 @@ describe("agent benchmark rendering", () => {
     );
     const same = result(passing(), { baselineSuiteDigest: "suite0123456789a" });
     expect(renderReport(same)).not.toContain("different prompt or suite settings");
+  });
+
+  test("a baseline from another observed model is flagged; the same model is not", () => {
+    const other = result(passing(), { baselineModel: "claude-older-model" });
+    expect(other.comparison.observedModel).toEqual({
+      baseline: "claude-older-model",
+      current: "claude-test-model",
+      matches: false,
+    });
+    expect(renderReport(other)).toContain(
+      "! baseline was recorded on model claude-older-model; this run used claude-test-model",
+    );
+    const same = result(passing(), { baselineModel: "claude-test-model" });
+    expect(renderReport(same)).not.toContain("recorded on model");
   });
 });

@@ -18,13 +18,6 @@ export const MCP_TOOL_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
 
 const DEFAULT_TIMEOUT_SECONDS = 900;
 
-/** Claude flags that load an earlier conversation, which would contaminate a run. */
-const SESSION_RESUME_FLAGS = ["--resume", "-r", "--continue", "-c", "--fork-session"];
-
-function matchesFlag(arg: string, flags: readonly string[]): boolean {
-  return flags.some((flag) => arg === flag || arg.startsWith(`${flag}=`));
-}
-
 /**
  * Android stores <float> preferences as Float32. Non-integers are all below 2^53, so the
  * only loss to reject is underflow: a tiny nonzero value that would be stored as 0.
@@ -47,6 +40,8 @@ const baselineSchema = z
     appBuild: z.string().min(1).optional(),
     /** Digest of the prompt and suite settings the baseline was recorded with. */
     suiteDigest: z.string().min(1).optional(),
+    /** The model Claude reported running (stream-json init), not the requested selector. */
+    observedModel: z.string().min(1).optional(),
   })
   .strict();
 
@@ -58,15 +53,8 @@ const claudeSchema = z
     disallowedTools: z.array(z.string().min(1)).default(["Bash"]),
     maxBudgetUsd: z.number().positive().optional(),
     timeoutSeconds: z.number().int().positive().default(DEFAULT_TIMEOUT_SECONDS),
-    extraArgs: z
-      .array(z.string())
-      .default([])
-      .refine((args) => !args.some((arg) => matchesFlag(arg, ["--model"])), {
-        message: "set claude.model (or pass --model on the command line), not --model in extraArgs",
-      })
-      .refine((args) => !args.some((arg) => matchesFlag(arg, SESSION_RESUME_FLAGS)), {
-        message: "extraArgs must not resume or continue a session; every run starts fresh",
-      }),
+    // No free-form extra flags: any Claude flag can undo run isolation (--settings,
+    // --resume, --plugin-dir, ...), so each supported knob gets its own typed field.
   })
   .strict();
 

@@ -35,7 +35,7 @@ export interface PrototypeRequestHost {
 
 export function createPrototypeRequestHost(
   deviceId: string,
-  coordinator: PrototypeRequestCoordinator,
+  coordinator: Pick<PrototypeRequestCoordinator, "run" | "cancelConnection">,
 ): PrototypeRequestHost {
   // One host per socket: closing it must not abort requests another connection on the same
   // device (a second injected app, or a newer connection) is still waiting on.

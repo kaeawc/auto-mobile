@@ -1,10 +1,11 @@
+import { ENV as ENV_SPECS } from "../../config/env";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BindingScopeIdentity } from "./registry/bindingRegistry";
 
 /** Operator configuration, never a session requester input. */
-export const SESSION_BROKER_HOST_CONFIG_ENV = "AUTOMOBILE_SESSION_BROKER_CONFIG";
+export const SESSION_BROKER_HOST_CONFIG_ENV = ENV_SPECS.SESSION_BROKER_CONFIG.name;
 export const SESSION_BROKER_CAPABILITY = "session-broker/v1";
 
 /** One private allocation scope in the host-wide registry; no caller chooses these values. */

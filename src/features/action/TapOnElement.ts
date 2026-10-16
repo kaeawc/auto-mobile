@@ -66,7 +66,7 @@ import {
   type HierarchyCapture,
 } from "../observe/HierarchyCapture";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import { BaseVisualChange, ProgressCallback, type ObservedActionResult } from "./BaseVisualChange";
 import {
   displayTransitions,
   type DisplayTransitionReader,
@@ -4092,34 +4092,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           }
 
           if (options.accessibilityLink) {
-            const occurrence = options.index ?? 0;
-            const owner = this.resolveContainerElement(
-              viewHierarchy,
-              this.withObservationScreenSize(options, observeResult),
-            );
-            if (options.container && !owner) {
-              return { success: false, error: "Semantic link container is no longer present" };
-            }
-            const activation = await this.activateSemanticLink(
+            return this.activateAccessibilityLinkPhase(
+              options,
               options.accessibilityLink,
-              occurrence,
-              owner,
+              observeResult,
               viewHierarchy,
+              activationWarnings,
               signal,
             );
-            if (!activation.success) {
-              return { success: false, error: activation.error };
-            }
-            return {
-              success: true,
-              action: options.action,
-              element: {
-                text: options.accessibilityLink,
-                bounds: { left: 0, top: 0, right: 0, bottom: 0 },
-              } as Element,
-              activatedSubtext: { text: options.accessibilityLink, occurrence },
-              ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
-            };
           }
 
           let searchOutcome = await perf.track("findElement", () =>
@@ -4204,26 +4184,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             return ensureCheckedResult;
           }
           if (options.subtext) {
-            const occurrence = options.subtext.occurrence ?? 0;
-            const activation = await this.activateSemanticLink(
-              options.subtext.text,
-              occurrence,
+            return this.activateSubtextPhase({
+              options,
+              subtext: options.subtext,
               element,
               viewHierarchy,
-              signal,
-            );
-            if (!activation.success) {
-              return { success: false, error: activation.error };
-            }
-            return {
-              success: true,
-              action: options.action,
-              element,
               selectedElement: selectedElementMetadata,
               searchUntil: searchOutcome.stats,
-              activatedSubtext: { text: options.subtext.text, occurrence },
-              ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
-            };
+              activationWarnings,
+              signal,
+            });
           }
           const initialTapPoint = this.geometry.getElementCenter(element);
           let action = options.action;
@@ -4351,70 +4321,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           }
           appendDisabledElementWarning(this.device.platform, tapElement, activationWarnings);
           this.logClickableParentSelection(usedParent);
-          const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy, {
-            observationScreenSize: observeResult.screenSize,
-            display: observeResult.viewHierarchy,
-          });
-          const visibleBounds = this.visibleTapBounds(
+          const { tapPoint, warning: tapPointWarning } = this.planVisibleTapPoint({
+            options,
+            requestedAction,
+            observeResult,
+            viewHierarchy,
             finalSelection,
-            viewHierarchy,
-            screenSize,
-            requestedAction === "focus" ? { ...options, action: "focus" } : options,
             tapElement,
-          );
-          if (!visibleBounds) {
-            throw this.invisibleMatchFailure(
-              finalSelection,
-              options,
-              viewHierarchy,
-              screenSize,
-              "Matched element has no visible tap area on this screen. " +
-                "Scroll it into view with swipeOn, then retry tapOn.",
-            );
-          }
-          const visibleTapPoint = this.resolveVisibleTapPoint(
-            tapElement,
-            viewHierarchy,
-            visibleBounds,
-            {
-              options,
-              screenSize,
-              chromeElements: [
-                matchedTapElement(
-                  finalSelection,
-                  tapElement,
-                  requestedAction === "focus" ? { ...options, action: "focus" } : options,
-                ),
-                tapElement,
-              ],
-            },
-          );
-          if (!visibleTapPoint) {
-            throw this.invisibleMatchFailure(
-              finalSelection,
-              options,
-              viewHierarchy,
-              screenSize,
-              "Matched element has no unobstructed visible tap area. " +
-                "Dismiss the keyboard or scroll it into view, then retry tapOn.",
-            );
-          }
-          const barDecision = this.prototypeBarTapDecision(
-            viewHierarchy,
-            tapElement,
-            visibleTapPoint,
-          );
-          if (barDecision.kind === "refuse") {
-            throw new ActionableError(
-              `Cannot tap (${visibleTapPoint.x}, ${visibleTapPoint.y}): the AutoMobile prototype control is under the ${barDecision.bar} and the touch would not reach it. ` +
-                "Move the control inside the safe area (safeAreaPadding on the node, or an offset in the floating placement), then retry.",
-            );
-          }
-          const tapPoint = barDecision.point;
-          // The selector resolved in the scoped tree; the touch lands on whatever is on top (#9305).
-          assertAppGestureNotUnderPrototype(viewHierarchy, options.layer, tapPoint, "tap");
-          if (barDecision.warning) {
-            activationWarnings.push(barDecision.warning);
+          });
+          if (tapPointWarning) {
+            activationWarnings.push(tapPointWarning);
           }
           const tapBounds = tapElement.bounds;
           logger.info(
@@ -4578,26 +4494,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         this.enforceFreshnessConsistencyWithEffect(previousObserveResult, result);
       }
 
-      if (requestedAction === "focus" && result.success && !result.wasAlreadyFocused) {
-        const target = focusTarget ?? result.element;
-        result.focusVerified = await this.verifyFocusAfterTap(
-          result,
-          (observation) =>
-            this.verifyFocusedInputTarget(
-              { ...options, action: "focus" },
-              target,
-              observation,
-              focusLabelText,
-              result.selectedElement?.indexInMatches,
-              preTapHierarchy,
-            ),
-          signal,
-        );
-        if (!result.focusVerified) {
-          result.success = false;
-          result.error = `Failed to confirm focus on editable input ${describeFocusTarget(target, options)}: the focused field could not be matched to the target`;
-        }
-      }
+      await this.confirmFocusAfterTap({
+        result,
+        options,
+        requestedAction,
+        focusTarget,
+        focusLabelText,
+        preTapHierarchy,
+        signal,
+      });
 
       if (options.action === "longPress") {
         const metadata = this.detectLongPressMetadata(previousObserveResult, result.observation);
@@ -4633,6 +4538,198 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         searchUntilStats,
         debugContext,
       );
+    }
+  }
+
+  private async activateAccessibilityLinkPhase(
+    options: TapOnElementOptions,
+    linkText: string,
+    observeResult: ObserveResult,
+    viewHierarchy: ViewHierarchyResult,
+    activationWarnings: string[],
+    signal?: AbortSignal,
+  ): Promise<TapOnFocusOutcome | ObservedActionResult> {
+    const occurrence = options.index ?? 0;
+    const owner = this.resolveContainerElement(
+      viewHierarchy,
+      this.withObservationScreenSize(options, observeResult),
+    );
+    if (options.container && !owner) {
+      return { success: false, error: "Semantic link container is no longer present" };
+    }
+    const activation = await this.activateSemanticLink(
+      linkText,
+      occurrence,
+      owner,
+      viewHierarchy,
+      signal,
+    );
+    if (!activation.success) {
+      return { success: false, error: activation.error };
+    }
+    return {
+      success: true,
+      action: options.action,
+      element: {
+        text: linkText,
+        bounds: { left: 0, top: 0, right: 0, bottom: 0 },
+      } as Element,
+      activatedSubtext: { text: linkText, occurrence },
+      ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
+    };
+  }
+
+  private async activateSubtextPhase({
+    options,
+    subtext,
+    element,
+    viewHierarchy,
+    selectedElement,
+    searchUntil,
+    activationWarnings,
+    signal,
+  }: {
+    options: TapOnElementOptions;
+    subtext: NonNullable<TapOnElementOptions["subtext"]>;
+    element: Element;
+    viewHierarchy: ViewHierarchyResult;
+    selectedElement: TapOnFocusResult["selectedElement"];
+    searchUntil: SearchUntilStats;
+    activationWarnings: string[];
+    signal?: AbortSignal;
+  }): Promise<TapOnFocusOutcome | ObservedActionResult> {
+    const occurrence = subtext.occurrence ?? 0;
+    const activation = await this.activateSemanticLink(
+      subtext.text,
+      occurrence,
+      element,
+      viewHierarchy,
+      signal,
+    );
+    if (!activation.success) {
+      return { success: false, error: activation.error };
+    }
+    return {
+      success: true,
+      action: options.action,
+      element,
+      selectedElement,
+      searchUntil,
+      activatedSubtext: { text: subtext.text, occurrence },
+      ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
+    };
+  }
+
+  /** Pick the tap point inside the visible, unobstructed part of the resolved element. */
+  private planVisibleTapPoint({
+    options,
+    requestedAction,
+    observeResult,
+    viewHierarchy,
+    finalSelection,
+    tapElement,
+  }: {
+    options: TapOnElementOptions;
+    requestedAction: NonNullable<TapOnElementOptions["action"]>;
+    observeResult: ObserveResult;
+    viewHierarchy: ViewHierarchyResult;
+    finalSelection: ElementSelectionResult;
+    tapElement: Element;
+  }): { tapPoint: { x: number; y: number }; warning?: string } {
+    const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy, {
+      observationScreenSize: observeResult.screenSize,
+      display: observeResult.viewHierarchy,
+    });
+    const visibleBounds = this.visibleTapBounds(
+      finalSelection,
+      viewHierarchy,
+      screenSize,
+      requestedAction === "focus" ? { ...options, action: "focus" } : options,
+      tapElement,
+    );
+    if (!visibleBounds) {
+      throw this.invisibleMatchFailure(
+        finalSelection,
+        options,
+        viewHierarchy,
+        screenSize,
+        "Matched element has no visible tap area on this screen. " +
+          "Scroll it into view with swipeOn, then retry tapOn.",
+      );
+    }
+    const visibleTapPoint = this.resolveVisibleTapPoint(tapElement, viewHierarchy, visibleBounds, {
+      options,
+      screenSize,
+      chromeElements: [
+        matchedTapElement(
+          finalSelection,
+          tapElement,
+          requestedAction === "focus" ? { ...options, action: "focus" } : options,
+        ),
+        tapElement,
+      ],
+    });
+    if (!visibleTapPoint) {
+      throw this.invisibleMatchFailure(
+        finalSelection,
+        options,
+        viewHierarchy,
+        screenSize,
+        "Matched element has no unobstructed visible tap area. " +
+          "Dismiss the keyboard or scroll it into view, then retry tapOn.",
+      );
+    }
+    const barDecision = this.prototypeBarTapDecision(viewHierarchy, tapElement, visibleTapPoint);
+    if (barDecision.kind === "refuse") {
+      throw new ActionableError(
+        `Cannot tap (${visibleTapPoint.x}, ${visibleTapPoint.y}): the AutoMobile prototype control is under the ${barDecision.bar} and the touch would not reach it. ` +
+          "Move the control inside the safe area (safeAreaPadding on the node, or an offset in the floating placement), then retry.",
+      );
+    }
+    const tapPoint = barDecision.point;
+    // The selector resolved in the scoped tree; the touch lands on whatever is on top (#9305).
+    assertAppGestureNotUnderPrototype(viewHierarchy, options.layer, tapPoint, "tap");
+    return { tapPoint, ...(barDecision.warning ? { warning: barDecision.warning } : {}) };
+  }
+
+  /** Mark a focus-requested tap as failed unless the focused field matches the target (mutates `result`). */
+  private async confirmFocusAfterTap({
+    result,
+    options,
+    requestedAction,
+    focusTarget,
+    focusLabelText,
+    preTapHierarchy,
+    signal,
+  }: {
+    result: TapOnFocusOutcome;
+    options: TapOnElementOptions;
+    requestedAction: NonNullable<TapOnElementOptions["action"]>;
+    focusTarget: Element | undefined;
+    focusLabelText: string | undefined;
+    preTapHierarchy: ViewHierarchyResult | undefined;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    if (requestedAction !== "focus" || !result.success || result.wasAlreadyFocused) {
+      return;
+    }
+    const target = focusTarget ?? result.element;
+    result.focusVerified = await this.verifyFocusAfterTap(
+      result,
+      (observation) =>
+        this.verifyFocusedInputTarget(
+          { ...options, action: "focus" },
+          target,
+          observation,
+          focusLabelText,
+          result.selectedElement?.indexInMatches,
+          preTapHierarchy,
+        ),
+      signal,
+    );
+    if (!result.focusVerified) {
+      result.success = false;
+      result.error = `Failed to confirm focus on editable input ${describeFocusTarget(target, options)}: the focused field could not be matched to the target`;
     }
   }
 

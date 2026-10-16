@@ -212,4 +212,24 @@ describe("device-session ownership under seeded concurrent interleavings", () =>
   test("rebindEvict: seed 17 keeps a rebound session when its old device is lost mid-cleanup", async () => {
     await assertOwnershipInvariants([17], PROFILES.rebindEvict, { tolerate: KNOWN_VIOLATIONS });
   });
+
+  // Pinned harness findings (#12832): these seeds failed because the harness judged them against
+  // the wrong rule, not because the pool broke ownership.
+  // An autolock acquisition whose connection closed mid-bind is handed nothing, even when an attach
+  // on another connection claimed the autolock session it minted.
+  test("autolockAttach: seed 2581 does not count an unrouted autolock acquisition as a hand-out", async () => {
+    await assertOwnershipInvariants([2581], PROFILES.autolockAttach, {
+      tolerate: KNOWN_VIOLATIONS,
+    });
+  });
+
+  // A client acquiring on its new connection may be handed its own session from its closed one.
+  test("rebindEvict: seed 40939 lets a client reuse its own session from a closed connection", async () => {
+    await assertOwnershipInvariants([40939], PROFILES.rebindEvict, { tolerate: KNOWN_VIOLATIONS });
+  });
+
+  // A derived label session released by its base session's expiry has no idle window of its own.
+  test("mixed: seed 20444 exempts a label session released by its expired base", async () => {
+    await assertOwnershipInvariants([20444], PROFILES.mixed, { tolerate: KNOWN_VIOLATIONS });
+  });
 });

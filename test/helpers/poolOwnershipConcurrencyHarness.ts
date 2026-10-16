@@ -78,7 +78,13 @@ const SETTLE_TURNS = 300;
 const SETTLE_TIME_NUDGES = 75;
 const SETTLE_NUDGE_MS = 1_000;
 /** Microtask turns the fake keep-screen-awake restore takes. */
-const RESTORE_TURNS = 60;
+const RESTORE_TURNS = positiveIntEnv("AUTOMOBILE_POOL_OWNERSHIP_RESTORE_TURNS") ?? 60;
+/**
+ * Microtask turns a settle point leaves for background work no operation awaits. Deferred rebind
+ * cleanup restores the old device's overrides one after another, each as slow as the restore, and a
+ * second cleanup can chain behind it, so the budget scales with the restore (#12832).
+ */
+const BACKGROUND_DRAIN_TURNS = Math.max(60, RESTORE_TURNS * 8);
 
 export type StepKind =
   | "acquireMcp"
@@ -553,7 +559,15 @@ class OwnershipWorld {
     const now = record.at;
     const lastControl = this.lastControlAt.get(record.sessionId);
     const idleReasons = ["lazy-expiry", "cleanup-expired", "cli-idle-timeout", "expired"];
-    if (idleReasons.includes(record.reason) && lastControl !== undefined) {
+    // A derived label session is released by the cascade with its base session's reason (see
+    // registerDerivedLabelSessionReleaseCascade): it has no idle window of its own then.
+    const baseRelease = this.released.get(record.sessionId.replace(/:[A-Za-z]+$/, ""));
+    const cascadedFromBase =
+      baseRelease !== undefined &&
+      baseRelease.sessionId !== record.sessionId &&
+      baseRelease.at === record.at &&
+      baseRelease.reason === record.reason;
+    if (idleReasons.includes(record.reason) && lastControl !== undefined && !cascadedFromBase) {
       // An autolock session's idle window is the device pool timeout, not the session default.
       const window = this.autolockSessions.has(record.sessionId)
         ? AUTOLOCK_IDLE_WINDOW_MS
@@ -890,14 +904,26 @@ class OwnershipWorld {
       if (bound !== sessionId && !(via === "autolock" && !origin)) {
         // The same client whose acquisition outlived its connection, after its reconnect restored
         // the session onto a newer one, is not handed a foreign session: the reply goes nowhere.
+        // The same client is also handed back its own session from an earlier connection that has
+        // since closed (the proxy reconnected and acquired a device that session was rebound to).
+        // An autolock acquisition is not handed anything when its connection closed mid-bind (the
+        // reply goes nowhere), even if an attach on another connection claimed the autolock
+        // session it minted in the meantime.
+        const unroutedAutolock =
+          via === "autolock" &&
+          kind === "mcp" &&
+          connection !== undefined &&
+          this.closedConnections.has(connection);
         const sameOwner =
-          kind === "cli"
+          unroutedAutolock ||
+          (kind === "cli"
             ? origin?.kind === "cli"
             : origin?.kind === "mcp" &&
               (origin.connection === connection ||
                 (origin.client === client.index &&
-                  connection !== undefined &&
-                  this.closedConnections.has(connection)));
+                  ((connection !== undefined && this.closedConnections.has(connection)) ||
+                    (origin.connection !== undefined &&
+                      this.closedConnections.has(origin.connection))))));
         if (!sameOwner) {
           this.fail(
             "foreign-session-reuse",
@@ -1667,7 +1693,7 @@ class OwnershipWorld {
     if (this.inflight.size > 0) {
       this.fail("unsettled-operation", `${this.inflight.size} operation(s) never settled`);
     }
-    await drainMicrotasks(60);
+    await drainMicrotasks(BACKGROUND_DRAIN_TURNS);
   }
 
   async apply(step: Step): Promise<void> {

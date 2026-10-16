@@ -1,4 +1,9 @@
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
+import {
+  isContainerAvailable,
+  resolveSearchUntilDuration,
+  throwIfLongPressInterrupted,
+} from "./tapSharedHelpers";
 import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
 import type { OwnPrototypeCoverRule } from "../observe/ApplicationWindowCover";
 import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
@@ -20,7 +25,6 @@ import { DispatchedObservationError } from "../../models/DispatchedObservationEr
 import { inputDurationArgument } from "./touchscreenInput";
 import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
 import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
-import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
   assertLongPressFitsRequestBudget,
@@ -83,8 +87,6 @@ import {
 } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 
-// Fallback for injected selectors that predate `hasContainer`; resolver semantics, no finder.
-const defaultContainerSelector = new ResolverElementSelector();
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";
@@ -1020,25 +1022,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private getSearchUntilDuration(options: TapOnElementOptions): number {
-    const duration = options.searchUntil?.duration ?? TapOnElement.SEARCH_UNTIL_DEFAULT_MS;
-
-    if (!Number.isFinite(duration)) {
-      throw new ActionableError("searchUntil.duration must be a number");
-    }
-
-    if (duration < TapOnElement.SEARCH_UNTIL_MIN_MS) {
-      throw new ActionableError(
-        `searchUntil.duration must be at least ${TapOnElement.SEARCH_UNTIL_MIN_MS}ms`,
-      );
-    }
-
-    if (duration > TapOnElement.SEARCH_UNTIL_MAX_MS) {
-      throw new ActionableError(
-        `searchUntil.duration must be at most ${TapOnElement.SEARCH_UNTIL_MAX_MS}ms`,
-      );
-    }
-
-    return Math.round(duration);
+    return resolveSearchUntilDuration(options.searchUntil?.duration, {
+      defaultMs: TapOnElement.SEARCH_UNTIL_DEFAULT_MS,
+      minMs: TapOnElement.SEARCH_UNTIL_MIN_MS,
+      maxMs: TapOnElement.SEARCH_UNTIL_MAX_MS,
+    });
   }
 
   private hashViewHierarchy(viewHierarchy: ViewHierarchyResult | null): string | null {
@@ -3440,14 +3428,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     viewHierarchy: ViewHierarchyResult,
     container?: ElementContainerSelector,
   ): boolean {
-    if (!container) {
-      return true;
-    }
-
-    return (
-      this.elementSelector.hasContainer?.(viewHierarchy, container) ??
-      defaultContainerSelector.hasContainer(viewHierarchy, container)
-    );
+    return isContainerAvailable(this.elementSelector, viewHierarchy, container);
   }
 
   private resolveContainerElement(
@@ -5782,17 +5763,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     durationMs: number,
     signal?: AbortSignal,
   ): void {
-    if (
-      signal?.aborted ||
-      error instanceof AdbCommandTimeoutError ||
-      (error instanceof Error && error.name === "AbortError")
-    ) {
-      // Killing host adb cannot cancel input's system_server injection.
-      throw new ActionableError(
-        `Android long press interrupted; press may still be held on the device for up to ${durationMs} ms. Wait ${durationMs} ms before retrying touch input.`,
-        { cause: error },
-      );
-    }
+    throwIfLongPressInterrupted(error, durationMs, signal);
   }
 
   private semanticAndroidLongPressTargetError(

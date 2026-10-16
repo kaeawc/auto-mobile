@@ -7,7 +7,7 @@ import {
   type TraversalOrderResult,
   type ViewHierarchyResult,
 } from "../../models";
-import type { ElementSelector as FocusElementSelector } from "./ElementSelector";
+import type { TalkBackElementSelector } from "./TalkBackElementSelector";
 import { DeviceDetection } from "../../utils/DeviceDetection";
 import { isDeviceLostError } from "../../models/DeviceLostError";
 import { combineWithAmbientAbort, getRequestContext } from "../../utils/AbortContext";
@@ -260,7 +260,7 @@ export class FocusNavigationExecutor {
    */
   async navigateToElement(
     deviceId: string,
-    targetSelector: FocusElementSelector,
+    targetSelector: TalkBackElementSelector,
     options: NavigationOptions = {},
   ): Promise<boolean> {
     const signal = combineWithAmbientAbort(options.signal);
@@ -288,7 +288,7 @@ export class FocusNavigationExecutor {
 
   private async runNavigation(
     deviceId: string,
-    targetSelector: FocusElementSelector,
+    targetSelector: TalkBackElementSelector,
     options: NavigationOptions,
     progress: { focusRequests: number },
   ): Promise<boolean> {
@@ -338,7 +338,7 @@ export class FocusNavigationExecutor {
    */
   private async readCursorAfterFocusRequest(
     driver: FocusNavigationDriver,
-    targetSelector: FocusElementSelector,
+    targetSelector: TalkBackElementSelector,
     options: NavigationOptions,
     focusRequests: number,
   ): Promise<NavigationVerification> {
@@ -413,7 +413,7 @@ export class FocusNavigationExecutor {
   private unreachedTargetError(
     before: NavigationVerification,
     after: NavigationVerification,
-    targetSelector: FocusElementSelector,
+    targetSelector: TalkBackElementSelector,
   ): ActionableError {
     const target = this.describeSelector(targetSelector);
     if (screenFingerprint(before.orderedElements) !== screenFingerprint(after.orderedElements)) {
@@ -442,7 +442,7 @@ export class FocusNavigationExecutor {
 
   private async verifyNavigationState(
     driver: FocusNavigationDriver,
-    targetSelector: FocusElementSelector,
+    targetSelector: TalkBackElementSelector,
     dispatched: boolean,
     signal?: AbortSignal,
   ): Promise<NavigationVerification> {
@@ -498,7 +498,7 @@ export class FocusNavigationExecutor {
     return label ? `focus is on "${label}"` : "focus is on another element";
   }
 
-  private describeSelector(selector: FocusElementSelector): string {
+  private describeSelector(selector: TalkBackElementSelector): string {
     const parts: string[] = [];
     if (selector.resourceId) {
       parts.push(`resourceId="${selector.resourceId}"`);

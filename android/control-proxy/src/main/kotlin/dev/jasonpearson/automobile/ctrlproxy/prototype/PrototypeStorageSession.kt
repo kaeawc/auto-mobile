@@ -45,6 +45,19 @@ class PrototypeStorageSessionRegistry {
     sessions += WeakReference(session)
   }
 
+  /**
+   * Holds back every live session of [id] while its storage is cleaned up. The result either
+   * [QuiescedSessions.invalidate]s them for good (the delete went through) or
+   * [QuiescedSessions.resume]s them (it failed, and the prototype stays saved and persisting).
+   */
+  @Synchronized
+  fun quiesce(id: String): QuiescedSessions {
+    sessions.removeAll { it.get() == null }
+    val live = sessions.mapNotNull { it.get() }.filter { it.id == id }
+    live.forEach { it.quiesce() }
+    return QuiescedSessions(live)
+  }
+
   /** Stops every live session of [id] from writing again; returns how many were live. */
   @Synchronized
   fun invalidate(id: String): Int {
@@ -56,6 +69,13 @@ class PrototypeStorageSessionRegistry {
     /** The process-wide registry the service and the saved activity share. */
     val Shared = PrototypeStorageSessionRegistry()
   }
+}
+
+/** Sessions held back by [PrototypeStorageSessionRegistry.quiesce]. */
+class QuiescedSessions internal constructor(private val sessions: List<PrototypeStorageSession>) {
+  fun invalidate() = sessions.forEach { it.invalidate() }
+
+  fun resume() = sessions.forEach { it.resume() }
 }
 
 /**
@@ -101,17 +121,22 @@ class PrototypeStoragePersistence(
   suspend fun open(
     spec: PrototypeSpec,
     fits: (PrototypeSpec) -> Boolean = { true },
-  ): PrototypeStorageOpen = prepare(spec, fits).also { it.commit() }
+  ): PrototypeStorageOpen = prepare(spec, null, fits).also { it.commit() }
 
   /**
    * Like [open] but side-effect-free: nothing on disk changes until [PrototypeStorageOpen.commit].
    */
   suspend fun prepare(
     spec: PrototypeSpec,
+    /**
+     * Values a same-id session could not write (its disk refused): laid over the disk record so a
+     * re-show does not revert them, then restored under the usual rules and written again.
+     */
+    unsaved: PrototypeStoredValues? = null,
     fits: (PrototypeSpec) -> Boolean = { true },
   ): PrototypeStorageOpen {
     val loaded = withContext(io) { store.load(spec.id) }
-    val stored =
+    val onDisk =
       when (loaded) {
         is PrototypeStorageLoad.Loaded -> loaded.stored
         PrototypeStorageLoad.Missing -> null
@@ -123,6 +148,13 @@ class PrototypeStoragePersistence(
           null
         }
       }
+    val stored =
+      if (unsaved == null) onDisk
+      else
+        PrototypeStoredValues(
+          unsaved.version,
+          onDisk?.takeIf { it.version == unsaved.version }?.values.orEmpty() + unsaved.values,
+        )
     var restore = PrototypeStorageRestorer.restore(spec, stored)
     if (restore.applied.isNotEmpty() && !fits(restore.spec)) {
       warn.warn("Stored values of ${spec.id} no longer fit the spec, using the spec's", null)
@@ -156,6 +188,10 @@ class PrototypeStoragePersistence(
         warn = warn,
         stored = kept,
         baseline = PrototypeStorageRestorer.currentValues(restore.spec),
+        // What the disk holds is not what the session does when the unsaved values were carried.
+        persisted =
+          if (unsaved == null) kept
+          else onDisk?.takeIf { it.version == block.version }?.values.orEmpty(),
       )
     registry?.register(session)
     return PrototypeStorageOpen(restore.spec, session, plan)
@@ -203,6 +239,7 @@ internal constructor(
   private val warn: PrototypeStorageWarn,
   stored: Map<String, JsonElement>,
   baseline: Map<String, JsonElement>,
+  persisted: Map<String, JsonElement> = stored,
 ) {
   private val lock = Any()
   private val values = LinkedHashMap(stored)
@@ -221,8 +258,16 @@ internal constructor(
   /** Set once the id was deleted: nothing this session holds may reach the disk again. */
   private var invalidated = false
 
+  /** Set while a delete is cleaning up: writes wait, and resume if the cleanup fails. */
+  private var quiesced = false
+
   /** Orders every disk operation of this session, so a clear cannot overtake an older save. */
   private val diskLock = Mutex()
+
+  init {
+    // Keys that differ from the disk are written again, after the usual debounce.
+    if (persisted != values) markDirty()
+  }
 
   /** Notes the shown spec's listed values; stores those that changed. Cheap when none did. */
   fun record(spec: PrototypeSpec) {
@@ -259,6 +304,7 @@ internal constructor(
   private fun markDirty() {
     if (invalidated) return
     dirty = true
+    if (quiesced) return
     if (pending == null)
       pending = scheduler.schedule(debounceMillis) { write(cancelPending = false) }
   }
@@ -273,7 +319,7 @@ internal constructor(
         // The scheduled task is the caller when it is not cancelled: it must not cancel itself.
         if (cancelPending) pending?.cancel()
         pending = null
-        if (!dirty || invalidated) return
+        if (!dirty || invalidated || quiesced) return
         dirty = false
         snapshotGeneration = generation
         PrototypeStoredValues(version, LinkedHashMap(values))
@@ -297,6 +343,31 @@ internal constructor(
 
   private fun markDirtyUnlessCleared(snapshotGeneration: Long) =
     synchronized(lock) { if (generation == snapshotGeneration) dirty = true }
+
+  /** The values that never reached the disk (a refused write), or null when nothing is owed. */
+  internal fun unsavedValues(): PrototypeStoredValues? =
+    synchronized(lock) {
+      if (dirty && !invalidated) PrototypeStoredValues(version, LinkedHashMap(values)) else null
+    }
+
+  /** Holds writes back while a delete cleans up; [resume] undoes it if the cleanup fails. */
+  internal fun quiesce() {
+    synchronized(lock) {
+      quiesced = true
+      pending?.cancel()
+      pending = null
+      generation++
+    }
+  }
+
+  /** The delete failed: the session persists again, writing what it holds from now. */
+  internal fun resume() {
+    synchronized(lock) {
+      if (!quiesced || invalidated) return
+      quiesced = false
+      markDirty()
+    }
+  }
 
   /** The id was deleted: drop the pending write and every later one. Touches no disk. */
   internal fun invalidate() {

@@ -109,19 +109,30 @@ class SavedPrototypeController(
     reply(requestId) {
       // Storage goes first and does not depend on the entry: a failed cleanup leaves the entry in
       // place, and a retry of an entry that is already gone still removes the orphaned values.
-      storageSessions.invalidate(id)
+      val held = storageSessions.quiesce(id)
       try {
         clearStorage(id)
       } catch (error: CancellationException) {
+        held.resume()
         throw error
       } catch (error: Exception) {
+        held.resume()
         Log.w(TAG, "Saved prototype storage cleanup failed", error)
         return@reply refusal(
           SavedPrototypeErrorCode.STORAGE_FAILURE,
           "Could not remove the stored values of $id",
         )
       }
-      if (!store.delete(id)) {
+      val removed =
+        try {
+          store.delete(id)
+        } catch (error: Throwable) {
+          // The entry stays, so the screen keeps persisting.
+          held.resume()
+          throw error
+        }
+      held.invalidate()
+      if (!removed) {
         refusal(SavedPrototypeErrorCode.NOT_FOUND, "Saved prototype not found: $id")
       } else {
         disableShortcut(id)

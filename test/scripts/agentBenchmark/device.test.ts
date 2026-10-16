@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   captureScreen,
-  decodeXmlEntities,
   describeAppBuild,
   parseOnlineSerials,
   resolveSerial,
   runPreflight,
+  screenTextForApp,
   sharedPreferencesXml,
 } from "../../../scripts/agent-benchmark/device";
 import { FakeCommandRunner } from "./fakeCommandRunner";
@@ -212,9 +212,18 @@ describe("agent benchmark screen capture", () => {
     );
   });
 
-  test("entity decoding restores visible text, decoding &amp; last", () => {
-    expect(decodeXmlEntities("&lt;a&gt; &quot;b&quot; &apos;c&#39; &amp;lt;")).toBe(
-      "<a> \"b\" 'c' &lt;",
-    );
+  test("screen text is the target app's text and content descriptions, entities decoded", async () => {
+    const xml =
+      '<?xml version="1.0"?><hierarchy rotation="0">' +
+      '<node package="com.android.systemui" text="12:00"/>' +
+      '<node package="dev.example.app" text="" resource-id="dev.example.app:id/summary">' +
+      '<node package="dev.example.app" text="A &amp; &lt;b&gt;" class="android.widget.TextView"/>' +
+      '<node package="dev.example.app" content-desc="Close &quot;x&quot;"/>' +
+      "</node></hierarchy>";
+    expect(await screenTextForApp(xml, PACKAGE)).toBe('A & <b>\nClose "x"');
+  });
+
+  test("malformed hierarchy XML rejects rather than matching raw text", async () => {
+    await expect(screenTextForApp("<hierarchy><node", PACKAGE)).rejects.toThrow();
   });
 });

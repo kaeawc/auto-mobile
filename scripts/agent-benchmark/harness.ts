@@ -14,9 +14,9 @@ import { compareRun } from "./compare";
 import type { LoadedSuite } from "./config";
 import {
   captureScreen,
-  decodeXmlEntities,
   resolveSerial,
   runPreflight,
+  screenTextForApp,
   type CommandRunner,
 } from "./device";
 import {
@@ -127,11 +127,11 @@ async function stopPrivateDaemon(deps: HarnessDeps, options: RunOptions, paths: 
   }
 }
 
-async function screenAfterRun(deps: HarnessDeps, serial: string, runDirectory: string) {
+async function screenAfterRun(deps: HarnessDeps, run: PreparedRun, packageName: string) {
   try {
-    const xml = await captureScreen(deps.runner, serial);
-    deps.fs.writeFile(join(runDirectory, "screen.xml"), xml);
-    return { screenText: decodeXmlEntities(xml) };
+    const xml = await captureScreen(deps.runner, run.serial);
+    deps.fs.writeFile(join(run.runDirectory, "screen.xml"), xml);
+    return { screenText: await screenTextForApp(xml, packageName) };
   } catch (error) {
     deps.log(`post-run screen dump failed: ${errorMessage(error)}`);
     return { screenError: errorMessage(error) };
@@ -260,7 +260,7 @@ export async function runSuite(
   try {
     exit = await launchClaude(suite, options, deps, prepared);
     if (definition.verify.screenIncludes.length > 0) {
-      screen = await screenAfterRun(deps, prepared.serial, prepared.runDirectory);
+      screen = await screenAfterRun(deps, prepared, definition.app.packageName);
     }
   } finally {
     await stopPrivateDaemon(deps, options, prepared.paths);

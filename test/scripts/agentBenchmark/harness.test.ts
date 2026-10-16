@@ -15,7 +15,9 @@ import { TranscriptBuilder } from "./transcriptBuilder";
 
 const START_MS = Date.UTC(2026, 9, 16, 1, 2, 3);
 const DEVICES = "List of devices attached\nemulator-5554\tdevice\n";
-const SCREEN = '<hierarchy><node text="Expected count: 3"/><node text="A &amp; B"/></hierarchy>';
+const SCREEN =
+  '<hierarchy><node package="dev.example" text="Expected count: 3"/>' +
+  '<node package="dev.example" content-desc="A &amp; B"/></hierarchy>';
 // The harness builds paths with path.join, so expectations do too (Windows unit lane).
 const RUN_DIR = join("/out", "demo", "20261016T010203Z-run-1");
 const artifact = (...parts: string[]) => join(RUN_DIR, ...parts);
@@ -181,6 +183,18 @@ describe("agent benchmark harness", () => {
     expect(fs.exists(artifact("baseline.yml"))).toBe(false);
   });
 
+  test("screen checks ignore other packages and non-visible attributes", async () => {
+    const { runner, deps, options } = setup(PASSING);
+    runner.onAdb("exec-out cat", {
+      stdout:
+        '<hierarchy><node package="wrong.app" text="Expected count: 3"/>' +
+        '<node package="dev.example" resource-id="dev.example:id/A &amp; B" text=""/></hierarchy>',
+    });
+    const result = await runSuite(loadedSuite(), options, deps);
+    expect(result.comparison.verdict).toBe("failed");
+    expect(result.outcome.screenText).toBe("");
+  });
+
   test("no screen dump is taken when the suite has no screen checks", async () => {
     const { runner, deps, options } = setup(PASSING);
     await runSuite(loadedSuite({ verify: { answerIncludes: ["COUNT: 3"] } }), options, deps);
@@ -226,6 +240,7 @@ describe("agent benchmark harness", () => {
       AUTOMOBILE_DAEMON_PID_FILE_PATH: "/tmp/resident.pid",
       AUTO_MOBILE_DB_DIR: "/home/me/legacy-db",
       AUTOMOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/claims",
+      AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/legacy-claims",
     };
     await runSuite(loadedSuite(), options, deps);
     const stop = runner.calls.find((call) => call.args.includes("--daemon"));
@@ -236,6 +251,7 @@ describe("agent benchmark harness", () => {
       expect(env.AUTO_MOBILE_DB_DIR).toBeUndefined();
       expect(env.AUTOMOBILE_DB_DIR).toBe(artifact("db"));
       expect(env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR).toBe("/shared/claims");
+      expect(env.AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR).toBe("/shared/legacy-claims");
     }
   });
 

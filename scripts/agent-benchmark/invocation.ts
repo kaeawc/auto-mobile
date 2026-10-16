@@ -25,7 +25,12 @@
 import { MCP_SERVER_NAME, type SuiteDefinition } from "./config";
 
 /** The one AutoMobile setting shared with any resident daemon: device claims. */
-const SHARED_AUTOMOBILE_VARIABLES = new Set(["AUTOMOBILE_ADB_SERVER_COORDINATION_DIR"]);
+const SHARED_AUTOMOBILE_VARIABLES = new Set([
+  "AUTOMOBILE_ADB_SERVER_COORDINATION_DIR",
+  // Legacy spelling the env registry still honors; dropping it would move the private
+  // daemon's claim root away from the one the harness checked.
+  "AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR",
+]);
 
 /** Orphaned private daemons shut down after this idle window once Claude exits. */
 const PRIVATE_DAEMON_ORPHAN_IDLE_MS = "5000";

@@ -83,7 +83,7 @@ Each run is isolated so earlier runs and your own setup cannot change the result
   legacy `AUTO_MOBILE_*` names) is removed first. Otherwise a state override such as
   `AUTOMOBILE_DB_PATH` would win over the run's values, and a setting such as
   `AUTOMOBILE_DISABLED_TOOLS` would quietly change the agent's toolset. The one exception is
-  `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`, kept so a resident daemon's device claims are still
+  `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` (and its legacy `AUTO_MOBILE_` spelling), kept so a resident daemon's device claims are still
   respected. Before preflight touches the device, the harness checks that claim store and refuses a
   device another AutoMobile session holds.
 - Exactly one Android device must be online. Nothing pins the MCP server to a serial, so with
@@ -106,8 +106,9 @@ Every suite must have at least one `verify` check; otherwise a run could pass wi
 task. `verify.answerIncludes` checks Claude's final reply, case-insensitively. Each expected string
 must stand alone: it can't run on into a letter or digit, so `EXPECTED_COUNT: 3` doesn't match
 `EXPECTED_COUNT: 30`. Suite prompts ask for a fixed final-line format so this is deterministic. `verify.screenIncludes` checks an independent
-`uiautomator` dump taken after Claude exits. This is the oracle that catches an agent that
-_reports_ success without achieving it.
+`uiautomator` dump taken after Claude exits. It matches only the `text` and `content-desc` of the
+suite app's own nodes, so resource ids, class names, and other packages' windows can't satisfy it.
+This is the oracle that catches an agent that _reports_ success without achieving it.
 
 **Stumbles** are tool results with `is_error`, failure-pattern matches in tool results, and
 permission denials. They are reported, not scored.

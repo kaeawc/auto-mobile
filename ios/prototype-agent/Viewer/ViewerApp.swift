@@ -140,6 +140,15 @@ private final class ViewerTerminationObserver: NSObject {
         NotificationCenter.default.addObserver(
             self, selector: #selector(terminate(_:)), name: UIApplication.willTerminateNotification, object: nil
         )
+        // iOS can kill a suspended app without willTerminate, so stored values flush on backgrounding too.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(background(_:)), name: UIApplication.didEnterBackgroundNotification, object: nil
+        )
+    }
+
+    @objc
+    private func background(_: Notification) {
+        PrototypeAgent.flushStorage()
     }
 
     @objc

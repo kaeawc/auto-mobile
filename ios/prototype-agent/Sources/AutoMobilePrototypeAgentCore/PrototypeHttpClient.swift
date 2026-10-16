@@ -104,3 +104,24 @@ enum PrototypeJSONText {
         return String(decoding: data, as: UTF8.self)
     }
 }
+
+/// Header fields Foundation could silently drop or rewrite, rejected before a request is built so
+/// `via: "device"` reports `invalid_request` like the host executor and Android.
+enum PrototypeHttpHeaderCheck {
+    private static let tokenCharacters = Set(
+        "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    )
+
+    /// The first problem with `headers` (names visited in sorted order), or `nil` when all are valid.
+    static func problem(in headers: [String: String]) -> PrototypeRequestError? {
+        for name in headers.keys.sorted() {
+            if name.isEmpty || !name.allSatisfy({ tokenCharacters.contains($0) }) {
+                return .init(.invalidRequest, "Header name is not an HTTP token: \(name.debugDescription)")
+            }
+            if headers[name]?.unicodeScalars.contains(where: { $0 == "\r" || $0 == "\n" || $0 == "\0" }) == true {
+                return .init(.invalidRequest, "Header \(name) has a value with a CR, LF or NUL character")
+            }
+        }
+        return nil
+    }
+}

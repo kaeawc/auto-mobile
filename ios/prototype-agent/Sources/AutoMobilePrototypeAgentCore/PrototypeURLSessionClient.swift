@@ -47,6 +47,9 @@ final class PrototypeURLSessionClient: PrototypeHttpClient, @unchecked Sendable 
 
     func perform(_ request: PrototypeHttpRequest) async throws -> PrototypeHttpResponse {
         let started = nowMs()
+        if let problem = PrototypeHttpHeaderCheck.problem(in: request.headers) {
+            throw PrototypeHttpFailure(error: problem, durationMs: 0)
+        }
         guard let urlRequest = Self.urlRequest(for: request) else {
             throw PrototypeHttpFailure(error: .init(.invalidURL, "Not an absolute URL: \(request.url)"), durationMs: 0)
         }

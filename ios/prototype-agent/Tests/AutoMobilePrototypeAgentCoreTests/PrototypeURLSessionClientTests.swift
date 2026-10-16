@@ -146,6 +146,16 @@ final class PrototypeURLSessionClientTests: XCTestCase {
         XCTAssertEqual(PrototypeHttpRequest(job: job).headers["Content-Type"], "application/json")
     }
 
+    func testAnInvalidHeaderIsInvalidRequestAndNothingIsSent() async {
+        StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: []) }
+        for headers in [["X-A": "a\r\nX-Evil: 1"], ["X-A": "a\nb"], ["X-A": "a\0b"], ["bad name": "v"], ["": "v"]] {
+            let failed = await failure { try await client().perform(call(headers: headers)) }
+            XCTAssertEqual(failed?.error.code, .invalidRequest, "\(headers)")
+        }
+        XCTAssertTrue(StubProtocol.requests.isEmpty)
+        XCTAssertNil(PrototypeHttpHeaderCheck.problem(in: ["X-Token_1": "tab\there", "Accept": "a, b"]))
+    }
+
     func testAGetSendsNoBody() async throws {
         StubProtocol.reset { _ in .respond(status: 200, headers: [:], chunks: []) }
         _ = try await client().perform(call())

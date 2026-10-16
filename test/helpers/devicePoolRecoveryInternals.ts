@@ -1,8 +1,21 @@
 import type { ChildProcess } from "node:child_process";
 import type { EventEmitter } from "node:events";
-import type { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRecordLedger";
-import type { DevicePool, PooledDevice } from "../../src/daemon/devicePool";
-import type { DeviceRecoveryCoordinator } from "../../src/daemon/deviceRecoveryCoordinator";
+import type { Mutex } from "async-mutex";
+import type {
+  AndroidRecoveryRecord,
+  AndroidRecoveryRecordLedger,
+  AndroidRecoveryReservationKind,
+} from "../../src/daemon/androidRecoveryRecordLedger";
+import type {
+  AdbServerResetRecoveryReservation,
+  DevicePool,
+  PooledDevice,
+  SessionPreservingRecoveryResult,
+} from "../../src/daemon/devicePool";
+import type {
+  DeviceRecoveryCoordinator,
+  SessionPreservingRecovery,
+} from "../../src/daemon/deviceRecoveryCoordinator";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import type { EmulatorLossIncidentLedger } from "../../src/daemon/emulatorLossIncidentLedger";
 
@@ -68,6 +81,29 @@ export interface DevicePoolInternals {
     reason: string,
     options?: { attemptDeviceLossRecovery?: boolean; incidentId?: string },
   ): Promise<void>;
+  assignmentMutex: Pick<Mutex, "runExclusive">;
+  adbServerResetQuarantinedSessions: Set<string>;
+  adbServerResetRecoveryReservations: Map<string, AdbServerResetRecoveryReservation>;
+  recoveryCoordinator: DeviceRecoveryCoordinator;
+  afterAndroidStartupRecoverySnapshot?: () => void;
+  startAndroidRecoveryRecord(
+    sessionId: string,
+    details: Omit<
+      Partial<AndroidRecoveryRecord>,
+      "sessionId" | "generation" | "state" | "reservations"
+    >,
+    reservations: readonly AndroidRecoveryReservationKind[],
+    replace?: boolean,
+  ): AndroidRecoveryRecord;
+  completeEmulatorLossRecovery(
+    incidentId: string | undefined,
+    outcome: "recovered" | "exhausted" | "not-attempted",
+    releasedSessionState?: "awaiting-device",
+  ): Promise<void>;
+  joinSessionPreservingRecovery(
+    recovery: SessionPreservingRecovery,
+    incidentId: string | undefined,
+  ): Promise<SessionPreservingRecoveryResult>;
   captureReleasedDevice(sessionId: string, deviceId: string): void;
   runCoordinatedDeviceStart(device: DeviceInfo, deadlineMs: number, op: "start"): Promise<unknown>;
 }

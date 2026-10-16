@@ -3506,6 +3506,12 @@
           "type": "object:dev.jasonpearson.automobile.protocol.SavedPrototypePinInfo",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "cleared",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -6681,6 +6687,12 @@
         "type": "json",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "storage",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStorageBlock",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeSpecTheme": [
@@ -7046,6 +7058,66 @@
         "name": "stacks",
         "type": "map",
         "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "storage",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStorageReport",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeStorageBlock": [
+      {
+        "name": "version",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "keys",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeStorageKeyBytes": [
+      {
+        "name": "key",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "bytes",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeStorageReport": [
+      {
+        "name": "version",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "keys",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "totalBytes",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "skippedKeys",
+        "type": "list",
+        "nullable": true,
         "hasDefault": true
       }
     ],

@@ -124,6 +124,11 @@ class PrototypeRuntime(
   previousStacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
   /** Where a refused data write is explained; a seam so JVM tests need no `android.util.Log`. */
   private val warn: (String) -> Unit = { Log.w("PrototypeRuntime", it) },
+  /**
+   * Keeps the spec's `storage` keys across shows (#12522). The [spec] passed in already carries the
+   * restored values, so restoring is neither a write nor an event.
+   */
+  internal val storage: PrototypeStorageSession? = null,
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
@@ -270,6 +275,7 @@ class PrototypeRuntime(
         stateRevisions = before.stateRevisions + changed.associateWith { revision },
       )
     // The commit is authoritative even if an ancillary event sink fails. Cancellation propagates.
+    storage?.record(current.spec)
     try {
       emitStateChange(changed.filter { it in current.state })
     } catch (error: CancellationException) {
@@ -292,7 +298,14 @@ class PrototypeRuntime(
       handleInteraction(interaction)
     } finally {
       interactionRevision = null
+      // Every device write ends an interaction here, so one diff covers state, data and checks.
+      if (current.active) storage?.record(current.spec)
     }
+  }
+
+  /** Writes any stored value not yet on disk: the dismissal and replacement path. */
+  suspend fun flushStorage() {
+    storage?.flush()
   }
 
   private var interactionRevision: Long? = null
@@ -649,6 +662,8 @@ class PrototypeRuntime(
   /** Teardown is terminal even if the platform removal or event delivery fails. */
   internal suspend fun finishDismissal(reason: PrototypeDismissReason) {
     if (!current.active) return
+    storage?.record(current.spec)
+    storage?.flush()
     close()
     emit(
       kind = PrototypeEventKind.DISMISSED,

@@ -1101,6 +1101,51 @@ device runtimes follow, as `applyPrototypeDataWrite` is for data actions.
 above, report `storage` in the inspect entry, handle `clear_prototype_storage` (a `ClearPrototypeStorage`
 serializer with `requestId` and `id`; replies carry `cleared`), and clear storage on `delete_saved_prototype`.
 
+**Android CtrlProxy (#12525).** CtrlProxy advertises `prototype_storage_v1` and implements the rules
+above in `PrototypeStorageRestorer` (`android/protocol`, the pure twin of `restorePrototypeStorage`),
+`PrototypeStoragePersistence` / `PrototypeStorageSession` and a `PrototypeStorageStore`
+(`android/control-proxy/.../prototype`).
+
+- **Store.** `PrototypeStorageDirectoryStore` keeps one document per id at
+  `filesDir/prototype-storage/<slug>-<hash16>.json` (the slug prefix is the one saved prototypes use,
+  followed by 16 hex characters of the id's SHA-256): `{"id", "version", "values": {"state:dark": true,
+  "data:/cart": {...}}}`. A save writes `<name>.tmp`, syncs and renames it over the target, so a reader
+  sees the old or the new document. An unparsable document, a wrong shape or another id's document is
+  `Corrupt`: the show uses the spec's values, logs a warning and deletes it.
+- **Show.** The restore runs before the runtime is built, so the first draw already shows the stored
+  values; the runtime starts at the spec's revision and no `change` event is sent. Dropped entries
+  (version, unlisted, no longer fits) are deleted at once. The restored spec must still pass the same
+  validation as a shown one (a stored text that breaks a field's `maxLength` would not), otherwise
+  every stored value is dropped. A same-id show first flushes the shown prototype's pending write, so
+  it restores what the user last did.
+- **Write-back.** After each interaction and each patch, the session compares the listed keys with
+  what it last saw and stores those that changed: a state write, a device data action or a host
+  patch. Only changed keys are stored, so an untouched key keeps following the spec's value. The first
+  change of a burst arms one write `PROTOTYPE_STORAGE_DEBOUNCE_MILLIS` (500 ms) later and changes
+  inside the window ride along; dismissal (any reason, including teardown), replacement and the saved
+  activity's `onStop` flush at once. A write that fails is logged and retried at the next flush.
+  `request` responses (#12523) are covered when they land, because they write through the same state
+  and data paths.
+- **Limit.** Per id the stored entries (key bytes plus compact JSON) are summed against
+  `MAX_PROTOTYPE_STORAGE_BYTES`. A write that would pass it applies live, is not stored, keeps the
+  key's previous stored value and lists the key in `skippedKeys` until a later write fits.
+- **Removed pointers.** A listed `data:` pointer that a data action removes loses its stored value
+  (JSON `null` is not stored), so the spec's value returns on the next show.
+- **Surfaces.** The overlay (`PrototypeController`), `persistence: "device"` prototypes (same
+  controller) and `SavedPrototypeActivity` (its own persistence over the same store) all use it.
+  A service prototype and the saved activity of the same id share one file; the last write wins.
+- **Host actions.** `clear_prototype_storage` is answered by one `prototype_result` with `cleared`.
+  It clears the shown session (and its pending write) or, for an id nobody shows, the document. The
+  prototype on screen keeps its live values. `delete_saved_prototype` clears the id's storage after
+  deleting the saved copy. Each `inspect_prototypes` entry carries `storage` when its spec declares
+  `storage`: `keys` holds only the keys that currently hold a stored value.
+- **Reinstall (not done; follow-up).** Stored values live in `filesDir`, so they survive a dismiss,
+  a process restart and a saved prototype's launch but not an uninstall, a data clear or the
+  reinstall fallback. The #12268 host mirror (`savedPrototypeMirror.ts`) records a saved prototype
+  from what the host sent at `save`; the stored values exist only on the device, so mirroring them
+  needs a device-to-host export of a prototype's storage (a new wire message and a
+  `restoreSavedPrototypes` step that re-seeds it). That host work is not built here.
+
 ### Conditions
 
 A condition is exactly one of these forms. `visibleWhen` takes any of them;

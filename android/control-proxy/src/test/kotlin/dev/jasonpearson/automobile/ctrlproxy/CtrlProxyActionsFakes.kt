@@ -184,6 +184,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) {}
 
+  override suspend fun clearPrototypeStorage(requestId: String?, id: String) {}
+
   override suspend fun removePrototypeAsset(requestId: String?, id: String) {}
 
   override suspend fun listPreferenceFiles(requestId: String?, packageName: String) {}
@@ -497,6 +499,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) =
     record("deleteSavedPrototype", requestId, id)
+
+  override suspend fun clearPrototypeStorage(requestId: String?, id: String) =
+    record("clearPrototypeStorage", requestId, id)
 
   override suspend fun removePrototypeAsset(requestId: String?, id: String) =
     record("removePrototypeAsset", requestId, id)

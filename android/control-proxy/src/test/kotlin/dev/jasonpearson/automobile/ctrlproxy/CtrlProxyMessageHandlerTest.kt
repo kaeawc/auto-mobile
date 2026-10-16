@@ -1963,6 +1963,9 @@ class CtrlProxyMessageHandlerTest {
     dispatch("""{"type":"delete_saved_prototype","requestId":"delete","id":"panel"}""")
     assertEquals("deleteSavedPrototype", lastCall.first)
     assertEquals(listOf("delete", "panel"), lastCall.second)
+    dispatch("""{"type":"clear_prototype_storage","requestId":"clear","id":"panel"}""")
+    assertEquals("clearPrototypeStorage", lastCall.first)
+    assertEquals(listOf("clear", "panel"), lastCall.second)
   }
 
   @Test

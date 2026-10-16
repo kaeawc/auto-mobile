@@ -1418,6 +1418,8 @@ data class PrototypeSpec(
   /** `none` opts out of prototype animation; absent or `standard` follows the system scale. */
   val motion: String? = null,
   val data: JsonObject? = null,
+  /** The state keys and `/data` pointers the device keeps across shows (#12522). */
+  val storage: PrototypeStorageBlock? = null,
 )
 
 @Serializable

@@ -144,6 +144,7 @@ class WebSocketServer(
         "list_saved_prototypes",
         "delete_saved_prototype",
         "pin_saved_prototype",
+        "clear_prototype_storage",
       ) + prototypeAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */
@@ -404,6 +405,9 @@ class WebSocketServer(
     add("prototype_persistence_replay_v1")
     // Gates save_prototype, list_saved_prototypes and delete_saved_prototype.
     add("prototype_saved_v1")
+    // A spec's storage block is kept across shows, inspect reports the stored keys and
+    // clear_prototype_storage wipes them (#12522). Hosts refuse storage without this flag.
+    add("prototype_storage_v1")
     // show_prototype replaces a same-id prototype in place (display and pager pages kept) unless
     // reset
     // is set. Older APKs ignore reset and re-show fresh; hosts warn that pages restarted (#10642).

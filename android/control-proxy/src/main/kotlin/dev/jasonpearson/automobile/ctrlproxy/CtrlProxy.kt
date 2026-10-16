@@ -86,6 +86,8 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStores
@@ -94,6 +96,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.imeLiftPx
 import dev.jasonpearson.automobile.ctrlproxy.prototype.isPrototypeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundFromWindows
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.AnrData
@@ -1275,6 +1278,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
 
+      override suspend fun sendCleared(requestId: String?, cleared: Int) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "prototype_result") {
+            webSocketServer.broadcastWithPerf { _ -> prototypeClearedFrame(requestId, cleared) }
+          }
+        }
+      }
+
       override suspend fun sendPrototypeStatus(
         requestId: String?,
         prototypes: List<PrototypeStatusEntry>,
@@ -1315,6 +1326,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val prototypeFonts by lazy {
     PrototypeFontCache(prototypeAssets, ComposePrototypeFontLoader())
   }
+  // Values a spec's storage block keeps across shows (#12522); writes are coalesced on the service
+  // scope and hit the disk on IO.
+  private val prototypeStorage by lazy {
+    PrototypeStoragePersistence(
+      PrototypeStorageStores.inDirectory(prototypeStorageRoot(filesDir)),
+      CoroutinePrototypeScheduler(serviceScope),
+    )
+  }
   private val savedPrototypeController by lazy {
     SavedPrototypeController(
       SavedPrototypeStores.inDirectory(File(filesDir, "saved-prototypes")),
@@ -1322,6 +1341,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       AndroidSavedPrototypeShortcuts(this),
       prototypeResultSink,
       pinner = PinnedPrototypeShortcuts(AndroidPinnedShortcutPlatform(this)),
+      // Deleting a saved prototype also removes the values its storage block kept.
+      clearStorage = { id ->
+        if (::prototypeController.isInitialized) prototypeController.clearStoredValues(id)
+        else prototypeStorage.clear(id)
+      },
     )
   }
   private val prototypeAssetController by lazy {
@@ -2063,6 +2087,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   }
                 }
               },
+            storage = prototypeStorage,
             windowOnScreen =
               PrototypeWindowOnScreen { displayId ->
                 try {
@@ -3393,6 +3418,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) {
     launchRequestScope(requestId) { savedPrototypeController.delete(requestId, id) }
+  }
+
+  override suspend fun clearPrototypeStorage(requestId: String?, id: String) {
+    launchRequestScope(requestId) { prototypeController.clearStorage(requestId, id) }
   }
 
   override suspend fun patchPrototype(

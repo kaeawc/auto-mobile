@@ -539,6 +539,16 @@ data class DeleteSavedPrototype(override val requestId: String? = null, val id: 
   WebSocketRequest()
 
 /**
+ * Wipes every stored value the device keeps for prototype [id] (`prototype_storage_v1`). Answered
+ * by one `prototype_result` whose `cleared` counts the stored keys removed; an id with nothing
+ * stored succeeds with 0. The prototype on screen is not changed.
+ */
+@Serializable
+@SerialName("clear_prototype_storage")
+data class ClearPrototypeStorage(override val requestId: String? = null, val id: String) :
+  WebSocketRequest()
+
+/**
  * Uploads one prototype image asset, replacing any asset with the same [id]. [dataBase64] is the
  * encoded image (PNG, JPEG or WebP) in standard base64 without line breaks. Answered by one
  * `prototype_result`. [toString] never renders the payload, so a stray log line cannot dump bytes.

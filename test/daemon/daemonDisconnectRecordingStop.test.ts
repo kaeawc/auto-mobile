@@ -18,7 +18,7 @@ function disconnectRecordingStopHarness(timer: FakeTimer): DisconnectRecordingSt
   return Object.assign(daemon, {
     timer,
     stoppingRecordings: new Set<string>(),
-  }) as unknown as DisconnectRecordingStopSurface;
+  }) as DisconnectRecordingStopSurface;
 }
 
 describe("recording stop after a device disconnect (#10217)", () => {

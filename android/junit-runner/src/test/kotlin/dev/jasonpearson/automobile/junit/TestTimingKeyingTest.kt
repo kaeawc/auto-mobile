@@ -21,6 +21,7 @@ import org.junit.Test
  * is keyed by fully qualified class name (issue #10091).
  */
 class TestTimingKeyingTest {
+  private val store = TestTimingStore(ciMode = { false })
   private lateinit var daemon: TimingFakeDaemonClient
 
   @Before
@@ -31,9 +32,8 @@ class TestTimingKeyingTest {
     DaemonHeartbeat.testController = TimingFakeHeartbeat()
     AutoMobilePlanExecutor.testAgent =
       AutoMobileAgent(recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = false))
-    TestTimingCache.testCiModeOverride = false
     SystemPropertyCache.clear()
-    TestTimingCache.clear()
+    store.clear()
   }
 
   @After
@@ -42,10 +42,9 @@ class TestTimingKeyingTest {
     AutoMobileSharedUtils.testDeviceChecker = null
     DaemonHeartbeat.testController = null
     AutoMobilePlanExecutor.testAgent = null
-    TestTimingCache.testCiModeOverride = null
     System.clearProperty("automobile.junit.timing.ordering")
     SystemPropertyCache.clear()
-    TestTimingCache.clear()
+    store.clear()
   }
 
   @Test
@@ -53,7 +52,7 @@ class TestTimingKeyingTest {
     daemon.sessionUuid = "fresh-jvm-session"
     daemon.timings = listOf(timing("com.app.login.SmokeTest", "opensHome", 500))
 
-    assertTrue(TestTimingCache.hasTimings())
+    assertTrue(store.hasTimings())
 
     val uri = daemon.readUris.single()
     assertTrue(uri, uri.startsWith("automobile:test-timings?"))
@@ -72,18 +71,18 @@ class TestTimingKeyingTest {
       )
 
     val qualified =
-      TestTimingCache.getTiming(
+      store.getTiming(
         "com.app.login.SmokeTest",
         "opensHome",
         legacySimpleName = "SmokeTest",
       )
     val legacy =
-      TestTimingCache.getTiming(
+      store.getTiming(
         "com.app.login.SmokeTest",
         "legacyOnly",
         legacySimpleName = "SmokeTest",
       )
-    val noFallback = TestTimingCache.getTiming("com.app.login.SmokeTest", "legacyOnly")
+    val noFallback = store.getTiming("com.app.login.SmokeTest", "legacyOnly")
 
     assertEquals(500, qualified?.averageDurationMs)
     assertEquals(700, legacy?.averageDurationMs)
@@ -100,7 +99,9 @@ class TestTimingKeyingTest {
       )
 
     val order =
-      AutoMobileRunner(RunnerTestTarget::class.java).description.children.map { it.methodName }
+      AutoMobileRunner(RunnerTestTarget::class.java, store).description.children.map {
+        it.methodName
+      }
 
     assertEquals(listOf("testSetAlarm", "testLaunchClockApp"), order)
   }
@@ -115,7 +116,9 @@ class TestTimingKeyingTest {
       )
 
     val order =
-      AutoMobileRunner(RunnerTestTarget::class.java).description.children.map { it.methodName }
+      AutoMobileRunner(RunnerTestTarget::class.java, store).description.children.map {
+        it.methodName
+      }
 
     assertEquals(listOf("testSetAlarm", "testLaunchClockApp"), order)
   }

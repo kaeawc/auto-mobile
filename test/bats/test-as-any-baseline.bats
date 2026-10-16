@@ -66,3 +66,38 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"no new assertions (1 gated assertion(s)"* ]]
 }
+
+@test "double-cast ratchet counts as unknown as, including parenthesized and multiline forms" {
+  printf 'const a = (value as unknown) as T;\nconst b = other as unknown as\n  U;\nconst c = x as unknown;\nconst s = "as unknown as T"; // y as unknown as T\n' > "$TEST_AS_ANY_ROOT/a.test.ts"
+  run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"(2 gated double cast(s))"* ]]
+  grep -q "^2[[:space:]].*a.test.ts" "${TEST_AS_ANY_BASELINE%.txt}.unknown.txt"
+}
+
+@test "double-cast check fails when a file grows or a new file appears" {
+  bash "$SCRIPT" --update
+  printf 'const a = value as unknown as T;\n' > "$TEST_AS_ANY_ROOT/a.test.ts"
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in"*"a.test.ts"* ]]
+  bash "$SCRIPT" --update --allow-grow
+  printf 'const a = value as unknown as T;\nconst b = value as unknown as T;\n' > "$TEST_AS_ANY_ROOT/a.test.ts"
+  printf 'const c = v as unknown as T;\n' > "$TEST_AS_ANY_ROOT/new.test.ts"
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"new.test.ts"* ]]
+}
+
+@test "double-cast update shrinks and refuses growth without --allow-grow" {
+  printf 'const a = v as unknown as T; const b = v as unknown as T;\n' > "$TEST_AS_ANY_ROOT/a.test.ts"
+  bash "$SCRIPT" --update --allow-grow
+  printf 'const a = v as unknown as T;\n' > "$TEST_AS_ANY_ROOT/a.test.ts"
+  run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+  grep -q "^1[[:space:]].*a.test.ts" "${TEST_AS_ANY_BASELINE%.txt}.unknown.txt"
+  printf 'const a = v as unknown as T; const b = v as unknown as T;\n' > "$TEST_AS_ANY_ROOT/a.test.ts"
+  run bash "$SCRIPT" --update
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refusing to grow"* ]]
+}

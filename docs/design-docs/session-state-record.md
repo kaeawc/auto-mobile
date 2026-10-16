@@ -33,20 +33,20 @@ the assignment, creation, release-before-publish and rebind groups now live in `
 Line numbers below are historical for the remaining manager fields. `U` = keyed by UUID,
 `S` = keyed by `Session` object identity (a `WeakMap`/`WeakSet`).
 
-| Concern                | Field (line)                                                                                                            | Key         |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------- |
-| Published              | `sessions` (1614)                                                                                                       | U           |
-| Device index           | `sessionDeviceMap` (1615), `deviceSessionMap` (1616)                                                                    | U / device  |
-| Assignment             | `pendingSessionAssignments`, `sharedSessionAssignments` (now `SessionSlots`)                                            | U           |
-| Creation               | `pendingSessionCreations`, `pendingPersistedRecoveries`, `claimedRecoverableRows` (now `SessionSlots`)                  | U / S       |
-| Rebind                 | `pendingSessionRebinds`, `deferredRebindCleanups` (now `SessionSlots`)                                                  | U           |
-| Release before publish | `pendingSessionReleases` (now `SessionSlots`)                                                                           | U           |
-| Release in flight      | `releasePromises` (1651), `activeReleasePromises` (1653), `releasingSessions` (1740) (now SessionSlots)                 | U / set / S |
-| Terminal fence         | `terminalReleaseSnapshots` (1856), `terminalReleaseReasonStates` (1733), `terminalReleaseReservations` (1735)           | U           |
-| Finalized identity     | `finalizedSessionReleases` (1688), `latestFinalizedSessionIdentities` (1723), `finalizedSessionIdentityRegistry` (1724) | S / U       |
-| Forced release         | `forcedNonTerminalReleases` (1694) (now SessionSlots)                                                                   | S           |
-| Journal recovery       | `recoveredTerminalReleaseIntents` (1679), `adoptedDeadDaemonJournals` (1681), `adoptedTerminalReleaseOwners` (1686)     | U / daemon  |
-| Row facet (see 1.3)    | 17 fields, 1660-1665, 1703-1721, 1822-1843, 1857                                                                        | U / S       |
+| Concern                | Field (line)                                                                                                                                                         | Key         |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| Published              | `sessions` (1614)                                                                                                                                                    | U           |
+| Device index           | `sessionDeviceMap` (1615), `deviceSessionMap` (1616)                                                                                                                 | U / device  |
+| Assignment             | `pendingSessionAssignments`, `sharedSessionAssignments` (now `SessionSlots`)                                                                                         | U           |
+| Creation               | `pendingSessionCreations`, `pendingPersistedRecoveries`, `claimedRecoverableRows` (now `SessionSlots`)                                                               | U / S       |
+| Rebind                 | `pendingSessionRebinds`, `deferredRebindCleanups` (now `SessionSlots`)                                                                                               | U           |
+| Release before publish | `pendingSessionReleases` (now `SessionSlots`)                                                                                                                        | U           |
+| Release in flight      | `releasePromises` (1651), `activeReleasePromises` (1653), `releasingSessions` (1740) (now SessionSlots)                                                              | U / set / S |
+| Terminal fence         | `terminalReleaseSnapshots` (1856), `terminalReleaseReasonStates` (1733), `terminalReleaseReservations` (1735) (now SessionSlots)                                     | U           |
+| Finalized identity     | `finalizedSessionReleases` (1688), `latestFinalizedSessionIdentities` (1723), `finalizedSessionIdentityRegistry` (1724) (identity map and registry now SessionSlots) | S / U       |
+| Forced release         | `forcedNonTerminalReleases` (1694) (now SessionSlots)                                                                                                                | S           |
+| Journal recovery       | `recoveredTerminalReleaseIntents` (1679), `adoptedDeadDaemonJournals` (1681), `adoptedTerminalReleaseOwners` (1686) (now SessionSlots)                               | U / daemon  |
+| Row facet (see 1.3)    | 17 fields, 1660-1665, 1703-1721, 1822-1843, 1857                                                                                                                     | U / S       |
 
 Flags on records carry more lifecycle: `forced`, `commitFenced`, `commitDeclined`, `stage`
 (`SessionReleaseOperation`, 990-1026) and `terminalPersisted`, `lateTerminalRelease`,
@@ -379,7 +379,8 @@ Predicate mappings (including the design-visible S2 shadow resolutions):
   `absent`, `ended` and `fenced` during the shadow migration.
 - `getHeldDeviceSessions()`: the device index joined with the slot's `session`.
 
-`waitOutRecreationOf` / `waitOutReleaseOf` / `waitOutRebindOf` become `await slot.settled`.
+S7 provides resolve-only `SessionSlots.settled(uuid, view)` notifications but keeps all three
+`waitOut*Of` implementations: the characterization tests below show that switching changes timing.
 
 ### S2 agreement findings
 
@@ -389,7 +390,11 @@ behaviour. `getLegacyLifecycleView()` borrows the nine real maps through read-on
 hooks observe creation/assignment start and end, publication, rebind start/end, release start/end,
 and unpublication (shared by ordinary and forced release). Production defaults to `log`:
 disagreements use `logger.debug`; exceptions from derivation/predicates are caught and warned.
-Tests set `throw`; `off` performs no reads. No probe result controls a lifecycle operation.
+Tests set `throw`; `off` skips diagnostics (settled notifications still run). In S7 production
+uses this wiring only for transition checking. The agreement harness injects a frozen test-local
+copy of the old predicates, checking real manager wrappers at every hook and microtask checkpoint;
+production no longer compares derivation against its own tag-read wrappers. No diagnostic result
+controls a lifecycle decision in production.
 
 1. **Published releases are still being recreated.** `releasing` joins the recreation tag set.
    The WeakSet add precedes release-op installation, so that window also derives `releasing`.
@@ -414,8 +419,8 @@ Tests set `throw`; `off` performs no reads. No probe result controls a lifecycle
    WeakSet cleanup on a published incarnation. A non-terminal `releasing` tag can therefore be
    current and admitted after that cleanup; a terminal-fenced published session remains blocked
    even without WeakSet membership. The exact S2 mapping is current-by-tag/fence, then
-   `!view.isReleasing(publishedSession)` for admission. S5/S7 must preserve those windows before
-   collapsing admission to tags. Superseded/stale ops never replace a newer published identity.
+   `!view.isReleasing(publishedSession)` for admission. S7 preserves these windows rather than
+   collapsing admission to tags alone. Superseded/stale ops never replace a newer published identity.
 5. **Known and latest identity have separate precedence.** An unpublished release op remains
    known even when its tag is `ended`/`fenced` (the same residue flag). Latest identity chooses
    published, then rejects pending creation/assignment, then release-op identity, then the weak
@@ -423,13 +428,50 @@ Tests set `throw`; `off` performs no reads. No probe result controls a lifecycle
    incarnations. `getHeldDeviceSessions` is outside S2: it joins the separate device index and is
    not a UUID-only predicate.
 
-The production known-id check is the constant-time six-map membership equivalent of
-`getAllKnownSessionIds()`, not an allocation of its complete union per hook. The agreement test
-additionally checks membership against the real public union after operations and individual
-microtask yields. Its 29 seeds (including a pinned corpus), 36 random steps per seed and three
+Per-UUID known-id derivation stays constant-time. S7 deletes the production S2 six-map reference
+helper; the test-local oracle checks the real public union's order and membership after operations
+and individual microtask yields. Its 29 seeds (including a pinned corpus), 36 random steps per seed and three
 forced reincarnations run in `beforeAll`; the timed per-seed tests only assert results. It also
 performs a shutdown drain and rehydrates a guaranteed recoverable row with the shared in-memory
 persistence and journal filesystem. It uses no devices or SQLite.
+
+### S7 guard findings
+
+The tag guard observes the ten existing hooks synchronously; unchanged positions are no-ops.
+The unchanged S2 corpus and the 428-file baseline exposed these table gaps. No lifecycle behavior
+or transition table was changed. These four coarse observations follow paths already allowed by
+§3.1 (the intermediate tag is not observed by the hook), so the guard logs them at debug and counts them:
+
+| Hook           | Observed pair         | Legal path / evidence                                                                                             |
+| -------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| published      | absent -> live        | absent -> creating -> live; already-published shadow-probe fixture (not a runtime failure)                        |
+| assignment-end | assigning -> fenced   | assigning -> absent -> fenced; refused acquisition / admission fencing (`sessionManager.test.ts`)                 |
+| creation-end   | creating -> fenced    | creating -> absent -> fenced; cancelled client-chosen creation (`sessionManager.cancelledClientChosenId.test.ts`) |
+| unpublished    | releasing -> creating | releasing -> ended -> creating; covering creation resurfaces (`sessionSlots.agreement.test.ts`)                   |
+
+The following pairs are not allowed by §3.1. Each remains **debug+count even in test throw mode**,
+scoped to exactly the hook listed; other illegal pairs throw under test. These are reported
+findings, not new legal transitions:
+
+| Hook             | Observed pair          | Existing behavior / evidence                                                                                                          |
+| ---------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| assignment-start | ended -> assigning     | Revival first assigns a device (`sessionSlots.agreement.test.ts`, three forced reincarnations).                                       |
+| assignment-end   | assigning -> ended     | Failed assignment reveals an older finalized identity (`sessionSlots.agreement.test.ts`).                                             |
+| creation-end     | creating -> assigning  | Creation clears before the covering assignment's finally (`sessionSlots.agreement.test.ts`).                                          |
+| creation-end     | creating -> ended      | Failed creation reveals an older finalized identity (`sessionSlots.agreement.test.ts`).                                               |
+| unpublished      | releasing -> assigning | Removing the published incarnation reveals a covering assignment (`sessionSlots.agreement.test.ts`).                                  |
+| release-end      | ended -> fenced        | Terminal upgrade of an already finalized non-terminal release (`sessionManager.test.ts`, `deviceRestartRecoveryReservation.test.ts`). |
+| release-end      | ended -> live          | `daemonShutdownSessionRelease.test.ts` directly injects a replacement into `sessions`, bypassing publication; test-only observation.  |
+
+`sessionManager.waitOutSettled.test.ts` pins native microtask turns using FakeTimer and both
+controlled issuer continuations and real gated manager operations. All six cases passed before
+trying settled. With settled, controlled release resumed/wrote at turn 3 instead of 5, and rebind
+at turn 3 instead of 2 (clearing remains turn 1). In real operations release resumed/wrote at turn
+5 instead of 13 (facet clearing 10, issuer completion 12); rebind at turn 24 instead of 23
+(clearing 22). Recreation normally publishes at 14, resumes/writes at 18, clears at 21 and finishes
+at 22; settled wakes on publication, sees the creation still present, then cannot observe another
+tag change when that facet clears. It does not finish. All three original waits therefore remain,
+including recreation's microtask yield. The rebind-during-release re-dispatch is unchanged.
 
 ## 5. Where `SessionRowWriter` sits
 
@@ -501,13 +543,20 @@ New code goes in proposed modules (SessionSlots and SessionRowWriter) so
 | S4  | Rebind group (`pendingSessionRebinds`, `deferredRebindCleanups`).                                                                                                                                                                                                                                                                                                                                                    | S                      | `sessionManager.rebindTtlRestoreShield`, rebind tests; S2.                                                                                                                                           |
 | S5  | Release group: `releasePromises`, `activeReleasePromises`, `releasingSessions`, `forcedNonTerminalReleases` collapse into `releasing.op` and `retiring`. Highest risk: every await in `releaseSessionInternal` re-reads these.                                                                                                                                                                                       | L                      | `releasePersistDeadline`, `releaseTeardownShield`, `releaseDeviceHold`, `abandonRestoreSingleBaseline`; S2 extended with forced and stuck releases; a new test for the single "releasing" invariant. |
 | S6  | Fence and identity group: `terminalReleaseSnapshots`, `terminalReleaseReasonStates`, `terminalReleaseReservations`, `latestFinalizedSessionIdentities`, recovered and adopted intents. `finalizedSessionReleases` stays a side table.                                                                                                                                                                                | L                      | `releasePersistDeadline` journal cases, `devicePool.recoveryShutdown`, terminal-reservation tests; GC test through a fake `FinalizationRegistry` seam.                                               |
-| S7  | Predicates become tag reads; the six hand predicates are deleted; `waitOut*Of` use `slot.settled`. An illegal transition throws under test and logs a warning plus a counter in production, so this PR stays behaviour-preserving. The rebind-during-release re-dispatch (§3.1) is split into its own PR if it changes behaviour.                                                                                    | M                      | S2, plus the unit tests of each predicate's call sites and one test per removed microtask-yield workaround.                                                                                          |
+| S7  | Predicates become tag reads; the six hand predicates are deleted; `settled` notifications land but all three `waitOut*Of` stay unchanged after characterization (§4). An illegal transition throws under test and logs a warning plus a counter in production, so this PR stays behaviour-preserving. The rebind-during-release re-dispatch (§3.1) is split into its own PR if it changes behaviour.                 | M                      | S2, plus the unit tests of each predicate's call sites and one test per removed microtask-yield workaround.                                                                                          |
 | S8  | Its own issue, not part of closing #11798. Split `getSessionInternal` into pure `find` and explicit `expireIfDue`; migrate the 31 in-class readers (`getClock`, `getRotation`, `getNetworkCondition`...) to `find`. `expireIfDue` stays at every site where expiry is observable (routing, admission), so lazy expiry does not silently disappear for the 84 external callers; those migrate directory by directory. | M, then several S      | A lint-guarded test that `find` never schedules a release; the expiry tests move to `expireIfDue`.                                                                                                   |
 | S9  | Hand-off: slot code no longer reads row-facet fields; `rowPending` is the only row signal (stubbed `() => false` until W2). Closes #11798.                                                                                                                                                                                                                                                                           | S                      | Existing row-invariant suites unchanged.                                                                                                                                                             |
 
 S3 landed with `SessionSlots` owning the assignment and creation group as per-facet maps.
 S4 landed with SessionSlots owning the rebind group (pendingSessionRebinds, deferredRebindCleanups).
 S5 landed with SessionSlots owning the release group (releasePromises, activeReleasePromises, releasingSessions, forcedNonTerminalReleases) as per-facet containers.
+
+S6 landed with SessionSlots owning the fence and identity group (terminalReleaseSnapshots, terminalReleaseReasonStates, terminalReleaseReservations, latestFinalizedSessionIdentities, recoveredTerminalReleaseIntents, adoptedTerminalReleaseOwners, adoptedDeadDaemonJournals); finalizedSessionReleases stays a side table.
+
+S7 landed: the six hand predicates are tag reads over SessionSlots; none of the waitOut*Of moved
+to settled, and all three stayed on their characterized implementations; illegal slot transitions
+throw under test and warn+count in production, with the reported §4 design gaps warning and
+counting in both modes. Ended guard bookkeeping is discarded with weak-identity finalization.
 
 S1 and S2 can run in parallel with W1. S3-S6 are independent of each other but touch the same file,
 so they merge serially. S8 can ship any time after S2 and is tracked separately.

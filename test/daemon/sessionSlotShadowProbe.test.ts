@@ -3,7 +3,13 @@ import {
   SessionSlotShadowProbe,
   type LegacySlotPredicates,
 } from "../../src/daemon/sessionSlotShadowProbe";
-import { deriveSlot, isSlotKnown, isSlotTagBeingRecreated } from "../../src/daemon/sessionSlots";
+import {
+  deriveSlot,
+  isSlotCurrentSession,
+  isSlotKnown,
+  isSlotTagBeingRecreated,
+  SlotTransitionError,
+} from "../../src/daemon/sessionSlots";
 import { FakeLegacyLifecycleView } from "../fakes/FakeLegacyLifecycleView";
 import { FakeLogger } from "../fakes/FakeLogger";
 
@@ -65,6 +71,43 @@ test("off does not read either view or predicates", () => {
   probe.mode = "off";
   probe.check("id", "ignored");
   expect(logger.messages).toEqual([]);
+});
+
+test.each(["log", "throw"] as const)(
+  "off discards all UUID positions before re-enabling %s, even without off-mode checks",
+  (mode) => {
+    const view = new FakeLegacyLifecycleView().startAssignment("a").startAssignment("b");
+    const logger = new FakeLogger();
+    const probe = new SessionSlotShadowProbe(() => view, undefined, logger);
+    probe.mode = mode;
+    probe.check("a", "assignment-start");
+    probe.check("b", "assignment-start");
+    probe.mode = "off";
+    view.pendingAssignments.clear();
+    view.publish("a").startRebind("a").publish("b");
+    probe.check("a", "rebind-start");
+    probe.mode = mode;
+    probe.check("a", "rebind-start");
+    probe.check("b", "published");
+    expect(probe.transitionGuard.illegalTransitionCount).toBe(0);
+    expect(logger.messages).toEqual([]);
+    view.startCreation("a").unpublish("a");
+    if (mode === "throw") {
+      expect(() => probe.check("a", "creation-start")).toThrow(SlotTransitionError);
+    } else {
+      probe.check("a", "creation-start");
+      expect(logger.at("warn")).toHaveLength(1);
+    }
+    expect(probe.transitionGuard.illegalTransitionCount).toBe(1);
+  },
+);
+
+test("current session rejects a stale identity before reading lifecycle facets", () => {
+  const view = new FakeLegacyLifecycleView().publish("id");
+  view.isReleasing = () => {
+    throw new Error("must short-circuit before deriving the slot");
+  };
+  expect(isSlotCurrentSession(view, "id", {})).toBe(false);
 });
 
 test("gap 1: releasing published incarnation is still being recreated", () => {

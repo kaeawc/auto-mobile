@@ -6,8 +6,7 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 
 const NAVIGATION_TOOLS = ["explore", "navigateTo", "getNavigationGraph"];
 
-const registered = (name: string): RegisteredTool =>
-  (ToolRegistry as unknown as { tools: Map<string, RegisteredTool> }).tools.get(name)!;
+const registered = (name: string): RegisteredTool => ToolRegistry.getRegisteredTool(name)!;
 
 describe("navigation tools listing (#4459)", () => {
   const originalDebug = isDebugModeEnabled();

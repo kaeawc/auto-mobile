@@ -13,6 +13,7 @@ import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../utils/
 import { type FileDownloader, DefaultFileDownloader } from "../../utils/FileDownloader";
 import { logger } from "../../utils/logger";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
+import { VerifiedArtifactCache } from "../../utils/VerifiedArtifactCache";
 import { ensureSecureTempDirSync, getTempDir } from "../../utils/tempDir";
 
 const CACHE_SUBDIR = "screen-capture-helper";
@@ -58,6 +59,7 @@ export class ScreenCaptureHelperProvider {
   private readonly cacheDir: string;
   private readonly usesDefaultCacheDir: boolean;
   private readonly timer: Timer;
+  private readonly cache: VerifiedArtifactCache;
   private readonly env: NodeJS.ProcessEnv;
   private readonly expectedChecksumOverride?: string;
   private readonly releaseUrlOverride?: string;
@@ -71,6 +73,11 @@ export class ScreenCaptureHelperProvider {
     this.cacheDir = deps.cacheDir ?? getTempDir(CACHE_SUBDIR);
     this.usesDefaultCacheDir = deps.cacheDir === undefined;
     this.timer = deps.timer ?? defaultTimer;
+    this.cache = new VerifiedArtifactCache({
+      downloader: this.downloader,
+      checksumCalculator: this.checksumCalculator,
+      timer: this.timer,
+    });
     this.env = deps.env ?? process.env;
     this.expectedChecksumOverride = deps.expectedChecksum;
     this.releaseUrlOverride = deps.releaseUrl;
@@ -125,43 +132,31 @@ export class ScreenCaptureHelperProvider {
   }
 
   private async tryCache(expected: string): Promise<string | null> {
-    let metadata: unknown;
-    try {
-      metadata = JSON.parse(await fs.readFile(this.metadataPath, "utf8"));
-    } catch (error) {
-      // Missing or stale cache entries are expected after upgrades; download repairs them.
-      logger.debug("[SCREEN_CAPTURE_HELPER] No usable cached helper metadata", {
-        error: errorMessage(error),
-      });
-      return null;
-    }
-    if (!isCacheMetadata(metadata)) {
-      // Stale metadata schemas are expected after upgrades; download rewrites them.
-      logger.debug("[SCREEN_CAPTURE_HELPER] No usable cached helper metadata", {
-        reason: "Expected an object with a string sha256 and numeric size",
-      });
-      return null;
-    }
-    if (metadata.sha256.toLowerCase() !== expected.toLowerCase()) {
-      return null;
-    }
+    const hit = await this.cache.isCached<Pick<ScreenCaptureHelperMetadata, "sha256" | "size">>({
+      label: "[SCREEN_CAPTURE_HELPER]",
+      subject: "helper",
+      expectedSha256: expected,
+      metadataPath: this.metadataPath,
+      parseMetadata: (value) => (isCacheMetadata(value) ? value : null),
+      verifyArtifact: (metadata) => this.isHelperExecutable(metadata.size),
+    });
+    return hit ? this.helperPath : null;
+  }
 
+  private async isHelperExecutable(size: number): Promise<boolean> {
     try {
       const stats = await fs.stat(this.helperPath);
-      if (
+      return !(
         !stats.isFile() ||
-        stats.size !== metadata.size ||
+        stats.size !== size ||
         (this.platform !== "win32" && (stats.mode & 0o111) === 0)
-      ) {
-        return null;
-      }
+      );
     } catch (error) {
       logger.debug("[SCREEN_CAPTURE_HELPER] No usable cached helper executable", {
         error: errorMessage(error),
       });
-      return null;
+      return false;
     }
-    return this.helperPath;
   }
 
   private async ensureSecureCacheDir(): Promise<string> {
@@ -176,62 +171,45 @@ export class ScreenCaptureHelperProvider {
     const dir = await this.ensureSecureCacheDir();
     const archivePath = path.join(dir, `${SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME}.download`);
     const extractedPath = path.join(dir, `${SCREEN_CAPTURE_HELPER_CACHE_FILENAME}.download`);
-    const controller = new AbortController();
-    const timeout = this.timer.setTimeout(() => controller.abort(), this.downloadTimeoutMs);
 
-    try {
-      await this.downloader.download(
-        this.releaseUrlOverride ?? resolveScreenCaptureHelperUrl(this.env),
-        archivePath,
-        controller.signal,
-      );
-      await fs.chmod(archivePath, SECURE_FILE_MODE);
-      const { checksum: actual } = await this.checksumCalculator.computeFileSha256(archivePath);
-      if (actual.toLowerCase() !== expected.toLowerCase()) {
-        throw new ActionableError(
-          `screen-capture-helper checksum verification failed. Expected: ${expected}, Got: ${actual}. ` +
+    await this.cache.fetch({
+      label: "[SCREEN_CAPTURE_HELPER]",
+      expectedSha256: expected,
+      url: this.releaseUrlOverride ?? resolveScreenCaptureHelperUrl(this.env),
+      archivePath,
+      metadataPath: this.metadataPath,
+      metadataMode: SECURE_FILE_MODE,
+      downloadTimeoutMs: this.downloadTimeoutMs,
+      afterDownload: (downloaded) => fs.chmod(downloaded, SECURE_FILE_MODE),
+      mismatchError: (want, actual) =>
+        new ActionableError(
+          `screen-capture-helper checksum verification failed. Expected: ${want}, Got: ${actual}. ` +
             "The downloaded release asset is corrupted or tampered.",
-        );
-      }
-
-      await fs.writeFile(extractedPath, extractHelper(archivePath), { mode: EXECUTABLE_MODE });
-      await fs.chmod(extractedPath, EXECUTABLE_MODE);
-      const { size } = await fs.stat(extractedPath);
-      await fs.rename(extractedPath, this.helperPath);
-      await fs.writeFile(
-        this.metadataPath,
-        JSON.stringify(
-          {
-            version: resolvePinnedVersion(this.env),
-            sha256: actual,
-            size,
-            downloadedAt: this.timer.now(),
-          } satisfies ScreenCaptureHelperMetadata,
-          null,
-          2,
         ),
-        { encoding: "utf8", mode: SECURE_FILE_MODE },
-      );
-      logger.info("[SCREEN_CAPTURE_HELPER] Downloaded and verified release helper", {
-        path: this.helperPath,
-        sha256: actual,
-      });
-      return this.helperPath;
-    } catch (error) {
-      await Promise.all([
-        fs.rm(archivePath, { force: true }),
-        fs.rm(extractedPath, { force: true }),
-      ]);
-      if (controller.signal.aborted) {
-        throw new ActionableError(
+      timeoutError: () =>
+        new ActionableError(
           `Timed out downloading screen-capture-helper after ${this.downloadTimeoutMs}ms. ` +
             "Check GitHub Release asset availability or set AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER for local development.",
-        );
-      }
-      throw error;
-    } finally {
-      this.timer.clearTimeout(timeout);
-    }
+        ),
+      publish: async (downloaded, sha256) => {
+        await fs.writeFile(extractedPath, extractHelper(downloaded), { mode: EXECUTABLE_MODE });
+        await fs.chmod(extractedPath, EXECUTABLE_MODE);
+        const { size } = await fs.stat(extractedPath);
+        await fs.rename(extractedPath, this.helperPath);
+        logger.info("[SCREEN_CAPTURE_HELPER] Downloaded and verified release helper", {
+          path: this.helperPath,
+          sha256,
+        });
+        return {
+          version: resolvePinnedVersion(this.env),
+          sha256,
+          size,
+          downloadedAt: this.timer.now(),
+        } satisfies ScreenCaptureHelperMetadata;
+      },
+      discard: () => fs.rm(extractedPath, { force: true }),
+    });
+    return this.helperPath;
   }
 }
 

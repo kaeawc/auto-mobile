@@ -24,6 +24,7 @@ import org.yaml.snakeyaml.Yaml
 import org.yaml.snakeyaml.constructor.SafeConstructor
 
 class AutoMobilePlanExecutorTest {
+  private var timings = PlanExecutorTimings()
   private val json = Json { ignoreUnknownKeys = true }
   private lateinit var fakeDaemonClient: FakeDaemonToolClient
   private lateinit var fakeDeviceChecker: FakeDeviceChecker
@@ -45,9 +46,6 @@ class AutoMobilePlanExecutorTest {
     AutoMobileSharedUtils.testDeviceChecker = null
     DaemonHeartbeat.testController = null
     AutoMobilePlanExecutor.testAgent = null
-    AutoMobilePlanExecutor.retryBackoffMs = 2000L
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { Thread.sleep(it) }
-    AutoMobilePlanExecutor.deviceOwnedWaitBudgetMs = 30_000L
   }
 
   private fun recoveryFixtureDir(): File {
@@ -91,7 +89,7 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `recovery corpus waits without retries and permanent health failures include reasons`() {
     val sleeps = mutableListOf<Long>()
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { sleeps.add(it) }
+    timings = timings.copy(deviceOwnedSleeper = { sleeps.add(it) })
     var hinted = false
     var unbounded = false
     var permanent = false
@@ -149,7 +147,7 @@ class AutoMobilePlanExecutorTest {
       )) {
       val wire = recoveryPayload(File(recoveryFixtureDir(), "$name.json"))
       val sleeps = mutableListOf<Long>()
-      AutoMobilePlanExecutor.deviceOwnedSleeper = { sleeps.add(it) }
+      timings = timings.copy(deviceOwnedSleeper = { sleeps.add(it) })
       fakeDaemonClient = FakeDaemonToolClient()
       DaemonSocketClientManager.testClient = fakeDaemonClient
       fakeDaemonClient.setResponse("executePlan", buildDaemonResponse(wire, true))
@@ -183,7 +181,7 @@ class AutoMobilePlanExecutorTest {
           JsonObject(wire + ("id" to JsonPrimitive("frame"))).toString(),
         )
       val sleeps = mutableListOf<Long>()
-      AutoMobilePlanExecutor.deviceOwnedSleeper = { sleeps.add(it) }
+      timings = timings.copy(deviceOwnedSleeper = { sleeps.add(it) })
       fakeDaemonClient = FakeDaemonToolClient()
       DaemonSocketClientManager.testClient = fakeDaemonClient
       fakeDaemonClient.queueExecutePlanResponse(frame)
@@ -218,7 +216,7 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `a device held by another session is waited for with backoff then succeeds`() {
     val waits = mutableListOf<Long>()
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    timings = timings.copy(deviceOwnedSleeper = { waits.add(it) })
     repeat(3) {
       fakeDaemonClient.queueExecutePlanResponse(
         buildDaemonResponse(deviceOwnedPayload(), isError = true),
@@ -236,7 +234,7 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `a device still finishing cleanup is waited on like a held device`() {
     val waits = mutableListOf<Long>()
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    timings = timings.copy(deviceOwnedSleeper = { waits.add(it) })
     repeat(2) {
       fakeDaemonClient.queueExecutePlanResponse(
         buildDaemonResponse(deviceCleanupPayload(), isError = true),
@@ -257,7 +255,7 @@ class AutoMobilePlanExecutorTest {
     // #11538: the daemon advertises its finalize cap (about 125 s) in retryAfterMs; a finalize that
     // takes 2 s must be noticed on the next poll, not after sleeping the whole cap.
     val waits = mutableListOf<Long>()
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    timings = timings.copy(deviceOwnedSleeper = { waits.add(it) })
     repeat(3) {
       fakeDaemonClient.queueExecutePlanResponse(
         buildDaemonResponse(finalizeRefusalPayload("device_cleanup_in_progress", 125_000), true),
@@ -275,7 +273,7 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `a finalize refusal that never clears is polled until the 150 s cap then given up`() {
     val waits = mutableListOf<Long>()
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    timings = timings.copy(deviceOwnedSleeper = { waits.add(it) })
     fakeDaemonClient.setResponse(
       "executePlan",
       buildDaemonResponse(finalizeRefusalPayload("device_cleanup_in_progress", 125_000), true),
@@ -366,7 +364,7 @@ class AutoMobilePlanExecutorTest {
 
   @Test
   fun `a failed frame is retried only when its typed retryable flag says so`() {
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    timings = timings.copy(retryBackoffMs = 0L)
     // code, retryable (null = the frame omits it), message, executePlan calls with maxRetries = 1
     val cases =
       listOf(
@@ -407,7 +405,7 @@ class AutoMobilePlanExecutorTest {
 
   @Test
   fun `a failed frame with no typed fields keeps the transient message retry`() {
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    timings = timings.copy(retryBackoffMs = 0L)
     fakeDaemonClient.setResponse(
       "executePlan",
       DaemonResponse("untyped", "mcp_response", false, error = "daemon request timeout"),
@@ -421,7 +419,7 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `a failed frame for a held device is waited out without spending a retry`() {
     val waits = mutableListOf<Long>()
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    timings = timings.copy(deviceOwnedSleeper = { waits.add(it) })
     fakeDaemonClient.queueExecutePlanResponse(
       DaemonResponse(
         id = "held",
@@ -442,7 +440,7 @@ class AutoMobilePlanExecutorTest {
 
   @Test
   fun `a retryable failed frame from the executePlan opt-in is retried`() {
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    timings = timings.copy(retryBackoffMs = 0L)
     fakeDaemonClient.queueToolSelectionResponse(
       DaemonResponse(
         id = "opt-in",
@@ -463,7 +461,7 @@ class AutoMobilePlanExecutorTest {
 
   @Test
   fun `a terminal failed frame from the executePlan opt-in is not retried`() {
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    timings = timings.copy(retryBackoffMs = 0L)
     fakeDaemonClient.queueToolSelectionResponse(
       DaemonResponse(
         id = "opt-in",
@@ -485,7 +483,7 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `a cleanup refusal with no retryAfterMs keeps the 30 s budget`() {
     val waits = mutableListOf<Long>()
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    timings = timings.copy(deviceOwnedSleeper = { waits.add(it) })
     fakeDaemonClient.setResponse(
       "executePlan",
       buildDaemonResponse(finalizeRefusalPayload("device_cleanup_in_progress", null), true),
@@ -500,8 +498,8 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `retryable capacity exhaustion waits within the budget honouring retryAfterMs`() {
     val waits = mutableListOf<Long>()
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
-    AutoMobilePlanExecutor.deviceOwnedWaitBudgetMs = 5_000L
+    timings = timings.copy(deviceOwnedSleeper = { waits.add(it) })
+    timings = timings.copy(deviceOwnedWaitBudgetMs = 5_000L)
     fakeDaemonClient.queueExecutePlanResponse(
       buildDaemonResponse(capacityPayload("capacity_exhausted", true, 3000), isError = true),
     )
@@ -520,7 +518,7 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `non retryable capacity exhaustion is not waited on and exhausted waits report the code`() {
     val waits = mutableListOf<Long>()
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    timings = timings.copy(deviceOwnedSleeper = { waits.add(it) })
     fakeDaemonClient.setResponse(
       "executePlan",
       buildDaemonResponse(capacityPayload("capacity_exhausted", false, null), isError = true),
@@ -528,7 +526,7 @@ class AutoMobilePlanExecutorTest {
     assertEquals(false, executePlan(AutoMobilePlanExecutionOptions(aiAssistance = false)).success)
     assertEquals(emptyList<Long>(), waits)
 
-    AutoMobilePlanExecutor.deviceOwnedWaitBudgetMs = 600L
+    timings = timings.copy(deviceOwnedWaitBudgetMs = 600L)
     fakeDaemonClient.setResponse(
       "executePlan",
       buildDaemonResponse(capacityPayload("capacity_exhausted", true, null), isError = true),
@@ -541,7 +539,7 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `a device another daemon claims is waited on like a held device`() {
     val waits = mutableListOf<Long>()
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    timings = timings.copy(deviceOwnedSleeper = { waits.add(it) })
     fakeDaemonClient.queueExecutePlanResponse(
       buildDaemonResponse(otherDaemonPayload(), isError = true),
     )
@@ -557,7 +555,7 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `a device that is shutting down is waited on like a held device`() {
     val waits = mutableListOf<Long>()
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    timings = timings.copy(deviceOwnedSleeper = { waits.add(it) })
     fakeDaemonClient.queueExecutePlanResponse(
       buildDaemonResponse(shuttingDownDevicePayload(), isError = true),
     )
@@ -573,8 +571,8 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `a held device that never frees fails with a clear error after the wait budget`() {
     val waits = mutableListOf<Long>()
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
-    AutoMobilePlanExecutor.deviceOwnedWaitBudgetMs = 3_000L
+    timings = timings.copy(deviceOwnedSleeper = { waits.add(it) })
+    timings = timings.copy(deviceOwnedWaitBudgetMs = 3_000L)
     fakeDaemonClient.setResponse(
       "executePlan",
       buildDaemonResponse(deviceOwnedPayload(), isError = true),
@@ -593,7 +591,7 @@ class AutoMobilePlanExecutorTest {
   @Test
   fun `only the typed code triggers the device held wait`() {
     val waits = mutableListOf<Long>()
-    AutoMobilePlanExecutor.deviceOwnedSleeper = { waits.add(it) }
+    timings = timings.copy(deviceOwnedSleeper = { waits.add(it) })
     fakeDaemonClient.setResponse(
       "executePlan",
       buildDaemonResponse(
@@ -676,7 +674,7 @@ class AutoMobilePlanExecutorTest {
       "executePlan",
       buildDaemonResponse(shutdownPayload(), isError = true),
     )
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    timings = timings.copy(retryBackoffMs = 0L)
 
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 2, aiAssistance = false))
 
@@ -691,7 +689,7 @@ class AutoMobilePlanExecutorTest {
       "executePlan",
       buildDaemonResponse(otherDaemonTerminalSessionPayload(), isError = true),
     )
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    timings = timings.copy(retryBackoffMs = 0L)
 
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
 
@@ -710,7 +708,7 @@ class AutoMobilePlanExecutorTest {
         isError = true,
       ),
     )
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    timings = timings.copy(retryBackoffMs = 0L)
 
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 2, aiAssistance = false))
 
@@ -724,7 +722,7 @@ class AutoMobilePlanExecutorTest {
       "executePlan",
       buildDaemonResponse(sessionOwnershipLostPayload(), isError = true),
     )
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    timings = timings.copy(retryBackoffMs = 0L)
 
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
 
@@ -738,7 +736,7 @@ class AutoMobilePlanExecutorTest {
       "executePlan",
       buildDaemonResponse(deviceLostPayload(), isError = true),
     )
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    timings = timings.copy(retryBackoffMs = 0L)
 
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 2, aiAssistance = false))
 
@@ -755,7 +753,7 @@ class AutoMobilePlanExecutorTest {
         isError = true,
       ),
     )
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    timings = timings.copy(retryBackoffMs = 0L)
 
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 2, aiAssistance = false))
 
@@ -831,7 +829,7 @@ class AutoMobilePlanExecutorTest {
           ),
       ),
     )
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    timings = timings.copy(retryBackoffMs = 0L)
 
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1, aiAssistance = false))
 
@@ -1014,7 +1012,7 @@ class AutoMobilePlanExecutorTest {
       "executePlan",
       buildDaemonResponse(JsonObject(mapOf("success" to JsonPrimitive(true)))),
     )
-    AutoMobilePlanExecutor.retryBackoffMs = 0L
+    timings = timings.copy(retryBackoffMs = 0L)
 
     val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 1))
 
@@ -1107,6 +1105,7 @@ class AutoMobilePlanExecutorTest {
       "test-plans/launch-clock-app.yaml",
       emptyMap(),
       options,
+      timings,
     )
   }
 

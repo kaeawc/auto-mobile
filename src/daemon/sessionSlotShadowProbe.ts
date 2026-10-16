@@ -2,6 +2,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import {
   deriveLatestSessionIdentity,
   deriveSlot,
+  SlotTransitionGuard,
   isSlotKnown,
   isSlotTagBeingRecreated,
   type LegacyLifecycleView,
@@ -24,28 +25,63 @@ export interface SlotShadowLogger {
 
 /** Diagnostic only: never consult this probe to decide a lifecycle operation. */
 export class SessionSlotShadowProbe<S> {
-  mode: SlotShadowProbeMode = "log";
+  private currentMode: SlotShadowProbeMode = "log";
+
+  get mode(): SlotShadowProbeMode {
+    return this.currentMode;
+  }
+
+  set mode(mode: SlotShadowProbeMode) {
+    if (mode === "off") {
+      this.transitionGuard.reset();
+    }
+    this.currentMode = mode;
+  }
+
+  readonly transitionGuard: SlotTransitionGuard;
 
   constructor(
     private readonly view: () => LegacyLifecycleView<S>,
-    private readonly legacy: LegacySlotPredicates<S>,
+    private legacy: LegacySlotPredicates<S> | undefined,
     private readonly logger: SlotShadowLogger,
-  ) {}
+    private readonly notifySettled?: (uuid: string) => void,
+  ) {
+    this.transitionGuard = new SlotTransitionGuard(logger);
+  }
+
+  /** Tests supply the frozen pre-migration oracle; production only checks transitions. */
+  setReferencePredicates(reference: LegacySlotPredicates<S>): void {
+    this.legacy = reference;
+  }
 
   check(uuid: string, event: string, identities: readonly S[] = []): void {
+    this.notifySettled?.(uuid);
     if (this.mode === "off") {
       return;
     }
     if (this.mode === "throw") {
+      this.observe(uuid, event);
       this.compare(uuid, event, identities);
       return;
     }
     try {
+      this.observe(uuid, event);
       this.compare(uuid, event, identities);
     } catch (error) {
       // A diagnostic must never prevent the legacy lifecycle operation from completing.
       this.logger.warn(
         `[SessionSlotShadowProbe] uuid=${uuid} event=${event}: ${errorMessage(error)}`,
+      );
+    }
+  }
+
+  private observe(uuid: string, event: string): void {
+    if (LIFECYCLE_HOOKS.has(event)) {
+      this.transitionGuard.check(
+        uuid,
+        event,
+        deriveSlot(this.view(), uuid),
+        this.mode === "throw" ? "throw" : "log",
       );
     }
   }
@@ -62,11 +98,14 @@ export class SessionSlotShadowProbe<S> {
       .filter((s) => s !== undefined)
       .map((s) => ({
         derived: latest === s,
-        legacy: this.legacy.isLatestSessionIdentity(s),
+        legacy: this.legacy!.isLatestSessionIdentity(s),
       }));
   }
 
   private compare(uuid: string, event: string, identities: readonly S[]): void {
+    if (!this.legacy) {
+      return;
+    }
     const view = this.view();
     const slot = deriveSlot(view, uuid);
     const session = view.sessions.get(uuid);
@@ -103,3 +142,18 @@ export class SessionSlotShadowProbe<S> {
     this.logger.debug(message);
   }
 }
+
+const LIFECYCLE_HOOKS = new Set([
+  "creation-start",
+  "creation-end",
+  "assignment-start",
+  "assignment-end",
+  "published",
+  "rebind-start",
+  "rebind-end",
+  "release-start",
+  "release-end",
+  "unpublished",
+  "plan-label-fence-lifted",
+  "recovered-terminal-intent-deleted",
+]);

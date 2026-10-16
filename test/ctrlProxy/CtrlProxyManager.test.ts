@@ -14,6 +14,7 @@ import { BootedDevice } from "../../src/models";
 import * as fs from "fs/promises";
 import type { Dirent } from "fs";
 import { readFileSync } from "fs";
+import * as os from "os";
 import * as path from "path";
 import crypto from "crypto";
 import AdmZip from "adm-zip";
@@ -716,6 +717,38 @@ describe("CtrlProxyManager", function () {
       fakeAdb.setCommandResponse(listCommand, { stdout: "", stderr: "" });
 
       expect(await accessibilityServiceClient.isInstalled()).toBe(false);
+    });
+  });
+
+  describe("cleanupApk temp-directory containment", function () {
+    test("removes an auto-mobile-* temp dir nested under a '..'-prefixed parent", async function () {
+      const parent = await fs.mkdtemp(path.join(os.tmpdir(), "..am-contain-"));
+      const tempDir = path.join(parent, "auto-mobile-apk");
+      try {
+        await fs.mkdir(tempDir);
+        const apkPath = path.join(tempDir, "ctrl.apk");
+        await fs.writeFile(apkPath, "apk");
+
+        await accessibilityServiceClient.cleanupApk(apkPath);
+
+        await expect(fs.access(tempDir)).rejects.toThrow();
+      } finally {
+        await fs.rm(parent, { recursive: true, force: true });
+      }
+    });
+
+    test("keeps a non-auto-mobile directory and removes only the file", async function () {
+      const apkPath = path.join(await fs.mkdtemp(path.join(os.tmpdir(), "am-keep-")), "ctrl.apk");
+      const dir = path.dirname(apkPath);
+      try {
+        await fs.writeFile(apkPath, "apk");
+        // Not named auto-mobile-*, so only the file goes.
+        await accessibilityServiceClient.cleanupApk(apkPath);
+        expect((await fs.stat(dir)).isDirectory()).toBe(true);
+        await expect(fs.access(apkPath)).rejects.toThrow();
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
     });
   });
 

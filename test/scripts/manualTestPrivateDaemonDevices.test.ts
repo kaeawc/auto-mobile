@@ -1135,6 +1135,12 @@ test("resolvedFileLookup finds files keyed by an unresolved path under Windows-s
 async function addBrokerLedger(f: Awaited<ReturnType<typeof deviceFixture>>) {
   const { BrokerDeviceLedger } = await import("../../scripts/manual-test/brokerDeviceLedger");
   f.files.set(join(options.batchDir, "broker/clients.json"), "{}");
+  // The ledger resolves its batch dir, which on Windows adds a drive letter to this POSIX
+  // fixture path; expose the manifest under that key too so protected devices are seen.
+  const manifest = f.files.get(join(options.batchDir, "batch.json"));
+  if (manifest !== undefined) {
+    f.files.set(join(resolve(options.batchDir), "batch.json"), manifest);
+  }
   const ledger = new BrokerDeviceLedger({
     batchDir: options.batchDir,
     timer: f.deps.timer,

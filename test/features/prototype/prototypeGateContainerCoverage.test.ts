@@ -26,6 +26,11 @@ const fixtures: Record<string, Node> = {
   prototype_flow_grid_v1: { type: "flow", children: [label] },
   prototype_pager_options_v1: { type: "pager", axis: "horizontal", children: [label] },
   prototype_gestures_v1: { ...label, onLongPress: [{ type: "emit", name: "long" }] },
+  prototype_refresh_v1: {
+    type: "scroll",
+    refresh: { stateKey: "refreshing", onRefresh: [{ type: "emit", name: "refresh" }] },
+    child: label,
+  },
   prototype_search_bar_v1: {
     type: "searchBar",
     stateKey: "query",

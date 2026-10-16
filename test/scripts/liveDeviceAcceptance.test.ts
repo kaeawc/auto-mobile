@@ -3491,7 +3491,7 @@ describe("private broker acceptance lane", () => {
         return {
           code:
             own?.outcome === "ready" && other?.outcome === "ready"
-              ? "device_outside_broker_grant"
+              ? "device_outside_bound_session"
               : null,
         };
       },

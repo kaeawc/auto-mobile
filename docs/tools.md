@@ -214,6 +214,22 @@ duration must be at most 3000 ms, and forward + pause + return must be at most
 increase `returnSpeed` or shorten the forward duration or pause to fit the budget.
 These timing options require `boomerang: true`.
 
+`swipeOn.durationMs` sets the forward-stroke duration exactly instead of a `speed`
+preset. It is an integer from 1 to 3000 ms (the gesture transport allows a 5000 ms
+request, minus 2000 ms of dispatch headroom). `durationMs` cannot be combined with
+`speed` or `lookFor`; out-of-range values and a `speed` + `durationMs` pair are rejected
+by the schema and the action before any dispatch. Velocity follows from swipe
+distance divided by duration; the result's `duration` (and `x1`/`y1`/`x2`/`y2`) report
+what was dispatched so the fling can be reproduced. With `boomerang`, `durationMs`
+applies to the forward stroke only (the return leg keeps `returnSpeed`), and the
+existing 5000 ms boomerang budget still applies. Real limits: the value sent is the
+requested duration, not a measured one. Android accessibility gesture strokes complete
+at the last emitted event rather than the planned duration, and the injection path may
+quantize very short strokes, so treat durations below roughly 50 ms as a "very fast
+fling" request rather than exact timing; the effective minimum on each platform is not
+yet measured. Verify the resulting velocity on
+a device when a test depends on a pager or dismiss threshold.
+
 `pinchOn` requires positive `scale`, `distanceStart`, and `distanceEnd` when
 supplied; nonpositive values are rejected before gesture dispatch. Its optional
 `duration` must be a positive integer from 1 to 10000 ms; the default remains
@@ -654,6 +670,8 @@ require `prototype_data_model_v1`; the host refuses an unsupported device before
 require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show.
 `onLongPress`/`onDoubleTap` on box/row/column/text/image/icon/card require
 `prototype_gestures_v1`, with the same refusal before uploads or show.
+`scroll.refresh` (`{stateKey, onRefresh}`, pull-to-refresh on a vertical scroll) requires
+`prototype_refresh_v1`, with the same refusal.
 Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve
 once per show on the device; `status` remembers shown data beside state, `inspect` reports and
 adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).

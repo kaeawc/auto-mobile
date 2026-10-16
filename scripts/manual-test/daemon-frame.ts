@@ -1012,7 +1012,11 @@ function isProductRefusal(response: DaemonResponse): boolean {
   const code = response.code ?? payload?.code;
   if (
     typeof code === "string" &&
-    ["device_outside_broker_grant", "session_ownership_lost"].includes(code)
+    [
+      "device_outside_broker_grant",
+      "device_outside_bound_session",
+      "session_ownership_lost",
+    ].includes(code)
   ) {
     return true;
   }

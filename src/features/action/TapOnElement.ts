@@ -451,6 +451,7 @@ export type TapOnFocusResult = TapOnElementResult & {
   [tapFocusFailure]?: TapFocusFailure;
   [tapResolvedLayer]?: HierarchyLayer;
 };
+type TapOnFocusOutcome = TapOnFocusResult & { wasAlreadyFocused?: boolean; focusChanged?: boolean };
 
 /** Keep routing metadata available to internal callers without exposing it in MCP payloads. */
 function withResolvedLayer<T extends TapOnFocusResult>(
@@ -3541,7 +3542,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       onDispatched: () => void;
       talkBack: AndroidDisplayTalkBackState;
     },
-  ): Promise<TapOnFocusResult & { wasAlreadyFocused?: boolean; focusChanged?: boolean }> {
+  ): Promise<TapOnFocusOutcome> {
     const { target, signal } = context;
     const prepared = await this.prepareAndroidDisplaySelection(options, context);
     if ("result" in prepared) {
@@ -4058,8 +4059,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     try {
       throwIfAborted(signal);
-      // Tap on the calculated point using observedChange
-      const result = await this.observedInteraction(
+      const result = await this.observedInteraction<TapOnFocusOutcome>(
         async (observeResult: ObserveResult, fence) => {
           previousObserveResult = observeResult;
           preTapHierarchy = observeResult.viewHierarchy;

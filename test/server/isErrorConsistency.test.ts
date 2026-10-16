@@ -13,13 +13,9 @@
  * in the same process that happens to construct the same class (#6251
  * review).
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { createPostNotificationHandler } from "../../src/server/notificationTools";
-import {
-  resetAppPermissionsFactory,
-  setAppPermissionsFactory,
-  setAppPermissionsHandler,
-} from "../../src/server/appTools";
+import { createSetAppPermissionsHandler } from "../../src/server/appTools";
 import { createNavigateToHandler } from "../../src/server/navigationTools";
 import { createSetUIStateHandler } from "../../src/server/formTools";
 import type { BootedDevice } from "../../src/models";
@@ -78,12 +74,8 @@ describe("isError consistency (#6251)", () => {
   });
 
   describe("setAppPermissions", () => {
-    afterEach(() => {
-      resetAppPermissionsFactory();
-    });
-
     test("whole-operation failure (nothing applied) sets isError: true", async () => {
-      setAppPermissionsFactory(() => ({
+      const setAppPermissionsHandler = createSetAppPermissionsHandler(() => ({
         setPermissions: async () => ({
           success: false,
           appId: "com.example.app",
@@ -115,7 +107,7 @@ describe("isError consistency (#6251)", () => {
     });
 
     test("genuine partial success (some permissions applied) stays isError: false", async () => {
-      setAppPermissionsFactory(() => ({
+      const setAppPermissionsHandler = createSetAppPermissionsHandler(() => ({
         setPermissions: async () => ({
           success: false,
           appId: "com.example.app",
@@ -156,7 +148,7 @@ describe("isError consistency (#6251)", () => {
     });
 
     test("full success stays isError: false", async () => {
-      setAppPermissionsFactory(() => ({
+      const setAppPermissionsHandler = createSetAppPermissionsHandler(() => ({
         setPermissions: async () => ({
           success: true,
           appId: "com.example.app",

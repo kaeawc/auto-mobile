@@ -52,8 +52,8 @@ internal data class DaemonSessionLoss(
       ": $error"
 }
 
-internal object DaemonHeartbeat {
-  private const val DEFAULT_INTERVAL_MS = 1_000L
+internal object DaemonHeartbeat : DaemonHeartbeatController {
+  internal const val DEFAULT_INTERVAL_MS = 1_000L
 
   /**
    * Connect and read timeouts for one beat. A hung beat blocks its session's next beat (in-flight
@@ -76,43 +76,18 @@ internal object DaemonHeartbeat {
   private val json = Json { ignoreUnknownKeys = true }
   private val backgroundHeartbeat = BackgroundHeartbeatManager(sendHeartbeat = ::sendHeartbeat)
   private val userIdResolver = DaemonUserIdResolver()
-  @JvmStatic internal var testController: DaemonHeartbeatController? = null
-  private val defaultController =
-    object : DaemonHeartbeatController {
-      override fun startBackground(intervalMs: Long): Closeable {
-        return backgroundHeartbeat.start(intervalMs)
-      }
 
-      override fun registerSession(sessionId: String) {
-        backgroundHeartbeat.addSession(sessionId)
-      }
+  fun startBackground(): Closeable = startBackground(DEFAULT_INTERVAL_MS)
 
-      override fun unregisterSession(sessionId: String) {
-        backgroundHeartbeat.removeSession(sessionId)
-      }
+  override fun startBackground(intervalMs: Long): Closeable = backgroundHeartbeat.start(intervalMs)
 
-      override fun sessionLoss(sessionId: String): DaemonSessionLoss? =
-        backgroundHeartbeat.sessionLoss(sessionId)
-    }
+  override fun registerSession(sessionId: String) = backgroundHeartbeat.addSession(sessionId)
 
-  fun startBackground(intervalMs: Long = DEFAULT_INTERVAL_MS): Closeable {
-    return controller().startBackground(intervalMs)
-  }
-
-  fun registerSession(sessionId: String) {
-    controller().registerSession(sessionId)
-  }
-
-  fun unregisterSession(sessionId: String) {
-    controller().unregisterSession(sessionId)
-  }
+  override fun unregisterSession(sessionId: String) = backgroundHeartbeat.removeSession(sessionId)
 
   /** Why the daemon released [sessionId] while it was heartbeated, or null (#11072). */
-  fun sessionLoss(sessionId: String): DaemonSessionLoss? = controller().sessionLoss(sessionId)
-
-  private fun controller(): DaemonHeartbeatController {
-    return testController ?: defaultController
-  }
+  override fun sessionLoss(sessionId: String): DaemonSessionLoss? =
+    backgroundHeartbeat.sessionLoss(sessionId)
 
   private fun sendHeartbeat(sessionId: String) {
     // A missing port is a miss, not an acknowledgement: it must not confirm the session.

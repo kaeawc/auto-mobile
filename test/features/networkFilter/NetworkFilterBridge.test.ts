@@ -12,7 +12,7 @@ import {
   type ManagedSimulator,
   NETWORK_FILTER_CONTROLLER_TIMEOUT_MS,
   NETWORK_FILTER_INSTALL_COMMAND,
-} from "../../../src/features/network-filter/NetworkFilterBridge";
+} from "../../../src/features/networkFilter/NetworkFilterBridge";
 import {
   DefaultHostCommandExecutor,
   type ExecFileAsync,

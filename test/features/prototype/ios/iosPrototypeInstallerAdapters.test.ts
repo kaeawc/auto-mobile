@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { DefaultPrototypeSimctl } from "../../../../src/features/prototype/ios/iosPrototypeInstallerAdapters";
-import { FakeSimCtlClient } from "../../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../../fakes/FakeSimctl";
 
 function harness() {
-  const client = new FakeSimCtlClient();
+  const client = new FakeSimctl();
   const calls: Array<{ method: string; args: Array<string | undefined> }> = [];
   const adapter = new DefaultPrototypeSimctl({
     installApp: async (path, udid) => {

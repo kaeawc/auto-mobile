@@ -16,6 +16,7 @@ const LINT_READ_FILES = {
   "bun.lock": "Bun/tool dependency versions",
   "turbo.json": "oxfmt formats the task configuration",
   "scripts/oxlint-baseline.txt": "oxlint-baseline.sh",
+  "scripts/file-size-baseline.txt": "file-size-baseline.sh",
   "scripts/utils-import-direction-baseline.txt":
     "check-utils-import-direction.ts via check-boundaries.sh",
   "test/features/element-resolution/observeContractGaps.json":

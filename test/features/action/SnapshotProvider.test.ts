@@ -3,7 +3,7 @@ import { FakeSnapshotProvider } from "../../fakes/FakeSnapshotProvider";
 import { CaptureSnapshot } from "../../../src/features/action/CaptureSnapshot";
 import { RestoreSnapshot } from "../../../src/features/action/RestoreSnapshot";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
-import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
 import {
@@ -108,7 +108,7 @@ describe("SnapshotProvider interfaces", () => {
           undefined,
           new FakeTimer(),
           store(),
-          new FakeSimCtlClient(),
+          new FakeSimctl(),
         ),
     ],
   ];
@@ -133,7 +133,7 @@ describe("SnapshotProvider interfaces", () => {
           undefined,
           new FakeTimer(),
           store(),
-          new FakeSimCtlClient(),
+          new FakeSimctl(),
         ),
     ],
   ];

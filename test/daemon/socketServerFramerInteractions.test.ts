@@ -1,5 +1,4 @@
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -9,7 +8,7 @@ import { DaemonSocketReachability } from "../../src/daemon/daemonSocketReachabil
 import { type UnixSocketServer } from "../../src/daemon/socketServer";
 import { BaseSocketServer } from "../../src/daemon/socketServer/BaseSocketServer";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { executionTracker } from "../../src/server/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -20,6 +19,7 @@ import {
   createFakeDaemonState,
   createFakeDeviceManager,
 } from "./helpers/inputSocketHarness";
+import { FakeSocket } from "../fakes/FakeNetServer";
 
 /**
  * Interactions between the control socket's incremental line framer (#10109) and the
@@ -32,39 +32,6 @@ import {
  */
 
 const LIMIT = 512;
-
-class FakeSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    if (this.destroyed) {
-      throw Object.assign(new Error("peer closed"), { code: "EPIPE" });
-    }
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  end(): this {
-    return this.destroy();
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-  sendRaw(text: string): void {
-    this.emit("data", Buffer.from(text));
-  }
-  send(request: DaemonRequest): void {
-    this.sendRaw(`${JSON.stringify(request)}\n`);
-  }
-}
 
 type Ack = { success: boolean; error?: string };
 

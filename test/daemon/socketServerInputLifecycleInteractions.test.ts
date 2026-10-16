@@ -1,11 +1,10 @@
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
 import { mcpRequestFailureDetails, type UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -18,6 +17,7 @@ import {
   createFakeDeviceManager,
   createFakeSession,
 } from "./helpers/inputSocketHarness";
+import { FakeSocket } from "../fakes/FakeNetServer";
 
 /**
  * Interactions between the four daemon input/shutdown changes that were each tested alone:
@@ -26,36 +26,6 @@ import {
  * `runTrackedDeviceInput`). Sockets, the CtrlProxy client and the device manager are in-memory
  * fakes; nothing spawns and no daemon or database is touched.
  */
-
-class FakeSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    if (this.destroyed) {
-      throw Object.assign(new Error("peer closed"), { code: "EPIPE" });
-    }
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  end(): this {
-    return this.destroy();
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-  send(request: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
-  }
-}
 
 type Ack = { success: boolean; error?: string };
 

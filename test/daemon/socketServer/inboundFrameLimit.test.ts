@@ -2,10 +2,7 @@ import { createTestUnixSocketServer } from "../../helpers/createTestUnixSocketSe
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { describe, expect, it } from "bun:test";
-import {
-  FailuresStreamSocketServer,
-  type FailuresStreamRepository,
-} from "../../../src/daemon/failuresStreamSocketServer";
+import { FailuresStreamSocketServer } from "../../../src/daemon/failuresStreamSocketServer";
 import { type UnixSocketServer } from "../../../src/daemon/socketServer";
 import { BaseSocketServer } from "../../../src/daemon/socketServer/BaseSocketServer";
 import { RequestResponseSocketServer } from "../../../src/daemon/socketServer/RequestResponseSocketServer";
@@ -19,6 +16,7 @@ import type {
   SocketResponse,
 } from "../../../src/daemon/socketServer/SocketServerTypes";
 import type { DaemonResponse } from "../../../src/daemon/types";
+import { FakeFailuresStreamRepository } from "../../fakes/FakeFailuresStreamRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const LIMIT = 64;
@@ -248,24 +246,8 @@ describe("per-server inbound frame limits", () => {
     );
   });
 
-  class FakeFailuresRepository implements FailuresStreamRepository {
-    acknowledgedIds: number[] = [];
-    async getNotificationsSince(): ReturnType<FailuresStreamRepository["getNotificationsSince"]> {
-      return { notifications: [], lastTimestamp: undefined, lastId: undefined };
-    }
-    async getAggregatedGroups(): ReturnType<FailuresStreamRepository["getAggregatedGroups"]> {
-      return { groups: [], totals: { crashes: 0, anrs: 0, toolFailures: 0 } };
-    }
-    async getTimelineData(): ReturnType<FailuresStreamRepository["getTimelineData"]> {
-      return { dataPoints: [], previousPeriodTotals: undefined as never };
-    }
-    async acknowledgeNotifications(ids: number[]): Promise<void> {
-      this.acknowledgedIds = ids;
-    }
-  }
-
   it("accepts a failures-stream acknowledge frame larger than the 1 MiB default", async () => {
-    const repository = new FakeFailuresRepository();
+    const repository = new FakeFailuresStreamRepository();
     const socket = new FlushingSocket();
     const authorizedSessions: Array<string | undefined> = [];
     const server = new FailuresStreamSocketServer(
@@ -308,7 +290,7 @@ describe("per-server inbound frame limits", () => {
     const server = new FailuresStreamSocketServer(
       "/fake/failures.sock",
       new FakeTimer(),
-      new FakeFailuresRepository(),
+      new FakeFailuresStreamRepository(),
     );
     (server as unknown as { handleConnection(socket: Socket): void }).handleConnection(
       socket.asSocket(),

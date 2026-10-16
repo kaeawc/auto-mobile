@@ -204,10 +204,12 @@ export function containsBounded(haystack: string, needle: string): boolean {
   // or 1,300 items). A needle that starts with a digit also rejects a leading sign, which
   // would make it the opposite number (-3 items).
   const signed = /^\p{N}/u.test(needle) ? "|[+\\-\u2212]" : "";
+  // Canonically equivalent text (precomposed é vs e + U+0301) must compare equal, so both
+  // sides use NFC before matching.
   return new RegExp(
-    `(?<![\\p{L}\\p{N}\\p{M}]|\\p{N}[.,]${signed})${RegExp.escape(needle)}(?![\\p{L}\\p{N}\\p{M}]|[.,]\\p{N})`,
+    `(?<![\\p{L}\\p{N}\\p{M}]|\\p{N}[.,]${signed})${RegExp.escape(needle.normalize("NFC"))}(?![\\p{L}\\p{N}\\p{M}]|[.,]\\p{N})`,
     "iu",
-  ).test(haystack);
+  ).test(haystack.normalize("NFC"));
 }
 
 function missingFrom(haystack: string, needles: string[]): string[] {

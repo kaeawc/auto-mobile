@@ -56,6 +56,15 @@ describe("agent benchmark suite config", () => {
         "x.yml",
       ),
     ).toThrow(/Unrecognized key\(s\) in object: 'extraArgs'/);
+    // The tool lists follow a variadic flag, so an option-shaped entry would become a flag.
+    for (const claude of [
+      { allowedTools: ["mcp__auto-mobile", "--settings", "/tmp/s.json"] },
+      { disallowedTools: ["-p"] },
+    ]) {
+      expect(() => parseSuiteDefinition({ ...MINIMAL, claude }, "x.yml")).toThrow(
+        /a tool rule cannot start with '-'/,
+      );
+    }
     expect(() =>
       parseSuiteDefinition(
         { ...MINIMAL, preflight: { sharedPreferences: { "../escape": { a: true } } } },

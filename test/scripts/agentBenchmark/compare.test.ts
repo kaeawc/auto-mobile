@@ -246,6 +246,9 @@ describe("verification text matching", () => {
     expect(containsBounded("COUNT: \u22123 items", "3 items")).toBe(false);
     expect(containsBounded("COUNT: -3 items", "-3 items")).toBe(true);
     expect(containsBounded("Status -Done", "Done")).toBe(true);
+    // Canonically equivalent forms match each other (NFC vs NFD).
+    expect(containsBounded("Cafe\u0301", "Caf\u00e9")).toBe(true);
+    expect(containsBounded("Caf\u00e9", "Cafe\u0301")).toBe(true);
   });
 
   test("an over-tapped run fails both the answer and the screen check", () => {

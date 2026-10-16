@@ -476,7 +476,8 @@ function harnessSources(): string[] {
  * leaves sharp and jimp external and the lockfile pins which versions load at runtime;
  * `package.json`, which the server reads for its version; this harness's sources and every
  * repository module they import, which run unbundled and decide preflight, verdicts, and
- * metrics; and the Bun runtime version. The git commit is left out: it
+ * metrics; the Bun runtime version; and the host platform and architecture, which pick the
+ * native image build that loads. The git commit is left out: it
  * changes with every unrelated commit, which would flag every baseline as mismatched.
  */
 function serverDigest(): string {
@@ -494,6 +495,11 @@ function serverDigest(): string {
     file("bun.lock"),
     file("package.json"),
     { path: "bun-version", read: () => new TextEncoder().encode(process.versions.bun ?? "") },
+    // bun.lock lists every platform's native sharp build; the host decides which one loads.
+    {
+      path: "host-platform",
+      read: () => new TextEncoder().encode(`${process.platform}-${process.arch}`),
+    },
   ]);
 }
 

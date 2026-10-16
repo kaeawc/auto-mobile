@@ -218,13 +218,13 @@ yourself and remove `app.apkPath` to run without the check.
 It also records `baseline.suiteDigest`, a digest of the prompt, every suite setting other than
 the baseline itself, and the requested model. If the prompt, preflight, tool permissions, failure
 patterns, or timeout change, the report flags that the baseline measured a different task.
-It also records `baseline.deviceFingerprint` (SDK level, model, locale, and effective screen
-size and density, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
+It also records `baseline.deviceFingerprint` (SDK level, model, locale, effective screen
+size and density, and live rotation, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
 tool handling), `baseline.serverBuild` (a SHA-256 prefix over what executes and scores the run: the
 built `dist/` with the schemas and vendor tools it loads at runtime, `bun.lock` for the image
 libraries the build leaves external, `package.json`, the harness sources under
-`scripts/agent-benchmark/` with every repository module they import (they run unbundled), and
-the Bun version. A stale build or changed scoring code is
+`scripts/agent-benchmark/` with every repository module they import (they run unbundled), the
+Bun version, and the host platform and architecture (which pick the native image build). A stale build or changed scoring code is
 flagged rather than silently measured. The git commit is deliberately left out, since every
 unrelated commit would change it), and
 `baseline.observedModel`, the model Claude reported running. Suites without

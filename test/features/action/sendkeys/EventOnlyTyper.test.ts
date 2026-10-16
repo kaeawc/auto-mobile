@@ -1,3 +1,4 @@
+import { TypingSession } from "../../../../src/features/action/sendkeys/TypingSession";
 import { describe, expect, test } from "bun:test";
 import {
   EventOnlyTyper,
@@ -28,6 +29,7 @@ function harness() {
   const calls: unknown[] = [];
   const adb = new FakeAdbExecutor();
   const host: EventOnlyTyperHost = {
+    session: new TypingSession(),
     adb,
     observer: {
       execute: async (options) => {
@@ -49,7 +51,6 @@ function harness() {
       return typed;
     },
     supportsAndroidKeyCombination: async () => true,
-    isCaretUnsafe: () => false,
     preExistingFieldText: (_hierarchy, operation) => (operation === "replace" ? "" : "old"),
     markPartialAfterMutation: (result) =>
       result.success ? result : { ...result, partialApplication: true },
@@ -75,7 +76,7 @@ describe("EventOnlyTyper", () => {
       return buildAsciiKeyEventPlan(char, true);
     };
     const pending = typer.type({ text: "a", operation: "insert" });
-    host.isCaretUnsafe = () => true;
+    host.session.androidCaretUnsafe = true;
     timer.advanceTime(1);
     expect(await pending).toEqual({
       success: false,

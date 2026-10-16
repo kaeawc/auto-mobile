@@ -1,11 +1,11 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { evaluateDeviceDisconnects } from "../../src/daemon/disconnectMonitor";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { BootedDevice, Platform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -74,6 +74,14 @@ class FakeBootedSimctl implements SimctlBootedDeviceSurface {
   }
 }
 
+/** Adapt the two-method fake to the handle the device manager takes. */
+function asManagerSimctl(fake: SimctlBootedDeviceSurface) {
+  return fakeDeviceManagerSimctl({
+    isAvailable: () => fake.isAvailable(),
+    getBootedSimulatorsChecked: () => fake.getBootedSimulatorsChecked(),
+  });
+}
+
 class FakeBootedEmulator implements EmulatorBootedDeviceSurface {
   async getBootedDevicesChecked(): Promise<BootedDevice[]> {
     return [];
@@ -89,9 +97,11 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
   }): MultiPlatformDeviceManager =>
     new MultiPlatformDeviceManager(
       null,
-      new FakeBootedSimctl(
-        options.simctlOk ? [SIMULATOR] : new Error("simctl list devices failed"),
-      ) as unknown as SimCtlClient,
+      asManagerSimctl(
+        new FakeBootedSimctl(
+          options.simctlOk ? [SIMULATOR] : new Error("simctl list devices failed"),
+        ),
+      ),
       new FakeBootedEmulator() as unknown as AndroidEmulatorClient,
       undefined,
       undefined,
@@ -164,7 +174,7 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
   test("a replayed iPhone is reported but not fresh", async () => {
     const manager = new MultiPlatformDeviceManager(
       null,
-      new FakeBootedSimctl([SIMULATOR]) as unknown as SimCtlClient,
+      asManagerSimctl(new FakeBootedSimctl([SIMULATOR])),
       new FakeBootedEmulator() as unknown as AndroidEmulatorClient,
       undefined,
       undefined,
@@ -278,7 +288,7 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     });
     const manager = new MultiPlatformDeviceManager(
       null,
-      new FakeBootedSimctl([SIMULATOR]) as unknown as SimCtlClient,
+      asManagerSimctl(new FakeBootedSimctl([SIMULATOR])),
       new FakeBootedEmulator() as unknown as AndroidEmulatorClient,
       undefined,
       undefined,

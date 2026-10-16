@@ -7,6 +7,7 @@ import type {
   DeviceTimestampSource,
   DeviceTimestampResult,
 } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { resolveExecuteCommandOptions } from "../../src/utils/android-cmdline-tools/executeCommandArgs";
 import type { ExecResult } from "../../src/models";
 import { FakeAdbProcess } from "./FakeAdbProcess";
 
@@ -83,12 +84,12 @@ export class FakeAdbClient implements FakeAdbClientContract {
    */
   async executeCommand(
     command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort?: boolean,
-    onStdout?: (chunk: string) => void,
+    timeoutMsOrOptions?: number | AdbExecuteOptions,
+    maxBufferArg?: number,
+    noRetryArg?: boolean,
+    signalArg?: AbortSignal,
+    waitForProcessSettlementAfterAbortArg?: boolean,
+    onStdoutArg?: (chunk: string) => void,
   ): Promise<{
     stdout: string;
     stderr: string;
@@ -96,6 +97,15 @@ export class FakeAdbClient implements FakeAdbClientContract {
     trim: () => string;
     includes: (search: string) => boolean;
   }> {
+    const { timeoutMs, maxBuffer, noRetry, signal, waitForProcessSettlementAfterAbort, onStdout } =
+      resolveExecuteCommandOptions(
+        timeoutMsOrOptions,
+        maxBufferArg,
+        noRetryArg,
+        signalArg,
+        waitForProcessSettlementAfterAbortArg,
+        onStdoutArg,
+      );
     this.commandCalls.push({
       command,
       timeoutMs,
@@ -156,15 +166,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
       throw preDispatchError;
     }
     await options?.beforeDispatch?.(options.timeoutMs);
-    return this.executeCommand(
-      command,
-      options?.timeoutMs,
-      options?.maxBuffer,
-      options?.noRetry,
-      options?.signal,
-      options?.waitForProcessSettlementAfterAbort,
-      options?.onStdout,
-    );
+    return this.executeCommand(command, options);
   }
 
   /**

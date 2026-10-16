@@ -648,13 +648,12 @@ export class CtrlProxyHierarchy {
     }
 
     try {
-      const result = await this.context.adb.executeCommand(
-        "shell dumpsys activity processes",
+      const result = await this.context.adb.executeCommand("shell dumpsys activity processes", {
         timeoutMs,
-        DUMPSYS_MAX_BUFFER,
-        true,
+        maxBuffer: DUMPSYS_MAX_BUFFER,
+        noRetry: true,
         signal,
-      );
+      });
       return isAndroidPackageRunning(result.stdout, packageName, cachedHierarchy.hierarchy.userId);
     } catch (error) {
       if (signal?.aborted) {
@@ -697,7 +696,9 @@ export class CtrlProxyHierarchy {
       throwIfAborted(signal);
       // Check if service is available
       const available = await perf.track("checkAvailable", () =>
-        AndroidCtrlProxyManager.getInstance(this.context.device, this.context.adb).isAvailable(),
+        AndroidCtrlProxyManager.getInstance(this.context.device, {
+          create: () => this.context.adb,
+        }).isAvailable(),
       );
       if (!available) {
         logger.debug("[CTRL_PROXY] Service not available, will use fallback");
@@ -1138,10 +1139,7 @@ export class CtrlProxyHierarchy {
         await perf.track("sendBroadcast", async () => {
           await this.context.adb.executeCommand(
             `shell "am broadcast -a dev.jasonpearson.automobile.EXTRACT_HIERARCHY --es uuid ${uuid} --ez disableAllFiltering ${disableAllFiltering}"`,
-            undefined,
-            undefined,
-            undefined,
-            signal,
+            { signal },
           );
         });
       }

@@ -125,8 +125,8 @@ describe("readAndroidPackageProcesses", () => {
 
     expect(state.isRunning).toBe(true);
     expect(calls).toEqual([
-      [COMMAND, 5_000, DUMPSYS_MAX_BUFFER, true, undefined],
-      [COMMAND, 5_000, DUMPSYS_MAX_BUFFER, true, undefined],
+      [COMMAND, { timeoutMs: 5_000, maxBuffer: DUMPSYS_MAX_BUFFER, noRetry: true }],
+      [COMMAND, { timeoutMs: 5_000, maxBuffer: DUMPSYS_MAX_BUFFER, noRetry: true }],
     ]);
     expect(timer.now()).toBe(200);
     expect(timer.getPendingTimeoutCount()).toBe(0);

@@ -1264,13 +1264,11 @@ async function probeBootCompletionWithBudget(
         await raceWithDeadline(
           factory
             .create(probeTarget(device))
-            .executeCommand(
-              "shell getprop sys.boot_completed",
-              remainingMs,
-              undefined,
-              true,
-              combineWithAmbientAbort(controller.signal),
-            )
+            .executeCommand("shell getprop sys.boot_completed", {
+              timeoutMs: remainingMs,
+              noRetry: true,
+              signal: combineWithAmbientAbort(controller.signal),
+            })
             .then((result) => result.stdout.trim()),
           {
             timer,

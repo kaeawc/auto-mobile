@@ -1,3 +1,4 @@
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -111,8 +112,8 @@ describe("Rotate non-default display read-back (#10362)", () => {
   test("slow reads stop polling once the confirmation budget has elapsed", async () => {
     const { adb, rotate, timer } = setup();
     const slow = new (class extends FakeAdbExecutor {
-      override async executeCommand(command: string, timeoutMs?: number) {
-        const result = await adb.executeCommand(command, timeoutMs);
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
+        const result = await adb.executeCommand(command, options);
         if (command === DUMPSYS) {
           timer.advanceTime(600);
         }

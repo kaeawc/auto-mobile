@@ -1,11 +1,12 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { fakeWhipClient } from "../../helpers/fakeWhipClient";
 import { logger } from "../../../src/utils/logger";
 import type { RTCPeerConnection } from "werift";
 import {
   KEYFRAME_REQUEST_MIN_INTERVAL_MS,
   WebRtcPublisher,
 } from "../../../src/features/webrtc/WebRtcPublisher";
-import type { WhipClient, WhipClientOptions } from "../../../src/features/webrtc/WhipClient";
+import type { WhipClientOptions } from "../../../src/features/webrtc/WhipClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { capturedH264AsDevicePackets } from "../../helpers/capturedH264Stream";
 
@@ -85,7 +86,7 @@ describe("WebRtcPublisher WHIP endpoint", () => {
       {
         createWhipClient: (options) => {
           captured = options;
-          return {} as unknown as WhipClient;
+          return fakeWhipClient();
         },
       },
     );
@@ -126,7 +127,7 @@ describe("WebRtcPublisher establish failure", () => {
         {
           createPeerConnection: () => pc as unknown as RTCPeerConnection,
           createWhipClient: () =>
-            ({
+            fakeWhipClient({
               publish: async () => ({
                 answerSdp: "v=0",
                 resourceUrl: "https://coord/whip/s",
@@ -136,7 +137,7 @@ describe("WebRtcPublisher establish failure", () => {
                   throw new Error("session cleanup failed");
                 }
               },
-            }) as unknown as WhipClient,
+            }),
         },
       );
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
@@ -166,7 +167,7 @@ describe("WebRtcPublisher establish failure", () => {
         {
           createPeerConnection: () => pc as unknown as RTCPeerConnection,
           createWhipClient: () =>
-            ({
+            fakeWhipClient({
               publish: async () => {
                 publishing.resolve();
                 await answer.promise;
@@ -177,7 +178,7 @@ describe("WebRtcPublisher establish failure", () => {
                   throw new Error("session cleanup failed");
                 }
               },
-            }) as unknown as WhipClient,
+            }),
         },
       );
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
@@ -211,12 +212,12 @@ describe("WebRtcPublisher establish failure", () => {
       {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => {
               throw new Error("ingest rejected");
             },
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -239,13 +240,13 @@ describe("WebRtcPublisher establish failure", () => {
           return new FakePeerConnection() as unknown as RTCPeerConnection;
         },
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => {
               publishes++;
               return { answerSdp: ACCEPTED_VIDEO_ANSWER, resourceUrl: "https://coord/whip/s" };
             },
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -269,10 +270,10 @@ describe("WebRtcPublisher WHIP answer validation", () => {
       {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({ answerSdp, resourceUrl: "https://coord/whip/s" }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
     await expect(publisher.start()).rejects.toThrow(/WHIP answer did not accept/);
@@ -298,13 +299,13 @@ describe("WebRtcPublisher WHIP answer validation", () => {
       {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER.replace("42e02a", "42c02a"),
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -320,7 +321,7 @@ describe("WebRtcPublisher WHIP answer validation", () => {
       {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER.replace(
                 "profile-level-id=42e02a",
@@ -329,7 +330,7 @@ describe("WebRtcPublisher WHIP answer validation", () => {
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -349,7 +350,7 @@ describe("WebRtcPublisher WHIP answer validation", () => {
       {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               resourceUrl: "https://coord/resource",
               answerSdp: ACCEPTED_VIDEO_ANSWER.replace(
@@ -358,7 +359,7 @@ describe("WebRtcPublisher WHIP answer validation", () => {
               ),
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -385,7 +386,7 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
     const publisher = new WebRtcPublisher(
       { streamId: "s", whipEndpoint: "https://coord/whip" },
       {
-        createWhipClient: () => ({}) as unknown as WhipClient,
+        createWhipClient: () => fakeWhipClient(),
         onSourceFailure: (error) => failures.push(error),
       },
     );
@@ -403,7 +404,7 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
         onConnected: () => {
           throw new Error("capture start failed");
         },
-        createWhipClient: () => ({}) as unknown as WhipClient,
+        createWhipClient: () => fakeWhipClient(),
       },
     );
     const internals = publisher as unknown as {
@@ -433,13 +434,13 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
       {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
     await publisher.start();
@@ -467,13 +468,13 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
         },
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
     await publisher.start();
@@ -493,13 +494,13 @@ describe("WebRtcPublisher.notifySourceFailed", () => {
         onLifecycleEvent: (event) => events.push(event),
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
     await publisher.start();
@@ -540,13 +541,13 @@ describe("WebRtcPublisher packet boundary (issue #10150)", () => {
         onLifecycleEvent: (event) => events.push(event),
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
     await publisher.start();
@@ -575,13 +576,13 @@ describe("WebRtcPublisher keyframe requests", () => {
         timer,
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
         onKeyFrameRequest: () => {
           requests++;
           return true;
@@ -612,13 +613,13 @@ describe("WebRtcPublisher keyframe requests", () => {
         timer,
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
         onKeyFrameRequest: () => true,
       },
     );
@@ -668,13 +669,13 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
         onConnected,
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
   }
@@ -763,13 +764,13 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
         onKeyFrameRequest: () => true,
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
     const internals = publisher as unknown as { notifySourceFailed: () => void };
@@ -807,13 +808,13 @@ describe("WebRtcPublisher frame-stall watchdog", () => {
         onKeyFrameRequest: () => recoveryStarts,
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
     const internals = publisher as unknown as { notifySourceFailed: () => void };
@@ -866,13 +867,13 @@ describe("WebRtcPublisher audio", () => {
       {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_AND_AUDIO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -892,13 +893,13 @@ describe("WebRtcPublisher audio", () => {
       {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: ACCEPTED_VIDEO_ANSWER,
               resourceUrl: "https://coord/whip/s",
             }),
             delete: async () => {},
-          }) as unknown as WhipClient,
+          }),
       },
     );
 
@@ -919,7 +920,7 @@ describe("WebRtcPublisher audio", () => {
       {
         createPeerConnection: () => pc as unknown as RTCPeerConnection,
         createWhipClient: () =>
-          ({
+          fakeWhipClient({
             publish: async () => ({
               answerSdp: `${ACCEPTED_VIDEO_ANSWER}\r\nm=audio 0 UDP/TLS/RTP/SAVPF 0`,
               resourceUrl: "https://coord/whip/s",
@@ -927,7 +928,7 @@ describe("WebRtcPublisher audio", () => {
             delete: async (url: string) => {
               deleted.push(url);
             },
-          }) as unknown as WhipClient,
+          }),
       },
     );
 

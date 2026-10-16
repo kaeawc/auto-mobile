@@ -87,6 +87,11 @@ export interface AdbDeviceState {
   state: string;
 }
 
+/** The options-form `executeCommand` seam for consumers that never need the deprecated positional form. */
+export interface AdbCommandRunner {
+  executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult>;
+}
+
 /**
  * Interface for executing ADB commands
  * Enables dependency injection and testing with fakes
@@ -100,10 +105,12 @@ export interface AdbExecutor {
   /**
    * Execute an ADB command
    * @param command - The ADB command to execute (without "adb -s <device>" prefix)
-   * @param timeoutMs - Optional timeout in milliseconds
-   * @param maxBuffer - Optional maximum buffer size for command output
-   * @param noRetry - Optional flag to disable retry logic
+   * @param options - Timeout, buffer, retry, cancellation and streaming options
    * @returns Promise with command output
+   */
+  executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult>;
+  /**
+   * @deprecated Pass an {@link AdbExecuteOptions} object instead of positional arguments.
    */
   executeCommand(
     command: string,

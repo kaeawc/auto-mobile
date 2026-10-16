@@ -305,13 +305,11 @@ export class HomeScreen extends BaseVisualChange {
       );
     }
 
-    await this.adb.executeCommand(
-      "shell input keyevent 3",
-      HomeScreen.HOME_KEYEVENT_TIMEOUT_MS,
-      undefined,
-      true,
+    await this.adb.executeCommand("shell input keyevent 3", {
+      timeoutMs: HomeScreen.HOME_KEYEVENT_TIMEOUT_MS,
+      noRetry: true,
       signal,
-    );
+    });
 
     if (!(await this.verifyAndroidHomeForeground(verificationOptions))) {
       throw new ActionableError(

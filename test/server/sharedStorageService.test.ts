@@ -7,6 +7,7 @@ import {
   type SharedStorageFileSystem,
 } from "../../src/server/sharedStorageService";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { executeCommandOptionsOf } from "../fakes/executeCommandOptionsOf";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { BootedDevice } from "../../src/models";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -188,7 +189,8 @@ describe("SharedStorageService", () => {
     const removed: string[] = [];
     const execute = executor.executeCommand.bind(executor);
     spyOn(executor, "executeCommand").mockImplementation(async (...args) => {
-      const [command, timeoutMs, , , signal] = args;
+      const [command] = args;
+      const { timeoutMs, signal } = executeCommandOptionsOf(args);
       const effectiveSignal = signal ?? getAbortSignal();
       effectiveSignal?.throwIfAborted();
       if (command.startsWith("shell rm -f")) {
@@ -256,7 +258,8 @@ describe("SharedStorageService", () => {
         executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
         const execute = executor.executeCommand.bind(executor);
         spyOn(executor, "executeCommand").mockImplementation(async (...args) => {
-          const [command, timeoutMs, , , signal] = args;
+          const [command] = args;
+          const { timeoutMs, signal } = executeCommandOptionsOf(args);
           (signal ?? getAbortSignal())?.throwIfAborted();
           if (command.includes("MEDIA_SCANNER_SCAN_FILE") && command.includes("file-11.png")) {
             if (outcome === "cancel") {
@@ -363,7 +366,8 @@ describe("SharedStorageService", () => {
     const cleanupSignals: AbortSignal[] = [];
     const execute = executor.executeCommand.bind(executor);
     spyOn(executor, "executeCommand").mockImplementation(async (...args) => {
-      const [command, timeoutMs, , , signal] = args;
+      const [command] = args;
+      const { timeoutMs, signal } = executeCommandOptionsOf(args);
       (signal ?? getAbortSignal())?.throwIfAborted();
       if (command.startsWith("push /fixtures/trigger.txt")) {
         controller.abort(new Error("request cancelled"));

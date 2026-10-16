@@ -276,12 +276,9 @@ export class KeepScreenAwakeManager {
     }
 
     try {
-      const result = await this.adb.executeCommand(
-        "shell getprop ro.kernel.qemu",
-        undefined,
-        undefined,
-        true,
-      );
+      const result = await this.adb.executeCommand("shell getprop ro.kernel.qemu", {
+        noRetry: true,
+      });
       const trimmed = result.stdout.trim();
       if (trimmed === "1") {
         return "emulator";
@@ -422,12 +419,9 @@ export class KeepScreenAwakeManager {
       logger.debug(`[KeepScreenAwake] a11y settings get failed for ${scope}/${key}: ${error}`);
     }
     try {
-      const result = await this.adb.executeCommand(
-        `shell settings get ${scope} ${key}`,
-        undefined,
-        undefined,
-        true,
-      );
+      const result = await this.adb.executeCommand(`shell settings get ${scope} ${key}`, {
+        noRetry: true,
+      });
       const trimmed = result.stdout.trim();
       if (!trimmed || trimmed === "null") {
         return null;

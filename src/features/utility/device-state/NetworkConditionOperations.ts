@@ -97,7 +97,7 @@ export class NetworkConditionOperations {
     // session layer, not re-derived here.
     try {
       const adb = this.dependencies.adbFactory().create(this.dependencies.device());
-      const result = await adb.executeCommand("emu network status", undefined, undefined, true);
+      const result = await adb.executeCommand("emu network status", { noRetry: true });
       const stdout = result.stdout;
       const stderr = result.stderr ?? "";
       if (emulatorConsoleReportsFailure(stdout, stderr)) {
@@ -346,7 +346,7 @@ export class NetworkConditionOperations {
         const cleanup = new AbortController();
         try {
           await raceWithDeadline(
-            () => adb.executeCommand(command, timeoutMs, undefined, true, cleanup.signal),
+            () => adb.executeCommand(command, { timeoutMs, noRetry: true, signal: cleanup.signal }),
             {
               timer: this.dependencies.timer(),
               timeoutMs,
@@ -373,7 +373,7 @@ export class NetworkConditionOperations {
     commands: string[],
   ): Promise<string | null> {
     for (const command of commands) {
-      const result = await adb.executeCommand(command, undefined, undefined, true);
+      const result = await adb.executeCommand(command, { noRetry: true });
       const stdout = result.stdout;
       const stderr = result.stderr ?? "";
       if (emulatorConsoleReportsFailure(stdout, stderr)) {
@@ -442,7 +442,7 @@ export class NetworkConditionOperations {
     command: string,
   ): Promise<string | undefined> {
     try {
-      const result = await adb.executeCommand(command, undefined, undefined, true);
+      const result = await adb.executeCommand(command, { noRetry: true });
       const stdout = result.stdout;
       const stderr = result.stderr ?? "";
       if (outputLooksLikeShellFailure(stdout, stderr)) {

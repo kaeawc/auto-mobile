@@ -456,13 +456,12 @@ async function executeShell(
   script: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const result = await adb.executeCommand(
-    `shell ${script}`,
-    SHARED_STORAGE_BULK_TIMEOUT_MS,
-    SHARED_STORAGE_MAX_BUFFER,
-    true,
+  const result = await adb.executeCommand(`shell ${script}`, {
+    timeoutMs: SHARED_STORAGE_BULK_TIMEOUT_MS,
+    maxBuffer: SHARED_STORAGE_MAX_BUFFER,
+    noRetry: true,
     signal,
-  );
+  });
   return result.stdout;
 }
 

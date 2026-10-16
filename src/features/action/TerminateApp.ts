@@ -297,13 +297,10 @@ export class TerminateApp extends BaseVisualChange {
     }
     try {
       const isInstalledCmd = `shell pm list packages --user ${targetUserId}`;
-      const isInstalledOutput = await this.adb.executeCommand(
-        isInstalledCmd,
-        undefined,
-        undefined,
-        true,
+      const isInstalledOutput = await this.adb.executeCommand(isInstalledCmd, {
+        noRetry: true,
         signal,
-      );
+      });
       throwIfAborted(signal);
       return packageListingContains(isInstalledOutput.stdout, packageName);
     } catch (error) {

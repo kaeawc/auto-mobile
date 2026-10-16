@@ -1,6 +1,7 @@
 import { logger } from "../../../src/utils/logger";
 import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   beforeEach as beforeOutputSchema,
@@ -868,7 +869,8 @@ describe("DeviceState", () => {
     const accepted: string[] = [];
     const execute = adb.executeCommand.bind(adb);
     spyOnOutputSchema(adb, "executeCommand").mockImplementation(async (...args) => {
-      const [command, timeoutMs, , , signal] = args;
+      const [command] = args;
+      const { timeoutMs, signal } = executeCommandOptionsOf(args);
       const effectiveSignal = signal ?? getAbortSignal();
       effectiveSignal?.throwIfAborted();
       accepted.push(command);
@@ -915,7 +917,8 @@ describe("DeviceState", () => {
     const accepted: string[] = [];
     const execute = adb.executeCommand.bind(adb);
     spyOnOutputSchema(adb, "executeCommand").mockImplementation(async (...args) => {
-      const [command, timeoutMs, , , signal] = args;
+      const [command] = args;
+      const { timeoutMs, signal } = executeCommandOptionsOf(args);
       (signal ?? getAbortSignal())?.throwIfAborted();
       if (command === "emu network speed umts") {
         controller.abort(new Error("request cancelled"));
@@ -960,7 +963,8 @@ describe("DeviceState", () => {
     const timeouts: Array<number | undefined> = [];
     const execute = adb.executeCommand.bind(adb);
     spyOnOutputSchema(adb, "executeCommand").mockImplementation(async (...args) => {
-      const [command, timeoutMs, , , signal] = args;
+      const [command] = args;
+      const { timeoutMs, signal } = executeCommandOptionsOf(args);
       (signal ?? getAbortSignal())?.throwIfAborted();
       if (command === "emu network speed umts") {
         controller.abort(new Error("request cancelled"));

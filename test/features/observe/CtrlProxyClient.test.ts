@@ -332,7 +332,7 @@ describe("AndroidCtrlProxyClient", function () {
   const malformedHierarchyUpdate = async (overrides: Record<string, unknown>) => {
     const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
-    const manager = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdb);
+    const manager = AndroidCtrlProxyManager.getInstance(testDevice, { create: () => fakeAdb });
     const availability = spyOn(manager, "isAvailable").mockResolvedValue(true);
     try {
       const resultPromise = client.getAccessibilityHierarchy();
@@ -4866,7 +4866,7 @@ describe("AndroidCtrlProxyClient", function () {
   describe("getAccessibilityHierarchy", function () {
     test("should return null when service is not available", async function () {
       // Keep the unavailable verdict deterministic and independent of ADB I/O.
-      const manager = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdb);
+      const manager = AndroidCtrlProxyManager.getInstance(testDevice, { create: () => fakeAdb });
       spyOn(manager, "isAvailable").mockResolvedValue(false);
 
       const result = await accessibilityServiceClient.getAccessibilityHierarchy();
@@ -4881,7 +4881,7 @@ describe("AndroidCtrlProxyClient", function () {
         factory,
         fakeTimer,
       );
-      const manager = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdb);
+      const manager = AndroidCtrlProxyManager.getInstance(testDevice, { create: () => fakeAdb });
       const availability = spyOn(manager, "isAvailable").mockResolvedValue(true);
 
       try {

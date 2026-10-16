@@ -23,7 +23,6 @@ src/ctrlProxy/CtrlProxyManager.ts	AUTOMOBILE_CTRL_PROXY_APK_PATH
 src/ctrlProxy/CtrlProxyManager.ts	AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM
 src/ctrlProxy/CtrlProxyManager.ts	AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED
 src/ctrlProxy/CtrlProxyManager.ts	AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK
-src/ctrlProxy/CtrlProxyManager.ts	HOME
 src/ctrlProxy/IOSCtrlProxyManager.ts	AUTOMOBILE_CTRLPROXY_VERBOSE
 src/ctrlProxy/IOSCtrlProxyManager.ts	AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS
 src/ctrlProxy/IOSCtrlProxyManager.ts	AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH
@@ -173,8 +172,8 @@ src/features/observe/Window.ts	NODE_ENV
 src/features/observe/ios/CtrlProxyExchangeRecorder.ts	AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR
 src/features/observe/ios/CtrlProxyGestures.ts	AUTOMOBILE_IOS_TAP_STRATEGY
 src/features/observe/shared/ctrlProxyForwardLeaseOwnership.ts	AUTOMOBILE_CTRL_PROXY_LEASE_IDLE_MS
-src/features/prototype-agent/PrototypeAgentProvider.ts	AUTOMOBILE_IOS_PROTOTYPE_AGENT
-src/features/prototype-agent/PrototypeAgentProvider.ts	AUTOMOBILE_SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD
+src/features/prototype/ios/PrototypeAgentProvider.ts	AUTOMOBILE_IOS_PROTOTYPE_AGENT
+src/features/prototype/ios/PrototypeAgentProvider.ts	AUTOMOBILE_SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD
 src/features/prototype/ios/iosPrototypeViewerTemplateProvider.ts	AUTOMOBILE_IOS_PROTOTYPE_VIEWER
 src/features/prototype/ios/iosPrototypeViewerTemplateProvider.ts	AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD
 src/features/telemetry/TelemetryRecorder.ts	NODE_ENV

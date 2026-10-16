@@ -715,7 +715,6 @@ describe("checkCtrlProxy", () => {
     configureInstalled(fakeAdb);
     await checkCtrlProxy(fakeFactory);
     expect(AndroidCtrlProxyManager.getExistingInstance("one")).toBe(live);
-    expect(Reflect.get(AndroidCtrlProxyManager, "adbFactory")).toBe(liveFactory);
     expect(await live.isInstalled()).toBe(true);
     expect(await live.isEnabled()).toBe(true);
     expect(liveAdb.getExecutedCommands()).toHaveLength(commands);

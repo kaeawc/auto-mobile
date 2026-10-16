@@ -9,6 +9,8 @@ import {
   ExportedGraph,
   UIState,
   BackStackInfo,
+  HierarchyNavigationEvent,
+  NavigationSuggestionInfo,
   NavigationGraphSummary,
   NavigationGraphSummaryEdge,
   NavigationGraphSummaryNode,
@@ -89,6 +91,7 @@ export class FakeNavigationGraphManager
       from: edge.from,
       to: edge.to,
       toolName: edge.interaction?.toolName ?? null,
+      traversalCount: 1,
     });
   }
 
@@ -176,7 +179,7 @@ export class FakeNavigationGraphManager
 
   // ==================== NavigationGraph Interface ====================
 
-  setCurrentApp(appId: string): void {
+  async setCurrentApp(appId: string): Promise<void> {
     this.trackCall("setCurrentApp", [appId]);
     this.currentAppId = appId;
     this.emitGraphUpdated();
@@ -185,6 +188,19 @@ export class FakeNavigationGraphManager
   getCurrentAppId(): string | null {
     this.trackCall("getCurrentAppId", []);
     return this.currentAppId;
+  }
+
+  async recordHierarchyNavigation(event: HierarchyNavigationEvent): Promise<void> {
+    this.trackCall("recordHierarchyNavigation", [event]);
+  }
+
+  async getSuggestions(): Promise<NavigationSuggestionInfo[]> {
+    this.trackCall("getSuggestions", []);
+    return [];
+  }
+
+  async promoteSuggestion(suggestionId: number, screenName: string): Promise<void> {
+    this.trackCall("promoteSuggestion", [suggestionId, screenName]);
   }
 
   async recordNavigationEvent(event: NavigationEvent): Promise<void> {
@@ -226,6 +242,7 @@ export class FakeNavigationGraphManager
         from: edge.from,
         to: edge.to,
         toolName: edge.interaction?.toolName ?? null,
+        traversalCount: 1,
       });
     }
 
@@ -268,7 +285,7 @@ export class FakeNavigationGraphManager
     this.trackCall("settleTransientEdgeFailure", [edge, searched]);
   }
 
-  findPath(targetScreen: string): PathResult {
+  async findPath(targetScreen: string): Promise<PathResult> {
     this.trackCall("findPath", [targetScreen]);
 
     if (this.pathResult) {
@@ -330,7 +347,7 @@ export class FakeNavigationGraphManager
     };
   }
 
-  getKnownScreens(): string[] {
+  async getKnownScreens(): Promise<string[]> {
     this.trackCall("getKnownScreens", []);
     return Array.from(this.nodes.keys());
   }
@@ -340,17 +357,17 @@ export class FakeNavigationGraphManager
     return this.nodes.get(screenName);
   }
 
-  getEdgesFrom(screenName: string): NavigationEdge[] {
+  async getEdgesFrom(screenName: string): Promise<NavigationEdge[]> {
     this.trackCall("getEdgesFrom", [screenName]);
     return this.edges.filter((e) => e.from === screenName);
   }
 
-  getEdgesTo(screenName: string): NavigationEdge[] {
+  async getEdgesTo(screenName: string): Promise<NavigationEdge[]> {
     this.trackCall("getEdgesTo", [screenName]);
     return this.edges.filter((e) => e.to === screenName);
   }
 
-  getStats(): NavigationGraphStats {
+  async getStats(): Promise<NavigationGraphStats> {
     this.trackCall("getStats", []);
     return {
       nodeCount: this.nodes.size,
@@ -362,7 +379,7 @@ export class FakeNavigationGraphManager
     };
   }
 
-  clearCurrentGraph(): void {
+  async clearCurrentGraph(): Promise<void> {
     this.trackCall("clearCurrentGraph", []);
     this.nodes.clear();
     this.edges = [];
@@ -375,14 +392,14 @@ export class FakeNavigationGraphManager
     this.emitGraphUpdated();
   }
 
-  clearAllGraphs(): void {
+  async clearAllGraphs(): Promise<void> {
     this.trackCall("clearAllGraphs", []);
     this.clearCurrentGraph();
     this.currentAppId = null;
     this.emitGraphUpdated();
   }
 
-  exportGraph(): ExportedGraph {
+  async exportGraph(): Promise<ExportedGraph> {
     this.trackCall("exportGraph", []);
     return {
       appId: this.currentAppId,

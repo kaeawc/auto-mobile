@@ -1,3 +1,4 @@
+import type { TypingSession } from "./TypingSession";
 import { ANDROID_TYPE_FOCUSED_INPUT_ERROR } from "./AndroidTypingConstants";
 import type {
   SendKeysTextClient,
@@ -23,7 +24,7 @@ import { withAndroidImeLock, quarantineAndroidIme } from "../androidImeLock";
 import { AUTO_MOBILE_IME_ID } from "../AndroidImeCatalog";
 import { isDebugModeEnabled } from "../../../utils/debug";
 import { getFocusedTextLength, hasFocusedTextInput } from "../ClearText";
-import { IME_COMMIT_READ_BACK_SETTLE_MS } from "../SendKeys";
+import { IME_COMMIT_READ_BACK_SETTLE_MS } from "./AndroidTypingConstants";
 import {
   focusedFieldIsPassword,
   withImeFailure,
@@ -52,6 +53,9 @@ const IME_CLEAR_FIELD_UNAVAILABLE_ERROR =
   "IME-mode clear needs the CtrlProxy ime_clear_field_v1 capability, and key-event deletion " +
   "could not size the focused text. Update the CtrlProxy APK, then retry.";
 export interface ImeCommitTyperHost {
+  session: TypingSession;
+  executeAndroidImeCommit: ImeCommitTyper["executeAndroidImeCommit"];
+  clearImeFieldWithKeyEvents: ImeCommitTyper["clearImeFieldWithKeyEvents"];
   markPartialAfterMutation(result: TextActionResult): TextActionResult;
   textClient: Pick<
     SendKeysTextClient,
@@ -67,11 +71,6 @@ export interface ImeCommitTyperHost {
   timer: Timer;
   imeTraceContext: Pick<AsyncLocalStorage<{ lines?: string[] }>, "getStore">;
   eventOnlyTyper: Pick<EventOnlyTyper, "clearEventOnlyForReplace">;
-  getImeUserId(): number | undefined;
-  setImeUserId(value: number | undefined): void;
-  isCaretUnsafe(): boolean;
-  isPasswordField(): boolean;
-  setPasswordField(value: boolean): void;
   getTargetLayer(): HierarchyLayer | undefined;
   isSendKeysBudgetExhausted(signal?: AbortSignal): boolean;
   executeAndroidType(
@@ -137,7 +136,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
     TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode; imeActivationFailed?: boolean }
   > {
     return mode === "imeKeyEvents"
-      ? this.executeAndroidImeCommit(text, operation, keyboardProfile, routing, mode)
+      ? this.host.executeAndroidImeCommit(text, operation, keyboardProfile, routing, mode)
       : this.executeAndroidImeOrFallback(
           text,
           operation,
@@ -156,10 +155,15 @@ export class ImeCommitTyper implements AndroidModeTyper {
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     const { signal } = routing;
     if (!autoImeFallback) {
-      return this.executeAndroidImeCommit(text, operation, keyboardProfile, routing);
+      return this.host.executeAndroidImeCommit(text, operation, keyboardProfile, routing);
     }
     if (await this.host.textClient.supportsImeCommit()) {
-      const result = await this.executeAndroidImeCommit(text, operation, keyboardProfile, routing);
+      const result = await this.host.executeAndroidImeCommit(
+        text,
+        operation,
+        keyboardProfile,
+        routing,
+      );
       if (!result.imeActivationFailed) {
         return result;
       }
@@ -209,7 +213,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
         try {
           return await this.runAndroidImeCommit(text, operation, keyboardProfile, routing, mode);
         } finally {
-          this.host.setImeUserId(undefined);
+          this.host.session.imeUserId = undefined;
         }
       },
       signal,
@@ -248,7 +252,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
       );
     }
     this.host.checkAbort(signal);
-    if (mode === "imeKeyEvents" && this.host.isCaretUnsafe()) {
+    if (mode === "imeKeyEvents" && this.host.session.androidCaretUnsafe) {
       return withImeFailure(
         {
           success: false,
@@ -465,7 +469,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
     if (!supportsClearField) {
       // IME mode never uses the accessibility clear: it breaks a rich-text editor's live
       // formatting until the editor resets (#10408). Delete with key events instead.
-      const cleared = await this.clearImeFieldWithKeyEvents(routing.signal, routing.display);
+      const cleared = await this.host.clearImeFieldWithKeyEvents(routing.signal, routing.display);
       if (routing.delivery === "clearField") {
         progress.result = cleared;
       }
@@ -522,7 +526,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
       mode !== "ime" ||
       text.length === 0 ||
       routing.passwordField ||
-      this.host.isPasswordField() ||
+      this.host.session.typingPasswordField ||
       result.insertedText !== undefined
     ) {
       return undefined;
@@ -719,7 +723,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
       // Explicit modes skip the pre-type observe; the read-back still shows a password field.
       isPasswordField: (observation) => {
         const password = focusedFieldIsPassword(observation);
-        this.host.isPasswordField() || this.host.setPasswordField(password);
+        this.host.session.typingPasswordField || (this.host.session.typingPasswordField = password);
         return password;
       },
     };
@@ -825,7 +829,7 @@ export class ImeCommitTyper implements AndroidModeTyper {
               imeId: prior,
               subtypeId: subtype.id,
               wasEnabled: subtype.wasEnabled,
-              userId: this.host.getImeUserId(),
+              userId: this.host.session.imeUserId,
             };
       quarantineAndroidIme(this.host.device.deviceId, snapshot);
       return false;

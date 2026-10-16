@@ -190,10 +190,7 @@ export class CrashApp {
     try {
       commandResult = await this.adb.executeCommand(
         `shell am crash --user ${userId} ${shellQuote(appId)}`,
-        CRASH_COMMAND_TIMEOUT_MS,
-        undefined,
-        true,
-        signal,
+        { timeoutMs: CRASH_COMMAND_TIMEOUT_MS, noRetry: true, signal },
       );
     } catch (error) {
       signal?.throwIfAborted();
@@ -443,13 +440,12 @@ export class CrashApp {
   ): Promise<string | undefined> {
     try {
       return (
-        await this.adb.executeCommand(
-          command,
-          CONFIRMATION_COMMAND_TIMEOUT_MS,
-          command === PROCESS_STATE_COMMAND ? DUMPSYS_MAX_BUFFER : undefined,
-          true,
+        await this.adb.executeCommand(command, {
+          timeoutMs: CONFIRMATION_COMMAND_TIMEOUT_MS,
+          maxBuffer: command === PROCESS_STATE_COMMAND ? DUMPSYS_MAX_BUFFER : undefined,
+          noRetry: true,
           signal,
-        )
+        })
       ).stdout;
     } catch (error) {
       signal?.throwIfAborted();

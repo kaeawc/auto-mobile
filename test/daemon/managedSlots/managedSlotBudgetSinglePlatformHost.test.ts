@@ -13,7 +13,6 @@ import { MultiPlatformDeviceManager } from "../../../src/devices/deviceUtils";
 import { AndroidEmulatorUnavailableError } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { SimctlUnavailableError } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { ActionableError } from "../../../src/models/ActionableError";
-import type { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { createFakeAndroidEmulator } from "../../fakes/FakeAndroidEmulator";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
@@ -65,11 +64,7 @@ describe("hunt: total-resource admission on a host without the Android emulator"
     });
     const simctl = new FakeSimctl();
     return new DeviceManagerSlotInventory(
-      new MultiPlatformDeviceManager(
-        new FakeAdbExecutor(),
-        simctl as unknown as SimCtlClient,
-        emulator,
-      ),
+      new MultiPlatformDeviceManager(new FakeAdbExecutor(), simctl, emulator),
     );
   }
 
@@ -113,11 +108,7 @@ describe("hunt: total-resource admission on a host without the Android emulator"
       return [];
     };
     return new DeviceManagerSlotInventory(
-      new MultiPlatformDeviceManager(
-        new FakeAdbExecutor(),
-        simctl as unknown as SimCtlClient,
-        emulator,
-      ),
+      new MultiPlatformDeviceManager(new FakeAdbExecutor(), simctl, emulator),
     );
   }
 

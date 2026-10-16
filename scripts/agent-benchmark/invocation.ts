@@ -121,11 +121,14 @@ export const RUN_SHAPING_CLAUDE_VARIABLES: ReadonlySet<string> = new Set([
   "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS",
   "CLAUDE_CODE_MCP_STARTUP_WAIT_MS",
   "CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH",
+  // Background tasks (force-enabling them backgrounds long MCP calls)
+  "CLAUDE_AUTO_BACKGROUND_TASKS",
   // Retries and API request timeouts
   "API_TIMEOUT_MS",
   "CLAUDE_CODE_MAX_RETRIES",
   "CLAUDE_CODE_RETRY_WATCHDOG",
-  // System prompt and tool set
+  // System prompt and tool set (the attribution toggle changes the system prompt's opening)
+  "CLAUDE_CODE_ATTRIBUTION_HEADER",
   "CLAUDE_CODE_SIMPLE",
   "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
   "CLAUDE_CODE_ENABLE_TASKS",
@@ -314,6 +317,8 @@ const PROVIDER_REGIONS = ["AWS_REGION", "CLOUD_ML_REGION"];
 // Provider-specific region routing (ANTHROPIC_BEDROCK_REGION_PREFIX,
 // ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION, VERTEX_REGION_CLAUDE_*, ...).
 const PROVIDER_REGION = /^(?:ANTHROPIC_\w*REGION\w*|VERTEX_REGION_\w+)$/;
+// Provider service tiers (ANTHROPIC_BEDROCK_SERVICE_TIER: default, flex, priority).
+const PROVIDER_TIER = /^ANTHROPIC_\w*SERVICE_TIER$/;
 // Proxy routing passes through too (Claude may need it to reach the API at all), and a
 // different proxy changes latency. Upper- and lowercase forms are both honored.
 const PROXY_URLS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
@@ -325,7 +330,8 @@ const ADB_ENDPOINT = ["ADB_SERVER_SOCKET", "ANDROID_ADB_SERVER_ADDRESS", "ANDROI
 /**
  * A non-secret identity of the backend Claude will use: which provider is selected, the
  * host and a digest of the path (never credentials, the path itself, or the query) of any
- * provider base URL or proxy, the proxy bypass list, the region, the adb server endpoint,
+ * provider base URL or proxy, the proxy bypass list, regions and service tiers, the adb
+ * server endpoint,
  * and model-routing variables. Provider settings pass through to Claude on purpose, so they are recorded
  * rather than scrubbed: the same model through another backend can differ in latency.
  */
@@ -348,7 +354,9 @@ export function providerIdentity(env: Record<string, string | undefined>): strin
   };
   const set = (key: string) => env[key] !== undefined && env[key] !== "";
   const urls = Object.keys(env).filter((key) => PROVIDER_URL.test(key));
-  const regions = Object.keys(env).filter((key) => PROVIDER_REGION.test(key));
+  const regions = Object.keys(env).filter(
+    (key) => PROVIDER_REGION.test(key) || PROVIDER_TIER.test(key),
+  );
   const routing = Object.keys(env)
     .filter((key) => /^ANTHROPIC_(?:DEFAULT_\w+_)?MODEL$|^ANTHROPIC_SMALL_FAST_MODEL$/.test(key))
     .filter(set);

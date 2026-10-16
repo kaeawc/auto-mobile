@@ -197,17 +197,19 @@ bun run lint:baseline   # alias of lint:prune (regenerate the baseline)
 
 Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (its
 exit code is authoritative; CI disables fixes so even auto-fixable violations
-exit non-zero). The ratchet only gates the rules set to `warn` because they carry
-pre-existing violations: `complexity`, `max-depth`, `max-params`,
+exit non-zero). The ratchet's violation counts cover only the rules set to `warn`
+because they carry pre-existing violations: `complexity`, `max-depth`, `max-params`,
 `max-lines-per-function`, `auto-mobile/catch-convention`,
 `auto-mobile/no-unknown-cast`,
 `auto-mobile/no-caught-error-interpolation`, and the two type-aware promise rules
-(`typescript/no-floating-promises`, `typescript/no-misused-promises`). Inline suppressions are ratcheted too: a
-comment scan of `src/` (`scripts/lib/oxlintDisableScan.ts`) adds
+(`typescript/no-floating-promises`, `typescript/no-misused-promises`). Inline suppressions of ANY rule are ratcheted too: a
+TypeScript-scanner comment scan of `src/`, `test/`, `scripts/`, `benchmark/` and
+`build.ts` (`scripts/lib/oxlintDisableScan.ts`) adds
 `oxlint-disable(<rule>)` rows (and `oxlint-disable-no-reason(<rule>)` for
 directives lacking a `-- reason`) to the same baseline, so a new
 `oxlint-disable*`/`eslint-disable*` comment fails like a new violation and needs
-`--allow-grow`; always give new directives a `-- reason`. The baseline
+`--allow-grow` even when it carries a `-- reason`; a new directive without a
+reason additionally trips the no-reason row, so always write one. The baseline
 is keyed per file + per rule with only a **count**, so it does not churn on line
 shifts. Because the type-aware rules need type info, the ratchet script runs
 `oxlint --type-aware` (tsgolint) — which is why the initial oxlint stage does not,

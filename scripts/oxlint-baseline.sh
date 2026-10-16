@@ -27,8 +27,9 @@
 # Inline suppressions are ratcheted too. An `oxlint-disable*` / `eslint-disable*`
 # directive removes the diagnostic from oxlint's report, so without this a new
 # violation could be hidden instead of failing. scripts/lib/oxlintDisableScan.ts
-# scans src/ comments and this script merges its rows into the same baseline and
-# the same new_or_increased compare:
+# scans the comments of src/ (mandatory; the scan fails closed without it), test/,
+# scripts/, benchmark/ and build.ts using the TypeScript scanner, and this script
+# merges its rows into the same baseline and the same new_or_increased compare:
 #   <count>  <file>  oxlint-disable(<rule>)            every directive, per rule
 #   <count>  <file>  oxlint-disable-no-reason(<rule>)  those lacking a `-- reason`
 # A new suppression therefore fails like a new violation and needs --allow-grow,
@@ -160,14 +161,17 @@ compare_counts() {
 
 # Suppression rows. OXLINT_SCAN_ROOT overrides the scanned root (BATS fixtures).
 scan_suppressions() {
-  bun "$ROOT/scripts/lib/oxlintDisableScan.ts" "${OXLINT_SCAN_ROOT:-$ROOT}" src
+  bun "$ROOT/scripts/lib/oxlintDisableScan.ts" "${OXLINT_SCAN_ROOT:-$ROOT}" src --optional test scripts benchmark build.ts
 }
 
 report_json="$(run_oxlint_json)"
 violations="$(printf '%s' "$report_json" | extract_counts)"
 suppressions="$(scan_suppressions)"
 current="$(printf '%s\n%s\n' "$violations" "$suppressions" | grep -v '^$' | sort || true)"
-current_total="$(printf '%s' "$current" | awk -F'\t' 'NF{s+=$1} END{print s+0}')"
+violation_total="$(printf '%s' "$violations" | awk -F'\t' 'NF{s+=$1} END{print s+0}')"
+# Directives only; the no-reason rows are a subset and would double count.
+suppression_total="$(printf '%s' "$suppressions" | awk -F'\t' 'NF && $3 !~ /^oxlint-disable-no-reason/ {s+=$1} END{print s+0}')"
+summary="$violation_total gated violation(s), $suppression_total suppression row(s)"
 
 if [[ "$MODE" == "update" ]]; then
   if [[ -f "$BASELINE" && "$ALLOW_GROW" != "true" ]]; then
@@ -187,10 +191,10 @@ if [[ "$MODE" == "update" ]]; then
   {
     echo "# AutoMobile oxlint ratchet baseline -- see scripts/oxlint-baseline.sh"
     echo "# Gated rules: $RATCHET_CODES"
-    echo "# Also counted: oxlint-disable(<rule>) and oxlint-disable-no-reason(<rule>) rows from the src/ comment scan"
+    echo "# Also counted: oxlint-disable(<rule>) and oxlint-disable-no-reason(<rule>) rows from the comment scan"
     printf '%s\n' "$current"
   } > "$BASELINE"
-  echo "Updated $BASELINE ($current_total gated violation(s))."
+  echo "Updated $BASELINE ($summary)."
   exit 0
 fi
 
@@ -212,5 +216,5 @@ if [[ -n "$new_violations" ]]; then
   exit 1
 fi
 
-echo "oxlint ratchet gate: no new violations ($current_total gated violation(s) in baseline)."
+echo "oxlint ratchet gate: no new violations ($summary in baseline)."
 exit 0

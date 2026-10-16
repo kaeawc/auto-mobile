@@ -16,6 +16,8 @@ setup() {
   # The suppression comment scan reads this fixture tree, never the real src/.
   export OXLINT_SCAN_ROOT="$TEST_DIR/scan"
   mkdir -p "$OXLINT_SCAN_ROOT/src"
+  # The scan fails closed on an empty src/, so keep one directive-free file.
+  printf 'export const base = 1;\n' > "$OXLINT_SCAN_ROOT/src/base.ts"
 
   # A canned oxlint JSON report: two ratcheted diagnostics in one file plus one
   # in another, and two error-level diagnostics that must be ignored entirely.
@@ -156,9 +158,9 @@ write_src() { # <name> <lines...>
     'const s = "// oxlint-disable-next-line max-params";'
   OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
   [ "$status" -eq 0 ]
-  grep -qP '^1\tsrc/a.ts\toxlint-disable\(max-params\)$' "$OXLINT_BASELINE"
-  grep -qP '^1\tsrc/a.ts\toxlint-disable\(complexity\)$' "$OXLINT_BASELINE"
-  grep -qP '^1\tsrc/a.ts\toxlint-disable\(max-depth\)$' "$OXLINT_BASELINE"
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable(max-params)')" "$OXLINT_BASELINE"
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable(complexity)')" "$OXLINT_BASELINE"
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable(max-depth)')" "$OXLINT_BASELINE"
   ! grep -q 'eslint/complexity' "$OXLINT_BASELINE"
   ! grep -v '^#' "$OXLINT_BASELINE" | grep -q 'no-reason'
 }
@@ -190,6 +192,23 @@ write_src() { # <name> <lines...>
   OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
   [ "$status" -eq 0 ]
   ! grep -v '^#' "$OXLINT_BASELINE" | grep -q 'oxlint-disable'
+}
+
+@test "the scan fails closed when src/ is missing" {
+  rm -rf "$OXLINT_SCAN_ROOT/src"
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"required root 'src'"* ]]
+  [ ! -f "$OXLINT_BASELINE" ]
+}
+
+@test "suppressions in test/ and scripts/ are ratcheted too" {
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  mkdir -p "$OXLINT_SCAN_ROOT/test"
+  printf '// oxlint-disable-next-line max-params -- r\n' > "$OXLINT_SCAN_ROOT/test/t.ts"
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in test/t.ts  oxlint-disable(max-params)"* ]]
 }
 
 @test "eslint/complexity and complexity share one key" {

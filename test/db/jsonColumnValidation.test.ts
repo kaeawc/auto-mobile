@@ -3,6 +3,8 @@ import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { DeviceSnapshotRepository } from "../../src/db/deviceSnapshotRepository";
 import { FailureAnalyticsRepository } from "../../src/db/failureAnalyticsRepository";
+import { parseStackTrace } from "../../src/features/observe/android/AndroidAppEventRecorder";
+import { decodeStackTrace } from "../../src/db/failureAggregateJson";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createTestDatabase } from "./testDbHelper";
@@ -69,5 +71,17 @@ describe("behaviour-driving JSON columns are validated on read (#11859)", () => 
     expect(group.stackTraceElements).toEqual([]);
     expect(group.toolCallInfo).toBeNull();
     expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  test("real producer stack trace with a frame lacking a line number round-trips", () => {
+    const frames = parseStackTrace(
+      "at com.example.app.Foo.bar(Foo.kt)\nat com.example.app.Foo.baz(Foo.kt:12)",
+      "com.example.app",
+    );
+    const decoded = decodeStackTrace(JSON.stringify(frames));
+    expect(decoded).toHaveLength(2);
+    expect(decoded[0].lineNumber).toBeNull();
+    expect(decoded[1].lineNumber).toBe(12);
+    expect(warn).not.toHaveBeenCalled();
   });
 });

@@ -7,8 +7,15 @@ const stackTraceElementsSchema = z.array(
   z.object({
     className: z.string(),
     methodName: z.string(),
-    fileName: z.string().nullable(),
-    lineNumber: z.number().nullable(),
+    // Producers leave absent values undefined, which JSON.stringify omits.
+    fileName: z
+      .string()
+      .nullish()
+      .transform((v) => v ?? null),
+    lineNumber: z
+      .number()
+      .nullish()
+      .transform((v) => v ?? null),
     isAppCode: z.boolean(),
   }),
 ) satisfies z.ZodType<StackTraceElement[]>;

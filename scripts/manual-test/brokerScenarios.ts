@@ -162,7 +162,8 @@ async function capacity(ctx: BrokerScenarioContext) {
   const refused = client(ctx, refusedIndex);
   const refusal = results[refusedIndex];
   assert.equal(refusal.outcome, "failed");
-  assert.equal(refusal.failure?.retryable, false);
+  assert.equal(refusal.failure?.retryable, true);
+  assert.equal(refusal.failure?.retryRequires, "new_request_id");
   assert.deepEqual(
     await ctx.record("tools/list", { outcome: refusal.outcome }, () => control.tools(refusal)),
     [],

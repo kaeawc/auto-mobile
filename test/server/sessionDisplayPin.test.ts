@@ -14,7 +14,7 @@ import {
   setSwipeOnFactory,
   resetSwipeOnFactory,
 } from "../../src/server/interactionTools";
-import { withStaleDisplay } from "../../src/models/StaleDisplayError";
+import { withStaleDisplay } from "../../src/features/observe/StaleDisplayError";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import { z } from "zod/v4";
 import { ToolRegistryClass, ToolRegistry } from "../../src/server/toolRegistry";

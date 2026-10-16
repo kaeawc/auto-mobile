@@ -3,7 +3,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import type { Element } from "../../models";
 import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./swipeon/androidSearchDrag";
 import { inputDurationArgument } from "./touchscreenInput";
-import { StaleDisplayError } from "../../models/StaleDisplayError";
+import { StaleDisplayError } from "../observe/StaleDisplayError";
 import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, Point } from "../../models";

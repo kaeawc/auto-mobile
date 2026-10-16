@@ -33,7 +33,6 @@ export interface PrivateDaemonOrphanPort {
 }
 
 export const DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS = 15 * 60_000;
-export const PRIVATE_DAEMON_ORPHAN_IDLE_MS_ENV = ENV.PRIVATE_DAEMON_ORPHAN_IDLE_MS.name;
 const CHECK_INTERVAL_MS = 30_000;
 const INIT_PID = 1;
 

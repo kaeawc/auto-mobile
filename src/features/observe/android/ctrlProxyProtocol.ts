@@ -128,6 +128,8 @@ export interface RequestTwoFingerSwipeMessage {
   duration: number;
   offset: number;
   displayId?: number;
+  /** 2-5 fingers (default 2); above 2 requires the `multi_finger_gesture_v1` capability. */
+  fingerCount?: number;
 }
 
 /** `@SerialName("request_drag")` → `RequestDrag` (legacy holdTime/duration fields not sent) */
@@ -1213,6 +1215,12 @@ export const SDK_CAPABILITIES_USER_ID_CAPABILITY = "sdk_capabilities_user_id_v1"
  */
 export const SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY = "screenshot_hide_prototype_v1";
 
+/**
+ * request_two_finger_swipe honours fingerCount (2-5). An older service ignores the field and would
+ * silently perform two fingers, so hosts refuse a larger count before dispatch.
+ */
+export const MULTI_FINGER_GESTURE_CAPABILITY = "multi_finger_gesture_v1";
+
 /** Capability flags in the handshake that are never sent as wire requests. */
 export const ANDROID_CAPABILITY_FLAGS = [
   "node_selector_actions",
@@ -1223,6 +1231,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "ime_commit_trace_v1",
   "gesture_display_id_v1",
   "tap_double_v1",
+  MULTI_FINGER_GESTURE_CAPABILITY,
   PROTOTYPE_SAVED_CAPABILITY,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,

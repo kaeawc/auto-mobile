@@ -128,7 +128,7 @@ describe("session persistence guards live in the statement, not in a prior read"
     manager: SessionManager;
     pool: SessionDeviceAssigner;
   } {
-    const manager = new SessionManager(timer, racing, () => new FakeDbWriteBarrier());
+    const manager = new SessionManager(timer, racing, { barrier: () => new FakeDbWriteBarrier() });
     managers.push(manager);
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId(daemonSessionId);
@@ -420,7 +420,7 @@ describe("session persistence guards live in the statement, not in a prior read"
     // #11206: a late superseded terminal write is rewritten live, rather than ending its UUID.
     test("a late terminal write of this daemon's superseded release does not end the session it left alive", async () => {
       const store = new LateReleaseWritePersistence();
-      const manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
       managers.push(manager);
       manager.stopCleanupTimer();
       const releases: string[] = [];
@@ -434,7 +434,7 @@ describe("session persistence guards live in the statement, not in a prior read"
       const release = manager.releaseSessionUnlessSuperseded(
         SESSION,
         `device-disconnected:${DEVICE}`,
-        () => !superseded,
+        { commitFence: () => !superseded },
       );
       await settleMicrotasks(100);
       // Fail the eager rewrite so the late terminal write drives the original activity race.
@@ -472,7 +472,7 @@ describe("session persistence guards live in the statement, not in a prior read"
 
     test("a manager on the fake persistence is refused like one on SQLite", async () => {
       const fake = new FakeDeviceSessionPersistence();
-      const manager = new SessionManager(timer, fake, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(timer, fake, { barrier: () => new FakeDbWriteBarrier() });
       managers.push(manager);
       manager.stopCleanupTimer();
       manager.attachDaemonSessionId("daemon-a");

@@ -38,11 +38,9 @@ describe("a rehydrated cli-idle session across a daemon stall", () => {
     try {
       const timer = new FakeTimer();
       timer.setCurrentTime(0);
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-      );
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       cleanups.push(() => manager.stopCleanupTimer());
 
       // A one-shot CLI's session, rehydrated after a daemon restart and awaiting its owner.
@@ -117,11 +115,9 @@ describe("a rehydrated cli-idle session across a daemon stall", () => {
   test("host sleep still counts toward its window; a stall moves both clocks alike", async () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(0);
-    const manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     cleanups.push(() => manager.stopCleanupTimer());
     await manager.createSession(
       "rehydrated-cli",

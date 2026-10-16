@@ -53,11 +53,9 @@ describe("device state tools", () => {
   ]) {
     test(`tracks a location-only ${location.mode} request through session setup`, async () => {
       const timer = new FakeTimer();
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-      );
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       const pool = new DevicePool(
         createDevicePoolDependencies(manager, "test-daemon", {
           timer,
@@ -104,11 +102,9 @@ describe("device state tools", () => {
 
   test("combined biometric/location request is tracked once when capture succeeds", async () => {
     const timer = new FakeTimer();
-    const manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     const pool = new DevicePool(
       createDevicePoolDependencies(manager, "test-daemon", {
         timer,
@@ -159,11 +155,9 @@ describe("device state tools", () => {
     for (const releaseDuringCapture of [false, true]) {
       test(`biometric capture failure skips ${mode} location and preserves failure${releaseDuringCapture ? " after release" : ""}`, async () => {
         const timer = new FakeTimer();
-        const manager = new SessionManager(
-          timer,
-          new FakeDeviceSessionPersistence(),
-          () => new FakeDbWriteBarrier(),
-        );
+        const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+          barrier: () => new FakeDbWriteBarrier(),
+        });
         const pool = new DevicePool(
           createDevicePoolDependencies(manager, "test-daemon", {
             timer,

@@ -130,11 +130,9 @@ describe("releaseSessionAndDevice", () => {
     ["device-restart:Pixel_8", false, "Failed to persist non-terminal release"],
   ] as const)("real manager persistence failure: %s", async (reason, stillPresent, message) => {
     const persistence = new FakeDeviceSessionPersistence();
-    const manager = new SessionManager(
-      new FakeTimer(),
-      persistence,
-      () => new FakeDbWriteBarrier(),
-    );
+    const manager = new SessionManager(new FakeTimer(), persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     const pool = new FakeReleasePool(manager);
     const originalRelease = manager.releaseSession.bind(manager);
     let originalError: unknown;

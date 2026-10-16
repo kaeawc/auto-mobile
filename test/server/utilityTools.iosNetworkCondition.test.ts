@@ -80,13 +80,11 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
     timer = new FakeTimer();
     timer.setCurrentTime(1_759_900_000_000);
     const client = new IosAppNetworkRuleClient(bridge);
-    manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => ({ status: "restored" as const }) }),
-      () => ({ restore: async () => {} }),
-      {
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+      biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+      restorers: {
         networkCondition: () => ({ restore: async () => {} }),
         clock: () => ({ restore: async () => {} }),
         iosAppNetworkRule: {
@@ -99,7 +97,7 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
           renew: (rule, leaseMs) => client.renew(rule, leaseMs),
         },
       },
-    );
+    });
     const pool = new DevicePool(
       createDevicePoolDependencies(manager, "test-daemon", {
         timer,

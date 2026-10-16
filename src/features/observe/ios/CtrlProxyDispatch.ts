@@ -22,6 +22,7 @@ const IOS_WIRE_DEADLINE_REQUEST_TYPES: ReadonlySet<string> = new Set([
   "request_multi_finger_swipe",
   "request_drag",
   "request_pinch",
+  "request_path_gesture",
   "request_set_text",
   "request_append_text",
   "request_clear_text",

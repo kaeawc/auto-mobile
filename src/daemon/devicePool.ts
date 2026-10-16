@@ -1297,9 +1297,7 @@ export class DevicePool {
         const release = await this.sessionManager.releaseSessionUnlessSuperseded(
           sessionId,
           releaseReason,
-          shouldCommit,
-          false,
-          options,
+          { commitFence: shouldCommit, ...options },
         );
         return !release.superseded;
       });
@@ -8210,7 +8208,7 @@ export class DevicePool {
     if (!device) {
       return false;
     }
-    this.sessionManager.retireClockRestoration(deviceId);
+    this.sessionManager.retireRestorationsOnIncarnationBump(deviceId);
     this.deviceHealthMarkers.clear(deviceId);
     device.incarnation = this.nextDeviceIncarnation();
     // Full: a VM restore can replace the rendered screen even on the same connection/serial.

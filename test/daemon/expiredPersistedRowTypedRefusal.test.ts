@@ -64,7 +64,7 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
 
   /** The daemon that starts after the previous one died. */
   function restartedDaemon(): SessionManager {
-    const manager = new SessionManager(timer, repo, () => new FakeDbWriteBarrier());
+    const manager = new SessionManager(timer, repo, { barrier: () => new FakeDbWriteBarrier() });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId("daemon-b");
     manager.attachLiveDaemonSessionIds(() => new Set(["daemon-b"]));

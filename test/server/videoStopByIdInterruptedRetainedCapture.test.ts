@@ -361,11 +361,9 @@ async function retainStartupOrphan(
   if (captureTeardown) {
     await repository.updateRecording("startup-orphan", { captureTeardown, platform: "ios" });
   }
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   const holder = spyOn(manager, "getSessionForDevice").mockReturnValue(OWNER);
   spies.push(holder);

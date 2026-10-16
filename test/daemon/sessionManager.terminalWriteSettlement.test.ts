@@ -28,7 +28,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
     store = new BusyRewritePersistence();
-    manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId("daemon-1");
     await manager.createSession(SESSION, DEVICE, "android", 60_000);
@@ -162,7 +162,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     const release = manager.releaseSessionUnlessSuperseded(
       SESSION,
       `device-disconnected:${DEVICE}`,
-      () => !superseded,
+      { commitFence: () => !superseded },
     );
     await settleMicrotasks();
     const snapshot = manager["sessionSlots"].getTerminalSnapshot(SESSION)!;

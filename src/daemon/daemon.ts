@@ -4857,9 +4857,7 @@ export class Daemon {
               const release = await this.sessionManager.releaseSessionUnlessSuperseded(
                 sessionId,
                 releaseReason,
-                shouldCommit,
-                allowExpired,
-                ...(options?.releaseOptions ? ([options.releaseOptions] as const) : []),
+                { commitFence: shouldCommit, allowExpired, ...options?.releaseOptions },
               );
               if (release.superseded) {
                 logger.info(
@@ -4870,14 +4868,10 @@ export class Daemon {
               }
               deviceId = release.deviceId;
             } else {
-              const releaseOptions: [fence?: undefined, options?: SessionReleaseOptions] =
-                options?.releaseOptions ? [undefined, options.releaseOptions] : [];
-              deviceId = await this.sessionManager.releaseSession(
-                sessionId,
-                releaseReason,
+              deviceId = await this.sessionManager.releaseSession(sessionId, releaseReason, {
                 allowExpired,
-                ...releaseOptions,
-              );
+                ...options?.releaseOptions,
+              });
             }
             // A completed persistence retry may return a device already idle or
             // reassigned. Do not issue a stale pool release or report it as freed.

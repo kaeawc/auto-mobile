@@ -33,7 +33,7 @@ describe("an open input stroke vs. its holder rebinding to another device", () =
   afterEach(() => rig.dispose());
 
   test("control: releasing the holder lifts the stroke", async () => {
-    await rig.sessionManager.releaseSession(HOLDER, "explicit-release", true);
+    await rig.sessionManager.releaseSession(HOLDER, "explicit-release", { allowExpired: true });
     await rig.settle();
 
     expect(rig.deviceCalls).toEqual([`${OLD_DEVICE}:start`, `${OLD_DEVICE}:cancel`]);

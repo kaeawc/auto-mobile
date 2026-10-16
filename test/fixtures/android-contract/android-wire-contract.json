@@ -1487,6 +1487,12 @@
           "type": "int",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "fingerCount",
+          "type": "int",
+          "nullable": false,
+          "hasDefault": true
         }
       ]
     },

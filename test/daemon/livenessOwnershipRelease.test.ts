@@ -60,7 +60,7 @@ describe("deliberate liveness ownership release", () => {
   beforeEach(async () => {
     timer = new FakeTimer();
     persistence = new FakeDeviceSessionPersistence();
-    manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, persistence, { barrier: () => new FakeDbWriteBarrier() });
     state = {
       isInitialized: () => true,
       getSessionManager: () => manager,

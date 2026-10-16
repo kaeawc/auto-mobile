@@ -29,6 +29,7 @@ class CommandAdvertisementTest {
       "ime_inserted_text_v1",
       "ime_commit_trace_v1",
       "tap_double_v1",
+      "multi_finger_gesture_v1",
       "network_mock_rules_report_v1",
       "sdk_capabilities_user_id_v1",
       "gesture_display_id_v1",
@@ -80,6 +81,7 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("ime_inserted_text_v1"))
       assertTrue(commands.contains("ime_commit_trace_v1"))
       assertTrue(commands.contains("tap_double_v1"))
+      assertTrue(commands.contains("multi_finger_gesture_v1"))
       assertTrue(commands.contains("prototype_multi_surface_v1"))
       assertTrue(commands.contains("prototype_window_options_v1"))
       assertTrue(commands.contains("prototype_window_chrome_v1"))

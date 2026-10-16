@@ -213,7 +213,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
       sessionExecutionProbe(executionTracker, sessionManager, pool, { excludeReads: true }),
       async (sessionId, reason) => {
         sessionManager.cancelExecutionsCutByRelease(sessionId, reason);
-        await sessionManager.releaseSession(sessionId, reason, true);
+        await sessionManager.releaseSession(sessionId, reason, { allowExpired: true });
       },
       timer,
     );

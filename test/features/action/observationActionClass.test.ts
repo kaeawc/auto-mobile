@@ -31,8 +31,10 @@ const advertisedClasses = {
   swipeOn: "scroll",
   dragAndDrop: "scroll",
   biometricAuth: "unknown",
+  dragPath: "unknown", // Like tapAt: unclassified until coordinate gestures are classified together.
   launchApp: "unknown",
   observe: "unknown", // Top-level projection; included to cover every raw/project advertiser.
+  multiTouch: "unknown",
   pinchOn: "unknown",
   pressButton: "unknown", // Missing button; argument-dependent cases are pinned below.
   rotate: "unknown",

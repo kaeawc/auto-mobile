@@ -244,6 +244,19 @@ extension CommandHandler {
         )
     }
 
+    func handlePathGesture(_ request: RequestPathGesture, startTime: Date) async throws -> WebSocketResponse {
+        let points = try PathGesturePlan.validate(request.points)
+        try await performContextCheckedGesture(expected: request.frameContext) {
+            try self.gesturePerformer.path(points: points)
+        }
+
+        return WebSocketResponse.success(
+            type: ResponseType.pathGestureResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
     func handlePinch(_ request: RequestPinch, startTime: Date) async throws -> WebSocketResponse {
         try requireFinite(request.centerX, field: "centerX")
         try requireFinite(request.centerY, field: "centerY")

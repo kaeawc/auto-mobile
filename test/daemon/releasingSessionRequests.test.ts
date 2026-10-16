@@ -139,11 +139,9 @@ describe("requests during device session release", () => {
     restoreCalls = 0;
     poolReleases = [];
     snapshots = [];
-    manager = new SessionManager(
-      timer,
-      persistence,
-      () => barrier,
-      () => ({
+    manager = new SessionManager(timer, persistence, {
+      barrier: () => barrier,
+      keepScreenAwakeRestorer: () => ({
         restore: async () => {
           restoreCalls++;
           restoreStarted.resolve();
@@ -152,7 +150,7 @@ describe("requests during device session release", () => {
           return { status: "restored" as const };
         },
       }),
-    );
+    });
     manager.onSessionRelease((_id, _device, _reason, snapshot) => snapshots.push(snapshot));
     registry = new ObserverSessionRegistry(timer, 10000);
     manager.setObserverSessionRegistry(registry);

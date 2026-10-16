@@ -66,11 +66,9 @@ test("declined terminal commit agrees across fence lifting and live-row rewrite"
   const releaseGate = Promise.withResolvers<void>();
   persistence.releaseGate = releaseGate.promise;
   let commit = true;
-  const release = rig.manager.releaseSessionUnlessSuperseded(
-    "id",
-    "explicit-release",
-    () => commit,
-  );
+  const release = rig.manager.releaseSessionUnlessSuperseded("id", "explicit-release", {
+    commitFence: () => commit,
+  });
   const view = rig.manager.getLegacyLifecycleView();
   await drainUntil(() => view.terminalSnapshots.has("id"), { description: "terminal fence" });
   const rewriteGate = Promise.withResolvers<void>();
@@ -107,11 +105,9 @@ test("failed terminal write leaves a published fence without an op, including a 
   });
   assertSlotAgreement(rig, ["id"], [session], "failed-terminal-without-op");
   persistence.failure = null;
-  const declined = rig.manager.releaseSessionUnlessSuperseded(
-    "id",
-    "explicit-release",
-    () => false,
-  );
+  const declined = rig.manager.releaseSessionUnlessSuperseded("id", "explicit-release", {
+    commitFence: () => false,
+  });
   expect((await declined).superseded).toBe(true);
   expect(view.isReleasing(session)).toBe(false);
   expect(view.terminalSnapshots.has("id")).toBe(true);

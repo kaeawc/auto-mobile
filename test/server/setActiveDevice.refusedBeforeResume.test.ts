@@ -50,11 +50,9 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
   const arrange = async (): Promise<void> => {
     restoreProviders = installFakeCtrlProxyManagers();
     timer = new FakeTimer();
-    sessions = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     const utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", [device]);
     restoreFactory = snapshotPlatformDeviceManagerFactory();

@@ -52,17 +52,13 @@ describe("a device restart under a session whose owner already lost its heartbea
     reaped = [];
     announced = [];
     persistence = new FakeDeviceSessionPersistence();
-    manager = new SessionManager(
-      timer,
-      persistence,
-      () => new FakeDbWriteBarrier(),
-      undefined,
-      undefined,
-      {
+    manager = new SessionManager(timer, persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+      restorers: {
         networkCondition: () => ({ restore: async () => undefined }),
         clock: () => ({ restore: () => timer.sleep(restoreMs) }),
       },
-    );
+    });
     manager.stopCleanupTimer();
     manager.onSessionRelease((_session, _device, reason) => announced.push(reason));
     monitor = new SessionHeartbeatMonitor(
@@ -309,7 +305,7 @@ describe("a device restart under a session whose owner already lost its heartbea
       await start(restoreMs);
       await monitor.stop();
       await timer.advanceTimeAsync(silenceMs, () => drainMicrotasks(20));
-      const release = manager.releaseSession(SESSION, "daemon-shutdown", true);
+      const release = manager.releaseSession(SESSION, "daemon-shutdown", { allowExpired: true });
       await drainMicrotasks(100);
       await timer.advanceTimeAsync(restoreMs, () => drainMicrotasks(50));
       expect(await release).toBe(DEVICE);
@@ -322,7 +318,9 @@ describe("a device restart under a session whose owner already lost its heartbea
       expect(announced).toEqual(["daemon-shutdown"]);
       expect(reaped).toEqual([]);
 
-      const successor = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+      const successor = new SessionManager(timer, persistence, {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       successor.stopCleanupTimer();
       const summary = await successor.rehydratePersistedSessions({
         assignDeviceToSession: async (id, _platform, target) =>

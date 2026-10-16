@@ -339,6 +339,8 @@ class WebSocketServer(
     // Optional text-free callback and commit decision trace.
     add("ime_commit_trace_v1")
     add("tap_double_v1")
+    // request_two_finger_swipe honours fingerCount (2-5); older services perform two fingers.
+    add("multi_finger_gesture_v1")
     // set_network_mock_rules with a requestId is answered with set_network_mock_rules_result
     // naming the rules the app's regex engine rejected (issue #10101). Hosts only wait for the
     // reply when this flag is present, so an older runner never costs them a timeout.

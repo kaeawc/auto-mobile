@@ -52,8 +52,10 @@ describe("a session another connection owns is not controlled by naming it (#113
       spyOn(logger, "error").mockImplementation(() => {}),
     ];
     const timer = new FakeTimer();
-    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), () => {
-      return new FakeDbWriteBarrier();
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => {
+        return new FakeDbWriteBarrier();
+      },
     });
     manager.stopCleanupTimer();
     const discovery = new FakeDeviceUtils();

@@ -91,17 +91,15 @@ describe("device restart reserves the entire recovery window", () => {
     persistence = new FakeDeviceSessionPersistence();
     keepAwakeGate = Promise.withResolvers<void>();
     keepAwakeStarted = false;
-    sessions = new SessionManager(
-      timer,
-      persistence,
-      () => new FakeDbWriteBarrier(),
-      () => ({
+    sessions = new SessionManager(timer, persistence, {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({
         restore: () => {
           keepAwakeStarted = true;
           return keepAwakeGate.promise.then(() => ({ status: "restored" as const }));
         },
       }),
-    );
+    });
     sessions.attachDaemonSessionId(DAEMON_A);
     sessions.stopCleanupTimer();
     manager = new FakeDeviceManager();
@@ -124,17 +122,15 @@ describe("device restart reserves the entire recovery window", () => {
       pool.releaseDeviceClaimsForShutdown();
       sessions.stopCleanupTimer();
       persistence = new FakeDeviceSessionPersistence();
-      sessions = new SessionManager(
-        timer,
-        persistence,
-        () => new FakeDbWriteBarrier(),
-        () => ({
+      sessions = new SessionManager(timer, persistence, {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({
           restore: () => {
             keepAwakeStarted = true;
             return keepAwakeGate.promise.then(() => ({ status: "restored" as const }));
           },
         }),
-      );
+      });
       sessions.attachDaemonSessionId(DAEMON_A);
       sessions.stopCleanupTimer();
       manager = new FakeDeviceManager();

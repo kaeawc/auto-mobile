@@ -1485,6 +1485,101 @@
     }
   },
   {
+    "name": "dragPath",
+    "description": "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android and iOS).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "points": {
+          "description": "Polyline vertices; the finger goes down on the first and lifts on the last",
+          "minItems": 2,
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "description": "x in the selected coordinateSpace (native by default)",
+                "type": "number"
+              },
+              "y": {
+                "description": "y in the selected coordinateSpace (native by default)",
+                "type": "number"
+              },
+              "durationMs": {
+                "description": "Milliseconds spent moving from the previous point to this one (default 200); ignored on the first point",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5000
+              }
+            },
+            "required": ["x", "y"],
+            "additionalProperties": false
+          }
+        },
+        "holdMs": {
+          "description": "Press and hold at the first point before moving (long press, then drag)",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3000
+        },
+        "releaseHoldMs": {
+          "description": "Keep the finger down at the last point before lifting",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3000
+        },
+        "coordinateSpace": {
+          "description": "Coordinate units: native absolute (default), normalized 0–1, or percent 0–100",
+          "type": "string",
+          "enum": ["absolute", "normalized", "percent"]
+        },
+        "display": {
+          "description": "Target panel key, role, or active",
+          "type": "string"
+        },
+        "snapshotId": {
+          "description": "Short-lived reference from observe.snapshotReference; reject stale geometry or frame context",
+          "type": "string",
+          "minLength": 1
+        },
+        "layer": {
+          "description": "app: exclude the AutoMobile prototype; prototype: prototype nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "prototype"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["points"],
+      "additionalProperties": false,
+      "description": "Drag one finger along a polyline of points with per-segment timing, an initial hold and a release hold (Android and iOS). Use for drawing, unlock patterns, sliders, and long press then drag."
+    }
+  },
+  {
     "name": "executePlan",
     "description": "Execute YAML plan steps; stops on first failed step.",
     "inputSchema": {
@@ -2219,6 +2314,7 @@
               "deviceSnapshot",
               "displayConfig",
               "dragAndDrop",
+              "dragPath",
               "executePlan",
               "explore",
               "exportPlan",
@@ -2245,6 +2341,7 @@
               "listDeviceImages",
               "listDevices",
               "mockNetwork",
+              "multiTouch",
               "navigateTo",
               "network",
               "observe",
@@ -2346,6 +2443,7 @@
               "deviceSnapshot",
               "displayConfig",
               "dragAndDrop",
+              "dragPath",
               "executePlan",
               "explore",
               "exportPlan",
@@ -2372,6 +2470,7 @@
               "listDeviceImages",
               "listDevices",
               "mockNetwork",
+              "multiTouch",
               "navigateTo",
               "network",
               "observe",
@@ -8971,6 +9070,94 @@
     }
   },
   {
+    "name": "multiTouch",
+    "description": "Simultaneous 2-5 finger tap, long press, or swipe at a screen point.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Simultaneous multi-finger gesture to perform",
+          "type": "string",
+          "enum": ["tap", "longPress", "swipe"]
+        },
+        "fingers": {
+          "description": "Simultaneous fingers (2-5, default 2); use tapAt/swipeOn for one finger. Counts above 2 on Android need the multi_finger_gesture_v1 CtrlProxy capability and are refused before dispatch otherwise",
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 5
+        },
+        "x": {
+          "description": "Finger-group center x in the selected coordinateSpace",
+          "type": "number"
+        },
+        "y": {
+          "description": "Finger-group center y in the selected coordinateSpace",
+          "type": "number"
+        },
+        "coordinateSpace": {
+          "description": "Units for x/y: native absolute (default), normalized 0-1, or percent 0-100",
+          "type": "string",
+          "enum": ["absolute", "normalized", "percent"]
+        },
+        "direction": {
+          "description": "Swipe finger direction; required for swipe, invalid otherwise",
+          "type": "string",
+          "enum": ["up", "down", "left", "right"]
+        },
+        "distance": {
+          "description": "Swipe travel in native px (default 30% of the travel axis); clamped so every finger stays on screen",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "fingerSpacing": {
+          "description": "Horizontal gap between neighbouring fingers in native px (10-400; default 10% of the width, 40-160). The row is centered on x and shifted to fit the screen",
+          "type": "number",
+          "minimum": 10,
+          "maximum": 400
+        },
+        "durationMs": {
+          "description": "Duration in ms (max 3000). longPress 500-3000, default 1000; swipe default 300; tap is fixed at 50",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3000
+        },
+        "layer": {
+          "description": "app: exclude the AutoMobile prototype; prototype: prototype nodes only (error if none shown). Omit for both, topmost first",
+          "type": "string",
+          "enum": ["app", "prototype"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action", "x", "y"],
+      "additionalProperties": false,
+      "description": "Simultaneous 2-5 finger tap, long press, or swipe at a screen point. Fingers sit in a horizontal row centered on x/y."
+    }
+  },
+  {
     "name": "navigateTo",
     "description": "Navigate to screen using navigation graph",
     "inputSchema": {
@@ -15216,7 +15403,7 @@
           "type": "string"
         },
         "direction": {
-          "description": "Pinch direction",
+          "description": "Pinch direction; ignored when the finger distance does not change (rotation only)",
           "type": "string",
           "enum": ["in", "out"]
         },
@@ -15242,7 +15429,7 @@
           "maximum": 10000
         },
         "rotationDegrees": {
-          "description": "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS.",
+          "description": "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.",
           "type": "number"
         },
         "includeSystemInsets": {
@@ -24545,6 +24732,7 @@
               "deviceSnapshot",
               "displayConfig",
               "dragAndDrop",
+              "dragPath",
               "executePlan",
               "explore",
               "exportPlan",
@@ -24571,6 +24759,7 @@
               "listDeviceImages",
               "listDevices",
               "mockNetwork",
+              "multiTouch",
               "navigateTo",
               "network",
               "observe",
@@ -31857,6 +32046,7 @@
             "deviceSnapshot",
             "displayConfig",
             "dragAndDrop",
+            "dragPath",
             "executePlan",
             "explore",
             "exportPlan",
@@ -31883,6 +32073,7 @@
             "listDeviceImages",
             "listDevices",
             "mockNetwork",
+            "multiTouch",
             "navigateTo",
             "network",
             "observe",
@@ -31950,6 +32141,7 @@
               "deviceSnapshot",
               "displayConfig",
               "dragAndDrop",
+              "dragPath",
               "executePlan",
               "explore",
               "exportPlan",
@@ -31976,6 +32168,7 @@
               "listDeviceImages",
               "listDevices",
               "mockNetwork",
+              "multiTouch",
               "navigateTo",
               "network",
               "observe",

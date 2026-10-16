@@ -61,6 +61,7 @@ enum PrototypeStateValidator {
         actions += node.onLongPress ?? []
         actions += node.onDoubleTap ?? []
         actions += node.onSubmit ?? []
+        actions += node.trailingIcon?.onTap ?? []
         actions += node.refresh?.onRefresh ?? []
         actions += (node.trailingActions ?? []).flatMap { $0.onTap ?? [] }
         actions += (node.spans ?? []).flatMap { $0.onTap ?? [] }

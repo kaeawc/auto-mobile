@@ -275,6 +275,8 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeTextFieldNode ->
       copy(
+        trailingIcon = trailingIcon?.bound(instance),
+        onSubmit = onSubmit?.map { it.bound(instance) },
         checks = checks?.map { it.bound(instance) },
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,

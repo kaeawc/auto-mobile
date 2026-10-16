@@ -49,6 +49,15 @@ class PrototypeSpecContentScreenshotTest {
 
   // Pending: #12395 added these cases (and changed material_slider_chip_card's render) without
   // Linux baselines; record them with the Linux workflow, commit the PNGs, then drop pending.
+  // Pending: #12066 textField trailing icon and IME action; no Linux baseline recorded yet.
+  @Test
+  fun textFieldActions() =
+    prototypeScreenshotTest(
+      "text_field_actions",
+      validPrototypeFixture("text-field-actions"),
+      pending = true,
+    )
+
   // Pending: #12071 carousel and pager indicator cases; no Linux baselines recorded yet.
   @Test
   fun carouselMultiBrowse() =

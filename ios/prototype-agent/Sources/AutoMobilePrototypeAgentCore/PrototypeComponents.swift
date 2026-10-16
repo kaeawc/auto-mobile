@@ -117,6 +117,8 @@ extension PrototypeNode {
                   let menuItems, menuItems.indices.contains(index),
                   case let .item(item) = menuItems[index], item.enabled != false else { return nil }
             return .menuItem(self, item)
+        case "textField":
+            return name == "trailingIcon" ? trailingIcon.map { .appBarButton($0) } : nil
         case "topAppBar":
             return appBarButton(named: name).map { .appBarButton($0) }
         case "radioGroup", "segmentedButton", "select":

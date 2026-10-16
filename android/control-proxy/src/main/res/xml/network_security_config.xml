@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Prototype request actions with via "device" (#12528) call any absolute http or https URL, with no
+  host allowlist: a prototype is a mock whose backend is often a plain-HTTP dev server on a LAN
+  address or localhost. CtrlProxy is sideloaded over adb for development and never distributed, so
+  cleartext is allowed for every host.
+-->
+<network-security-config>
+  <base-config cleartextTrafficPermitted="true">
+    <trust-anchors>
+      <certificates src="system" />
+    </trust-anchors>
+  </base-config>
+</network-security-config>

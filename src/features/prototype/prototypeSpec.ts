@@ -3,8 +3,17 @@ import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol
 import { z } from "zod";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { record, BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
+import { record } from "./prototypeTemplate";
 import { prototypeStorageSchema } from "./prototypeStorageSchema";
+import {
+  keySchema,
+  stateKeySchema,
+  pointerSchema,
+  prototypeDataActionValueSchema,
+  type PrototypeDataActionValue,
+} from "./prototypeActionValues";
+import { requestActionSchema, bindPrototypeRequestFollowUps } from "./prototypeRequestSchema";
+export { prototypeDataActionValueSchema, type PrototypeDataActionValue };
 export const {
   MAX_PROTOTYPE_SPEC_BYTES,
   MAX_PROTOTYPE_TEXT_SPANS,
@@ -33,7 +42,6 @@ const iconNameSchema = z.string().refine((name) => iconNames.has(name), {
   message: "Unknown prototype icon name",
 });
 const iconVariantSchema = z.enum(["filled", "outlined", "rounded", "sharp", "twoTone"]);
-const keySchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
 const offsetSchema = z
   .object({
     x: z.number().finite().min(-10000).max(10000),
@@ -73,8 +81,6 @@ const selectorSchema = z
     container: containerSchema.optional(),
   })
   .strict();
-// State-key fields also take repeat placeholders such as `liked_{item.id}` (#11051).
-const stateKeySchema = z.string().regex(BOUND_STATE_KEY_PATTERN);
 const scalarSchema = z.union([z.string(), z.number().finite(), z.boolean()]);
 export type PrototypeDataValue =
   | string
@@ -83,11 +89,6 @@ export type PrototypeDataValue =
   | PrototypeDataValue[]
   | { [key: string]: PrototypeDataValue };
 export type PrototypeData = Record<string, PrototypeDataValue>;
-const pointerSchema = z
-  .string()
-  .min(1)
-  .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH)
-  .regex(/^(?:\/(?:[^~\/]|~[01])*)+$/);
 
 export type PrototypeCondition =
   | { valid: string | string[] }
@@ -394,15 +395,6 @@ export const placementSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 ]);
-/** The emit.context binding forms except `page`; `{value: literal}` is the literal form. */
-export const prototypeDataActionValueSchema = z.union([
-  z.object({ state: stateKeySchema }).strict(),
-  z.object({ item: keySchema }).strict(),
-  z.object({ index: z.literal(true) }).strict(),
-  z.object({ data: pointerSchema }).strict(),
-  z.object({ value: prototypeJsonSchema }).strict(),
-]);
-export type PrototypeDataActionValue = z.infer<typeof prototypeDataActionValueSchema>;
 export const prototypeEmitContextBindingSchema = z.union([
   ...prototypeDataActionValueSchema.options,
   z.object({ page: z.string().min(1) }).strict(),
@@ -467,6 +459,7 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.enum(["setData"]), ...dataActionFields }).strict(),
   z.object({ type: z.enum(["appendData"]), ...dataActionFields }).strict(),
   z.object({ type: z.enum(["removeData"]), path: dataActionPathSchema }).strict(),
+  requestActionSchema,
   z
     .object({ type: z.enum(["push"]), stack: z.string().min(1), screen: z.string().min(1) })
     .strict(),
@@ -476,6 +469,7 @@ export const actionSchema = z.discriminatedUnion("type", [
     .object({ type: z.enum(["replace"]), stack: z.string().min(1), screen: z.string().min(1) })
     .strict(),
 ]);
+bindPrototypeRequestFollowUps(() => actionSchema);
 const gestureNodeShape = {
   onLongPress: z.array(actionSchema).min(1).max(32).optional(),
   onDoubleTap: z.array(actionSchema).min(1).max(32).optional(),
@@ -1244,6 +1238,7 @@ export const PROTOTYPE_ACTION_TYPES = [
   "setData",
   "appendData",
   "removeData",
+  "request",
 ] as const;
 export const PROTOTYPE_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;
 

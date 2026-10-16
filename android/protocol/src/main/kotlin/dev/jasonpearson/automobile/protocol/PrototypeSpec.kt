@@ -345,6 +345,29 @@ data class PrototypeAppendDataAction(val path: String, val value: EmitContextBin
 @Serializable
 data class PrototypeRemoveDataAction(val path: String) : PrototypeAction()
 
+/**
+ * An HTTP call from a tap (`prototype_network_v1`, #12523): the response goes to [into] (and its
+ * `<into>__meta` sibling), [statusKey] follows `loading`, `success` and `error`, and [onSuccess] or
+ * [onError] runs afterwards. [headers] and [query] entries are a literal string or a value binding
+ * (`{state}`, `{data}`, `{value}`, and `{item}` / `{index}` in a repeat), kept as JSON because both
+ * forms share a slot; [body] is a binding. [method] defaults to GET and [via] to `host`.
+ */
+@SerialName("request")
+@Serializable
+data class PrototypeRequestAction(
+  val url: String,
+  val method: String? = null,
+  val headers: Map<String, JsonElement>? = null,
+  val query: Map<String, JsonElement>? = null,
+  val body: EmitContextBinding? = null,
+  val into: String? = null,
+  val statusKey: String? = null,
+  val via: String? = null,
+  val timeoutMs: Int? = null,
+  val onSuccess: List<PrototypeAction>? = null,
+  val onError: List<PrototypeAction>? = null,
+) : PrototypeAction()
+
 @Serializable
 sealed class PrototypeNode {
   abstract val id: String?

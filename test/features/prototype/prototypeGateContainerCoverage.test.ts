@@ -64,6 +64,14 @@ const fixtures: Record<string, Node> = {
     ...label,
     onTap: [{ type: "setData", path: "/data/count", value: { value: 1 } }],
   },
+  prototype_network_v1: {
+    ...label,
+    onTap: [{ type: "request", url: "http://localhost:8080/feed", into: "/data/feed" }],
+  },
+  prototype_network_device_v1: {
+    ...label,
+    onTap: [{ type: "request", url: "http://localhost:8080/feed", via: "device" }],
+  },
 };
 
 // One table drives the gate matrix and contract coverage, including every node-bearing variant.

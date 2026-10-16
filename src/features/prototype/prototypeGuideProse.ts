@@ -369,6 +369,72 @@ the result has \`cleared\`, the number of keys removed). \`deleteSaved\` also cl
 \`storage\`, \`clearStorage\` and the report need \`prototype_storage_v1\`: a spec with \`storage\` is refused
 before anything is shown, and \`clearStorage\` before anything is sent, on a device without it.
 
+
+`;
+
+export const GUIDE_REQUEST = `### Requests
+
+\`{type: "request", url, method?, headers?, query?, body?, into?, statusKey?, via?, timeoutMs?, onSuccess?, onError?}\`
+calls an HTTP endpoint from a tap and writes the answer into \`/data\`, so a prototype can load and
+post real content without the agent answering each tap. It requires \`prototype_network_v1\`
+(\`prototype_network_device_v1\` as well for \`via: "device"\`); a show or patch result containing
+one is refused on a device without them.
+
+- \`url\` is any absolute \`http\` or \`https\` URL (at most 2048 characters). There is no host
+  allowlist: localhost, loopback and private addresses are allowed. It takes the text placeholders of
+  any text field (\`{key}\` state, \`{data:/pointer}\`, repeat \`{item.field}\` / \`{index}\`). Without a
+  placeholder it must parse as an http(s) URL; with one, it must start with a literal \`http://\` or
+  \`https://\`. (\`{state:key}\` is not a placeholder: write \`{key}\`.)
+- \`method\` is GET (default), POST, PUT, PATCH, DELETE or HEAD. A GET or HEAD cannot have a \`body\`.
+- \`headers\` and \`query\` (up to 16 entries each) map a name to a literal string or to a value
+  binding: \`{state: key}\`, \`{data: pointer}\`, \`{value: scalar}\`, \`{item: field}\` / \`{index: true}\`
+  (repeat only). A bound value must be a string, number or boolean. \`query\` entries are set on the URL
+  in order (a key already in the URL is replaced). Literal header and query strings take the same
+  text placeholders as \`url\`.
+- \`body\` is a value binding, so a literal body is \`{value: json}\`; \`{state: key}\` sends the state
+  value and \`{data: pointer}\` the data subtree. A non-string body is sent as JSON with
+  \`Content-Type: application/json\` unless a header sets one; a string body is sent as is.
+- \`into\` is a \`/data/<pointer>\` path with the data-action rules (a whole \`{index}\` segment inside a
+  repeat); it must name an object member, not an array element, and its parent must exist. Without
+  \`into\` nothing is written to data.
+- \`statusKey\` names a declared **string** state key. The device sets it to \`"loading"\` when the
+  request starts and to \`"success"\` or \`"error"\` when it ends, so \`visibleWhen\` can show a spinner
+  (\`{key: "feedStatus", equals: "loading"}\`) or an error. Do not bind it to a control with fixed options.
+- \`via\` is \`"host"\` (default: the host runs the call and the device sends only the resolved request
+  frame) or \`"device"\` (the device makes the call itself, which on Android reaches localhost through
+  \`adb reverse\`, see below).
+- \`timeoutMs\` is optional, 1 to \`MAX_PROTOTYPE_REQUEST_TIMEOUT_MS\`; the default is
+  \`DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS\`.
+- \`onSuccess\` and \`onError\` are action lists (1 to 32) run after the request ends, for example
+  \`setState\`, \`push\` or another \`request\`. Requests nest up to \`MAX_PROTOTYPE_ACTION_DEPTH\` levels.
+
+**Response.** A 2xx response is parsed: JSON is written to \`into\` exactly as \`setData\` would write it,
+anything else as a string, an empty body (and a HEAD) as \`""\`. The response must be data (no null,
+within the data limits) or the request fails with \`invalid_response\`. Metadata goes to \`<into>__meta\`,
+a sibling whose key is the last segment of \`into\` plus \`__meta\` (\`/data/feed\` writes
+\`/data/feed__meta\`): \`{status?, headers?, durationMs, error?: {code, message}}\`. \`status\` and
+\`headers\` (names lower-cased) are present once a response arrived; \`error\` is present for every
+failure. A non-2xx status leaves \`into\` untouched, writes the metadata with
+\`error: {code: "http_error", message: "HTTP 404"}\` and counts as an error. If the metadata would not fit
+the data write limit, \`headers\` is dropped. Other \`error.code\` values: \`timeout\`, \`too_large\`,
+\`connection_refused\`, \`cancelled\`, \`invalid_url\`, \`invalid_request\`, \`network\`, \`too_many_in_flight\`,
+\`invalid_response\`.
+
+**Order.** On completion the device writes \`into\`, then \`<into>__meta\`, then \`statusKey\`, then sends the
+request event, then runs \`onSuccess\` or \`onError\`. Each \`/data\` write is a \`change\` event as for data
+actions. The request event is an \`emit\` with \`name\` \`prototype_request\` (reserved: an authored
+\`emit\` cannot use it) and \`payload\`
+\`{requestId, method, url, via, into?, outcome: "success"|"error", status?, durationMs, error?: {code, message}}\`,
+where \`url\` is the resolved URL cut to 2048 characters. Await it with
+\`awaitEvent {kind: "emit", eventName: "prototype_request"}\`.
+
+**Limits.** A response body over \`MAX_PROTOTYPE_RESPONSE_BYTES\` fails with \`too_large\` (the value never
+exceeds \`MAX_PROTOTYPE_DATA_WRITE_BYTES\`, so an accepted response fits one \`/data\` write). At most
+\`MAX_PROTOTYPE_REQUESTS_IN_FLIGHT\` requests run per device; another fails with \`too_many_in_flight\`.
+A request to an \`into\` that already has one in flight cancels the first: the latest request wins. The
+cancelled one writes nothing, does not touch \`statusKey\`, runs no follow-up and reports a
+\`cancelled\` event. Dismissing the prototype cancels all its requests.
+
 `;
 
 export const GUIDE_DATA = `## Data
@@ -796,7 +862,7 @@ each literal port (a URL without a port reverses 80, or 443 for https), removes 
 created when the prototype is dismissed or the device disconnects, and leaves a reverse that already
 existed alone. A failed reverse never fails the show; \`inspect\` reports it as \`reverseFailures\`.
 
-A port that is a binding (\`http://localhost:{state:port}/feed\`) cannot be reversed, because it is only
+A port that is a binding (\`http://localhost:{port}/feed\`) cannot be reversed, because it is only
 known when the request runs. \`inspect\` lists such URLs as \`unreversiblePorts\`. Use \`via: "host"\` for
 those requests. A saved prototype launched with no host connected gets no reverse either.
 iOS simulators share the Mac's network, so nothing is reversed there.

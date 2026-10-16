@@ -37,6 +37,7 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 | Bottom sheet lifting above the keyboard                                               | Supported, not yet device-verified; see [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Style `weight`, `minWidth`/`maxWidth`/`minHeight`/`maxHeight`, `aspectRatio` (#11543) | Supported, not yet device-verified: sized by `PrototypeSizing` in Android's order (bounds, then `width`/`height`, then aspect ratio); a weight takes exactly its share of a `row`/`column`'s main axis and beats that axis's size and bounds, and is ignored outside a row or column; `min` wins when it exceeds `max`; content on an axis with no authored size (or `wrap`) is centred in the box a min bound grew, as `wrapContentWidth()`/`wrapContentHeight()` do, while an explicit `width`/`height`/`fill` keeps the node's alignment; weighted stacks mirror under RTL via SwiftUI's own Layout mirroring; sizes are fractional points, not rounded to pixels |
 | Data model (#11673)                                                                   | Implemented with `prototype_data_model_v1`: authored tree and repeat-cell guards precede resolution; resolved limits precede repeat expansion; status reports read-only `data`; see [Data model](../android/prototype-ux.md#data-model-11673).                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Request action (#12529)                                                               | Implemented, not yet device-verified (`prototype_network_v1` and `prototype_network_device_v1`): `via: "host"` through `prototype_request` / `prototype_response` frames, `via: "device"` through a URLSession client; see [Request action capability](#request-action-capability).                                                                                                                                                                                                                                                                                                                                                                                  |
 | [Patch (#11675)](../android/prototype-ux.md#patch-11675)                              | Not implemented: the agent does not advertise `prototype_patch_v1` (the pure applier and shared fixtures exist in the agent core).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Non-scalar state values (`null`, array, object)                                       | Refused at `show`, as Android and the host schema do: state is string, number or boolean only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Foreground scoping to the shown-over app                                              | Not needed: the agent lives in the app, so backgrounding the app hides its window                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -551,6 +552,65 @@ listed in `skippedKeys`. `reset: true` does not clear storage.
 `storage`. `clear_prototype_storage {id}` answers `cleared`, the number of stored keys removed, and leaves the
 shown prototype alone. The iOS saved prototype is its own app, so `deleteSaved` uninstalls the app and its
 sandbox, storage included.
+
+## Request action capability
+
+The agent advertises `prototype_network_v1` and `prototype_network_device_v1` for the `request` action
+([contract](../android/prototype-ux.md#request-action-12523)). `PrototypeSession` is a twin of the
+host's `applyPrototypeRequestOutcome`: a tap resolves the action's bindings against the committed
+state and data (`PrototypeRequestResolver`, twin of `resolvePrototypeRequest`; `{key}` and
+`{data:/pointer}` are bound in one pass so a substituted value is never scanned again), moves the
+`statusKey` to `loading` and issues a start command. The answer arrives later through
+`completeRequest`, which writes `into`, then `<into>__meta` (dropping `headers` when the value does not
+fit the data write limit), moves the status key, emits the `prototype_request` event and runs
+`onSuccess` or `onError`, in that order. A request that cannot be built (an unresolvable binding, an
+invalid URL) or is refused (`too_many_in_flight`, at 4) completes at once as an error through the same
+path. A newer request to the same `into` cancels the older: the older writes nothing, leaves the status
+key alone, runs no follow-up and reports a `cancelled` event (its `durationMs` is 0, because the
+session has no clock). Dismissal, a replacing show of another prototype and `reset` cancel every
+request; a same-id replace keeps them.
+
+`PrototypeRequestValidator` repeats the host's static rules on the authored tree at show (URL scheme,
+method, bodies on GET and HEAD, `into` naming an object member, `statusKey` naming a declared string
+state key, header names, entry counts, `timeoutMs` 1 to 30000, follow-up lists of 1 to 32, the reserved
+`prototype_request` emit name and `MAX_PROTOTYPE_ACTION_DEPTH`), and `PrototypeRepeat` binds a request's
+`url`, `statusKey`, `into`, header and query strings, binding objects and nested follow-up lists per
+row. The Swift decoder keeps `query` as an unordered dictionary, so entries are set on the URL in
+UTF-16 name order, not authored order (the resolved URL, and so the event `url`, can differ from the
+host's ordering for a request with several query entries).
+
+`PrototypeRequestDriver` runs what the session starts, behind a clock and two seams so its tests are
+deterministic:
+
+- **`via: "host"` (the default).** The agent broadcasts a `prototype_request` frame
+  (`prototypeRequestMessageSchema`) to the authenticated host connection and the host's
+  `prototype_response` frame arrives as an ordinary request line that the agent routes to the driver and
+  never replies to. The host has no cancel frame, so a cancelled call is forgotten and its late response
+  ignored. A host that stays silent for `timeoutMs` plus 2 s ends as `timeout`; no connected host, or
+  the last host leaving, ends it as `network`. The host side is `createPrototypeRequestHost` wired to
+  the agent client (`attachIosPrototypeRequests`), which also cancels the device's requests when the
+  connection closes.
+- **`via: "device"`.** Core owns the `PrototypeHttpClient` protocol and links no HTTP library; the agent
+  injects `PrototypeURLSessionClient`. It uses a dedicated ephemeral `URLSession` (never
+  `URLSession.shared`, so the app's cookies, cache and credentials are untouched) with the contract's
+  30 s ceiling, enforces `timeoutMs` as a total deadline, stops reading and fails with `too_large` once
+  the body crosses 262144 bytes (or its `Content-Length` announces more), maps URLSession errors to the
+  contract's codes and reports the duration from the task metrics. Its tests run the real client over a
+  `URLProtocol` stub.
+
+**Alamofire.** The proposal for #12529 names Alamofire 5.x for the on-device client, after two checks:
+that an injected dylib linking Alamofire coexists with a host app that links its own copy, and the
+dylib's binary size. Both need macOS, Xcode and a simulator, so they have not been run and the package
+does not depend on Alamofire. The URLSession client above is in place behind the same
+`PrototypeHttpClient` protocol, which is the fallback the proposal describes; an Alamofire client would
+be a second conformance, chosen where the agent builds the driver, with no change to Core.
+
+**App Transport Security.** localhost and IP-literal `http://` hosts are exempt from ATS; any other
+cleartext `http://` host falls under the host app's own ATS settings. There is no allowlist. The
+viewer template app sets `NSAllowsArbitraryLoads` in `Viewer/Info.plist`, so a viewer runs any URL. In
+an injected agent a `via: "device"` request that ATS blocks
+(`NSURLErrorAppTransportSecurityRequiresSecureConnection`) completes as a typed `network` error whose
+message tells the author to use `via: "host"`, which the AutoMobile host runs without that restriction.
 
 ## Text field options
 

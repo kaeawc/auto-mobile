@@ -13,6 +13,9 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -165,6 +168,10 @@ class PrototypeController(
    * Null leaves `storage` inert, and the device must not advertise the capability.
    */
   private val storage: PrototypeStoragePersistence? = null,
+  /** The transports behind `request` actions (#12528). */
+  private val httpClients: PrototypeHttpClients = PrototypeHttpClients.Unavailable,
+  /** Where requests wait for their response; they are cancelled when their prototype ends. */
+  private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
   val isShowing: Boolean
     get() = surfaces.values.any { it.host.isShowing }
@@ -537,6 +544,10 @@ class PrototypeController(
         previousStacks =
           if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
         storage = opened.session,
+        httpClients = httpClients,
+        requestScope = requestScope,
+        // A response lands between interactions, never in the middle of one.
+        exclusively = { block -> settleRequest(runtime, block) },
       )
     val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
@@ -765,18 +776,39 @@ class PrototypeController(
           )
             armIdle(runtime)
           runtime.handle(interaction)
-          if (surfaceOf(runtime) != null && runtime.current.active) {
-            val model = runtime.renderModel()
-            PrototypeTrace.asyncSection(PrototypeTrace.SYNC_APPEARANCE) {
-              syncAppearance(runtime, model)
-              syncTextFieldFocus(runtime, model)
-            }
-          }
+          syncAfterChange(runtime)
         } catch (error: CancellationException) {
           throw error
         } catch (error: Exception) {
           Log.w("PrototypeController", "Prototype interaction failed", error)
         }
+      }
+    }
+
+  /** Re-resolves the appearance and the focused field after the runtime changed the spec. */
+  private suspend fun syncAfterChange(runtime: PrototypeRuntime) {
+    if (surfaceOf(runtime) == null || !runtime.current.active) return
+    val model = runtime.renderModel()
+    PrototypeTrace.asyncSection(PrototypeTrace.SYNC_APPEARANCE) {
+      syncAppearance(runtime, model)
+      syncTextFieldFocus(runtime, model)
+    }
+  }
+
+  /**
+   * A request's response, applied under the same lock as a tap and followed by the same appearance
+   * and focus sync, because its writes and follow-up actions change the spec like one.
+   */
+  private suspend fun settleRequest(runtime: PrototypeRuntime, apply: suspend () -> Unit) =
+    mutex.withLock {
+      if (destroyed || !runtime.current.active || surfaceOf(runtime) == null) return@withLock
+      try {
+        apply()
+        syncAfterChange(runtime)
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Exception) {
+        Log.w("PrototypeController", "Prototype request completion failed", error)
       }
     }
 

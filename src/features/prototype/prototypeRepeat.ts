@@ -16,6 +16,7 @@ import {
   templateSegments,
   type Binding,
   type FieldKind,
+  isDataPathKind,
   type Raw,
   type Segment,
 } from "./prototypeTemplate";
@@ -208,7 +209,7 @@ function dataPathPlaceholderError(
   scope: Scope,
 ): RepeatError | undefined {
   const message =
-    kind === "dataPath" && typeof value === "string"
+    isDataPathKind(kind) && typeof value === "string"
       ? prototypeDataPathPlaceholderMessage(value, scope.binding)
       : undefined;
   return message === undefined ? undefined : fail(path, message);
@@ -261,7 +262,7 @@ function literalPlaceholderError(
   if (kind === "key" && !STATE_KEY.test(value)) {
     return fail(path, "State key placeholder outside a repeat template");
   }
-  return kind === "dataPath" && prototypeDataPathHasIndex(value)
+  return isDataPathKind(kind) && prototypeDataPathHasIndex(value)
     ? fail(path, "{index} outside a repeat template")
     : undefined;
 }

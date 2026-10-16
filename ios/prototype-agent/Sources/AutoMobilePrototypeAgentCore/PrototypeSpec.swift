@@ -155,6 +155,7 @@ struct PrototypeSpec: Decodable {
     {
         try PrototypeSizeBounds.validate(.object(["root": raw]))
         try PrototypeLimits.guardAuthoredTree(raw)
+        try PrototypeRequestValidator.validate(raw, state: menuState)
         try PrototypeLimits.guardRepeatPathCells(raw, data: data)
         try PrototypeMenus.validateAuthoredText(raw)
         try PrototypeRepeat.validateEmitContexts(raw, data: data)
@@ -500,6 +501,59 @@ struct PrototypeAction: Decodable, Sendable {
     /// `increment`/`decrement` step; 1 when omitted.
     let by: Double?
     let requireValid: [String]?
+    // `request` (#12529): method defaults to GET and `via` to host. `headers` and `query` entries
+    // are a literal string or a binding object; `body` is a binding; `url`, `statusKey` and `into`
+    // are bound per repeat row at expansion like the data actions' paths.
+    let method: String?
+    let url: String?
+    let headers: [String: JSONValue]?
+    let query: [String: JSONValue]?
+    let body: JSONValue?
+    let into: String?
+    let statusKey: String?
+    let via: String?
+    let timeoutMs: Double?
+    let onSuccess: [PrototypeAction]?
+    let onError: [PrototypeAction]?
+
+    init(
+        type: String, name: String?, payload: JSONValue?, context: PrototypeEmitContext?, pager: String?,
+        page: JSONValue?, stack: String?, screen: String?, path: String?, key: String?, value: JSONValue?,
+        by: Double?, requireValid: [String]?, method: String? = nil, url: String? = nil,
+        headers: [String: JSONValue]? = nil, query: [String: JSONValue]? = nil, body: JSONValue? = nil,
+        into: String? = nil, statusKey: String? = nil, via: String? = nil, timeoutMs: Double? = nil,
+        onSuccess: [PrototypeAction]? = nil, onError: [PrototypeAction]? = nil
+    ) {
+        self.type = type
+        self.name = name
+        self.payload = payload
+        self.context = context
+        self.pager = pager
+        self.page = page
+        self.stack = stack
+        self.screen = screen
+        self.path = path
+        self.key = key
+        self.value = value
+        self.by = by
+        self.requireValid = requireValid
+        self.method = method
+        self.url = url
+        self.headers = headers
+        self.query = query
+        self.body = body
+        self.into = into
+        self.statusKey = statusKey
+        self.via = via
+        self.timeoutMs = timeoutMs
+        self.onSuccess = onSuccess
+        self.onError = onError
+    }
+
+    /// This action and every action nested in its `onSuccess` / `onError` lists, depth first.
+    var flattened: [PrototypeAction] {
+        [self] + ((onSuccess ?? []) + (onError ?? [])).flatMap(\.flattened)
+    }
 }
 
 /// The shared validator's condition vocabulary (`visibleWhen`, `openWhen`): exactly one form per

@@ -127,6 +127,8 @@ dependencies {
   implementation(libs.ktor.serialization.kotlinx.json)
   implementation(libs.okhttp)
   implementation(libs.okhttp.sse)
+  // Typed device client for prototype request actions (no converters; see docs/decisions)
+  implementation(libs.retrofit)
 
   // Test dependencies
   testImplementation(libs.bundles.unit.test)
@@ -134,6 +136,7 @@ dependencies {
   testImplementation(libs.robolectric)
   // createComposeRule's mainClock drives prototype motion frame by frame (#10442).
   testImplementation(libs.compose.ui.junit)
+  testImplementation(libs.okhttp.mockwebserver)
   testImplementation(libs.ktor.client.core)
   testImplementation(libs.ktor.client.cio)
   testImplementation(libs.ktor.client.websockets)

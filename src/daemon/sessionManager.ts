@@ -1,5 +1,14 @@
 import { createLegacyLifecycleView } from "./legacyLifecycleView";
-import { SessionSlots, isLegacySessionIdKnown, type LegacyLifecycleView } from "./sessionSlots";
+import {
+  SessionSlots,
+  deriveSlotTag,
+  isSlotTagBeingRecreated,
+  isSlotCurrentSession,
+  deriveLatestSessionIdentity,
+  deriveHeldSlotSession,
+  deriveKnownSessionIds,
+  type LegacyLifecycleView,
+} from "./sessionSlots";
 import { SessionSlotShadowProbe, type SlotShadowProbeMode } from "./sessionSlotShadowProbe";
 import {
   RecorderTeardownRetries,
@@ -1777,7 +1786,7 @@ export class SessionManager {
     ReleaseReasonState,
     TerminalReleaseReservation,
     TerminalReleaseIntent
-  >();
+  >({ onFinalizedIdentityCollected: (uuid) => this.slotShadowProbe.transitionGuard.forget(uuid) });
   /** False once daemon shutdown fences acquisitions that outlive request quiescence. */
   private acceptingSessionCreations = true;
   /**
@@ -1965,6 +1974,7 @@ export class SessionManager {
         continue;
       }
       this.sessionSlots.deleteRecoveredTerminalIntent(intent.sessionId);
+      this.slotShadowProbe.check(intent.sessionId, "recovered-terminal-intent-deleted");
       this.sessionSlots.deleteAdoptedTerminalOwner(intent.sessionId);
       this.terminalReleaseJournal.resolve(intent.sessionId, intent.reason);
     }
@@ -6502,8 +6512,7 @@ export class SessionManager {
   /** The same holders as getSessionForDevice, including expired and releasing sessions. */
   getHeldDeviceSessions(): readonly HeldDeviceSession[] {
     return [...this.deviceSessionMap].flatMap(([deviceId, sessionId]) => {
-      const session =
-        this.sessions.get(sessionId) ?? this.sessionSlots.getReleaseOp(sessionId)?.session;
+      const session = deriveHeldSlotSession(this.getLegacyLifecycleView(), sessionId);
       return session
         ? [
             {
@@ -6538,9 +6547,10 @@ export class SessionManager {
     );
   }
 
+  private lifecycleView?: LegacyLifecycleView<Session>;
   /** Read-only shadow adapter; its maps reflect subsequent lifecycle mutations. */
   getLegacyLifecycleView(): LegacyLifecycleView<Session> {
-    return createLegacyLifecycleView(
+    return (this.lifecycleView ??= createLegacyLifecycleView(
       {
         sessions: this.sessions,
         pendingAssignments: this.sessionSlots.assignments,
@@ -6553,21 +6563,15 @@ export class SessionManager {
         latestFinalizedIdentities: this.sessionSlots.latestFinalizedIdentities,
       },
       { has: (session) => this.sessionSlots.isReleasing(session) },
-    );
+    ));
   }
 
   private readonly slotShadowProbe = new SessionSlotShadowProbe(
     () => this.getLegacyLifecycleView(),
-    {
-      isCurrentSession: (session) => this.isCurrentSession(session),
-      isAdmittedForAutomation: (session) => this.isAdmittedForAutomation(session),
-      isLatestSessionIdentity: (session) => this.isLatestSessionIdentity(session),
-      isSessionBeingRecreated: (uuid) => this.isSessionBeingRecreated(uuid),
-      isKnownSessionId: (uuid) => isLegacySessionIdKnown(this.getLegacyLifecycleView(), uuid),
-    },
+    undefined,
     logger,
+    (uuid) => this.sessionSlots.notifySettled(uuid),
   );
-
   setSlotShadowProbeMode(mode: SlotShadowProbeMode): void {
     this.slotShadowProbe.mode = mode;
   }
@@ -6578,10 +6582,7 @@ export class SessionManager {
   }
 
   isCurrentSession(session: Session): boolean {
-    return (
-      this.sessions.get(session.sessionId) === session &&
-      !this.sessionSlots.hasTerminalSnapshot(session.sessionId)
-    );
+    return isSlotCurrentSession(this.getLegacyLifecycleView(), session.sessionId, session);
   }
 
   isAdmittedForAutomation(session: Session): boolean {
@@ -6604,21 +6605,13 @@ export class SessionManager {
     session: Session,
     options: { ignorePendingAssignment?: boolean } = {},
   ): boolean {
-    const current = this.sessions.get(session.sessionId);
-    if (current) {
-      return current === session;
-    }
-    if (
-      this.sessionSlots.hasCreation(session.sessionId) ||
-      (!options.ignorePendingAssignment && this.sessionSlots.hasAssignment(session.sessionId))
-    ) {
-      return false;
-    }
-    const inFlightRelease = this.sessionSlots.getReleaseOp(session.sessionId);
-    if (inFlightRelease) {
-      return inFlightRelease.session === session;
-    }
-    return this.sessionSlots.getFinalizedIdentity(session.sessionId)?.deref() === session;
+    return (
+      deriveLatestSessionIdentity(
+        this.getLegacyLifecycleView(),
+        session.sessionId,
+        options.ignorePendingAssignment,
+      ) === session
+    );
   }
 
   /**
@@ -9492,11 +9485,7 @@ export class SessionManager {
   }
 
   private isSessionBeingRecreated(sessionId: string): boolean {
-    return (
-      this.sessions.has(sessionId) ||
-      this.sessionSlots.hasCreation(sessionId) ||
-      this.sessionSlots.hasAssignment(sessionId)
-    );
+    return isSlotTagBeingRecreated(deriveSlotTag(this.getLegacyLifecycleView(), sessionId));
   }
 
   private shouldSurfaceReleasePersistenceFailure(
@@ -11842,6 +11831,7 @@ export class SessionManager {
     }
     this.endedLabelBases.delete(sessionId);
     if (this.sessionSlots.deleteTerminalSnapshot(sessionId)) {
+      this.slotShadowProbe.check(sessionId, "plan-label-fence-lifted");
       this.sessionSlots.deleteTerminalReasonState(sessionId);
       this.volatileTerminalReleaseIntents.delete(sessionId);
       this.terminalReleaseJournal.resolve(sessionId);
@@ -13219,16 +13209,7 @@ export class SessionManager {
    * creation, assignment, rebind, or early-release work.
    */
   getAllKnownSessionIds(): string[] {
-    return Array.from(
-      new Set([
-        ...this.sessions.keys(),
-        ...this.sessionSlots.creations.keys(),
-        ...this.sessionSlots.assignments.keys(),
-        ...this.sessionSlots.rebinds.keys(),
-        ...this.sessionSlots.releaseRequests.keys(),
-        ...this.sessionSlots.releaseOps.keys(),
-      ]),
-    );
+    return deriveKnownSessionIds(this.getLegacyLifecycleView());
   }
 
   /**

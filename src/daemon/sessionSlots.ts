@@ -65,8 +65,45 @@ export class SessionSlots<
   /** An adopted intent applies only while its row still belongs to this dead daemon. */
   private readonly adoptedTerminalReleaseOwners = new Map<string, string>();
 
+  private readonly tagWaiters = new Map<
+    string,
+    {
+      view: LegacyLifecycleView<S>;
+      tag: SlotPhase;
+      promise: Promise<void>;
+      resolve: () => void;
+    }
+  >();
+
+  /** Shared, resolve-only notification for the next tag change, with no promise wrapper. */
+  settled(id: string, view: LegacyLifecycleView<S>): Promise<void> {
+    const existing = this.tagWaiters.get(id);
+    if (existing) {
+      return existing.promise;
+    }
+    const { promise, resolve } = Promise.withResolvers<void>();
+    this.tagWaiters.set(id, { view, tag: deriveSlotTag(view, id), promise, resolve });
+    return promise;
+  }
+
+  /** Also called at publication/unpublication, whose session map still belongs to the manager. */
+  notifySettled(id: string): void {
+    const waiter = this.tagWaiters.get(id);
+    if (waiter && deriveSlotTag(waiter.view, id) !== waiter.tag) {
+      this.tagWaiters.delete(id);
+      waiter.resolve();
+    }
+  }
+
+  private notifyReleasingChanged(): void {
+    for (const id of this.tagWaiters.keys()) {
+      this.notifySettled(id);
+    }
+  }
+
   constructor(
     options: {
+      onFinalizedIdentityCollected?: (id: string) => void;
       createFinalizationRegistry?: (
         cleanup: (held: { sessionId: string; identity: WeakRef<S> }) => void,
       ) => FinalizationRegistryLike<{ sessionId: string; identity: WeakRef<S> }>;
@@ -75,6 +112,8 @@ export class SessionSlots<
     const cleanup = ({ sessionId, identity }: { sessionId: string; identity: WeakRef<S> }) => {
       if (this.latestFinalizedSessionIdentities.get(sessionId) === identity) {
         this.latestFinalizedSessionIdentities.delete(sessionId);
+        this.notifySettled(sessionId);
+        options.onFinalizedIdentityCollected?.(sessionId);
       }
     };
     this.finalizedSessionIdentityRegistry = options.createFinalizationRegistry
@@ -89,6 +128,7 @@ export class SessionSlots<
     }
     const identity = new WeakRef(session);
     this.latestFinalizedSessionIdentities.set(session.sessionId, identity);
+    this.notifySettled(session.sessionId);
     this.finalizedSessionIdentityRegistry.register(session, {
       sessionId: session.sessionId,
       identity,
@@ -109,10 +149,13 @@ export class SessionSlots<
 
   setTerminalSnapshot(id: string, value: TerminalSnapshot): void {
     this.terminalReleaseSnapshots.set(id, value);
+    this.notifySettled(id);
   }
 
   deleteTerminalSnapshot(id: string): boolean {
-    return this.terminalReleaseSnapshots.delete(id);
+    const deleted = this.terminalReleaseSnapshots.delete(id);
+    this.notifySettled(id);
+    return deleted;
   }
 
   get terminalReasonStates(): ReadonlyMap<string, Reason> {
@@ -167,12 +210,10 @@ export class SessionSlots<
     return this.latestFinalizedSessionIdentities.has(id);
   }
 
-  setFinalizedIdentity(id: string, value: WeakRef<S>): void {
-    this.latestFinalizedSessionIdentities.set(id, value);
-  }
-
   deleteFinalizedIdentity(id: string): boolean {
-    return this.latestFinalizedSessionIdentities.delete(id);
+    const deleted = this.latestFinalizedSessionIdentities.delete(id);
+    this.notifySettled(id);
+    return deleted;
   }
 
   get recoveredTerminalIntents(): ReadonlyMap<string, Intent> {
@@ -189,10 +230,13 @@ export class SessionSlots<
 
   setRecoveredTerminalIntent(id: string, value: Intent): void {
     this.recoveredTerminalReleaseIntents.set(id, value);
+    this.notifySettled(id);
   }
 
   deleteRecoveredTerminalIntent(id: string): boolean {
-    return this.recoveredTerminalReleaseIntents.delete(id);
+    const deleted = this.recoveredTerminalReleaseIntents.delete(id);
+    this.notifySettled(id);
+    return deleted;
   }
 
   get adoptedTerminalOwners(): ReadonlyMap<string, string> {
@@ -245,10 +289,13 @@ export class SessionSlots<
 
   setReleaseOp(id: string, value: Op): void {
     this.releasePromises.set(id, value);
+    this.notifySettled(id);
   }
 
   deleteReleaseOp(id: string): boolean {
-    return this.releasePromises.delete(id);
+    const deleted = this.releasePromises.delete(id);
+    this.notifySettled(id);
+    return deleted;
   }
 
   get activeReleases(): ReadonlySet<Op> {
@@ -269,10 +316,13 @@ export class SessionSlots<
 
   markReleasing(session: S): void {
     this.releasingSessions.add(session);
+    this.notifyReleasingChanged();
   }
 
   unmarkReleasing(session: S): boolean {
-    return this.releasingSessions.delete(session);
+    const deleted = this.releasingSessions.delete(session);
+    this.notifyReleasingChanged();
+    return deleted;
   }
 
   isReleasing(session: S): boolean {
@@ -309,10 +359,13 @@ export class SessionSlots<
 
   setAssignment(id: string, value: A): void {
     this.pendingSessionAssignments.set(id, value);
+    this.notifySettled(id);
   }
 
   deleteAssignment(id: string): boolean {
-    return this.pendingSessionAssignments.delete(id);
+    const deleted = this.pendingSessionAssignments.delete(id);
+    this.notifySettled(id);
+    return deleted;
   }
 
   get sharedAssignments(): ReadonlyMap<string, Sh> {
@@ -345,10 +398,13 @@ export class SessionSlots<
 
   setCreation(id: string, value: C): void {
     this.pendingSessionCreations.set(id, value);
+    this.notifySettled(id);
   }
 
   deleteCreation(id: string): boolean {
-    return this.pendingSessionCreations.delete(id);
+    const deleted = this.pendingSessionCreations.delete(id);
+    this.notifySettled(id);
+    return deleted;
   }
 
   get recoveries(): ReadonlyMap<string, R> {
@@ -381,10 +437,13 @@ export class SessionSlots<
 
   setReleaseRequest(id: string, value: Rel): void {
     this.pendingSessionReleases.set(id, value);
+    this.notifySettled(id);
   }
 
   deleteReleaseRequest(id: string): boolean {
-    return this.pendingSessionReleases.delete(id);
+    const deleted = this.pendingSessionReleases.delete(id);
+    this.notifySettled(id);
+    return deleted;
   }
 
   get rebinds(): ReadonlyMap<string, Reb> {
@@ -401,10 +460,13 @@ export class SessionSlots<
 
   setRebind(id: string, value: Reb): void {
     this.pendingRebinds.set(id, value);
+    this.notifySettled(id);
   }
 
   deleteRebind(id: string): boolean {
-    return this.pendingRebinds.delete(id);
+    const deleted = this.pendingRebinds.delete(id);
+    this.notifySettled(id);
+    return deleted;
   }
 
   /** Live iteration lets cleanup commits delete receipts while a flush is in progress. */
@@ -577,6 +639,92 @@ export function assertSlotTransition(from: SlotPosition, to: SlotPosition): void
   }
 }
 
+// Each skipped path is already legal in design §3.1. Hooks do not observe the absent
+// admission fence between failure and cleanup, or ended while older work still covers a UUID.
+const COARSE_SLOT_PATHS: readonly {
+  event: string;
+  from: SlotPhase;
+  via: SlotPhase;
+  to: SlotPhase;
+}[] = [
+  { event: "published", from: "absent", via: "creating", to: "live" },
+  { event: "assignment-end", from: "assigning", via: "absent", to: "fenced" },
+  { event: "creation-end", from: "creating", via: "absent", to: "fenced" },
+  { event: "unpublished", from: "releasing", via: "ended", to: "creating" },
+];
+
+// docs/design-docs/session-state-record.md §4 "S7 guard findings" documents these
+// seven §3.1 gaps and the four coarse paths above. Count both at debug: they are known
+// observations, so warning or throwing would add production noise without a new finding.
+// Scope each exception to its actual hook so it cannot silently bless a new transition.
+const REPORTED_SLOT_TRANSITIONS = new Set([
+  "assignment-start:ended:assigning", // revival first needs automatic device assignment
+  "assignment-end:assigning:ended", // failed assignment reveals the old finalized identity
+  "creation-end:creating:assigning", // creation clears before its covering assignment
+  "creation-end:creating:ended", // failed creation reveals the old finalized identity
+  "unpublished:releasing:assigning", // unpublication reveals the covering assignment
+  "release-end:ended:fenced", // terminal upgrade of a finalized non-terminal release
+  "release-end:ended:live", // shutdown test injects a replacement without a publish hook
+]);
+
+/** Diagnostic only; hook bookkeeping is synchronous and never drives lifecycle decisions. */
+export class SlotTransitionGuard {
+  illegalTransitionCount = 0;
+  private readonly positions = new Map<string, SlotPosition>();
+  private baselineAfterReset = false;
+
+  constructor(
+    private readonly logger: { debug(message: string): void; warn(message: string): void },
+  ) {}
+
+  /** Off mode leaves unobserved transitions; resume from each UUID's first new observation. */
+  reset(): void {
+    this.positions.clear();
+    this.baselineAfterReset = true;
+  }
+
+  /** Finalization cleanup releases ended UUID bookkeeping along with its weak identity. */
+  forget(uuid: string): void {
+    this.positions.delete(uuid);
+  }
+
+  check(uuid: string, event: string, to: SlotPosition, mode: "throw" | "log"): void {
+    const from = this.positions.get(uuid) ?? (this.baselineAfterReset ? to : { tag: "absent" });
+    if (to.tag === "absent") {
+      this.positions.delete(uuid);
+    } else {
+      this.positions.set(uuid, { tag: to.tag, fence: to.fence });
+    }
+    if (from.tag === to.tag && from.fence === to.fence) {
+      return;
+    }
+    const result = checkSlotTransition(from, to);
+    if (result.ok) {
+      return;
+    }
+    const known =
+      REPORTED_SLOT_TRANSITIONS.has(`${event}:${from.tag}:${to.tag}`) ||
+      COARSE_SLOT_PATHS.some(
+        (path) =>
+          path.event === event &&
+          path.from === from.tag &&
+          path.to === to.tag &&
+          checkSlotTransition(from, { tag: path.via }).ok &&
+          checkSlotTransition({ tag: path.via }, to).ok,
+      );
+    this.illegalTransitionCount++;
+    const message = `[SlotTransitionGuard] uuid=${uuid} event=${event}: ${result.reason}`;
+    if (known) {
+      this.logger.debug(message);
+      return;
+    }
+    if (mode === "throw") {
+      throw new SlotTransitionError(from, to, message);
+    }
+    this.logger.warn(message);
+  }
+}
+
 export interface LegacyLifecycleView<S = object> {
   readonly sessions: ReadonlyMap<string, S>;
   isReleasing(session: S): boolean;
@@ -603,60 +751,61 @@ export interface DerivedSlot {
 
 /** Published incarnations outrank old operations; terminal fences also cover declined commits. */
 export function deriveSlot<S>(view: LegacyLifecycleView<S>, uuid: string): DerivedSlot {
-  const session = view.sessions.get(uuid);
-  if (session !== undefined) {
-    return derivePublishedSlot(view, uuid, session);
+  const tag = deriveSlotTag(view, uuid);
+  const slot: DerivedSlot = {
+    tag,
+    releaseRequested: (tag === "creating" || tag === "assigning") && view.pendingReleases.has(uuid),
+  };
+  if (tag === "releasing") {
+    slot.fence = view.terminalSnapshots.has(uuid) ? "terminal" : "none";
   }
-  if (view.pendingCreations.has(uuid)) {
-    return { tag: "creating", releaseRequested: view.pendingReleases.has(uuid) };
-  }
-  if (view.pendingAssignments.has(uuid)) {
-    return { tag: "assigning", releaseRequested: view.pendingReleases.has(uuid) };
-  }
-  const slot = deriveFinalizedSlot(view, uuid);
   if (
-    view.pendingReleases.has(uuid) ||
-    view.pendingRebinds.has(uuid) ||
-    view.releaseOps.has(uuid)
+    !isSlotTagBeingRecreated(tag) &&
+    (view.pendingReleases.has(uuid) || view.pendingRebinds.has(uuid) || view.releaseOps.has(uuid))
   ) {
     slot.residue = true;
   }
   return slot;
 }
 
-function derivePublishedSlot<S>(
+/** The hot predicates need only the tag; do not allocate a DerivedSlot for those reads. */
+export function deriveSlotTag<S>(view: LegacyLifecycleView<S>, uuid: string): SlotPhase {
+  const session = view.sessions.get(uuid);
+  if (session !== undefined) {
+    return derivePublishedSlotTag(view, uuid, session);
+  }
+  if (view.pendingCreations.has(uuid)) {
+    return "creating";
+  }
+  if (view.pendingAssignments.has(uuid)) {
+    return "assigning";
+  }
+  if (view.terminalSnapshots.has(uuid) || view.recoveredTerminalIntents.has(uuid)) {
+    return "fenced";
+  }
+  if (
+    view.releaseOps.has(uuid) ||
+    view.latestFinalizedIdentities.get(uuid)?.deref() !== undefined
+  ) {
+    return "ended";
+  }
+  return "absent";
+}
+
+function derivePublishedSlotTag<S>(
   view: LegacyLifecycleView<S>,
   uuid: string,
   session: S,
-): DerivedSlot {
+): SlotTag {
   const op = view.releaseOps.get(uuid);
-  const terminal = view.terminalSnapshots.has(uuid);
   if (
-    terminal ||
+    view.terminalSnapshots.has(uuid) ||
     view.isReleasing(session) ||
     (op?.session === session && !op.forced && !op.commitDeclined)
   ) {
-    return { tag: "releasing", fence: terminal ? "terminal" : "none", releaseRequested: false };
+    return "releasing";
   }
-  return { tag: view.pendingRebinds.has(uuid) ? "rebinding" : "live", releaseRequested: false };
-}
-
-function deriveFinalizedSlot<S>(view: LegacyLifecycleView<S>, uuid: string): DerivedSlot {
-  const fenced = view.terminalSnapshots.has(uuid) || view.recoveredTerminalIntents.has(uuid);
-  if (view.releaseOps.has(uuid)) {
-    return { tag: fenced ? "fenced" : "ended", releaseRequested: false };
-  }
-  if (fenced) {
-    return { tag: "fenced", releaseRequested: false };
-  }
-  return {
-    tag: view.latestFinalizedIdentities.get(uuid)?.deref() !== undefined ? "ended" : "absent",
-    releaseRequested: false,
-  };
-}
-
-export function deriveSlotTag<S>(view: LegacyLifecycleView<S>, uuid: string): SlotPhase {
-  return deriveSlot(view, uuid).tag;
+  return view.pendingRebinds.has(uuid) ? "rebinding" : "live";
 }
 
 export function deriveAllSlots<S>(view: LegacyLifecycleView<S>): Map<string, DerivedSlot> {
@@ -700,29 +849,60 @@ export function isSlotKnown(slot: DerivedSlot): boolean {
   return isSlotTagKnown(slot.tag) || slot.residue === true;
 }
 
-/** Constant-time equivalent of getAllKnownSessionIds membership, without allocating its union. */
-export function isLegacySessionIdKnown<S>(view: LegacyLifecycleView<S>, uuid: string): boolean {
-  return (
-    view.sessions.has(uuid) ||
-    view.pendingCreations.has(uuid) ||
-    view.pendingAssignments.has(uuid) ||
-    view.pendingRebinds.has(uuid) ||
-    view.pendingReleases.has(uuid) ||
-    view.releaseOps.has(uuid)
-  );
-}
-
 /** Identity read for the shadow model, including unpublished and finalized incarnations. */
 export function deriveLatestSessionIdentity<S>(
   view: LegacyLifecycleView<S>,
   uuid: string,
+  ignorePendingAssignment = false,
 ): S | undefined {
   const published = view.sessions.get(uuid);
   if (published !== undefined) {
     return published;
   }
-  if (view.pendingCreations.has(uuid) || view.pendingAssignments.has(uuid)) {
+  if (
+    view.pendingCreations.has(uuid) ||
+    (!ignorePendingAssignment && view.pendingAssignments.has(uuid))
+  ) {
     return undefined;
   }
   return view.releaseOps.get(uuid)?.session ?? view.latestFinalizedIdentities.get(uuid)?.deref();
+}
+
+/** Currentness includes non-terminal release windows before and after WeakSet cleanup. */
+export function isSlotCurrentSession<S>(
+  view: LegacyLifecycleView<S>,
+  uuid: string,
+  session: S,
+): boolean {
+  if (view.sessions.get(uuid) !== session) {
+    return false;
+  }
+  const tag = deriveSlotTag(view, uuid);
+  return (
+    tag === "live" ||
+    tag === "rebinding" ||
+    (tag === "releasing" && !view.terminalSnapshots.has(uuid))
+  );
+}
+
+/** The device index holds both published sessions and unpublished release operations. */
+export function deriveHeldSlotSession<S>(
+  view: LegacyLifecycleView<S>,
+  uuid: string,
+): S | undefined {
+  return view.sessions.get(uuid) ?? view.releaseOps.get(uuid)?.session;
+}
+
+/** Preserve the public union's insertion order, including otherwise-ended residue. */
+export function deriveKnownSessionIds<S>(view: LegacyLifecycleView<S>): string[] {
+  return [
+    ...new Set([
+      ...view.sessions.keys(),
+      ...view.pendingCreations.keys(),
+      ...view.pendingAssignments.keys(),
+      ...view.pendingRebinds.keys(),
+      ...view.pendingReleases.keys(),
+      ...view.releaseOps.keys(),
+    ]),
+  ].filter((uuid) => isSlotKnown(deriveSlot(view, uuid)));
 }

@@ -11,6 +11,7 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 /**
  * Executes swipe gestures on specific UI elements
@@ -118,9 +119,8 @@ export class SwipeOnElement extends BaseVisualChange {
         }
       },
       {
-        usesObservationForResolution: false,
-        changeExpected: false,
-        timeoutMs: 500,
+        ...OBSERVED_INTERACTION_PROFILES.noTreeResolution,
+        timeoutMs: SETTLE_BUDGET_MS.brief,
         progress,
         perf,
         signal,

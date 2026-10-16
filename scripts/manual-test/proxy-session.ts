@@ -1095,6 +1095,18 @@ export async function runProxySessionCommand(
       await closeBrokerSession(context, deps);
       return 0;
     }
+    if (
+      context &&
+      command.op === "close" &&
+      !driverAlive(dir, deps) &&
+      record(init?.session)?.outcome === "ready" &&
+      typeof record(init?.session)?.sessionUuid === "string"
+    ) {
+      // The driver died without publishing closed.json, but the grant is still recorded:
+      // release it through the broker so the caller gets a real release receipt.
+      deps.log("Driver is not alive; releasing the recorded broker grant instead of closing.");
+      return await runBrokerLifecycle({ ...command, op: "release" }, context, deps);
+    }
     if (context && command.op !== "close") {
       const refusal = brokerRequestRefusal(
         {

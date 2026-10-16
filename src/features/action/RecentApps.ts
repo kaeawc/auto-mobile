@@ -13,6 +13,7 @@ import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { logger } from "../../utils/logger";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 // Two reads preserve the existing recent-app verification bound.
 export const RECENT_APPS_VERIFY_ATTEMPTS = 2;
@@ -62,7 +63,7 @@ export class RecentApps extends BaseVisualChange {
           usesObservationForResolution: false,
           changeExpected: true,
           foregroundAppMayChange: true,
-          timeoutMs: 5000,
+          timeoutMs: SETTLE_BUDGET_MS.lifecycle,
           progress,
           signal,
           perf,
@@ -74,7 +75,7 @@ export class RecentApps extends BaseVisualChange {
       usesObservationForResolution: false,
       changeExpected: true,
       foregroundAppMayChange: true,
-      timeoutMs: 3000,
+      timeoutMs: SETTLE_BUDGET_MS.systemUi,
       progress,
       signal,
       perf,

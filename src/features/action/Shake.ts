@@ -18,6 +18,7 @@ import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKin
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { emulatorConsoleReportsFailure } from "../utility/DeviceState";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { OBSERVED_INTERACTION_PROFILES } from "./observedInteractionProfiles";
 
 // Issue #10250 reports this as the emulator's default resting gravity vector.
 const FALLBACK_RESTING_ACCELERATION = "0:9.77622:0";
@@ -106,8 +107,7 @@ export class Shake extends BaseVisualChange {
           }
         },
         {
-          usesObservationForResolution: false,
-          changeExpected: false,
+          ...OBSERVED_INTERACTION_PROFILES.noTreeResolution,
           timeoutMs: duration + 2000,
           tolerancePercent: 0.0,
           progress,
@@ -174,8 +174,8 @@ export class Shake extends BaseVisualChange {
         }
       },
       {
-        usesObservationForResolution: false,
-        changeExpected: false, // Shake typically doesn't change UI directly
+        // Shake typically doesn't change UI directly
+        ...OBSERVED_INTERACTION_PROFILES.noTreeResolution,
         timeoutMs: duration + 2000, // Give extra time beyond shake duration
         tolerancePercent: 0.0,
         progress,

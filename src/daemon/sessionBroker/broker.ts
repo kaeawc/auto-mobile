@@ -441,7 +441,7 @@ export class SessionBroker {
         await this.release(request.sessionId);
       }
       if (request.state === "acquiring" && !this.preparations.has(request.requestId)) {
-        await this.options.store.fail(
+        await this.options.store.failInterruptedAcquisition(
           request.requestId,
           this.options.owner,
           "Acquisition ended without committing a session; cleanup is pending",

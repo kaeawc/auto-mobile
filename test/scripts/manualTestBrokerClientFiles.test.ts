@@ -134,8 +134,14 @@ test("persisted request and token replay byte-for-byte with ordered batch attemp
   expect(second.requestId).toBe("batch-seed-phone-2");
   expect(() => persistBrokerAttempt(f.client, second, f.deps)).toThrow("immutable");
   f.files.set(join(f.client.dir, "in/stale.json"), "{}");
+  f.files.set(join(f.client.dir, "info.json"), '{"prior":"device"}');
   archiveBrokerAttempt(f.client, false, f.deps);
   persistBrokerAttempt(f.client, second, f.deps);
+  // A stale native-device descriptor must not survive into the next attempt's evidence.
+  expect(f.files.has(join(f.client.dir, "info.json"))).toBe(false);
+  expect(f.files.get(join(f.client.dir, "attempts/1/execution/info.json"))).toBe(
+    '{"prior":"device"}',
+  );
   expect(f.files.get(join(f.client.dir, "attempts/1/execution/request.json"))).toBe(bytes);
   expect(f.files.get(join(f.client.dir, "attempts/1/execution/in/stale.json"))).toBe("{}");
   expect(f.files.has(join(f.client.dir, "in/stale.json"))).toBe(false);

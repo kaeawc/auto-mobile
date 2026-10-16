@@ -190,6 +190,9 @@ describe("agent benchmark provider identity", () => {
     );
     expect(identity).not.toContain("secret");
     expect(providerIdentity({})).toBe("");
+    expect(
+      providerIdentity({ CLAUDE_CODE_USE_MANTLE: "1", CLAUDE_CODE_USE_ANTHROPIC_AWS: "1" }),
+    ).toBe(["CLAUDE_CODE_USE_ANTHROPIC_AWS=1", "CLAUDE_CODE_USE_MANTLE=1"].join("\n"));
     // Proxy routing is recorded by host and bypass list, never with its credentials.
     const proxied = providerIdentity({
       HTTPS_PROXY: "http://user:pass@proxy.corp:3128",

@@ -229,6 +229,7 @@ import { CtrlProxyFocus, type FocusActionOutcome } from "./CtrlProxyFocus";
 import { CtrlProxyPrototypes, type PrototypeAssetRequestOptions } from "./CtrlProxyPrototypes";
 import type { PrototypeSpec } from "../../prototype/prototypeSpec";
 import type { PrototypeAssetUpload } from "../../prototype/prototypeAssets";
+import type { PrototypeRequestHost } from "../../prototype/prototypeRequestHandler";
 import type {
   PrototypeAppearanceOverride,
   PrototypeAssetResult,
@@ -2119,6 +2120,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (this.pendingRecoveryStability) {
       this.pendingRecoveryStability.stableSocket = null;
     }
+    this._prototypes?.handleDisconnect();
     this.supportedCommands = null;
     this.rejectedCommands.clear();
     this.lateCancelledScreenshotRequestIds.clear();
@@ -3226,6 +3228,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
   onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void {
     return this.prototypes.onPrototypeEvent(listener);
+  }
+  attachPrototypeRequestHost(host: PrototypeRequestHost | undefined): void {
+    this.prototypes.attachRequestHost(host);
   }
 
   async requestAddHighlight(

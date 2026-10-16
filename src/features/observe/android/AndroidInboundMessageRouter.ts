@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
+import { PROTOTYPE_REQUEST_MESSAGE_TYPE } from "../../prototype/prototypeRequestProtocol";
 import { displayTransitions } from "../DisplayTransition";
 import { deriveSdkNavigationScreenIdentity } from "../sdkScreenIdentity";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
@@ -401,6 +402,12 @@ export class AndroidInboundMessageRouter {
         await this.ctx.recordSdkTelemetryEvent(
           message as { type: string; timestamp?: number; event?: Record<string, unknown> },
         );
+      } else if (type === PROTOTYPE_REQUEST_MESSAGE_TYPE) {
+        // Host-proxied prototype HTTP (#12527). Not awaited: a request can run for 30s and must
+        // not hold up the inbound handler drain. Not in the Kotlin-mirrored wire manifest.
+        this.ctx.prototypes.handlePrototypeRequest(message).catch((error) => {
+          logger.warn(`[CTRL_PROXY] prototype_request failed: ${error}`);
+        });
       } else {
         logger.debug(`[CTRL_PROXY] Ignoring unknown WebSocket message type: ${type}`);
       }

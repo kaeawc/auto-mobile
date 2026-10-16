@@ -29,6 +29,11 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 import type { DelegateContext } from "./types";
 import {
+  webSocketResponseSender,
+  type PrototypeRequestHost,
+} from "../../prototype/prototypeRequestHandler";
+import { PROTOTYPE_RESPONSE_MESSAGE_TYPE } from "../../prototype/prototypeRequestProtocol";
+import {
   ctrlProxyRequests,
   PROTOTYPE_SAVED_CAPABILITY,
   isSavedPrototypeErrorCode,
@@ -287,6 +292,7 @@ export class CtrlProxyPrototypes {
   private readonly listeners = new Set<(event: PrototypeEvent) => void>();
   /** Pushes that arrived with no subscriber; bounded like the device's offline ring. */
   private readonly staged: PrototypeEvent[] = [];
+  private requestHost: PrototypeRequestHost | undefined;
 
   constructor(private readonly context: DelegateContext) {}
 
@@ -813,6 +819,34 @@ export class CtrlProxyPrototypes {
     ) {
       throw new ActionableError(prototypeMultiSurfaceUnsupportedMessage());
     }
+  }
+
+  /** Routes device `prototype_request` frames (#12527) to the host proxy; replaces any earlier host. */
+  attachRequestHost(host: PrototypeRequestHost | undefined): void {
+    this.requestHost = host;
+  }
+
+  /** The connection closed: requests still running for this device have nobody to answer. */
+  handleDisconnect(): void {
+    this.requestHost?.handleDisconnect();
+  }
+
+  /** Answers one `prototype_request` frame with a `prototype_response` on the same socket. */
+  async handlePrototypeRequest(frame: unknown): Promise<void> {
+    const send = webSocketResponseSender(() => this.context.getWebSocket());
+    if (this.requestHost === undefined) {
+      const requestId = (frame as { requestId?: unknown } | null)?.requestId;
+      logger.warn("[CTRL_PROXY] prototype_request received but no host proxy is attached");
+      send({
+        type: PROTOTYPE_RESPONSE_MESSAGE_TYPE,
+        requestId: typeof requestId === "string" ? requestId : "",
+        ok: false,
+        error: { code: "network", message: "The host request proxy is not available." },
+        durationMs: 0,
+      });
+      return;
+    }
+    await this.requestHost.handleRequest(frame, send);
   }
 
   onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void {

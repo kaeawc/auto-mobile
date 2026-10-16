@@ -8,6 +8,7 @@
  * rather than trusting the agent's own summary.
  */
 
+import { parseStringPromise } from "xml2js";
 import { amStartReportedFailure } from "../../src/features/action/LaunchApp";
 import { shellQuote } from "../../src/utils/shellQuote";
 
@@ -248,13 +249,32 @@ export async function captureScreen(runner: CommandRunner, serial: string): Prom
   }
 }
 
-/** Decode the five predefined XML entities so screen checks match visible text. */
-export function decodeXmlEntities(xml: string): string {
-  return xml
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&apos;", "'")
-    .replaceAll("&#39;", "'")
-    .replaceAll("&amp;", "&");
+interface HierarchyNode {
+  $?: Record<string, string>;
+  node?: HierarchyNode[];
+}
+
+function visibleText(nodes: HierarchyNode[], packageName: string): string[] {
+  return nodes.flatMap((node) => {
+    const attributes = node.$ ?? {};
+    const own =
+      attributes.package === packageName
+        ? [attributes.text, attributes["content-desc"]].filter((value): value is string =>
+            Boolean(value),
+          )
+        : [];
+    return [...own, ...visibleText(node.node ?? [], packageName)];
+  });
+}
+
+/**
+ * The text and content descriptions of `packageName`'s nodes, one per line. Screen checks
+ * match only these, so resource ids, class names, and other apps' windows (the status bar,
+ * a launcher, a dialog from another package) can never satisfy them.
+ */
+export async function screenTextForApp(xml: string, packageName: string): Promise<string> {
+  const parsed: { hierarchy?: HierarchyNode } = await parseStringPromise(xml, {
+    explicitArray: true,
+  });
+  return visibleText(parsed.hierarchy?.node ?? [], packageName).join("\n");
 }

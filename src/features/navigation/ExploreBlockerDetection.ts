@@ -13,6 +13,7 @@ import { TapOnElement } from "../action/TapOnElement";
 import { logger } from "../../utils/logger";
 import { extractAllElements, tapSelectorFor } from "./ExploreElementExtraction";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
+import type { ActionCall } from "../action/ActionCall";
 
 // Blocker checks wait for the UI to settle after interaction.
 const BLOCKER_DETECTION_SETTLE_MS = 1000;
@@ -30,7 +31,7 @@ const BLOCKER_DETECTION_SETTLE_MS = 1000;
  * attributed to the next app navigation event.
  */
 export interface DialogTapAction {
-  execute(options: TapOnElementOptions, progress?: ProgressCallback): Promise<BaseActionResult>;
+  execute(options: TapOnElementOptions, call?: ActionCall): Promise<BaseActionResult>;
 }
 
 /**
@@ -429,7 +430,7 @@ export async function handlePermissionDialog(
     const tapOn = tapActionFactory(device, adb);
     let tapResult: BaseActionResult;
     try {
-      tapResult = await tapOn.execute({ ...selector, action: "tap" }, progress);
+      tapResult = await tapOn.execute({ ...selector, action: "tap" }, { progress });
     } catch (error) {
       logger.warn(`[Explore] Failed to handle permission dialog: ${error}`);
       continue;
@@ -477,7 +478,7 @@ async function dismissDialog(
     const tapOn = tapActionFactory(device, adb);
     let tapResult: BaseActionResult;
     try {
-      tapResult = await tapOn.execute({ ...selector, action: "tap" }, progress);
+      tapResult = await tapOn.execute({ ...selector, action: "tap" }, { progress });
     } catch (error) {
       logger.warn(`[Explore] Failed to dismiss dialog: ${error}`);
       continue;

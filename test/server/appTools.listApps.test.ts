@@ -304,11 +304,10 @@ describe("terminateApp tool", () => {
         undefined,
         controller.signal,
       );
-      expect(execute).toHaveBeenCalledWith(
-        "com.example.app",
-        { skipUiStability: true },
-        controller.signal,
-      );
+      expect(execute).toHaveBeenCalledWith("com.example.app", {
+        skipUiStability: true,
+        signal: controller.signal,
+      });
     } finally {
       resetInstalledAppResourceRefresh();
     }

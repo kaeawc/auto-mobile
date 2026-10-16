@@ -34,7 +34,7 @@
 1528	src/features/action/InstallApp.ts
 2258	src/features/action/LaunchApp.ts
 2030	src/features/action/Rotate.ts
-1897	src/features/action/SetUIState.ts
+1891	src/features/action/SetUIState.ts
 1981	src/features/action/TapAnyElement.ts
 1424	src/features/action/TapAtCoordinate.ts
 5407	src/features/action/TapOnElement.ts
@@ -71,7 +71,7 @@
 1005	src/features/webrtc/WebRtcPublisher.ts
 2370	src/server/appFileService.ts
 1431	src/server/appResources.ts
-1559	src/server/appTools.ts
+1530	src/server/appTools.ts
 1985	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
 2530	src/server/deviceToolsProvisioning.ts

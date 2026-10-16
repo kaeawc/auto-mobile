@@ -158,6 +158,9 @@ final class CommandHandler: CommandHandling {
             case let .pinch(payload):
                 return try await handlePinch(payload, startTime: startTime)
 
+            case let .pathGesture(payload):
+                return try await handlePathGesture(payload, startTime: startTime)
+
             // Text input commands
             case let .setText(payload):
                 return try await handleSetText(payload, startTime: startTime)

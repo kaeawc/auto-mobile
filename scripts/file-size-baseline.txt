@@ -54,7 +54,7 @@
 1841	src/features/observe/android/ctrlProxyProtocol.ts
 1114	src/features/observe/android/ctrlProxyWireManifest.ts
 1342	src/features/observe/ios/CtrlProxyHierarchy.ts
-4569	src/features/observe/ios/IOSCtrlProxyClient.ts
+4586	src/features/observe/ios/IOSCtrlProxyClient.ts
 2118	src/features/observe/output/ObserveResultOutput.ts
 1693	src/features/observe/output/SkeletonProjection.ts
 1429	src/features/performance/PerformanceMonitor.ts

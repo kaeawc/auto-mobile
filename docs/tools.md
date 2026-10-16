@@ -1226,7 +1226,7 @@ settled screenshot is eligible.
 | 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                 |
 | 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                  |
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                   |
-| ✍️ <code>dragPath</code>      | Drags one finger along a polyline with per-segment timing, an initial hold and a release hold (Android).                                                    |
+| ✍️ <code>dragPath</code>      | Drags one finger along a polyline with per-segment timing, an initial hold and a release hold (Android and iOS).                                            |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                    |
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                                               |
 | 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                                               |
@@ -1644,8 +1644,10 @@ tool, which changes screen orientation.
 finger down, along a polyline, and up using the CtrlProxy streaming stroke
 protocol, so it covers signatures and drawing canvases, Android unlock patterns,
 dragging a slider thumb to a coordinate, and long press then drag (for example a
-text-selection handle). Android only for now; iOS fails with a platform error
-before any input is sent.
+text-selection handle). On Android it streams start/move/end frames; on iOS the
+runner follows the whole timed path in one request (private XCTest touch
+synthesis, main display only), which needs a runner built from this revision
+(feature `path_gesture_v1`) and fails before any input on an older one.
 
 - `points`: 2 to 100 `{ x, y, durationMs? }` vertices. `durationMs` (1 to 5000,
   default 200) is the time spent moving from the previous point to this one and

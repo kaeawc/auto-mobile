@@ -133,6 +133,36 @@ import os
             }
         }
 
+        // MARK: - Path Gestures
+
+        public func path(points: [PathGesturePoint]) throws {
+            guard application != nil else {
+                throw GestureError.noApplication
+            }
+            let cgPoints = points.map { CGPoint(x: $0.x, y: $0.y) }
+            let offsets = points.map { TimeInterval($0.offsetMs) / 1000.0 }
+            try catchingObjCException {
+                let orientation = DeviceRotation.currentGestureInterfaceOrientation()
+                var errorMessage: NSString?
+                var symbolsUnavailable: ObjCBool = false
+                let succeeded = ObjCExceptionCatcher_synthesizePath(
+                    cgPoints, offsets, UInt(points.count), orientation.rawValue,
+                    &symbolsUnavailable, &errorMessage
+                )
+                if !succeeded {
+                    // No public XCUITest API follows an arbitrary polyline with timing, so there is
+                    // no degraded fallback; report the OS/XCTest gap clearly.
+                    let underlying = errorMessage as String? ?? "path gesture synthesis failed"
+                    throw GestureError.gestureFailed(
+                        symbolsUnavailable.boolValue
+                            ? "private XCTest touch synthesis unavailable on this OS/XCTest version, "
+                            + "and no public XCUITest API can follow a timed path. \(underlying)"
+                            : underlying
+                    )
+                }
+            }
+        }
+
         // MARK: - Drag Gestures
 
         public func drag(

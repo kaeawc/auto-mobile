@@ -18,6 +18,7 @@ public enum WebSocketRequest: Decodable, Sendable {
     case multiFingerSwipe(RequestMultiFingerSwipe)
     case drag(RequestDrag)
     case pinch(RequestPinch)
+    case pathGesture(RequestPathGesture)
 
     case setText(RequestSetText)
     case appendText(RequestAppendText)
@@ -102,6 +103,8 @@ public enum WebSocketRequest: Decodable, Sendable {
             self = try .drag(RequestDrag(from: decoder))
         case .requestPinch:
             self = try .pinch(RequestPinch(from: decoder))
+        case .requestPathGesture:
+            self = try .pathGesture(RequestPathGesture(from: decoder))
         case .requestSetText:
             self = try .setText(RequestSetText(from: decoder))
         case .requestAppendText:
@@ -202,6 +205,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .multiFingerSwipe: return .requestMultiFingerSwipe
         case .drag: return .requestDrag
         case .pinch: return .requestPinch
+        case .pathGesture: return .requestPathGesture
         case .setText: return .requestSetText
         case .appendText: return .requestAppendText
         case .clearText: return .requestClearText
@@ -280,6 +284,7 @@ public enum WebSocketRequest: Decodable, Sendable {
             return payload
         case let .drag(payload): return payload
         case let .pinch(payload): return payload
+        case let .pathGesture(payload): return payload
         case let .setText(payload): return payload
         case let .appendText(payload): return payload
         case let .clearText(payload): return payload

@@ -5,6 +5,13 @@ import type { PrivateDaemonCliDeps } from "./private-daemon";
 import type { PrivateDaemonBatchOptions, PrivateDaemonSpec } from "./privateDaemonEnv";
 import { androidDevices, iosDevices, definedEnv } from "./privateDaemonStatus";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import { isBrokerBatch } from "./brokerClientFiles";
+import {
+  BrokerDeviceLedger,
+  classifyDevice as classifyLedgerDevice,
+  ledgerDevice,
+  leakReport,
+} from "./brokerDeviceLedger";
 import {
   classifyDevice,
   matchesProtection,
@@ -168,7 +175,7 @@ const descriptionSchema = z.object({
       state: z.enum(["configured", "booting", "booted", "shutting-down", "unavailable"]),
     }),
     poolStatus: z.enum(["idle", "assigned", "error"]).nullable().optional(),
-    heldBy: z.enum(["managed_slot", "other_daemon"]).optional(),
+    heldBy: z.string().optional(),
   }),
 });
 const listSchema = z.object({ devices: z.array(descriptionSchema) });
@@ -272,16 +279,26 @@ const deviceSchema = z.object({
   seenByDaemons: z.array(z.string()),
   pid: z.number().int().positive().nullable(),
   pidReason: z.string().optional(),
-  provenance: z.enum(["batch-booted", "foreign", "preexisting", "batch-inferred", "unknown"]),
+  provenance: z.enum([
+    "broker-owned",
+    "batch-booted",
+    "foreign",
+    "preexisting",
+    "batch-inferred",
+    "unknown",
+  ]),
   bootedBy: z.string().optional(),
   processAvdName: z.string().optional(),
   identity: z.object({ stableId: z.string() }).optional(),
   protected: z.boolean(),
   poolStatus: z.enum(["idle", "assigned", "error"]).nullable().optional(),
-  heldBy: z.enum(["managed_slot", "other_daemon"]).optional(),
+  heldBy: z.string().optional(),
+  classification: z.enum(["allowed", "foreign", "protected"]).optional(),
+  client: z.string().optional(),
+  sessionUuid: z.string().optional(),
 });
 type BatchDevice = z.infer<typeof deviceSchema>;
-interface DeviceView {
+export interface DeviceView {
   batchDir: string;
   protectedDevices: string[];
   baseline: {
@@ -336,8 +353,8 @@ function mergeRows(
     if (previous) {
       previous.seenByDaemons.push(name);
       previous.protected ||= matchesProtection({ ...row, deviceId }, protectedDevices);
-      if (row.runtime.heldBy === "other_daemon") {
-        previous.heldBy = "other_daemon";
+      if (row.runtime.heldBy !== undefined && previous.heldBy !== "other_daemon") {
+        previous.heldBy = row.runtime.heldBy;
       }
       // Conflicting identities cannot authorize shutdown from either daemon's label.
       if (identitiesConflict(previous, row)) {
@@ -363,7 +380,7 @@ function mergeRows(
     });
   }
 }
-async function buildDeviceView(
+export async function buildDeviceView(
   options: PrivateDaemonBatchOptions,
   specs: PrivateDaemonSpec[],
   timeoutMs: number,
@@ -380,6 +397,9 @@ async function buildDeviceView(
   };
   const devices = new Map<string, BatchDevice>();
   const conflicts = new Set<string>();
+  const brokerBatch = isBrokerBatch(options.batchDir, deps);
+  const hasLedger = deps.exists(join(options.batchDir, "evidence/ledger.jsonl"));
+  const ledger = brokerBatch || hasLedger ? readDeviceLedger(options.batchDir, deps) : undefined;
   for (const spec of specs) {
     try {
       const response = await deps.requestSocket(spec.socketPath, {
@@ -413,6 +433,25 @@ async function buildDeviceView(
     }
   }
   for (const device of devices.values()) {
+    if (ledger) {
+      device.classification =
+        device.protected || matchesProtection(device, protectedDevices)
+          ? "protected"
+          : conflicts.has(device.deviceId)
+            ? "foreign"
+            : classifyLedgerDevice(device, ledger, protectedDevices);
+      device.protected ||= device.classification === "protected";
+      const grant = device.classification === "allowed" ? ledgerDevice(device, ledger) : undefined;
+      if (grant) {
+        device.client = grant.client;
+        device.sessionUuid = grant.sessionUuid;
+        device.provenance = "broker-owned";
+      } else {
+        device.provenance = "foreign";
+      }
+      // Broker batches use ledger evidence exclusively; no host PID/environment probes.
+      continue;
+    }
     Object.assign(device, await devicePid(device, deps));
     const evidence = await processEvidence(device, options.batchDir, deps);
     if (evidence?.processAvdName) {
@@ -428,6 +467,22 @@ async function buildDeviceView(
   view.devices = [...devices.values()];
   return view;
 }
+function readDeviceLedger(batchDir: string, deps: PrivateDaemonCliDeps): BrokerDeviceLedger {
+  return new BrokerDeviceLedger({
+    batchDir,
+    timer: deps.timer,
+    fs: {
+      exists: deps.exists,
+      readFile: deps.readFile,
+      mkdir: () => {
+        throw new Error("Read-only ledger view cannot create directories.");
+      },
+      appendFile: () => {
+        throw new Error("Read-only ledger view cannot append evidence.");
+      },
+    },
+  });
+}
 export interface BatchDevicesCommand {
   op: "devices" | "shutdown-devices";
   batchDir: string;
@@ -436,6 +491,7 @@ export interface BatchDevicesCommand {
   timeoutMs: number;
   deviceSelectors?: string[];
   dryRun?: boolean;
+  ledger?: boolean;
 }
 type DeviceOutcome =
   | "stopped"
@@ -446,6 +502,7 @@ type DeviceOutcome =
   | "not-batch-booted"
   | "inferred-not-stopped"
   | "held-by-other-daemon"
+  | "broker-held"
   | "ambiguous"
   | "not-found"
   | "dry-run"
@@ -478,6 +535,18 @@ function refusal(
   }
   if (device.heldBy === "other_daemon") {
     return { outcome: "held-by-other-daemon", message: "Device is held by another daemon." };
+  }
+  if (device.heldBy !== undefined) {
+    return {
+      outcome: "broker-held",
+      message: "Device is broker-held; release it through the session broker.",
+    };
+  }
+  if (device.classification !== undefined || device.provenance === "broker-owned") {
+    return {
+      outcome: device.classification === "allowed" ? "broker-held" : "not-batch-booted",
+      message: "Broker batch devices must be released through proxy-session release.",
+    };
   }
   if (!device.isVirtual || !["batch-booted", "batch-inferred"].includes(device.provenance)) {
     return { outcome: "not-batch-booted" };
@@ -514,7 +583,8 @@ function selectedDevices(
       devices: view.devices.filter(
         (device) =>
           device.isVirtual &&
-          ["batch-booted", "batch-inferred"].includes(device.provenance) &&
+          (["batch-booted", "batch-inferred"].includes(device.provenance) ||
+            device.classification === "allowed") &&
           !device.protected,
       ),
       exactIds: new Set(),
@@ -676,14 +746,17 @@ async function deadDaemonFallback(
       results.push(resultRow(device, denied));
       continue;
     }
-    if (denied && !["held-by-other-daemon", "inferred-not-stopped"].includes(denied.outcome)) {
+    if (
+      denied &&
+      !["held-by-other-daemon", "broker-held", "inferred-not-stopped"].includes(denied.outcome)
+    ) {
       continue;
     }
     Object.assign(device, await devicePid(device, deps));
     results.push(
       resultRow(
         device,
-        denied?.outcome === "held-by-other-daemon"
+        denied?.outcome === "held-by-other-daemon" || denied?.outcome === "broker-held"
           ? denied
           : {
               outcome: "daemon-dead",
@@ -701,6 +774,11 @@ export async function privateDaemonDevices(
   specs: PrivateDaemonSpec[],
   deps: PrivateDaemonCliDeps,
 ): Promise<number> {
+  if (command.ledger && command.op === "devices") {
+    const ledger = readDeviceLedger(options.batchDir, deps);
+    deps.log(JSON.stringify({ batchDir: ledger.batchDir, ledger: ledger.entries }));
+    return 0;
+  }
   const view = await buildDeviceView(options, specs, command.timeoutMs, deps);
   if (!view.daemons.some((daemon) => daemon.alive && daemon.error === undefined)) {
     return deadDaemonFallback(view, specs, command, deps);
@@ -710,6 +788,9 @@ export async function privateDaemonDevices(
   if (command.op === "shutdown-devices") {
     return shutdownDevices(view, specs, command, deps);
   }
-  deps.log(JSON.stringify(view));
+  const ledger = deps.exists(join(options.batchDir, "evidence/ledger.jsonl"))
+    ? readDeviceLedger(options.batchDir, deps)
+    : undefined;
+  deps.log(JSON.stringify({ ...view, ...(ledger ? { leaks: leakReport(ledger, view) } : {}) }));
   return 0;
 }

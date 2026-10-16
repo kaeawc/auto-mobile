@@ -1,12 +1,12 @@
 import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
-  MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
-  assertInputNotOnForeignManagedSlotDevice,
+  BINDING_INPUT_SNAPSHOT_MAX_AGE_MS,
+  assertInputNotOnForeignBindingDevice,
   assertInputRequesterHoldsDevice,
 } from "../../src/daemon/inputDeviceOwnership";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
-import type { SlotKey } from "../../src/daemon/managedSlots/slotRegistry";
+import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
+import type { BindingKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { isReadOnlySqlQuery } from "../../src/server/databaseTools";
 import {
   handleDaemonRequest,
@@ -35,12 +35,12 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SeededRandom } from "../fakes/SeededRandom";
 import { createDevicePoolDependencies } from "./devicePoolDependencies";
 import { drainMicrotasks } from "./fakeTimerStepping";
-import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 
 // Seeded concurrency harness for device-session ownership. One seed generates a list of steps
 // (acquire, release, heartbeat, control and read tool calls, heartbeat loss, time advance,
@@ -99,11 +99,10 @@ export type StepKind =
   | "planEnd"
   | "restart"
   | "settle"
-  // Managed-slot operations (RunOptions.managedSlots): the registry-level life of a slot.
+  // Broker binding operations (RunOptions.bindings): the registry-level life of a slot.
   | "slotAssign"
   | "slotExecStart"
   | "slotExecEnd"
-  | "slotRelease"
   // Tool-path operations: the admission a read or a control call passes before a handler runs.
   | "toolRead"
   | "toolControl"
@@ -155,15 +154,9 @@ export function describeStep(step: Step, index: number): string {
   const target =
     step.kind === "advance"
       ? `${step.ms}ms`
-      : [
-            "kill",
-            "disconnect",
-            "reconnect",
-            "slotAssign",
-            "slotExecStart",
-            "slotExecEnd",
-            "slotRelease",
-          ].includes(step.kind)
+      : ["kill", "disconnect", "reconnect", "slotAssign", "slotExecStart", "slotExecEnd"].includes(
+            step.kind,
+          )
         ? `d${step.device}`
         : [
               "acquireMcp",
@@ -279,10 +272,10 @@ export interface Violation {
 
 export interface RunOptions {
   /**
-   * Plug a fake managed-slot registry into the pool, so the slot steps can assign devices to
+   * Plug a fake broker binding registry into the pool, so the slot steps can assign devices to
    * slots. Off by default: the pool then has no slot exclusion, as before.
    */
-  managedSlots?: boolean;
+  bindings?: boolean;
   /** Violation kinds that are logged but do not end the run (known, reported findings). */
   tolerate?: ReadonlySet<ViolationKind>;
 }
@@ -350,20 +343,20 @@ function connectionOwnership(pool: DevicePool): ReadonlyMap<string, ReadonlySet<
 class OwnershipWorld {
   constructor(
     private readonly tolerate: ReadonlySet<ViolationKind>,
-    private readonly managedSlots = false,
+    private readonly bindingsEnabled = false,
   ) {}
 
   /** Slots the steps assigned, by device index: when, the key and the live execution session. */
-  readonly slots = new Map<
+  readonly bindings = new Map<
     number,
-    { key: SlotKey; assignedAt: number; execSession: string | undefined; execStartedAt?: number }
+    { key: BindingKey; assignedAt: number; execSession: string | undefined; execStartedAt?: number }
   >();
   /** Control handlers that ran: who asked, for which device, and who held it at that moment. */
   readonly handlerRuns: Array<{ action: string; deviceIndex: number }> = [];
   private slotExecCounter = 0;
 
   readonly timer = new FakeTimer();
-  readonly slotRegistry = new FakeSlotRegistry(this.timer);
+  readonly bindingRegistry = new FakeBindingRegistry(this.timer);
   readonly persistence = new FakeDeviceSessionPersistence();
   readonly discovery = new FakeDeviceUtils();
   readonly releases: ReleaseRecord[] = [];
@@ -426,10 +419,10 @@ class OwnershipWorld {
         idGenerator: new FakeIdGenerator(),
         installedAppsRepository: new FakeInstalledAppsRepository(),
         env: { ...process.env },
-        ...(this.managedSlots
+        ...(this.bindingsEnabled
           ? {
-              managedSlotExclusion: new RegistryManagedSlotExclusion(
-                async () => this.slotRegistry,
+              bindingExclusion: new RegistryBindingExclusion(
+                async () => this.bindingRegistry,
                 timer,
               ),
             }
@@ -665,7 +658,7 @@ class OwnershipWorld {
     const stats = this.pool.getStats();
     const busy = devices.filter((d) => d.status === "busy").length;
     const idle = devices.filter((d) => d.status === "idle" && !d.sessionId).length;
-    // An idle device a managed slot holds counts as assigned once the pool has read the registry
+    // An idle device a broker binding holds counts as assigned once the pool has read the registry
     // (its snapshot is cached), so the stats may show it either way.
     const slotIdle = devices.filter(
       (d) => d.status === "idle" && !d.sessionId && this.slotHoldsDevice(d.id),
@@ -683,7 +676,10 @@ class OwnershipWorld {
       );
     }
     if (stats.idle + stats.assigned + stats.error > stats.total) {
-      this.fail("pool-stats", `pool slot counts exceed the device total: ${JSON.stringify(stats)}`);
+      this.fail(
+        "pool-stats",
+        `pool binding counts exceed the device total: ${JSON.stringify(stats)}`,
+      );
     }
     const acquired = connectionOwnership(this.pool);
     const connectionOwners = new Map<string, string>();
@@ -967,85 +963,69 @@ class OwnershipWorld {
   }
 
   // ---------------------------------------------------------------------------------------------
-  // Managed-slot operations
+  // Broker binding operations
 
   /** The slot a device index is assigned to, once a `slotAssign` step landed. */
   private slotFor(deviceIndex: number) {
-    return this.slots.get(deviceIndex);
+    return this.bindings.get(deviceIndex);
   }
 
   /** Assign an idle, unheld device to a fresh slot (a held or already assigned device is skipped). */
   slotAssign(deviceIndex: number): void {
     const device = DEVICES[deviceIndex]!;
-    if (!this.managedSlots || this.slots.has(deviceIndex) || !this.online[deviceIndex]) {
+    if (!this.bindingsEnabled || this.bindings.has(deviceIndex) || !this.online[deviceIndex]) {
       return;
     }
     // A slot is assigned to a device nothing holds and no acquisition is racing for.
     if (this.pool.getDevice(device.deviceId)?.sessionId || this.inflight.size > 0) {
       return;
     }
-    this.log(`slot assign ${device.deviceId}`);
-    this.launch(`slot assign ${device.deviceId}`, async () => {
-      const key = await assignManagedSlotDevice(
-        this.slotRegistry,
+    this.log(`binding assign ${device.deviceId}`);
+    this.launch(`binding assign ${device.deviceId}`, async () => {
+      const key = await assignBindingDevice(
+        this.bindingRegistry,
         "android",
         device.deviceId,
         `runner-${deviceIndex}`,
       );
-      this.slots.set(deviceIndex, { key, assignedAt: this.timer.now(), execSession: undefined });
+      this.bindings.set(deviceIndex, { key, assignedAt: this.timer.now(), execSession: undefined });
     });
   }
 
   /** The slot's own execution starts: the registry records its session as the device's user. */
   slotExecStart(deviceIndex: number): void {
-    const slot = this.slotFor(deviceIndex);
-    if (!slot || slot.execSession) {
+    const binding = this.slotFor(deviceIndex);
+    if (!binding || binding.execSession) {
       return;
     }
     const sessionUuid = `slot-exec-${++this.slotExecCounter}`;
     const stableDeviceId = DEVICES[deviceIndex]!.deviceId;
-    this.log(`slot exec start ${stableDeviceId} as ${sessionUuid}`);
-    this.launch(`slot exec start ${stableDeviceId}`, async () => {
-      const claimed = await this.slotRegistry.claimExecution(
-        slot.key,
+    this.log(`binding exec start ${stableDeviceId} as ${sessionUuid}`);
+    this.launch(`binding exec start ${stableDeviceId}`, async () => {
+      const claimed = await this.bindingRegistry.claimExecution(
+        binding.key,
         { generation: 1, stableDeviceId },
         { daemonId: "daemon", pid: 1, sessionUuid },
       );
       if (claimed.kind === "claimed") {
-        slot.execSession = sessionUuid;
-        slot.execStartedAt = this.timer.now();
+        binding.execSession = sessionUuid;
+        binding.execStartedAt = this.timer.now();
       }
     });
   }
 
   slotExecEnd(deviceIndex: number): void {
-    const slot = this.slotFor(deviceIndex);
-    const sessionUuid = slot?.execSession;
-    if (!slot || !sessionUuid) {
+    const binding = this.slotFor(deviceIndex);
+    const sessionUuid = binding?.execSession;
+    if (!binding || !sessionUuid) {
       return;
     }
-    this.log(`slot exec end ${DEVICES[deviceIndex]!.deviceId} ${sessionUuid}`);
-    this.launch(`slot exec end ${DEVICES[deviceIndex]!.deviceId}`, async () => {
-      await this.slotRegistry.releaseExecution(slot.key, sessionUuid);
-      if (slot.execSession === sessionUuid) {
-        slot.execSession = undefined;
+    this.log(`binding exec end ${DEVICES[deviceIndex]!.deviceId} ${sessionUuid}`);
+    this.launch(`binding exec end ${DEVICES[deviceIndex]!.deviceId}`, async () => {
+      await this.bindingRegistry.releaseExecution(binding.key, sessionUuid);
+      if (binding.execSession === sessionUuid) {
+        binding.execSession = undefined;
       }
-    });
-  }
-
-  /**
-   * The slot's scope is reset: its device goes to the free pool. A device parked there is still
-   * managed (never generic capacity), so the slot keeps excluding it.
-   */
-  slotRelease(deviceIndex: number): void {
-    const slot = this.slotFor(deviceIndex);
-    if (!slot || slot.execSession) {
-      return;
-    }
-    this.log(`slot release ${DEVICES[deviceIndex]!.deviceId}`);
-    this.launch(`slot release ${DEVICES[deviceIndex]!.deviceId}`, async () => {
-      await this.slotRegistry.beginScopeInvalidation(slot.key.scopeKey, "operator_reset");
-      await this.slotRegistry.completeScopeInvalidation(slot.key.scopeKey);
     });
   }
 
@@ -1067,7 +1047,7 @@ class OwnershipWorld {
     this.log(`c${client.index} ${action} on ${device.deviceId} as ${requester ?? "(none)"}`);
     this.launch(`c${client.index} ${action} ${device.deviceId}`, async () => {
       try {
-        await assertInputNotOnForeignManagedSlotDevice({
+        await assertInputNotOnForeignBindingDevice({
           action,
           deviceId: device.deviceId,
           platform: "android",
@@ -1084,28 +1064,28 @@ class OwnershipWorld {
         });
       } catch (error) {
         this.log(`  ${action} refused: ${errorMessage(error).slice(0, 100)}`);
-        const slot = this.slotFor(deviceIndex);
+        const binding = this.slotFor(deviceIndex);
         if (
-          slot &&
+          binding &&
           requester !== undefined &&
-          requester === slot.execSession &&
-          this.slotSettledFor(slot, requester, askedAt)
+          requester === binding.execSession &&
+          this.slotSettledFor(binding, requester, askedAt)
         ) {
           this.fail(
             "slot-execution-refused",
-            `${action} from slot execution ${requester} was refused its own device ${device.deviceId}: ${errorMessage(error).slice(0, 100)}`,
+            `${action} from binding execution ${requester} was refused its own device ${device.deviceId}: ${errorMessage(error).slice(0, 100)}`,
           );
         }
         return;
       }
       // The handler runs here. Judge the caller against the device's holder at this instant. The
       // admission reads the registry through a snapshot cached for
-      // MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS, so a slot is only judged once it is older than that.
+      // BINDING_INPUT_SNAPSHOT_MAX_AGE_MS, so a slot is only judged once it is older than that.
       const holder = this.manager.getSessionForDevice(device.deviceId) ?? undefined;
-      const slot = this.slotFor(deviceIndex);
-      const slotUserNow = slot?.execSession;
-      const slotJudged = slot !== undefined && this.slotSettledFor(slot, requester, askedAt);
-      const allowed = slot
+      const binding = this.slotFor(deviceIndex);
+      const slotUserNow = binding?.execSession;
+      const slotJudged = binding !== undefined && this.slotSettledFor(binding, requester, askedAt);
+      const allowed = binding
         ? !slotJudged || (requester !== undefined && requester === slotUserNow)
         : holder === undefined || holder === requester;
       this.handlerRuns.push({ action, deviceIndex });
@@ -1113,7 +1093,7 @@ class OwnershipWorld {
         this.fail(
           "non-owner-control-ran",
           `${action} ran its handler on ${device.deviceId} for ${requester ?? "a sessionless caller"}, ` +
-            `but the device is held by ${slot ? `slot execution ${slotUserNow ?? "(none)"}` : (holder ?? "nobody")}`,
+            `but the device is held by ${binding ? `binding execution ${slotUserNow ?? "(none)"}` : (holder ?? "nobody")}`,
         );
       }
     });
@@ -1166,35 +1146,35 @@ class OwnershipWorld {
    * its execution (when the requester is that execution), are older than that.
    */
   private slotSettledFor(
-    slot: { assignedAt: number; execSession: string | undefined; execStartedAt?: number },
+    binding: { assignedAt: number; execSession: string | undefined; execStartedAt?: number },
     requester: string | undefined,
     admittedAt: number,
   ): boolean {
     const now = admittedAt;
-    const age = MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS;
+    const age = BINDING_INPUT_SNAPSHOT_MAX_AGE_MS;
     return (
-      now - slot.assignedAt > age &&
-      (requester !== slot.execSession || now - (slot.execStartedAt ?? 0) > age)
+      now - binding.assignedAt > age &&
+      (requester !== binding.execSession || now - (binding.execStartedAt ?? 0) > age)
     );
   }
 
   private slotHoldsDevice(deviceId: string): boolean {
-    return [...this.slots.keys()].some((index) => DEVICES[index]!.deviceId === deviceId);
+    return [...this.bindings.keys()].some((index) => DEVICES[index]!.deviceId === deviceId);
   }
 
   /** No generic session may be bound to a device a slot holds, unless it was bound before. */
   checkSlotDevices(): void {
-    for (const [deviceIndex, slot] of this.slots) {
+    for (const [deviceIndex, binding] of this.bindings) {
       const device = this.pool.getDevice(DEVICES[deviceIndex]!.deviceId);
       const holder = device?.sessionId;
-      if (!holder || holder === slot.execSession) {
+      if (!holder || holder === binding.execSession) {
         continue;
       }
       const session = this.manager.getAllSessions().find((s) => s.sessionId === holder);
-      if (session && session.createdAt > slot.assignedAt) {
+      if (session && session.createdAt > binding.assignedAt) {
         this.fail(
           "slot-device-allocated-generically",
-          `${DEVICES[deviceIndex]!.deviceId} is assigned to a managed slot (since t=${slot.assignedAt}) ` +
+          `${DEVICES[deviceIndex]!.deviceId} is assigned to a binding (since t=${binding.assignedAt}) ` +
             `but generic session ${holder} (created t=${session.createdAt}) holds it`,
         );
       }
@@ -1577,9 +1557,6 @@ class OwnershipWorld {
       case "slotExecEnd":
         this.slotExecEnd(step.device);
         break;
-      case "slotRelease":
-        this.slotRelease(step.device);
-        break;
       case "toolRead":
         this.toolRead(client, step.turns % 2 === 0, "observe");
         break;
@@ -1614,7 +1591,7 @@ export async function runSteps(
   steps: readonly Step[],
   options: RunOptions = {},
 ): Promise<RunResult> {
-  const world = new OwnershipWorld(options.tolerate ?? new Set(), options.managedSlots ?? false);
+  const world = new OwnershipWorld(options.tolerate ?? new Set(), options.bindings ?? false);
   try {
     await world.start();
     for (const [index, step] of steps.entries()) {

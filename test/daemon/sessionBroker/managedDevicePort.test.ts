@@ -1,44 +1,44 @@
 import { describe, expect, test } from "bun:test";
-import type { ManagedExecutionReleaseResult } from "../../../src/daemon/managedSlots/managedExecutionRelease";
-import type { ManagedSlotAcquisition } from "../../../src/daemon/managedSlots/managedSlotAcquisition";
-import { ManagedSlotJournal } from "../../../src/daemon/managedSlots/slotJournal";
+import type { BrokerExecutionReleaseResult } from "../../../src/daemon/sessionBroker/provisioning/executionRelease";
+import type { BrokerDeviceAcquisition } from "../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
+import { BindingJournal } from "../../../src/daemon/sessionBroker/registry/bindingJournal";
 import {
-  computeSlotScopeKey,
-  type OpenSlotJournalInput,
-  type SlotExecOwnerLiveness,
-  type SlotJournalOwner,
-  type SlotKey,
-  type SlotRegistry,
-  type SlotScopeIdentity,
-} from "../../../src/daemon/managedSlots/slotRegistry";
+  computeBindingScopeKey,
+  type OpenBindingJournalInput,
+  type BindingExecOwnerLiveness,
+  type BindingJournalOwner,
+  type BindingKey,
+  type BindingRegistry,
+  type BindingScopeIdentity,
+} from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { SessionBrokerFailureError } from "../../../src/daemon/sessionBroker/devicePort";
 import { ManagedDevicePort } from "../../../src/daemon/sessionBroker/managedDevicePort";
-import { currentManagedSlotReconciler } from "../../../src/daemon/managedSlots/managedSlotExclusion";
+import { currentBindingReconciler } from "../../../src/daemon/sessionBroker/provisioning/exclusion";
 import type { ManagedDevicePortDependencies } from "../../../src/daemon/sessionBroker/managedDevicePort";
 import type { BrokerResourceRecord } from "../../../src/daemon/sessionBroker/store";
-import type { ManagedSlotConfig } from "../../../src/models/managedSlotConfig";
-import type { ManagedSlotsResult } from "../../../src/models/managedSlotsResult";
-import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
+import type { BrokerProvisionRequest } from "../../../src/daemon/sessionBroker/provisioning/provisionRequest";
+import type { BindingsResult } from "../../../src/daemon/sessionBroker/provisioning/acquisitionResult";
+import { FakeBindingRegistry } from "../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   FakeClaims,
   FakeDeleter,
   FakeInventory,
   FakeMatcher,
-} from "../managedSlots/fixtures/reconcilerFakes";
+} from "./registry/fixtures/reconcilerFakes";
 
-const SCOPE: SlotScopeIdentity = {
+const SCOPE: BindingScopeIdentity = {
   managedHostScope: "broker-host",
   runnerNamespace: "private-session-broker",
   runnerIncarnation: "persistent-pool-v1",
 };
-const SCOPE_KEY = computeSlotScopeKey(SCOPE);
-const OWNER: SlotJournalOwner = {
+const SCOPE_KEY = computeBindingScopeKey(SCOPE);
+const OWNER: BindingJournalOwner = {
   daemonId: "broker-daemon",
   pid: 101,
   processGenerationToken: "broker-generation",
 };
-const FOREIGN_OWNER: SlotJournalOwner = {
+const FOREIGN_OWNER: BindingJournalOwner = {
   daemonId: "foreign-daemon",
   pid: 202,
   processGenerationToken: "foreign-generation",
@@ -103,34 +103,34 @@ function resource(
 
 function releaseResult(
   sessionId: string,
-  overrides: Partial<ManagedExecutionReleaseResult> = {},
-): ManagedExecutionReleaseResult {
+  overrides: Partial<BrokerExecutionReleaseResult> = {},
+): BrokerExecutionReleaseResult {
   return {
     sessionId,
-    outcome: "reusable_for_this_slot",
+    outcome: "reusable_for_this_binding",
     settlement: "confirmed",
     alreadyReleased: false,
     cancellationRequested: 0,
     releaseForced: false,
     device: "device-1",
-    slots: [],
-    slotFailures: [],
+    bindings: [],
+    bindingFailures: [],
     ...overrides,
   };
 }
 
 function readyResult(
-  config: ManagedSlotConfig,
-  overrides: Partial<ManagedSlotsResult["slots"][number]> = {},
-): ManagedSlotsResult {
+  config: BrokerProvisionRequest,
+  overrides: Partial<BindingsResult["bindings"][number]> = {},
+): BindingsResult {
   const request = config.requests[0]!;
   return {
     contractVersion: 1,
     scope: { ...SCOPE, scopeKey: SCOPE_KEY },
     outcome: "ready",
-    slots: [
+    bindings: [
       {
-        slotIndex: request.slotIndex,
+        bindingIndex: request.bindingIndex,
         role: request.role,
         platform: request.platform,
         assignmentGeneration: 1,
@@ -149,13 +149,13 @@ function readyResult(
 }
 
 function acquisition(
-  run: (config: ManagedSlotConfig) => Promise<ManagedSlotsResult>,
-): Pick<ManagedSlotAcquisition, "acquire"> {
+  run: (config: BrokerProvisionRequest) => Promise<BindingsResult>,
+): Pick<BrokerDeviceAcquisition, "acquire"> {
   return { acquire: run };
 }
 
 describe("ManagedDevicePort preparation and release", () => {
-  test.each(["result", "slot"] as const)(
+  test.each(["result", "binding"] as const)(
     "preserves typed retryable acquisition failure from %s and releases its session",
     async (source) => {
       const failure = {
@@ -167,23 +167,23 @@ describe("ManagedDevicePort preparation and release", () => {
       const releases: string[] = [];
       const port = new ManagedDevicePort({
         scope: SCOPE,
-        managedSlotAcquisition: acquisition((config) =>
+        brokerDeviceAcquisition: acquisition((config) =>
           Promise.resolve({
-            ...readyResult(config, { failure: source === "slot" ? failure : undefined }),
+            ...readyResult(config, { failure: source === "binding" ? failure : undefined }),
             outcome: "failed",
             ...(source === "result" ? { failure } : {}),
           }),
         ),
-        managedExecutionRelease: {
+        brokerExecutionRelease: {
           releaseExecution: (id) => {
             releases.push(id);
             return Promise.resolve(releaseResult(id));
           },
         },
         registry: {} as never,
-        managedSlotJournal: {
+        bindingJournal: {
           owner: OWNER,
-          redriveSlot: () => Promise.resolve({ kind: "clear", redriven: [] }),
+          redriveBinding: () => Promise.resolve({ kind: "clear", redriven: [] }),
         },
       });
       const rejected = port.prepare(resource(), { livenessOwnerToken: "consumer" });
@@ -196,20 +196,20 @@ describe("ManagedDevicePort preparation and release", () => {
   );
 
   test("maps exact iOS native identifiers and private provider allocation options", async () => {
-    let received: ManagedSlotConfig | undefined;
+    let received: BrokerProvisionRequest | undefined;
     const port = new ManagedDevicePort({
       scope: SCOPE,
-      managedSlotAcquisition: acquisition(async (config) => {
+      brokerDeviceAcquisition: acquisition(async (config) => {
         received = config;
         return readyResult(config);
       }),
-      managedExecutionRelease: {
+      brokerExecutionRelease: {
         releaseExecution: async (sessionId) => releaseResult(sessionId),
       },
       registry: {} as never,
-      managedSlotJournal: {
+      bindingJournal: {
         owner: OWNER,
-        redriveSlot: async () => ({ kind: "clear", redriven: [] }),
+        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
       },
     });
 
@@ -223,10 +223,10 @@ describe("ManagedDevicePort preparation and release", () => {
     expect(received).toEqual({
       contractVersion: 1,
       ...SCOPE,
-      localSlotCapacity: 1,
+      localBindingCapacity: 1,
       requests: [
         {
-          slotIndex: 7,
+          bindingIndex: 7,
           role: "session-broker-device",
           platform: "ios",
           requestedSpec: {
@@ -243,20 +243,20 @@ describe("ManagedDevicePort preparation and release", () => {
   });
 
   test("maps the exact Android profile and rejects inconsistent API, ABI, or flavor metadata", async () => {
-    const configs: ManagedSlotConfig[] = [];
+    const configs: BrokerProvisionRequest[] = [];
     const port = new ManagedDevicePort({
       scope: SCOPE,
-      managedSlotAcquisition: acquisition(async (config) => {
+      brokerDeviceAcquisition: acquisition(async (config) => {
         configs.push(config);
         return readyResult(config);
       }),
-      managedExecutionRelease: {
+      brokerExecutionRelease: {
         releaseExecution: async (sessionId) => releaseResult(sessionId),
       },
       registry: {} as never,
-      managedSlotJournal: {
+      bindingJournal: {
         owner: OWNER,
-        redriveSlot: async () => ({ kind: "clear", redriven: [] }),
+        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
       },
     });
 
@@ -264,7 +264,7 @@ describe("ManagedDevicePort preparation and release", () => {
       await port.prepare(resource(ANDROID), { livenessOwnerToken: "consumer-liveness" }),
     ).toMatchObject({ profile: ANDROID.profile });
     expect(configs[0]?.requests[0]).toEqual({
-      slotIndex: 7,
+      bindingIndex: 7,
       role: "session-broker-device",
       platform: "android",
       requestedSpec: {
@@ -291,19 +291,19 @@ describe("ManagedDevicePort preparation and release", () => {
     const releases: string[] = [];
     const port = new ManagedDevicePort({
       scope: SCOPE,
-      managedSlotAcquisition: acquisition(async (config) =>
+      brokerDeviceAcquisition: acquisition(async (config) =>
         readyResult(config, { readiness: { mode: "automation", status: "booted" } }),
       ),
-      managedExecutionRelease: {
+      brokerExecutionRelease: {
         releaseExecution: async (sessionId) => {
           releases.push(sessionId);
           return releaseResult(sessionId);
         },
       },
       registry: {} as never,
-      managedSlotJournal: {
+      bindingJournal: {
         owner: OWNER,
-        redriveSlot: async () => ({ kind: "clear", redriven: [] }),
+        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
       },
     });
 
@@ -320,18 +320,18 @@ describe("ManagedDevicePort preparation and release", () => {
     });
     const port = new ManagedDevicePort({
       scope: SCOPE,
-      managedSlotAcquisition: acquisition(async (config) => readyResult(config)),
-      managedExecutionRelease: { releaseExecution: async () => result },
+      brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+      brokerExecutionRelease: { releaseExecution: async () => result },
       registry: {} as never,
-      managedSlotJournal: {
+      bindingJournal: {
         owner: OWNER,
-        redriveSlot: async () => ({ kind: "clear", redriven: [] }),
+        redriveBinding: async () => ({ kind: "clear", redriven: [] }),
       },
     });
 
     expect(await port.release("session-1")).toEqual({ settled: false });
     result = releaseResult("session-1", {
-      slotFailures: [{ scopeKey: SCOPE_KEY, slotIndex: 7, error: "registry busy" }],
+      bindingFailures: [{ scopeKey: SCOPE_KEY, bindingIndex: 7, error: "registry busy" }],
     });
     expect(await port.release("session-1")).toEqual({ settled: false });
     result = releaseResult("session-1");
@@ -340,30 +340,30 @@ describe("ManagedDevicePort preparation and release", () => {
 });
 
 interface DestructionRig {
-  key: SlotKey;
+  key: BindingKey;
   resource: BrokerResourceRecord;
-  registry: FakeSlotRegistry;
+  registry: FakeBindingRegistry;
   inventory: FakeInventory;
   deleter: FakeDeleter;
-  journal: ManagedSlotJournal;
-  isExecOwnerLive: SlotExecOwnerLiveness;
+  journal: BindingJournal;
+  isExecOwnerLive: BindingExecOwnerLiveness;
 }
 
 async function destructionRig(
-  isExecOwnerLive: SlotExecOwnerLiveness = () => true,
+  isExecOwnerLive: BindingExecOwnerLiveness = () => true,
 ): Promise<DestructionRig> {
   const timer = new FakeTimer();
-  const registry = new FakeSlotRegistry(timer, isExecOwnerLive);
+  const registry = new FakeBindingRegistry(timer, isExecOwnerLive);
   const ensured = await registry.ensureScope(SCOPE);
   if (ensured.kind !== "ready") {
     throw new Error(`Scope setup failed: ${ensured.kind}`);
   }
-  const key = { scopeKey: SCOPE_KEY, slotIndex: 7 };
+  const key = { scopeKey: SCOPE_KEY, bindingIndex: 7 };
   const requestedSpec = {
     runtime: IOS.profile.runtimeId,
     deviceType: IOS.profile.simulatorDeviceTypeIdentifier,
   };
-  await registry.initSlot(key, {
+  await registry.initBinding(key, {
     role: "session-broker-device",
     platform: "ios",
     requestedSpec,
@@ -392,7 +392,7 @@ async function destructionRig(
     deviceType: IOS.profile.simulatorDeviceTypeIdentifier,
   });
   const deleter = new FakeDeleter(inventory);
-  const journal = new ManagedSlotJournal({
+  const journal = new BindingJournal({
     registry,
     inventory,
     matcher: new FakeMatcher(),
@@ -416,18 +416,18 @@ async function destructionRig(
 
 function destroyingPort(
   rig: DestructionRig,
-  releaseExecution: (sessionId: string) => Promise<ManagedExecutionReleaseResult>,
+  releaseExecution: (sessionId: string) => Promise<BrokerExecutionReleaseResult>,
   registry: Pick<
-    SlotRegistry,
-    "getAssignment" | "listOpenSlotJournal" | "openSlotJournal"
+    BindingRegistry,
+    "getAssignment" | "listOpenBindingJournal" | "openBindingJournal"
   > = rig.registry,
 ): ManagedDevicePort {
   return new ManagedDevicePort({
     scope: SCOPE,
-    managedSlotAcquisition: acquisition(async (config) => readyResult(config)),
-    managedExecutionRelease: { releaseExecution },
+    brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+    brokerExecutionRelease: { releaseExecution },
     registry,
-    managedSlotJournal: rig.journal,
+    bindingJournal: rig.journal,
     isExecOwnerLive: rig.isExecOwnerLive,
   });
 }
@@ -440,10 +440,10 @@ describe("ManagedDevicePort clean-reset ownership", () => {
     const rig = await destructionRig();
     const port = new ManagedDevicePort({
       scope: SCOPE,
-      managedSlotAcquisition: acquisition(async (config) => readyResult(config)),
-      managedExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
+      brokerDeviceAcquisition: acquisition(async (config) => readyResult(config)),
+      brokerExecutionRelease: { releaseExecution: async (id) => releaseResult(id) },
       registry: rig.registry,
-      managedSlotJournal: rig.journal,
+      bindingJournal: rig.journal,
       resetIosBaseline: reset,
       isCurrentReset: async () => current,
     });
@@ -454,7 +454,7 @@ describe("ManagedDevicePort clean-reset ownership", () => {
     const rig = await resetRig(async (device, profile, assertOwned) => {
       expect(device.deviceId).toBe("UDID-1");
       expect(profile.runtimeId).toBe(IOS.profile.runtimeId);
-      expect(currentManagedSlotReconciler()).toEqual({ scopeKey: SCOPE_KEY, slotIndex: 7 });
+      expect(currentBindingReconciler()).toEqual({ scopeKey: SCOPE_KEY, bindingIndex: 7 });
       await assertOwned();
       return "clean";
     });
@@ -531,7 +531,7 @@ describe("ManagedDevicePort destruction", () => {
       stableDeviceId: null,
       execOwner: null,
     });
-    expect(await rig.registry.listOpenSlotJournal(rig.key)).toEqual([]);
+    expect(await rig.registry.listOpenBindingJournal(rig.key)).toEqual([]);
   });
 
   test("keeps capacity pending when the execution drain is incomplete", async () => {
@@ -557,7 +557,7 @@ describe("ManagedDevicePort destruction", () => {
     const rig = await destructionRig();
     rig.deleter.failWith = "simulator delete failed";
     const assignment = (await rig.registry.getAssignment(rig.key))!;
-    const opened = await rig.registry.openSlotJournal(rig.key, {
+    const opened = await rig.registry.openBindingJournal(rig.key, {
       kind: "replace",
       phase: "deleting",
       owner: OWNER,
@@ -587,7 +587,7 @@ describe("ManagedDevicePort destruction", () => {
       stableDeviceId: "UDID-1",
       state: "cleanup_pending",
     });
-    expect(await rig.registry.listOpenSlotJournal(rig.key)).toMatchObject([
+    expect(await rig.registry.listOpenBindingJournal(rig.key)).toMatchObject([
       { id: opened.entry.id, target: { oldStableId: "UDID-1" } },
     ]);
   });
@@ -646,8 +646,8 @@ describe("ManagedDevicePort destruction", () => {
     };
     const ownerView = {
       getAssignment: async () => emptyWithOwner,
-      listOpenSlotJournal: ownerRig.registry.listOpenSlotJournal.bind(ownerRig.registry),
-      openSlotJournal: ownerRig.registry.openSlotJournal.bind(ownerRig.registry),
+      listOpenBindingJournal: ownerRig.registry.listOpenBindingJournal.bind(ownerRig.registry),
+      openBindingJournal: ownerRig.registry.openBindingJournal.bind(ownerRig.registry),
     };
     expect(
       await destroyingPort(
@@ -669,7 +669,7 @@ describe("ManagedDevicePort destruction", () => {
     if (emptied.kind !== "committed") {
       throw new Error(`Empty binding setup failed: ${emptied.kind}`);
     }
-    await settlerRig.registry.updateSlotState(settlerRig.key, emptied.assignment, "settling", {
+    await settlerRig.registry.updateBindingState(settlerRig.key, emptied.assignment, "settling", {
       settler: FOREIGN_OWNER,
     });
     expect(
@@ -684,26 +684,26 @@ describe("ManagedDevicePort destruction", () => {
     let raced = false;
     const racingRegistry = {
       getAssignment: rig.registry.getAssignment.bind(rig.registry),
-      listOpenSlotJournal: rig.registry.listOpenSlotJournal.bind(rig.registry),
-      openSlotJournal: async (key: SlotKey, input: OpenSlotJournalInput) => {
+      listOpenBindingJournal: rig.registry.listOpenBindingJournal.bind(rig.registry),
+      openBindingJournal: async (key: BindingKey, input: OpenBindingJournalInput) => {
         if (!raced) {
           raced = true;
           const current = (await rig.registry.getAssignment(key))!;
-          await rig.registry.updateSlotState(
+          await rig.registry.updateBindingState(
             key,
             { generation: current.generation, stableDeviceId: current.stableDeviceId },
             "settling",
             { settler: FOREIGN_OWNER },
           );
         }
-        return rig.registry.openSlotJournal(key, input);
+        return rig.registry.openBindingJournal(key, input);
       },
     };
     const port = destroyingPort(rig, async (sessionId) => releaseResult(sessionId), racingRegistry);
 
     expect(await port.destroy(rig.resource)).toBe("pending");
     expect(rig.deleter.calls).toEqual([]);
-    expect(await rig.registry.listOpenSlotJournal(rig.key)).toEqual([]);
+    expect(await rig.registry.listOpenBindingJournal(rig.key)).toEqual([]);
     expect(await rig.registry.getAssignment(rig.key)).toMatchObject({
       generation: 2,
       stableDeviceId: "UDID-1",

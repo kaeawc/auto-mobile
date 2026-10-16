@@ -1097,12 +1097,12 @@ class AutoMobilePlanExecutorTest {
   private fun executePlan(
     options: AutoMobilePlanExecutionOptions = AutoMobilePlanExecutionOptions(),
   ): AutoMobilePlanExecutionResult {
-    return AutoMobilePlanExecutor.execute(
-      "test-plans/launch-clock-app.yaml",
-      emptyMap(),
-      options,
-      collaborators.copy(timings = timings),
-    )
+    return PlanExecutor(collaborators.copy(timings = timings))
+      .execute(
+        "test-plans/launch-clock-app.yaml",
+        emptyMap(),
+        options,
+      )
   }
 
   private fun payload(text: String): JsonObject = json.parseToJsonElement(text) as JsonObject

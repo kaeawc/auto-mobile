@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { dirname, join } from "node:path";
-import { openSqliteSlotRegistry } from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
+import { openSqliteBindingRegistry } from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { BrokerAdmissionInput } from "../../../src/daemon/sessionBroker/store";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 import {
@@ -115,7 +115,7 @@ describe("session broker durable process boundary", () => {
   async function database() {
     const dir = await harness().makeTempDbDir("session-broker-");
     const dbPath = join(dir, "slots.sqlite");
-    const registry = await openSqliteSlotRegistry({ dbPath });
+    const registry = await openSqliteBindingRegistry({ dbPath });
     try {
       const scope = await registry.ensureScope(SCOPE);
       if (scope.kind !== "ready") {
@@ -131,7 +131,7 @@ describe("session broker durable process boundary", () => {
     "reopen retains failed cleanup and its capacity until confirmed absent",
     async () => {
       const { dbPath, scopeKey } = await database();
-      const first = await openSqliteSlotRegistry({ dbPath });
+      const first = await openSqliteBindingRegistry({ dbPath });
       let ticket;
       try {
         const store = first.sessionBrokerStore(scopeKey);
@@ -143,7 +143,7 @@ describe("session broker durable process boundary", () => {
       if (!ticket) {
         throw new Error("Missing durable destruction ticket");
       }
-      const restarted = await openSqliteSlotRegistry({ dbPath });
+      const restarted = await openSqliteBindingRegistry({ dbPath });
       try {
         const store = restarted.sessionBrokerStore(scopeKey);
         expect(await store.admit(input("interrupted"))).toMatchObject({
@@ -178,7 +178,7 @@ describe("session broker durable process boundary", () => {
       );
       expect(results.filter((result) => result.kind === "create")).toHaveLength(1);
       expect(results.filter((result) => result.kind === "refused")).toHaveLength(5);
-      const registry = await openSqliteSlotRegistry({ dbPath });
+      const registry = await openSqliteBindingRegistry({ dbPath });
       try {
         expect(await registry.sessionBrokerStore(scopeKey).listResources()).toHaveLength(1);
       } finally {

@@ -22,6 +22,8 @@ type DeviceSnapshotStoreContract = Pick<
 export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
   private basePath: string;
   private sizes = new Map<string, number | null>();
+  /** Sizes scripted for one scope, keyed by the scoped path; they win over the name-keyed size. */
+  private readonly scopedSizes = new Map<string, number | null>();
   /** Scripted by tests via {@link setSnapshotExists}: the name exists in every scope. */
   private existing = new Set<string>();
   /** Snapshots created by {@link replaceSnapshotData}, keyed by their scoped path. */
@@ -96,7 +98,16 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
     };
   }
 
-  setSnapshotSize(snapshotName: string, sizeBytes: number | null): void {
+  /** Script a size for the name in every scope, or for one scope when `options` is given. */
+  setSnapshotSize(
+    snapshotName: string,
+    sizeBytes: number | null,
+    options?: SnapshotPathOptions,
+  ): void {
+    if (options) {
+      this.scopedSizes.set(this.getSnapshotPathWithOptions(snapshotName, options), sizeBytes);
+      return;
+    }
     this.sizes.set(snapshotName, sizeBytes);
   }
 
@@ -146,8 +157,12 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
 
   async getSnapshotSizeBytes(
     snapshotName: string,
-    _options?: SnapshotPathOptions,
+    options?: SnapshotPathOptions,
   ): Promise<number | null> {
+    const scopedPath = this.getSnapshotPathWithOptions(snapshotName, options);
+    if (this.scopedSizes.has(scopedPath)) {
+      return this.scopedSizes.get(scopedPath)!;
+    }
     return this.sizes.has(snapshotName) ? this.sizes.get(snapshotName)! : 0;
   }
 
@@ -193,6 +208,7 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
     this.deleted.add(snapshotName);
     const snapshotPath = this.getSnapshotPathWithOptions(snapshotName, options);
     this.existingPaths.delete(snapshotPath);
+    this.scopedSizes.delete(snapshotPath);
     const activePath = this.activePaths.get(snapshotName);
     if (activePath && activePath !== snapshotPath) {
       return;

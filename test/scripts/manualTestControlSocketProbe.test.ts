@@ -127,3 +127,27 @@ test("matching response before overflow in the same chunk proves the daemon aliv
   expect(f.connection.ended).toBe(true);
   expect(f.timer.getPendingTimeoutCount()).toBe(0);
 });
+
+test("required broker capability must be advertised by a successful matching response", async () => {
+  for (const [capabilities, success, alive] of [
+    [["session-broker/v1"], true, true],
+    [[], true, false],
+    [["session-broker/v1"], false, false],
+  ] as const) {
+    const f = fixture();
+    f.connection.write = (text) => {
+      const frame = JSON.parse(text);
+      f.connection.data(
+        Buffer.from(JSON.stringify({ id: frame.id, success, result: { capabilities } }) + "\n"),
+      );
+    };
+    const result = await probeControlSocket("/fake/socket", f.deps, {
+      requireCapability: "session-broker/v1",
+    });
+    expect(result.alive).toBe(alive);
+    if (!result.alive) {
+      expect(result.reason).toContain("session-broker/v1");
+    }
+    expect(f.connection.ended).toBe(true);
+  }
+});

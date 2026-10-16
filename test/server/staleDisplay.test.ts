@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { staleDisplayError, withStaleDisplay } from "../../src/models/StaleDisplayError";
+import { staleDisplayError, withStaleDisplay } from "../../src/features/observe/StaleDisplayError";
 import { runWithSelectedDisplayPin } from "../../src/features/observe/SessionDisplayContext";
 import type {
   TapAtResult,

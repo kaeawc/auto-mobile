@@ -56,6 +56,7 @@ import { logger } from "../../../src/utils/logger";
 import { reportToolDispatched } from "../../../src/utils/ToolDispatchContext";
 import { FakeElementParser } from "../../fakes/FakeElementParser";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import type { LaunchAppCall } from "../../../src/features/action/LaunchApp";
 
 // `dumpsys window windows` output parseable (by Window.parseActiveWindowModern)
 // as the launcher being foreground. Used to satisfy home-press verification
@@ -328,7 +329,9 @@ describe("Explore", () => {
         );
 
         expect(fakeGraph.getMethodCallCount("getStats")).toBe(1);
-        expect(fakeGraph.getMethodCallCount("exportGraph")).toBe(2);
+        // The recorded event names its app, so the final report exports that app's graph.
+        expect(fakeGraph.getMethodCallCount("exportGraph")).toBe(1);
+        expect(fakeGraph.getMethodCallCount("exportGraphForApp")).toBe(1);
         expect(progressMessages).toContain("Explored 1 new screens (1/1 interactions)");
         expect(result.screensDiscovered).toBe(1);
       });
@@ -805,8 +808,10 @@ describe("Explore", () => {
         );
         expect(result.interactionsPerformed).toBe(1);
         expect(launch).toHaveBeenCalledTimes(1);
-        expect(launch.mock.calls[0]?.slice(0, 3)).toEqual(["com.test.app", false, false]);
-        expect(launch.mock.calls[0]?.[6]).toBe(controller.signal);
+        expect(launch.mock.calls[0]).toEqual([
+          "com.test.app",
+          { clearAppData: false, coldBoot: false, signal: controller.signal },
+        ]);
         expect(back).not.toHaveBeenCalled();
         expect(recoverySeams().consecutiveOutOfAppCount).toBe(0);
         expect(result.stopReason).toBe("Reached max interactions limit (1)");
@@ -2433,7 +2438,10 @@ describe("Explore", () => {
       // the exploration signal must reach the launch so cancellation is honored.
       const launchSpy = spyOn(LaunchApp.prototype, "execute").mockImplementation(
         async (...args: unknown[]) => {
-          commands.push(`launch ${JSON.stringify(args.slice(0, 3))} signal=${args[6] === signal}`);
+          const launch = args[1] as LaunchAppCall;
+          commands.push(
+            `launch ${JSON.stringify([args[0], launch.clearAppData, launch.coldBoot])} signal=${launch.signal === signal}`,
+          );
           return { success: true, packageName: args[0] } as never;
         },
       );

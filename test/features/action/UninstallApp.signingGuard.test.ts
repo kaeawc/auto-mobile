@@ -53,7 +53,7 @@ describe("UninstallApp signing guard", () => {
   test("a different key leaves the installed package untouched", async () => {
     const { uninstall } = build([installed([SIGNER_B])]);
     const error = await uninstall
-      .execute(APP, false, 0, undefined, { expectedSigningSha256: [SIGNER_A] })
+      .execute(APP, { keepData: false, userId: 0, guard: { expectedSigningSha256: [SIGNER_A] } })
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(SigningGuardError);
     expect((error as SigningGuardError).reason).toBe("mismatch");
@@ -68,15 +68,23 @@ describe("UninstallApp signing guard", () => {
   test("one shared signer of a multi-signer package does not satisfy the guard", async () => {
     const { uninstall } = build([installed([SIGNER_A, SIGNER_B])]);
     await expect(
-      uninstall.execute(APP, false, 0, undefined, { expectedSigningSha256: [SIGNER_A] }),
+      uninstall.execute(APP, {
+        keepData: false,
+        userId: 0,
+        guard: { expectedSigningSha256: [SIGNER_A] },
+      }),
     ).rejects.toMatchObject({ reason: "mismatch" });
     expect(uninstalled()).toBe(false);
   });
 
   test("a matching package is removed with data and confirmed absent", async () => {
     const { uninstall, inspector } = build([installed([SIGNER_A]), absent]);
-    const result = await uninstall.execute(APP, false, 0, undefined, {
-      expectedSigningSha256: [SIGNER_A.toUpperCase()],
+    const result = await uninstall.execute(APP, {
+      keepData: false,
+      userId: 0,
+      guard: {
+        expectedSigningSha256: [SIGNER_A.toUpperCase()],
+      },
     });
     expect(result).toMatchObject({
       success: true,
@@ -100,7 +108,11 @@ describe("UninstallApp signing guard", () => {
     ]);
     const { uninstall } = build([absent]);
     await expect(
-      uninstall.execute(APP, false, 0, undefined, { expectedSigningSha256: [SIGNER_A] }),
+      uninstall.execute(APP, {
+        keepData: false,
+        userId: 0,
+        guard: { expectedSigningSha256: [SIGNER_A] },
+      }),
     ).rejects.toMatchObject({ reason: "absent" });
   });
 
@@ -109,7 +121,11 @@ describe("UninstallApp signing guard", () => {
       signingInspection({ presence: "unknown", unknownReason: "dumpsys timed out" }),
     ]);
     await expect(
-      uninstall.execute(APP, false, 0, undefined, { expectedSigningSha256: [SIGNER_A] }),
+      uninstall.execute(APP, {
+        keepData: false,
+        userId: 0,
+        guard: { expectedSigningSha256: [SIGNER_A] },
+      }),
     ).rejects.toMatchObject({ reason: "presence-unknown" });
     expect(uninstalled()).toBe(false);
   });
@@ -119,7 +135,11 @@ describe("UninstallApp signing guard", () => {
       signingInspection({ signing: { status: "unavailable", reason: "no signing block" } }),
     ]);
     await expect(
-      uninstall.execute(APP, false, 0, undefined, { expectedSigningSha256: [SIGNER_A] }),
+      uninstall.execute(APP, {
+        keepData: false,
+        userId: 0,
+        guard: { expectedSigningSha256: [SIGNER_A] },
+      }),
     ).rejects.toMatchObject({ reason: "signing-unavailable" });
     expect(uninstalled()).toBe(false);
   });
@@ -127,15 +147,23 @@ describe("UninstallApp signing guard", () => {
   test("an inspection of another profile is refused", async () => {
     const { uninstall } = build([signingInspection({ userId: 10, signerSha256: [SIGNER_A] })]);
     await expect(
-      uninstall.execute(APP, false, 0, undefined, { expectedSigningSha256: [SIGNER_A] }),
+      uninstall.execute(APP, {
+        keepData: false,
+        userId: 0,
+        guard: { expectedSigningSha256: [SIGNER_A] },
+      }),
     ).rejects.toMatchObject({ reason: "presence-unknown" });
     expect(uninstalled()).toBe(false);
   });
 
   test("inconclusive post-removal read is not a verified success", async () => {
     const { uninstall } = build([installed([SIGNER_A]), new Error("adb offline")]);
-    const result = await uninstall.execute(APP, false, 0, undefined, {
-      expectedSigningSha256: [SIGNER_A],
+    const result = await uninstall.execute(APP, {
+      keepData: false,
+      userId: 0,
+      guard: {
+        expectedSigningSha256: [SIGNER_A],
+      },
     });
     expect(result).toMatchObject({ success: false, removalVerification: "unknown" });
     expect(result.error).toContain("could not be verified");
@@ -143,15 +171,19 @@ describe("UninstallApp signing guard", () => {
 
   test("a fresh read that still sees the package fails even if pm list no longer does", async () => {
     const { uninstall } = build([installed([SIGNER_A]), installed([SIGNER_A])]);
-    const result = await uninstall.execute(APP, false, 0, undefined, {
-      expectedSigningSha256: [SIGNER_A],
+    const result = await uninstall.execute(APP, {
+      keepData: false,
+      userId: 0,
+      guard: {
+        expectedSigningSha256: [SIGNER_A],
+      },
     });
     expect(result).toMatchObject({ success: false, removalVerification: "installed" });
   });
 
   test("without a guard no inspection happens and the result is unchanged", async () => {
     const { uninstall, inspector } = build([installed([SIGNER_B])]);
-    const result = await uninstall.execute(APP, false, 0);
+    const result = await uninstall.execute(APP, { keepData: false, userId: 0 });
     expect(result.success).toBe(true);
     expect(result).not.toHaveProperty("signingGuard");
     expect(result).not.toHaveProperty("removalVerification");
@@ -163,7 +195,7 @@ describe("UninstallApp signing guard", () => {
       installedAppsRepository: new FakeInstalledAppsRepository(),
     });
     await expect(
-      ios.execute(APP, false, undefined, undefined, { expectedSigningSha256: [SIGNER_A] }),
+      ios.execute(APP, { keepData: false, guard: { expectedSigningSha256: [SIGNER_A] } }),
     ).rejects.toThrow("only supported for Android");
   });
 });

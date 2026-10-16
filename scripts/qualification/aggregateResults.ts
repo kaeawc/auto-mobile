@@ -84,7 +84,7 @@ function render(report: AggregateReport, identity: ArtifactIdentityRecord | null
     (result) => result.outcome !== "blocked" && result.outcome !== "not-exercised",
   );
   const sections = [
-    "# Managed-slot qualification summary",
+    "# Qualification summary",
     artifact,
     `## Totals\n\n${table(
       ["Platform", ...outcomes],

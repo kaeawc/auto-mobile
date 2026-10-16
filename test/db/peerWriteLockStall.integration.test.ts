@@ -36,8 +36,8 @@ test("real peer write locks leave the event loop responsive", async () => {
     "app-db-session-upsert",
     "app-db-session-release",
     "app-db-transaction",
-    "slot-registry-ensure-scope",
-    "slot-registry-journal",
+    "binding-registry-ensure-scope",
+    "binding-registry-journal",
   ]);
   for (const row of cases) {
     expect(row.maxLoopStallMs).toBeLessThan(1000);

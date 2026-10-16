@@ -8,7 +8,10 @@ import {
   type HostDefaults,
 } from "./privateDaemonEnv";
 
-/** Complete private namespace required before any harness client performs I/O. */
+/** Complete private namespace required before any harness client performs I/O.
+ * Harness-owned broker/session config and legacy slot env are scrubbed by
+ * privateClientEnvironment; inherited path overrides still fail closed here.
+ */
 export function privateHarnessEnvRefusal(
   env: Record<string, string | undefined>,
   host: HostDefaults,

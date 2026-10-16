@@ -49,7 +49,7 @@ import {
   type DisplayFenceOption,
   type DisplayFenceDependencies,
 } from "./BaseVisualChange";
-import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
+import { withStaleDisplay, StaleDisplayError } from "../observe/StaleDisplayError";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import {

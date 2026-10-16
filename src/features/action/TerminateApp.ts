@@ -39,6 +39,7 @@ import {
   DefaultDeviceWindowCacheInvalidator,
   type DeviceWindowCacheInvalidator,
 } from "../observe/DeviceWindowCacheInvalidator";
+import type { ActionCall } from "./ActionCall";
 export {
   DefaultDeviceWindowCacheInvalidator,
   type DeviceWindowCacheInvalidator,
@@ -104,6 +105,13 @@ function settledValue<T>(result: PromiseSettledResult<T>): T {
   return result.value;
 }
 
+/** Per-call options for {@link TerminateApp.execute}; `signal` joins the old progress/observation options. */
+export interface TerminateAppCall extends ActionCall {
+  skipObservation?: boolean;
+  skipUiStability?: boolean;
+  userId?: number;
+}
+
 export interface TerminateAppOptions {
   simctl?: SimCtlClient;
   timer?: Timer;
@@ -141,15 +149,11 @@ export class TerminateApp extends BaseVisualChange {
    */
   async execute(
     packageName: string,
-    options?: {
-      progress?: ProgressCallback;
-      skipObservation?: boolean;
-      skipUiStability?: boolean;
-      userId?: number;
-    },
-    signal?: AbortSignal,
+    options?: TerminateAppCall,
+    signalArg?: AbortSignal,
   ): Promise<TerminateAppResult> {
-    signal = combineWithAmbientAbort(signal);
+    // A signal on the call context wins over none; an explicit trailing signal is the old form.
+    const signal = combineWithAmbientAbort(signalArg ?? options?.signal);
     throwIfAborted(signal);
     if (this.device.platform === "ios") {
       return this.executeiOS(packageName, options);

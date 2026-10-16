@@ -5,7 +5,7 @@ import {
 } from "../../talkback/TalkBackTapStrategy";
 import { runBoomerangReturnLeg } from "./boomerangReturnLeg";
 import { withEpilogueWarning } from "../../../utils/bestEffortEpilogue";
-import { StaleDisplayError } from "../../../models/StaleDisplayError";
+import { StaleDisplayError } from "../../observe/StaleDisplayError";
 import type { FencedGestureOptions } from "../ExecuteGesture";
 import { ActionableError, BootedDevice, Element, SwipeDirection } from "../../../models";
 import { logger } from "../../../utils/logger";

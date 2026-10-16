@@ -2,7 +2,7 @@ import { ActionableError } from "../../models/ActionableError";
 import type { Element } from "../../models/Element";
 import { boundsNearlyEqual } from "../../utils/bounds";
 import type { ViewHierarchyResult } from "../../models";
-import { StaleDisplayError } from "../../models/StaleDisplayError";
+import { StaleDisplayError } from "../observe/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";

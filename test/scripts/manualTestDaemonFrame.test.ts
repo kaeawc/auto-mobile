@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
   FrameRpc,
   parseDaemonFrameArgs,
@@ -25,6 +25,7 @@ class FakeConnection implements FrameConnection {
   close: (error?: Error) => void = () => {};
   respond: (frame: FakeConnection["writes"][number]) => unknown = () => ({});
   success = true;
+  refusalCode = "typed_refusal";
   silent = false;
   write(data: string): void {
     if (this.destroyed) {
@@ -34,14 +35,15 @@ class FakeConnection implements FrameConnection {
     const frame = JSON.parse(data) as FakeConnection["writes"][number];
     this.writes.push(frame);
     if (!this.silent) {
+      const result = this.respond(frame);
       this.data(
         Buffer.from(
           JSON.stringify({
             id: frame.id,
             type: "mcp_response",
             success: this.success,
-            result: this.respond(frame),
-            code: this.success ? undefined : "typed_refusal",
+            result,
+            code: this.success ? undefined : this.refusalCode,
           }) + "\n",
         ),
       );
@@ -97,6 +99,7 @@ function fixture() {
       paths.push(path);
       return connection;
     },
+    exists: () => false,
     readFile: () => '{"name":"named"}',
     out: (line) => {
       out.push(line);
@@ -107,40 +110,94 @@ function fixture() {
   };
   return { connection, timer, out, err, paths, deps };
 }
-const config = JSON.stringify({
+const request = {
   contractVersion: 1,
-  managedHostScope: "fake-host",
-  runnerNamespace: "fake-runner",
-  runnerIncarnation: "boot-1",
-  executionAttempt: "attempt-1",
-  localSlotCapacity: 1,
-  requests: [
-    {
-      slotIndex: 0,
-      role: "main",
-      platform: "android",
-      requestedSpec: {
-        runtime: "system-images;android-36;google_apis;arm64-v8a",
-        deviceType: "pixel_7",
-        displayCutout: "none",
-      },
-    },
-  ],
-});
-function managedFixture(failed = false) {
+  requestId: "request-1",
+  device: {
+    schemaVersion: 1,
+    platform: "android",
+    hardware: { kind: "omitted" },
+    os: { kind: "omitted" },
+  },
+};
+const config = "/standalone/request.json";
+/** In-memory wire fake mirroring handlers.ts bind-before-prepare/status and the broker tool gate.
+ * No database or native lifecycle is needed to exercise connection confinement here. */
+function fakeBrokerBindingFixture(failed = false) {
   const f = fixture();
-  f.connection.respond = (frame) =>
-    frame.method === "daemon/capabilities"
-      ? { capabilities: ["managed-slots/v1"] }
-      : frame.method === "daemon/acquireManagedSlots"
-        ? {
-            contractVersion: 1,
-            scope: { scopeKey: "scope" },
-            outcome: failed ? "failed" : "ready",
-            slots: failed ? [] : [{ slotIndex: 0, sessionUuid: "slot-session" }],
-          }
-        : {};
-  return f;
+  f.connection.refusalCode = "device_outside_broker_grant";
+  delete f.deps.env.MT_BATCH;
+  const files = new Map([[config, JSON.stringify(request)]]);
+  f.deps.readFile = (path) => files.get(path) ?? '{"name":"named"}';
+  f.deps.exists = (path) => files.has(path);
+  let bound = new Set<string>();
+  const grants = new Map([[request.requestId, { sessionId: "broker-session", token: "fake-1" }]]);
+  f.connection.respond = (frame) => {
+    f.connection.success = true;
+    if (frame.method === "daemon/capabilities") {
+      return { capabilities: ["session-broker/v1"] };
+    }
+    if (["daemon/prepareSession", "daemon/sessionRequestStatus"].includes(frame.method)) {
+      bound = new Set();
+      const id =
+        frame.method === "daemon/prepareSession"
+          ? (frame.params.config as typeof request).requestId
+          : String(frame.params.requestId);
+      const grant = grants.get(id);
+      if (grant && grant.token !== frame.params.livenessOwnerToken) {
+        f.connection.success = false;
+        return { error: "Session request belongs to another liveness owner" };
+      }
+      if (!failed && grant) {
+        bound.add(grant.sessionId);
+      }
+      return {
+        contractVersion: 1,
+        requestId: id,
+        outcome: failed ? "failed" : "ready",
+        sessionUuid: failed ? null : grant?.sessionId,
+        profile: failed ? null : {},
+        cleanupPending: false,
+      };
+    }
+    if (frame.method === "daemon/registerSession") {
+      bound = new Set();
+      const registration = frame.params.sessionBroker as {
+        requestId: string;
+        livenessOwnerToken: string;
+      };
+      const grant = grants.get(registration.requestId);
+      f.connection.success =
+        !!grant &&
+        grant.sessionId === frame.params.sessionId &&
+        grant.token === registration.livenessOwnerToken;
+      if (f.connection.success) {
+        bound.add(grant!.sessionId);
+      }
+      return {};
+    }
+    if (frame.method === "daemon/releaseBrokerSession") {
+      const grant = [...grants.values()].find(
+        (value) =>
+          value.sessionId === frame.params.sessionId &&
+          value.token === frame.params.livenessOwnerToken,
+      );
+      return {
+        sessionUuid: frame.params.sessionId,
+        outcome: grant ? "released" : "unknown_session",
+      };
+    }
+    if (frame.method === "tools/call") {
+      const args = frame.params.arguments as { sessionUuid?: string } | undefined;
+      f.connection.success =
+        !["startDevice", "provisionDevice", "getAndroid", "getApple", "killDevice"].includes(
+          String(frame.params.name),
+        ) &&
+        (!args?.sessionUuid || bound.has(args.sessionUuid));
+    }
+    return {};
+  };
+  return { ...f, files, grants, bound: () => [...bound] };
 }
 test("parses every flag including explicit type, file JSON and cancellation delay", () => {
   expect(
@@ -158,11 +215,10 @@ test("parses every flag including explicit type, file JSON and cancellation dela
       "90",
       "--mode",
       "cancel-after:7",
-      "--managed-binding",
+      "--broker-binding",
       config,
       "--hold-ms",
       "20",
-      "--allow-selector",
       "--allow-host-mutation",
     ]),
   ).toEqual({
@@ -176,9 +232,11 @@ test("parses every flag including explicit type, file JSON and cancellation dela
     keepOpenMs: 5000,
     then: [],
     cancelAfterMs: 7,
-    managedBinding: config,
+    brokerBinding: config,
+    tokenOf: undefined,
+    expectRefused: false,
     holdMs: 20,
-    allowSelector: true,
+    allowSelector: false,
     allowHostMutation: true,
   });
   expect(parsed(["send", "x", "--mode", "cancel"]).mode).toBe("cancel");
@@ -287,20 +345,20 @@ posixTest("response and connection timeout exit 3", async () => {
   expect(await connecting).toBe(3);
 });
 posixTest(
-  "managed acquisition, claim, frame, continuing heartbeats and release use ONE socket",
+  "broker acquisition, claim, frame, continuing heartbeats and release use ONE socket",
   async () => {
-    const f = managedFixture();
-    const task = runDaemonFrame({ ...parsed(), managedBinding: config, holdMs: 4500 }, f.deps);
+    const f = fakeBrokerBindingFixture();
+    const task = runDaemonFrame({ ...parsed(), brokerBinding: config, holdMs: 4500 }, f.deps);
     await drainUntilQuiescent(f.timer);
     expect(f.connection.writes.map((frame) => frame.method)).toEqual([
       "daemon/capabilities",
-      "daemon/acquireManagedSlots",
+      "daemon/prepareSession",
       "daemon/heartbeat",
       "ide/status",
     ]);
     const claim = f.connection.writes[2].params;
     expect(claim).toEqual({
-      sessionId: "slot-session",
+      sessionId: "broker-session",
       livenessPolicy: "heartbeat",
       livenessOwnerToken: "fake-1",
       claimLivenessOwnership: true,
@@ -319,7 +377,7 @@ posixTest(
     expect(await task).toBe(0);
     expect(f.paths).toHaveLength(1);
     expect(f.connection.writes.at(-1)?.params).toEqual({
-      sessionId: "slot-session",
+      sessionId: "broker-session",
       livenessOwnerToken: "fake-1",
     });
     const n = f.connection.writes.length;
@@ -327,8 +385,8 @@ posixTest(
     expect(f.connection.writes).toHaveLength(n);
   },
 );
-posixTest("failed managed acquisition still sends the frame and reflects its refusal", async () => {
-  const f = managedFixture(true);
+posixTest("failed broker acquisition refuses all user frames", async () => {
+  const f = fakeBrokerBindingFixture(true);
   const base = f.connection.respond;
   // Use explicit response injection to represent a refused user frame.
   f.connection.write = (data) => {
@@ -345,17 +403,16 @@ posixTest("failed managed acquisition still sends the frame and reflects its ref
       ),
     );
   };
-  expect(await runDaemonFrame({ ...parsed(), managedBinding: config }, f.deps)).toBe(1);
+  expect(await runDaemonFrame({ ...parsed(), brokerBinding: config }, f.deps)).toBe(1);
   expect(f.connection.writes.map((frame) => frame.method)).toEqual([
     "daemon/capabilities",
-    "daemon/acquireManagedSlots",
-    "ide/status",
+    "daemon/prepareSession",
   ]);
   expect(f.out.some((line) => line.includes('"outcome":"failed"'))).toBe(true);
 });
 posixTest("invalid config or JSON is refused before connect; @file is read", async () => {
   const f = fixture();
-  expect(await runDaemonFrame({ ...parsed(), managedBinding: "{}" }, f.deps)).toBe(2);
+  expect(await runDaemonFrame({ ...parsed(), brokerBinding: "{}" }, f.deps)).toBe(2);
   expect(await runDaemonFrame({ ...parsed(), json: "not json" }, f.deps)).toBe(2);
   expect(f.paths).toEqual([]);
   expect(await runDaemonFrame({ ...parsed(), json: "@fake-file" }, f.deps)).toBe(0);
@@ -387,10 +444,10 @@ posixTest(
 );
 
 posixTest(
-  "connection loss during a managed hold stops the keeper and returns 3 immediately",
+  "connection loss during a broker hold stops the keeper and returns 3 immediately",
   async () => {
-    const f = managedFixture();
-    const task = runDaemonFrame({ ...parsed(), managedBinding: config, holdMs: 10000 }, f.deps);
+    const f = fakeBrokerBindingFixture();
+    const task = runDaemonFrame({ ...parsed(), brokerBinding: config, holdMs: 10000 }, f.deps);
     await drainUntilQuiescent(f.timer);
     f.connection.close(new Error("fake connection loss"));
     expect(await task).toBe(3);
@@ -399,12 +456,12 @@ posixTest(
   },
 );
 posixTest(
-  "managed cancel modes clear the keeper without a release frame on the destroyed socket",
+  "broker cancel modes clear the keeper without a release frame on the destroyed socket",
   async () => {
     for (const mode of ["cancel", "cancel-after"] as const) {
-      const f = managedFixture();
+      const f = fakeBrokerBindingFixture();
       const task = runDaemonFrame(
-        { ...parsed(), managedBinding: config, mode, cancelAfterMs: 7 },
+        { ...parsed(), brokerBinding: config, mode, cancelAfterMs: 7 },
         f.deps,
       );
       await drainUntilQuiescent(f.timer);
@@ -413,9 +470,9 @@ posixTest(
       expect(f.connection.destroyed).toBe(true);
       expect(f.err).toEqual([]);
       expect(f.connection.writesAfterDestroy).toBe(0);
-      expect(f.connection.writes.some((frame) => frame.method === "daemon/releaseExecution")).toBe(
-        false,
-      );
+      expect(
+        f.connection.writes.some((frame) => frame.method === "daemon/releaseBrokerSession"),
+      ).toBe(false);
       expect(f.timer.getPendingIntervalCount()).toBe(0);
     }
   },
@@ -447,7 +504,7 @@ posixTest(
 posixTest(
   "keeper starts only after claim response and logs a failed heartbeat without aborting",
   async () => {
-    const f = managedFixture();
+    const f = fakeBrokerBindingFixture();
     const write = f.connection.write.bind(f.connection);
     let claim: FakeConnection["writes"][number] | undefined;
     f.connection.write = (data) => {
@@ -472,7 +529,7 @@ posixTest(
         write(data);
       }
     };
-    const task = runDaemonFrame({ ...parsed(), managedBinding: config, holdMs: 4500 }, f.deps);
+    const task = runDaemonFrame({ ...parsed(), brokerBinding: config, holdMs: 4500 }, f.deps);
     await drainUntilQuiescent(f.timer);
     expect(claim).toBeDefined();
     expect(f.timer.getPendingIntervalCount()).toBe(0);
@@ -485,77 +542,15 @@ posixTest(
     expect(f.timer.getPendingIntervalCount()).toBe(1);
     f.timer.advanceTime(2000);
     await drainUntilQuiescent(f.timer);
-    expect(f.err.join(" ")).toContain("Managed heartbeat failed: transient heartbeat failure");
+    expect(f.err.join(" ")).toContain("Broker heartbeat failed: transient heartbeat failure");
     f.timer.advanceTime(2500);
     expect(await task).toBe(0);
     expect(f.timer.getPendingIntervalCount()).toBe(0);
   },
 );
 
-posixTest(
-  "a claim answered after the preparation deadline cannot start an abandoned keeper",
-  async () => {
-    const f = managedFixture();
-    const write = f.connection.write.bind(f.connection);
-    let claim: FakeConnection["writes"][number] | undefined;
-    f.connection.write = (data) => {
-      const frame = JSON.parse(data) as FakeConnection["writes"][number];
-      if (frame.method === "daemon/heartbeat" && frame.params.claimLivenessOwnership) {
-        claim = frame;
-        f.connection.writes.push(frame);
-      } else {
-        write(data);
-      }
-    };
-    const task = runDaemonFrame(
-      {
-        ...parsed(),
-        managedBinding: JSON.stringify({ ...JSON.parse(config), preparationTimeoutMs: 100 }),
-        holdMs: 10000,
-      },
-      f.deps,
-    );
-    await drainUntilQuiescent(f.timer);
-    expect(claim).toBeDefined();
-    f.timer.advanceTime(100);
-    await drainUntilQuiescent(f.timer);
-    const result = f.out.find((line) => line.startsWith('{"contractVersion":'));
-    expect(JSON.parse(result!)).toMatchObject({
-      outcome: "failed",
-      failure: { code: "timeout" },
-      slots: [{ sessionUuid: null }],
-    });
-    const releases = () =>
-      f.connection.writes.filter((frame) => frame.method === "daemon/releaseExecution");
-    expect(releases()).toHaveLength(1);
-    expect(releases()[0].params).toEqual({
-      sessionId: "slot-session",
-      livenessOwnerToken: "fake-1",
-    });
-    f.timer.advanceTime(1);
-    f.connection.data(
-      Buffer.from(
-        JSON.stringify({ id: claim!.id, type: "mcp_response", success: true, result: {} }) + "\n",
-      ),
-    );
-    await drainUntilQuiescent(f.timer);
-    expect(f.timer.getPendingIntervalCount()).toBe(0);
-    for (let tick = 0; tick < 4; tick++) {
-      f.timer.advanceTime(2000);
-      await drainUntilQuiescent(f.timer);
-    }
-    expect(f.connection.writes.filter((frame) => frame.method === "daemon/heartbeat")).toHaveLength(
-      1,
-    );
-    f.timer.advanceTime(2000);
-    expect(await task).toBe(0);
-    expect(releases()).toHaveLength(1);
-    expect(f.paths).toHaveLength(1);
-  },
-);
-
 posixTest("failed keeper heartbeat logs and continues to a successful exit", async () => {
-  const f = managedFixture();
+  const f = fakeBrokerBindingFixture();
   const write = f.connection.write.bind(f.connection);
   f.connection.write = (data) => {
     const frame = JSON.parse(data) as FakeConnection["writes"][number];
@@ -576,11 +571,11 @@ posixTest("failed keeper heartbeat logs and continues to a successful exit", asy
       write(data);
     }
   };
-  const task = runDaemonFrame({ ...parsed(), managedBinding: config, holdMs: 2500 }, f.deps);
+  const task = runDaemonFrame({ ...parsed(), brokerBinding: config, holdMs: 2500 }, f.deps);
   await drainUntilQuiescent(f.timer);
   f.timer.advanceTime(2000);
   await drainUntilQuiescent(f.timer);
-  expect(f.err.join(" ")).toContain("Managed heartbeat failed: temporary miss");
+  expect(f.err.join(" ")).toContain("Broker heartbeat failed: temporary miss");
   f.timer.advanceTime(500);
   expect(await task).toBe(0);
   expect(f.timer.getPendingIntervalCount()).toBe(0);
@@ -588,7 +583,7 @@ posixTest("failed keeper heartbeat logs and continues to a successful exit", asy
 posixTest(
   "keeper deadline matches proxy lease formula and tolerates a timed-out heartbeat",
   async () => {
-    const f = managedFixture();
+    const f = fakeBrokerBindingFixture();
     f.deps.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS = "12000";
     const write = f.connection.write.bind(f.connection);
     let missed = false;
@@ -601,7 +596,7 @@ posixTest(
         write(data);
       }
     };
-    const task = runDaemonFrame({ ...parsed(), managedBinding: config, holdMs: 9000 }, f.deps);
+    const task = runDaemonFrame({ ...parsed(), brokerBinding: config, holdMs: 9000 }, f.deps);
     await drainUntilQuiescent(f.timer);
     f.timer.advanceTime(2000);
     await drainUntilQuiescent(f.timer);
@@ -612,7 +607,7 @@ posixTest(
     f.timer.advanceTime(2000);
     await drainUntilQuiescent(f.timer);
     expect(f.err.join(" ")).toContain(
-      "Managed heartbeat failed: daemon/heartbeat timed out after 4000ms",
+      "Broker heartbeat failed: daemon/heartbeat timed out after 4000ms",
     );
     f.timer.advanceTime(3000);
     expect(await task).toBe(0);
@@ -620,7 +615,7 @@ posixTest(
   },
 );
 posixTest("typed session-loss answer retires keeper without aborting user hold", async () => {
-  const f = managedFixture();
+  const f = fakeBrokerBindingFixture();
   const write = f.connection.write.bind(f.connection);
   f.connection.write = (data) => {
     const frame = JSON.parse(data) as FakeConnection["writes"][number];
@@ -641,7 +636,7 @@ posixTest("typed session-loss answer retires keeper without aborting user hold",
       write(data);
     }
   };
-  const task = runDaemonFrame({ ...parsed(), managedBinding: config, holdMs: 6500 }, f.deps);
+  const task = runDaemonFrame({ ...parsed(), brokerBinding: config, holdMs: 6500 }, f.deps);
   await drainUntilQuiescent(f.timer);
   f.timer.advanceTime(2000);
   await drainUntilQuiescent(f.timer);
@@ -736,8 +731,8 @@ posixTest("kebab-case hint preserves the requested method on the wire", async ()
   ).toBe(0);
   expect(f.err).toContain("did you mean daemon/sessionInfo?");
   expect(f.connection.writes[0].method).toBe("daemon/session-info");
-  expect(daemonMethodHint("daemon/release-execution")).toBe(
-    "did you mean daemon/releaseExecution?",
+  expect(daemonMethodHint("daemon/release-broker-session")).toBe(
+    "did you mean daemon/releaseBrokerSession?",
   );
   expect(daemonMethodHint("daemon/non-existent")).toBeUndefined();
 });
@@ -805,38 +800,38 @@ posixTest("cancel keep-open without an answer prints a bounded false summary", a
 posixTest(
   "sequential then frames resolve own identities and release without spurious failure",
   async () => {
-    const f = managedFixture();
+    const f = fakeBrokerBindingFixture();
     const respond = f.connection.respond;
     let released = false;
     f.connection.respond = (frame) => {
-      if (frame.method === "daemon/releaseExecution") {
+      if (frame.method === "daemon/releaseBrokerSession") {
         const alreadyReleased = released;
         released = true;
-        return { sessionId: "slot-session", alreadyReleased, outcome: "reusable_for_this_slot" };
+        return { sessionId: "broker-session", alreadyReleased, outcome: "released" };
       }
       return respond(frame);
     };
     const command = parsed([
       "send",
       "ide/status",
-      "--managed-binding",
+      "--broker-binding",
       config,
       "--then",
-      'daemon/sessionInfo {"sessionId":"{{ownSessionId}}","nested":["{{ownSessionId:0}}"]}',
+      'daemon/sessionInfo {"sessionId":"{{ownSessionId}}","nested":["{{ownSessionId}}"]}',
       "--then",
-      'daemon/releaseExecution {"sessionId":"{{ownSessionId}}","livenessOwnerToken":"{{ownLivenessOwnerToken}}"}',
+      'daemon/releaseBrokerSession {"sessionId":"{{ownSessionId}}","livenessOwnerToken":"{{ownLivenessOwnerToken}}"}',
     ]);
     expect(await runDaemonFrame(command, f.deps)).toBe(0);
     const user = f.connection.writes.filter((frame) =>
-      ["ide/status", "daemon/sessionInfo", "daemon/releaseExecution"].includes(frame.method),
+      ["ide/status", "daemon/sessionInfo", "daemon/releaseBrokerSession"].includes(frame.method),
     );
     expect(user.slice(0, 3).map((frame) => frame.method)).toEqual([
       "ide/status",
       "daemon/sessionInfo",
-      "daemon/releaseExecution",
+      "daemon/releaseBrokerSession",
     ]);
-    expect(user[1].params).toEqual({ sessionId: "slot-session", nested: ["slot-session"] });
-    expect(user[2].params).toEqual({ sessionId: "slot-session", livenessOwnerToken: "fake-1" });
+    expect(user[1].params).toEqual({ sessionId: "broker-session", nested: ["broker-session"] });
+    expect(user[2].params).toEqual({ sessionId: "broker-session", livenessOwnerToken: "fake-1" });
     expect(f.paths).toHaveLength(1);
     expect(f.err).toEqual([]);
     expect(f.timer.getPendingIntervalCount()).toBe(0);
@@ -852,26 +847,26 @@ posixTest("unresolved placeholders refuse before any connection or frame", async
         "--then",
         'daemon/sessionInfo {"sessionId":"{{ownSessionId:9}}"}',
       ]),
-      managedBinding: binding,
+      brokerBinding: binding,
     };
     expect(await runDaemonFrame(command, f.deps)).toBe(2);
     expect(f.connection.writes).toEqual([]);
     expect(f.paths).toEqual([]);
   }
-  const f = managedFixture(true);
+  const f = fakeBrokerBindingFixture(true);
   expect(
     await runDaemonFrame(
       parsed([
         "send",
         "ide/status",
-        "--managed-binding",
+        "--broker-binding",
         config,
         "--then",
         'daemon/sessionInfo {"sessionId":"{{ownSessionId}}"}',
       ]),
       f.deps,
     ),
-  ).toBe(2);
+  ).toBe(1);
   expect(f.connection.writes.some((frame) => frame.method === "ide/status")).toBe(false);
 });
 posixTest("a refused then frame exits one and later frames still run", async () => {
@@ -917,18 +912,14 @@ posixTest("then device-start and maintenance guards apply before anything is sen
     expect(f.paths).toEqual([]);
   }
 });
-test("placeholder values select sparse slot indices and keep object keys literal", () => {
-  const identity = {
-    sessionIds: ["first", "second"],
-    slots: new Map([[3, "second"]]),
-    token: "owner",
-  };
+test("placeholder values resolve one grant and named clients while keys stay literal", () => {
+  const identity = { sessionId: "first", clients: new Map([["b", "second"]]), token: "owner" };
   expect(
     substituteFramePlaceholders(
       {
         "{{ownSessionId}}": [
           "prefix {{ownSessionId}}",
-          "{{ownSessionId:3}}",
+          "{{clientSessionId:b}}",
           "{{ownLivenessOwnerToken}}",
         ],
       },
@@ -936,7 +927,7 @@ test("placeholder values select sparse slot indices and keep object keys literal
     ),
   ).toEqual({ "{{ownSessionId}}": ["prefix first", "second", "owner"] });
   expect(() => substituteFramePlaceholders("{{ownSessionId}}", undefined)).toThrow(
-    "--managed-binding",
+    "--broker-binding",
   );
 });
 
@@ -976,36 +967,21 @@ test("cancellation window and placeholder syntax refuse unresolvable input", () 
   ]) {
     expect(() =>
       substituteFramePlaceholders(value, {
-        sessionIds: ["S"],
-        slots: new Map([[0, "S"]]),
+        sessionId: "S",
+        clients: new Map(),
         token: "T",
       }),
-    ).toThrow("Cannot resolve");
+    ).toThrow();
   }
 });
-posixTest("automatic managed release treats a typed missing session as completed", async () => {
-  const f = managedFixture();
-  const write = f.connection.write.bind(f.connection);
-  f.connection.write = (data) => {
-    const frame = JSON.parse(data) as FakeConnection["writes"][number];
-    if (frame.method === "daemon/releaseExecution") {
-      f.connection.writes.push(frame);
-      f.connection.data(
-        Buffer.from(
-          JSON.stringify({
-            type: "mcp_response",
-            id: frame.id,
-            success: false,
-            code: "daemon_session_not_found",
-            error: "already gone",
-          }) + "\n",
-        ),
-      );
-    } else {
-      write(data);
-    }
-  };
-  expect(await runDaemonFrame({ ...parsed(), managedBinding: config }, f.deps)).toBe(0);
+posixTest("automatic broker release accepts an unknown-session receipt", async () => {
+  const f = fakeBrokerBindingFixture();
+  const respond = f.connection.respond;
+  f.connection.respond = (frame) =>
+    frame.method === "daemon/releaseBrokerSession"
+      ? { sessionUuid: "broker-session", outcome: "unknown_session" }
+      : respond(frame);
+  expect(await runDaemonFrame({ ...parsed(), brokerBinding: config }, f.deps)).toBe(0);
   expect(f.err).toEqual([]);
 });
 
@@ -1043,18 +1019,18 @@ posixTest("heartbeat convenience honours the keeper idle timeout from injected e
   });
 });
 
-posixTest("keep-open summary remains final after managed cleanup", async () => {
-  const f = managedFixture();
+posixTest("keep-open summary remains final after broker cleanup", async () => {
+  const f = fakeBrokerBindingFixture();
   expect(
     await runDaemonFrame(
-      { ...parsed(["send", "ide/status", "--mode", "cancel-keep-open"]), managedBinding: config },
+      { ...parsed(["send", "ide/status", "--mode", "cancel-keep-open"]), brokerBinding: config },
       f.deps,
     ),
   ).toBe(0);
   expect(JSON.parse(f.out.at(-1)!)).toMatchObject({
     cancelled: [{ answered: true, success: true }],
   });
-  expect(f.connection.writes.at(-1)?.method).toBe("daemon/releaseExecution");
+  expect(f.connection.writes.at(-1)?.method).toBe("daemon/releaseBrokerSession");
   expect(f.connection.ended).toBe(true);
   expect(f.connection.destroyed).toBe(false);
 });
@@ -1100,3 +1076,738 @@ test("response before overflow resolves and echoes before other waiters fail", a
   f.connection.data(Buffer.from(line + "\n"));
   expect(f.out).toHaveLength(1);
 });
+
+function batchFixture() {
+  const f = fakeBrokerBindingFixture();
+  const batch = resolve("/fake/batch");
+  f.deps.env.MT_BATCH = batch;
+  const clients = Object.fromEntries(
+    ["a", "b"].map((name) => [
+      name,
+      {
+        platform: "android",
+        profile: request.device,
+        requestId: `batch-${name}-1`,
+        tokenFile: `sessions/${name}/owner-token`,
+      },
+    ]),
+  );
+  f.files.set(join(batch, "broker/clients.json"), JSON.stringify(clients));
+  for (const name of ["a", "b"]) {
+    const dir = join(batch, "sessions", name);
+    const config = { ...request, requestId: `batch-${name}-1` };
+    f.files.set(join(dir, "request.json"), JSON.stringify(config));
+    f.files.set(join(dir, "attempts.json"), JSON.stringify([config.requestId]));
+    f.files.set(join(dir, "owner-token"), `secret-${name}-token`);
+    f.files.set(
+      join(dir, "init.json"),
+      JSON.stringify({
+        session: {
+          outcome: "ready",
+          sessionUuid: `session-${name}`,
+          requestId: config.requestId,
+        },
+      }),
+    );
+    f.grants.set(config.requestId, { sessionId: `session-${name}`, token: `secret-${name}-token` });
+  }
+  return { ...f, batch };
+}
+
+posixTest(
+  "batch name and request path reuse the exact identity, bind one grant, and never release it",
+  async () => {
+    for (const source of ["a", "/fake/batch/sessions/a/request.json"]) {
+      const f = batchFixture();
+      const command = parsed([
+        "send",
+        "tools/call",
+        '{"name":"observe","arguments":{"sessionUuid":"{{ownSessionId}}"}}',
+        "--broker-binding",
+        source,
+      ]);
+      expect(await runDaemonFrame(command, f.deps)).toBe(0);
+      expect(f.bound()).toEqual(["session-a"]);
+      expect(
+        f.connection.writes.find((frame) => frame.method === "daemon/prepareSession")?.params,
+      ).toEqual({
+        config: { ...request, requestId: "batch-a-1" },
+        livenessOwnerToken: "secret-a-token",
+      });
+      expect(
+        f.connection.writes.find((frame) => frame.method === "tools/call")?.params.arguments,
+      ).toEqual({ sessionUuid: "session-a" });
+      expect(
+        f.connection.writes.some((frame) => frame.method === "daemon/releaseBrokerSession"),
+      ).toBe(false);
+      expect(f.timer.getPendingIntervalCount()).toBe(0);
+      expect(f.paths).toHaveLength(1);
+    }
+  },
+);
+
+posixTest(
+  "a named foreign grant is sent for isolation and refused by the bound socket",
+  async () => {
+    const f = batchFixture();
+    expect(
+      await runDaemonFrame(
+        parsed([
+          "send",
+          "tools/call",
+          '{"name":"observe","arguments":{"sessionUuid":"{{clientSessionId:b}}"}}',
+          "--broker-binding",
+          "a",
+          "--expect-refused",
+        ]),
+        f.deps,
+      ),
+    ).toBe(0);
+    expect(
+      f.connection.writes.find((frame) => frame.method === "tools/call")?.params.arguments,
+    ).toEqual({ sessionUuid: "session-b" });
+    expect(f.bound()).toEqual(["session-a"]);
+    // The other grant remains independently usable on a new connection.
+    f.connection.writes.length = 0;
+    expect(
+      await runDaemonFrame(
+        parsed([
+          "send",
+          "tools/call",
+          '{"name":"observe","arguments":{"sessionUuid":"{{ownSessionId}}"}}',
+          "--broker-binding",
+          "b",
+        ]),
+        f.deps,
+      ),
+    ).toBe(0);
+    expect(f.bound()).toEqual(["session-b"]);
+  },
+);
+
+posixTest(
+  "broker acquisition tools are locally refused and explicit expected refusals reach the gate",
+  async () => {
+    for (const name of ["startDevice", "provisionDevice", "getAndroid", "getApple", "killDevice"]) {
+      const f = fakeBrokerBindingFixture();
+      const command = parsed([
+        "send",
+        "tools/call",
+        JSON.stringify({ name, arguments: { deviceId: "explicit" } }),
+        "--broker-binding",
+        config,
+      ]);
+      expect(await runDaemonFrame(command, f.deps)).toBe(2);
+      expect(f.paths).toEqual([]);
+      expect(f.err.join(" ")).toContain("--expect-refused");
+      const allowed = fakeBrokerBindingFixture();
+      expect(
+        await runDaemonFrame(
+          { ...command, json: JSON.stringify({ name, arguments: {} }), expectRefused: true },
+          allowed.deps,
+        ),
+      ).toBe(0);
+      expect(allowed.connection.writes.some((frame) => frame.method === "tools/call")).toBe(true);
+    }
+  },
+);
+
+posixTest(
+  "expected refusal exits two on any successful response, including then frames",
+  async () => {
+    const f = fakeBrokerBindingFixture();
+    expect(
+      await runDaemonFrame(
+        parsed([
+          "send",
+          "tools/call",
+          '{"name":"startDevice","arguments":{}}',
+          "--broker-binding",
+          config,
+          "--expect-refused",
+          "--then",
+          "ide/status {}",
+        ]),
+        f.deps,
+      ),
+    ).toBe(2);
+    const g = fakeBrokerBindingFixture();
+    const respond = g.connection.respond;
+    g.connection.respond = (frame) => {
+      const result = respond(frame);
+      if (frame.method === "tools/call") {
+        g.connection.success = true;
+      }
+      return result;
+    };
+    expect(
+      await runDaemonFrame(
+        parsed([
+          "send",
+          "tools/call",
+          '{"name":"killDevice","arguments":{}}',
+          "--broker-binding",
+          config,
+          "--expect-refused",
+        ]),
+        g.deps,
+      ),
+    ).toBe(2);
+  },
+);
+
+posixTest(
+  "broker resources and device reads are never sent, even under expected refusal",
+  async () => {
+    for (const method of ["resources", "resources/list", "read", "resources/read"]) {
+      const f = fakeBrokerBindingFixture();
+      expect(
+        await runDaemonFrame(
+          parsed([
+            "send",
+            method,
+            '{"uri":"automobile:devices/android"}',
+            "--broker-binding",
+            config,
+            "--expect-refused",
+          ]),
+          f.deps,
+        ),
+      ).toBe(2);
+      expect(f.paths).toEqual([]);
+    }
+  },
+);
+
+posixTest(
+  "indexed and unknown client placeholders refuse before acquisition with migration guidance",
+  async () => {
+    for (const value of [
+      "{{ownSessionId:0}}",
+      "{{ownSessionId:3}}",
+      "{{clientSessionId:foreign}}",
+    ]) {
+      const f = batchFixture();
+      expect(
+        await runDaemonFrame(
+          parsed([
+            "send",
+            "daemon/sessionInfo",
+            JSON.stringify({ sessionId: value }),
+            "--broker-binding",
+            "a",
+          ]),
+          f.deps,
+        ),
+      ).toBe(2);
+      expect(f.paths).toEqual([]);
+      if (value.startsWith("{{ownSessionId:")) {
+        expect(f.err.join(" ")).toContain("{{clientSessionId:<name>}}");
+      }
+    }
+  },
+);
+
+posixTest(
+  "token-of changes only status/release user frames and never prints either token",
+  async () => {
+    for (const method of ["daemon/sessionRequestStatus", "daemon/releaseBrokerSession"]) {
+      const f = batchFixture();
+      expect(
+        await runDaemonFrame(
+          parsed([
+            "send",
+            method,
+            '{"requestId":"batch-a-1","sessionId":"{{ownSessionId}}","livenessOwnerToken":"{{ownLivenessOwnerToken}}"}',
+            "--broker-binding",
+            "a",
+            "--token-of",
+            "b",
+          ]),
+          f.deps,
+        ),
+      ).toBe(method.endsWith("Status") ? 1 : 0);
+      const user = f.connection.writes.find((frame) => frame.method === method)!;
+      expect(user.params.livenessOwnerToken).toBe("secret-b-token");
+      expect(
+        f.connection.writes.find((frame) => frame.method === "daemon/heartbeat")?.params
+          .livenessOwnerToken,
+      ).toBe("secret-a-token");
+      expect(f.err).toEqual(["Isolation frame: using token of batch client b."]);
+      expect([...f.out, ...f.err].join(" ")).not.toContain("secret-a-token");
+      expect([...f.out, ...f.err].join(" ")).not.toContain("secret-b-token");
+    }
+  },
+);
+
+posixTest(
+  "token-of refuses self, foreign, standalone, and non-isolation methods before connecting",
+  async () => {
+    for (const [binding, token, method] of [
+      ["a", "a", "daemon/sessionRequestStatus"],
+      ["a", "foreign", "daemon/sessionRequestStatus"],
+      [config, "b", "daemon/sessionRequestStatus"],
+      ["a", "b", "tools/call"],
+    ]) {
+      const f = batchFixture();
+      expect(
+        await runDaemonFrame(
+          parsed(["send", method, "{}", "--broker-binding", binding, "--token-of", token]),
+          f.deps,
+        ),
+      ).toBe(2);
+      expect(f.paths).toEqual([]);
+    }
+  },
+);
+
+posixTest(
+  "all batch tokens are redacted from echoed response fields, free text and errors",
+  async () => {
+    const f = batchFixture();
+    const respond = f.connection.respond;
+    f.connection.respond = (frame) =>
+      frame.method === "ide/status"
+        ? { livenessOwnerToken: "secret-a-token", message: "foreign secret-b-token" }
+        : respond(frame);
+    expect(
+      await runDaemonFrame(parsed(["send", "ide/status", "--broker-binding", "a"]), f.deps),
+    ).toBe(0);
+    expect(f.out.join(" ")).toContain("[REDACTED]");
+    expect(f.out.join(" ")).not.toContain("secret-a-token");
+    expect(f.out.join(" ")).not.toContain("secret-b-token");
+    const g = fakeBrokerBindingFixture();
+    g.connection.close = () => {};
+    g.deps.connect = async () => {
+      throw new Error("failed fake-1");
+    };
+    expect(await runDaemonFrame({ ...parsed(), brokerBinding: config }, g.deps)).toBe(3);
+    expect(g.err.join(" ")).not.toContain("fake-1");
+  },
+);
+
+posixTest("existing-client hold failure does not release its grant", async () => {
+  const f = batchFixture();
+  const respond = f.connection.respond;
+  f.connection.respond = (frame) => {
+    const result = respond(frame);
+    if (frame.method === "daemon/heartbeat") {
+      f.connection.success = false;
+    }
+    return result;
+  };
+  expect(await runDaemonFrame({ ...parsed(), brokerBinding: "a" }, f.deps)).toBe(1);
+  expect(f.connection.writes.some((frame) => frame.method === "daemon/releaseBrokerSession")).toBe(
+    false,
+  );
+  expect(f.timer.getPendingIntervalCount()).toBe(0);
+});
+
+test("broker flags reject incompatible modes, selector override and obsolete binding flag", () => {
+  for (const flags of [
+    ["--broker-binding", "a", "--allow-selector"],
+    ["--expect-refused"],
+    ["--token-of", "b"],
+    ["--managed-binding", "a"],
+    ["--broker-binding", "a", "--expect-refused", "--mode", "cancel"],
+  ]) {
+    expect(parseDaemonFrameArgs(["send", "ide/status", ...flags])).toHaveProperty("error");
+  }
+});
+
+posixTest(
+  "a failed standalone hold releases through broker ports with the cleanup budget",
+  async () => {
+    const f = fakeBrokerBindingFixture();
+    const respond = f.connection.respond;
+    f.connection.respond = (frame) => {
+      const result = respond(frame);
+      if (frame.method === "daemon/heartbeat") {
+        f.connection.success = false;
+      }
+      return result;
+    };
+    expect(await runDaemonFrame({ ...parsed(), brokerBinding: config }, f.deps)).toBe(1);
+    expect(f.connection.writes.at(-1)).toMatchObject({
+      method: "daemon/releaseBrokerSession",
+      timeoutMs: 240000,
+      params: { sessionId: "broker-session", livenessOwnerToken: "fake-1" },
+    });
+    expect(f.connection.writes.some((frame) => frame.method === "ide/status")).toBe(false);
+    expect(f.timer.getPendingIntervalCount()).toBe(0);
+  },
+);
+
+posixTest(
+  "escaped owner tokens are redacted before response and invalid JSON diagnostics",
+  async () => {
+    for (const invalid of [false, true]) {
+      const f = batchFixture();
+      const token = 'secret-"a\\value';
+      const json = invalid ? `{"broken":${JSON.stringify(token)}` : "{}";
+      f.files.set(join(f.batch, "sessions/a/owner-token"), token);
+      f.grants.set("batch-a-1", { sessionId: "session-a", token });
+      const respond = f.connection.respond;
+      f.connection.respond = (frame) =>
+        frame.method === "ide/status"
+          ? { livenessOwnerToken: token, message: token }
+          : respond(frame);
+      expect(
+        await runDaemonFrame(parsed(["send", "ide/status", json, "--broker-binding", "a"]), f.deps),
+      ).toBe(invalid ? 2 : 0);
+      const output = [...f.out, ...f.err].join(" ");
+      expect(output).not.toContain(token);
+      expect(output).not.toContain(JSON.stringify(token).slice(1, -1));
+    }
+  },
+);
+
+posixTest("cross-client reconnect cannot expand the connection's one-session grant", async () => {
+  const f = batchFixture();
+  expect(
+    await runDaemonFrame(
+      parsed([
+        "send",
+        "daemon/registerSession",
+        '{"sessionId":"{{clientSessionId:b}}","clientName":"isolation","sessionBroker":{"requestId":"batch-b-1","livenessOwnerToken":"{{ownLivenessOwnerToken}}"}}',
+        "--broker-binding",
+        "a",
+        "--expect-refused",
+      ]),
+      f.deps,
+    ),
+  ).toBe(0);
+  expect(f.bound()).toEqual([]);
+  expect(f.grants.get("batch-b-1")?.sessionId).toBe("session-b");
+  expect(f.connection.writes.some((frame) => frame.method === "daemon/releaseBrokerSession")).toBe(
+    false,
+  );
+});
+
+posixTest(
+  "expected lifecycle refusals reject every device selector before connecting",
+  async () => {
+    for (const name of ["killDevice", "startDevice", "provisionDevice", "getAndroid", "getApple"]) {
+      for (const args of [
+        { deviceId: "protected" },
+        { device: { name: "protected" } },
+        { platform: "android" },
+        { sessionUuid: "session-b" },
+        null,
+        [],
+        { force: true },
+      ]) {
+        const f = batchFixture();
+        expect(
+          await runDaemonFrame(
+            parsed([
+              "send",
+              "tools/call",
+              JSON.stringify({ name, arguments: args }),
+              "--broker-binding",
+              "a",
+              "--expect-refused",
+            ]),
+            f.deps,
+          ),
+        ).toBe(2);
+        expect(f.paths).toEqual([]);
+      }
+    }
+  },
+);
+posixTest("expected lifecycle refusals allow empty or only own session arguments", async () => {
+  for (const args of [{}, { sessionUuid: "{{ownSessionId}}" }, { sessionUuid: "session-a" }]) {
+    for (const name of ["killDevice", "startDevice", "provisionDevice", "getAndroid", "getApple"]) {
+      const f = batchFixture();
+      expect(
+        await runDaemonFrame(
+          parsed([
+            "send",
+            "tools/call",
+            JSON.stringify({ name, arguments: args }),
+            "--broker-binding",
+            "a",
+            "--expect-refused",
+          ]),
+          f.deps,
+        ),
+      ).toBe(0);
+      expect(f.connection.writes.some((frame) => frame.method === "tools/call")).toBe(true);
+    }
+  }
+});
+posixTest("unrelated errors are not product refusals", async () => {
+  for (const result of [
+    { isError: true, content: [{ type: "text", text: "bad arguments" }] },
+    {},
+  ]) {
+    const f = batchFixture();
+    const respond = f.connection.respond;
+    f.connection.respond = (frame) => {
+      if (frame.method === "tools/call") {
+        f.connection.success = !result.isError;
+        f.connection.refusalCode = "internal_error";
+        return result;
+      }
+      return respond(frame);
+    };
+    expect(
+      await runDaemonFrame(
+        parsed([
+          "send",
+          "tools/call",
+          '{"name":"killDevice","arguments":{}}',
+          "--broker-binding",
+          "a",
+          "--expect-refused",
+        ]),
+        f.deps,
+      ),
+    ).toBe(2);
+  }
+});
+posixTest("broker batches reject untracked request paths before any socket access", async () => {
+  const f = batchFixture();
+  f.files.set("/untracked/request.json", JSON.stringify(request));
+  expect(
+    await runDaemonFrame(
+      parsed(["send", "ide/status", "--broker-binding", "/untracked/request.json"]),
+      f.deps,
+    ),
+  ).toBe(2);
+  expect(f.paths).toEqual([]);
+  expect(f.err.join(" ")).toContain("--broker-binding <client>");
+});
+
+posixTest("expected refusal recognizes product messages and structured refusal codes", async () => {
+  for (const result of [
+    {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: "Session broker owns device lifecycle; killDevice cannot allocate or retire a device",
+        },
+      ],
+    },
+    {
+      isError: true,
+      content: [{ type: "text", text: JSON.stringify({ code: "device_outside_broker_grant" }) }],
+    },
+    { isError: true, structuredContent: { code: "device_outside_broker_grant" } },
+  ]) {
+    const f = batchFixture();
+    const respond = f.connection.respond;
+    f.connection.respond = (frame) => {
+      if (frame.method === "tools/call") {
+        f.connection.success = true;
+        return result;
+      }
+      return respond(frame);
+    };
+    expect(
+      await runDaemonFrame(
+        parsed([
+          "send",
+          "tools/call",
+          '{"name":"killDevice","arguments":{}}',
+          "--broker-binding",
+          "a",
+          "--expect-refused",
+        ]),
+        f.deps,
+      ),
+    ).toBe(0);
+  }
+});
+posixTest("an isError envelope with an unrelated message never counts as refused", async () => {
+  const f = batchFixture();
+  const respond = f.connection.respond;
+  f.connection.respond = (frame) => {
+    if (frame.method === "tools/call") {
+      f.connection.success = true;
+      return { isError: true, content: [{ type: "text", text: "Invalid arguments" }] };
+    }
+    return respond(frame);
+  };
+  expect(
+    await runDaemonFrame(
+      parsed([
+        "send",
+        "tools/call",
+        '{"name":"killDevice","arguments":{}}',
+        "--broker-binding",
+        "a",
+        "--expect-refused",
+      ]),
+      f.deps,
+    ),
+  ).toBe(2);
+});
+
+const grantedNative = { name: "ambroker-own", deviceId: "emulator-5556", platform: "android" };
+posixTest("broker-bound calls confine every native target to the recorded grant", async () => {
+  for (const args of [
+    { deviceId: "emulator-5554" },
+    { device: { deviceId: "emulator-5554" } },
+    { device: { name: "protected-avd" } },
+    { nested: [{ deviceId: "emulator-5554" }] },
+    { device: { platform: "ios" } },
+    { selector: { platform: "android" } },
+  ]) {
+    const f = batchFixture();
+    f.files.set(
+      join(f.batch, "batch.json"),
+      JSON.stringify({
+        options: { protectedDevices: ["emulator-5554", "protected-avd"] },
+        broker: {},
+      }),
+    );
+    f.files.set(
+      join(f.batch, "sessions/a/info.json"),
+      JSON.stringify({ sessionId: "session-a", nativeDevice: grantedNative }),
+    );
+    expect(
+      await runDaemonFrame(
+        parsed([
+          "send",
+          "tools/call",
+          JSON.stringify({
+            name: "observe",
+            arguments: { sessionUuid: "{{ownSessionId}}", ...args },
+          }),
+          "--broker-binding",
+          "a",
+        ]),
+        f.deps,
+      ),
+    ).toBe(2);
+    expect(f.paths).toEqual([]);
+  }
+});
+posixTest("broker-bound calls refuse named devices when native identity is unknown", async () => {
+  const f = batchFixture();
+  expect(
+    await runDaemonFrame(
+      parsed([
+        "send",
+        "tools/call",
+        JSON.stringify({ name: "observe", arguments: { deviceId: "emulator-5556" } }),
+        "--broker-binding",
+        "a",
+      ]),
+      f.deps,
+    ),
+  ).toBe(2);
+  expect(f.paths).toEqual([]);
+});
+posixTest(
+  "broker batch socket and daemon directory refuse untracked bindings without MT_BATCH",
+  async () => {
+    for (const socket of [
+      "/fake/batch/daemon1/d.sock",
+      "/fake/batch/aux/1/d.sock",
+      "/fake/aux/d.sock",
+    ]) {
+      const f = batchFixture();
+      delete f.deps.env.MT_BATCH;
+      f.files.delete(join(f.batch, "broker/clients.json"));
+      f.files.set(join(f.batch, "batch.json"), JSON.stringify({ broker: {} }));
+      f.files.set("/untracked/request.json", JSON.stringify(request));
+      expect(
+        await runDaemonFrame(
+          parsed([
+            "send",
+            "ide/status",
+            "--socket",
+            socket,
+            "--broker-binding",
+            "/untracked/request.json",
+          ]),
+          f.deps,
+        ),
+      ).toBe(2);
+      expect(f.paths).toEqual([]);
+      expect(f.err.join(" ")).toContain("Untracked broker batch acquisition refused");
+    }
+  },
+);
+
+posixTest(
+  "native grant evidence allows only its device, including ledger-only bindings",
+  async () => {
+    for (const evidence of ["info", "ledger"]) {
+      const f = batchFixture();
+      if (evidence === "info") {
+        f.files.set(
+          join(f.batch, "sessions/a/info.json"),
+          JSON.stringify({ sessionId: "session-a", nativeDevice: grantedNative }),
+        );
+      } else {
+        const identity = {
+          batchDir: f.batch,
+          client: "a",
+          requestId: "batch-a-1",
+          sessionUuid: "session-a",
+          at: 0,
+        };
+        f.files.set(
+          join(f.batch, "evidence/ledger.jsonl"),
+          [
+            { ...identity, kind: "acquired" },
+            { ...identity, kind: "info", device: grantedNative },
+          ]
+            .map((row) => JSON.stringify(row) + "\n")
+            .join(""),
+        );
+      }
+      expect(
+        await runDaemonFrame(
+          parsed([
+            "send",
+            "tools/call",
+            JSON.stringify({
+              name: "observe",
+              arguments: {
+                sessionUuid: "{{ownSessionId}}",
+                deviceId: grantedNative.deviceId,
+                device: grantedNative,
+              },
+            }),
+            "--broker-binding",
+            "a",
+          ]),
+          f.deps,
+        ),
+      ).toBe(0);
+    }
+  },
+);
+posixTest(
+  "a protected recorded native grant is refused even without a device override",
+  async () => {
+    const f = batchFixture();
+    f.files.set(
+      join(f.batch, "batch.json"),
+      JSON.stringify({ options: { protectedDevices: [grantedNative.deviceId] }, broker: {} }),
+    );
+    f.files.set(
+      join(f.batch, "sessions/a/info.json"),
+      JSON.stringify({ sessionId: "session-a", nativeDevice: grantedNative }),
+    );
+    expect(
+      await runDaemonFrame(
+        parsed([
+          "send",
+          "tools/call",
+          '{"name":"observe","arguments":{"sessionUuid":"{{ownSessionId}}"}}',
+          "--broker-binding",
+          "a",
+        ]),
+        f.deps,
+      ),
+    ).toBe(2);
+    expect(f.paths).toEqual([]);
+  },
+);

@@ -25,7 +25,7 @@ const REMOVE_CALLS = new Set(["rm", "rmSync", "rmdir", "rmdirSync"]);
 const IMAGE_CONSTRUCTORS = new Set(["Jimp", "AdmZip"]);
 const IMAGE_CALLS = new Set(["createTestImage", "createTestPng"]);
 const HARNESS_CONSTRUCTORS = new Set(["DevicePool"]);
-const HARNESS_CALLS = new Set(["createRegistryWiredDevicePool"]);
+const HARNESS_CALLS = new Set(["createRegistryWiredDevicePool", "makePool", "createDevicePoolFor"]);
 
 function isAstNode(value: unknown): value is AstNode {
   return typeof value === "object" && value !== null && "type" in value;

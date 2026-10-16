@@ -35,22 +35,15 @@ describe("AndroidCtrlProxyClient request registration cleanup", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
     adb.setScreenState(true);
-    const instance = AndroidCtrlProxyClient.createForTesting(
-      device,
-      adb,
-      (url) => {
+    const instance = AndroidCtrlProxyClient.createForTesting(device, adb, {
+      webSocketFactory: (url) => {
         const socket = new FakeWebSocket(url, "none", 0, timer);
         socket.readyState = WebSocketState.CLOSED;
         return socket;
       },
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      loggerInstance,
-    );
+      logger: loggerInstance,
+    });
     return instance;
   };
 
@@ -155,12 +148,10 @@ describe("AndroidCtrlProxyClient request registration cleanup", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
     adb.setScreenState(true);
-    client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      adb,
-      createInstantFailureWebSocketFactory(timer),
+    client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+      webSocketFactory: createInstantFailureWebSocketFactory(timer),
       timer,
-    );
+    });
     const result = await client.requestDeviceInfo(5000);
 
     expect(result.error).toBe("Failed to connect to accessibility service");

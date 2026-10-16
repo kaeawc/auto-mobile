@@ -96,8 +96,8 @@ test("wakeAndUnlock handler forwards the daemon's absolute transport deadline", 
     await handler!(device, { pin: "1234", [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 123_000 });
     await handler!(device, {});
     expect(calls).toEqual([
-      ["1234", 123_000],
-      [undefined, undefined],
+      ["1234", { deadlineMs: 123_000, signal: undefined }],
+      [undefined, { deadlineMs: undefined, signal: undefined }],
     ]);
   } finally {
     registration.mockRestore();

@@ -1,4 +1,4 @@
-import { StaleDisplayError } from "../models/StaleDisplayError";
+import { StaleDisplayError } from "../features/observe/StaleDisplayError";
 import {
   terminalScreenshotUnavailable,
   isTerminalScreenshotUnavailable,

@@ -3290,6 +3290,7 @@ describe("finalizeToolResponse", () => {
       expect(() =>
         finalizeToolResponse(response, {
           name: "observe",
+          loudArtifactWrites: true,
           sessionUuid: "s1",
           artifactWriter: writer,
         }),
@@ -3412,7 +3413,12 @@ describe("finalizeToolResponse", () => {
           createStructuredToolResponse({
             graph: [{ scheme: "https", host: "api.example.com", paths: {} }],
           }),
-          { name: "getNetworkGraph", artifactMode: "always", artifactWriter: writer },
+          {
+            name: "getNetworkGraph",
+            loudArtifactWrites: true,
+            artifactMode: "always",
+            artifactWriter: writer,
+          },
         ),
       ).toThrow("artifact disk is full");
     });

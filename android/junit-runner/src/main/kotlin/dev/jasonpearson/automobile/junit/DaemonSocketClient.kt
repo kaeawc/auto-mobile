@@ -32,6 +32,11 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 
 internal object DaemonSocketClientManager : DaemonToolClient {
+  override fun isAlive(): Boolean = DaemonSocketClient.isAvailable(DaemonSocketPaths.socketPath())
+
+  override fun awaitAlive(timeoutMs: Long): Boolean =
+    DaemonSocketClient.waitForAvailability(DaemonSocketPaths.socketPath(), timeoutMs)
+
   // Use ThreadLocal to give each thread its own socket connection
   // This enables true parallel execution since socket server queues requests per connection
   private val threadLocalClient = ThreadLocal<DaemonSocketClient>()
@@ -1051,6 +1056,10 @@ internal data class DaemonResponse(
 
 /** Interface for daemon tool calls to enable testing with fakes. */
 internal interface DaemonToolClient {
+  fun isAlive(): Boolean = true
+
+  fun awaitAlive(timeoutMs: Long): Boolean = true
+
   fun callTool(toolName: String, arguments: JsonObject, timeoutMs: Long): DaemonResponse
 
   fun readResource(uri: String, timeoutMs: Long): DaemonResponse
@@ -1084,13 +1093,11 @@ internal interface DaemonConnectivityChecker {
   fun waitForDaemon(timeoutMs: Long): Boolean
 }
 
-/** Default implementation that checks actual daemon socket connectivity. */
-internal class DefaultDaemonConnectivityChecker : DaemonConnectivityChecker {
-  override fun isDaemonAlive(): Boolean {
-    return DaemonSocketClient.isAvailable(DaemonSocketPaths.socketPath())
-  }
+/** Connectivity follows the tool client; the default manager probes the actual daemon socket. */
+internal class DefaultDaemonConnectivityChecker(
+  private val daemon: DaemonToolClient = DaemonSocketClientManager,
+) : DaemonConnectivityChecker {
+  override fun isDaemonAlive(): Boolean = daemon.isAlive()
 
-  override fun waitForDaemon(timeoutMs: Long): Boolean {
-    return DaemonSocketClient.waitForAvailability(DaemonSocketPaths.socketPath(), timeoutMs)
-  }
+  override fun waitForDaemon(timeoutMs: Long): Boolean = daemon.awaitAlive(timeoutMs)
 }

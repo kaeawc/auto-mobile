@@ -13,16 +13,16 @@ import {
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
+import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import * as toolExecutionContext from "../../src/server/ToolExecutionContext";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
+import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
-import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
+import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 import type { BootedDevice } from "../../src/models";
 import { registerPlanTools } from "../../src/server/planTools";
 import * as realDeviceGestureRecordingManager from "../../src/server/deviceGestureRecordingManager";
@@ -191,7 +191,7 @@ describe("recordDeviceGestures tool", () => {
 describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
   const held: BootedDevice = { deviceId: "emulator-5554", name: "Held", platform: "android" };
   const other: BootedDevice = { deviceId: "emulator-5556", name: "Other", platform: "android" };
-  const slot: BootedDevice = { deviceId: "slot-iphone", name: "Slot", platform: "ios" };
+  const binding: BootedDevice = { deviceId: "slot-iphone", name: "Slot", platform: "ios" };
   const unheld: BootedDevice = { deviceId: "emulator-5558", name: "Unheld", platform: "android" };
   let manager: SessionManager;
   let pool: DevicePool;
@@ -211,17 +211,17 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     manager.stopCleanupTimer();
     const discovery = new FakeDeviceUtils();
     discovery.setBootedDevices("android", [held, other, unheld]);
-    discovery.setBootedDevices("ios", [slot]);
-    const registry = new FakeSlotRegistry(timer);
-    await assignManagedSlotDevice(registry, "ios", slot.deviceId);
+    discovery.setBootedDevices("ios", [binding]);
+    const registry = new FakeBindingRegistry(timer);
+    await assignBindingDevice(registry, "ios", binding.deviceId);
     pool = new DevicePool(
       createDevicePoolDependencies(manager, "recording-tool-start", {
         timer,
         deviceManager: discovery,
-        managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer),
+        bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
       }),
     );
-    await pool.initializeWithDevices([held, other, slot, unheld]);
+    await pool.initializeWithDevices([held, other, binding, unheld]);
     DaemonState.getInstance().initialize(manager, pool);
     await pool.bindOrReuseDeviceSession(
       "holder",
@@ -238,7 +238,7 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     );
     await manager.createSession("stranger", other.deviceId, "android");
     manager.setDeviceReadiness("holder", "automationReady");
-    tools = new RealToolCallPath([held, other, slot, unheld]).install(false);
+    tools = new RealToolCallPath([held, other, binding, unheld]).install(false);
     tools.setBody((input) => input.handler(input.device, input.args, input.progress, input.signal));
     // Fake the readiness boundary after the real registry's ownership and session admission.
     readiness = spyOn(toolExecutionContext, "createToolExecutionContext").mockImplementation(
@@ -380,22 +380,22 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     expect(start).toHaveBeenCalledTimes(1);
   });
 
-  test("a held managed-slot device refuses the non-holder before the slot refusal", async () => {
-    await manager.createSession("slot-holder", slot.deviceId, "ios");
+  test("a held binding device refuses the non-holder before the binding refusal", async () => {
+    await manager.createSession("slot-holder", binding.deviceId, "ios");
     await expect(
-      tools.call("recordDeviceGestures", { deviceId: slot.deviceId }),
+      tools.call("recordDeviceGestures", { deviceId: binding.deviceId }),
     ).rejects.toMatchObject({
       code: "device_owned_by_other_session",
-      deviceId: slot.deviceId,
+      deviceId: binding.deviceId,
       retryable: false,
     });
     expectNoDeviceWork();
   });
 
-  test("a predicted idle managed-slot device keeps its refusal before readiness", async () => {
-    tools.deviceSessionManager.setConnectedDevices([slot]);
+  test("a predicted idle binding device keeps its refusal before readiness", async () => {
+    tools.deviceSessionManager.setConnectedDevices([binding]);
     await expect(tools.call("recordDeviceGestures", { platform: "ios" })).rejects.toMatchObject({
-      code: "device_assigned_to_managed_slot",
+      code: "device_assigned_to_binding",
     });
     expectNoDeviceWork();
   });
@@ -438,10 +438,10 @@ describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
     expect(start.mock.calls[0]?.[4]).toBe("holder");
   });
 
-  test("an idle managed-slot device keeps its existing refusal before readiness", async () => {
+  test("an idle binding device keeps its existing refusal before readiness", async () => {
     await expect(
-      tools.call("recordDeviceGestures", { deviceId: slot.deviceId }),
-    ).rejects.toMatchObject({ code: "device_assigned_to_managed_slot" });
+      tools.call("recordDeviceGestures", { deviceId: binding.deviceId }),
+    ).rejects.toMatchObject({ code: "device_assigned_to_binding" });
     expect(readiness).not.toHaveBeenCalled();
     expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
     expect(start).not.toHaveBeenCalled();

@@ -152,7 +152,10 @@ for (const action of [
                   onDispatch: () => dispatchCount++,
                 })
               : action === "multi-finger swipe"
-                ? new ExecuteGesture(device, null, h.timer).execute(fingers, 300, controller.signal)
+                ? new ExecuteGesture(device, null, h.timer).execute(fingers, {
+                    durationMs: 300,
+                    signal: controller.signal,
+                  })
                 : new PressButton(device, null, h.timer).press(
                     action,
                     50,

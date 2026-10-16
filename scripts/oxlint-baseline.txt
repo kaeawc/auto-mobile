@@ -1,5 +1,5 @@
 # AutoMobile oxlint ratchet baseline -- see scripts/oxlint-baseline.sh
-# Gated rules: eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) auto-mobile(catch-convention) auto-mobile(no-unknown-cast) auto-mobile(no-caught-error-interpolation) auto-mobile(no-raw-selector-field-read) typescript(no-floating-promises) typescript(no-misused-promises)
+# Gated rules: eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) auto-mobile(catch-convention) auto-mobile(no-unknown-cast) auto-mobile(no-caught-error-interpolation) typescript(no-floating-promises) typescript(no-misused-promises)
 1	src/ctrlProxy/IOSCtrlProxyManager.ts	eslint(complexity)
 1	src/ctrlProxy/IOSCtrlProxyManager.ts	eslint(max-params)
 1	src/daemon/client.ts	eslint(max-params)
@@ -76,7 +76,6 @@
 1	src/utils/logPruner.ts	auto-mobile(catch-convention)
 1	src/utils/workingDirectory.ts	auto-mobile(catch-convention)
 1	src/vision/applyVisionFallback.ts	eslint(max-params)
-14	src/features/utility/DeepLinkManager.ts	auto-mobile(no-raw-selector-field-read)
 2	src/daemon/daemon.ts	eslint(complexity)
 2	src/daemon/socketServer.ts	eslint(max-lines-per-function)
 2	src/features/action/LaunchApp.ts	eslint(complexity)
@@ -98,6 +97,6 @@
 3	src/utils/plan/PlanExecutor.ts	eslint(complexity)
 4	src/features/observe/shared/SharedGestureDelegate.ts	eslint(max-params)
 5	src/features/action/swipeon/TalkBackSwipeExecutor.ts	eslint(max-params)
+5	src/features/observe/android/AndroidCtrlProxyClient.ts	eslint(max-params)
 5	src/features/observe/ios/IOSCtrlProxyClient.ts	eslint(max-params)
 7	src/features/action/TapOnElement.ts	eslint(complexity)
-7	src/features/observe/android/AndroidCtrlProxyClient.ts	eslint(max-params)

@@ -1,5 +1,5 @@
 import { DispatchedObservationError } from "../../../../src/models/DispatchedObservationError";
-import { StaleDisplayError } from "../../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../../src/features/observe/StaleDisplayError";
 import { SwipeSearchCancelledError } from "../../../../src/features/action/swipeon/searchCancellation";
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { SwipeOnOptions } from "../../../../src/models";

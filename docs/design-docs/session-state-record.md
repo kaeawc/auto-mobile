@@ -1,7 +1,7 @@
 # Session state record
 
 Design note for #11798 (one explicit state record per session UUID) and the two "Not verified"
-questions of #11799 (one serialized per-UUID row writer). The S2 agreement findings below
+questions of #11799 (one per-UUID row writer with deadline-bounded serialization). The S2 agreement findings below
 record the implemented shadow-only mapping; the remaining migration is proposed. Line numbers are
 `src/daemon/sessionManager.ts` at `4f6d25591e` unless a path says otherwise; the file is 13,903
 lines.
@@ -223,14 +223,16 @@ Risks, and the condition that bounds each:
    `daemon-shutdown` releases, and `livePeerDaemonSessionIds` is hard-coded empty (8670). A parked
    terminal write can therefore land on a row the same daemon re-upserted for the same UUID after
    the fence was lifted (7826, 11716); only the in-memory fence prevents it. No test reproduces it
-   (read, not run). The per-UUID writer closes it by construction: a parked write keeps the UUID's
-   writer busy, so a later `live` desire waits for it to settle and then overwrites it as a new
-   generation, never the other way round. The cost: that UUID's next create row waits behind a
-   wedged write, bounded by `withinCreateDeadline`. Whether production `markReleased` can interleave
+   (read, not run). W2 decision (owner): a write frees its slot at its deadline; the SQL generation
+   guard, not in-process serialization, closes the late-overwrite gap for parked writes.
+   Before the deadline, a later desire waits for the issued write. After the deadline, a later
+   write may issue while the parked statement remains tracked for callbacks and drain.
+   Whether production `markReleased` can interleave
    at all (bun:sqlite is synchronous) is to be confirmed in W2; if it cannot, the gap exists only on
    the retry and park paths and the regression test is scoped to them.
-4. Wedged writer. A per-UUID writer holds one coalesced intent per UUID, not a queue of parked
-   writes (`lateReleaseWrites` can hold several per UUID today).
+4. Wedged writer. A per-UUID writer holds one coalesced intent per UUID and tracks physically
+   unsettled parked writes separately for callbacks and drain. A deadline-expired write no longer
+   occupies the issuing slot; at most one unexpired write occupies it at a time.
 5. Part two of #11799 removes the superseded-after-persist path. After a free-before-row commit a
    later supersede arrives after the commit and is refused (the release already won) rather than
    rewritten. That is sound only because the final fence, the journal append and the commit are all
@@ -480,15 +482,15 @@ SessionManager
  |-- SessionSlots (sync, pure, no I/O)        -- tag, session, op, fence, retiring
  |       | emits desired-row intents on transitions
  |       v
- |-- SessionRowWriter (async I/O, per-UUID)  -- desired row, one in-flight write, one backoff
+ |-- SessionRowWriter (async I/O, per-UUID)  -- desired row, one unexpired write, one backoff
  |       |-- DeviceSessionPersistence (#12465 interface)
  |       `-- TerminalReleaseJournal           -- record() before a terminal intent is queued
  `-- activity writes: direct `recordActivity` (commutative via activity_seq)
 ```
 
 - Direction: slots -> writer. The writer never reads slots. The supersede decision is made by the
-  transition (the intent is replaced before it is written), so "a stale write landed over a newer
-  row" and "the rewrite is owed" stop being cases.
+  transition (the intent is replaced before it is written). An already issued parked statement
+  still needs its SQL generation guard to protect a newer row.
 - The writer exposes `desire(uuid, DesiredRow)`, `pending(uuid): boolean` (read by slots as
   `rowPending`), `settled(uuid): Promise<void>` and `drain(): Promise<void>` (shutdown, called
   where `drainReleasePromises` is today).
@@ -497,8 +499,12 @@ SessionManager
   `released` and `terminal` carry the binding because `markReleased` is an UPDATE: if the row does
   not exist yet (a `live` desire was replaced before it was written) the writer upserts with the
   release status instead. Replacement applies to an **unwritten** desire only. A write that has been
-  issued, including one parked past its deadline, is in flight: a later desire waits for it to
-  settle and is then written as a new generation. A terminal desire is never replaced by a
+  issued occupies the slot only until it settles or reaches its deadline. Before the deadline,
+  a later desire waits; after it, the next same-UUID write may issue while the old statement is
+  still physically parked. W2 decision (owner): a write frees its slot at its deadline; the SQL
+  generation guard, not in-process serialization, closes the late-overwrite gap for parked writes.
+  Parked statements retain late/refused callbacks and remain tracked by `settled` and `drain`.
+  A terminal desire is never replaced by a
   non-terminal one unless the slot has been lifted (`fenced` -> `creating`).
 - Writer invariant: **an intent on disk implies the slot is `fenced`** (or `releasing` with
   `fence: "terminal"`). Startup replay (1964-1970) has no generation guard, only "the row's reason is
@@ -558,13 +564,72 @@ to settled, and all three stayed on their characterized implementations; illegal
 throw under test and warn+count in production, with the reported §4 design gaps warning and
 counting in both modes. Ended guard bookkeeping is discarded with weak-identity finalization.
 
-S9 landed: slot code reads no row-facet field; `SessionSlots.rowPending(uuid)` is the only row signal, stubbed false until W2 (#11799).
+S9 landed: slot code reads no row-facet field; `SessionSlots.rowPending(uuid)` is the only row signal, wired to `SessionRowWriter.pending` in W2 (#11799).
 S8 landed (#12581): `findSession` is the pure lookup; `expireIfDue` keeps lazy expiry at the retained admission/routing sites; the in-class readers listed in test/lint/findSessionNoRelease.test.ts are the retained set; external callers of getSession migrate directory by directory.
 
 S1 and S2 can run in parallel with W1. S3-S6 are independent of each other but touch the same file,
 so they merge serially. S8 can ship any time after S2 and is tracked separately.
 
 ### Part B: #11799 (blocked by S9, except W1)
+
+W2 adapter implemented: SessionRowWriter owns the drain-write set (formerly lateReleaseWrites),
+terminal retry scheduling and the non-terminal snapshot map. Production uses the adapter surface:
+`noteRelease`, `noteLive`, `canIssueRelease`, `scheduleRetry`, drain-write tracking, and the
+non-terminal map. In production `pending(uuid)` means only "retry owed".
+
+The per-UUID desire/settled/drain engine in `sessionRowWriter.ts` is exercised by tests; production
+first-attempt writes do not yet use it and stay manager-side until W3/W4. The owner decision that
+a past-deadline write frees its slot is implemented in that engine. Production has no per-UUID
+serialization, as before.
+
+The behavior-preserving adapter keeps first-attempt persistence, deadline/fallback and late callbacks
+on the manager, and the writer owns retry scheduling and drain tracking. At synchronous issue,
+a still-current terminal snapshot remains writable; otherwise first and retried statements consult
+the writer's snapshot desire sequence. Publish and rebind publish synchronously call `noteLive`.
+The current terminal fence takes precedence over a rebind live sequence: no fence lift has revoked
+that terminal desire.
+A sequence refusal after a lift is a named subtype of
+`DeviceSessionRowNotReleasableError` and follows `handleReleaseWriteFailure` -> `confirmReleaseWrite`,
+resolving the journal without SQL-miss reclassification. Forced snapshots capture the session's
+known SQL generation and weak incarnation identity for the existing same-session rebind classifier.
+Real statement refusals keep their existing
+read/classify/retry sequence. There are no new manager awaits or promise hops.
+
+| Path                                                                   | Terminal guard form                                                                                                                                                                           |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `persistSessionRelease` (including forced fence and creation rollback) | Current terminal fence, otherwise snapshot desire/live sequence at the synchronous issue boundary; captured `expectedRowGeneration` plus `unlessTerminalOrOwnedByLivePeer` at SQL when known. |
+| Writer-scheduled manager retry                                         | Same current-fence/desire/live check, cancellation identity, and existing fresh `retriedReleaseWritePrecondition` read; SQL generation whenever known.                                        |
+| Refused-row fallback / physically parked statement                     | Same sequence check before a further statement issues; already-issued SQL keeps its original generation guard. Existing same-incarnation SQL classification and W3/W5 compensation remain.    |
+| No captured generation and no newer in-process live generation         | Existing `unlessTerminalOrOwnedByLivePeer` statement guard only; no invented generation.                                                                                                      |
+| Standalone writer desires / retries                                    | Monotonic desire/live sequence checked after asynchronous preconditions and immediately before every issue; supplied SQL generation forwarded unchanged.                                      |
+| Startup replay / peer adoption                                         | Existing statement ownership/terminal guards; replay is before live publication. Resolution routes through `liftTerminalFence`.                                                               |
+
+`liftTerminalFence` performs deletion, volatile-intent clearing, journal resolution and writer
+cancellation in one synchronous turn. Successful writes, refusals, rejected-creation fence adoption,
+and startup replay retain the existing terminal admission fence: resolving an intent must not make
+an ended UUID reusable. They cancel only the matching snapshot, without eagerly removing the
+manager retry entry (its existing identity checks still retire it). Actual lifts remove the snapshot
+and cancel terminal desires and scheduled retries together. Plan-label minting retains its shadow
+probe and reason-state deletion between snapshot deletion and journal resolution. Startup retains
+recovered-intent/probe/adopted-owner deletion before resolution; retry-drop retains cancel-retry and
+superseded bookkeeping before resolution. A durable `record` clearing the volatile signal is not a
+fence lift. Two behavior changes previously left unnamed by the W2 note are:
+
+- Non-terminal commit now also deletes the volatile intent, resolves the journal and cancels a
+  terminal retry, matching the intent-implies-fence invariant. The boundary is skipped when no
+  terminal snapshot is fenced, avoiding an unnecessary journal load/resolve.
+- Forced terminal snapshots now capture `expectedRowGeneration` and `releaseRowSessions` (weak
+  incarnation identity), enabling SQL protection and same-session rebind classification.
+
+At most one unexpired standalone desire per UUID may issue; parked statements remain tracked for
+callbacks and drain after their deadline frees the slot. Production bun:sqlite statements are
+synchronous; the overwrite regression therefore parks injected statements and retry/precondition
+work around actual manager lift/publication. Fault tests use in-memory persistence and journal
+files only. The synchronous journal fake models hang/delay as a whole-process pause: its injected supervisor
+advances FakeTimer without firing JS callbacks and explicitly resumes the syscall; an in-process
+rebind cannot run inside it. Rejected journal syscalls yield the W1 volatile result. Persistence
+hang/delay points suspend across FakeTimer turns. Crash cases discard the manager and
+replay the committed disk prefix via `rehydratePersistedSessions`.
 
 | #   | PR                                                                                                                                                                                                                                                                                                                                  | Size | Test plan                                                                                                                                                                                                                                                                     |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -589,10 +654,12 @@ so they merge serially. S8 can ship any time after S2 and is tracked separately.
 - W4 changes durability semantics. It is gated on `durable`; on Noop and after a failed append it
   keeps today's order, and W1 lands first. A bug in the `durable` signal is the worst case (a
   revived UUID), so the fault-injection test fails the signal itself.
-- Multi-daemon rows: no SQL guard is removed in any step; the writer only removes in-process
-  reordering, and W2 adds one guard. Peers read rows through the same statements.
-- A writer that serializes per UUID makes a wedged write delay that UUID's next create row. It is
-  bounded by the create deadline and affects only the UUID that was already wedged.
+- Multi-daemon rows: no SQL guard is removed in any step; the writer serializes unexpired writes,
+  and W2 adds the generation guard that protects against late parked statements. Peers read rows
+  through the same statements.
+- A wedged write delays that UUID's next issued row only until its persistence deadline. It frees
+  the slot at the deadline, but remains tracked for late/refused callbacks and shutdown drain;
+  the SQL generation guard closes the late-overwrite gap.
 - Line count: S1 adds files, not lines, to `sessionManager.ts`; S3-S7 are net deletions. #11784
   must land first or nothing holds the gain.
 - Unchanged and out of scope: derived-label maps, restore queues, per-device cleanup bookkeeping,

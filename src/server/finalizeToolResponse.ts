@@ -25,7 +25,7 @@ import {
   type ObservationActionClass,
 } from "../features/action/observationActionClass";
 import { serverConfig } from "../utils/ServerConfig";
-import { stringifyToolResponse } from "../utils/toolUtils";
+import { observationOfPayload, stringifyToolResponse } from "../utils/toolUtils";
 import { readToolEnvelopePayload, writeToolEnvelopePayload } from "./toolEnvelopePayload";
 import { boundStructuredField, truncateBodyText } from "../utils/truncateBodyText";
 import { logger } from "../utils/logger";
@@ -520,7 +520,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   let sanitizedPayload: Record<string, unknown> | undefined;
   let hasArtifactableObservation = false;
   let pendingBaselineUpdate: { sessionUuid: string; observation: ObserveResult } | undefined;
-  const renderedObservation = isObserveTool ? payload : payload.observation;
+  const renderedObservation = observationOfPayload(ctx.name, payload);
   const renderedDisplayKey = isObserveResult(renderedObservation)
     ? renderedObservation.display?.key
     : undefined;
@@ -1000,7 +1000,7 @@ function actionMetadataBlocks(
   payload: Record<string, unknown>,
   name: string,
 ): Record<string, unknown> {
-  const observation = name === "observe" ? payload : payload.observation;
+  const observation = observationOfPayload(name, payload);
   if (!isRecord(observation)) {
     return {};
   }
@@ -1024,7 +1024,7 @@ function actionMetadataDeviceId(
   payload: Record<string, unknown>,
   name: string,
 ): string | undefined {
-  const observation = name === "observe" ? payload : payload.observation;
+  const observation = observationOfPayload(name, payload);
   const deviceId = isRecord(observation) ? observation.deviceId : undefined;
   return typeof deviceId === "string" && deviceId.length > 0 ? deviceId : undefined;
 }

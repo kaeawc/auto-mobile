@@ -19,7 +19,7 @@ export interface AdbServerResetQuarantinePoolPort {
   /** Tell resource subscribers a status or holder write committed (#11413). */
   noteDeviceStateChanged?(device: Pick<PooledDevice, "id" | "platform">): void;
   withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
-  getDevices(): Map<string, PooledDevice>;
+  getDevices(): ReadonlyMap<string, PooledDevice>;
   getSessionManager(): SessionManager;
   getStartedDeviceProcesses(): Map<string, DeviceAutolockChildProcess>;
   getAdbServerResetTrackedProcesses(): WeakMap<PooledDevice, DeviceAutolockChildProcess>;

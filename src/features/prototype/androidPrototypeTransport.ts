@@ -21,6 +21,7 @@ export type AndroidPrototypeClient = Pick<
   AndroidCtrlProxyClient,
   | "requestSavePrototype"
   | "requestListSavedPrototypes"
+  | "requestPinSavedPrototype"
   | "requestDeleteSavedPrototype"
   | "requestShowPrototype"
   | "requestInspectPrototypes"
@@ -70,6 +71,10 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
 
   listSaved(timeoutMs?: number): Promise<PrototypeResult> {
     return this.client.requestListSavedPrototypes(timeoutMs);
+  }
+
+  pinSaved(id: string, icon?: string, timeoutMs?: number): Promise<PrototypeResult> {
+    return this.client.requestPinSavedPrototype(id, icon, timeoutMs);
   }
 
   deleteSaved(id: string, timeoutMs?: number): Promise<PrototypeResult> {

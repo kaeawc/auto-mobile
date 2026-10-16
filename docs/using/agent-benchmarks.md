@@ -101,6 +101,8 @@ Each run is isolated so earlier runs and your own setup cannot change the result
   instead of continuing unprotected. A separate benchmark-only lock
   (`<claim file>.agent-benchmark`) is held for the whole run, so a second benchmark on the same
   device is refused even after the handover; a crashed benchmark's lock is reclaimed.
+- No iOS simulator may be booted (checked with `xcrun simctl` on macOS): the benchmark's
+  AutoMobile server discovers iOS too, which would make device selection ambiguous.
 - Exactly one Android device must be online. Nothing pins the MCP server to a serial, so with
   several online the agent could act on a device other than the one prepared and verified.
 - `Bash` is disallowed by default, so the agent cannot fall back to raw `adb`. A suite can disallow

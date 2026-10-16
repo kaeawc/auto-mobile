@@ -72,6 +72,34 @@ export async function resolveSerial(runner: CommandRunner, requested?: string): 
   return online[0];
 }
 
+/**
+ * Names of booted iOS simulators. The private AutoMobile daemon discovers iOS too, so a
+ * booted simulator would make selector-less tool calls ambiguous; `adb devices` cannot see
+ * it. Hosts without `xcrun` (Linux, Windows) have none, so any failure here means none.
+ */
+export async function bootedIosSimulators(runner: CommandRunner): Promise<string[]> {
+  try {
+    const result = await runner.run(
+      "xcrun",
+      ["simctl", "list", "devices", "booted", "-j"],
+      ADB_TIMEOUT_MS,
+    );
+    if (result.exitCode !== 0) {
+      return [];
+    }
+    const parsed = JSON.parse(result.stdout) as {
+      devices?: Record<string, Array<{ name?: string; state?: string }>>;
+    };
+    return Object.values(parsed.devices ?? {})
+      .flat()
+      .filter((device) => device.state === "Booted")
+      .map((device) => device.name ?? "unnamed simulator");
+  } catch {
+    // No xcrun (not macOS) or unparseable output: no simulator the daemon could see either.
+    return [];
+  }
+}
+
 export type PreferenceValue = boolean | number | string;
 
 export interface PreflightSpec {

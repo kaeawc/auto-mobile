@@ -1,5 +1,16 @@
 /** Lifecycle facets retain the legacy maps' identity and insertion order. */
-export class SessionSlots<A, Sh, C, R extends object, Rel, Reb, Cleanup> {
+export class SessionSlots<
+  A,
+  Sh,
+  C,
+  R extends object,
+  Rel,
+  Reb,
+  Cleanup,
+  Op,
+  Snapshot,
+  S extends object,
+> {
   /** Automatic device assignments that have not yet started their creation write. */
   private readonly pendingSessionAssignments = new Map<string, A>();
   private readonly sharedSessionAssignments = new Map<string, Sh>();
@@ -18,6 +29,78 @@ export class SessionSlots<A, Sh, C, R extends object, Rel, Reb, Cleanup> {
     Cleanup,
     { sessionId: string; deviceId: string }
   >();
+
+  private readonly releasePromises = new Map<string, Op>();
+  /** Every release still running, including an older session that reused a UUID. */
+  private readonly activeReleasePromises = new Set<Op>();
+  /** Forced non-terminal snapshots belong to the exact incarnation, even if teardown stays stuck. */
+  private readonly forcedNonTerminalReleases = new WeakMap<S, Snapshot>();
+  /** Sessions whose teardown has closed admission for further device-state setup. */
+  private readonly releasingSessions = new WeakSet<S>();
+
+  get releaseOps(): ReadonlyMap<string, Op> {
+    return this.releasePromises;
+  }
+
+  getReleaseOp(id: string): Op | undefined {
+    return this.releasePromises.get(id);
+  }
+
+  hasReleaseOp(id: string): boolean {
+    return this.releasePromises.has(id);
+  }
+
+  setReleaseOp(id: string, value: Op): void {
+    this.releasePromises.set(id, value);
+  }
+
+  deleteReleaseOp(id: string): boolean {
+    return this.releasePromises.delete(id);
+  }
+
+  get activeReleases(): ReadonlySet<Op> {
+    return this.activeReleasePromises;
+  }
+
+  addActiveRelease(op: Op): void {
+    this.activeReleasePromises.add(op);
+  }
+
+  hasActiveRelease(op: Op): boolean {
+    return this.activeReleasePromises.has(op);
+  }
+
+  deleteActiveRelease(op: Op): boolean {
+    return this.activeReleasePromises.delete(op);
+  }
+
+  markReleasing(session: S): void {
+    this.releasingSessions.add(session);
+  }
+
+  unmarkReleasing(session: S): boolean {
+    return this.releasingSessions.delete(session);
+  }
+
+  isReleasing(session: S): boolean {
+    return this.releasingSessions.has(session);
+  }
+
+  getForcedNonTerminal(session: S): Snapshot | undefined {
+    return this.forcedNonTerminalReleases.get(session);
+  }
+
+  setForcedNonTerminal(session: S, snapshot: Snapshot): void {
+    this.forcedNonTerminalReleases.set(session, snapshot);
+  }
+
+  hasForcedNonTerminal(session: S): boolean {
+    return this.forcedNonTerminalReleases.has(session);
+  }
+
+  deleteForcedNonTerminal(session: S): boolean {
+    return this.forcedNonTerminalReleases.delete(session);
+  }
 
   get assignments(): ReadonlyMap<string, A> {
     return this.pendingSessionAssignments;

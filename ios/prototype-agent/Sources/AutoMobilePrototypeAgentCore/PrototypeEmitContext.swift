@@ -101,7 +101,12 @@ struct PrototypeEmitContext: Decodable {
     }
 
     private static func fits(_ context: [String: JSONValue]) -> Bool {
-        guard let count = jsonByteCount(.object(context)) else { return false }
+        fits(.object(context))
+    }
+
+    /// Whether the compact JSON of `value` fits one emit payload (`maxEmitPayloadBytes`).
+    static func fits(_ value: JSONValue) -> Bool {
+        guard let count = jsonByteCount(value) else { return false }
         return count <= PrototypeLimits.maxEmitPayloadBytes
     }
 

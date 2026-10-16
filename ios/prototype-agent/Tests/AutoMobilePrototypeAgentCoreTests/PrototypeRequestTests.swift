@@ -222,6 +222,35 @@ final class PrototypeRequestTests: XCTestCase {
         XCTAssertEqual(session.state["status"], .string("error"))
     }
 
+    func testMetaTheDrawnTreeRefusesRollsTheBodyBackAndRunsOnErrorNotOnSuccess() throws {
+        // The text substitutes `/feed` and `/feed__meta/durationMs`; with a 16383-character body the
+        // metadata's two digits push it past the substituted-text limit, so neither meta form can be
+        // drawn although the pure data preflight passes.
+        let json = """
+        {"id":"p1","window":{"placement":{"type":"fullscreen"}},"state":{"status":"idle","loaded":false},
+         "data":{"title":"Feed"},
+         "root":{"type":"column","children":[
+           {"type":"text","text":"{data:/feed}{data:/feed__meta/durationMs}"},
+           {"type":"button","label":"Go","onTap":[{"type":"request","url":"http://localhost:8080/feed",
+             "into":"/data/feed","statusKey":"status",
+             "onSuccess":[{"type":"setState","key":"loaded","value":true}]}]}]}}
+        """
+        var session = PrototypeSession()
+        try session.show(JSONDecoder().decode(PrototypeSpec.self, from: Data(json.utf8)))
+        let go = try XCTUnwrap(session.spec?.root.children?.last?.onTap)
+        _ = session.run(go)
+        let body = String(repeating: "x", count: PrototypeLimits.maxSubstitutedTextLength - 1)
+        let events = session.completeRequest("r-1", ok(.string(body)))
+        XCTAssertNil(PrototypeDataPointer.resolve(session.data, pointer: "/feed"))
+        XCTAssertEqual(
+            PrototypeDataPointer.resolve(session.data, pointer: "/feed__meta/error/message"),
+            .string("response and metadata exceed the data limit")
+        )
+        XCTAssertEqual(session.state["status"], .string("error"))
+        XCTAssertEqual(session.state["loaded"], .bool(false), "onSuccess must not run")
+        XCTAssertEqual(try requestEvent(events)["outcome"], .string("error"))
+    }
+
     func testARequestWithoutIntoWritesNoDataButStillReportsStatusAndFollowUp() throws {
         var (session, actions) = try shown(
             onTap:

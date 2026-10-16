@@ -382,7 +382,11 @@ struct PrototypeSession {
         let revision = dataRevision + 1
         revisions[rebuilt.id] = revision
         var payload: [String: JSONValue] = ["op": .string(op.rawValue), "revision": .number(Double(revision))]
-        if let value { payload["value"] = value }
+        // The value is left out when the event would not fit the emit payload limit, so the host,
+        // which cannot mirror a write it was not shown, stops tracking the spec (as on Android).
+        if let value, PrototypeEmitContext.fits(.object(payload.merging(["value": value]) { $1 })) {
+            payload["value"] = value
+        }
         return .success(emit(kind: "change", name: path, payload: .object(payload)))
     }
 
@@ -768,6 +772,8 @@ extension PrototypeSession {
         var meta = PrototypeRequestMeta(response)
         var events: [PrototypeEvent] = []
         var minimalMeta = false
+        let saved = self
+        var wroteBody = false
         if case let .received(_, _, body, _) = response, meta.error == nil, let into = inFlight.into {
             let stored = PrototypeRequestOutcome.storedBody(body, method: inFlight.job.method)
             if leavesNoRoomForMeta(stored, into: into, meta: meta) {
@@ -777,12 +783,25 @@ extension PrototypeSession {
                 minimalMeta = true
             } else {
                 switch commitDataWrite(.set, path: into, value: stored) {
-                case let .success(written): events += written
+                case let .success(written):
+                    events += written
+                    wroteBody = true
                 case let .failure(failure): meta.error = PrototypeRequestError(.invalidResponse, failure.message)
                 }
             }
         }
-        if let into = inFlight.into { events += writeRequestMeta(meta, beside: into, minimal: minimalMeta) }
+        if let into = inFlight.into {
+            if let written = writeRequestMeta(meta, beside: into, minimal: minimalMeta) {
+                events += written
+            } else if wroteBody {
+                // The pure preflight passed but the drawn tree refused every form of `__meta` (a bound
+                // field, such as substituted text, outgrew its limit): roll the body back too.
+                self = saved
+                events = []
+                meta.error = PrototypeRequestError(.invalidResponse, PrototypeRequestOutcome.noRoomForMeta)
+                events += writeRequestMeta(meta, beside: into, minimal: true) ?? []
+            }
+        }
         let failed = meta.error != nil
         events += writeRequestStatus(inFlight.statusKey, failed ? "error" : "success")
         events += emit(
@@ -820,14 +839,14 @@ extension PrototypeSession {
     private mutating func writeRequestMeta(
         _ meta: PrototypeRequestMeta, beside into: String, minimal: Bool
     )
-        -> [PrototypeEvent]
+        -> [PrototypeEvent]?
     {
         for form in metaForms(meta, minimal: minimal) {
             if case let .success(events) = commitDataWrite(.set, path: into + "__meta", value: form) {
                 return events
             }
         }
-        return []
+        return nil
     }
 
     /// Moves the status key to `loading`, `success` or `error`. Nothing is written for an

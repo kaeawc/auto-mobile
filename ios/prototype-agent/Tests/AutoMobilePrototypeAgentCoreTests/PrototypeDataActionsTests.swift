@@ -218,6 +218,28 @@ final class PrototypeDataActionsTests: XCTestCase {
         XCTAssertEqual(session.state["b"], .bool(true))
     }
 
+    func testAChangeEventLeavesOutAValueThatWouldNotFitAnEmitPayload() throws {
+        func changePayload(_ text: String) throws -> [String: JSONValue] {
+            var session = PrototypeSession()
+            try session.show(spec("""
+            {"id":"big","window":{"placement":{"type":"fullscreen"}},"data":{"title":"T"},
+             "root":{"type":"button","label":"Go","onTap":[
+               {"type":"setData","path":"/data/title","value":{"value":\(PrototypeJSONText.string(.string(text)))}}]}}
+            """))
+            let events = try session.run(XCTUnwrap(session.spec?.root.onTap))
+            return try XCTUnwrap(events.first?.payload.objectValue)
+        }
+        // The whole `{op, value, revision}` payload must fit 4096 bytes of compact JSON.
+        let small = try changePayload(String(repeating: "x", count: 100))
+        XCTAssertNotNil(small["value"])
+        let fitsExactly = try changePayload(String(repeating: "x", count: 4096 - 40))
+        XCTAssertNotNil(fitsExactly["value"])
+        let big = try changePayload(String(repeating: "x", count: 4096))
+        XCTAssertNil(big["value"])
+        XCTAssertEqual(big["op"], .string("set"))
+        XCTAssertEqual(big["revision"], .number(1))
+    }
+
     func testRepeatBindsTheRowIndexAndItemIntoEachRowsDataActions() throws {
         let session = try shown()
         let delete = try button(session, "Delete two")

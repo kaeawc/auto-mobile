@@ -689,6 +689,7 @@ export class AdbClient implements AdbExecutor {
       beforeDispatch,
       waitForProcessSettlementAfterAbort,
       logLabel,
+      onStdout,
     } = options;
     // The default uses the same AdbCommandTimeoutError and SIGTERM path as an
     // explicit timeout; long-lived spawn commands do not pass through here.
@@ -702,6 +703,7 @@ export class AdbClient implements AdbExecutor {
       beforeDispatch,
       waitForProcessSettlementAfterAbort,
       logLabel,
+      onStdout,
     });
     AdbClient.resetMissingAdbProbeState();
     const duration = this.timer.now() - startTime;
@@ -1165,6 +1167,7 @@ export class AdbClient implements AdbExecutor {
       beforeDispatch,
       waitForProcessSettlementAfterAbort = false,
       logLabel,
+      onStdout,
     } = options;
     const startTime = this.timer.now();
     const resolvedSignal = signal ?? getAbortSignal();
@@ -1179,7 +1182,7 @@ export class AdbClient implements AdbExecutor {
           maxBuffer,
           remainingMs,
           resolvedSignal,
-          waitForProcessSettlementAfterAbort,
+          { waitForProcessSettlementAfterAbort, onStdout },
         );
       } catch (error) {
         throw logLabel ? redactCommandFromError(error, fullArgs, commandArgs, logLabel) : error;
@@ -1273,8 +1276,9 @@ export class AdbClient implements AdbExecutor {
     maxBuffer?: number,
     timeoutMs?: number,
     signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort = false,
+    options: Pick<AdbExecuteOptions, "waitForProcessSettlementAfterAbort" | "onStdout"> = {},
   ): Promise<ExecResult> {
+    const { waitForProcessSettlementAfterAbort, onStdout } = options;
     if (signal?.aborted) {
       throw this.getAbortError(signal);
     }
@@ -1293,6 +1297,7 @@ export class AdbClient implements AdbExecutor {
         args,
         maxBuffer ? { maxBuffer } : undefined,
       );
+      const stopObservingStdout = this.observeStdout(child, onStdout);
       result
         .then((execResult) => {
           if (settled) {
@@ -1372,13 +1377,12 @@ export class AdbClient implements AdbExecutor {
       };
 
       const cleanup = () => {
+        stopObservingStdout();
         removeFinishedAdbChild(child);
         child.off("exit", onExit);
         child.off("exit", settleAfterSigkill);
         child.off("close", settleAfterSigkill);
-        if (signal) {
-          signal.removeEventListener("abort", onAbort);
-        }
+        signal?.removeEventListener("abort", onAbort);
         if (timeoutId) {
           this.timer.clearTimeout(timeoutId);
         }
@@ -1425,6 +1429,17 @@ export class AdbClient implements AdbExecutor {
         signal.addEventListener("abort", onAbort, { once: true });
       }
     });
+  }
+
+  private observeStdout(child: ChildProcess, onStdout?: (chunk: string) => void): () => void {
+    if (!onStdout || !child.stdout) {
+      return () => {};
+    }
+    const listener = (chunk: Buffer | string) => onStdout(chunk.toString());
+    child.stdout.on("data", listener);
+    return () => {
+      child.stdout?.off("data", listener);
+    };
   }
 
   private parseCommandArgs(command: string): string[] {

@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import {
@@ -19,7 +20,6 @@ import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
   hasActiveSessionExecution,
   sessionExecutionProbe,
@@ -276,7 +276,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
         }) as unknown as AndroidCtrlProxyClient,
     );
     const fakePool = createFakeDaemonState().getDevicePool();
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       {

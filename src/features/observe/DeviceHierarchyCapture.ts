@@ -1,3 +1,4 @@
+import { holderOf } from "../../daemon/deviceBinding";
 import type { ViewHierarchy as ViewHierarchyReader } from "./interfaces/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
@@ -177,7 +178,7 @@ function resolveHierarchyClient(
   }
   const daemon = DaemonState.getInstance();
   const owned = daemon.isInitialized()
-    ? !!daemon.getDevicePool().getDevice(device.deviceId)?.sessionId
+    ? !!holderOf(daemon.getDevicePool().getDevice(device.deviceId))
     : false;
   if (owned && !existing?.isConnected()) {
     throw new ActionableError(

@@ -148,13 +148,14 @@ export function assertSlotTransition(from: SlotPosition, to: SlotPosition): void
 
 export interface LegacyLifecycleView<S = object> {
   readonly sessions: ReadonlyMap<string, S>;
+  isReleasing(session: S): boolean;
   readonly pendingAssignments: ReadonlyMap<string, unknown>;
   readonly pendingCreations: ReadonlyMap<string, unknown>;
   readonly pendingReleases: ReadonlyMap<string, unknown>;
   readonly pendingRebinds: ReadonlyMap<string, unknown>;
   readonly releaseOps: ReadonlyMap<
     string,
-    { session: S; forced?: boolean; commitDeclined?: boolean }
+    { readonly session: S; readonly forced?: boolean; readonly commitDeclined?: boolean }
   >;
   readonly terminalSnapshots: ReadonlyMap<string, unknown>;
   readonly recoveredTerminalIntents: ReadonlyMap<string, unknown>;
@@ -165,30 +166,15 @@ export interface DerivedSlot {
   tag: SlotPhase;
   fence?: SlotFence;
   releaseRequested: boolean;
+  /** Legacy pending work still counts as known after its session has disappeared. */
+  residue?: true;
 }
 
-/**
- * First match wins: current non-forced release, published session, creation, assignment,
- * unpublished release op (fenced if terminal, otherwise ended), terminal fence, then a
- * still-reachable finalized identity. A declined commit keeps the published incarnation
- * live; forced/stale ops cannot hide a newer incarnation or pending work. Creation
- * beats an old fence during revival. This mirrors SessionManager's isCurrentSession,
- * isSessionBeingRecreated and getAllKnownSessionIds reads without importing their I/O.
- */
+/** Published incarnations outrank old operations; terminal fences also cover declined commits. */
 export function deriveSlot<S>(view: LegacyLifecycleView<S>, uuid: string): DerivedSlot {
-  const op = view.releaseOps.get(uuid);
-  if (op && !op.forced && view.sessions.get(uuid) === op.session && !op.commitDeclined) {
-    return {
-      tag: "releasing",
-      fence: view.terminalSnapshots.has(uuid) ? "terminal" : "none",
-      releaseRequested: false,
-    };
-  }
-  if (view.sessions.has(uuid)) {
-    return {
-      tag: view.pendingRebinds.has(uuid) ? "rebinding" : "live",
-      releaseRequested: false,
-    };
+  const session = view.sessions.get(uuid);
+  if (session !== undefined) {
+    return derivePublishedSlot(view, uuid, session);
   }
   if (view.pendingCreations.has(uuid)) {
     return { tag: "creating", releaseRequested: view.pendingReleases.has(uuid) };
@@ -196,7 +182,32 @@ export function deriveSlot<S>(view: LegacyLifecycleView<S>, uuid: string): Deriv
   if (view.pendingAssignments.has(uuid)) {
     return { tag: "assigning", releaseRequested: view.pendingReleases.has(uuid) };
   }
-  return deriveFinalizedSlot(view, uuid);
+  const slot = deriveFinalizedSlot(view, uuid);
+  if (
+    view.pendingReleases.has(uuid) ||
+    view.pendingRebinds.has(uuid) ||
+    view.releaseOps.has(uuid)
+  ) {
+    slot.residue = true;
+  }
+  return slot;
+}
+
+function derivePublishedSlot<S>(
+  view: LegacyLifecycleView<S>,
+  uuid: string,
+  session: S,
+): DerivedSlot {
+  const op = view.releaseOps.get(uuid);
+  const terminal = view.terminalSnapshots.has(uuid);
+  if (
+    terminal ||
+    view.isReleasing(session) ||
+    (op?.session === session && !op.forced && !op.commitDeclined)
+  ) {
+    return { tag: "releasing", fence: terminal ? "terminal" : "none", releaseRequested: false };
+  }
+  return { tag: view.pendingRebinds.has(uuid) ? "rebinding" : "live", releaseRequested: false };
 }
 
 function deriveFinalizedSlot<S>(view: LegacyLifecycleView<S>, uuid: string): DerivedSlot {
@@ -232,7 +243,7 @@ export function deriveAllSlots<S>(view: LegacyLifecycleView<S>): Map<string, Der
   const slots = new Map<string, DerivedSlot>();
   for (const uuid of uuids) {
     const slot = deriveSlot(view, uuid);
-    if (slot.tag !== "absent") {
+    if (slot.tag !== "absent" || slot.residue) {
       slots.set(uuid, slot);
     }
   }
@@ -240,9 +251,47 @@ export function deriveAllSlots<S>(view: LegacyLifecycleView<S>): Map<string, Der
 }
 
 export function isSlotTagBeingRecreated(tag: SlotPhase): boolean {
-  return tag === "assigning" || tag === "creating" || tag === "live" || tag === "rebinding";
+  return (
+    tag === "assigning" ||
+    tag === "creating" ||
+    tag === "live" ||
+    tag === "rebinding" ||
+    tag === "releasing"
+  );
 }
 
 export function isSlotTagKnown(tag: SlotPhase): boolean {
   return tag !== "absent" && tag !== "ended" && tag !== "fenced";
+}
+
+/** During migration a finalized/absent slot can still have legacy work awaiting cleanup. */
+export function isSlotKnown(slot: DerivedSlot): boolean {
+  return isSlotTagKnown(slot.tag) || slot.residue === true;
+}
+
+/** Constant-time equivalent of getAllKnownSessionIds membership, without allocating its union. */
+export function isLegacySessionIdKnown<S>(view: LegacyLifecycleView<S>, uuid: string): boolean {
+  return (
+    view.sessions.has(uuid) ||
+    view.pendingCreations.has(uuid) ||
+    view.pendingAssignments.has(uuid) ||
+    view.pendingRebinds.has(uuid) ||
+    view.pendingReleases.has(uuid) ||
+    view.releaseOps.has(uuid)
+  );
+}
+
+/** Identity read for the shadow model, including unpublished and finalized incarnations. */
+export function deriveLatestSessionIdentity<S>(
+  view: LegacyLifecycleView<S>,
+  uuid: string,
+): S | undefined {
+  const published = view.sessions.get(uuid);
+  if (published !== undefined) {
+    return published;
+  }
+  if (view.pendingCreations.has(uuid) || view.pendingAssignments.has(uuid)) {
+    return undefined;
+  }
+  return view.releaseOps.get(uuid)?.session ?? view.latestFinalizedIdentities.get(uuid)?.deref();
 }

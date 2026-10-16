@@ -1,7 +1,7 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { expect, spyOn } from "bun:test";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
   DAEMON_OWNED_SESSIONS_PARAM,
@@ -280,7 +280,7 @@ for (const outcome of [
         };
       },
     };
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "/fake/owner-call.sock",
       "http://localhost:0/mcp",
       {

@@ -1,5 +1,5 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { describe, expect, test } from "bun:test";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -31,7 +31,7 @@ function createFakeSocket(): any {
 describe("UnixSocketServer session id comes from the injected IdGenerator", () => {
   test("handleConnection keys the session on the injected generator", () => {
     const idGenerator = new CountingIdGenerator("session");
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "/tmp/never-listened.sock",
       "http://localhost:0/mcp",
       createFakeDaemonState(),

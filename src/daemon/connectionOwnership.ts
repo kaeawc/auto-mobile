@@ -1,3 +1,4 @@
+import { holderOf } from "./deviceBinding";
 import type { Platform } from "../models";
 import type { PooledDevice } from "./devicePool";
 import type { ForeignDeviceOwnership } from "./foreignDeviceOwnership";
@@ -30,7 +31,7 @@ export class ConnectionOwnership {
     this.claimedDeviceIds.set(deviceId, ownership);
     // The claim is this daemon's, not one session's: a session that took the device since
     // depends on it, so it is only withdrawn when nothing here holds the device (#11565).
-    if (!this.port.getDevice(deviceId)?.sessionId) {
+    if (!holderOf(this.port.getDevice(deviceId))) {
       this.releaseDeviceClaim(deviceId);
     }
     return true;

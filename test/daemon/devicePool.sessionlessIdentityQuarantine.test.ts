@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { FakeDeviceExecutionBinding } from "../fakes/FakeDeviceExecutionBinding";
 import { Daemon } from "../../src/daemon/daemon";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
@@ -9,7 +10,6 @@ import type { BootedDevice } from "../../src/models";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { ExecutionTracker, executionTracker } from "../../src/server/executionTracker";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
@@ -286,7 +286,7 @@ describe("sessionless identity quarantine", () => {
 
   describe("input resolved for a session that has since left the device (#9958)", () => {
     const newServer = () =>
-      new UnixSocketServer(
+      createTestUnixSocketServer(
         "scratch/never-listened.sock",
         "http://localhost:0/mcp",
         DaemonState.getInstance(),
@@ -347,7 +347,7 @@ describe("sessionless identity quarantine", () => {
 
   test("daemon sessionless input carries execution context, binding, and ambient abort", async () => {
     const h = await setup(executionTracker);
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "scratch/never-listened.sock",
       "http://localhost:0/mcp",
       DaemonState.getInstance(),
@@ -380,7 +380,7 @@ describe("sessionless identity quarantine", () => {
 
   test("a direct tracked input dispatched before a quarantine is held until its operation settles", async () => {
     const h = await setup(executionTracker);
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "scratch/never-listened.sock",
       "http://localhost:0/mcp",
       DaemonState.getInstance(),

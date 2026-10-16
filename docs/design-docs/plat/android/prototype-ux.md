@@ -961,6 +961,16 @@ added: `name` is the written `/data/...` path (for an append, the array) and `pa
 is a data path must carry a valid payload or the host drops it. `awaitEvent` returns it like any
 other event.
 
+The Android runtime (`PrototypeRuntime.writeData`, over the shared `PrototypeDataWriter` that mirrors
+`applyPrototypeDataWrite`) applies a write to an immutable copy of `/data`, so Compose re-renders
+`repeat` and `{data: ...}` bindings from the new spec. A refused write (a typed error, an unresolvable
+value binding, or rows the renderer cannot take) changes and emits nothing, is logged, and the rest of
+the action list still runs. Each accepted write takes its own revision, so a state write later in the
+same list takes a later one. The event carries the value only while the payload fits
+`MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`; otherwise it is left out and the host stops tracking the spec. With
+no host connected, a device-persistent prototype's write events wait in `PrototypeOfflineEventBuffer`
+like every other event.
+
 **Revisions and host patches.** The device has one revision counter per prototype. A data write bumps
 it and reports the new value as `payload.revision`; a patch result's `revision` is the same counter.
 The agent's `/data` patch and a device write must not silently lose each other, so:

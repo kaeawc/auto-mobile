@@ -1,8 +1,10 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import dev.jasonpearson.automobile.protocol.EmitContextBinding
 import dev.jasonpearson.automobile.protocol.EmitContextResolver
 import dev.jasonpearson.automobile.protocol.PrototypeAction
 import dev.jasonpearson.automobile.protocol.PrototypeAppBarAction
+import dev.jasonpearson.automobile.protocol.PrototypeAppendDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeBadgeNode
 import dev.jasonpearson.automobile.protocol.PrototypeBottomNavNode
 import dev.jasonpearson.automobile.protocol.PrototypeBottomSheetNode
@@ -38,6 +40,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePagerNode
 import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
+import dev.jasonpearson.automobile.protocol.PrototypeRemoveDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeRepeat
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatSegment
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatTemplate
@@ -47,6 +50,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeScrollNode
 import dev.jasonpearson.automobile.protocol.PrototypeSearchBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeSegmentedButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeSelectNode
+import dev.jasonpearson.automobile.protocol.PrototypeSetDataAction
 import dev.jasonpearson.automobile.protocol.PrototypeSetStateAction
 import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
 import dev.jasonpearson.automobile.protocol.PrototypeSnackbarNode
@@ -497,11 +501,29 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
             )
           },
       )
+    is PrototypeSetDataAction ->
+      copy(path = instance.dataPath(path), value = instance.dataValue(value))
+    is PrototypeAppendDataAction ->
+      copy(path = instance.dataPath(path), value = instance.dataValue(value))
+    is PrototypeRemoveDataAction -> copy(path = instance.dataPath(path))
     is PrototypeToggleAction -> copy(key = instance.interpolate(key))
     is PrototypeIncrementAction -> copy(key = instance.interpolate(key))
     is PrototypeDecrementAction -> copy(key = instance.interpolate(key))
     else -> this
   }
+
+/** Only a whole `{index}` segment binds in a data path; the validator refuses anything else. */
+private fun RepeatInstance.dataPath(path: String): String =
+  PrototypeRepeatTemplate.bindDataPath(path, index)
+
+/** `{item}` and `{index}` become literals of this row; `{state}` keys interpolate. */
+private fun RepeatInstance.dataValue(binding: EmitContextBinding): EmitContextBinding =
+  PrototypeRepeatTemplate.bindBinding(
+    binding,
+    alias,
+    item.mapValues { (_, value) -> EmitContextResolver.scalar(value) },
+    index,
+  )
 
 private fun PrototypeCondition.bound(instance: RepeatInstance): PrototypeCondition =
   copy(

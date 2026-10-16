@@ -4388,6 +4388,20 @@
     "PrototypeRepeat": [],
     "PrototypeScalar": [],
     "PrototypeValidityKeys": [],
+    "appendData": [
+      {
+        "name": "path",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "value",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "badge": [
       {
         "name": "id",
@@ -8832,6 +8846,14 @@
         "hasDefault": true
       }
     ],
+    "removeData": [
+      {
+        "name": "path",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "replace": [
       {
         "name": "stack",
@@ -9304,6 +9326,20 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      }
+    ],
+    "setData": [
+      {
+        "name": "path",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "value",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "setPage": [

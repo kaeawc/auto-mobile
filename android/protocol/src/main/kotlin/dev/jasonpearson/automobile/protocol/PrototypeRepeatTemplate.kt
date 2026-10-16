@@ -109,6 +109,16 @@ object PrototypeRepeatTemplate {
     item: Map<String, JsonElement>,
     index: Int,
   ): Map<String, EmitContextBinding> = context.mapValues { (_, binding) ->
+    bindBinding(binding, alias, item, index)
+  }
+
+  /** One emit-context style binding bound to a repeat row; also the value of a data action. */
+  fun bindBinding(
+    binding: EmitContextBinding,
+    alias: String,
+    item: Map<String, JsonElement>,
+    index: Int,
+  ): EmitContextBinding =
     when {
       "item" in binding ->
         JsonObject(
@@ -125,7 +135,33 @@ object PrototypeRepeatTemplate {
         )
       else -> binding
     }
-  }
+
+  /** A data action path with each whole `{index}` segment bound to the row. */
+  fun bindDataPath(path: String, index: Int): String =
+    path.split('/').joinToString("/") { if (it == INDEX_SEGMENT) index.toString() else it }
+
+  /** True when the path holds a `{index}` placeholder anywhere in it. */
+  fun dataPathHasIndex(path: String): Boolean =
+    segments(path, NO_ALIAS).any { it is PrototypeRepeatSegment.Index }
+
+  /**
+   * The message for a data path whose placeholders break the grammar inside a repeat aliased
+   * [alias], or null. Only a whole `{index}` segment binds; `{alias.field}` would let item content
+   * inject pointer syntax.
+   */
+  fun dataPathPlaceholderMessage(path: String, alias: String): String? =
+    when {
+      segments(path, alias).any { it is PrototypeRepeatSegment.Field } ->
+        "Only a whole {index} segment may be a placeholder in a data path"
+      path.split('/').any { INDEX_SEGMENT in it && it != INDEX_SEGMENT } ->
+        "{index} must be a whole data path segment"
+      else -> null
+    }
+
+  private const val INDEX_SEGMENT = "{index}"
+
+  // NUL cannot occur in a repeat alias, so only `{index}` is recognised as a placeholder.
+  private const val NO_ALIAS = "\u0000"
 
   /** Integral numbers render without a decimal point or exponent at any magnitude. */
   fun rendered(value: JsonPrimitive): String {
@@ -159,6 +195,9 @@ internal enum class PrototypeBindableKind {
   EMIT_NAME,
   EMIT_BINDING,
   KEY,
+
+  /** A data action's `/data/...` path: renders to text, and only a whole `{index}` binds. */
+  DATA_PATH,
 }
 
 /**
@@ -240,8 +279,22 @@ internal object PrototypeBindableFields {
         "toggle",
         "increment",
         "decrement" -> field(action, "key", path, PrototypeBindableKind.KEY)
+        "setData",
+        "appendData" ->
+          field(action, "path", path, PrototypeBindableKind.DATA_PATH)
+            ?: binding(action["value"], "$path.value")
+        "removeData" -> field(action, "path", path, PrototypeBindableKind.DATA_PATH)
         else -> null
       }
+
+    /** An emit-binding value: the binding itself, then the state key it names. */
+    fun binding(value: JsonElement?, at: String): T? {
+      value ?: return null
+      visit(value, at, PrototypeBindableKind.EMIT_BINDING)?.let {
+        return it
+      }
+      return (value as? JsonObject)?.let { field(it, "state", at, PrototypeBindableKind.KEY) }
+    }
 
     fun emitContext(action: JsonObject, path: String): T? {
       val context = action["context"] as? JsonObject ?: return null
@@ -249,13 +302,8 @@ internal object PrototypeBindableFields {
         val at =
           if (contextNamePattern.matches(name)) "$path.context.$name"
           else "$path.context[" + JsonPrimitive(name).toString() + "]"
-        visit(value, at, PrototypeBindableKind.EMIT_BINDING)?.let {
+        binding(value, at)?.let {
           return it
-        }
-        (value as? JsonObject)?.let { binding ->
-          field(binding, "state", at, PrototypeBindableKind.KEY)?.let {
-            return it
-          }
         }
       }
       return null
@@ -580,8 +628,23 @@ internal object PrototypeRepeatValidator {
     state: RepeatState,
   ): PrototypeSpecError? =
     PrototypeBindableFields.first(node, path) { value, fieldPath, kind ->
-      fieldError(value, fieldPath, kind, scope, state)
+      dataPathPlaceholderError(kind, value, fieldPath, scope)
+        ?: fieldError(value, fieldPath, kind, scope, state)
     }
+
+  /** A data action path binds only a whole `{index}` segment; `{alias.field}` is refused. */
+  private fun dataPathPlaceholderError(
+    kind: PrototypeBindableKind,
+    value: JsonElement?,
+    path: String,
+    scope: Scope,
+  ): PrototypeSpecError? {
+    val text = value.string()
+    if (kind != PrototypeBindableKind.DATA_PATH || text == null) return null
+    return PrototypeRepeatTemplate.dataPathPlaceholderMessage(text, scope.alias)?.let {
+      fail(path, it)
+    }
+  }
 
   /** Outside every template a state key is literal, so a placeholder there is an invalid key. */
   private fun checkLiteralKeys(
@@ -606,6 +669,12 @@ internal object PrototypeRepeatValidator {
         dataTextError(fieldPath, state)
       else if (kind == PrototypeBindableKind.KEY && text != null && !stateKeyPattern.matches(text))
         fail(fieldPath, "State key placeholder outside a repeat template")
+      else if (
+        kind == PrototypeBindableKind.DATA_PATH &&
+          text != null &&
+          PrototypeRepeatTemplate.dataPathHasIndex(text)
+      )
+        fail(fieldPath, "{index} outside a repeat template")
       else null
     }
 

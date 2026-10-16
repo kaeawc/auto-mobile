@@ -374,6 +374,10 @@ class WebSocketServer(
     // APKs reject data, {path} items, repeat.key and data conditions as unknown, and draw
     // {data:/x} text literally, so hosts refuse such a spec for a device lacking this flag.
     add("prototype_data_model_v1")
+    // setData, appendData and removeData change /data on the device and report each write as a
+    // change event. Older APKs reject the actions as unknown, so hosts refuse a spec using one
+    // for a device lacking this flag. Advertised only together with prototype_data_model_v1.
+    add("prototype_data_actions_v1")
     // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")

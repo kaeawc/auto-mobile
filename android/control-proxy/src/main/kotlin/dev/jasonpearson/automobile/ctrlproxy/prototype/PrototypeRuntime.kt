@@ -122,6 +122,8 @@ class PrototypeRuntime(
   initialRevision: Long = 0L,
   private val nextRevision: (() -> Long)? = null,
   previousStacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
+  /** Where a refused data write is explained; a seam so JVM tests need no `android.util.Log`. */
+  private val warn: (String) -> Unit = { Log.w("PrototypeRuntime", it) },
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
@@ -303,9 +305,11 @@ class PrototypeRuntime(
       }
     if (changed.isEmpty()) return
     val revision = interactionRevision ?: allocateRevision().also { interactionRevision = it }
+    // Only state differs from the spec the write was planned against. Taking the planned spec whole
+    // would roll back a data write made earlier in the same action list.
     mutableSnapshot.value =
       current.copy(
-        spec = spec,
+        spec = current.spec.copy(state = spec.state),
         revision = revision,
         stateRevisions = current.stateRevisions + changed.associateWith { revision },
       )
@@ -455,6 +459,9 @@ class PrototypeRuntime(
             if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
           }
         PrototypeDismissAction -> dismiss()
+        is PrototypeSetDataAction,
+        is PrototypeAppendDataAction,
+        is PrototypeRemoveDataAction -> writeData(action)
         else ->
           writes[index]?.let { (key, spec) ->
             writeInteractionSpec(spec)
@@ -665,22 +672,106 @@ class PrototypeRuntime(
     )
   }
 
+  /** Bindings read the committed values at the action, after the writes before it in the list. */
+  private fun bindingInputs() =
+    object : EmitContextInputs {
+      override fun state(key: String): JsonElement? =
+        current.state[key]?.let(EmitContextResolver::scalar)
+
+      override fun page(id: String): Int? = current.pages[id]
+
+      override fun data(pointer: String): JsonElement? =
+        PrototypeDataPointer.resolve(current.spec.data, pointer)
+    }
+
+  /**
+   * A `setData`, `appendData` or `removeData` action (#12519). The write is the shared
+   * [PrototypeDataWriter] semantics, applied to an immutable copy of the data so Compose sees a new
+   * spec; a refused write (typed error, or a result the renderer cannot take) changes and emits
+   * nothing and the rest of the list still runs. An accepted write bumps the revision and reports
+   * itself as a `change` event named by the written path.
+   */
+  private suspend fun writeData(action: PrototypeAction) {
+    val write = dataWrite(action) ?: return
+    val before = current
+    val data =
+      when (val result = PrototypeDataWriter.apply(before.spec.data, write)) {
+        is PrototypeDataWriteResult.Success -> result.data
+        is PrototypeDataWriteResult.Failure -> return refusedDataWrite(write, result.error.message)
+      }
+    val spec = before.spec.copy(data = data)
+    // Rows added by the write must still fit the renderer's limits; a disposable mapper keeps a
+    // rejected write from touching the runtime's own caches, as for a patch.
+    try {
+      PrototypeRenderMapper()
+        .map(spec, before.pages, stacks = before.stacks, shownErrors = before.shownErrors)
+    } catch (error: IllegalArgumentException) {
+      return refusedDataWrite(write, error.message ?: "Data write exceeds a prototype limit")
+    }
+    val revision = allocateRevision()
+    // The next state write of this interaction allocates a later revision, so it never regresses.
+    interactionRevision = null
+    stateWriteValidator = null
+    mutableSnapshot.value = before.copy(spec = spec, revision = revision)
+    emit(
+      kind = PrototypeEventKind.CHANGE,
+      name = write.path,
+      payload = dataWritePayload(write, revision),
+    )
+  }
+
+  private fun refusedDataWrite(write: PrototypeDataWrite, message: String) {
+    warn("Refused ${write.op}Data at ${write.path}: $message")
+  }
+
+  /** Binds the action's value; null when the value cannot be resolved (the write is refused). */
+  private fun dataWrite(action: PrototypeAction): PrototypeDataWrite? {
+    fun value(binding: EmitContextBinding, path: String): JsonElement? =
+      when (val resolved = PrototypeDataWriter.resolveValue(binding, bindingInputs())) {
+        is PrototypeDataValue.Resolved -> resolved.value
+        is PrototypeDataValue.Failure -> {
+          warn("Refused data write at $path: ${resolved.error.message}")
+          null
+        }
+      }
+    return when (action) {
+      is PrototypeSetDataAction ->
+        value(action.value, action.path)?.let { PrototypeDataWrite.Set(action.path, it) }
+      is PrototypeAppendDataAction ->
+        value(action.value, action.path)?.let { PrototypeDataWrite.Append(action.path, it) }
+      is PrototypeRemoveDataAction -> PrototypeDataWrite.Remove(action.path)
+      else -> null
+    }
+  }
+
+  /**
+   * `{op, value?, revision}`. The value is left out when the payload would not fit an event, so the
+   * host, which cannot mirror a write it was not shown, stops tracking the spec.
+   */
+  private fun dataWritePayload(write: PrototypeDataWrite, revision: Long): JsonObject {
+    fun payload(value: JsonElement?) = buildJsonObject {
+      put("op", write.op)
+      if (value != null) put("value", value)
+      put("revision", revision)
+    }
+    val value =
+      when (write) {
+        is PrototypeDataWrite.Set -> write.value
+        is PrototypeDataWrite.Append -> write.value
+        is PrototypeDataWrite.Remove -> null
+      }
+    val full = payload(value)
+    return if (
+      full.toString().toByteArray(Charsets.UTF_8).size <=
+        PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES
+    )
+      full
+    else payload(null)
+  }
+
   private suspend fun emitAction(action: PrototypeEmitAction) {
     val resolved =
-      action.context?.let { bindings ->
-        EmitContextResolver.resolve(
-          bindings,
-          object : EmitContextInputs {
-            override fun state(key: String): JsonElement? =
-              current.state[key]?.let(EmitContextResolver::scalar)
-
-            override fun page(id: String): Int? = current.pages[id]
-
-            override fun data(pointer: String): JsonElement? =
-              PrototypeDataPointer.resolve(current.spec.data, pointer)
-          },
-        )
-      }
+      action.context?.let { bindings -> EmitContextResolver.resolve(bindings, bindingInputs()) }
     emit(
       kind = PrototypeEventKind.EMIT,
       name = action.name,

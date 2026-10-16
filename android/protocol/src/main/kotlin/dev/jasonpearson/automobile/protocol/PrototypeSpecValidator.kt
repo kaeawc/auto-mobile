@@ -72,6 +72,7 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_CONDITION_DEPTH: Int = limit("MAX_PROTOTYPE_CONDITION_DEPTH")
   val MAX_PROTOTYPE_PATCH_OPS: Int = limit("MAX_PROTOTYPE_PATCH_OPS")
   val MAX_PROTOTYPE_DATA_BYTES: Int = limit("MAX_PROTOTYPE_DATA_BYTES")
+  val MAX_PROTOTYPE_DATA_WRITE_BYTES: Int = limit("MAX_PROTOTYPE_DATA_WRITE_BYTES")
   val MAX_PROTOTYPE_DATA_DEPTH: Int = limit("MAX_PROTOTYPE_DATA_DEPTH")
   val MAX_PROTOTYPE_DATA_ARRAY_ITEMS: Int = limit("MAX_PROTOTYPE_DATA_ARRAY_ITEMS")
   val MAX_PROTOTYPE_REPEAT_PATH_CELLS: Int = limit("MAX_PROTOTYPE_REPEAT_PATH_CELLS")
@@ -259,6 +260,7 @@ object PrototypeSpecValidator {
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
         ?: gridSpanErrors(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
+        ?: dataActionErrors(context, value)
         ?: pagerErrors(context)
         ?: stackErrors(context)
         ?: stateTypeErrors(value, context, repeats)
@@ -879,6 +881,54 @@ object PrototypeSpecValidator {
     return walkDataValue(value, "data", 1)
       ?: if (jsonCost(value) > MAX_PROTOTYPE_DATA_BYTES) fail("data", "Data byte limit exceeded")
       else null
+  }
+
+  /**
+   * The data a device write leaves behind must stay inside the data limits, with the write byte cap
+   * in place of the spec's own. A message containing "limit" is a limit refusal; any other is a
+   * value data cannot hold.
+   */
+  internal fun dataWriteError(value: JsonObject): PrototypeSpecError? =
+    walkDataValue(value, "data", 1)
+      ?: if (jsonCost(value) > MAX_PROTOTYPE_DATA_WRITE_BYTES)
+        fail("data", "Data byte limit exceeded")
+      else null
+
+  private val dataActionTypes = setOf("setData", "appendData", "removeData")
+
+  /**
+   * Static checks for `setData`, `appendData` and `removeData` (#12519) that the contract cannot
+   * express: the `/data/<pointer>` path, a literal value data can hold, and an `appendData` target
+   * the spec's own data already defines as something other than an array. A target under `{index}`
+   * or one only an earlier write creates is the device's to check.
+   */
+  private fun dataActionErrors(context: Context, root: JsonElement): PrototypeSpecError? {
+    val data = (root as? JsonObject)?.get("data") as? JsonObject
+    for ((value, path) in context.actions) {
+      val type = value.text("type")
+      if (type !in dataActionTypes) continue
+      val actionPath = value.text("path").orEmpty()
+      val pointer =
+        PrototypeDataWriter.pathPointer(PrototypeRepeatTemplate.bindDataPath(actionPath, 0))
+          ?: return fail(
+            "$path.path",
+            "Data action paths are /data/<RFC 6901 pointer> and address a member of data",
+          )
+      val literal = (value["value"] as? JsonObject)?.get("value")
+      if (literal != null && dataError(JsonObject(mapOf("value" to literal))) != null) {
+        return fail(
+          "$path.value.value",
+          "A data write value must be a string, boolean, finite number, array or object",
+        )
+      }
+      if (type == "appendData" && !PrototypeRepeatTemplate.dataPathHasIndex(actionPath)) {
+        val target = PrototypeDataPointer.resolve(data, pointer)
+        if (target != null && target !is JsonArray) {
+          return fail("$path.path", "appendData target is not an array")
+        }
+      }
+    }
+    return null
   }
 
   private fun dataChildren(value: JsonElement, path: String): List<Pair<JsonElement, String>> =

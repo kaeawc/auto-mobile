@@ -81,13 +81,10 @@ export class AndroidUserTargetResolver {
     }
 
     if (request.currentUser) {
-      const result = await this.adb.executeCommand(
-        "shell am get-current-user",
-        undefined,
-        undefined,
-        true,
-        request.signal,
-      );
+      const result = await this.adb.executeCommand("shell am get-current-user", {
+        noRetry: true,
+        signal: request.signal,
+      });
       const currentUserId = Number.parseInt(result.stdout.trim(), 10);
       if (Number.isSafeInteger(currentUserId) && currentUserId >= 0) {
         return { userId: currentUserId, source: "currentUser" };

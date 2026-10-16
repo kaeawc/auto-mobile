@@ -1,3 +1,4 @@
+import { TypingSession } from "../../../../src/features/action/sendkeys/TypingSession";
 import { android, createSendKeysHarness } from "../SendKeysTestHarness";
 import { clearAndroidImeQuarantine } from "../../../../src/features/action/androidImeLock";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -16,9 +17,10 @@ function harness() {
     safeToRestore: true,
     snapshot: { prior: "keyboard/.Ime", wasEnabled: true, priorSubtype: { id: 7 } },
   };
-  let userId: number | undefined = 10;
-  let password = false;
   const host: ImeCommitTyperHost = {
+    session: Object.assign(new TypingSession(), { imeUserId: 10 }),
+    executeAndroidImeCommit: (...args) => typer.executeAndroidImeCommit(...args),
+    clearImeFieldWithKeyEvents: (...args) => typer.clearImeFieldWithKeyEvents(...args),
     markPartialAfterMutation: (result) =>
       result.success ? result : { ...result, partialApplication: true },
     device: { deviceId: "ime-typer-unit" },
@@ -41,15 +43,6 @@ function harness() {
     },
     imeTraceContext: { getStore: () => undefined },
     eventOnlyTyper: { clearEventOnlyForReplace: async () => ({ success: true }) },
-    getImeUserId: () => userId,
-    setImeUserId: (value) => {
-      userId = value;
-    },
-    isCaretUnsafe: () => false,
-    isPasswordField: () => password,
-    setPasswordField: (value) => {
-      password = value;
-    },
     getTargetLayer: () => undefined,
     isSendKeysBudgetExhausted: () => false,
     executeAndroidType: async (options) => {
@@ -96,8 +89,9 @@ function harness() {
       calls.push({ acquire: active === span, signal });
     },
   };
+  const typer = new ImeCommitTyper(host, service, restoration);
   return {
-    typer: new ImeCommitTyper(host, service, restoration),
+    typer,
     host,
     service,
     restoration,
@@ -123,6 +117,79 @@ describe("ImeCommitTyper", () => {
     });
     expect(restored).toHaveLength(1);
     expect(restored[0]).toEqual(["com.example.keyboard/.Ime", false, { id: null }]);
+  });
+
+  test("executor commit dispatch observes patches in every IME route", async () => {
+    for (const mode of ["ime", "imeKeyEvents", "auto"] as const) {
+      const { executor } = createSendKeysHarness(android);
+      const calls: unknown[] = [];
+      Reflect.set(executor, "executeAndroidImeCommit", (...args: unknown[]) => {
+        calls.push(args);
+        return Promise.resolve({ success: true });
+      });
+      expect(await executor.type({ action: "type", text: "a", mode })).toMatchObject({
+        success: true,
+      });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toEqual([
+        "a",
+        "insert",
+        undefined,
+        {
+          signal: undefined,
+          display: undefined,
+          focusedInputVerified: mode === "auto",
+          focusedFieldClass: mode === "auto" ? "android.widget.EditText" : undefined,
+          passwordField: undefined,
+        },
+        ...(mode === "imeKeyEvents" ? ["imeKeyEvents"] : []),
+      ]);
+    }
+  });
+
+  test("executor IME snapshot and activation callbacks resolve patches lazily", async () => {
+    const { executor } = createSendKeysHarness(android);
+    const calls: string[] = [];
+    Reflect.set(executor, "pinImeUser", () => {
+      calls.push("pin");
+      return Promise.resolve({ success: true });
+    });
+    Reflect.set(executor, "readDefaultIme", () => {
+      calls.push("readDefault");
+      return Promise.resolve({ success: false, error: "patched default read" });
+    });
+    expect(await executor.type({ action: "type", text: "a", mode: "ime" })).toMatchObject({
+      success: false,
+      error: "patched default read",
+    });
+    expect(calls).toEqual(["pin", "readDefault"]);
+    const activated = createSendKeysHarness(android);
+    Reflect.set(activated.executor, "activateCommitIme", () => {
+      calls.push("activate");
+      return Promise.resolve(false);
+    });
+    Reflect.set(activated.executor, "restoreIme", () => {
+      calls.push("restore");
+      return Promise.resolve();
+    });
+    expect(await activated.executor.type({ action: "type", text: "a", mode: "ime" })).toMatchObject(
+      { success: false, error: "Failed to activate the IME for text commit." },
+    );
+    expect(calls).toEqual(["pin", "readDefault", "activate", "restore"]);
+  });
+
+  test("executor clear fallback resolves a patch installed after construction", async () => {
+    const { executor, client } = createSendKeysHarness(android);
+    client.supportsImeClearField = async () => false;
+    const calls: unknown[] = [];
+    Reflect.set(executor, "clearImeFieldWithKeyEvents", (...args: unknown[]) => {
+      calls.push(args);
+      return Promise.resolve({ success: false, error: "patched clear" });
+    });
+    expect(
+      await executor.type({ action: "type", text: "a", operation: "replace", mode: "ime" }),
+    ).toMatchObject({ success: false, error: "patched clear" });
+    expect(calls).toEqual([[undefined, undefined]]);
   });
 
   test("auto fallback recurses through the current host callback with routing intact", async () => {
@@ -200,7 +267,7 @@ describe("ImeCommitTyper", () => {
       return true;
     };
     const pending = typer.type({ text: "a", operation: "insert", mode: "imeKeyEvents" });
-    host.isCaretUnsafe = () => true;
+    host.session.androidCaretUnsafe = true;
     timer.enableAutoAdvance();
     expect(await pending).toMatchObject({
       success: false,
@@ -214,11 +281,11 @@ describe("ImeCommitTyper", () => {
     service.imeSpan = undefined;
     host.getTargetLayer = () => "prototype";
     host.restoreIme = async () => {
-      calls.push({ restoredUser: host.getImeUserId() });
+      calls.push({ restoredUser: host.session.imeUserId });
     };
     expect(await typer.type({ text: "a", operation: "insert" })).toMatchObject({ success: true });
     expect(calls).toContainEqual({ restoredUser: 10 });
-    expect(host.getImeUserId()).toBeUndefined();
+    expect(host.session.imeUserId).toBeUndefined();
   });
 
   test("does not restore or retry a session-unsafe commit and marks the span unsafe", async () => {

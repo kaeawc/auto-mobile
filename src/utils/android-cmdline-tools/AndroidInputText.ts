@@ -15,6 +15,9 @@ export const INPUT_TEXT_SETTLEMENT_MAX_MS = 30_000;
 /** API 31+ host wait: measured ~15-18 ms per char on an API 36 emulator (#12566). */
 export const INPUT_TEXT_HOST_WAIT_PER_CHAR_MS = 20;
 export const INPUT_TEXT_HOST_WAIT_MAX_MS = 60_000;
+/** App-side consumption of `input text` events (~14 ms/char on API 36), see #12599. */
+export const INPUT_TEXT_CONSUME_PER_CHAR_MS = 14;
+export const INPUT_TEXT_CONSUME_MARGIN_MS = 500;
 const INPUT_TEXT_POLL_MS = 75;
 const INPUT_TEXT_PROBE_MS = 500;
 const MAX_PID_LINE_LENGTH = 32;
@@ -97,7 +100,8 @@ export async function executeAndroidInputText(
  * Killing the host adb client closes the shell stream and kills `cmd`, yet typing continues
  * with nothing left to observe (#12566). So the host client is never given the request's abort
  * signal or timeout (nor the ambient request signal): cancel or timeout only stops waiting for
- * a result, then holds until the host exits on its own, which is when typing is complete.
+ * a result, then holds until the host exits on its own, then lets the app drain
+ * the handed-over events (host exit alone is not "typing done", #12599).
  */
 async function executeUntilHostExit(
   adb: AndroidInputTextExecutor,
@@ -125,13 +129,20 @@ async function executeUntilHostExit(
       },
     }),
   );
+  const dispatchedAt = timer.now();
   let hostExited = false;
-  const markExited = () => {
-    hostExited = true;
-  };
-  host.then(markExited, markExited);
+  let hostFailed = false;
+  host.then(
+    () => {
+      hostExited = true;
+    },
+    () => {
+      hostExited = true;
+      hostFailed = true;
+    },
+  );
   try {
-    return await raceWithDeadline(host, {
+    const result = await raceWithDeadline(host, {
       timer,
       timeoutMs,
       signal,
@@ -139,7 +150,16 @@ async function executeUntilHostExit(
       timeoutError: () =>
         new AdbCommandTimeoutError(`Android input text timed out after ${timeoutMs}ms`),
     });
+    // The host exits when the events are handed over, not when the app has consumed them:
+    // pace the call to the consumption rate (not faster, or the backlog grows per chunk) so the backlog a cancel can strand stays small.
+    const paceMs = INPUT_TEXT_CONSUME_PER_CHAR_MS * textLength - (timer.now() - dispatchedAt);
+    if (paceMs > 0) {
+      await pause(timer, paceMs, signal);
+    }
+    return result;
   } catch (error) {
+    // A host that failed by itself says nothing about typing in flight: no drain wait for it.
+    const failedOnItsOwn = hostFailed;
     if (!hostExited) {
       if (!typingStarted) {
         // Nothing reached system_server yet: killing the host cannot strand typing, and it
@@ -150,9 +170,32 @@ async function executeUntilHostExit(
       // Past the hold the caller moves on; do not let a stuck host type late.
       hostController.abort(error);
     }
+    if (typingStarted && !failedOnItsOwn) {
+      // Host exit is not "typing done" (#12599): let the app drain what was handed over.
+      await timer.sleep(INPUT_TEXT_CONSUME_PER_CHAR_MS * textLength + INPUT_TEXT_CONSUME_MARGIN_MS);
+    }
     // The caller's cancellation/timeout contract must survive the wait.
     throw error;
   }
+}
+
+/** A cancellable delay that stays out of `Timer.sleep` history, which tests use as a settle-poll count. */
+function pause(timer: Timer, ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const onAbort = () => {
+      timer.clearTimeout(handle);
+      reject(signal?.reason);
+    };
+    const handle = timer.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function hostWaitMs(textLength: number): number {

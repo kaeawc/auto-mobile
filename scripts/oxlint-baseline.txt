@@ -98,6 +98,6 @@
 3	src/utils/plan/PlanExecutor.ts	eslint(complexity)
 4	src/features/observe/shared/SharedGestureDelegate.ts	eslint(max-params)
 5	src/features/action/swipeon/TalkBackSwipeExecutor.ts	eslint(max-params)
-6	src/features/observe/ios/IOSCtrlProxyClient.ts	eslint(max-params)
+5	src/features/observe/ios/IOSCtrlProxyClient.ts	eslint(max-params)
 7	src/features/action/TapOnElement.ts	eslint(complexity)
-8	src/features/observe/android/AndroidCtrlProxyClient.ts	eslint(max-params)
+7	src/features/observe/android/AndroidCtrlProxyClient.ts	eslint(max-params)

@@ -46,13 +46,12 @@ function expectOnlyReads() {
   ).toBe(true);
 }
 
-test("detached managers leave the registry and static factory untouched", () => {
+test("detached managers leave the registry untouched", () => {
   const liveFactory = { create: () => adb };
   const live = AndroidCtrlProxyManager.getInstance(device, liveFactory);
   const detached = AndroidCtrlProxyManager.createDetached(device, new FakeAdbExecutor());
   expect(detached).not.toBe(live);
   expect(AndroidCtrlProxyManager.getExistingInstance(device.deviceId)).toBe(live);
-  expect(Reflect.get(AndroidCtrlProxyManager, "adbFactory")).toBe(liveFactory);
   const other = { ...device, deviceId: "other" };
   AndroidCtrlProxyManager.createDetached(other, liveFactory);
   expect(AndroidCtrlProxyManager.getExistingInstance("other")).toBeUndefined();

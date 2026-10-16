@@ -112,7 +112,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
       };
       internals.isTestMode = false;
       internals.getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
-      const result = client.executeCommand("shell input tap 1 2", explicitTimeoutMs);
+      const result = client.executeCommand("shell input tap 1 2", { timeoutMs: explicitTimeoutMs });
       await Promise.resolve();
       await Promise.resolve();
       expect(dispatches).toBe(1);
@@ -142,7 +142,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
     internals.isTestMode = false;
     internals.getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
 
-    const result = client.executeCommand("shell getprop", 5);
+    const result = client.executeCommand("shell getprop", { timeoutMs: 5 });
     await Promise.resolve();
     await Promise.resolve();
     expect(dispatches).toBe(1);

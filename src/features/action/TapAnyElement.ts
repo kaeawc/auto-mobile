@@ -631,13 +631,10 @@ export class TapAnyElement extends BaseVisualChange {
         // Once beforeSend lands, also pass this as the dispatch's beforeSend.
         fence.assertCurrent();
         const command = `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`;
-        const result = await this.adb.executeCommand(
-          command,
-          resolveTapAnyCtrlProxyTimeoutMs(durationMs),
-          undefined,
-          undefined,
+        const result = await this.adb.executeCommand(command, {
+          timeoutMs: resolveTapAnyCtrlProxyTimeoutMs(durationMs),
           signal,
-        );
+        });
         assertTouchscreenInputSucceeded(command, result);
         return;
       } catch (error) {
@@ -651,13 +648,10 @@ export class TapAnyElement extends BaseVisualChange {
       // Only a non-cancellation failure may use the legacy input source.
       fence.assertCurrent();
       const command = `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`;
-      const result = await this.adb.executeCommand(
-        command,
-        resolveTapAnyCtrlProxyTimeoutMs(durationMs),
-        undefined,
-        undefined,
+      const result = await this.adb.executeCommand(command, {
+        timeoutMs: resolveTapAnyCtrlProxyTimeoutMs(durationMs),
         signal,
-      );
+      });
       assertTouchscreenInputSucceeded(command, result);
       return;
     } catch (error) {

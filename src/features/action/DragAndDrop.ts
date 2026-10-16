@@ -316,7 +316,9 @@ export class DragAndDrop extends BaseVisualChange {
     // The Android accessibility service is only required for the Android gesture path.
     // iOS dispatches the drag through the XCUITest CtrlProxy runner (no a11y service).
     if (this.device.platform === "android") {
-      const a11yManager = AndroidCtrlProxyManager.getInstance(this.device, this.adb);
+      const a11yManager = AndroidCtrlProxyManager.getInstance(this.device, {
+        create: () => this.adb,
+      });
       const isAvailable = await perf.track("a11yAvailable", () => a11yManager.isAvailable());
       if (!isAvailable) {
         perf.end();

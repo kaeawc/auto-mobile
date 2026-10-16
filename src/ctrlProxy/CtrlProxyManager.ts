@@ -63,14 +63,12 @@ import type {
   ProxySetupResult,
 } from "../utils/interfaces/ProxyManager";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
-import {
-  type AndroidPrerequisiteDetector,
-  DefaultAndroidPrerequisiteDetector,
-} from "../utils/android-cmdline-tools/AndroidPrerequisiteDetector";
+import { DefaultAndroidPrerequisiteDetector } from "../utils/android-cmdline-tools/AndroidPrerequisiteDetector";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT, CTRL_PROXY_PACKAGE } from "./constants";
 import {
   DefaultCtrlProxyApkPrefetcher,
   type CtrlProxyApkPrefetcher,
+  type CtrlProxyApkPrefetcherDeps,
 } from "./CtrlProxyApkPrefetcher";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
@@ -295,9 +293,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private static foreignForwardEvidenceOverride: ForeignCtrlProxyForwardEvidence | null = null;
   private readonly foreignForwardGuardContext = new AsyncLocalStorage<boolean>();
 
-  // Static factory for creating ADB clients
-  private static adbFactory: AdbClientFactory = defaultAdbClientFactory;
-
   private timer: Timer;
   private savedPrototypeMirror: SavedPrototypeMirror = defaultSavedPrototypeMirror();
   private savedPrototypeRestorer: typeof restoreSavedPrototypes = restoreSavedPrototypes;
@@ -316,35 +311,38 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private static readonly defaultChecksumCalculator: ChecksumCalculator =
     new DefaultChecksumCalculator();
 
-  // Gate that decides whether the startup APK prefetch should run at all (#4404).
-  private static androidPrerequisiteDetector: AndroidPrerequisiteDetector =
-    new DefaultAndroidPrerequisiteDetector();
-  // Test seam for the static prefetch's downloader; null uses defaultFileDownloader.
-  private static prefetchFileDownloaderOverride: FileDownloader | null = null;
-  private static prefetchCacheDirOverride: string | null = null;
-  // Seam for tests that stage a completed prefetch without a download.
-  private static get prefetchedApkPath(): string | null {
-    return AndroidCtrlProxyManager.prefetcher.completedPath();
+  // Process-wide prefetch state lives in the prefetcher. Production uses the default one;
+  // tests (or a daemon that owns its lifecycle) swap in their own with `useApkPrefetcher`.
+  private static prefetcher: CtrlProxyApkPrefetcher = AndroidCtrlProxyManager.createApkPrefetcher();
+
+  /**
+   * Build a prefetcher wired to the real release resolvers. Pass `overrides` to inject a
+   * downloader, cache directory, prerequisite detector or checksum source (fakes in tests).
+   */
+  public static createApkPrefetcher(
+    overrides: Partial<CtrlProxyApkPrefetcherDeps> = {},
+  ): CtrlProxyApkPrefetcher {
+    const prerequisiteDetector = new DefaultAndroidPrerequisiteDetector();
+    return new DefaultCtrlProxyApkPrefetcher({
+      downloader: () => AndroidCtrlProxyManager.defaultFileDownloader,
+      checksumCalculator: () => AndroidCtrlProxyManager.defaultChecksumCalculator,
+      prerequisiteDetector: () => prerequisiteDetector,
+      cacheDirOverride: () => null,
+      expectedChecksumOverride: () => AndroidCtrlProxyManager.expectedChecksumOverride,
+      isPinnedVersionUnverifiable: () => AndroidCtrlProxyManager.isPinnedVersionUnverifiable(),
+      describePinnedVersion: () => resolvePinnedVersion(),
+      resolveApkUrl: () => resolveApkUrl(),
+      resolveApkChecksum: () => resolveApkChecksum(),
+      localApkPathOverride: () => process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH,
+      ...overrides,
+    });
   }
-  private static set prefetchedApkPath(apkPath: string | null) {
-    AndroidCtrlProxyManager.prefetcher.adoptCompletedPath(apkPath);
+
+  /** Use `prefetcher` for every manager in this process; null restores a default one. */
+  public static useApkPrefetcher(prefetcher: CtrlProxyApkPrefetcher | null): void {
+    AndroidCtrlProxyManager.prefetcher =
+      prefetcher ?? AndroidCtrlProxyManager.createApkPrefetcher();
   }
-  // Process-wide prefetch state lives in the prefetcher; its collaborators resolve lazily so the
-  // ForTesting setters above keep taking effect.
-  private static readonly prefetcher: CtrlProxyApkPrefetcher = new DefaultCtrlProxyApkPrefetcher({
-    downloader: () =>
-      AndroidCtrlProxyManager.prefetchFileDownloaderOverride ??
-      AndroidCtrlProxyManager.defaultFileDownloader,
-    checksumCalculator: () => AndroidCtrlProxyManager.defaultChecksumCalculator,
-    prerequisiteDetector: () => AndroidCtrlProxyManager.androidPrerequisiteDetector,
-    cacheDirOverride: () => AndroidCtrlProxyManager.prefetchCacheDirOverride,
-    expectedChecksumOverride: () => AndroidCtrlProxyManager.expectedChecksumOverride,
-    isPinnedVersionUnverifiable: () => AndroidCtrlProxyManager.isPinnedVersionUnverifiable(),
-    describePinnedVersion: () => resolvePinnedVersion(),
-    resolveApkUrl: () => resolveApkUrl(),
-    resolveApkChecksum: () => resolveApkChecksum(),
-    localApkPathOverride: () => process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH,
-  });
 
   private constructor(
     device: BootedDevice,
@@ -353,11 +351,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     fileDownloader: FileDownloader = AndroidCtrlProxyManager.defaultFileDownloader,
     checksumCalculator: ChecksumCalculator = AndroidCtrlProxyManager.defaultChecksumCalculator,
   ) {
-    // home should either be process.env.HOME or bash resolution of home for current user
-    const homeDir = process.env.HOME || require("os").homedir();
-    if (!homeDir) {
-      throw new Error("Home directory for current user not found");
-    }
     this.device = device;
     this.adb = adb;
     this.timer = timer;
@@ -367,31 +360,14 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
   public static getInstance(
     device: BootedDevice,
-    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
   ): AndroidCtrlProxyManager {
     requireBootedDevice(device, "AndroidCtrlProxyManager.getInstance");
-    return getOrCreateDeviceInstance(AndroidCtrlProxyManager.instances, device.deviceId, () => {
-      let adb: AdbExecutor;
-      let factory: AdbClientFactory;
-      // Detect if the argument is a factory (has create method) or an executor
-      if (
-        adbFactoryOrExecutor &&
-        typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
-      ) {
-        factory = adbFactoryOrExecutor as AdbClientFactory;
-        adb = factory.create(device);
-      } else if (adbFactoryOrExecutor) {
-        // Legacy path: wrap the executor in a factory for downstream dependencies
-        const executor = adbFactoryOrExecutor as AdbExecutor;
-        adb = executor;
-        factory = { create: () => executor };
-      } else {
-        factory = defaultAdbClientFactory;
-        adb = factory.create(device);
-      }
-      AndroidCtrlProxyManager.adbFactory = factory;
-      return new AndroidCtrlProxyManager(device, adb);
-    });
+    return getOrCreateDeviceInstance(
+      AndroidCtrlProxyManager.instances,
+      device.deviceId,
+      () => new AndroidCtrlProxyManager(device, adbFactory.create(device)),
+    );
   }
 
   /** Fresh diagnostic reads without registering or replacing live session dependencies. */
@@ -550,10 +526,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     return AndroidCtrlProxyManager.prefetcher.cleanup();
   }
 
-  public static setPrefetchCacheDirForTesting(cacheDir: string | null): void {
-    AndroidCtrlProxyManager.prefetchCacheDirOverride = cacheDir;
-  }
-
   /** Best-effort startup sweep for orphaned `auto-mobile-prefetch-*` scratch directories (#4334). */
   public static sweepStalePrefetchDirsOnStartup(tempRoot?: string, timer?: Timer): Promise<void> {
     return AndroidCtrlProxyManager.prefetcher.sweepStaleDirs(tempRoot, timer);
@@ -565,19 +537,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
   public static setAccessibilityDetectorForTesting(detector: AccessibilityDetector | null): void {
     AndroidCtrlProxyManager.accessibilityDetectorOverride = detector;
-  }
-
-  /** Override the Android-prerequisite gate for the prefetch (#4404). Null restores the default detector. */
-  public static setAndroidPrerequisiteDetectorForTesting(
-    detector: AndroidPrerequisiteDetector | null,
-  ): void {
-    AndroidCtrlProxyManager.androidPrerequisiteDetector =
-      detector ?? new DefaultAndroidPrerequisiteDetector();
-  }
-
-  /** Override the downloader used by the static prefetch (#4404). Null restores the default. */
-  public static setPrefetchFileDownloaderForTesting(downloader: FileDownloader | null): void {
-    AndroidCtrlProxyManager.prefetchFileDownloaderOverride = downloader;
   }
 
   private getAccessibilityDetector(): AccessibilityDetector {

@@ -12,6 +12,7 @@ import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { logger } from "../../utils/logger";
+import { resolveActionCall, type ActionCall } from "./ActionCall";
 
 // Two reads preserve the existing recent-app verification bound.
 export const RECENT_APPS_VERIFY_ATTEMPTS = 2;
@@ -40,7 +41,14 @@ export class RecentApps extends BaseVisualChange {
    * @param progress - Optional progress callback
    * @returns Result of the recent apps operation
    */
-  async execute(progress?: ProgressCallback, signal?: AbortSignal): Promise<RecentAppsResult> {
+  async execute(call?: ActionCall): Promise<RecentAppsResult>;
+  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
+  async execute(progress?: ProgressCallback, signal?: AbortSignal): Promise<RecentAppsResult>;
+  async execute(
+    progressOrCall?: ProgressCallback | ActionCall,
+    signalArg?: AbortSignal,
+  ): Promise<RecentAppsResult> {
+    const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
     throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("recentApps");

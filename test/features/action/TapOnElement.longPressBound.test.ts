@@ -6,6 +6,7 @@ import { ActionableError } from "../../../src/models/ActionableError";
 import type { Element, ViewHierarchyResult } from "../../../src/models";
 import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
@@ -140,7 +141,7 @@ describe("tapOn long press safety", () => {
         if (path === "fallback" && args[0].includes("touchscreen")) {
           throw new Error("touchscreen source unavailable");
         }
-        expect(args[4]).toBe(controller.signal);
+        expect(executeCommandOptionsOf(args).signal).toBe(controller.signal);
         controller.abort();
         throw new DOMException("Operation aborted", "AbortError");
       });

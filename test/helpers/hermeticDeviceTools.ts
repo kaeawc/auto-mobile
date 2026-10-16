@@ -27,15 +27,13 @@ export function installFakeCtrlProxyManagers(): () => void {
   const previousInstances = new Map<string, AndroidCtrlProxyManager>(
     Reflect.get(AndroidCtrlProxyManager, "instances"),
   );
-  const previousFactory = Reflect.get(AndroidCtrlProxyManager, "adbFactory");
   const factory = new FakeAdbClientFactory(new FakeAdbExecutor());
   const getInstance = AndroidCtrlProxyManager.getInstance.bind(AndroidCtrlProxyManager);
   const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
-    (device, adbFactoryOrExecutor) => getInstance(device, adbFactoryOrExecutor ?? factory),
+    (device, adbFactory) => getInstance(device, adbFactory ?? factory),
   );
   return () => {
     managerSpy.mockRestore();
     Reflect.set(AndroidCtrlProxyManager, "instances", previousInstances);
-    Reflect.set(AndroidCtrlProxyManager, "adbFactory", previousFactory);
   };
 }

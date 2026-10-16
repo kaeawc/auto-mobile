@@ -1,6 +1,10 @@
 import { android, createSendKeysHarness } from "../SendKeysTestHarness";
 import { describe, expect, test } from "bun:test";
 import { EventAllTyper } from "../../../../src/features/action/sendkeys/EventAllTyper";
+import {
+  ANDROID_INPUT_TEXT_CHUNK_CHARS,
+  type KeyEventPlan,
+} from "../../../../src/utils/android-cmdline-tools/asciiKeyEvents";
 import { eventHost } from "./EventTyperTestHarness";
 
 describe("EventAllTyper", () => {
@@ -61,9 +65,35 @@ describe("EventAllTyper", () => {
     ]);
   });
 
+  test("splits a long ASCII run into bounded input text commands so cancel stops between chunks", async () => {
+    const { host, calls } = eventHost();
+    const text = "abcdefghij".repeat(7);
+    expect(
+      await new EventAllTyper(host).type({
+        text,
+        operation: "insert",
+        focusedInputVerified: true,
+      }),
+    ).toEqual({ success: true });
+    const plan = calls.find(
+      (call): call is { plan: KeyEventPlan } =>
+        typeof call === "object" && call !== null && "plan" in call,
+    )?.plan;
+    expect(plan?.commands.map((command) => command.length)).toEqual([
+      ...[ANDROID_INPUT_TEXT_CHUNK_CHARS, ANDROID_INPUT_TEXT_CHUNK_CHARS].map(
+        () => "shell input text ''".length + ANDROID_INPUT_TEXT_CHUNK_CHARS,
+      ),
+      "shell input text ''".length + (text.length - 2 * ANDROID_INPUT_TEXT_CHUNK_CHARS),
+    ]);
+    expect(plan?.textLength).toBe(ANDROID_INPUT_TEXT_CHUNK_CHARS);
+    expect(
+      plan?.commands.map((command) => command.slice("shell input text '".length, -1)).join(""),
+    ).toBe(text);
+  });
+
   test("keeps password key events separate and redacts delivery failures", async () => {
     const { host, calls } = eventHost();
-    host.setPasswordField(true);
+    host.session.typingPasswordField = true;
     const typer = new EventAllTyper(host);
     expect(
       await typer.type({ text: "ab", operation: "insert", focusedInputVerified: true }),

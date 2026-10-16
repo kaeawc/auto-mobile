@@ -558,6 +558,9 @@ to settled, and all three stayed on their characterized implementations; illegal
 throw under test and warn+count in production, with the reported §4 design gaps warning and
 counting in both modes. Ended guard bookkeeping is discarded with weak-identity finalization.
 
+S9 landed: slot code reads no row-facet field; `SessionSlots.rowPending(uuid)` is the only row signal, stubbed false until W2 (#11799).
+S8 landed (#12581): `findSession` is the pure lookup; `expireIfDue` keeps lazy expiry at the retained admission/routing sites; the in-class readers listed in test/lint/findSessionNoRelease.test.ts are the retained set; external callers of getSession migrate directory by directory.
+
 S1 and S2 can run in parallel with W1. S3-S6 are independent of each other but touch the same file,
 so they merge serially. S8 can ship any time after S2 and is tracked separately.
 

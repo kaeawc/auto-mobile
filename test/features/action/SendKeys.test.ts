@@ -2466,6 +2466,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     ] as const) {
       const adb = new FakeAdbExecutor();
       const timer = new FakeTimer();
+      timer.enableAutoAdvance();
       const device = { ...androidDevice, deviceId: `old-apk-no-cancel-${operation}` };
       const client = AndroidCtrlProxyClient.createForTesting(
         device,

@@ -3,6 +3,11 @@ export interface FinalizationRegistryLike<T> {
   register(target: object, held: T): void;
 }
 
+/** The only row signal exposed to slots; the row writer owns its implementation. */
+export interface RowPendingSignal {
+  pending(uuid: string): boolean;
+}
+
 /** Lifecycle facets retain the legacy maps' identity and insertion order. */
 export class SessionSlots<
   A,
@@ -64,6 +69,7 @@ export class SessionSlots<
   private readonly adoptedDeadDaemonJournals = new Set<string>();
   /** An adopted intent applies only while its row still belongs to this dead daemon. */
   private readonly adoptedTerminalReleaseOwners = new Map<string, string>();
+  private readonly rowPendingSignal: RowPendingSignal;
 
   private readonly tagWaiters = new Map<
     string,
@@ -103,12 +109,14 @@ export class SessionSlots<
 
   constructor(
     options: {
+      rowPending?: RowPendingSignal;
       onFinalizedIdentityCollected?: (id: string) => void;
       createFinalizationRegistry?: (
         cleanup: (held: { sessionId: string; identity: WeakRef<S> }) => void,
       ) => FinalizationRegistryLike<{ sessionId: string; identity: WeakRef<S> }>;
     } = {},
   ) {
+    this.rowPendingSignal = options.rowPending ?? { pending: () => false };
     const cleanup = ({ sessionId, identity }: { sessionId: string; identity: WeakRef<S> }) => {
       if (this.latestFinalizedSessionIdentities.get(sessionId) === identity) {
         this.latestFinalizedSessionIdentities.delete(sessionId);
@@ -119,6 +127,10 @@ export class SessionSlots<
     this.finalizedSessionIdentityRegistry = options.createFinalizationRegistry
       ? options.createFinalizationRegistry(cleanup)
       : new FinalizationRegistry(cleanup);
+  }
+
+  rowPending(uuid: string): boolean {
+    return this.rowPendingSignal.pending(uuid);
   }
 
   recordFinalizedIdentity(session: S & { sessionId: string }): void {

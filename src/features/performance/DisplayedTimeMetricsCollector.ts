@@ -86,7 +86,7 @@ export class DisplayedTimeMetricsCollector {
     logger.info(`[DisplayedTimeMetrics] Logcat command: ${cmd}`);
     try {
       const { stdout } = await perf.track("adbLogcatDisplayed", () =>
-        this.adb.executeCommand(cmd, 5000, 1024 * 1024),
+        this.adb.executeCommand(cmd, { timeoutMs: 5000, maxBuffer: 1024 * 1024 }),
       );
       logger.info(`[DisplayedTimeMetrics] Logcat output length: ${stdout.length} chars`);
       const metrics = this.parseDisplayedMetrics(stdout, options);

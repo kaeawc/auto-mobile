@@ -23,18 +23,24 @@ describe("AndroidCtrlProxyManager prefetch prerequisite gate", function () {
     originalApkPathEnv = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     // The local-APK override short-circuits prefetch entirely; keep it unset.
     delete process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
-    await AndroidCtrlProxyManager.cleanupPrefetchedApk();
     prefetchCacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "ctrlproxy-prefetch-gate-"));
-    AndroidCtrlProxyManager.setPrefetchCacheDirForTesting(prefetchCacheDir);
     fakeDownloader = new FakeFileDownloader();
-    AndroidCtrlProxyManager.setPrefetchFileDownloaderForTesting(fakeDownloader);
   });
 
+  /** Install a prefetcher whose downloader, cache dir and gate are all fakes. */
+  const useGate = (hasPrerequisites: boolean): void => {
+    AndroidCtrlProxyManager.useApkPrefetcher(
+      AndroidCtrlProxyManager.createApkPrefetcher({
+        downloader: () => fakeDownloader,
+        cacheDirOverride: () => prefetchCacheDir,
+        prerequisiteDetector: () => detectorReturning(hasPrerequisites),
+      }),
+    );
+  };
+
   afterEach(async function () {
-    AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting(null);
-    AndroidCtrlProxyManager.setPrefetchFileDownloaderForTesting(null);
     await AndroidCtrlProxyManager.cleanupPrefetchedApk();
-    AndroidCtrlProxyManager.setPrefetchCacheDirForTesting(null);
+    AndroidCtrlProxyManager.useApkPrefetcher(null);
     await fs.rm(prefetchCacheDir, { recursive: true, force: true });
     if (originalApkPathEnv === undefined) {
       delete process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
@@ -44,7 +50,7 @@ describe("AndroidCtrlProxyManager prefetch prerequisite gate", function () {
   });
 
   test("does not download the APK when Android prerequisites are absent", async function () {
-    AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting(detectorReturning(false));
+    useGate(false);
 
     AndroidCtrlProxyManager.prefetchApk();
     // Draining the prefetch promise must resolve null without throwing, so the
@@ -56,7 +62,7 @@ describe("AndroidCtrlProxyManager prefetch prerequisite gate", function () {
   });
 
   test("attempts the APK download when Android prerequisites are present", async function () {
-    AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting(detectorReturning(true));
+    useGate(true);
 
     AndroidCtrlProxyManager.prefetchApk();
     await AndroidCtrlProxyManager.getPrefetchedApkPath();

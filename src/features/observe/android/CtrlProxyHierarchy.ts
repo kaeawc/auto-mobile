@@ -697,7 +697,9 @@ export class CtrlProxyHierarchy {
       throwIfAborted(signal);
       // Check if service is available
       const available = await perf.track("checkAvailable", () =>
-        AndroidCtrlProxyManager.getInstance(this.context.device, this.context.adb).isAvailable(),
+        AndroidCtrlProxyManager.getInstance(this.context.device, {
+          create: () => this.context.adb,
+        }).isAvailable(),
       );
       if (!available) {
         logger.debug("[CTRL_PROXY] Service not available, will use fallback");

@@ -455,7 +455,7 @@ test("freshness capture failure reaches hierarchy collection and reports viewHie
   const lost: string[] = [];
   AndroidCtrlProxyManager.resetInstances();
   const adb = new FakeAdbExecutor();
-  const availability = AndroidCtrlProxyManager.getInstance(device, adb);
+  const availability = AndroidCtrlProxyManager.getInstance(device, { create: () => adb });
   Reflect.set(availability, "cachedAvailability", { isAvailable: true, timestamp: timer.now() });
   const screen = new RealObserveScreen(
     device,

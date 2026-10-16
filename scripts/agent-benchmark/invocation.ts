@@ -157,11 +157,17 @@ const RUN_SHAPING_CLAUDE_PREFIXES = [
  * so the family is scrubbed by name rather than one variable at a time.
  */
 const RUN_SHAPING_TIMEOUT = /^(?:CLAUDE_|API_|MCP_|BASH_)\w*TIMEOUT(?:_MS|_SECONDS)?$/;
+/**
+ * API beta controls (ANTHROPIC_BETAS, CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS, ...): they add or
+ * remove beta request headers and tool-schema fields.
+ */
+const RUN_SHAPING_BETAS = /^(?:ANTHROPIC|CLAUDE_CODE)_\w*BETAS$/;
 
 export function isRunShapingClaudeVariable(key: string): boolean {
   return (
     RUN_SHAPING_CLAUDE_VARIABLES.has(key) ||
     RUN_SHAPING_TIMEOUT.test(key) ||
+    RUN_SHAPING_BETAS.test(key) ||
     RUN_SHAPING_CLAUDE_PREFIXES.some((prefix) => key.startsWith(prefix))
   );
 }

@@ -208,6 +208,8 @@ describe("agent benchmark provider identity", () => {
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_ATTRIBUTION_HEADER")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_AUTO_BACKGROUND_TASKS")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_EXTRA_BODY")).toBe(true);
+    expect(isRunShapingClaudeVariable("ANTHROPIC_BETAS")).toBe(true);
+    expect(isRunShapingClaudeVariable("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS")).toBe(true);
     // Every provider endpoint override and the adb endpoint are part of the identity.
     expect(
       providerIdentity({

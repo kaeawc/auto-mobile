@@ -257,9 +257,10 @@ function handleResult(event: JsonRecord, state: AuditState): void {
     // The final answer is the run's text; any other shape would read as an empty answer.
     state.audit.parseErrors.push("result event has a non-string result");
   }
-  if (event.is_error !== undefined && typeof event.is_error !== "boolean") {
-    // A non-boolean terminal flag ("true") cannot be read as success either.
-    state.audit.parseErrors.push("result event has a non-boolean is_error");
+  if (typeof event.is_error !== "boolean") {
+    // The flag is required on every terminal result; a missing or non-boolean one ("true")
+    // cannot be read as success.
+    state.audit.parseErrors.push("result event has a missing or non-boolean is_error");
   }
   // Terminal metrics land in baseline.yml, so they must fit the baseline schema's domains.
   const turns = event.num_turns;
@@ -297,6 +298,12 @@ function handleResult(event: JsonRecord, state: AuditState): void {
 }
 
 function handleEvent(event: JsonRecord, line: number, state: AuditState): void {
+  if (typeof event.type !== "string" || event.type.trim() === "") {
+    // Unknown event kinds are skipped for forward compatibility, but an event with no kind
+    // could be hiding tool calls.
+    state.audit.parseErrors.push(`line ${line}: event without a type`);
+    return;
+  }
   const activity = event.type === "assistant" || event.type === "user" || event.type === "result";
   if (activity && state.audit.mcpServerStatus === undefined) {
     // Activity before system/init would set the model and calls before the run's real

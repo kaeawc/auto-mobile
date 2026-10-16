@@ -3,7 +3,7 @@ import path from "path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { isIncompleteExtractionError } from "../../src/db/migrationDependencyIntegrity";
-import { bindFileBackedDbHarness } from "./withFileBackedDb";
+import { bindFileBackedDbHarness, WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./withFileBackedDb";
 
 /**
  * Issue #2833: the incomplete-extraction mapping is scoped to KNOWN migration
@@ -22,56 +22,60 @@ describe("startup migration failure does not mislabel a genuine bad import", () 
   // bounded `removeTempDbDir`, and full-env snapshot/restore (issue #3046).
   const getHarness = bindFileBackedDbHarness();
 
-  test("an unknown missing package surfaces the generic error, not incomplete-extraction", async () => {
-    const tempDir = await getHarness().makeTempDbDir("am-bad-import-");
-    const migrationsDir = path.join(tempDir, "migrations");
-    await mkdir(migrationsDir, { recursive: true });
+  test(
+    "an unknown missing package surfaces the generic error, not incomplete-extraction",
+    async () => {
+      const tempDir = await getHarness().makeTempDbDir("am-bad-import-");
+      const migrationsDir = path.join(tempDir, "migrations");
+      await mkdir(migrationsDir, { recursive: true });
 
-    // A migration whose runtime value import cannot be resolved and is NOT a
-    // declared migration dependency (i.e. a typo / genuine code bug).
-    await writeFile(
-      path.join(migrationsDir, "2099_01_01_000_am2833_bad_import.ts"),
-      "import 'nonexistent-package-am2833';\n" +
-        "export async function up(): Promise<void> {}\n" +
-        "export async function down(): Promise<void> {}\n",
-    );
+      // A migration whose runtime value import cannot be resolved and is NOT a
+      // declared migration dependency (i.e. a typo / genuine code bug).
+      await writeFile(
+        path.join(migrationsDir, "2099_01_01_000_am2833_bad_import.ts"),
+        "import 'nonexistent-package-am2833';\n" +
+          "export async function up(): Promise<void> {}\n" +
+          "export async function down(): Promise<void> {}\n",
+      );
 
-    process.env.AUTOMOBILE_DB_PATH = path.join(tempDir, "auto-mobile.db");
-    process.env.AUTOMOBILE_MIGRATIONS_DIR = migrationsDir;
+      process.env.AUTOMOBILE_DB_PATH = path.join(tempDir, "auto-mobile.db");
+      process.env.AUTOMOBILE_MIGRATIONS_DIR = migrationsDir;
 
-    const unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown): void => {
-      unhandled.push(reason);
-    };
-    process.on("unhandledRejection", onUnhandled);
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown): void => {
+        unhandled.push(reason);
+      };
+      process.on("unhandledRejection", onUnhandled);
 
-    let db:
-      | Awaited<ReturnType<ReturnType<typeof getHarness>["importFreshDatabaseModule"]>>
-      | undefined;
-    try {
-      db = await getHarness().importFreshDatabaseModule();
-
-      let thrown: unknown;
+      let db:
+        | Awaited<ReturnType<ReturnType<typeof getHarness>["importFreshDatabaseModule"]>>
+        | undefined;
       try {
-        await db.ensureMigrations();
-      } catch (error) {
-        thrown = error;
+        db = await getHarness().importFreshDatabaseModule();
+
+        let thrown: unknown;
+        try {
+          await db.ensureMigrations();
+        } catch (error) {
+          thrown = error;
+        }
+
+        expect(thrown).toBeInstanceOf(Error);
+        // Generic startup-migration failure, NOT the recoverable extraction remedy.
+        expect((thrown as Error).message).toMatch(/refusing to run queries/i);
+        expect(isIncompleteExtractionError(thrown)).toBe(false);
+        expect((thrown as Error).message).not.toMatch(/incomplete package extraction/i);
+
+        // Still sticky and generic on re-check.
+        expect(isIncompleteExtractionError(db.getMigrationsError())).toBe(false);
+
+        await defaultTimer.sleep(10);
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+        await db?.closeDatabase();
       }
-
-      expect(thrown).toBeInstanceOf(Error);
-      // Generic startup-migration failure, NOT the recoverable extraction remedy.
-      expect((thrown as Error).message).toMatch(/refusing to run queries/i);
-      expect(isIncompleteExtractionError(thrown)).toBe(false);
-      expect((thrown as Error).message).not.toMatch(/incomplete package extraction/i);
-
-      // Still sticky and generic on re-check.
-      expect(isIncompleteExtractionError(db.getMigrationsError())).toBe(false);
-
-      await defaultTimer.sleep(10);
-      expect(unhandled).toEqual([]);
-    } finally {
-      process.off("unhandledRejection", onUnhandled);
-      await db?.closeDatabase();
-    }
-  });
+    },
+    WINDOWS_FILE_DB_TEST_TIMEOUT_MS,
+  );
 });

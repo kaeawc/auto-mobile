@@ -13,7 +13,7 @@ import {
   type InputTapParams,
   type InputTypeTextParams,
 } from "./inputRouteParams";
-import { IDE_DEVICE_MUTATION_METHODS, STARTUP_PROBE_METHODS } from "./ideRoutes";
+import { IDE_DEVICE_MUTATION_METHODS, IDE_ROUTE_PARSERS, STARTUP_PROBE_METHODS } from "./ideRoutes";
 import {
   DISPATCH_HELD_INPUT_METHODS,
   GESTURE_FRAME_METHODS,
@@ -44,18 +44,13 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import {
   StreamableHTTPClientTransport,
   StreamableHTTPError,
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { dropToolCallRecording } from "../server/toolCallRecordingManager";
-import {
-  isSessionNotActiveWireError,
-  isToolUnavailableWireError,
-  unknownToolWireName,
-} from "../server/toolUnavailableError";
+import {} from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
 import type { RefusedOwnedSessionRestore } from "./devicePool";
 import { GestureOwnershipRegistry } from "./gestureOwnership";
@@ -63,15 +58,10 @@ import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpReq
 import { McpOverloadError, McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
-import { typedRefusalFields } from "../models/typedRefusalFields";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isDebugModeEnabled } from "../utils/debug";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
-  DAEMON_SESSION_SUSPECT_CODE,
-  DAEMON_TOOL_UNAVAILABLE_CODE,
-  DAEMON_SESSION_NOT_ACTIVE_CODE,
-  DAEMON_UNKNOWN_TOOL_CODE,
   BOUND_SESSION_LOSS_CODE,
   DaemonNotification,
   DaemonRequest,
@@ -283,14 +273,29 @@ import {
   processGenerationRecordFields,
   recordedProcessGenerationToken,
 } from "./processGenerationFields";
+import {
+  isSessionRefusal,
+  mcpRequestFailureDetails,
+  requestFailureCause,
+} from "./socketServer/errorFrames";
+import {
+  clearPooledIdleTimer,
+  closePooledClient,
+  discardTimedOutReconnect,
+  getPooledClient,
+  resetPooledClient,
+  resetPooledClientIfCurrent,
+  runWithActivePooledClient,
+  schedulePooledIdleClose,
+  type LoopbackClientPool,
+  type McpClientFactory,
+} from "./socketServer/loopbackMcpClientPool";
+import { runKeyedSerial, type McpForwardChainWait } from "./socketServer/keyedSerialQueue";
 import { CONTROL_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
 import {
-  SESSION_OWNERSHIP_LOST_CODE,
   SessionReleasedDuringCallError,
   sessionReleaseThatCancelledCall,
 } from "./sessionReleasedDuringCall";
-import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
-import { recoveryIdentityLoss, recoveryIdentityLossDetails } from "../server/deviceSessionResult";
 import {
   createDeviceSessionErrorResolver,
   DeviceSessionSupersededByRestoreError,
@@ -306,6 +311,8 @@ import {
   type DeviceControlTransportFailure,
   type DeviceControlTransportPhase,
 } from "./deviceControlTransportFailure";
+
+export { mcpRequestFailureDetails };
 
 export const MCP_FORWARD_START_HEADROOM_MS = 100;
 /**
@@ -334,24 +341,6 @@ function isDaemonSocketRequest(parsed: unknown): parsed is DaemonRequest {
     typeof request.method === "string" &&
     (request.type === "mcp_request" || request.type === "daemon_request")
   );
-}
-
-function requestFailureCause(
-  error: unknown,
-  requestSignal?: AbortSignal,
-): DaemonRequestFailureCause | undefined {
-  const cause = requestSignal?.aborted
-    ? requestSignal.reason
-    : error instanceof McpTimeoutError
-      ? error
-      : undefined;
-  if (cause === undefined) {
-    return undefined;
-  }
-  return {
-    name: cause instanceof Error ? cause.name : "Error",
-    message: errorMessage(cause),
-  };
 }
 
 class ClientRequestCancellation extends ActionableError {}
@@ -384,159 +373,6 @@ function logRequestFailureCause(cause: DaemonRequestFailureCause | undefined): v
   }
 }
 
-const JSONRPC_INVALID_PARAMS = -32602;
-
-type RefusalFrameFields = Pick<
-  DaemonResponse,
-  "code" | "retryable" | "retryAfterMs" | "nextAction" | "details"
->;
-
-/**
- * The payload a refusal builds for the MCP result (`toPayload()`), when it is a typed one. Read
- * structurally so a new self-describing refusal reaches the socket without a branch here.
- */
-function selfDescribedRefusalPayload(error: unknown): Record<string, unknown> | undefined {
-  if (!(error instanceof Error) || !("toPayload" in error)) {
-    return undefined;
-  }
-  const { toPayload } = error;
-  if (typeof toPayload !== "function") {
-    return undefined;
-  }
-  const payload: unknown = toPayload.call(error);
-  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
-    return undefined;
-  }
-  const fields: Record<string, unknown> = Object.fromEntries(Object.entries(payload));
-  return typeof fields.code === "string" && typeof fields.retryable === "boolean"
-    ? fields
-    : undefined;
-}
-
-/**
- * The frame fields of a control call refused at session admission (#11417): a suspect session is
- * the retryable `daemon_session_suspect`, a terminal one `session_ownership_lost` with
- * `acquire_new_session`, as in the MCP result for the same refusal. Matched on the error's name
- * and fields so the wire layer does not import the daemon's session manager.
- */
-function sessionAdmissionRefusalFields(error: unknown): RefusalFrameFields | undefined {
-  if (!(error instanceof Error)) {
-    return undefined;
-  }
-  const field = (key: string): unknown => Reflect.get(error, key);
-  const sessionUuid = field("sessionUuid");
-  if (typeof sessionUuid !== "string") {
-    return undefined;
-  }
-  const remainingMs = field("remainingMs");
-  if (error.name === "SessionSuspectError" && typeof remainingMs === "number") {
-    return {
-      code: DAEMON_SESSION_SUSPECT_CODE,
-      retryable: true,
-      details: { sessionUuid, remainingMs },
-    };
-  }
-  const release = field("release");
-  if (error.name !== "TerminalSessionError" || release === null || typeof release !== "object") {
-    return undefined;
-  }
-  const reason: unknown = Reflect.get(release, "releaseReason");
-  const ownerPid: unknown = Reflect.get(release, "ownerPid");
-  return {
-    code: SESSION_OWNERSHIP_LOST_CODE,
-    retryable: false,
-    nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
-    details: {
-      sessionUuid,
-      ...(typeof reason === "string" ? { reason } : {}),
-      ...idleReleaseField(typeof reason === "string" ? reason : undefined),
-      ...(typeof ownerPid === "number" ? { ownerPid } : {}),
-    },
-  };
-}
-
-/** Whether a failure is a session refusal: the session is suspect, or gone for good. */
-function isSessionRefusal(error: unknown): boolean {
-  const { code } = refusalFrameFields(error);
-  return code === DAEMON_SESSION_SUSPECT_CODE || code === SESSION_OWNERSHIP_LOST_CODE;
-}
-
-/**
- * The typed fields a refusal puts on a failure frame: the same code, retry intent and evidence its
- * MCP result carries (#11244, #11391). A self-describing refusal's payload supplies the evidence
- * (`deviceId`, `boundSessionUuid`, ...) as `details`; a persisted session lost to recovery is the
- * terminal `session_ownership_lost`; any other typed refusal is read from the error's own fields.
- */
-function refusalFrameFields(error: unknown): RefusalFrameFields {
-  const sessionRefusal = sessionAdmissionRefusalFields(error);
-  if (sessionRefusal) {
-    return sessionRefusal;
-  }
-  const lostToRecovery = recoveryIdentityLoss(error);
-  if (lostToRecovery) {
-    return {
-      code: SESSION_OWNERSHIP_LOST_CODE,
-      retryable: false,
-      nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
-      details: recoveryIdentityLossDetails(lostToRecovery),
-    };
-  }
-  const payload = selfDescribedRefusalPayload(error);
-  if (!payload) {
-    return typedRefusalFields(error) ?? {};
-  }
-  const { code, retryable, retryAfterMs, nextAction, ...details } = payload;
-  return {
-    ...(typeof code === "string" ? { code } : {}),
-    ...(typeof retryable === "boolean" ? { retryable } : {}),
-    ...(typeof retryAfterMs === "number" ? { retryAfterMs } : {}),
-    ...(typeof nextAction === "string" ? { nextAction } : {}),
-    ...(Object.keys(details).length > 0 ? { details } : {}),
-  };
-}
-
-function unknownToolFrameFields(error: unknown): Pick<DaemonResponse, "code" | "details"> {
-  const toolName = unknownToolWireName(error);
-  return toolName === undefined ? {} : { code: DAEMON_UNKNOWN_TOOL_CODE, details: { toolName } };
-}
-
-export function mcpRequestFailureDetails(
-  error: unknown,
-  cause: DaemonRequestFailureCause | undefined,
-): Pick<
-  DaemonResponse,
-  | "code"
-  | "retryable"
-  | "retryAfterMs"
-  | "nextAction"
-  | "details"
-  | "overloadFailure"
-  | "requestFailureCause"
-> {
-  return {
-    // Any typed refusal (e.g. retryable discovery_incomplete from an ide/* device lookup) keeps
-    // its code, retry intent and evidence on the socket wire, not just its message (#11244,
-    // #11391). The class-specific codes below still win.
-    ...refusalFrameFields(error),
-    ...(error instanceof McpOverloadError ? { overloadFailure: error.failure } : {}),
-    ...(error instanceof McpTimeoutError && error.code ? { code: error.code } : {}),
-    // Nothing was dispatched while the request waited in the queue, so a retry is safe; the MCP
-    // result already says so and the frame must agree for direct-socket clients.
-    ...(error instanceof McpTimeoutError && error.code === MCP_QUEUE_TIMEOUT_ERROR_CODE
-      ? { retryable: true }
-      : {}),
-    // Keep the daemon MCP server's invalid-params verdict (e.g. a malformed
-    // resource URI) so the proxy can return -32602 instead of -32603.
-    ...(error instanceof McpError && "code" in error && error.code === JSONRPC_INVALID_PARAMS
-      ? { code: JSONRPC_INVALID_PARAMS }
-      : {}),
-    ...(isToolUnavailableWireError(error) ? { code: DAEMON_TOOL_UNAVAILABLE_CODE } : {}),
-    ...unknownToolFrameFields(error),
-    ...(isSessionNotActiveWireError(error) ? { code: DAEMON_SESSION_NOT_ACTIVE_CODE } : {}),
-    ...(cause ? { requestFailureCause: cause } : {}),
-  };
-}
-
 function resolveIdentityStartedAt(value: number | undefined, timer: Timer): number {
   return value === undefined ? timer.now() : value;
 }
@@ -545,8 +381,6 @@ function snapshotDaemonOptions(options: DaemonOptions | undefined): DaemonOption
   return structuredClone(options ?? {});
 }
 
-const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
-const MCP_SESSION_TERMINATION_TIMEOUT_MS = 2_000;
 const DEVICE_ACQUISITION_TOOL_NAMES = new Set([
   "getAndroid",
   "getApple",
@@ -792,11 +626,7 @@ interface PendingSocketRequest {
  * by name (a name-based patch silently no-ops if the internal creator is renamed,
  * leaving forwarding dead but the suite green).
  */
-export type McpClientFactory = (
-  boundSessionUuid?: string,
-  toolSelectionProfileUuid?: string,
-  releasedSessionUuid?: string,
-) => Promise<Client>;
+export type { McpClientFactory };
 
 /**
  * The narrow append-text surface `input/typeText mode:"append"` needs.
@@ -844,18 +674,6 @@ interface BoundMcpClient {
   sessionUuid?: string;
   toolSelectionProfileUuid?: string;
   requiresLiveDaemonSession: boolean;
-}
-
-/**
- * Bounds how long a forward may park on another forward's execution-key chain. Without it a
- * waiter is only timed out after it acquires the key, so a stuck holder parks it (and its
- * socket's admission queue) forever (issue #6388).
- */
-interface McpForwardChainWait {
-  /** Milliseconds this waiter may still spend waiting, read at each acquisition. */
-  remainingMs: () => number;
-  /** Error to reject with once that budget is spent. */
-  timeoutError: (executionKey: string) => Error;
 }
 
 /** One keyed attempt either ran the forward or found its route moved to another key. */
@@ -2921,90 +2739,23 @@ export class UnixSocketServer {
     idleCloseKey?: string,
     chainWait?: McpForwardChainWait,
   ): Promise<T> {
-    if (idleCloseKey) {
-      const idleCloseKeys = this.mcpForwardIdleCloseKeys.get(executionKey) ?? new Set<string>();
-      idleCloseKeys.add(idleCloseKey);
-      this.mcpForwardIdleCloseKeys.set(executionKey, idleCloseKeys);
-    }
-    const heldTail = this.mcpForwardTails.get(executionKey);
-    const previous = heldTail ?? Promise.resolve();
-    // Only a contended acquisition needs a bound; an idle key is taken immediately.
-    const acquired =
-      heldTail && chainWait
-        ? this.waitForMcpForwardChain(executionKey, heldTail, chainWait)
-        : previous;
-    const run = acquired.then(() => {
-      if (idleCloseKey) {
-        this.clearMcpClientIdleTimer(idleCloseKey);
-      }
-      return fn();
-    });
-    // The tail also waits for `previous`: a waiter that gave up must not let the next
-    // waiter run concurrently with the forward still holding this key.
-    const tail = Promise.all([
-      previous,
-      run.then(
-        () => undefined,
-        () => undefined,
-      ),
-    ]).then(() => undefined);
-    this.mcpForwardTails.set(executionKey, tail);
-    void tail.finally(() => {
-      if (this.mcpForwardTails.get(executionKey) === tail) {
-        this.mcpForwardTails.delete(executionKey);
-        const idleCloseKeys = this.mcpForwardIdleCloseKeys.get(executionKey);
-        this.mcpForwardIdleCloseKeys.delete(executionKey);
-        for (const key of idleCloseKeys ?? []) {
-          this.scheduleMcpClientIdleClose(key);
-        }
-      }
-    });
-    return run;
-  }
-
-  private async waitForMcpForwardChain(
-    executionKey: string,
-    heldTail: Promise<void>,
-    chainWait: McpForwardChainWait,
-  ): Promise<void> {
-    try {
-      await raceWithDeadline(heldTail, {
+    return runKeyedSerial(
+      {
+        tails: this.mcpForwardTails,
+        idleCloseKeys: this.mcpForwardIdleCloseKeys,
         timer: this.timer,
-        timeoutMs: Math.max(0, chainWait.remainingMs()),
-        label: `MCP forward wait for ${executionKey}`,
-      });
-    } catch (error) {
-      // Tails never reject, so only the wait bound lands here (issue #6388).
-      logger.warn(
-        `[McpForward] chain wait expired executionKey=${executionKey}: ${errorMessage(error)}`,
-      );
-      throw chainWait.timeoutError(executionKey);
-    }
+        onAcquired: (key) => this.clearMcpClientIdleTimer(key),
+        onDrained: (key) => this.scheduleMcpClientIdleClose(key),
+      },
+      executionKey,
+      fn,
+      idleCloseKey,
+      chainWait,
+    );
   }
 
   private async runWithActiveMcpClient<T>(clientKey: string, fn: () => Promise<T>): Promise<T> {
-    this.clearMcpClientIdleTimer(clientKey);
-    this.activeMcpClientForwardCounts.set(
-      clientKey,
-      (this.activeMcpClientForwardCounts.get(clientKey) ?? 0) + 1,
-    );
-    try {
-      return await fn();
-    } finally {
-      const remainingForClient = (this.activeMcpClientForwardCounts.get(clientKey) ?? 1) - 1;
-      if (remainingForClient === 0) {
-        this.activeMcpClientForwardCounts.delete(clientKey);
-        // Re-arm the idle close around the whole active-client wrapper. A forward
-        // can throw before its own cleanup runs (e.g. the pre-forward queue
-        // timeout deadline throws before the forward-body finally), and this
-        // wrapper cleared the client's idle timer on entry. Without this re-arm
-        // the inactive transport would stay cached until another request or
-        // daemon shutdown (issue #4610).
-        this.scheduleMcpClientIdleClose(clientKey);
-      } else {
-        this.activeMcpClientForwardCounts.set(clientKey, remainingForClient);
-      }
-    }
+    return await runWithActivePooledClient(this.loopbackPool(), clientKey, fn);
   }
 
   /**
@@ -5563,6 +5314,91 @@ export class UnixSocketServer {
     );
   }
 
+  /** The `ide/*` and daemon-lifecycle routes this socket serves, by method name (#11813). */
+  private readonly ideRouteHandlers: ReadonlyMap<
+    string,
+    (
+      request: DaemonRequest,
+      socketSessionId: string | undefined,
+      ideMutation: IdeMutationCall | undefined,
+    ) => Promise<any | undefined> | any
+  > = new Map([
+    [
+      "ide/listFeatureFlags",
+      (request, socketSessionId, ideMutation) =>
+        this.ideListFeatureFlags(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/setFeatureFlag",
+      (request, socketSessionId, ideMutation) =>
+        this.ideSetFeatureFlag(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/setSessionToolEnabled",
+      (request, socketSessionId, ideMutation) =>
+        this.ideSetSessionToolEnabled(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/ping",
+      (request, socketSessionId, ideMutation) =>
+        this.idePing(request, socketSessionId, ideMutation),
+    ],
+    [
+      DAEMON_REPUBLISH_IDENTITY_METHOD,
+      async (request) => await this.republishDaemonIdentity(request.params),
+    ],
+    [DAEMON_PREPARE_RESTART_METHOD, async (request) => this.prepareDaemonRestart(request.params)],
+    [
+      DAEMON_PREPARE_MAINTENANCE_METHOD,
+      async (request) => this.prepareDaemonMaintenance(request.params),
+    ],
+    [
+      DAEMON_COMPLETE_MAINTENANCE_METHOD,
+      async (request) => this.completeDaemonMaintenance(request.params),
+    ],
+    [DAEMON_RESTART_ADMITTED_METHOD, async (request) => this.restartAdmittedDaemon(request.params)],
+    [
+      DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
+      async (request, socketSessionId) =>
+        this.restartAcceptanceSession(request.params, socketSessionId),
+    ],
+    [
+      DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
+      async (request, socketSessionId) =>
+        this.commitAcceptanceRestart(request.params, socketSessionId),
+    ],
+    [
+      DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
+      async (request, socketSessionId) =>
+        this.releaseAcceptanceRestart(request.params, socketSessionId),
+    ],
+    [
+      "ide/status",
+      (request, socketSessionId, ideMutation) =>
+        this.ideStatus(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/updateService",
+      (request, socketSessionId, ideMutation) =>
+        this.ideUpdateService(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/setKeyValue",
+      (request, socketSessionId, ideMutation) =>
+        this.ideSetKeyValue(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/removeKeyValue",
+      (request, socketSessionId, ideMutation) =>
+        this.ideRemoveKeyValue(request, socketSessionId, ideMutation),
+    ],
+    [
+      "ide/clearKeyValueFile",
+      (request, socketSessionId, ideMutation) =>
+        this.ideClearKeyValueFile(request, socketSessionId, ideMutation),
+    ],
+  ]);
+
   /**
    * The `ide/*` and acceptance routes. `ideMutation` is set for the routes that mutate a device
    * ({@link IDE_DEVICE_MUTATION_METHODS}): their ownership gate tracks the call under it.
@@ -5572,356 +5408,315 @@ export class UnixSocketServer {
     socketSessionId?: string,
     ideMutation?: IdeMutationCall,
   ): Promise<any | undefined> {
-    switch (request.method) {
-      case "ide/listFeatureFlags": {
-        const flags = await this.requireFeatureFlagService().listFlags();
-        return { flags };
-      }
-      case "ide/setFeatureFlag": {
-        const featureFlagService = this.requireFeatureFlagService();
-        const args = request.params as {
-          key?: string;
-          enabled?: boolean;
-          config?: Record<string, unknown> | null;
-        };
-        if (!args.key || typeof args.enabled !== "boolean") {
-          throw new Error("setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params");
-        }
-        this.assertBrokerConnectionHostMutation(socketSessionId, "ide/setFeatureFlag");
-        const updated = await featureFlagService.setFlag(
-          args.key as FeatureFlagKey,
-          args.enabled,
-          args.config,
-        );
-        return updated;
-      }
-      case "ide/setSessionToolEnabled": {
-        const args = request.params as {
-          sessionUuid?: string;
-          toolName?: string;
-          enabled?: boolean;
-        };
-        if (
-          !args.sessionUuid ||
-          !args.toolName ||
-          !ToolRegistry.isUserConfigurableTool(args.toolName) ||
-          typeof args.enabled !== "boolean"
-        ) {
-          throw new Error(
-            "setSessionToolEnabled requires sessionUuid, a user-configurable toolName, and enabled boolean params",
-          );
-        }
-        this.assertBrokerConnectionControl(socketSessionId, "ide/setSessionToolEnabled", {
-          requesterSessionUuid: args.sessionUuid,
-        });
-        await (this.sessionToolSelectionService ?? getSessionToolSelectionService()).setEnabled(
-          args.sessionUuid,
-          args.toolName,
-          args.enabled,
-        );
-        ListChangedBroadcaster.emit("tools");
-        return {
-          sessionUuid: args.sessionUuid,
-          toolName: args.toolName,
-          enabled: args.enabled,
-        };
-      }
-      case "ide/ping": {
-        return { ok: true, timestamp: this.timer.now() };
-      }
-      case DAEMON_REPUBLISH_IDENTITY_METHOD: {
-        return await this.republishDaemonIdentity(request.params);
-      }
-      case DAEMON_PREPARE_RESTART_METHOD: {
-        return this.prepareDaemonRestart(request.params);
-      }
-      case DAEMON_PREPARE_MAINTENANCE_METHOD: {
-        return this.prepareDaemonMaintenance(request.params);
-      }
-      case DAEMON_COMPLETE_MAINTENANCE_METHOD: {
-        return this.completeDaemonMaintenance(request.params);
-      }
-      case DAEMON_RESTART_ADMITTED_METHOD: {
-        return this.restartAdmittedDaemon(request.params);
-      }
-      case DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD: {
-        return this.restartAcceptanceSession(request.params, socketSessionId);
-      }
-      case DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD: {
-        return this.commitAcceptanceRestart(request.params, socketSessionId);
-      }
-      case DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD: {
-        return this.releaseAcceptanceRestart(request.params, socketSessionId);
-      }
-      case "ide/status": {
-        return {
-          structuredSessionNotFound: true,
-          structuredToolErrorCodes: true,
-          // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
-          // floating "latest" tag — external consumers must see exactly what the
-          // daemon will fetch (#2746).
-          version: this.daemonIdentity.version,
-          pid: process.pid,
-          buildId: this.daemonIdentity.build.buildId,
-          entryScript: this.daemonIdentity.build.entryScript,
-          acceptanceCapabilityFingerprint: this.acceptanceDiscoveryCapability
-            ? createHash("sha256")
-                .update(this.acceptanceDiscoveryCapability)
-                .digest("hex")
-                .slice(0, 8)
-            : null,
-          startedAt: this.identityStartedAt,
-          processStartedAt: this.identityProcessStartedAt,
-          dbPath: this.identityDbPath,
-          reportedPidFilePath: this.identityPidFilePath,
-          reportedSocketPath: this.socketPath,
-          reportedSockets: this.identitySockets,
-          effectiveDebug: isDebugModeEnabled(),
-          options: this.startupOptions,
-          ...processGenerationRecordFields(this.processGenerationToken),
-          activeProvisioning: executionTracker.hasActiveToolExecution("provisionDevice", {
-            scope: "global",
-          }),
-          releaseVersion: resolveAssetVersion(resolvePinnedVersion()),
-          android: {
-            ctrlProxy: {
-              expectedSha256: resolveApkChecksum(),
-              url: resolveApkUrl(),
-            },
-          },
-          ios: {
-            xcTestService: {
-              expectedSha256: resolveIpaChecksum(),
-              expectedAppHash: IOS_CTRL_PROXY_APP_HASH,
-              url: resolveIpaUrl(),
-            },
-          },
-        };
-      }
-      case "ide/updateService": {
-        const args = request.params as { deviceId?: string; platform?: string };
-        if (!args.deviceId || !args.platform) {
-          throw new Error(
-            "updateService requires 'deviceId' (string) and 'platform' (string) params",
-          );
-        }
-        if (args.platform !== "android" && args.platform !== "ios") {
-          throw new Error(`Invalid platform: ${args.platform}. Must be 'android' or 'ios'.`);
-        }
+    const handler = this.ideRouteHandlers.get(request.method);
+    return handler ? await handler(request, socketSessionId, ideMutation) : undefined;
+  }
 
-        // Find the booted device
-        const { devices: bootedDevices, deviceId } = await this.resolveIdeActionDevices(
-          args.platform,
-          args.deviceId,
-        );
-        // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
-        await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/updateService");
-        this.assertDeviceActionable(deviceId, "to update the accessibility service");
-        const targetDevice = bootedDevices.find((d) => d.deviceId === deviceId);
-        if (!targetDevice) {
-          throw new Error(`Device not found: ${args.deviceId}`);
-        }
-        if (await this.daemonState.getDevicePool().isShutdownReserved?.(targetDevice.deviceId)) {
-          throw new Error(`Device '${targetDevice.deviceId}' is shutting down.`);
-        }
-        // A lifecycle action on a held device: only the holder, or an explicit `force` (as
-        // killDevice allows), may reinstall/restart its CtrlProxy (#10827).
-        await this.assertIdeMutationOwnership(
-          request,
-          targetDevice,
-          "ide/updateService",
-          (request.params as { force?: unknown }).force === true,
-          ideMutation,
-        );
-        if (args.platform === "android") {
-          getAbortSignal()?.throwIfAborted();
-          ideMutation?.dispatching();
-          AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
-          const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
-          const result = await manager.ensureCompatibleVersion({
-            allowDownloadWhenInstalled: true,
-            bypassVersionCheckCache: true,
-          });
-          const successStatuses = new Set(["compatible", "upgraded", "installed", "reinstalled"]);
-          return {
-            success: successStatuses.has(result.status),
-            message: `Accessibility service ${result.status}${result.error ? `: ${result.error}` : ""}`,
-            status: result,
-          };
-        } else {
-          const manager = IOSCtrlProxyManager.getInstance(targetDevice);
-          getAbortSignal()?.throwIfAborted();
-          ideMutation?.dispatching();
-          IOSCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
-          await manager.forceRestart();
-          return {
-            success: true,
-            message: "CtrlProxy iOS restarted",
-          };
-        }
-      }
-      case "ide/setKeyValue": {
-        const args = request.params as {
-          platform?: string;
-          deviceId?: string;
-          appId?: string;
-          fileName?: string;
-          key?: string;
-          value?: string | null;
-          type?: string;
-        };
-        if (!args.deviceId || !args.appId || !args.fileName || !args.key || !args.type) {
-          throw new Error("setKeyValue requires deviceId, appId, fileName, key, and type params");
-        }
-        await this.assertSocketToolEnabled(args.deviceId, "setKeyValue");
-        const { platform, client, device } = await this.resolveKeyValueMutationClient(
-          args.platform,
-          args.deviceId,
-          request,
-          "ide/setKeyValue",
-          ideMutation,
-        );
-        const appId = args.appId;
-        const fileName = args.fileName;
-        const key = args.key;
-        let usedDirectFileFallback = false;
-        let resolution: PreferenceStoreResolution | undefined;
-        if (args.value === null || args.value === undefined) {
-          ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
-            platform,
-            device,
-            appId,
-            fileName,
-            {
-              dispatching: () => ideMutation?.dispatching(),
-              viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
-              viaDirectFile: (adb) =>
-                removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
-            },
-          ));
-        } else {
-          // Enforce the same cross-platform type guidance as the MCP-tool path
-          // (storageTools.ts) before dispatch, so a platform-incompatible type
-          // fails with an actionable error rather than deeper in the client (#5022).
-          validateTypeForPlatform(platform, args.type as KeyValueType);
-          const value = args.value;
-          const type = args.type as KeyValueType;
-          ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
-            platform,
-            device,
-            appId,
-            fileName,
-            {
-              dispatching: () => ideMutation?.dispatching(),
-              viaSdk: (onDispatch) =>
-                client.setPreference(appId, fileName, key, value, type, { onDispatch }),
-              viaDirectFile: (adb) =>
-                setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
-            },
-          ));
-        }
-        const resolvedStore = resolution?.resolvedStore;
-        const effectiveValueDiffers = resolution?.effectiveValueDiffers;
-        const warning = preferenceSetWarning(
-          usedDirectFileFallback ? directFileFallbackRelaunchWarning(appId, fileName) : undefined,
-          effectiveValueDiffers,
-        );
-        return {
-          success: true,
-          ...(resolvedStore ? { resolvedStore } : {}),
-          ...(effectiveValueDiffers ? { effectiveValueDiffers } : {}),
-          ...(warning ? { warning } : {}),
-        };
-      }
-      case "ide/removeKeyValue": {
-        const args = request.params as {
-          platform?: string;
-          deviceId?: string;
-          appId?: string;
-          fileName?: string;
-          key?: string;
-        };
-        if (!args.deviceId || !args.appId || !args.fileName || !args.key) {
-          throw new Error("removeKeyValue requires deviceId, appId, fileName, and key params");
-        }
-        await this.assertSocketToolEnabled(args.deviceId, "removeKeyValue");
-        const { platform, client, device } = await this.resolveKeyValueMutationClient(
-          args.platform,
-          args.deviceId,
-          request,
-          "ide/removeKeyValue",
-          ideMutation,
-        );
-        const appId = args.appId;
-        const fileName = args.fileName;
-        const key = args.key;
-        const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
-          platform,
-          device,
-          appId,
-          fileName,
-          {
-            dispatching: () => ideMutation?.dispatching(),
-            viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
-            viaDirectFile: (adb) =>
-              removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
-          },
-        );
-        const resolvedStore = resolution?.resolvedStore;
-        const warning = usedDirectFileFallback
-          ? directFileFallbackRelaunchWarning(appId, fileName)
-          : undefined;
-        return {
-          success: true,
-          ...(resolvedStore ? { resolvedStore } : {}),
-          ...(warning ? { warning } : {}),
-        };
-      }
-      case "ide/clearKeyValueFile": {
-        const args = request.params as {
-          platform?: string;
-          deviceId?: string;
-          appId?: string;
-          fileName?: string;
-        };
-        if (!args.deviceId || !args.appId || !args.fileName) {
-          throw new Error("clearKeyValueFile requires deviceId, appId, and fileName params");
-        }
-        await this.assertSocketToolEnabled(args.deviceId, "clearKeyValueFile");
-        const { platform, client, device } = await this.resolveKeyValueMutationClient(
-          args.platform,
-          args.deviceId,
-          request,
-          "ide/clearKeyValueFile",
-          ideMutation,
-        );
-        const appId = args.appId;
-        const fileName = args.fileName;
-        const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
-          platform,
-          device,
-          appId,
-          fileName,
-          {
-            dispatching: () => ideMutation?.dispatching(),
-            viaSdk: (onDispatch) => client.clearPreferenceStore(appId, fileName, { onDispatch }),
-            viaDirectFile: (adb) =>
-              clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
-          },
-        );
-        const resolvedStore = resolution?.resolvedStore;
-        const warning = usedDirectFileFallback
-          ? directFileFallbackRelaunchWarning(appId, fileName)
-          : undefined;
-        return {
-          success: true,
-          ...(resolvedStore ? { resolvedStore } : {}),
-          ...(warning ? { warning } : {}),
-        };
-      }
-      default:
-        return undefined;
+  private async ideListFeatureFlags(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const flags = await this.requireFeatureFlagService().listFlags();
+    return { flags };
+  }
+
+  private async ideSetFeatureFlag(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const featureFlagService = this.requireFeatureFlagService();
+    const args = IDE_ROUTE_PARSERS["ide/setFeatureFlag"](request.params);
+    this.assertBrokerConnectionHostMutation(socketSessionId, "ide/setFeatureFlag");
+    const updated = await featureFlagService.setFlag(
+      args.key as FeatureFlagKey,
+      args.enabled,
+      args.config,
+    );
+    return updated;
+  }
+
+  private async ideSetSessionToolEnabled(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const args = IDE_ROUTE_PARSERS["ide/setSessionToolEnabled"](request.params);
+    this.assertBrokerConnectionControl(socketSessionId, "ide/setSessionToolEnabled", {
+      requesterSessionUuid: args.sessionUuid,
+    });
+    await (this.sessionToolSelectionService ?? getSessionToolSelectionService()).setEnabled(
+      args.sessionUuid,
+      args.toolName,
+      args.enabled,
+    );
+    ListChangedBroadcaster.emit("tools");
+    return {
+      sessionUuid: args.sessionUuid,
+      toolName: args.toolName,
+      enabled: args.enabled,
+    };
+  }
+
+  private async idePing(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    return { ok: true, timestamp: this.timer.now() };
+  }
+
+  private async ideStatus(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    return {
+      structuredSessionNotFound: true,
+      structuredToolErrorCodes: true,
+      // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
+      // floating "latest" tag — external consumers must see exactly what the
+      // daemon will fetch (#2746).
+      version: this.daemonIdentity.version,
+      pid: process.pid,
+      buildId: this.daemonIdentity.build.buildId,
+      entryScript: this.daemonIdentity.build.entryScript,
+      acceptanceCapabilityFingerprint: this.acceptanceDiscoveryCapability
+        ? createHash("sha256").update(this.acceptanceDiscoveryCapability).digest("hex").slice(0, 8)
+        : null,
+      startedAt: this.identityStartedAt,
+      processStartedAt: this.identityProcessStartedAt,
+      dbPath: this.identityDbPath,
+      reportedPidFilePath: this.identityPidFilePath,
+      reportedSocketPath: this.socketPath,
+      reportedSockets: this.identitySockets,
+      effectiveDebug: isDebugModeEnabled(),
+      options: this.startupOptions,
+      ...processGenerationRecordFields(this.processGenerationToken),
+      activeProvisioning: executionTracker.hasActiveToolExecution("provisionDevice", {
+        scope: "global",
+      }),
+      releaseVersion: resolveAssetVersion(resolvePinnedVersion()),
+      android: {
+        ctrlProxy: {
+          expectedSha256: resolveApkChecksum(),
+          url: resolveApkUrl(),
+        },
+      },
+      ios: {
+        xcTestService: {
+          expectedSha256: resolveIpaChecksum(),
+          expectedAppHash: IOS_CTRL_PROXY_APP_HASH,
+          url: resolveIpaUrl(),
+        },
+      },
+    };
+  }
+
+  private async ideUpdateService(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const args = IDE_ROUTE_PARSERS["ide/updateService"](request.params);
+
+    // Find the booted device
+    const { devices: bootedDevices, deviceId } = await this.resolveIdeActionDevices(
+      args.platform,
+      args.deviceId,
+    );
+    // FUNNEL 1 then FUNNEL 2: reconcile before addressing the serial.
+    await this.reconcileDiscoveryObservation(bootedDevices, "socket:ide/updateService");
+    this.assertDeviceActionable(deviceId, "to update the accessibility service");
+    const targetDevice = bootedDevices.find((d) => d.deviceId === deviceId);
+    if (!targetDevice) {
+      throw new Error(`Device not found: ${args.deviceId}`);
     }
+    if (await this.daemonState.getDevicePool().isShutdownReserved?.(targetDevice.deviceId)) {
+      throw new Error(`Device '${targetDevice.deviceId}' is shutting down.`);
+    }
+    // A lifecycle action on a held device: only the holder, or an explicit `force` (as
+    // killDevice allows), may reinstall/restart its CtrlProxy (#10827).
+    await this.assertIdeMutationOwnership(
+      request,
+      targetDevice,
+      "ide/updateService",
+      args.force,
+      ideMutation,
+    );
+    if (args.platform === "android") {
+      getAbortSignal()?.throwIfAborted();
+      ideMutation?.dispatching();
+      AndroidCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
+      const manager = AndroidCtrlProxyManager.getInstance(targetDevice);
+      const result = await manager.ensureCompatibleVersion({
+        allowDownloadWhenInstalled: true,
+        bypassVersionCheckCache: true,
+      });
+      const successStatuses = new Set(["compatible", "upgraded", "installed", "reinstalled"]);
+      return {
+        success: successStatuses.has(result.status),
+        message: `Accessibility service ${result.status}${result.error ? `: ${result.error}` : ""}`,
+        status: result,
+      };
+    } else {
+      const manager = IOSCtrlProxyManager.getInstance(targetDevice);
+      getAbortSignal()?.throwIfAborted();
+      ideMutation?.dispatching();
+      IOSCtrlProxyClient.resumeAfterDeviceStart(targetDevice.deviceId);
+      await manager.forceRestart();
+      return {
+        success: true,
+        message: "CtrlProxy iOS restarted",
+      };
+    }
+  }
+
+  private async ideSetKeyValue(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const args = IDE_ROUTE_PARSERS["ide/setKeyValue"](request.params);
+    await this.assertSocketToolEnabled(args.deviceId, "setKeyValue");
+    const { platform, client, device } = await this.resolveKeyValueMutationClient(
+      args.platform,
+      args.deviceId,
+      request,
+      "ide/setKeyValue",
+      ideMutation,
+    );
+    const appId = args.appId;
+    const fileName = args.fileName;
+    const key = args.key;
+    let usedDirectFileFallback = false;
+    let resolution: PreferenceStoreResolution | undefined;
+    if (args.value === null || args.value === undefined) {
+      ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
+        platform,
+        device,
+        appId,
+        fileName,
+        {
+          dispatching: () => ideMutation?.dispatching(),
+          viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
+          viaDirectFile: (adb) =>
+            removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+        },
+      ));
+    } else {
+      // Enforce the same cross-platform type guidance as the MCP-tool path
+      // (storageTools.ts) before dispatch, so a platform-incompatible type
+      // fails with an actionable error rather than deeper in the client (#5022).
+      validateTypeForPlatform(platform, args.type as KeyValueType);
+      const value = args.value;
+      const type = args.type as KeyValueType;
+      ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
+        platform,
+        device,
+        appId,
+        fileName,
+        {
+          dispatching: () => ideMutation?.dispatching(),
+          viaSdk: (onDispatch) =>
+            client.setPreference(appId, fileName, key, value, type, { onDispatch }),
+          viaDirectFile: (adb) =>
+            setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
+        },
+      ));
+    }
+    const resolvedStore = resolution?.resolvedStore;
+    const effectiveValueDiffers = resolution?.effectiveValueDiffers;
+    const warning = preferenceSetWarning(
+      usedDirectFileFallback ? directFileFallbackRelaunchWarning(appId, fileName) : undefined,
+      effectiveValueDiffers,
+    );
+    return {
+      success: true,
+      ...(resolvedStore ? { resolvedStore } : {}),
+      ...(effectiveValueDiffers ? { effectiveValueDiffers } : {}),
+      ...(warning ? { warning } : {}),
+    };
+  }
+
+  private async ideRemoveKeyValue(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const args = IDE_ROUTE_PARSERS["ide/removeKeyValue"](request.params);
+    await this.assertSocketToolEnabled(args.deviceId, "removeKeyValue");
+    const { platform, client, device } = await this.resolveKeyValueMutationClient(
+      args.platform,
+      args.deviceId,
+      request,
+      "ide/removeKeyValue",
+      ideMutation,
+    );
+    const appId = args.appId;
+    const fileName = args.fileName;
+    const key = args.key;
+    const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
+      platform,
+      device,
+      appId,
+      fileName,
+      {
+        dispatching: () => ideMutation?.dispatching(),
+        viaSdk: (onDispatch) => client.removePreference(appId, fileName, key, { onDispatch }),
+        viaDirectFile: (adb) =>
+          removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
+      },
+    );
+    const resolvedStore = resolution?.resolvedStore;
+    const warning = usedDirectFileFallback
+      ? directFileFallbackRelaunchWarning(appId, fileName)
+      : undefined;
+    return {
+      success: true,
+      ...(resolvedStore ? { resolvedStore } : {}),
+      ...(warning ? { warning } : {}),
+    };
+  }
+
+  private async ideClearKeyValueFile(
+    request: DaemonRequest,
+    socketSessionId: string | undefined,
+    ideMutation: IdeMutationCall | undefined,
+  ): Promise<any | undefined> {
+    const args = IDE_ROUTE_PARSERS["ide/clearKeyValueFile"](request.params);
+    await this.assertSocketToolEnabled(args.deviceId, "clearKeyValueFile");
+    const { platform, client, device } = await this.resolveKeyValueMutationClient(
+      args.platform,
+      args.deviceId,
+      request,
+      "ide/clearKeyValueFile",
+      ideMutation,
+    );
+    const appId = args.appId;
+    const fileName = args.fileName;
+    const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
+      platform,
+      device,
+      appId,
+      fileName,
+      {
+        dispatching: () => ideMutation?.dispatching(),
+        viaSdk: (onDispatch) => client.clearPreferenceStore(appId, fileName, { onDispatch }),
+        viaDirectFile: (adb) =>
+          clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
+      },
+    );
+    const resolvedStore = resolution?.resolvedStore;
+    const warning = usedDirectFileFallback
+      ? directFileFallbackRelaunchWarning(appId, fileName)
+      : undefined;
+    return {
+      success: true,
+      ...(resolvedStore ? { resolvedStore } : {}),
+      ...(warning ? { warning } : {}),
+    };
   }
 
   /**
@@ -8718,82 +8513,21 @@ export class UnixSocketServer {
     toolSelectionProfileUuid?: string,
     releasedSessionUuid?: string,
   ): Promise<Client> {
-    this.clearMcpClientIdleTimer(key);
-
-    const existingClient = this.mcpClients.get(key);
-    if (existingClient) {
-      return existingClient;
-    }
-
-    const existingPromise = this.mcpClientPromises.get(key);
-    if (existingPromise) {
-      return existingPromise;
-    }
-
-    const generation = this.lifecycleGeneration;
-    const clientPromise = this.mcpClientFactory(
+    return await getPooledClient(
+      this.loopbackPool(),
+      key,
       boundSessionUuid,
       toolSelectionProfileUuid,
       releasedSessionUuid,
-    )
-      .then(async (client) => {
-        if (
-          this.closing ||
-          generation !== this.lifecycleGeneration ||
-          this.mcpClientPromises.get(key) !== clientPromise
-        ) {
-          await this.closeMcpClient(key, client);
-          throw new Error("MCP client creation was superseded");
-        }
-        this.mcpClients.set(key, client);
-        this.mcpClientPromises.delete(key);
-        return client;
-      })
-      .catch((error) => {
-        if (this.mcpClientPromises.get(key) === clientPromise) {
-          this.mcpClientPromises.delete(key);
-        }
-        throw error;
-      });
-
-    this.mcpClientPromises.set(key, clientPromise);
-    return clientPromise;
+    );
   }
 
   private async resetMcpClient(key: string, closeMode: "wait" | "detach" = "wait"): Promise<void> {
-    this.clearMcpClientIdleTimer(key);
-    const existingClient = this.mcpClients.get(key);
-    this.mcpClients.delete(key);
-    this.mcpClientPromises.delete(key);
-    if (!existingClient) {
-      return;
-    }
-    const close = Promise.resolve()
-      .then(() => this.closeMcpClient(key, existingClient))
-      .catch((error) => {
-        logger.warn(`Error closing MCP client for key ${key}:`, error);
-      });
-    if (closeMode === "wait") {
-      await close;
-    }
+    await resetPooledClient(this.loopbackPool(), key, closeMode);
   }
 
   private async closeMcpClient(key: string, client: Client): Promise<void> {
-    const transport = client.transport;
-    if (transport instanceof StreamableHTTPClientTransport && transport.sessionId) {
-      try {
-        await raceWithDeadline(transport.terminateSession(), {
-          timer: this.timer,
-          timeoutMs: MCP_SESSION_TERMINATION_TIMEOUT_MS,
-          label: "MCP session termination",
-          timeoutError: () => new Error("MCP session termination timed out"),
-        });
-      } catch (error) {
-        // A failed DELETE is best-effort; closing the local client still releases its resources.
-        logger.debug(`Could not terminate MCP session for key ${key}: ${error}`);
-      }
-    }
-    await client.close();
+    await closePooledClient(this.timer, key, client);
   }
 
   private async resetMcpClientIfCurrent(
@@ -8801,51 +8535,44 @@ export class UnixSocketServer {
     expectedClient: Client,
     closeMode: "wait" | "detach" = "wait",
   ): Promise<boolean> {
-    if (this.mcpClients.get(key) !== expectedClient) {
-      return false;
-    }
-    await this.resetMcpClient(key, closeMode);
-    return true;
+    return await resetPooledClientIfCurrent(this.loopbackPool(), key, expectedClient, closeMode);
   }
 
-  // Clean up after a reconnect that blew its deadline without clobbering an
-  // unrelated request. Two teardown paths, each fenced to what this wait owns:
-  //   1. If our creation is still the pending one, drop it so a hung factory does
-  //      not leak; a resolved or superseded creation has already cleared itself.
-  //   2. When our own creation does resolve, close that specific client only while
-  //      it remains the cached one — never a replacement another request installed
-  //      under the same key (issue #5499). Fire-and-forget: the connection may
-  //      never settle, so the request must not block on it.
   private discardTimedOutMcpReconnect(
     key: string,
     connection: Promise<Client>,
     pendingCreation: Promise<Client> | undefined,
   ): void {
-    if (pendingCreation && this.mcpClientPromises.get(key) === pendingCreation) {
-      this.mcpClientPromises.delete(key);
-    }
-    void connection
-      .then((client) => this.resetMcpClientIfCurrent(key, client, "detach"))
-      .catch(() => {
-        // Creation was superseded or failed; nothing of ours remains to discard.
-      });
+    discardTimedOutReconnect(this.loopbackPool(), key, connection, pendingCreation);
   }
 
   private scheduleMcpClientIdleClose(key: string): void {
-    this.clearMcpClientIdleTimer(key);
-    const timer = this.timer.setTimeout(() => {
-      void this.closeIdleMcpClient(key);
-    }, MCP_CLIENT_IDLE_CLOSE_MS);
-    this.mcpClientIdleTimers.set(key, timer);
+    schedulePooledIdleClose(this.loopbackPool(), key);
   }
 
   private clearMcpClientIdleTimer(key: string): void {
-    const timer = this.mcpClientIdleTimers.get(key);
-    if (!timer) {
-      return;
-    }
-    this.timer.clearTimeout(timer);
-    this.mcpClientIdleTimers.delete(key);
+    clearPooledIdleTimer(this.loopbackPool(), key);
+  }
+
+  /** The loopback client cache's state and hooks; cross-calls re-enter through this server. */
+  private loopbackPool(): LoopbackClientPool {
+    return {
+      clients: this.mcpClients,
+      promises: this.mcpClientPromises,
+      idleTimers: this.mcpClientIdleTimers,
+      activeForwardCounts: this.activeMcpClientForwardCounts,
+      timer: this.timer,
+      factory: () => this.mcpClientFactory,
+      generation: () => this.lifecycleGeneration,
+      isSuperseded: (generation) => this.closing || generation !== this.lifecycleGeneration,
+      closeClient: (key, client) => this.closeMcpClient(key, client),
+      clearIdleTimer: (key) => this.clearMcpClientIdleTimer(key),
+      scheduleIdleClose: (key) => this.scheduleMcpClientIdleClose(key),
+      resetClient: (key, closeMode) => this.resetMcpClient(key, closeMode),
+      resetClientIfCurrent: (key, client, closeMode) =>
+        this.resetMcpClientIfCurrent(key, client, closeMode),
+      onIdle: (key) => this.closeIdleMcpClient(key),
+    };
   }
 
   private async closeIdleMcpClient(key: string): Promise<void> {

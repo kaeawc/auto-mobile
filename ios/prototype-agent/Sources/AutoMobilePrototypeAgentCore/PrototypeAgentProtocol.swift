@@ -34,6 +34,7 @@ enum PrototypeAgentProtocol {
         dataModelCapability,
         textFieldOptionsCapability,
         gesturesCapability,
+        swipeActionsCapability,
         textFieldActionsCapability,
         carouselCapability,
         refreshCapability,
@@ -99,6 +100,8 @@ enum PrototypeAgentProtocol {
     static let textFieldOptionsCapability = "prototype_text_field_options_v1"
     /// Long press and double tap action lists on generic nodes, matching CtrlProxy (#12065).
     static let gesturesCapability = "prototype_gestures_v1"
+    /// Swipe-revealed row actions with accessibility actions (#12065).
+    static let swipeActionsCapability = "prototype_swipe_actions_v1"
     /// Text field `trailingIcon`, `imeAction` and `onSubmit` (#12066).
     static let textFieldActionsCapability = "prototype_text_field_actions_v1"
     /// The `carousel` node and the pager `indicator` option (#12071).

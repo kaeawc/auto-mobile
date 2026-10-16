@@ -99,7 +99,7 @@ export class HierarchyCollector {
 
       // Clear cache on failure
       try {
-        AndroidCtrlProxyManager.getInstance(device, adb).clearAvailabilityCache();
+        AndroidCtrlProxyManager.getInstance(device, { create: () => adb }).clearAvailabilityCache();
       } catch (clearError) {
         logger.debug(`[HierarchyCollector] Failed to clear availability cache: ${clearError}`);
       }

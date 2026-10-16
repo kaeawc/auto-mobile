@@ -1038,7 +1038,10 @@ for (const key of savedKeys) {
 
 function startRetry(h: Awaited<ReturnType<typeof setup>>, kind: (typeof retryKinds)[number]) {
   if (kind === "clock") {
-    return h.sessions["getPendingClockRestoration"](h.holder, null);
+    return h.sessions["stateRestore"].getPendingClockRestoration.bind(h.sessions["stateRestore"])(
+      h.holder,
+      null,
+    );
   }
   if (kind === "rotation") {
     return h.sessions["stateRestore"].getPendingRotationRestoration.bind(

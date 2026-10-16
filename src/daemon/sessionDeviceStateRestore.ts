@@ -6,6 +6,11 @@ import type {
   IosAppNetworkRuleCommandContext,
 } from "../features/networkFilter/IosAppNetworkRuleClient";
 import { MAX_NETWORK_CONDITION_TTL_SECONDS } from "../features/utility/DeviceState";
+import {
+  defaultDeviceClockRestoreRegistry,
+  type DeviceClockRestoreRegistry,
+} from "../features/utility/DeviceClock";
+import type { DeviceHealthReason } from "./deviceHealthMarkers";
 import type { BackoffPolicy } from "../utils/Backoff";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -27,7 +32,11 @@ import {
   type IosAppNetworkRuleRestorer,
 } from "./iosAppNetworkLease";
 import {
+  CLOCK_RESTORE_TIMEOUT_MS,
+  NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS,
   NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+  type ClockRestorer,
+  type ClockSessionState,
   type RotationRestorer,
   type RotationSessionState,
   type ScreenReaderRestorer,
@@ -74,6 +83,13 @@ const rotationRestorePolicy: RestoreQueuePolicy = {
   removedDuringSetupMessage: "Cannot change rotation: device was removed during session setup.",
 };
 
+const clockRestorePolicy: RestoreQueuePolicy = {
+  kind: "clock",
+  retiredOnIncarnationBump: true,
+  setupHandoff: "await-then-track",
+  removedDuringSetupMessage: "Cannot change the clock: device was removed during session setup.",
+};
+
 const screenReaderRestorePolicy: RestoreQueuePolicy = {
   kind: "screen-reader",
   retiredOnIncarnationBump: false,
@@ -115,6 +131,20 @@ export interface SessionDeviceStateRestoreHost {
   trackSessionSetup(session: Session, createSetup: () => Promise<void>): Promise<void>;
   /** Whether this exact incarnation is still the published session. */
   isPublished(session: Session): boolean;
+  /** The pool incarnation the device's health markers are keyed by, if it has one. */
+  healthIncarnation(deviceId: string): number | undefined;
+  /** Whether a captured restore still targets the current incarnation and restore generation. */
+  restoreIncarnationIsCurrent(target: {
+    deviceId: string;
+    incarnation?: number;
+    restoreGeneration?: number;
+  }): boolean;
+  clearRestoreHealth(
+    target: { deviceId: string; incarnation?: number },
+    reason: DeviceHealthReason,
+  ): void;
+  markHealth(deviceId: string, incarnation: number, reason: DeviceHealthReason): void;
+  clearHealthMarker(deviceId: string, incarnation: number, reason: DeviceHealthReason): void;
   /** Quarantine the device until the cleanups settle. */
   trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<unknown>[]): void;
   /** True while `session` is live and not releasing. */
@@ -134,6 +164,9 @@ export interface SessionDeviceStateRestoreOptions {
   screenReaderBackoff: BackoffPolicy;
   rotation: (device: BootedDevice) => RotationRestorer;
   rotationBackoff: BackoffPolicy;
+  clock: (device: BootedDevice) => ClockRestorer;
+  /** The registry that serializes clock restores per device; defaults to the process-wide one. */
+  clockRegistry?: DeviceClockRestoreRegistry;
   /** Injected iOS per-app rule restorer; else `defaultIosAppNetworkRuleRestorer()`. */
   iosAppNetworkRuleRestorer?: IosAppNetworkRuleRestorer;
   defaultIosAppNetworkRuleRestorer: () => IosAppNetworkRuleRestorer;
@@ -176,6 +209,19 @@ export class SessionDeviceStateRestore {
   private readonly screenReaderMutationQueues = new Map<string, Promise<unknown>>();
   private readonly screenReaderRestorer: (device: BootedDevice) => ScreenReaderRestorer;
   private readonly screenReaderRestoreBackoff: BackoffPolicy;
+  private readonly clockMutationQueues = new Map<string, Promise<unknown>>();
+  readonly clockRestores = new DeviceStateRestoreQueue<ClockSessionState>(
+    clockRestorePolicy,
+    (deviceId) => {
+      const incarnation = this.host.healthIncarnation(deviceId);
+      if (incarnation !== undefined) {
+        this.host.clearHealthMarker(deviceId, incarnation, "clock");
+      }
+      this.clockRegistry.retire(deviceId);
+    },
+  );
+  private readonly clockRestorer: (device: BootedDevice) => ClockRestorer;
+  private readonly clockRegistry: DeviceClockRestoreRegistry;
   private readonly rotationMutationQueues = new Map<string, Promise<unknown>>();
   /** Rotation settings a device still holds after release cleanup gave up on them (#10714). */
   readonly abandonedRotations = new Map<string, RotationSessionState>();
@@ -236,6 +282,8 @@ export class SessionDeviceStateRestore {
     this.screenReaderRestoreBackoff = options.screenReaderBackoff;
     this.rotationRestorer = options.rotation;
     this.rotationRestoreBackoff = options.rotationBackoff;
+    this.clockRestorer = options.clock;
+    this.clockRegistry = options.clockRegistry ?? defaultDeviceClockRestoreRegistry;
     this.injectedIosAppNetworkRuleRestorer = options.iosAppNetworkRuleRestorer;
     this.defaultIosAppNetworkRuleRestorer = options.defaultIosAppNetworkRuleRestorer;
     this.iosAppNetworkLeases = new IosAppNetworkLeases(
@@ -337,6 +385,17 @@ export class SessionDeviceStateRestore {
       );
     },
   };
+  private readonly clockKind: RestoreKindSpec<ClockSessionState> = {
+    queue: this.clockRestores,
+    name: "Clock",
+    timeoutMs: CLOCK_RESTORE_TIMEOUT_MS,
+    mapStartError: (error) => error,
+    prepare: (deviceId, target) => this.prepareClockRestore(deviceId, target),
+  };
+  runClockMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+    return runDeviceStateMutationExclusive(this.clockMutationQueues, sessionId, fn);
+  }
+
   runRotationMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
     return runDeviceStateMutationExclusive(this.rotationMutationQueues, sessionId, fn);
   }
@@ -1232,6 +1291,126 @@ export class SessionDeviceStateRestore {
   ): Promise<void> {
     return this.trackRestoreSetup(this.rotationRestores, "rotation", session, createSetup, () =>
       this.getPendingRotationRestoration(session, null),
+    );
+  }
+
+  /** Use the same setup drain and pending device cleanup as network restoration. */
+  async getPendingClockRestoration(
+    session: Session,
+    pendingSetups: Promise<void> | null,
+  ): Promise<{ pending: Promise<void> | null }> {
+    return this.getPendingRestoration(
+      this.clockRestores,
+      "clock",
+      session,
+      pendingSetups,
+      (deviceId, target) => this.startClockRestoration(deviceId, target),
+      (next, setups) => this.getPendingClockRestoration(next, setups),
+    );
+  }
+
+  private startClockRestoration(
+    deviceId: string,
+    target: PendingRestore<ClockSessionState>,
+  ): Promise<{ pending: Promise<void> | null }> {
+    return this.startRestoration(this.clockKind, deviceId, target);
+  }
+
+  private prepareClockRestore(
+    deviceId: string,
+    target: PendingRestore<ClockSessionState>,
+  ): RestoreRun {
+    const healthTarget = { deviceId, incarnation: this.host.healthIncarnation(deviceId) };
+    const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
+    const signal = this.clockRegistry.signal(deviceId);
+    const generation = this.host.restoreGeneration(deviceId);
+    const restore = () =>
+      this.host.dispatchDeviceRestore(
+        deviceId,
+        (fenceSignal, identitySignal, acknowledge) =>
+          this.clockRegistry.runExclusive(
+            deviceId,
+            async () => {
+              target.controller.signal.throwIfAborted();
+              if (!this.host.restoreIncarnationIsCurrent(healthTarget)) {
+                return;
+              }
+              const dispatchSignal = AbortSignal.any([target.controller.signal, fenceSignal]);
+              identitySignal.throwIfAborted();
+              await this.clockRestorer(device).restore(target.state, dispatchSignal);
+              acknowledge();
+              target.controller.signal.throwIfAborted();
+              this.clockRegistry.restored(deviceId, target.state);
+              target.clear();
+              this.forgetFencedRestore(this.clockRestores.targets, deviceId, target);
+              if (!this.clockRestores.targets.has(deviceId)) {
+                this.host.clearRestoreHealth(healthTarget, "clock");
+              }
+            },
+            undefined,
+            signal,
+          ),
+        generation,
+        4,
+      );
+    return {
+      restore,
+      quarantined: (outcome) => {
+        logger.warn(`Clock restore ${outcome}; quarantining ${device.deviceId}`);
+        if (healthTarget.incarnation === undefined) {
+          logger.warn(
+            `Failed to restore state on ${deviceId} (clock); no health marker could be keyed because the device has no pool incarnation`,
+          );
+        }
+        if (
+          healthTarget.incarnation !== undefined &&
+          this.host.restoreIncarnationIsCurrent(healthTarget) &&
+          !target.removed &&
+          this.clockRestores.targets.get(deviceId)?.has(target.state)
+        ) {
+          this.host.markHealth(deviceId, healthTarget.incarnation, "clock");
+        }
+      },
+      retry: (restoration) => this.retryClockRestore(device.deviceId, target, restoration, restore),
+    };
+  }
+
+  /** Same setup drain, deadline, retry delay and pool quarantine as network restoration.
+   * Clock ownership remains pending beyond the network path's bounded retry batch.
+   */
+  private async retryClockRestore(
+    deviceId: string,
+    target: PendingRestore<ClockSessionState>,
+    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
+    restore: () => Promise<void>,
+  ): Promise<void> {
+    const result = await restoration;
+    if (result.outcome === "restored") {
+      return;
+    }
+    logger.warn(`Failed to restore clock on ${deviceId}`, result.error);
+    while (!target.removed) {
+      await this.host.timer.sleep(NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS);
+      if (target.removed) {
+        return;
+      }
+      try {
+        await restore();
+        return;
+      } catch (error) {
+        logger.warn(`Clock restore retry failed on ${deviceId}; device remains quarantined`, error);
+      }
+    }
+  }
+
+  /** Tracked setup retains this exact session even after a bounded release times out. */
+  trackClockSessionSetup(session: Session, createSetup: () => Promise<void>): Promise<void> {
+    return this.trackRestoreSetup(
+      this.clockRestores,
+      "clock",
+      session,
+      () => createSetup(),
+      () => this.getPendingClockRestoration(session, null),
     );
   }
 }

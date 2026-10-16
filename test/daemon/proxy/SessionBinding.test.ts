@@ -318,7 +318,7 @@ describe("SessionBinding", () => {
     port.holdPreviousBinding("named");
     expect(calls).toEqual([["named"]]);
     expect(port.isHeartbeatKeeperStarted()).toBe(false);
-    proxy["heartbeatKeeperStarted"] = true;
+    proxy["latestBindingKeeper"].started = true;
     expect(port.isHeartbeatKeeperStarted()).toBe(true);
   });
 });

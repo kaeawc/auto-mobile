@@ -15,6 +15,8 @@ preflight:
       user_id: agent-benchmark
       display_name: Agent Benchmark
   launchUri: automobile:playground/demos
+  # DemoIndexScreen's top bar; a redirect to onboarding or login stops the run before Claude.
+  startScreenIncludes: ["Docs Demo Index"]
 claude:
   # The task is tap navigation: deep links (openLink), graph navigation (navigateTo),
   # and plans (executePlan, which can run a nested openLink step) could reach the

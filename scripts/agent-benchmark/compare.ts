@@ -194,7 +194,11 @@ function processChecks(audit: TranscriptAudit, outcome: RunOutcome): CheckResult
  * side, so `EXPECTED_COUNT: 3` does not match `EXPECTED_COUNT: 30`.
  */
 export function containsBounded(haystack: string, needle: string): boolean {
-  return new RegExp(`(?<![A-Za-z0-9])${RegExp.escape(needle)}(?![A-Za-z0-9])`, "i").test(haystack);
+  // Unicode letters and digits bound a match, so 完了 does not match inside 未完了
+  // (and COUNT: 3 not inside COUNT: 30).
+  return new RegExp(`(?<![\\p{L}\\p{N}])${RegExp.escape(needle)}(?![\\p{L}\\p{N}])`, "iu").test(
+    haystack,
+  );
 }
 
 function missingFrom(haystack: string, needles: string[]): string[] {
@@ -202,7 +206,17 @@ function missingFrom(haystack: string, needles: string[]): string[] {
 }
 
 function verifyChecks(audit: TranscriptAudit, outcome: RunOutcome, verify: VerifySpec) {
-  const checks: CheckResult[] = [];
+  // A UI benchmark that never touched the device proved nothing, whatever it answered.
+  const checks: CheckResult[] = [
+    {
+      name: "used the device",
+      passed: audit.mcpToolCalls > 0,
+      detail:
+        audit.mcpToolCalls > 0
+          ? `${audit.mcpToolCalls} auto-mobile tool call(s)`
+          : "no auto-mobile tool calls",
+    },
+  ];
   if (verify.answerIncludes.length > 0) {
     const missing = missingFrom(audit.result?.finalText ?? "", verify.answerIncludes);
     checks.push({

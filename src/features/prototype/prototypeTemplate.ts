@@ -261,6 +261,10 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
     mapObject(node, "navigationIcon", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
     mapList(node, "actions", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
   },
+  textField: (node, path, visit) => {
+    mapObject(node, "trailingIcon", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
+    mapList(node, "onSubmit", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  },
   searchBar: (node, path, visit) => {
     mapField(node, "placeholder", path, "text", visit);
     mapList(node, "trailingActions", path, (entry, entryPath) => mapPart(entry, entryPath, visit));

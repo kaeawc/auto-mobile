@@ -3028,6 +3028,33 @@
               },
               "optional": true
             },
+            "trailingIcon": {
+              "rule": {
+                "kind": "ref",
+                "name": "appBarAction"
+              },
+              "optional": true
+            },
+            "imeAction": {
+              "rule": {
+                "kind": "enum",
+                "values": ["done", "next", "search", "send", "go"]
+              },
+              "optional": true
+            },
+            "onSubmit": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
             "checks": {
               "rule": {
                 "kind": "array",

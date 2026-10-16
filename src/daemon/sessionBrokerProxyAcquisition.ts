@@ -182,42 +182,165 @@ async function statusUntilSettled(
   );
 }
 
+async function releaseUnheldSession(
+  sessionUuid: string,
+  ports: SessionBrokerProxyAcquisitionPorts,
+): Promise<boolean> {
+  try {
+    const released = await ports.releaseSession(sessionUuid);
+    return !isReleaseResult(released, sessionUuid) || released.outcome !== "released";
+  } catch (releaseError) {
+    logger.warn(
+      `[SessionBroker] Releasing unheld session ${sessionUuid} failed: ${errorMessage(releaseError)}`,
+      releaseError,
+    );
+    return true;
+  }
+}
+
+class OwnershipHoldDeadlineError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Session ownership was not established within the remaining ${timeoutMs}ms`);
+    this.name = "OwnershipHoldDeadlineError";
+  }
+}
+
+/**
+ * The hold keeps running after the acquisition settles; it is never abandoned. A late success must
+ * not restore the cancelled grant, so it is released again once it lands (#12770).
+ */
+function releaseAfterLateHold(
+  hold: Promise<void>,
+  sessionUuid: string,
+  ports: SessionBrokerProxyAcquisitionPorts,
+): void {
+  void hold.then(
+    async () => {
+      logger.warn(
+        `[SessionBroker] Ownership of ${sessionUuid} was established after acquisition ended; releasing it.`,
+      );
+      await releaseUnheldSession(sessionUuid, ports);
+    },
+    (error: unknown) => {
+      // The grant was already released when acquisition ended; a late hold failure holds nothing.
+      logger.debug(
+        `[SessionBroker] Late hold of ${sessionUuid} failed after acquisition ended: ${errorMessage(error)}`,
+      );
+    },
+  );
+}
+
+type AcquisitionEnd = "cancelled" | "timeout";
+
+function acquisitionEnded(
+  ports: SessionBrokerProxyAcquisitionPorts,
+  deadlineMs: number,
+  signal: AbortSignal | undefined,
+): AcquisitionEnd | undefined {
+  if (signal?.aborted) {
+    return "cancelled";
+  }
+  return ports.timer.now() >= deadlineMs ? "timeout" : undefined;
+}
+
+async function abandonHeldReadyResult(
+  result: SessionBrokerResult,
+  late: Promise<void> | undefined,
+  ports: SessionBrokerProxyAcquisitionPorts,
+  end: AcquisitionEnd,
+): Promise<SessionBrokerResult> {
+  const sessionUuid = result.sessionUuid!;
+  if (late) {
+    releaseAfterLateHold(late, sessionUuid, ports);
+  }
+  const cleanupPending = await releaseUnheldSession(sessionUuid, ports);
+  return failedResult(
+    { requestId: result.requestId },
+    end === "cancelled"
+      ? brokerFailure(
+          "cancelled",
+          "The proxy shut down before session ownership was established.",
+          true,
+        )
+      : brokerFailure(
+          "timeout",
+          "Session preparation did not finish within its deadline: ownership was not established.",
+          true,
+        ),
+    cleanupPending,
+  );
+}
+
+async function failedHoldResult(
+  result: SessionBrokerResult,
+  ports: SessionBrokerProxyAcquisitionPorts,
+  error: unknown,
+): Promise<SessionBrokerResult> {
+  const sessionUuid = result.sessionUuid!;
+  logger.warn(
+    `[SessionBroker] Holding session ${sessionUuid} failed: ${errorMessage(error)}`,
+    error,
+  );
+  return failedResult(
+    { requestId: result.requestId },
+    brokerFailure(
+      "session_hold_failed",
+      `The prepared session could not be held: ${errorMessage(error)}`,
+      true,
+    ),
+    await releaseUnheldSession(sessionUuid, ports),
+  );
+}
+
+/**
+ * Final ownership establishment shares the acquisition's one deadline and cancellation: a hold
+ * still pending when either fires is fenced, its grant released, and its late answer cleaned up.
+ */
 async function holdReadyResult(
   result: SessionBrokerResult,
   ports: SessionBrokerProxyAcquisitionPorts,
+  deadlineMs: number,
+  signal: AbortSignal | undefined,
 ): Promise<SessionBrokerResult> {
   if (result.outcome !== "ready") {
     return result;
   }
   const sessionUuid = result.sessionUuid!;
+  const endedBeforeHold = acquisitionEnded(ports, deadlineMs, signal);
+  if (endedBeforeHold) {
+    // Never start ownership for a grant whose acquisition already ended; release it instead.
+    return abandonHeldReadyResult(result, undefined, ports, endedBeforeHold);
+  }
+  const holdTimeoutMs = deadlineMs - ports.timer.now();
+  const hold = ports.holdSession(result.requestId, sessionUuid);
   try {
-    await ports.holdSession(result.requestId, sessionUuid);
-    return result;
+    await raceWithDeadline(hold, {
+      timer: ports.timer,
+      timeoutMs: holdTimeoutMs,
+      signal,
+      label: `session broker ownership hold for ${sessionUuid}`,
+      timeoutError: () => new OwnershipHoldDeadlineError(holdTimeoutMs),
+    });
   } catch (error) {
+    const ended = signal?.aborted
+      ? "cancelled"
+      : error instanceof OwnershipHoldDeadlineError
+        ? "timeout"
+        : undefined;
+    if (!ended) {
+      return failedHoldResult(result, ports, error);
+    }
     logger.warn(
-      `[SessionBroker] Holding session ${sessionUuid} failed: ${errorMessage(error)}`,
+      `[SessionBroker] Holding session ${sessionUuid} did not finish before acquisition ended: ${errorMessage(error)}`,
       error,
     );
-    let cleanupPending = true;
-    try {
-      const released = await ports.releaseSession(sessionUuid);
-      cleanupPending = !isReleaseResult(released, sessionUuid) || released.outcome !== "released";
-    } catch (releaseError) {
-      logger.warn(
-        `[SessionBroker] Releasing unheld session ${sessionUuid} failed: ${errorMessage(releaseError)}`,
-        releaseError,
-      );
-    }
-    return failedResult(
-      { requestId: result.requestId },
-      brokerFailure(
-        "session_hold_failed",
-        `The prepared session could not be held: ${errorMessage(error)}`,
-        true,
-      ),
-      cleanupPending,
-    );
+    return abandonHeldReadyResult(result, hold, ports, ended);
   }
+  // Fence publication after the awaited hold: cancellation may land in the same turn it resolves.
+  const endedDuringHold = acquisitionEnded(ports, deadlineMs, signal);
+  return endedDuringHold
+    ? abandonHeldReadyResult(result, undefined, ports, endedDuringHold)
+    : result;
 }
 
 async function daemonSupportsRequestedContract(
@@ -340,7 +463,7 @@ export async function acquireSessionThroughDaemon(
       return timeoutFailure(config, new Error("No preparation budget remains"));
     }
     const result = await prepareThenRecover(config, ports, prepareCallBudgetMs, deadlineMs, signal);
-    return await holdReadyResult(result, ports);
+    return await holdReadyResult(result, ports, deadlineMs, signal);
   } catch (error) {
     const result = acquisitionFailure(config, error, signal);
     logger.warn(`[SessionBroker] Acquisition failed (${result.failure?.code})`, error);

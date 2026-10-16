@@ -106,9 +106,10 @@ test("captured windowed and headless qemu rows prove identity; adb and helpers a
       f.options,
     ),
   ).toMatchObject({ kind: "match", pid: 83205, port: 5554 });
-  expect((await f.stopper.describeSerial(target.serial, f.options)).map(({ pid }) => pid)).toEqual([
-    75134,
-  ]);
+  expect(await f.stopper.describeSerial(target.serial, f.options)).toMatchObject({
+    kind: "read",
+    candidates: [{ pid: 75134 }],
+  });
   expect(f.table.calls).toHaveLength(3);
 });
 
@@ -359,7 +360,10 @@ for (const command of [
     const decoy = { ...rows[0], pid: 90001, command };
     f.table.rows = [decoy];
     expect(await f.stopper.identify(target, f.options)).toEqual({ kind: "absent" });
-    expect(await f.stopper.describeSerial(target.serial, f.options)).toEqual([]);
+    expect(await f.stopper.describeSerial(target.serial, f.options)).toEqual({
+      kind: "read",
+      candidates: [],
+    });
     expect(await f.stopper.stop(target, f.options)).toEqual({
       kind: "unidentified",
       identity: { kind: "absent" },
@@ -381,7 +385,10 @@ for (const pid of [0, 1, 90002, -1, 2.5, Number.NaN]) {
       ownPid: 90002,
     });
     expect(await stopper.identify(target, f.options)).toEqual({ kind: "absent" });
-    expect(await stopper.describeSerial(target.serial, f.options)).toEqual([]);
+    expect(await stopper.describeSerial(target.serial, f.options)).toEqual({
+      kind: "read",
+      candidates: [],
+    });
     expect(await stopper.stop(target, f.options)).toEqual({
       kind: "unidentified",
       identity: { kind: "absent" },
@@ -558,4 +565,21 @@ test("failed KILL retains the successful TERM dispatch", async () => {
     signalled: true,
   });
   expect(f.signaler.signals).toHaveLength(2);
+});
+
+test("describeSerial reports an unreadable table instead of an empty read", async () => {
+  const f = fixture();
+  f.table.results = [{ error: "ps exited 1" }];
+  expect(await f.stopper.describeSerial(target.serial, f.options)).toEqual({
+    kind: "unreadable",
+    detail: "ps exited 1",
+  });
+});
+
+test("describeSerial reports an unreadable table when the deadline is already spent", async () => {
+  const f = fixture();
+  const spent = { ...f.options, deadlineMs: f.timer.now() };
+  expect(await f.stopper.describeSerial(target.serial, spent)).toMatchObject({
+    kind: "unreadable",
+  });
 });

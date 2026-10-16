@@ -278,6 +278,19 @@ import {
   mcpRequestFailureDetails,
   requestFailureCause,
 } from "./socketServer/errorFrames";
+import {
+  clearPooledIdleTimer,
+  closePooledClient,
+  discardTimedOutReconnect,
+  getPooledClient,
+  resetPooledClient,
+  resetPooledClientIfCurrent,
+  runWithActivePooledClient,
+  schedulePooledIdleClose,
+  type LoopbackClientPool,
+  type McpClientFactory,
+} from "./socketServer/loopbackMcpClientPool";
+import { runKeyedSerial, type McpForwardChainWait } from "./socketServer/keyedSerialQueue";
 import { CONTROL_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
 import {
   SessionReleasedDuringCallError,
@@ -368,8 +381,6 @@ function snapshotDaemonOptions(options: DaemonOptions | undefined): DaemonOption
   return structuredClone(options ?? {});
 }
 
-const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
-const MCP_SESSION_TERMINATION_TIMEOUT_MS = 2_000;
 const DEVICE_ACQUISITION_TOOL_NAMES = new Set([
   "getAndroid",
   "getApple",
@@ -615,11 +626,7 @@ interface PendingSocketRequest {
  * by name (a name-based patch silently no-ops if the internal creator is renamed,
  * leaving forwarding dead but the suite green).
  */
-export type McpClientFactory = (
-  boundSessionUuid?: string,
-  toolSelectionProfileUuid?: string,
-  releasedSessionUuid?: string,
-) => Promise<Client>;
+export type { McpClientFactory };
 
 /**
  * The narrow append-text surface `input/typeText mode:"append"` needs.
@@ -667,18 +674,6 @@ interface BoundMcpClient {
   sessionUuid?: string;
   toolSelectionProfileUuid?: string;
   requiresLiveDaemonSession: boolean;
-}
-
-/**
- * Bounds how long a forward may park on another forward's execution-key chain. Without it a
- * waiter is only timed out after it acquires the key, so a stuck holder parks it (and its
- * socket's admission queue) forever (issue #6388).
- */
-interface McpForwardChainWait {
-  /** Milliseconds this waiter may still spend waiting, read at each acquisition. */
-  remainingMs: () => number;
-  /** Error to reject with once that budget is spent. */
-  timeoutError: (executionKey: string) => Error;
 }
 
 /** One keyed attempt either ran the forward or found its route moved to another key. */
@@ -2744,90 +2739,23 @@ export class UnixSocketServer {
     idleCloseKey?: string,
     chainWait?: McpForwardChainWait,
   ): Promise<T> {
-    if (idleCloseKey) {
-      const idleCloseKeys = this.mcpForwardIdleCloseKeys.get(executionKey) ?? new Set<string>();
-      idleCloseKeys.add(idleCloseKey);
-      this.mcpForwardIdleCloseKeys.set(executionKey, idleCloseKeys);
-    }
-    const heldTail = this.mcpForwardTails.get(executionKey);
-    const previous = heldTail ?? Promise.resolve();
-    // Only a contended acquisition needs a bound; an idle key is taken immediately.
-    const acquired =
-      heldTail && chainWait
-        ? this.waitForMcpForwardChain(executionKey, heldTail, chainWait)
-        : previous;
-    const run = acquired.then(() => {
-      if (idleCloseKey) {
-        this.clearMcpClientIdleTimer(idleCloseKey);
-      }
-      return fn();
-    });
-    // The tail also waits for `previous`: a waiter that gave up must not let the next
-    // waiter run concurrently with the forward still holding this key.
-    const tail = Promise.all([
-      previous,
-      run.then(
-        () => undefined,
-        () => undefined,
-      ),
-    ]).then(() => undefined);
-    this.mcpForwardTails.set(executionKey, tail);
-    void tail.finally(() => {
-      if (this.mcpForwardTails.get(executionKey) === tail) {
-        this.mcpForwardTails.delete(executionKey);
-        const idleCloseKeys = this.mcpForwardIdleCloseKeys.get(executionKey);
-        this.mcpForwardIdleCloseKeys.delete(executionKey);
-        for (const key of idleCloseKeys ?? []) {
-          this.scheduleMcpClientIdleClose(key);
-        }
-      }
-    });
-    return run;
-  }
-
-  private async waitForMcpForwardChain(
-    executionKey: string,
-    heldTail: Promise<void>,
-    chainWait: McpForwardChainWait,
-  ): Promise<void> {
-    try {
-      await raceWithDeadline(heldTail, {
+    return runKeyedSerial(
+      {
+        tails: this.mcpForwardTails,
+        idleCloseKeys: this.mcpForwardIdleCloseKeys,
         timer: this.timer,
-        timeoutMs: Math.max(0, chainWait.remainingMs()),
-        label: `MCP forward wait for ${executionKey}`,
-      });
-    } catch (error) {
-      // Tails never reject, so only the wait bound lands here (issue #6388).
-      logger.warn(
-        `[McpForward] chain wait expired executionKey=${executionKey}: ${errorMessage(error)}`,
-      );
-      throw chainWait.timeoutError(executionKey);
-    }
+        onAcquired: (key) => this.clearMcpClientIdleTimer(key),
+        onDrained: (key) => this.scheduleMcpClientIdleClose(key),
+      },
+      executionKey,
+      fn,
+      idleCloseKey,
+      chainWait,
+    );
   }
 
   private async runWithActiveMcpClient<T>(clientKey: string, fn: () => Promise<T>): Promise<T> {
-    this.clearMcpClientIdleTimer(clientKey);
-    this.activeMcpClientForwardCounts.set(
-      clientKey,
-      (this.activeMcpClientForwardCounts.get(clientKey) ?? 0) + 1,
-    );
-    try {
-      return await fn();
-    } finally {
-      const remainingForClient = (this.activeMcpClientForwardCounts.get(clientKey) ?? 1) - 1;
-      if (remainingForClient === 0) {
-        this.activeMcpClientForwardCounts.delete(clientKey);
-        // Re-arm the idle close around the whole active-client wrapper. A forward
-        // can throw before its own cleanup runs (e.g. the pre-forward queue
-        // timeout deadline throws before the forward-body finally), and this
-        // wrapper cleared the client's idle timer on entry. Without this re-arm
-        // the inactive transport would stay cached until another request or
-        // daemon shutdown (issue #4610).
-        this.scheduleMcpClientIdleClose(clientKey);
-      } else {
-        this.activeMcpClientForwardCounts.set(clientKey, remainingForClient);
-      }
-    }
+    return await runWithActivePooledClient(this.loopbackPool(), clientKey, fn);
   }
 
   /**
@@ -8585,82 +8513,21 @@ export class UnixSocketServer {
     toolSelectionProfileUuid?: string,
     releasedSessionUuid?: string,
   ): Promise<Client> {
-    this.clearMcpClientIdleTimer(key);
-
-    const existingClient = this.mcpClients.get(key);
-    if (existingClient) {
-      return existingClient;
-    }
-
-    const existingPromise = this.mcpClientPromises.get(key);
-    if (existingPromise) {
-      return existingPromise;
-    }
-
-    const generation = this.lifecycleGeneration;
-    const clientPromise = this.mcpClientFactory(
+    return await getPooledClient(
+      this.loopbackPool(),
+      key,
       boundSessionUuid,
       toolSelectionProfileUuid,
       releasedSessionUuid,
-    )
-      .then(async (client) => {
-        if (
-          this.closing ||
-          generation !== this.lifecycleGeneration ||
-          this.mcpClientPromises.get(key) !== clientPromise
-        ) {
-          await this.closeMcpClient(key, client);
-          throw new Error("MCP client creation was superseded");
-        }
-        this.mcpClients.set(key, client);
-        this.mcpClientPromises.delete(key);
-        return client;
-      })
-      .catch((error) => {
-        if (this.mcpClientPromises.get(key) === clientPromise) {
-          this.mcpClientPromises.delete(key);
-        }
-        throw error;
-      });
-
-    this.mcpClientPromises.set(key, clientPromise);
-    return clientPromise;
+    );
   }
 
   private async resetMcpClient(key: string, closeMode: "wait" | "detach" = "wait"): Promise<void> {
-    this.clearMcpClientIdleTimer(key);
-    const existingClient = this.mcpClients.get(key);
-    this.mcpClients.delete(key);
-    this.mcpClientPromises.delete(key);
-    if (!existingClient) {
-      return;
-    }
-    const close = Promise.resolve()
-      .then(() => this.closeMcpClient(key, existingClient))
-      .catch((error) => {
-        logger.warn(`Error closing MCP client for key ${key}:`, error);
-      });
-    if (closeMode === "wait") {
-      await close;
-    }
+    await resetPooledClient(this.loopbackPool(), key, closeMode);
   }
 
   private async closeMcpClient(key: string, client: Client): Promise<void> {
-    const transport = client.transport;
-    if (transport instanceof StreamableHTTPClientTransport && transport.sessionId) {
-      try {
-        await raceWithDeadline(transport.terminateSession(), {
-          timer: this.timer,
-          timeoutMs: MCP_SESSION_TERMINATION_TIMEOUT_MS,
-          label: "MCP session termination",
-          timeoutError: () => new Error("MCP session termination timed out"),
-        });
-      } catch (error) {
-        // A failed DELETE is best-effort; closing the local client still releases its resources.
-        logger.debug(`Could not terminate MCP session for key ${key}: ${error}`);
-      }
-    }
-    await client.close();
+    await closePooledClient(this.timer, key, client);
   }
 
   private async resetMcpClientIfCurrent(
@@ -8668,51 +8535,44 @@ export class UnixSocketServer {
     expectedClient: Client,
     closeMode: "wait" | "detach" = "wait",
   ): Promise<boolean> {
-    if (this.mcpClients.get(key) !== expectedClient) {
-      return false;
-    }
-    await this.resetMcpClient(key, closeMode);
-    return true;
+    return await resetPooledClientIfCurrent(this.loopbackPool(), key, expectedClient, closeMode);
   }
 
-  // Clean up after a reconnect that blew its deadline without clobbering an
-  // unrelated request. Two teardown paths, each fenced to what this wait owns:
-  //   1. If our creation is still the pending one, drop it so a hung factory does
-  //      not leak; a resolved or superseded creation has already cleared itself.
-  //   2. When our own creation does resolve, close that specific client only while
-  //      it remains the cached one — never a replacement another request installed
-  //      under the same key (issue #5499). Fire-and-forget: the connection may
-  //      never settle, so the request must not block on it.
   private discardTimedOutMcpReconnect(
     key: string,
     connection: Promise<Client>,
     pendingCreation: Promise<Client> | undefined,
   ): void {
-    if (pendingCreation && this.mcpClientPromises.get(key) === pendingCreation) {
-      this.mcpClientPromises.delete(key);
-    }
-    void connection
-      .then((client) => this.resetMcpClientIfCurrent(key, client, "detach"))
-      .catch(() => {
-        // Creation was superseded or failed; nothing of ours remains to discard.
-      });
+    discardTimedOutReconnect(this.loopbackPool(), key, connection, pendingCreation);
   }
 
   private scheduleMcpClientIdleClose(key: string): void {
-    this.clearMcpClientIdleTimer(key);
-    const timer = this.timer.setTimeout(() => {
-      void this.closeIdleMcpClient(key);
-    }, MCP_CLIENT_IDLE_CLOSE_MS);
-    this.mcpClientIdleTimers.set(key, timer);
+    schedulePooledIdleClose(this.loopbackPool(), key);
   }
 
   private clearMcpClientIdleTimer(key: string): void {
-    const timer = this.mcpClientIdleTimers.get(key);
-    if (!timer) {
-      return;
-    }
-    this.timer.clearTimeout(timer);
-    this.mcpClientIdleTimers.delete(key);
+    clearPooledIdleTimer(this.loopbackPool(), key);
+  }
+
+  /** The loopback client cache's state and hooks; cross-calls re-enter through this server. */
+  private loopbackPool(): LoopbackClientPool {
+    return {
+      clients: this.mcpClients,
+      promises: this.mcpClientPromises,
+      idleTimers: this.mcpClientIdleTimers,
+      activeForwardCounts: this.activeMcpClientForwardCounts,
+      timer: this.timer,
+      factory: () => this.mcpClientFactory,
+      generation: () => this.lifecycleGeneration,
+      isSuperseded: (generation) => this.closing || generation !== this.lifecycleGeneration,
+      closeClient: (key, client) => this.closeMcpClient(key, client),
+      clearIdleTimer: (key) => this.clearMcpClientIdleTimer(key),
+      scheduleIdleClose: (key) => this.scheduleMcpClientIdleClose(key),
+      resetClient: (key, closeMode) => this.resetMcpClient(key, closeMode),
+      resetClientIfCurrent: (key, client, closeMode) =>
+        this.resetMcpClientIfCurrent(key, client, closeMode),
+      onIdle: (key) => this.closeIdleMcpClient(key),
+    };
   }
 
   private async closeIdleMcpClient(key: string): Promise<void> {

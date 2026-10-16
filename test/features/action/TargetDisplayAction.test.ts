@@ -322,14 +322,12 @@ describe("explicit action display", () => {
             action instanceof TapOnElement
               ? action.execute(
                   { action: "tap", text: "Notifications", display: "external" },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 )
               : action instanceof TapAtCoordinate
                 ? action.execute(
                     { x: 40, y: 50, display: "external" },
-                    undefined,
-                    controller.signal,
+                    { signal: controller.signal },
                   )
                 : action instanceof SwipeOn
                   ? action.execute(
@@ -1709,14 +1707,12 @@ describe("CtrlProxy display-targeted action routing", () => {
           action instanceof TapOnElement
             ? await action.execute(
                 { text: "Notifications", display: "external" },
-                undefined,
-                controller.signal,
+                { signal: controller.signal },
               )
             : action instanceof TapAtCoordinate
               ? await action.execute(
                   { x: 40, y: 50, display: "external" },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 )
               : action instanceof SwipeOn
                 ? await action.execute(
@@ -1841,8 +1837,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                     display: panel,
                     action: gesture === "longPressAt" ? "longPress" : "tap",
                   },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 );
               } else if (
                 gesture === "tapOn" ||
@@ -1862,8 +1857,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                           ? "doubleTap"
                           : "tap",
                   },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 );
               } else if (gesture === "swipe") {
                 const action = new SwipeOn(android, executor as unknown as AdbClient, {
@@ -2036,16 +2030,14 @@ describe("display routing capability lookup fences", () => {
             action.observeScreen = observe;
             pending = action.execute(
               { x: 40, y: 50, display: "external" },
-              undefined,
-              controller.signal,
+              { signal: controller.signal },
             );
           } else if (gesture === "tapOn") {
             const action = new TapOnElement(android, executor as unknown as AdbClient, deps);
             action.observeScreen = observe;
             pending = action.execute(
               { text: "Settings", display: "external" },
-              undefined,
-              controller.signal,
+              { signal: controller.signal },
             );
           } else if (gesture === "swipe") {
             const action = new SwipeOn(android, executor as unknown as AdbClient, {
@@ -2198,9 +2190,9 @@ describe("display gesture dispatch boundary race", () => {
           const display = kind === "defaultTapAt" ? undefined : "external";
           const pending = (
             action instanceof TapOnElement
-              ? action.execute({ text: "Settings", display }, undefined, controller.signal)
+              ? action.execute({ text: "Settings", display }, { signal: controller.signal })
               : action instanceof TapAtCoordinate
-                ? action.execute({ x: 40, y: 50, display }, undefined, controller.signal)
+                ? action.execute({ x: 40, y: 50, display }, { signal: controller.signal })
                 : action instanceof SwipeOn
                   ? action.execute({ direction: "up", display }, { signal: controller.signal })
                   : action instanceof DragAndDrop
@@ -2535,13 +2527,11 @@ describe("selected-display double tap delivery", () => {
             action instanceof TapOnElement
               ? action.execute(
                   { text: "Settings", action: "doubleTap", display: "external" },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 )
               : action.execute(
                   { action: "doubleTap", display: "external" },
-                  undefined,
-                  controller.signal,
+                  { signal: controller.signal },
                 );
           const partial =
             failure === "abort in gap" ||

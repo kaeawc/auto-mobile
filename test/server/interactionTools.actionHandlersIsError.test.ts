@@ -48,7 +48,7 @@ import type {
   SelectAllTextResult,
   TapOnElementResult,
 } from "../../src/models";
-import type { RotateCall } from "../../src/features/action/ActionCall";
+import type { ActionCall, RotateCall } from "../../src/features/action/ActionCall";
 
 const test = warmedTests(() => {
   resetTapAnyElementFactory();
@@ -159,16 +159,16 @@ describe("tapAnyHandler (registered handler wiring)", () => {
   test.each([undefined, 123456])(
     "forwards transport deadline %s through internal context",
     async (deadline) => {
-      let received: { requestDeadlineMs?: number } | undefined;
+      let received: number | undefined;
       setTapAnyElementFactory(() => ({
-        execute: async (_options, _progress, _signal, request) => {
-          received = request;
+        execute: async (_options, call) => {
+          received = (call as ActionCall | undefined)?.deadlineMs;
           return fakeResult({ success: true });
         },
       }));
       const internalArgs = { ...args, __mcpRequestDeadlineMs: deadline };
       await tapAnyHandler(fakeDevice, internalArgs);
-      expect(received).toEqual({ requestDeadlineMs: deadline });
+      expect(received).toBe(deadline);
     },
   );
 

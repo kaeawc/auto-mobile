@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   resolveActionCall,
+  deadlineRequest,
   resolveActionCallWithPerf,
+  resolveDeadlineActionCall,
+  resolveTapAtCall,
+  resolveTapOnCall,
   resolveRotateCall,
 } from "../../../src/features/action/ActionCall";
 
@@ -50,5 +54,40 @@ describe("resolveActionCallWithPerf", () => {
   test("returns the call context unchanged, carrying its own perf", () => {
     const call = { perf: new NoOpPerformanceTracker() };
     expect(resolveActionCallWithPerf(call)).toBe(call);
+  });
+});
+
+describe("tap call resolvers", () => {
+  test("tapOn maps the positional recovery and request deadline onto the call", () => {
+    const progress = async () => {};
+    const signal = new AbortController().signal;
+    const recovery = { throwOnKeyboardOcclusion: true };
+    expect(resolveTapOnCall(progress, signal, recovery, { requestDeadlineMs: 99 })).toEqual({
+      progress,
+      signal,
+      recovery,
+      deadlineMs: 99,
+    });
+    expect(resolveTapOnCall(undefined, signal).deadlineMs).toBeUndefined();
+  });
+
+  test("tapAny maps the positional request deadline onto the call", () => {
+    expect(resolveDeadlineActionCall(undefined, undefined, { requestDeadlineMs: 7 })).toEqual({
+      progress: undefined,
+      signal: undefined,
+      deadlineMs: 7,
+    });
+  });
+
+  test("tapAt maps the positional plan context onto the call", () => {
+    const planContext = { step: 1 };
+    expect(resolveTapAtCall(undefined, undefined, planContext).planContext).toBe(planContext);
+    const call = { planContext };
+    expect(resolveTapAtCall(call)).toBe(call);
+  });
+
+  test("deadlineRequest only builds the legacy carrier when a deadline exists", () => {
+    expect(deadlineRequest(undefined)).toBeUndefined();
+    expect(deadlineRequest(5)).toEqual({ requestDeadlineMs: 5 });
   });
 });

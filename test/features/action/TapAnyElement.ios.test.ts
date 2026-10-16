@@ -114,9 +114,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       const activate = spyOn(fakeIosClient, "requestVoiceOverActivate");
       const result = await tapAny.execute(
         { action: "longPress", duration: 17000 },
-        undefined,
-        undefined,
-        { requestDeadlineMs: fakeTimer.now() + 120000 },
+        { deadlineMs: fakeTimer.now() + 120000 },
       );
       expect(result.success).toBe(true);
       if (voiceOver) {
@@ -162,9 +160,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       const interaction = spyOn(tapAny, "observedInteraction");
       const result = await tapAny.execute(
         { action: "longPress", duration, display: "1" },
-        undefined,
-        undefined,
-        { requestDeadlineMs: fakeTimer.now() + remaining },
+        { deadlineMs: fakeTimer.now() + remaining },
       );
       expect(result.success).toBe(false);
       expect(result.action).toBe("longPress");
@@ -345,8 +341,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       try {
         const result = await tapAny.execute(
           { action: "longPress", duration: 1500 },
-          undefined,
-          controller.signal,
+          { signal: controller.signal },
         );
         expect(result.success).toBe(false);
         expect(result.error).toContain("press may still be held on the device for up to 1500 ms");
@@ -424,7 +419,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const tapSpy = spyOn(fakeIosClient, "requestTapCoordinates");
     const controller = new AbortController();
 
-    const result = await tapAny.execute({ action: "tap" }, undefined, controller.signal);
+    const result = await tapAny.execute({ action: "tap" }, { signal: controller.signal });
 
     expect(result.success).toBe(true);
     const [, , , , , , signalArg] = tapSpy.mock.calls[0] ?? [];
@@ -435,7 +430,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const probeSpy = spyOn(fakeVoiceOverDetector, "isVoiceOverActiveOrUnknown");
     const controller = new AbortController();
 
-    await tapAny.execute({ action: "tap" }, undefined, controller.signal);
+    await tapAny.execute({ action: "tap" }, { signal: controller.signal });
 
     const [, , , , signalArg] = probeSpy.mock.calls[0] ?? [];
     expect(signalArg).toBe(controller.signal);
@@ -790,7 +785,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       const actionSpy = spyOn(fakeIosClient, "requestAction");
       const controller = new AbortController();
 
-      await tapAny.execute({ action: "tap" }, undefined, controller.signal);
+      await tapAny.execute({ action: "tap" }, { signal: controller.signal });
 
       const options = actionSpy.mock.calls[0]?.[5];
       expect(options?.abortSignal).toBe(controller.signal);

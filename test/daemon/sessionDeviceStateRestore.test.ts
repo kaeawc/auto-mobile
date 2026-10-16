@@ -3,9 +3,11 @@ import {
   SessionDeviceStateRestore,
   type SessionDeviceStateRestoreHost,
 } from "../../src/daemon/sessionDeviceStateRestore";
-import type { Session } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BackoffPolicy } from "../../src/utils/Backoff";
 import { logger } from "../../src/utils/logger";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const flush = async () => {
@@ -14,7 +16,7 @@ const flush = async () => {
   }
 };
 
-function create(restoreResult: (call: number) => Promise<void>) {
+async function create(restoreResult: (call: number) => Promise<void>) {
   const timer = new FakeTimer();
   const calls: Array<{ deviceId: string; previousEnabled: boolean }> = [];
   const tracked: string[] = [];
@@ -40,16 +42,18 @@ function create(restoreResult: (call: number) => Promise<void>) {
     }),
     screenReaderBackoff: backoff,
   });
-  const session = {
-    sessionId: "s1",
-    assignedDevice: "emulator-5554",
-    cacheData: { screenReader: { platform: "android", previousEnabled: false } },
-  } as unknown as Session;
+  // A real Session (from a manager used only as a factory) keeps the fixture typed.
+  const factory = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
+  factory.stopCleanupTimer();
+  const session = await factory.createSession("s1", "emulator-5554", "android");
+  factory.setScreenReader(session, { platform: "android", previousEnabled: false });
   return { timer, restore, calls, tracked, session };
 }
 
 test("a successful screen-reader restore clears the slot and leaves no pending work", async () => {
-  const h = create(async () => {});
+  const h = await create(async () => {});
   const { pending } = await h.restore.getPendingScreenReaderRestoration(h.session, null);
   expect(pending).toBeNull();
   expect(h.calls).toEqual([{ deviceId: "emulator-5554", previousEnabled: false }]);
@@ -59,7 +63,7 @@ test("a successful screen-reader restore clears the slot and leaves no pending w
 
 test("a concurrent ask for the same baseline joins the one restore", async () => {
   const gate = Promise.withResolvers<void>();
-  const h = create(() => gate.promise);
+  const h = await create(() => gate.promise);
   const first = h.restore.getPendingScreenReaderRestoration(h.session, null);
   const second = h.restore.getPendingScreenReaderRestoration(h.session, null);
   await flush();
@@ -72,7 +76,7 @@ test("a concurrent ask for the same baseline joins the one restore", async () =>
 test("a failing screen-reader restore retries twice, then abandons and remembers the state", async () => {
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
-    const h = create(() => Promise.reject(new Error("toggle failed")));
+    const h = await create(() => Promise.reject(new Error("toggle failed")));
     const { pending } = await h.restore.getPendingScreenReaderRestoration(h.session, null);
     expect(pending).not.toBeNull();
     for (let i = 0; i < 2; i++) {
@@ -92,8 +96,8 @@ test("a failing screen-reader restore retries twice, then abandons and remembers
   }
 });
 
-test("retiring a device forgets its abandoned screen-reader state and bumps the generation", () => {
-  const h = create(async () => {});
+test("retiring a device forgets its abandoned screen-reader state and bumps the generation", async () => {
+  const h = await create(async () => {});
   h.restore.abandonedScreenReaders.set("emulator-5554", {
     platform: "android",
     previousEnabled: true,

@@ -218,15 +218,18 @@ the baseline itself, and the requested model. If the prompt, preflight, tool per
 patterns, or timeout change, the report flags that the baseline measured a different task.
 It also records `baseline.deviceFingerprint` (SDK level, model, locale, and effective screen
 size and density, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
-tool handling), `baseline.serverBuild` (a SHA-256 prefix over the built `dist/` the run used: the
-bundle plus the schemas and vendor tools it loads at runtime, together with `bun.lock` for the
-image libraries the build leaves external, so a stale build after switching commits is flagged
-rather than silently measured), and
+tool handling), `baseline.serverBuild` (a SHA-256 prefix over what executes and scores the run: the
+built `dist/` with the schemas and vendor tools it loads at runtime, `bun.lock` for the image
+libraries the build leaves external, `package.json`, the harness sources under
+`scripts/agent-benchmark/`, and the Bun version. A stale build or changed scoring code is
+flagged rather than silently measured. The git commit is deliberately left out, since every
+unrelated commit would change it), and
 `baseline.observedModel`, the model Claude reported running. Suites without
 `claude.model` use whatever model your environment selects, so a run on a different model is
 flagged too. A fingerprint that could not be read (`unknown`) never counts as a match. If the
-device or app build fingerprint is unknown, the run writes no `baseline.yml` at all, because a
-baseline missing them could never flag a later run on a different device or build.
+device, app build, or Claude Code version is unknown, the run writes no `baseline.yml` at all, because a
+baseline missing them could never flag a later run on a different device, build, or CLI. When
+`claude --version` fails (for example behind a wrapper), the version the stream reports is used.
 
 Suites have no free-form Claude flags. Any flag could undo run isolation (`--settings`,
 `--resume`, `--plugin-dir`), so each supported option is its own typed `claude` field.

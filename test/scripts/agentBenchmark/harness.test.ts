@@ -157,7 +157,7 @@ describe("agent benchmark harness", () => {
     expect(result.claude).toEqual({
       requestedModel: "suite-model",
       observedModel: "claude-test-model",
-      version: "2.1.301 (Claude Code)",
+      version: "2.1.301",
     });
 
     const [launch] = launches;
@@ -288,7 +288,8 @@ describe("agent benchmark harness", () => {
       throw new Error("spawn claude ENOENT");
     });
     const result = await runSuite(loadedSuite(), options, deps);
-    expect(result.claude.version).toBeUndefined();
+    // The probe failed, so the version comes from the stream's init event instead.
+    expect(result.claude.version).toBe("2.1.301");
     expect(logs).toContain("private daemon stop exited 3: no daemon");
     expect(logs).toContain("claude --version failed: spawn claude ENOENT");
   });
@@ -564,6 +565,29 @@ describe("agent benchmark harness", () => {
     expect(fs.exists(artifact("baseline.yml"))).toBe(false);
     expect(logs).toContain(
       "[demo] passed, but the device fingerprint is unknown; no baseline.yml written",
+    );
+  });
+
+  test("a failed --version probe falls back to the version the stream reports", async () => {
+    const { fs, runner, deps, options } = setup(PASSING);
+    runner.on("claude", () => ({ exitCode: 1, stderr: "wrapper: unknown flag" }));
+    const result = await runSuite(loadedSuite(), options, deps);
+    expect(result.claude.version).toBe("2.1.301");
+    expect(fs.readFile(artifact("baseline.yml"))).toContain("claudeCodeVersion: 2.1.301");
+  });
+
+  test("a pass with no Claude Code version from either source writes no baseline", async () => {
+    const noVersion = PASSING.split("\n")
+      .map((line) => line.replace(/"claude_code_version":"[^"]*",?/, ""))
+      .join("\n");
+    const { fs, logs, runner, deps, options } = setup(noVersion);
+    runner.on("claude", () => ({ exitCode: 1 }));
+    const result = await runSuite(loadedSuite(), options, deps);
+    expect(result.comparison.verdict).toBe("passed");
+    expect(result.claude.version).toBeUndefined();
+    expect(fs.exists(artifact("baseline.yml"))).toBe(false);
+    expect(logs).toContain(
+      "[demo] passed, but the Claude Code version fingerprint is unknown; no baseline.yml written",
     );
   });
 

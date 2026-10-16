@@ -482,6 +482,9 @@ export async function runPreflight(
  */
 export async function captureScreen(runner: CommandRunner, serial: string): Promise<string> {
   const target = ["-s", serial];
+  // uiautomator returns without writing on a null root or idle timeout, so a file left by
+  // an earlier capture would be read as this screen. It must be gone before dumping.
+  await adb(runner, [...target, "shell", "rm", "-f", SCREEN_DUMP_PATH]);
   try {
     await adb(runner, [...target, "shell", "uiautomator", "dump", SCREEN_DUMP_PATH]);
     const xml = await adb(runner, [...target, "exec-out", "cat", SCREEN_DUMP_PATH]);
@@ -493,7 +496,7 @@ export async function captureScreen(runner: CommandRunner, serial: string): Prom
     try {
       await runner.run("adb", [...target, "shell", "rm", "-f", SCREEN_DUMP_PATH], ADB_TIMEOUT_MS);
     } catch {
-      // Best effort: a leftover dump file is harmless and overwritten by the next run.
+      // Best effort: the next capture removes any leftover file before it dumps.
     }
   }
 }

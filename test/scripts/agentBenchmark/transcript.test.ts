@@ -170,6 +170,9 @@ describe("agent benchmark transcript audit", () => {
     const audit = auditTranscript(`${init}\n`, NO_PATTERNS);
     expect(audit.observedModel).toBeUndefined();
     expect(audit.claudeCodeVersion).toBeUndefined();
+    // The assistant-event fallback normalizes the same way.
+    const assistant = JSON.stringify({ type: "assistant", message: { model: " ", content: [] } });
+    expect(auditTranscript(`${assistant}\n`, NO_PATTERNS).observedModel).toBeUndefined();
   });
 
   test("terminal metrics outside the baseline domains fail the transcript", () => {

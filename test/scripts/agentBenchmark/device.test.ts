@@ -315,7 +315,7 @@ describe("agent benchmark preflight", () => {
 });
 
 describe("agent benchmark screen capture", () => {
-  test("dumps to a device file, reads it back, and removes it", async () => {
+  test("clears a stale file, dumps to a device file, reads it back, and removes it", async () => {
     const xml =
       '<?xml version="1.0"?><hierarchy rotation="0"><node text="Hi &amp; bye"/></hierarchy>';
     const ok = new FakeCommandRunner()
@@ -325,6 +325,7 @@ describe("agent benchmark screen capture", () => {
       .onAdb("exec-out cat", { stdout: xml });
     expect(await captureScreen(ok, "emulator-5554")).toBe(xml);
     expect(ok.adbCalls()).toEqual([
+      "-s emulator-5554 shell rm -f /sdcard/agent-benchmark-ui.xml",
       "-s emulator-5554 shell uiautomator dump /sdcard/agent-benchmark-ui.xml",
       "-s emulator-5554 exec-out cat /sdcard/agent-benchmark-ui.xml",
       "-s emulator-5554 shell rm -f /sdcard/agent-benchmark-ui.xml",
@@ -337,6 +338,14 @@ describe("agent benchmark screen capture", () => {
     expect(bad.adbCalls().at(-1)).toBe(
       "-s emulator-5554 shell rm -f /sdcard/agent-benchmark-ui.xml",
     );
+  });
+
+  test("a failed stale-file removal aborts before dumping", async () => {
+    const stuck = new FakeCommandRunner().onAdb("shell rm -f", { exitCode: 1, stderr: "denied" });
+    await expect(captureScreen(stuck, "emulator-5554")).rejects.toThrow(/rm -f/);
+    expect(stuck.adbCalls()).toEqual([
+      "-s emulator-5554 shell rm -f /sdcard/agent-benchmark-ui.xml",
+    ]);
   });
 
   test("screen text is the target app's text and content descriptions, entities decoded", async () => {

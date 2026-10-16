@@ -31,7 +31,10 @@ import {
 } from "../features/prototype/ios/iosPrototypeBundleId";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import type { BootedDevice } from "../models";
+import type { AdbCommandRunner } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { CTRL_PROXY_PACKAGE } from "../ctrlProxy/constants";
 import { ActionableError, toActionableError } from "../models/ActionableError";
+import { outputLooksLikeShellFailure } from "../utils/android-cmdline-tools/shellOutputHeuristics";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 
@@ -46,7 +49,7 @@ export interface PrototypeSavedOutput {
   errorCode?: PrototypeSavedErrorCode;
   saved?: SavedPrototypeInfo;
   savedPrototypes?: (Omit<SavedPrototypeEntry, "savedAt"> & { savedAt?: number })[];
-  pinned?: "unsupported";
+  pinned?: "pinned" | "pending" | "unsupported";
   warning?: string;
   uploadedAssets?: UploadedPrototypeAsset[];
 }
@@ -56,13 +59,19 @@ export interface PrototypeSavedArgs {
   label?: string;
   icon?: string;
   pin?: true;
+  autoConfirm?: true;
   id?: string;
   removeIcon?: true;
   timeoutMs?: number;
   assets?: readonly PrototypeAssetSource[];
 }
 export interface PrototypeSavedDependencies {
-  client: Pick<AndroidPrototypeTransport, "save" | "listSaved" | "deleteSaved" | "supportsCommand">;
+  client: Pick<
+    AndroidPrototypeTransport,
+    "save" | "listSaved" | "deleteSaved" | "pinSaved" | "supportsCommand"
+  >;
+  /** Host-side adb for `removeIcon`; absent means the icon cannot be cleared from the host. */
+  adb?: AdbCommandRunner;
   stageAssets: () => Promise<{ uploaded: UploadedPrototypeAsset[]; failure?: PrototypeResult }>;
   signal?: AbortSignal;
 }
@@ -121,22 +130,16 @@ export function savedPrototypeSuccess(
     return { success: true, savedPrototypes: result.savedPrototypes ?? [] };
   }
   if (args.action === "deleteSaved") {
-    return {
-      success: true,
-      warning: `${args.removeIcon ? "Icon removal is not available in this build; any icon pinned earlier remains and can be removed by hand. " : ""}A deleted prototype's disabled home-screen icon may remain.`,
-    };
+    return { success: true, warning: DISABLED_ICON_WARNING };
   }
   return {
     success: true,
     ...(result.saved ? { saved: result.saved } : {}),
-    ...(args.pin
-      ? {
-          pinned: "unsupported",
-          warning: "Pinning to the home screen is not available in this build.",
-        }
-      : {}),
   };
 }
+const DISABLED_ICON_WARNING = "A deleted prototype's disabled home-screen icon may remain.";
+/** Clearing is only safe when no saved prototype is left: it clears every CtrlProxy shortcut. */
+const CLEAR_SHORTCUTS_COMMAND = `shell cmd shortcut clear-shortcuts ${CTRL_PROXY_PACKAGE}`;
 function savedPrototypeRequestFailure(
   error: unknown,
   action: PrototypeSavedAction,
@@ -187,28 +190,109 @@ export async function performPrototypeSavedAction(
     }
     if (args.action === "deleteSaved") {
       const result = await deps.client.deleteSaved(args.id!, args.timeoutMs);
+      if (result.success && args.removeIcon) {
+        return { success: true, warning: await removeIconWarning(deps, args.timeoutMs) };
+      }
       return savedPrototypeResult(args, result);
     }
-    const staged = await deps.stageAssets();
-    deps.signal?.throwIfAborted();
-    const uploaded = staged.uploaded.length ? { uploadedAssets: staged.uploaded } : {};
-    if (staged.failure) {
-      return { ...savedPrototypeFailure(staged.failure), ...uploaded };
-    }
-    const result = await deps.client.save(
-      {
-        spec: args.spec!,
-        label: args.label ?? args.spec!.id,
-        ...(args.icon === undefined ? {} : { icon: args.icon }),
-      },
-      args.timeoutMs,
-    );
-    return {
-      ...savedPrototypeResult(args, result),
-      ...uploaded,
-    };
+    return await saveAndroidPrototype(deps, args);
   } catch (error) {
     return savedPrototypeRequestFailure(error, args.action, deps.signal);
+  }
+}
+
+async function saveAndroidPrototype(
+  deps: PrototypeSavedDependencies,
+  args: PrototypeSavedArgs,
+): Promise<PrototypeSavedOutput> {
+  const staged = await deps.stageAssets();
+  deps.signal?.throwIfAborted();
+  const uploaded = staged.uploaded.length ? { uploadedAssets: staged.uploaded } : {};
+  if (staged.failure) {
+    return { ...savedPrototypeFailure(staged.failure), ...uploaded };
+  }
+  const result = await deps.client.save(
+    {
+      spec: args.spec!,
+      label: args.label ?? args.spec!.id,
+      ...(args.icon === undefined ? {} : { icon: args.icon }),
+    },
+    args.timeoutMs,
+  );
+  const output = savedPrototypeResult(args, result);
+  if (!args.pin || !output.success) {
+    return { ...output, ...uploaded };
+  }
+  return {
+    ...output,
+    ...(await pinSavedPrototype(deps, args, result.saved?.id ?? args.spec!.id)),
+    ...uploaded,
+  };
+}
+
+/**
+ * The save already succeeded, so a pin problem never drops `saved`: the pin outcome rides beside
+ * it. Declining the launcher dialog sends no callback, so a requested pin stays `pending`.
+ */
+async function pinSavedPrototype(
+  deps: PrototypeSavedDependencies,
+  args: PrototypeSavedArgs,
+  id: string,
+): Promise<Partial<PrototypeSavedOutput>> {
+  const reply = await deps.client.pinSaved(id, args.icon, args.timeoutMs);
+  const autoConfirm = args.autoConfirm
+    ? " autoConfirm is not implemented yet (#12266): accept the launcher's Add to home screen dialog on the device."
+    : "";
+  if (reply.success && reply.pin?.status === "already_pinned") {
+    return { pinned: "pinned" };
+  }
+  if (reply.success) {
+    return {
+      pinned: "pending",
+      warning: `The launcher's confirmation dialog is open and the icon is pinned only once it is accepted; declining sends no signal.${autoConfirm}`,
+    };
+  }
+  const failure = savedPrototypeFailure(reply);
+  if (reply.errorCode === "pin_unsupported") {
+    return { pinned: "unsupported", warning: `Saved without a shortcut. ${failure.error}` };
+  }
+  return {
+    success: false,
+    errorCode: failure.errorCode,
+    error: `Saved, but pinning failed. ${failure.error}`,
+  };
+}
+
+async function removeIconWarning(
+  deps: PrototypeSavedDependencies,
+  timeoutMs: number | undefined,
+): Promise<string> {
+  if (!deps.adb) {
+    return `removeIcon is unavailable without host adb. ${DISABLED_ICON_WARNING}`;
+  }
+  const remaining = await deps.client.listSaved(timeoutMs);
+  if (!remaining.success) {
+    return `Could not confirm that no saved prototype remains, so no icon was cleared. ${DISABLED_ICON_WARNING}`;
+  }
+  if ((remaining.savedPrototypes ?? []).length > 0) {
+    return `Other saved prototypes remain, and clearing shortcuts would remove their icons too, so the icon was left. ${DISABLED_ICON_WARNING}`;
+  }
+  try {
+    const cleared = await deps.adb.executeCommand(CLEAR_SHORTCUTS_COMMAND, {
+      noRetry: true,
+      signal: deps.signal,
+    });
+    const output = `${cleared.stdout}\n${cleared.stderr ?? ""}`.trim();
+    if (outputLooksLikeShellFailure(cleared.stdout, cleared.stderr ?? "")) {
+      return `Clearing the icon failed: ${output}. ${DISABLED_ICON_WARNING}`;
+    }
+    return "Cleared CtrlProxy's pinned shortcuts, the last saved prototype's icon included.";
+  } catch (error) {
+    if (deps.signal?.aborted) {
+      throw error;
+    }
+    logger.warn(`[prototype] clear-shortcuts failed: ${errorMessage(error)}`, error);
+    return `Clearing the icon failed: ${errorMessage(error)}. ${DISABLED_ICON_WARNING}`;
   }
 }
 
@@ -341,6 +425,7 @@ async function saveIosPrototype(
     }),
     ...(args.pin
       ? {
+          pinned: "unsupported" as const,
           warning:
             "Pinning is not available on iOS simulators; the app icon is on the home screen.",
         }

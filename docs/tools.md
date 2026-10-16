@@ -214,6 +214,22 @@ duration must be at most 3000 ms, and forward + pause + return must be at most
 increase `returnSpeed` or shorten the forward duration or pause to fit the budget.
 These timing options require `boomerang: true`.
 
+`swipeOn.durationMs` sets the forward-stroke duration exactly instead of a `speed`
+preset. It is an integer from 1 to 3000 ms (the gesture transport allows a 5000 ms
+request, minus 2000 ms of dispatch headroom). `durationMs` cannot be combined with
+`speed` or `lookFor`; out-of-range values and a `speed` + `durationMs` pair are rejected
+by the schema and the action before any dispatch. Velocity follows from swipe
+distance divided by duration; the result's `duration` (and `x1`/`y1`/`x2`/`y2`) report
+what was dispatched so the fling can be reproduced. With `boomerang`, `durationMs`
+applies to the forward stroke only (the return leg keeps `returnSpeed`), and the
+existing 5000 ms boomerang budget still applies. Real limits: the value sent is the
+requested duration, not a measured one. Android accessibility gesture strokes complete
+at the last emitted event rather than the planned duration, and the injection path may
+quantize very short strokes, so treat durations below roughly 50 ms as a "very fast
+fling" request rather than exact timing; the effective minimum on each platform is not
+yet measured. Verify the resulting velocity on
+a device when a test depends on a pager or dismiss threshold.
+
 `pinchOn` requires positive `scale`, `distanceStart`, and `distanceEnd` when
 supplied; nonpositive values are rejected before gesture dispatch. Its optional
 `duration` must be a positive integer from 1 to 10000 ms; the default remains
@@ -654,6 +670,8 @@ require `prototype_data_model_v1`; the host refuses an unsupported device before
 require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show.
 `onLongPress`/`onDoubleTap` on box/row/column/text/image/icon/card require
 `prototype_gestures_v1`, with the same refusal before uploads or show.
+`scroll.refresh` (`{stateKey, onRefresh}`, pull-to-refresh on a vertical scroll) requires
+`prototype_refresh_v1`, with the same refusal.
 Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve
 once per show on the device; `status` remembers shown data beside state, `inspect` reports and
 adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).
@@ -681,12 +699,19 @@ The same `icon` asset id uses bytes uploaded in `assets` in that call; omit it f
 iOS `listSaved` returns bundle ids (accepted by `deleteSaved`), labels and slugs, with
 `pinned:false` and no `savedAt` because the simulator cannot recover the save time.
 `deleteSaved` also accepts the authored prototype id on iOS.
-Pinning (`pin:true`, optionally `autoConfirm:true`) and icon removal (`removeIcon:true`) are
-not available yet: save still succeeds with `pinned:"unsupported"`. iOS places the app icon
-on the home screen; deleting the prototype removes it, and `removeIcon:true` warns that
-separate icon removal does not apply. On Android deletion warns that
-an earlier pinned icon may remain and can be removed by hand. A deleted prototype's disabled
-home-screen icon may remain. Store failures return actionable errors with `errorCode`:
+On Android, `save` with `pin:true` then asks the launcher to pin a home-screen shortcut and
+reports `pinned`: `pinned` (already on the home screen), `pending` (the launcher's "Add to home
+screen" dialog is open; the icon exists only once a person accepts it, and declining sends no
+signal) or `unsupported` (the default launcher cannot pin; the prototype is still saved). A
+`device_locked` or `pin_failed` pin error returns `success:false` with `saved` kept, so retrying
+the same save is safe. `autoConfirm:true` (needs `pin`) only adds a reminder: accepting the launcher
+dialog automatically is tracked in #12266. `deleteSaved` disables the shortcut; the disabled icon
+stays on the home screen. With `removeIcon:true` the host runs `cmd shortcut clear-shortcuts` for
+CtrlProxy only when no saved prototype remains, because that command clears every CtrlProxy
+shortcut; otherwise the response says the icon remains and can be removed by hand. On iOS,
+`pin` is ignored (`pinned:"unsupported"`): the app icon is on the home screen, deleting the
+prototype removes it, and `removeIcon:true` warns that separate icon removal does not apply.
+Store failures return actionable errors with `errorCode`:
 `invalid_id`, `invalid_label`, `spec_too_large`, `invalid_spec`, `invalid_asset_id`,
 `duplicate_asset_id`, `unsupported_mime_type`, `empty_asset`, `asset_too_large`, `count_limit`,
 `total_limit`, `missing_asset`, `saved_count_limit`, `storage_failure`, `unsupported_existing`,

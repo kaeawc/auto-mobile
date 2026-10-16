@@ -48,6 +48,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     onLongPress: [{ type: "emit", name: "long" }],
     onDoubleTap: [{ type: "emit", name: "double" }],
   }),
+  prototype_refresh_v1: fixture({
+    type: "scroll",
+    id: "label",
+    refresh: { stateKey: "liked", onRefresh: [{ type: "emit", name: "refresh" }] },
+    child: label,
+  }),
   prototype_search_bar_v1: fixture({
     type: "searchBar",
     id: "label",

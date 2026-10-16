@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fixture, options as baseOptions, parsed } from "./manualTestPrivateDaemonFixture";
 import { BrokerDeviceInfoRefusedError } from "../../scripts/manual-test/brokerDeviceLedger";
 import { runPrivateDaemonCommand } from "../../scripts/manual-test/private-daemon";
@@ -1099,6 +1099,39 @@ test.each(["booting", "booted", "shutting-down"])(
   },
 );
 
+/**
+ * BrokerDeviceLedger resolves its batchDir (on Windows "/x" becomes "D:\\x"), so a
+ * fake fs keyed by the unresolved join() path would never be found. Look files up
+ * by their resolved path so the fake behaves the same on every platform.
+ */
+export function resolvedFileLookup(
+  files: Map<string, string>,
+  resolvePath: (path: string) => string = resolve,
+) {
+  const find = (path: string) =>
+    [...files.keys()].find((key) => key === path || resolvePath(key) === resolvePath(path));
+  return {
+    exists: (path: string) => find(path) !== undefined,
+    readFile: (path: string) => {
+      const key = find(path);
+      if (key === undefined) {
+        throw new Error(`ENOENT: ${path}`);
+      }
+      return files.get(key) ?? "";
+    },
+  };
+}
+
+test("resolvedFileLookup finds files keyed by an unresolved path under Windows-style resolution", () => {
+  const windowsResolve = (path: string) => (path.startsWith("D:") ? path : `D:${path}`);
+  const files = new Map([["/private/mt batch/batch.json", "{}"]]);
+  const lookup = resolvedFileLookup(files, windowsResolve);
+  expect(lookup.exists("D:/private/mt batch/batch.json")).toBe(true);
+  expect(lookup.readFile("D:/private/mt batch/batch.json")).toBe("{}");
+  expect(lookup.exists("D:/private/other/batch.json")).toBe(false);
+  expect(files.has("D:/private/mt batch/batch.json")).toBe(false);
+});
+
 async function addBrokerLedger(f: Awaited<ReturnType<typeof deviceFixture>>) {
   const { BrokerDeviceLedger } = await import("../../scripts/manual-test/brokerDeviceLedger");
   f.files.set(join(options.batchDir, "broker/clients.json"), "{}");
@@ -1106,8 +1139,7 @@ async function addBrokerLedger(f: Awaited<ReturnType<typeof deviceFixture>>) {
     batchDir: options.batchDir,
     timer: f.deps.timer,
     fs: {
-      exists: f.deps.exists,
-      readFile: f.deps.readFile,
+      ...resolvedFileLookup(f.files),
       mkdir: () => {},
       appendFile: (path, text) => f.files.set(path, (f.files.get(path) ?? "") + text),
     },

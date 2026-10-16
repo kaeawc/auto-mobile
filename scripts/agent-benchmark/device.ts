@@ -344,9 +344,8 @@ function accessibilityServices(raw: string | undefined): string | undefined {
   if (value === "" || value === "null") {
     return "none";
   }
-  return [...new Set(value.split(":").map((component) => component.split("/")[0]))]
-    .sort()
-    .join("+");
+  // Full components, not packages: one APK can expose several services that behave differently.
+  return [...new Set(value.split(":").filter(Boolean))].sort().join("+");
 }
 
 /** An animation scale setting: "null" is the 1.0 default, and 0 (animations off) is valid. */

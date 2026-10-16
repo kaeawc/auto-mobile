@@ -123,8 +123,9 @@ interface AuditState {
 }
 
 function handleInit(event: JsonRecord, state: AuditState): void {
-  state.audit.observedModel ??= asString(event.model);
-  state.audit.claudeCodeVersion ??= asString(event.claude_code_version);
+  // An empty string identifies nothing, so it stays unknown and cannot be baselined.
+  state.audit.observedModel ??= asString(event.model)?.trim() || undefined;
+  state.audit.claudeCodeVersion ??= asString(event.claude_code_version)?.trim() || undefined;
   const servers = Array.isArray(event.mcp_servers) ? event.mcp_servers.filter(isRecord) : [];
   const ours = servers.find((server) => server.name === MCP_SERVER_NAME);
   state.audit.mcpServerStatus = asString(ours?.status) ?? "missing";
@@ -198,6 +199,15 @@ function handleResult(event: JsonRecord, state: AuditState): void {
     // A non-boolean terminal flag ("true") cannot be read as success either.
     state.audit.parseErrors.push("result event has a non-boolean is_error");
   }
+  // Terminal metrics land in baseline.yml, so they must fit the baseline schema's domains.
+  const turns = event.num_turns;
+  if (turns !== undefined && !(Number.isInteger(turns) && (turns as number) >= 0)) {
+    state.audit.parseErrors.push("result event has an invalid num_turns");
+  }
+  const cost = event.total_cost_usd;
+  if (cost !== undefined && !(asNumber(cost) !== undefined && (cost as number) >= 0)) {
+    state.audit.parseErrors.push("result event has an invalid total_cost_usd");
+  }
   const usage = event.usage;
   state.audit.result = {
     subtype: asString(event.subtype) ?? "unknown",
@@ -214,6 +224,10 @@ function handleResult(event: JsonRecord, state: AuditState): void {
     ]),
     outputTokens: sumTokens(usage, ["output_tokens"]),
   };
+  if (event.permission_denials !== undefined && !Array.isArray(event.permission_denials)) {
+    // A malformed container could hide a denial, so it is not read as "none".
+    state.audit.parseErrors.push("result event has a non-array permission_denials");
+  }
   const denials = Array.isArray(event.permission_denials) ? event.permission_denials : [];
   state.audit.permissionDenials = denials.map((denial) =>
     isRecord(denial) ? (asString(denial.tool_name) ?? JSON.stringify(denial)) : String(denial),

@@ -174,7 +174,7 @@ describe("agent benchmark preflight", () => {
       })
       .onAdb("dumpsys window displays", { stdout: "  mRotation=1\n" });
     expect(await describeDevice(runner, "emulator-5554")).toBe(
-      "sdk=36 model=sdk_gphone64_arm64 locale=en-US build=BP22.250221.010 a11y=com.google.android.marvin.talkback size=720x1600 density=420 font=1.15 anim=0.5/1/0 theme=dark rotation=1",
+      "sdk=36 model=sdk_gphone64_arm64 locale=en-US build=BP22.250221.010 a11y=com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService size=720x1600 density=420 font=1.15 anim=0.5/1/0 theme=dark rotation=1",
     );
     // wm size reports the natural size in any orientation, so rotation tells the two apart.
     runner.onAdb("dumpsys window displays", { stdout: "  mRotation=0\n" });

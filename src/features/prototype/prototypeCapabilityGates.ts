@@ -5,6 +5,7 @@ import {
   PROTOTYPE_FLOW_GRID_CAPABILITY,
   PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
   PROTOTYPE_GESTURES_CAPABILITY,
+  PROTOTYPE_REFRESH_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
   PROTOTYPE_RICH_TEXT_CAPABILITY,
   PROTOTYPE_MENUS_CAPABILITY,
@@ -28,6 +29,7 @@ import {
   prototypePagerOptionsUnsupportedMessage,
 } from "./prototypePagerOptions";
 import { prototypeGestureFields, prototypeGesturesUnsupportedMessage } from "./prototypeGestures";
+import { prototypeRefreshFields, prototypeRefreshUnsupportedMessage } from "./prototypeRefresh";
 import {
   prototypeSearchBarFields,
   prototypeSearchBarUnsupportedMessage,
@@ -80,6 +82,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_GESTURES_CAPABILITY,
     fields: prototypeGestureFields,
     unsupportedMessage: prototypeGesturesUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_REFRESH_CAPABILITY,
+    fields: prototypeRefreshFields,
+    unsupportedMessage: prototypeRefreshUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_SEARCH_BAR_CAPABILITY,

@@ -1,0 +1,39 @@
+{
+  "spec": {
+    "id": "refresh",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "refreshing": false
+    },
+    "root": {
+      "type": "scroll",
+      "refresh": {
+        "stateKey": "not a key",
+        "onRefresh": [
+          {
+            "type": "emit",
+            "name": "r"
+          }
+        ]
+      },
+      "child": {
+        "type": "column",
+        "children": [
+          {
+            "type": "text",
+            "text": "Orders"
+          },
+          {
+            "type": "text",
+            "text": "Latte"
+          }
+        ]
+      }
+    }
+  },
+  "expectedPath": "root.refresh.stateKey"
+}

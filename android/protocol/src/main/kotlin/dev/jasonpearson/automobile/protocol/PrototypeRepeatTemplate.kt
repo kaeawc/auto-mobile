@@ -332,9 +332,25 @@ internal object PrototypeBindableFields {
           return it
         }
       }
+      (node["refresh"] as? JsonObject)?.let { refresh ->
+        field(refresh, "stateKey", "$path.refresh", PrototypeBindableKind.KEY)?.let {
+          return it
+        }
+      }
       return (node["openWhen"] as? JsonObject)?.let { openWhen ->
         field(openWhen, "key", "$path.openWhen", PrototypeBindableKind.KEY)
       }
+    }
+
+    /** Pull-to-refresh actions on a scroll: they bind like `onTap`. */
+    fun refreshActions(node: JsonObject, path: String): T? {
+      val refresh = node["refresh"] as? JsonObject ?: return null
+      for ((action, actionPath) in objects(refresh, "onRefresh", "$path.refresh")) {
+        action(action, actionPath)?.let {
+          return it
+        }
+      }
+      return null
     }
 
     fun node(node: JsonObject, path: String): T? {
@@ -360,6 +376,7 @@ internal object PrototypeBindableFields {
           condition(entry["when"], "$entryPath.when")
         }
         ?: actions(node, path)
+        ?: refreshActions(node, path)
         ?: keys(node, path)
     }
   }
@@ -758,6 +775,7 @@ internal object PrototypeRepeatValidator {
       listOfNotNull(
         (value["trailing"] as? JsonObject)?.text("stateKey"),
         (value["openWhen"] as? JsonObject)?.text("key"),
+        (value["refresh"] as? JsonObject)?.text("stateKey"),
       )
   }
 
@@ -807,6 +825,9 @@ internal object PrototypeRepeatValidator {
     }
     (bound["openWhen"] as? JsonObject)?.let {
       bound = JsonObject(bound + ("openWhen" to it.bound("key")))
+    }
+    (bound["refresh"] as? JsonObject)?.let {
+      bound = JsonObject(bound + ("refresh" to it.bound("stateKey")))
     }
     return bound
   }

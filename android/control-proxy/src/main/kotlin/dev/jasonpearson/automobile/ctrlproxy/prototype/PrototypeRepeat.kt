@@ -218,6 +218,13 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
+        refresh =
+          refresh?.let {
+            it.copy(
+              stateKey = instance.interpolate(it.stateKey),
+              onRefresh = it.onRefresh.map { action -> action.bound(instance) },
+            )
+          },
         child = child.bound(instance),
       )
     is PrototypeBottomSheetNode ->

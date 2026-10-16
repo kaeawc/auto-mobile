@@ -11,7 +11,7 @@ import type { Timer } from "../utils/SystemTimer";
 import { releasedRowStatus } from "./releaseReasons";
 import type { SessionReleaseSnapshot } from "./sessionManager";
 
-const MAX_PENDING_NON_TERMINAL_RELEASE_ROWS = 256;
+export const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 
 export interface DesiredReleaseRow {
   snapshot: SessionReleaseSnapshot;
@@ -49,6 +49,11 @@ export interface SessionRowWriter {
   retryPendingNow(): Promise<void>[];
   stopRetryTimers(): void;
   setRetryBackoff(backoff: BackoffPolicy): void;
+  /** Caller-owned non-terminal releases, in their original insertion order. */
+  pendingNonTerminalReleases(): ReadonlyMap<string, SessionReleaseSnapshot>;
+  recordPendingNonTerminalRelease(snapshot: SessionReleaseSnapshot): void;
+  deletePendingNonTerminalRelease(uuid: string): void;
+  clearPendingNonTerminalReleases(): void;
   pending(uuid: string): boolean;
   settled(uuid: string): Promise<void>;
   /** Track background writes without wrapping their promises or changing settlement timing. */
@@ -149,6 +154,7 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
   private readonly work = new Set<Promise<void>>();
   private readonly drainWrites = new Set<Promise<void>>();
   private readonly retries = new Map<string, ScheduledReleaseRowRetry>();
+  private readonly nonTerminalSnapshots = new Map<string, SessionReleaseSnapshot>();
   private readonly waiters = new Map<string, Set<() => void>>();
   private desireSeq = 0;
   private draining = false;
@@ -303,11 +309,37 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
     this.backoff = backoff;
   }
 
+  pendingNonTerminalReleases(): ReadonlyMap<string, SessionReleaseSnapshot> {
+    return this.nonTerminalSnapshots;
+  }
+
+  recordPendingNonTerminalRelease(snapshot: SessionReleaseSnapshot): void {
+    const pending = this.nonTerminalSnapshots;
+    if (
+      !pending.has(snapshot.sessionId) &&
+      pending.size >= MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS
+    ) {
+      const oldestSessionId = pending.keys().next().value;
+      if (oldestSessionId !== undefined) {
+        pending.delete(oldestSessionId);
+      }
+    }
+    pending.set(snapshot.sessionId, snapshot);
+  }
+
+  deletePendingNonTerminalRelease(uuid: string): void {
+    this.nonTerminalSnapshots.delete(uuid);
+  }
+
+  clearPendingNonTerminalReleases(): void {
+    this.nonTerminalSnapshots.clear();
+  }
+
   private evictNonTerminal(): void {
     const pending = Array.from(this.rows.entries()).filter(
       ([, row]) => row.desired && !row.desired.desired.terminal,
     );
-    if (pending.length <= MAX_PENDING_NON_TERMINAL_RELEASE_ROWS) {
+    if (pending.length <= MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS) {
       return;
     }
     const [uuid, row] = pending[0]!;

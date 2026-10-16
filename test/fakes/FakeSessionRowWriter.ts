@@ -5,6 +5,7 @@ import type {
   ReleaseRowRetryCallbacks,
   SessionRowWriter,
 } from "../../src/daemon/sessionRowWriter";
+import { MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS } from "../../src/daemon/sessionRowWriter";
 import type { BackoffPolicy } from "../../src/utils/Backoff";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 
@@ -20,6 +21,7 @@ export class FakeSessionRowWriter implements SessionRowWriter {
   private readonly waiters = new Map<string, Set<() => void>>();
   private readonly listeners = new Set<(event: ReleaseRowLanded) => void | Promise<unknown>>();
   private readonly drainWrites = new Set<Promise<void>>();
+  private readonly nonTerminalSnapshots = new Map<string, SessionReleaseSnapshot>();
 
   desire(uuid: string, desired: DesiredReleaseRow): void {
     if (this.desires.get(uuid)?.terminal && !desired.terminal) {
@@ -78,6 +80,31 @@ export class FakeSessionRowWriter implements SessionRowWriter {
   // This fake holds manually driven retries and never arms timers or consumes a backoff.
   stopRetryTimers(): void {}
   setRetryBackoff(_backoff: BackoffPolicy): void {}
+
+  pendingNonTerminalReleases(): ReadonlyMap<string, SessionReleaseSnapshot> {
+    return this.nonTerminalSnapshots;
+  }
+
+  recordPendingNonTerminalRelease(snapshot: SessionReleaseSnapshot): void {
+    if (
+      !this.nonTerminalSnapshots.has(snapshot.sessionId) &&
+      this.nonTerminalSnapshots.size >= MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS
+    ) {
+      const oldest = this.nonTerminalSnapshots.keys().next().value;
+      if (oldest !== undefined) {
+        this.nonTerminalSnapshots.delete(oldest);
+      }
+    }
+    this.nonTerminalSnapshots.set(snapshot.sessionId, snapshot);
+  }
+
+  deletePendingNonTerminalRelease(uuid: string): void {
+    this.nonTerminalSnapshots.delete(uuid);
+  }
+
+  clearPendingNonTerminalReleases(): void {
+    this.nonTerminalSnapshots.clear();
+  }
 
   pending(uuid: string): boolean {
     return this.desires.has(uuid) || this.retries.has(uuid);

@@ -146,6 +146,105 @@ describe("SessionRowWriter background drain writes", () => {
   });
 });
 
+describe("SessionRowWriter caller-owned non-terminal snapshots", () => {
+  const writers = [
+    ["serialized", async () => (await harness()).writer],
+    ["fake", () => Promise.resolve(new FakeSessionRowWriter())],
+  ] satisfies [string, () => Promise<SessionRowWriter>][];
+
+  test.each(writers)(
+    "%s evicts the oldest non-terminal snapshot without evicting a terminal retry",
+    async (_, create) => {
+      const writer = await create();
+      const terminal = desire("terminal").snapshot;
+      let ran: ReleaseRowRetry | undefined;
+      writer.scheduleRetry(terminal, {
+        isStillOwed: () => true,
+        drop: () => writer.cancelRetry(terminal),
+        run: (entry) => {
+          ran = entry;
+          return Promise.resolve();
+        },
+      });
+      const snapshots = Array.from(
+        { length: 257 },
+        (_, index) => desire(`n-${index}`, false).snapshot,
+      );
+      for (const snapshot of snapshots.slice(0, 256)) {
+        writer.recordPendingNonTerminalRelease(snapshot);
+      }
+      const pending = writer.pendingNonTerminalReleases();
+      expect(pending.size).toBe(256);
+      expect(pending.get("n-0")).toBe(snapshots[0]);
+      // Replacing a value at the cap neither evicts nor refreshes its insertion position.
+      const replacement = { ...snapshots[0]!, releaseReason: "allocation-rollback" };
+      writer.recordPendingNonTerminalRelease(replacement);
+      expect(pending.size).toBe(256);
+      expect(pending.get("n-0")).toBe(replacement);
+      writer.recordPendingNonTerminalRelease(snapshots[256]!);
+      expect(pending.size).toBe(256);
+      expect(pending.has("n-0")).toBe(false);
+      expect(pending.get("n-1")).toBe(snapshots[1]);
+      expect(pending.get("n-256")).toBe(snapshots[256]);
+      expect(writer.pending("terminal")).toBe(true);
+      writer.stopRetryTimers();
+      await Promise.all(writer.retryPendingNow());
+      expect(ran?.snapshot).toBe(terminal);
+      expect(ran?.isCurrent()).toBe(true);
+      writer.cancelRetry(terminal);
+      writer.clearPendingNonTerminalReleases();
+      await writer.drain();
+    },
+  );
+
+  test.each(writers)(
+    "%s preserves snapshot identity and live insertion-order iteration",
+    async (_, create) => {
+      const writer = await create();
+      const first = desire("first", false).snapshot;
+      const second = desire("second", false).snapshot;
+      const replacement = { ...first };
+      const pending = writer.pendingNonTerminalReleases();
+      writer.recordPendingNonTerminalRelease(first);
+      writer.recordPendingNonTerminalRelease(second);
+      writer.recordPendingNonTerminalRelease(replacement);
+      expect(Array.from(pending.keys())).toEqual(["first", "second"]);
+      expect(pending.get("first")).toBe(replacement);
+      const iterator = pending.values();
+      expect(iterator.next().value).toBe(replacement);
+      writer.deletePendingNonTerminalRelease("second");
+      writer.deletePendingNonTerminalRelease("missing");
+      writer.recordPendingNonTerminalRelease(second);
+      expect(iterator.next().value).toBe(second);
+      writer.deletePendingNonTerminalRelease("first");
+      writer.recordPendingNonTerminalRelease(first);
+      expect(Array.from(pending.keys())).toEqual(["second", "first"]);
+      expect(pending.get("first")).toBe(first);
+      writer.clearPendingNonTerminalReleases();
+      expect(pending.size).toBe(0);
+    },
+  );
+
+  test.each(writers)(
+    "%s clearing snapshots leaves independently scheduled retries intact",
+    async (_, create) => {
+      const writer = await create();
+      const snapshot = desire("uuid", false).snapshot;
+      writer.recordPendingNonTerminalRelease(snapshot);
+      writer.scheduleRetry(snapshot, {
+        isStillOwed: () => true,
+        drop: () => writer.cancelRetry(snapshot),
+        run: () => Promise.resolve(),
+      });
+      writer.clearPendingNonTerminalReleases();
+      expect(writer.pendingNonTerminalReleases().size).toBe(0);
+      expect(writer.pending("uuid")).toBe(true);
+      writer.cancelRetry(snapshot);
+      await writer.drain();
+    },
+  );
+});
+
 describe("SessionRowWriter release statements", () => {
   test("lands the desired row and settles without real sleeps", async () => {
     const h = await harness();

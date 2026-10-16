@@ -1476,7 +1476,6 @@ export const DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF: BackoffPolicy = exponentia
   initialDelayMs: 250,
   maxDelayMs: 5_000,
 });
-const MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS = 256;
 export const SESSION_REHYDRATION_DEADLINE_MS = 15_000;
 /** Persisted rows recovered at once during startup rehydration (#11114). */
 export const SESSION_REHYDRATION_CONCURRENCY = 4;
@@ -1817,8 +1816,6 @@ export class SessionManager {
   private readonly owedSupersededRowReasserts: Map<string, OwedSupersededRowReassert> = new Map();
   private supersededRowReassertBackoff: BackoffPolicy = DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF;
   private readonly keepAwakeRestoreReports = new Map<string, KeepAwakeRestoreReport>();
-  private readonly pendingNonTerminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> =
-    new Map();
   private deviceSessionRepository: DeviceSessionPersistence;
   private readonly getBarrier: () => DbWriteBarrier;
   private readonly keepScreenAwakeRestorerFactory: (
@@ -3809,7 +3806,7 @@ export class SessionManager {
       throw new TerminalSessionError(session.sessionId, terminalRelease);
     }
     this.invalidateFinalizedSessionIdentity(session.sessionId);
-    this.pendingNonTerminalReleaseSnapshots.delete(session.sessionId);
+    this.rowWriter.deletePendingNonTerminalRelease(session.sessionId);
     // A client that registered as an observer before acquiring a device keeps its name (#10671).
     const observerClientName = this.observerSessions
       ?.list?.()
@@ -6919,7 +6916,7 @@ export class SessionManager {
       await this.persistSessionRelease(terminalSnapshot);
       return terminalSnapshot.deviceId;
     }
-    const pendingSnapshot = this.pendingNonTerminalReleaseSnapshots.get(sessionId);
+    const pendingSnapshot = this.rowWriter.pendingNonTerminalReleases().get(sessionId);
     if (pendingSnapshot) {
       return (await this.persistSessionRelease(pendingSnapshot, true))
         ? pendingSnapshot.deviceId
@@ -7190,7 +7187,7 @@ export class SessionManager {
         throw error;
       }
     } finally {
-      this.pendingNonTerminalReleaseSnapshots.clear();
+      this.rowWriter.clearPendingNonTerminalReleases();
       this.supersededRowsUnderPendingRelease.clear();
     }
   }
@@ -8819,8 +8816,8 @@ export class SessionManager {
     reason.finalizedSnapshot = upgradedSnapshot;
     this.recordFinalizedSessionRelease(session, reason);
     // The first reason's row, if its write failed, is no longer the one to retry (#11557).
-    if (this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot) {
-      this.pendingNonTerminalReleaseSnapshots.delete(snapshot.sessionId);
+    if (this.rowWriter.pendingNonTerminalReleases().get(snapshot.sessionId) === snapshot) {
+      this.rowWriter.deletePendingNonTerminalRelease(snapshot.sessionId);
     }
     this.dropReleaseRetry(snapshot);
     if (upgradedSnapshot.terminal) {
@@ -9115,8 +9112,8 @@ export class SessionManager {
         this.volatileTerminalReleaseIntents.delete(snapshot.sessionId);
       }
       this.terminalReleaseJournal.resolve(snapshot.sessionId, snapshot.releaseReason);
-    } else if (this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot) {
-      this.pendingNonTerminalReleaseSnapshots.delete(snapshot.sessionId);
+    } else if (this.rowWriter.pendingNonTerminalReleases().get(snapshot.sessionId) === snapshot) {
+      this.rowWriter.deletePendingNonTerminalRelease(snapshot.sessionId);
     }
     this.forgetSupersededRowUnder(snapshot);
     this.restartReleasePersistence.get(snapshot)?.resolve();
@@ -9167,7 +9164,7 @@ export class SessionManager {
    */
   private isTerminalReleaseRetryCurrent(snapshot: SessionReleaseSnapshot): boolean {
     if (!snapshot.terminal) {
-      return this.pendingNonTerminalReleaseSnapshots.get(snapshot.sessionId) === snapshot;
+      return this.rowWriter.pendingNonTerminalReleases().get(snapshot.sessionId) === snapshot;
     }
     const fence = this.sessionSlots.getTerminalSnapshot(snapshot.sessionId);
     return (
@@ -9444,17 +9441,7 @@ export class SessionManager {
   }
 
   private recordPendingNonTerminalRelease(snapshot: SessionReleaseSnapshot): void {
-    const pending = this.pendingNonTerminalReleaseSnapshots;
-    if (
-      !pending.has(snapshot.sessionId) &&
-      pending.size >= MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS
-    ) {
-      const oldestSessionId = pending.keys().next().value;
-      if (oldestSessionId !== undefined) {
-        pending.delete(oldestSessionId);
-      }
-    }
-    pending.set(snapshot.sessionId, snapshot);
+    this.rowWriter.recordPendingNonTerminalRelease(snapshot);
   }
 
   private async persistTerminalReleaseIfNeeded(snapshot: SessionReleaseSnapshot): Promise<void> {
@@ -13479,7 +13466,7 @@ export class SessionManager {
     }
     this.networkConditionExpiryTimers.clear();
     this.iosAppNetworkLeases.stopAll();
-    this.pendingNonTerminalReleaseSnapshots.clear();
+    this.rowWriter.clearPendingNonTerminalReleases();
     this.supersededRowsUnderPendingRelease.clear();
   }
 

@@ -43,6 +43,9 @@ import { resolveDefaultAndroidPreferencesUser } from "./resolveAndroidPreference
 import type { KeyValueEntry, KeyValueType } from "../storage/storageTypes";
 import { getAndroidSharedPreferencesMutationCoordinator } from "./AndroidSharedPreferencesMutationCoordinator";
 
+// Two attempts preserve the existing preference read retry bound.
+const PREFERENCE_READ_ATTEMPTS = 2;
+
 export type PreferenceScope = "systemProperty" | "sharedPreferences" | "userDefaults";
 export type PreferenceValueType = "string" | "bool" | "int" | "float";
 export type PreferenceResultType = IosPreferenceType | "long" | "stringSet";
@@ -766,7 +769,7 @@ export class AppPreferences {
   ): Promise<{ stdout: string; stderr: string }> {
     let finalError: unknown;
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt < PREFERENCE_READ_ATTEMPTS; attempt += 1) {
       const remainingMs =
         deadlineMs === undefined ? IOS_DEFAULTS_COMMAND_TIMEOUT_MS : deadlineMs - this.timer.now();
       if (remainingMs <= 0) {
@@ -783,7 +786,7 @@ export class AppPreferences {
         );
       } catch (error) {
         finalError = error;
-        if (attempt === 1 || !isRetryableIosDefaultsError(error)) {
+        if (attempt === PREFERENCE_READ_ATTEMPTS - 1 || !isRetryableIosDefaultsError(error)) {
           throw toActionableError(
             error,
             "Failed to execute iOS defaults command; check simulator availability and retry",

@@ -29,6 +29,13 @@ import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
+// Exploration waits for the UI to settle after an action.
+const EXPLORE_ACTION_SETTLE_MS = 1000;
+// Exploration waits for scrolling to settle.
+const EXPLORE_SCROLL_SETTLE_MS = 1000;
+// Long exploration transitions need extra time to settle.
+const EXPLORE_LONG_SETTLE_MS = 2000;
+
 // Re-export consumed types
 export type { ExploreOptions } from "./ExploreTypes";
 
@@ -1036,7 +1043,7 @@ export class Explore extends BaseVisualChange {
     } catch (error) {
       logger.warn(`[Explore] Failed to return to target app: ${errorMessage(error)}`, error);
     }
-    await this.timer.sleep(1000);
+    await this.timer.sleep(EXPLORE_ACTION_SETTLE_MS);
 
     if (this.consecutiveOutOfAppCount >= Explore.MAX_OUT_OF_APP_ATTEMPTS) {
       this.stopReason =
@@ -1305,7 +1312,7 @@ export class Explore extends BaseVisualChange {
       this.consecutiveBackCount++;
 
       // Wait briefly for navigation
-      await awaitWhileRequestIsLive(this.timer.sleep(1000), signal);
+      await awaitWhileRequestIsLive(this.timer.sleep(EXPLORE_SCROLL_SETTLE_MS), signal);
     } catch (error) {
       // A cancelled recovery is not a failed one: report the cancelled partial run.
       if (this.stopIfCancelled(signal)) {
@@ -1358,7 +1365,7 @@ export class Explore extends BaseVisualChange {
       }
 
       // Wait for home screen
-      await awaitWhileRequestIsLive(this.timer.sleep(2000), signal);
+      await awaitWhileRequestIsLive(this.timer.sleep(EXPLORE_LONG_SETTLE_MS), signal);
 
       // Home alone leaves the launcher in the foreground, which the next
       // observation would treat as having left the target app (issue #6126).

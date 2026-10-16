@@ -117,14 +117,14 @@ class GestureDisplayRoutingTest {
               GestureDisplayRouting.apply(displayId, sdk, builder)
             }
 
-            override fun requestTapCoordinates(request: RequestTapCoordinates) =
+            override suspend fun requestTapCoordinates(request: RequestTapCoordinates) =
               apply(request.displayId)
 
-            override fun requestSwipe(request: RequestSwipe) = apply(request.displayId)
+            override suspend fun requestSwipe(request: RequestSwipe) = apply(request.displayId)
 
-            override fun requestPinch(request: RequestPinch) = apply(request.displayId)
+            override suspend fun requestPinch(request: RequestPinch) = apply(request.displayId)
 
-            override fun requestGestureStart(request: RequestGestureStart) =
+            override suspend fun requestGestureStart(request: RequestGestureStart) =
               apply(request.displayId)
           }
         val handler = CtrlProxyMessageHandler(actions, sdkInt = { sdk })

@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { observationServiceStartHarness } from "../helpers/observationServiceStartHarness";
 import { daemonObservationServiceOwnershipGuard } from "../../src/features/observe/ObservationReadServiceStart";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -199,4 +199,64 @@ test("declines an unresolved restoration health marker", async () => {
     "clock",
   );
   expect(h.safe()).toBe(false);
+});
+
+test("allocation and inventory do not collect observation recovery facts", async () => {
+  const h = await harness();
+  const recovery = spyOn(h.pool, "getRecoveringAndroidTargets").mockImplementation(() => {
+    throw new Error("Observation-only recovery probe reached by allocation/inventory");
+  });
+  try {
+    expect(h.pool.genericAvailability(h.device.deviceId)).toBe("free");
+    expect(h.pool.poolBucket(h.device.deviceId)).toBe("idle");
+    expect(h.pool.getIdleDevices()).toHaveLength(1);
+    expect(h.pool.getStats().idle).toBe(1);
+    expect(recovery).not.toHaveBeenCalled();
+  } finally {
+    recovery.mockRestore();
+  }
+});
+
+test("observation declines bound/busy/error rows before collecting recovery facts", async () => {
+  const h = await harness();
+  const recovery = spyOn(h.pool, "getRecoveringAndroidTargets");
+  try {
+    const device = h.pool.getDevice(h.device.deviceId)!;
+    expect(h.pool.isSafeForObservationServiceStart("missing")).toBe(false);
+    device.sessionId = "owner";
+    expect(h.safe()).toBe(false);
+    device.sessionId = null;
+    device.status = "busy";
+    expect(h.safe()).toBe(false);
+    device.status = "error";
+    expect(h.safe()).toBe(false);
+    expect(recovery).not.toHaveBeenCalled();
+  } finally {
+    recovery.mockRestore();
+  }
+});
+
+test("observation still evaluates later blockers through the live instance after readiness blocks", async () => {
+  const h = await harness();
+  const release = await h.pool.reserveDeviceForReadiness(h.device.deviceId, h.device);
+  const recovery = spyOn(h.pool, "getRecoveringAndroidTargets").mockReturnValue({
+    names: new Set(),
+    serials: new Set(),
+  });
+  const reverse = spyOn(h.sessions, "getSessionForDevice");
+  const health = spyOn(h.pool, "getDeviceHealthMarker");
+  const lifecycle = spyOn(h.lifecycle, "isReserved");
+  try {
+    expect(h.safe()).toBe(false);
+    expect(recovery).toHaveBeenCalledTimes(1);
+    expect(reverse).toHaveBeenCalledWith(h.device.deviceId);
+    expect(health).toHaveBeenCalledWith(h.device.deviceId);
+    expect(lifecycle).toHaveBeenCalledTimes(2);
+  } finally {
+    lifecycle.mockRestore();
+    health.mockRestore();
+    reverse.mockRestore();
+    recovery.mockRestore();
+    await release();
+  }
 });

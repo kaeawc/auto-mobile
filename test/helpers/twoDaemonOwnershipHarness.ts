@@ -1,4 +1,3 @@
-import type { Kysely } from "kysely";
 import { DAEMON_DEVICE_LEASE_STATUS_METHOD } from "../../src/daemon/constants";
 import {
   handleDaemonRequest,
@@ -24,7 +23,8 @@ import {
   terminalReleaseJournalPath,
   type TerminalReleaseJournalDirectory,
 } from "../../src/daemon/terminalReleaseJournal";
-import type { Database } from "../../src/db/types";
+import { resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
+import type { DeviceSession } from "../../src/db/types";
 import {
   DeviceSessionRepository,
   isRecoverableDaemonReleaseReason,
@@ -323,22 +323,20 @@ class SharedClaimFiles {
   }
 }
 
-class TwoDaemonWorld {
+export class TwoDaemonWorld {
   constructor(
-    private readonly db: Kysely<Database>,
+    private readonly repository: DeviceSessionRepository,
+    private readonly loadNonActiveRows: () => Promise<DeviceSession[]>,
     private readonly tolerate: ReadonlySet<TwoDaemonViolationKind>,
-  ) {
-    this.repository = new DeviceSessionRepository(db, this.timer);
-  }
+    readonly timer = new FakeTimer(),
+  ) {}
 
-  readonly timer = new FakeTimer();
   readonly discovery = new FakeDeviceUtils();
   readonly journalFiles = new FakeTerminalReleaseJournalFileSystem();
   /** Session id -> the dead daemon whose journal held its terminal release when it died. */
   private readonly deadTerminalReleases = new Map<string, string>();
   readonly claims = new SharedClaimFiles((pid) => this.isPidRunning(pid));
   readonly trace: string[] = [];
-  private readonly repository: DeviceSessionRepository;
   readonly online: boolean[] = DEVICES.map(() => true);
   readonly clients: ClientState[] = Array.from({ length: TWO_DAEMON_CLIENT_COUNT }, (_, index) => ({
     index,
@@ -740,6 +738,7 @@ class TwoDaemonWorld {
   }
 
   async start(): Promise<void> {
+    resetDbWriteBarrier();
     this.discovery.setBootedDevices("android", this.onlineDevices());
     this.startProcess(0);
     this.startProcess(1);
@@ -756,6 +755,8 @@ class TwoDaemonWorld {
     }
     this.timer.resolveAll();
     await drainMicrotasks(SETTLE_TURNS);
+    // A dead process deliberately leaves writes pending forever; no world owns the singleton.
+    resetDbWriteBarrier();
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -827,12 +828,7 @@ class TwoDaemonWorld {
    * the peer and that daemon's own startup refuse the row until the daemon exits.
    */
   private async checkNoStrandedClaims(): Promise<void> {
-    const rows = await this.db
-      .selectFrom("device_sessions")
-      .selectAll()
-      .where("status", "!=", "active")
-      .where("expires_at_ms", ">", this.timer.now())
-      .execute();
+    const rows = await this.loadNonActiveRows();
     for (const row of rows) {
       if (!row.release_reason || !isRecoverableDaemonReleaseReason(row.release_reason)) {
         continue;
@@ -1509,7 +1505,19 @@ export async function runTwoDaemonSteps(
   options: TwoDaemonRunOptions = {},
 ): Promise<TwoDaemonRunResult> {
   const db = await createTestDatabase();
-  const world = new TwoDaemonWorld(db, options.tolerate ?? new Set());
+  const timer = new FakeTimer();
+  const world = new TwoDaemonWorld(
+    new DeviceSessionRepository(db, timer),
+    () =>
+      db
+        .selectFrom("device_sessions")
+        .selectAll()
+        .where("status", "!=", "active")
+        .where("expires_at_ms", ">", timer.now())
+        .execute(),
+    options.tolerate ?? new Set(),
+    timer,
+  );
   try {
     await world.start();
     for (const [index, step] of steps.entries()) {

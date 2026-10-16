@@ -108,4 +108,24 @@ export class ProxySessionState {
   // acquire another device. `fromResultMint` records the binding's provenance at
   // fence time (see boundSessionFromResultMint).
   terminalBoundSession: TerminalBoundSession | undefined = undefined;
+
+  /**
+   * Whether this binding has sent its one ownership-claim heartbeat. Marked
+   * before awaiting the request, because the daemon may apply it even when the
+   * response is lost; reconnects must then verify the same token, not reclaim.
+   */
+  livenessOwnershipClaimSent = false;
+
+  // Whether the current binding was minted by a device-acquisition RESULT
+  // (getAndroid/getApple/startDevice), i.e. never named by the client, versus
+  // client-declared (an explicit `sessionUuid` arg, or a startup
+  // `initialSessionUuid`). Governs how a fenced sessionless call is reported: a
+  // client-declared binding keeps the ownership-lost-for-UUID error, while a
+  // result-minted one reports the connection state instead of a stale UUID the
+  // caller never referenced (issue #5689).
+  boundSessionFromResultMint = false;
+
+  // Startup bindings remain authoritative until the daemon signals release.
+  // Replay expiration only protects bindings inferred from ordinary calls.
+  initialSessionBindingConfigured = false;
 }

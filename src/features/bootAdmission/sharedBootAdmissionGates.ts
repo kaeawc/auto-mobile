@@ -79,11 +79,6 @@ export function getSharedBootAdmissionGates(
   return shared;
 }
 
-/** Test seam: forget the shared gates so the next call rebuilds them. */
-export function resetSharedBootAdmissionGates(): void {
-  shared = undefined;
-}
-
 export function createBootAdmissionGates(
   deps: SharedBootAdmissionGateDeps = {},
 ): SharedBootAdmissionGates {

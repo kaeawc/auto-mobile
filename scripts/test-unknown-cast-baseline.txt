@@ -62,7 +62,7 @@
 2	test/daemon/devicePool.iosRecovery.test.ts
 1	test/daemon/devicePool.recoveryLifecycleInteractions.test.ts
 1	test/daemon/devicePool.recoveryOutsideMutex.test.ts
-28	test/daemon/devicePool.recoveryShutdown.test.ts
+17	test/daemon/devicePool.recoveryShutdown.test.ts
 2	test/daemon/devicePool.refreshDevices.test.ts
 11	test/daemon/devicePool.releaseAndTracking.test.ts
 4	test/daemon/devicePool.removeDeviceLeaks.test.ts

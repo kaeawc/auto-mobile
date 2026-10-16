@@ -3,6 +3,7 @@ import { GestureClassifier } from "../../../../src/features/record/android/Gestu
 import { GESTURE_THRESHOLDS } from "../../../../src/features/record/android/types";
 import type { RawTouchFrame } from "../../../../src/features/record/android/types";
 import { buildScaler, type CoordScaler } from "../../../../src/features/record/android/AxisRanges";
+import { ScreenGeometryTimeline } from "../../../../src/features/record/android/ScreenGeometryTimeline";
 
 // Identity scaler: raw coords == screen coords
 const identityScaler: CoordScaler = {
@@ -414,5 +415,55 @@ describe("GestureClassifier", () => {
   test("DOWN frame alone returns null", () => {
     const result = c.feedFrame(makeFrame(0, [{ slotId: 0, trackingId: 1, x: 500, y: 500 }]));
     expect(result).toBeNull();
+  });
+});
+
+describe("GestureClassifier screen size (#12533)", () => {
+  // The recorder normalizes a swipe by the screen its coordinates were mapped into, so the swipe
+  // carries the size of the scaler captured at finger-down, never a later lookup.
+  const AXES = { xMin: 0, xMax: 32767, yMin: 0, yMax: 32767 };
+  const PORTRAIT = { width: 1080, height: 2400 };
+
+  function drag(classifier: GestureClassifier, downAt: number) {
+    const slot = (x: number, y: number) => [{ slotId: 0, trackingId: 1, x, y }];
+    classifier.feedFrame(makeFrame(downAt, slot(3277, 3277)));
+    classifier.feedFrame(makeFrame(downAt + 100, slot(13000, 20000)));
+    return classifier.feedFrame(makeFrame(downAt + 200, [], [0]));
+  }
+
+  test("a swipe carries the size of the screen it was mapped into", () => {
+    const timeline = new ScreenGeometryTimeline(AXES, { rotation: 0, display: PORTRAIT }, 1000);
+
+    expect(drag(new GestureClassifier(timeline, DENSITY), 2000)?.screenSize).toEqual(PORTRAIT);
+  });
+
+  test("after a rotation that size is the rotated screen", () => {
+    const timeline = new ScreenGeometryTimeline(AXES, { rotation: 0, display: PORTRAIT }, 1000);
+    timeline.apply({ rotation: 1, display: PORTRAIT }, 1500);
+
+    expect(drag(new GestureClassifier(timeline, DENSITY), 2000)?.screenSize).toEqual({
+      width: 2400,
+      height: 1080,
+    });
+  });
+
+  test("a size push whose read finishes after finger-down does not change the swipe's screen", () => {
+    const timeline = new ScreenGeometryTimeline(AXES, { rotation: 0, display: PORTRAIT }, 1000);
+    const classifier = new GestureClassifier(timeline, DENSITY);
+    const slot = (x: number, y: number) => [{ slotId: 0, trackingId: 1, x, y }];
+    classifier.feedFrame(makeFrame(2000, slot(3277, 3277)));
+    // The push arrived at 1500, but its size read completes only now: the timeline gains an entry
+    // that is retroactively in force at the finger-down, which the contact never saw.
+    timeline.apply({ rotation: 1, display: PORTRAIT }, 1500);
+    classifier.feedFrame(makeFrame(2100, slot(13000, 20000)));
+    const gesture = classifier.feedFrame(makeFrame(2200, [], [0]));
+
+    expect(gesture?.screenSize).toEqual(PORTRAIT);
+    // Its coordinates were mapped with the same (portrait) scaler.
+    expect(gesture?.startX).toBe(Math.round((3277 / 32768) * 1080));
+  });
+
+  test("a scaler that knows no screen size reports none", () => {
+    expect(drag(new GestureClassifier(identityScaler, DENSITY), 2000)?.screenSize).toBeUndefined();
   });
 });

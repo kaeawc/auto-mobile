@@ -16,6 +16,11 @@ export interface AxisRanges {
 
 export interface CoordScaler {
   toScreenPoint(rawX: number, rawY: number): { x: number; y: number };
+  /**
+   * The rotated screen size this scaler maps into, when it knows it. A gesture records the size of
+   * the scaler it was mapped with, so the size and the coordinates always come from the same moment.
+   */
+  readonly screenSize?: { width: number; height: number };
 }
 
 /**
@@ -56,6 +61,10 @@ export function buildScaler(ranges: AxisRanges): CoordScaler {
       ranges.displayHeight,
     );
   return {
+    screenSize:
+      ranges.rotation % 2 === 0
+        ? { width: ranges.displayWidth, height: ranges.displayHeight }
+        : { width: ranges.displayHeight, height: ranges.displayWidth },
     toScreenPoint(rawX: number, rawY: number): { x: number; y: number } {
       switch (ranges.rotation) {
         case 1:

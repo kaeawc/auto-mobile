@@ -60,6 +60,12 @@ export interface GestureEvent {
   /** First release time for a classifier-produced doubleTap. */
   firstTapArrivedAt?: number;
 
+  /**
+   * The rotated screen size of the scaler this gesture was mapped with at DOWN, when the scaler
+   * knows it. The recorder normalizes by this, not by a later lookup.
+   */
+  screenSize?: { width: number; height: number };
+
   // swipe
   direction?: "up" | "down" | "left" | "right";
   startX?: number;

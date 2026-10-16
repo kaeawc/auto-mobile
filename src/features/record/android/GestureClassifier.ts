@@ -185,7 +185,8 @@ export class GestureClassifier {
       displacement < slopPx
         ? this.evaluateTapOrLongPress(downX, downY, durationMs, frame.arrivedAt)
         : this.evaluateSwipe(downX, downY, upX, upY, durationMs, frame.arrivedAt);
-    return { ...gesture, ...this.downStamp(contact) };
+    const { screenSize } = contact.scaler;
+    return { ...gesture, ...this.downStamp(contact), ...(screenSize ? { screenSize } : {}) };
   }
 
   private evaluateUnknownContact(contact: ContactInfo, arrivedAt: number): GestureEvent {

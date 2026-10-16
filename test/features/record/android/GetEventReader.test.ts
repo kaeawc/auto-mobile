@@ -102,6 +102,8 @@ describe("GetEventReader", () => {
       arrivedAt: 1050,
       screenX: 420,
       screenY: 688,
+      // The size of the scaler the touch was mapped with at DOWN (this device's 1080x1920 display).
+      screenSize: { width: 1080, height: 1920 },
     });
     timer.advanceTime(20);
     data(proc, KEY_BACK);

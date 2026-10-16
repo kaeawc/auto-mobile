@@ -853,13 +853,22 @@ describe("a recorded diagonal swipe follows the geometry in force at touch-down 
     return { timer, probe, source, gestures, recorder };
   }
 
-  function swipe(r: Awaited<ReturnType<typeof recording>>, points: number[]): void {
+  const PORTRAIT_SCREEN = { width: PHYSICAL.width, height: PHYSICAL.height };
+  const LANDSCAPE_SCREEN = { width: PHYSICAL.height, height: PHYSICAL.width };
+
+  /** `screenSize` is what the classifier attaches: the screen of the scaler it used at DOWN. */
+  function swipe(
+    r: Awaited<ReturnType<typeof recording>>,
+    points: number[],
+    screenSize = PORTRAIT_SCREEN,
+  ): void {
     const [startX, startY, endX, endY] = points;
     r.gestures.emit({
       type: "swipe",
       arrivedAt: r.timer.now(),
       downAt: r.timer.now() - 200,
       geometry: STARTUP_GEOMETRY,
+      screenSize,
       direction: "right",
       startX,
       startY,
@@ -893,7 +902,7 @@ describe("a recorded diagonal swipe follows the geometry in force at touch-down 
     rotate(r, 1);
     r.timer.advanceTime(2_000);
     // Landscape is 2400x1080: these points are (0.1, 0.1) -> (0.7, 0.9) of that screen.
-    swipe(r, [240, 108, 1680, 972]);
+    swipe(r, [240, 108, 1680, 972], LANDSCAPE_SCREEN);
 
     const { steps } = await r.recorder.stop();
 
@@ -915,7 +924,7 @@ describe("a recorded diagonal swipe follows the geometry in force at touch-down 
     swipe(r, [108, 480, 972, 1680]);
     rotate(r, 1);
     r.timer.advanceTime(2_000);
-    swipe(r, [240, 108, 1680, 972]);
+    swipe(r, [240, 108, 1680, 972], LANDSCAPE_SCREEN);
 
     const { steps } = await r.recorder.stop();
 
@@ -923,5 +932,30 @@ describe("a recorded diagonal swipe follows the geometry in force at touch-down 
       { from: { x: 0.1, y: 0.2 }, to: { x: 0.9, y: 0.7 }, coordinateSpace: "normalized" },
       { from: { x: 0.1, y: 0.1 }, to: { x: 0.7, y: 0.9 }, coordinateSpace: "normalized" },
     ]);
+  });
+
+  test("the screen captured with the touch wins over the geometry read at recording start", async () => {
+    const r = await recording();
+    rotate(r, 1);
+    r.timer.advanceTime(2_000);
+    // Only the stale start-up geometry says portrait; the touch itself was mapped into landscape.
+    swipe(r, [240, 108, 1680, 972], LANDSCAPE_SCREEN);
+
+    const { steps } = await r.recorder.stop();
+
+    expect(steps[0].params).toMatchObject({ from: { x: 0.1, y: 0.1 }, to: { x: 0.7, y: 0.9 } });
+  });
+
+  test("the touch's own screen wins over whatever the timeline holds by the time it resolves", async () => {
+    const r = await recording();
+    rotate(r, 1);
+    r.timer.advanceTime(2_000);
+    // The timeline is landscape now, but this touch was mapped into portrait (a push whose size read
+    // finished after finger-down), so its fractions are portrait fractions.
+    swipe(r, [108, 480, 972, 1680], PORTRAIT_SCREEN);
+
+    const { steps } = await r.recorder.stop();
+
+    expect(steps[0].params).toMatchObject({ from: { x: 0.1, y: 0.2 }, to: { x: 0.9, y: 0.7 } });
   });
 });

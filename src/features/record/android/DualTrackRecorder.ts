@@ -504,17 +504,13 @@ export class DualTrackRecorder {
   }
 
   /**
-   * The screen the gesture's coordinates were mapped into. The geometry read at recording start
-   * rides on every gesture, so after a rotation it is stale; the timeline knows what was in force
-   * at the finger-down.
+   * The screen the gesture's coordinates were mapped into: the size its classifier captured with
+   * the scaler at DOWN. The geometry read at recording start rides on every gesture, so after a
+   * rotation it is stale and is only the fallback for a source that reports no size.
    */
   private screenSizeAt(gesture: GestureEvent): ScreenSize | undefined {
-    const recorded =
-      gesture.downAt === undefined
-        ? undefined
-        : this.geometry?.timeline.screenSizeAt(gesture.downAt);
-    if (recorded) {
-      return recorded;
+    if (gesture.screenSize) {
+      return gesture.screenSize;
     }
     return gesture.geometry
       ? { width: gesture.geometry.deviceWidth, height: gesture.geometry.deviceHeight }

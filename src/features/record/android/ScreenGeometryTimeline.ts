@@ -101,14 +101,6 @@ export class ScreenGeometryTimeline implements TimedCoordScaler {
     return this.entryAt(time).scaler;
   }
 
-  /** The rotated screen size in force at `time`, in the space `scalerAt` maps touches into. */
-  screenSizeAt(time: number): DisplaySize {
-    const { rotation, display } = this.entryAt(time);
-    return rotation % 2 === 0
-      ? { width: display.width, height: display.height }
-      : { width: display.height, height: display.width };
-  }
-
   /** Latest rotation the timeline holds, used to cross-check at stop. */
   get currentRotation(): number {
     return this.entries[this.entries.length - 1].rotation;

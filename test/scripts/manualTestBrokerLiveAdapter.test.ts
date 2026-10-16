@@ -267,7 +267,7 @@ test("production proxy command adapter runs up/tools/close through fake process 
   const name = "a-phone",
     dir = join(f.batchDir, "sessions", name);
   f.files.set(f.specs[0].pidFilePath, JSON.stringify({ pid: 987 }));
-  f.deps.proxy.isPidAlive = () => true;
+  f.deps.proxy.isPidAlive = (pid) => !(pid === 12345 && f.files.has(join(dir, "closed.json")));
   f.deps.proxy.spawnServe = (command) => {
     const config = JSON.parse(f.files.get(join(dir, "request.json"))!);
     f.files.set(

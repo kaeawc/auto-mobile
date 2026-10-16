@@ -287,9 +287,14 @@ prepare_cell_stubs() {
 #!/usr/bin/env bash
 echo 'test emulator version'
 STUB
+  # The cell backgrounds its emulator wrapper, which reads the clock concurrently with the
+  # main loop; an unlocked read-modify-write can tear the tick file ("1\n2").
   cat > "$bin/clock" <<'STUB'
 #!/usr/bin/env bash
-n=$(cat "$TICKS"); echo "$((n+1))" > "$TICKS"; echo "$n"
+until mkdir "$TICKS.lock" 2>/dev/null; do :; done
+n=$(cat "$TICKS"); echo "$((n+1))" > "$TICKS"
+rmdir "$TICKS.lock"
+echo "$n"
 STUB
   cat > "$bin/avdmanager" <<'STUB'
 #!/usr/bin/env bash

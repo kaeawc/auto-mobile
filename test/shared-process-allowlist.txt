@@ -16,6 +16,7 @@ test/cli/helpSchema.test.ts
 test/cli/iosNetworkFilter.test.ts
 test/cli/removedTools.test.ts
 test/cli/versionFlag.test.ts
+test/config/env.test.ts
 test/contracts/runAll.test.ts
 test/ctrlProxy/ForcedRestartBudget.test.ts
 test/ctrlProxy/ios/IosCtrlProxyProcessClient.test.ts
@@ -457,7 +458,11 @@ test/features/action/prototypeTapUnderSystemBars.test.ts
 test/features/action/refreshAndroidViewHierarchy.test.ts
 test/features/action/resolveAutoInputMode.property.test.ts
 test/features/action/resolveAutoInputMode.test.ts
+test/features/action/sendkeys/EventAllTyper.test.ts
+test/features/action/sendkeys/EventLastTyper.test.ts
 test/features/action/sendkeys/EventOnlyTyper.test.ts
+test/features/action/sendkeys/ImeCommitTyper.test.ts
+test/features/action/sendkeys/ImeRestore.test.ts
 test/features/action/sendkeys/ImeSpan.test.ts
 test/features/action/swipeon/AutoTargetSelectorUnit.test.ts
 test/features/action/swipeon/OverlayDetector.characterization.test.ts
@@ -477,6 +482,7 @@ test/features/action/swipeon/swipeNavigation.test.ts
 test/features/action/swipeon/swipeOnUtils.property.test.ts
 test/features/action/swipeon/swipeOnUtils.test.ts
 test/features/action/swipeon/swipeSelectorScopes.test.ts
+test/features/action/tapSharedHelpers.test.ts
 test/features/action/textTransportTimeout.test.ts
 test/features/action/touchscreenInput.test.ts
 test/features/appearance/AppearanceConfig.property.test.ts

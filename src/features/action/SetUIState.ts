@@ -4,7 +4,11 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
-import { SetUIStateOptions, FieldSpec, ElementSelector } from "../../models/SetUIStateOptions";
+import {
+  SetUIStateOptions,
+  FieldSpec,
+  SetUIStateElementSelector,
+} from "../../models/SetUIStateOptions";
 import { SetUIStateResult, FieldResult, FieldType } from "../../models/SetUIStateResult";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import type { InputTextMode } from "./InputText";
@@ -1388,7 +1392,9 @@ export class SetUIState extends BaseVisualChange {
    * Find element in view hierarchy
    */
   private findElement(
-    selector: ElementSelector & { screenSizeOptions?: ScreenSizeForOffscreenCheckOptions },
+    selector: SetUIStateElementSelector & {
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
+    },
     viewHierarchy?: ViewHierarchyResult,
     wantsCheckable = false,
   ): Element | null {
@@ -1951,7 +1957,7 @@ export class SetUIState extends BaseVisualChange {
    * Build tap options from selector
    */
   private buildTapOptions(
-    selector: ElementSelector,
+    selector: SetUIStateElementSelector,
     action: string,
   ): { text?: string; elementId?: string; action: string } {
     if (selector.text) {
@@ -1963,7 +1969,7 @@ export class SetUIState extends BaseVisualChange {
   /**
    * Describe a selector for error messages
    */
-  private describeSelector(selector: ElementSelector): string {
+  private describeSelector(selector: SetUIStateElementSelector): string {
     if (selector.text) {
       return `text="${selector.text}"`;
     }

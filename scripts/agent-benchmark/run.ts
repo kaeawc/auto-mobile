@@ -388,11 +388,39 @@ function emit(results: BenchmarkResult[], json: boolean): void {
   }
 }
 
+/**
+ * `sha256=<prefix>` over every file the built server can load: the bundle and the sidecars
+ * the build copies beside it (schemas, vendor tools). Source maps are skipped; they change
+ * with paths, not behavior. Paths are hashed with `/` so the digest is the same on Windows.
+ */
+export function bundleDigest(files: Array<{ path: string; read: () => Uint8Array }>): string {
+  const hash = createHash("sha256");
+  const ordered = files
+    .map((file) => ({ ...file, path: file.path.replaceAll("\\", "/") }))
+    .filter((file) => !file.path.endsWith(".map"))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  for (const file of ordered) {
+    hash.update(file.path);
+    hash.update("\0");
+    hash.update(file.read());
+    hash.update("\0");
+  }
+  return `sha256=${hash.digest("hex").slice(0, 16)}`;
+}
+
+function distDigest(distDir: string): string {
+  const files = readdirSync(distDir, { recursive: true, encoding: "utf8" })
+    .filter((path) => statSync(join(distDir, path)).isFile())
+    .map((path) => ({ path, read: () => readFileSync(join(distDir, path)) }));
+  return bundleDigest(files);
+}
+
 async function runSuites(options: CliOptions, deps: HarnessDeps): Promise<BenchmarkResult[]> {
   const serverEntry = join(REPO_ROOT, "dist", "src", "index.js");
   if (!existsSync(serverEntry)) {
     throw new Error(`${serverEntry} is missing; run \`bun run build\` first.`);
   }
+  const serverBuild = distDigest(join(REPO_ROOT, "dist"));
   const suites = suitePaths(options).map((path) => loadSuite(path, REPO_ROOT));
   const results: BenchmarkResult[] = [];
   for (const suite of suites) {
@@ -403,6 +431,7 @@ async function runSuites(options: CliOptions, deps: HarnessDeps): Promise<Benchm
           outputRoot: options.output,
           runtime: process.execPath,
           serverEntry,
+          serverBuild,
           claudeCommand: options.claude,
           deviceSerial: options.device,
           modelOverride: options.model,

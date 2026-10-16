@@ -126,6 +126,7 @@ function setup(transcript: string, launchMs = 42_000) {
     outputRoot: "/out",
     runtime: "/usr/bin/bun",
     serverEntry: "/repo/dist/src/index.js",
+    serverBuild: "sha256=5e5e5e5e5e5e5e5e",
     claudeCommand: "claude",
   };
   return { timer, fs, runner, launches, logs, claims, deps, options };
@@ -386,18 +387,11 @@ describe("agent benchmark harness", () => {
     expect(fs.readFile(artifact("baseline.yml"))).toContain(`suiteDigest: ${result.suiteDigest}`);
   });
 
-  test("the run result and baseline snippet carry the server bundle digest", async () => {
+  test("the run result and baseline snippet carry the server build digest", async () => {
     const { fs, deps, options } = setup(PASSING);
-    const hashed: string[] = [];
-    const sha256 = fs.sha256.bind(fs);
-    fs.sha256 = (path: string) => {
-      hashed.push(path);
-      return sha256(path);
-    };
     const result = await runSuite(loadedSuite(), options, deps);
-    expect(hashed).toContain(options.serverEntry);
-    expect(result.serverBuild).toBe("sha256=a1b2c3d4e5f60718");
-    expect(fs.readFile(artifact("baseline.yml"))).toContain("serverBuild: sha256=a1b2c3d4e5f60718");
+    expect(result.serverBuild).toBe("sha256=5e5e5e5e5e5e5e5e");
+    expect(fs.readFile(artifact("baseline.yml"))).toContain("serverBuild: sha256=5e5e5e5e5e5e5e5e");
   });
 
   test("the post-run screen is read only after the daemon stops and the claim is retaken", async () => {

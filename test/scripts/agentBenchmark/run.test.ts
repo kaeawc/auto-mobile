@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join, resolve } from "node:path";
-import { parseCliArgs, resolveSuitePath } from "../../../scripts/agent-benchmark/run";
+import { bundleDigest, parseCliArgs, resolveSuitePath } from "../../../scripts/agent-benchmark/run";
 
 describe("agent benchmark CLI arguments", () => {
   test("runs suites by name with overrides", () => {
@@ -49,5 +49,32 @@ describe("agent benchmark CLI arguments", () => {
   test("suite names map into the suites directory; YAML paths are used as given", () => {
     expect(resolveSuitePath("bug-repro", "/suites")).toBe(join("/suites", "bug-repro.yml"));
     expect(resolveSuitePath("local/custom.yaml", "/suites")).toBe(resolve("local/custom.yaml"));
+  });
+});
+
+describe("agent benchmark server build digest", () => {
+  const file = (path: string, text: string) => ({
+    path,
+    read: () => new TextEncoder().encode(text),
+  });
+  const build = [
+    file("src/index.js", "bundle"),
+    file("schemas/test-plan.schema.json", "{}"),
+    file("src/index.js.map", "map"),
+  ];
+
+  test("a sidecar change alters the digest; source maps and listing order do not", () => {
+    const base = bundleDigest(build);
+    expect(base).toMatch(/^sha256=[0-9a-f]{16}$/);
+    expect(bundleDigest([...build].reverse())).toBe(base);
+    expect(bundleDigest([build[0], build[1], file("src/index.js.map", "other")])).toBe(base);
+    expect(bundleDigest([build[0], file("schemas/test-plan.schema.json", '{"x":1}')])).not.toBe(
+      base,
+    );
+  });
+
+  test("Windows path separators hash the same as POSIX ones", () => {
+    const windows = build.map((entry) => ({ ...entry, path: entry.path.replaceAll("/", "\\") }));
+    expect(bundleDigest(windows)).toBe(bundleDigest(build));
   });
 });

@@ -69,6 +69,21 @@ describe("agent benchmark suite config", () => {
     expect(suite.apkPath).toBe(join(root, "build", "app.apk"));
   });
 
+  test("preference integers must be safe so Android can parse them", () => {
+    const prefs = (value: number) => ({
+      ...MINIMAL,
+      preflight: { sharedPreferences: { p: { value } } },
+    });
+    expect(() => parseSuiteDefinition(prefs(1e21), "x.yml")).toThrow(/must be safe integers/);
+    expect(() => parseSuiteDefinition(prefs(2 ** 53), "x.yml")).toThrow(/must be safe integers/);
+    expect(parseSuiteDefinition(prefs(2 ** 40), "x.yml").preflight.sharedPreferences).toEqual({
+      p: { value: 2 ** 40 },
+    });
+    expect(parseSuiteDefinition(prefs(0.5), "x.yml").preflight.sharedPreferences).toEqual({
+      p: { value: 0.5 },
+    });
+  });
+
   test("a suite with no verification check is rejected", () => {
     const withoutVerify = { ...MINIMAL, verify: undefined };
     expect(() => parseSuiteDefinition(withoutVerify, "x.yml")).toThrow(

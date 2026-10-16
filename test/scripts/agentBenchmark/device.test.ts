@@ -29,7 +29,7 @@ describe("agent benchmark device selection", () => {
     expect(parseOnlineSerials("List of devices attached\n")).toEqual([]);
   });
 
-  test("a single online device is chosen; zero or several need a serial", async () => {
+  test("exactly one online device is required; --device only asserts which", async () => {
     expect(await resolveSerial(new FakeCommandRunner().onAdb("devices", { stdout: DEVICES }))).toBe(
       "emulator-5554",
     );
@@ -40,9 +40,13 @@ describe("agent benchmark device selection", () => {
       stdout: "List of devices attached\na\tdevice\nb\tdevice\n",
     });
     await expect(resolveSerial(two)).rejects.toThrow(/Multiple online devices \(a, b\)/);
-    expect(await resolveSerial(two, "b")).toBe("b");
-    await expect(resolveSerial(two, "c")).rejects.toThrow(
-      /Device c is not online \(online: a, b\)/,
+    await expect(resolveSerial(two, "b")).rejects.toThrow(/needs exactly one/);
+    const one = new FakeCommandRunner().onAdb("devices", {
+      stdout: "List of devices attached\na\tdevice\n",
+    });
+    expect(await resolveSerial(one, "a")).toBe("a");
+    await expect(resolveSerial(one, "c")).rejects.toThrow(
+      /Device c is not the online device \(a\)/,
     );
   });
 

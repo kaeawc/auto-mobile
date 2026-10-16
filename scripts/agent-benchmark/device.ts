@@ -51,25 +51,22 @@ async function adb(runner: CommandRunner, args: string[], timeoutMs = ADB_TIMEOU
 }
 
 /**
- * Pick the device: an explicit serial must be online; otherwise exactly one
- * online device is required so the agent cannot end up on the wrong one.
+ * Pick the device. Exactly one online device is required: nothing pins the MCP
+ * server to a serial, so with several online the agent could act on a device the
+ * harness is not preparing or verifying. `requested` only asserts which one it is.
  */
 export async function resolveSerial(runner: CommandRunner, requested?: string): Promise<string> {
   const online = parseOnlineSerials(await adb(runner, ["devices"]));
-  if (requested) {
-    if (!online.includes(requested)) {
-      throw new Error(
-        `Device ${requested} is not online (online: ${online.join(", ") || "none"}).`,
-      );
-    }
-    return requested;
-  }
   if (online.length !== 1) {
     throw new Error(
       online.length === 0
         ? "No online Android device. Boot an emulator first."
-        : `Multiple online devices (${online.join(", ")}); pass --device <serial>.`,
+        : `Multiple online devices (${online.join(", ")}); the benchmark needs exactly one, ` +
+            "because the agent could otherwise act on a different device than the one verified.",
     );
+  }
+  if (requested && online[0] !== requested) {
+    throw new Error(`Device ${requested} is not the online device (${online[0]}).`);
   }
   return online[0];
 }

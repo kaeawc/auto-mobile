@@ -59,12 +59,19 @@ export interface HarnessFs {
   remove(path: string): void;
 }
 
+/** The shared AutoMobile device-allocation claims (the same store every daemon uses). */
+export interface DeviceClaims {
+  /** PID of a live process holding `serial`'s claim, or undefined when it is free. */
+  liveOwner(serial: string): number | undefined;
+}
+
 export interface HarnessDeps {
   runner: CommandRunner;
   launcher: ClaudeLauncher;
   timer: Timer;
   /** Suffixes run directories so same-second runs of one suite never share one. */
   idGenerator: IdGenerator;
+  deviceClaims: DeviceClaims;
   fs: HarnessFs;
   /** Progress lines; the CLI sends these to stderr so `--json` stdout stays clean. */
   log(line: string): void;
@@ -142,6 +149,14 @@ interface PreparedRun {
 async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDeps) {
   const { definition } = suite;
   const serial = await resolveSerial(deps.runner, options.deviceSerial);
+  // Preflight clears app data, so never touch a device another AutoMobile session holds.
+  // (Taking the claim here would block the run's own daemon from claiming it later.)
+  const owner = deps.deviceClaims.liveOwner(serial);
+  if (owner !== undefined) {
+    throw new Error(
+      `${serial} is claimed by another AutoMobile session (pid ${owner}); stop it before benchmarking.`,
+    );
+  }
   const startedAt = runTimestamp(deps.timer.now());
   const runId = deps.idGenerator.next().slice(0, 8);
   const runDirectory = join(options.outputRoot, definition.name, `${startedAt}-${runId}`);

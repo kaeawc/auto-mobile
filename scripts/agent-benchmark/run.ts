@@ -36,12 +36,21 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { deviceAllocationClaimPath } from "../../src/daemon/foreignDeviceOwnership";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import { readExclusiveLockContent } from "../../src/utils/fileLock";
+import { isProcessRunning } from "../../src/utils/processLiveness";
 import { defaultIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { loadSuite, type LoadedSuite } from "./config";
 import type { CommandRunner } from "./device";
-import { runSuite, type ClaudeLauncher, type HarnessDeps, type HarnessFs } from "./harness";
+import {
+  runSuite,
+  type ClaudeLauncher,
+  type DeviceClaims,
+  type HarnessDeps,
+  type HarnessFs,
+} from "./harness";
 import { buildClaudeArgs, buildMcpConfig, systemPromptFor } from "./invocation";
 import { renderReport, renderSummary } from "./render";
 import type { BenchmarkResult } from "./result";
@@ -237,6 +246,15 @@ const realFs: HarnessFs = {
   remove: (path) => rmSync(path, { recursive: true, force: true }),
 };
 
+const realDeviceClaims: DeviceClaims = {
+  liveOwner(serial) {
+    const owner = readExclusiveLockContent(deviceAllocationClaimPath(serial));
+    return owner && Number.isInteger(owner.pid) && isProcessRunning(owner.pid)
+      ? owner.pid
+      : undefined;
+  },
+};
+
 function dryRunReport(suite: LoadedSuite, options: CliOptions): string {
   const placeholders = {
     deviceSerial: options.device ?? "<serial>",
@@ -330,6 +348,7 @@ async function main(argv: string[]): Promise<number> {
     launcher: createLauncher(defaultTimer),
     timer: defaultTimer,
     idGenerator: defaultIdGenerator,
+    deviceClaims: realDeviceClaims,
     fs: realFs,
     log: (line) => console.error(line),
     env: process.env,

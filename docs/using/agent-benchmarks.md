@@ -36,7 +36,7 @@ bun scripts/agent-benchmark/run.ts --from-result scratch/agent-benchmarks/bug-re
 | ---------------------------------- | -------------------------------------------------------------------------------------- |
 | `--suite <name\|path.yml>`         | Run a committed suite by name or any suite file by path (repeatable).                  |
 | `--all`                            | Run every suite in `benchmark/agent/suites/`.                                          |
-| `--device <serial>`                | Target device. Without it, exactly one online device is required.                      |
+| `--device <serial>`                | Assert which device is the target. Exactly one online device is always required.       |
 | `--model <model>`                  | Override the suite's `claude.model` for a controlled comparison.                       |
 | `--json`                           | Print the full result JSON instead of the text report.                                 |
 | `--dry-run`                        | Validate suites and print the Claude command and MCP config; touches no device or API. |
@@ -80,10 +80,13 @@ Each run is isolated so earlier runs and your own setup cannot change the result
   `AUTOMOBILE_DB_PATH` would win over the run's values, and a setting such as
   `AUTOMOBILE_DISABLED_TOOLS` would quietly change the agent's toolset. The one exception is
   `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`, kept so a resident daemon's device claims are still
-  respected. Stop other sessions on the target device before a run.
+  respected. Before preflight touches the device, the harness checks that claim store and refuses a
+  device another AutoMobile session holds.
+- Exactly one Android device must be online. Nothing pins the MCP server to a serial, so with
+  several online the agent could act on a device other than the one prepared and verified.
 - `Bash` is disallowed by default, so the agent cannot fall back to raw `adb`. A suite can disallow
-  more tools: `ux-flow` also blocks `openLink` and `navigateTo`, because the task is to navigate
-  by tapping.
+  more tools: `ux-flow` also blocks `openLink`, `navigateTo`, and `executePlan` (which can run a
+  nested `openLink`), because the task is to navigate by tapping.
 
 ## Verdicts
 

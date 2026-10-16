@@ -86,6 +86,7 @@ function setup(transcript: string, launchMs = 42_000) {
     runner,
     timer,
     idGenerator: new CountingIdGenerator("run"),
+    deviceClaims: { liveOwner: () => undefined },
     fs,
     log: (line) => logs.push(line),
     env: { PATH: "/bin", UNSET: undefined },
@@ -246,5 +247,16 @@ describe("agent benchmark harness", () => {
     const b = await runSuite(loadedSuite(), second.options, second.deps);
     expect(a.startedAt).toBe(b.startedAt);
     expect(a.runDirectory).not.toBe(b.runDirectory);
+  });
+
+  test("a device claimed by another AutoMobile session is never touched", async () => {
+    const { runner, launches, fs, deps, options } = setup(PASSING);
+    deps.deviceClaims = { liveOwner: (serial) => (serial === "emulator-5554" ? 4242 : undefined) };
+    await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(
+      /emulator-5554 is claimed by another AutoMobile session \(pid 4242\)/,
+    );
+    expect(runner.adbCalls()).toEqual(["devices"]);
+    expect(launches).toHaveLength(0);
+    expect(fs.dirs.size).toBe(0);
   });
 });

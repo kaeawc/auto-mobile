@@ -602,13 +602,10 @@ export class GetBackStack implements BackStack {
 
       // Execute dumpsys activity activities
       const dumpsysOutput = await perf.track("dumpsysActivities", () =>
-        this.adb.executeCommand(
-          "shell dumpsys activity activities",
-          undefined,
-          DUMPSYS_MAX_BUFFER,
-          undefined,
+        this.adb.executeCommand("shell dumpsys activity activities", {
+          maxBuffer: DUMPSYS_MAX_BUFFER,
           signal,
-        ),
+        }),
       );
 
       // Parse activities, tasks, and current activity in parallel

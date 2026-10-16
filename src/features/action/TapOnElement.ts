@@ -5524,10 +5524,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         fence?.assertCurrent();
         await this.adb.executeCommand(
           `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`,
-          longPressTimeoutMs,
-          undefined,
-          undefined,
-          signal,
+          { timeoutMs: longPressTimeoutMs, signal },
         );
       } catch (error) {
         logger.warn(`[TapOnElement] touch input swipe failed: ${errorMessage(error)}`, error);
@@ -5540,10 +5537,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         fence?.assertCurrent();
         await this.adb.executeCommand(
           `shell input swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`,
-          longPressTimeoutMs,
-          undefined,
-          undefined,
-          signal,
+          { timeoutMs: longPressTimeoutMs, signal },
         );
       }
     } catch (error) {

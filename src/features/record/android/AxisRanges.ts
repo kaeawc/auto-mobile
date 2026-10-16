@@ -73,7 +73,7 @@ export async function queryDisplaySize(
   const { stdout } =
     options.timeoutMs === undefined
       ? await adb.executeCommand("shell wm size")
-      : await adb.executeCommand("shell wm size", options.timeoutMs, undefined, true);
+      : await adb.executeCommand("shell wm size", { timeoutMs: options.timeoutMs, noRetry: true });
   const match = stdout.match(/Physical size:\s*(\d+)x(\d+)/);
   if (!match) {
     throw new Error(`Could not parse display size from wm size output: ${stdout}`);

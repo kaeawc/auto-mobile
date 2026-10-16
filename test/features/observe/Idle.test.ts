@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Idle, ROTATION_READ_FLOOR_MS } from "../../../src/features/observe/Idle";
 import { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { BootedDevice, TouchIdleResult } from "../../../src/models";
 import { logger } from "../../../src/utils/logger";
@@ -800,7 +801,7 @@ describe("Idle - Unit Tests", function () {
         const executeCommand = adb.executeCommand.bind(adb);
         adb.executeCommand = async (...args) => {
           const result = await executeCommand(...args);
-          await timer.sleep(args[1] ?? 0);
+          await timer.sleep(executeCommandOptionsOf(args).timeoutMs ?? 0);
           return result;
         };
         const rotationIdle = new Idle(device, new FakeAdbClientFactory(adb), timer);

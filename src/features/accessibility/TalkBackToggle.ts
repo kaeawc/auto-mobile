@@ -472,10 +472,9 @@ export class TalkBackToggle {
    */
   private async dumpWindowHierarchy(): Promise<string> {
     const remotePath = "/sdcard/window_dump.xml";
-    await this.adb.executeCommand(
-      `shell uiautomator dump ${remotePath}`,
-      UIAUTOMATOR_DUMP_TIMEOUT_MS,
-    );
+    await this.adb.executeCommand(`shell uiautomator dump ${remotePath}`, {
+      timeoutMs: UIAUTOMATOR_DUMP_TIMEOUT_MS,
+    });
     const catResult = await this.adb.executeCommand(`shell cat ${remotePath}`);
     return catResult.stdout;
   }

@@ -180,7 +180,10 @@ export class Shake extends BaseVisualChange {
     try {
       const result = await runWithAbortSignal(undefined, () =>
         raceWithDeadline(
-          () => this.adb.executeCommand(`emu sensor set acceleration ${acceleration}`, 1000),
+          () =>
+            this.adb.executeCommand(`emu sensor set acceleration ${acceleration}`, {
+              timeoutMs: 1000,
+            }),
           { timer: this.shakeTimer, timeoutMs: 1000, label: "Restore shake acceleration" },
         ),
       );

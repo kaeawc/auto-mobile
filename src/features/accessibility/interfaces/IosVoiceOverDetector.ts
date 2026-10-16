@@ -1,4 +1,4 @@
-import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 import type { IOSCtrlProxy } from "../../observe/ios";
 
 /** The only CtrlProxy capability VoiceOver detection needs. */
@@ -30,7 +30,7 @@ export interface IosVoiceOverDetector {
   isVoiceOverEnabled(
     deviceId: string,
     client: VoiceOverStateClient,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean>;
@@ -55,7 +55,7 @@ export interface IosVoiceOverDetector {
   resolveState(
     deviceId: string,
     client: VoiceOverStateClient,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean | null>;
@@ -84,7 +84,7 @@ export interface IosVoiceOverDetector {
   isVoiceOverActiveOrUnknown(
     deviceId: string,
     client: VoiceOverStateClient,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean>;

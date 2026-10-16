@@ -59,13 +59,11 @@ export async function readAndroidDeviceApiLevel(
 
     throwIfAborted(signal);
     const r = await awaitWhileRequestIsLive(
-      adb.executeCommand(
-        "shell getprop ro.build.version.sdk",
-        fallbackTimeoutMs,
-        undefined,
-        true,
+      adb.executeCommand("shell getprop ro.build.version.sdk", {
+        timeoutMs: fallbackTimeoutMs,
+        noRetry: true,
         signal,
-      ),
+      }),
       signal,
     );
     const n = parseInt(r.stdout.trim(), 10);

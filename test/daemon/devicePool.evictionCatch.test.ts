@@ -1,3 +1,4 @@
+import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { EventEmitter } from "node:events";
@@ -54,20 +55,13 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     const warnSpy = spyOn(logger, "warn");
     const evictError = new Error("removeDevice failed");
     // Force the eviction chain to reject.
-    const evictSpy = spyOn(
-      pool as unknown as {
-        evictMissingPooledDevice: (...args: unknown[]) => Promise<void>;
-      },
-      "evictMissingPooledDevice",
-    ).mockRejectedValue(evictError);
+    const evictSpy = spyOn(poolInternals(pool), "evictMissingPooledDevice").mockRejectedValue(
+      evictError,
+    );
 
     const child = new EventEmitter();
     // Register the exit listener under test.
-    (
-      pool as unknown as {
-        trackStartedDeviceProcess: (device: unknown, child: unknown) => void;
-      }
-    ).trackStartedDeviceProcess(androidDevice, child);
+    poolInternals(pool).trackStartedDeviceProcess(androidDevice, child);
 
     // Fire the process-exit event; the rejection must be caught, not unhandled.
     child.emit("exit", 1, null);
@@ -122,11 +116,7 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     };
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
-    await (
-      diagnosticPool as unknown as {
-        trackStartedDeviceProcess: (device: unknown, child: unknown) => Promise<void>;
-      }
-    ).trackStartedDeviceProcess(androidDevice, child);
+    await poolInternals(diagnosticPool).trackStartedDeviceProcess(androidDevice, child);
     child.stdout.emit("data", Buffer.from("token="));
     (child as unknown as EventEmitter).emit("exit", 1, null);
     child.stderr.emit("data", Buffer.from("emulator died\n"));

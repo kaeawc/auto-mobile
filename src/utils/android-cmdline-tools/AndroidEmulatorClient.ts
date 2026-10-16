@@ -3,6 +3,7 @@ import {
   EmulatorStillRunningError,
   markEmulatorStopDispatched,
   type EmulatorProcessIdentity,
+  type EmulatorSerialDescription,
   type EmulatorProcessStopper,
 } from "./EmulatorProcessStop";
 import { AdbCommandTimeoutError } from "./AdbClient";
@@ -2260,9 +2261,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       deadlineMs: options.deadlineMs ?? this.timer.now(),
       signal: options.signal,
     };
-    const candidates = await stopper.describeSerial(device.deviceId, stopOptions);
-    if (candidates.length > 0) {
-      return emulatorProcessEscapeHint(device.deviceId, candidates);
+    const described = await stopper.describeSerial(device.deviceId, stopOptions);
+    if (described.kind === "read" && described.candidates.length > 0) {
+      return emulatorProcessEscapeHint(device.deviceId, described.candidates);
     }
     const observed = await stopper.identify(
       { serial: device.deviceId, avdName: this.processStopAvdName(device, options) ?? "" },
@@ -2397,12 +2398,23 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     options: EmulatorKillOptions,
   ): Promise<BootedDevice> {
     const stopper = options.processStop?.stopper;
-    const candidates = stopper
+    const described = stopper
       ? await stopper.describeSerial(device.deviceId, {
           deadlineMs: options.deadlineMs ?? this.timer.now(),
           signal: options.signal,
         })
-      : [];
+      : ({ kind: "read", candidates: [] } satisfies EmulatorSerialDescription);
+    if (described.kind === "unreadable") {
+      // Fail closed: an unreadable table (ps failure, deadline, unsupported platform) cannot
+      // prove absence, and this wording must not match the already-stopped classifier.
+      throw new ActionableError(
+        `Cannot confirm whether emulator '${this.emulatorLabel(device)}' (${device.deviceId}) has ` +
+          `stopped: adb does not list it and the host process table could not be read ` +
+          `(${described.detail}), so its session and pool entry were left untouched. ` +
+          emulatorProcessEscapeHint(device.deviceId, [], "unreadable"),
+      );
+    }
+    const { candidates } = described;
     if (candidates.length === 0) {
       throw new ActionableError(`Emulator '${this.emulatorLabel(device)}' is not running`);
     }

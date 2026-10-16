@@ -14,6 +14,8 @@ export class FakeEmulatorProcessStopper implements EmulatorProcessStopper {
   identity: EmulatorProcessIdentity = { kind: "absent" };
   outcome: EmulatorProcessStopOutcome = { kind: "unidentified", identity: { kind: "absent" } };
   candidates: { pid: number; command: string }[] = [];
+  /** When set, describeSerial reports an unreadable process table instead of `candidates`. */
+  describeUnreadable?: string;
   identities: EmulatorProcessIdentity[] = [];
   outcomes: EmulatorProcessStopOutcome[] = [];
   onStop?: () => void;
@@ -28,7 +30,9 @@ export class FakeEmulatorProcessStopper implements EmulatorProcessStopper {
   async describeSerial(...args: Parameters<EmulatorProcessStopper["describeSerial"]>) {
     args[1].signal?.throwIfAborted();
     this.describeCalls.push(args);
-    return this.candidates;
+    return this.describeUnreadable === undefined
+      ? { kind: "read" as const, candidates: this.candidates }
+      : { kind: "unreadable" as const, detail: this.describeUnreadable };
   }
   async stop(
     ...args: Parameters<EmulatorProcessStopper["stop"]>

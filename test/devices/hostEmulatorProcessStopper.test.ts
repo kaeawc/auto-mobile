@@ -240,3 +240,16 @@ test("host stopper is shared with the tool dependency for its timer", () => {
     resetDeviceToolsDependencies();
   }
 });
+
+test("win32 stopper reports an unreadable process table, never an empty read", async () => {
+  const f = fixture("");
+  const stopper = createHostEmulatorProcessStopper({
+    executor: f.executor,
+    timer: f.timer,
+    ownPid: 99,
+    platform: "win32",
+  });
+  const described = await stopper.describeSerial("emulator-5554", { deadlineMs: 30_000 });
+  expect(described.kind).toBe("unreadable");
+  expect(f.executor.getExecutedCommands()).toEqual([]);
+});

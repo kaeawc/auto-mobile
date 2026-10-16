@@ -1,3 +1,4 @@
+import type { TypingSession } from "./TypingSession";
 import type { SendKeysTextClient, TextActionResult } from "../SendKeys";
 import type { KeyboardProfileId } from "../keyboardProfiles";
 import type { ImeSubtypeSnapshot } from "../AndroidImeCatalog";
@@ -23,11 +24,10 @@ type DefaultImeReadResult =
   | { success: true; imeId: string | null }
   | { success: false; error: string };
 export interface ImeRestoreHost {
+  session: TypingSession;
   adb: AdbExecutor;
   device: Pick<BootedDevice, "deviceId">;
   textClient: Pick<SendKeysTextClient, "supportsKeyboardProfiles" | "setKeyboardProfile">;
-  getImeUserId(): number | undefined;
-  setImeUserId(value: number | undefined): void;
   checkAbort(signal?: AbortSignal, error?: unknown): void;
 }
 export class ImeRestore {
@@ -42,9 +42,9 @@ export class ImeRestore {
     signal?: AbortSignal,
   ): Promise<{ success: true } | { success: false; error: string }> {
     try {
-      this.host.setImeUserId(
-        await createForegroundUserSource(this.host.adb).foregroundUserId(signal),
-      );
+      this.host.session.imeUserId = await createForegroundUserSource(
+        this.host.adb,
+      ).foregroundUserId(signal);
       return { success: true };
     } catch (error) {
       this.host.checkAbort(signal, error);
@@ -58,7 +58,7 @@ export class ImeRestore {
 
   /** The pinned user as ` --user <id>` command text; empty for user 0. */
   imeUserFlag(): string {
-    const userId = this.host.getImeUserId();
+    const userId = this.host.session.imeUserId;
     if (userId === undefined) {
       throw new Error("IME user was not pinned before an IME command.");
     }
@@ -67,7 +67,7 @@ export class ImeRestore {
   }
 
   pinnedImeCatalog(): AndroidImeCatalog {
-    const userId = this.host.getImeUserId();
+    const userId = this.host.session.imeUserId;
     if (userId === undefined) {
       throw new Error("IME user was not pinned before an IME command.");
     }
@@ -263,7 +263,7 @@ export class ImeRestore {
               imeId: priorImeId,
               subtypeId: subtype.id,
               wasEnabled,
-              userId: this.host.getImeUserId(),
+              userId: this.host.session.imeUserId,
             };
       quarantineAndroidIme(this.host.device.deviceId, snapshot);
       logger.warn("[SendKeys] Original keyboard restoration failed", error);

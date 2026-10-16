@@ -605,7 +605,7 @@ class PrototypeRequestTest {
     assertFalse(result.succeeded)
     assertFalse(result.wroteInto)
     assertEquals(PrototypeRequestErrorCode.INVALID_RESPONSE, result.meta.error!!.code)
-    assertEquals("response and metadata exceed the data limit", result.meta.error!!.message)
+    assertEquals("response and metadata exceed the data limit", result.meta.error.message)
     assertEquals(JsonPrimitive("old"), data!!["feed"])
     assertEquals(
       "invalid_response",

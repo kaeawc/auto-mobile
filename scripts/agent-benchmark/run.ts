@@ -481,7 +481,24 @@ function harnessSources(): string[] {
  * native image build that loads. The git commit is left out: it
  * changes with every unrelated commit, which would flag every baseline as mismatched.
  */
-function serverDigest(): string {
+/**
+ * A `--claude` wrapper script can inject flags or prompts while the stream still reports
+ * the same CLI version, so a small file-backed command is hashed by content. A large
+ * binary (the CLI itself) is identified by its resolved path; its version is fingerprinted
+ * separately from the stream.
+ */
+function claudeCommandIdentity(command: string): Uint8Array {
+  const path = Bun.which(command) ?? command;
+  const encode = (text: string) => new TextEncoder().encode(text);
+  try {
+    return statSync(path).size <= 1024 * 1024 ? readFileSync(path) : encode(`binary:${path}`);
+  } catch {
+    // An unresolvable command fails at launch; record its name so the digest still differs.
+    return encode(`unresolved:${command}`);
+  }
+}
+
+function serverDigest(claudeCommand: string): string {
   const tree = (dir: string) =>
     readdirSync(join(REPO_ROOT, dir), { recursive: true, encoding: "utf8" })
       .filter((path) => statSync(join(REPO_ROOT, dir, path)).isFile())
@@ -503,6 +520,7 @@ function serverDigest(): string {
       read: () =>
         new TextEncoder().encode(`${process.platform}-${process.arch}-${familySync() ?? "none"}`),
     },
+    { path: "claude-command", read: () => claudeCommandIdentity(claudeCommand) },
   ]);
 }
 
@@ -511,7 +529,7 @@ async function runSuites(options: CliOptions, deps: HarnessDeps): Promise<Benchm
   if (!existsSync(serverEntry)) {
     throw new Error(`${serverEntry} is missing; run \`bun run build\` first.`);
   }
-  const serverBuild = serverDigest();
+  const serverBuild = serverDigest(options.claude);
   const suites = suitePaths(options).map((path) => loadSuite(path, REPO_ROOT));
   const results: BenchmarkResult[] = [];
   for (const suite of suites) {

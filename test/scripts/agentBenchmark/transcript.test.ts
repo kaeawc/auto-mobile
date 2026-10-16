@@ -115,6 +115,18 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.toolCalls).toHaveLength(1);
   });
 
+  test("a second tool_result for one call is a parse error and does not overwrite the first", () => {
+    const repeat = JSON.stringify({
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "fine" }] },
+    });
+    const first = new TranscriptBuilder().init().mcp("tapOn", "boom", { isError: true }).build();
+    const id = auditTranscript(first, NO_PATTERNS).toolCalls[0].id;
+    const audit = auditTranscript(`${first}${repeat.replace("toolu_1", id)}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual([`duplicate tool_result for tool_use_id ${id}`]);
+    expect(audit.toolCalls[0].isError).toBe(true);
+  });
+
   test("an empty transcript audits to zero calls with no init", () => {
     const audit = auditTranscript("", NO_PATTERNS);
     expect(audit.totalToolCalls).toBe(0);

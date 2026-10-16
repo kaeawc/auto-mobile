@@ -198,10 +198,11 @@ function processChecks(audit: TranscriptAudit, outcome: RunOutcome): CheckResult
  * side, so `EXPECTED_COUNT: 3` does not match `EXPECTED_COUNT: 30`.
  */
 /**
- * Characters that join digits into one number: decimal and grouping marks (ASCII and
- * Arabic U+066B/U+066C) and fraction slashes (/ and U+2044).
+ * Characters that join digits into one value: decimal and grouping marks (ASCII and
+ * Arabic U+066B/U+066C), fraction slashes (/ and U+2044), and range or ratio marks (-, the
+ * U+2013 en dash, and :), so 3 is not inside 3-4 or 3:4.
  */
-const NUMBER_JOINERS = "[.,/\u2044\u066B\u066C]";
+const NUMBER_JOINERS = "[.,/\u2044\u066B\u066C\\-\u2013:]";
 
 export function containsBounded(haystack: string, needle: string): boolean {
   // Unicode letters, digits, and combining marks bound a match, so 完了 does not match

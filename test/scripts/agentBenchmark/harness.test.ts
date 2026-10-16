@@ -91,7 +91,8 @@ function setup(transcript: string, launchMs = 42_000) {
         "versionCode=7 minSdk=26\n    versionName=1.0\n    lastUpdateTime=2026-10-16 10:00:00\n",
     })
     .onAdb("getprop", {
-      stdout: "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n1.0\n1\n1\n1\n",
+      stdout:
+        "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n1.0\n1\n1\n1\nNight mode: no\n",
     })
     .onAdb("dumpsys window displays", { stdout: "  mRotation=0\n" })
     .on("claude", () => ({ stdout: "2.1.301 (Claude Code)\n" }));
@@ -535,7 +536,8 @@ describe("agent benchmark harness", () => {
         stdout: '<hierarchy><node package="dev.example" text="Bug repro"/></hierarchy>',
       })
       .onAdb("getprop", {
-        stdout: "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n1.0\n1\n1\n1\n",
+        stdout:
+          "36\npixel\nen-US\nPhysical size: 1x2\nPhysical density: 3\n1.0\n1\n1\n1\nNight mode: no\n",
       });
     const suite = loadedSuite({
       preflight: { launchUri: "example:start", startScreenIncludes: ["Bug repro"] },
@@ -544,7 +546,7 @@ describe("agent benchmark harness", () => {
     const result = await runSuite(suite, options, deps);
     expect(result.comparison.verdict).toBe("passed");
     expect(result.preflight.device).toBe(
-      "sdk=36 model=pixel locale=en-US size=1x2 density=3 font=1 anim=1/1/1 rotation=0",
+      "sdk=36 model=pixel locale=en-US size=1x2 density=3 font=1 anim=1/1/1 theme=light rotation=0",
     );
     // Fingerprinting runs before the settle and start-screen check, never between it and launch.
     const calls = runner.adbCalls();

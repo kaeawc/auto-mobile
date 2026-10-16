@@ -21,6 +21,7 @@
  * See docs/using/agent-benchmarks.md.
  */
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -244,6 +245,7 @@ const realFs: HarnessFs = {
   makeTempDir: (prefix) =>
     mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", prefix)),
   remove: (path) => rmSync(path, { recursive: true, force: true }),
+  sha256: (path) => createHash("sha256").update(readFileSync(path)).digest("hex"),
 };
 
 const realDeviceClaims: DeviceClaims = {

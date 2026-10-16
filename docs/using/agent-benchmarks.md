@@ -167,12 +167,16 @@ baseline, and the delta. The tool sequence is shown as a longest-common-subseque
 means a baseline call the agent skipped, `+` means an extra call). Real runs can take equally valid
 paths, so sequence drift never fails a run.
 
-When a run passes, the harness writes `<run>/baseline.yml`, which you can paste into the suite.
+When a run passes with no stumbles, the harness writes `<run>/baseline.yml`, which you can paste
+into the suite. A run that recovered from a stumble still passes but writes no snippet, because its
+error count and recovery calls would skew later comparisons.
 Record baselines only from clean, passing runs. When establishing one, allow up to three
 attempts. If none passes, leave the suite without a `baseline` block rather than recording a
 failed run.
 
-The snippet also records the app build fingerprint (`baseline.appBuild`). If a later run's
+The snippet also records the app build fingerprint (`baseline.appBuild`): `versionName`,
+`versionCode`, and either the installed `lastUpdateTime` or, when the suite sets `app.apkPath`, a
+SHA-256 prefix of the APK (preflight reinstalls it every run, which resets the install time). If a later run's
 installed app differs, the report flags that its deltas compare different app builds.
 
 ## Artifacts
@@ -190,7 +194,7 @@ runs of the same suite that start in the same second apart.
 | `screen.xml`                     | The post-run `uiautomator` dump (suites with screen checks only).         |
 | `logs/`, `db/`                   | The private daemon's logs and database.                                   |
 | `result.json`                    | The full result: run metadata, audit, checks, metrics, and sequence diff. |
-| `baseline.yml`                   | A baseline snippet (passing runs only).                                   |
+| `baseline.yml`                   | A baseline snippet (passing runs with no stumbles only).                  |
 
 ## Adding a suite
 

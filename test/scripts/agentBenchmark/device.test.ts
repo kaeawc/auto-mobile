@@ -130,6 +130,9 @@ describe("agent benchmark preflight", () => {
       "versionName=1.2.3 versionCode=42 lastUpdateTime=2026-10-16 10:00:00",
     );
     expect(describeAppBuild("")).toBe("unknown");
+    expect(describeAppBuild(dumpsys, "0123456789abcdef")).toBe(
+      "versionName=1.2.3 versionCode=42 sha256=0123456789abcdef",
+    );
   });
 
   test("a pm clear that does not report Success stops the run before seeding", async () => {

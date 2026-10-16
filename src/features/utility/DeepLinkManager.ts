@@ -256,7 +256,7 @@ export async function resolveChooserActivityLabel(
 
 const defaultChooserAppMetadata: ChooserAppMetadata = {
   async getLabel(device, packageName, signal) {
-    const { resolveAppLabel } = await import("../../server/systemTrayHelpers");
+    const { resolveAppLabel } = await import("../systemTray/systemTrayHelpers");
     throwIfAborted(signal);
     return resolveAppLabel(device, packageName, signal);
   },

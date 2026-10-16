@@ -190,7 +190,7 @@ import type {
   ClipboardArgs,
 } from "./interactionToolTypes";
 
-import { createNotificationUIDetector } from "./system-tray/createNotificationUIDetector";
+import { createNotificationUIDetector } from "../features/systemTray/createNotificationUIDetector";
 
 import {
   SystemTrayObserver,
@@ -220,7 +220,7 @@ import {
   isSwipeTargetIsolatedFromGroup,
   tapElement,
   swipeElement,
-} from "./systemTrayHelpers";
+} from "../features/systemTray/systemTrayHelpers";
 
 // Re-export types for backward compatibility
 export type {

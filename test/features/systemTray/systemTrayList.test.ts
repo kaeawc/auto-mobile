@@ -1,8 +1,8 @@
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { compileAjv2020 } from "../helpers/jsonSchemaCompile";
-import generatedDefinitions from "../../schemas/tool-definitions.json";
+import { compileAjv2020 } from "../../helpers/jsonSchemaCompile";
+import generatedDefinitions from "../../../schemas/tool-definitions.json";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   listSystemTrayNotifications,
@@ -12,18 +12,18 @@ import {
   resetSystemTrayDependencies,
   setSystemTrayDependencies,
   type SystemTrayDependencies,
-} from "../../src/server/systemTrayHelpers";
-import { registerInteractionTools, systemTraySchema } from "../../src/server/interactionTools";
+} from "../../../src/features/systemTray/systemTrayHelpers";
+import { registerInteractionTools, systemTraySchema } from "../../../src/server/interactionTools";
 import {
   ListInstalledApps,
   type IosInstalledAppsDetailedResult,
-} from "../../src/features/observe/ListInstalledApps";
-import { getIosInstalledAppBundleId } from "../../src/utils/ios-cmdline-tools/iosInstalledApp";
-import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
-import { FakeTimer } from "../fakes/FakeTimer";
-import { logger } from "../../src/utils/logger";
-import type { BootedDevice, ObserveResult } from "../../src/models";
+} from "../../../src/features/observe/ListInstalledApps";
+import { getIosInstalledAppBundleId } from "../../../src/utils/ios-cmdline-tools/iosInstalledApp";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger } from "../../../src/utils/logger";
+import type { BootedDevice, ObserveResult } from "../../../src/models";
 
 const device: BootedDevice = {
   deviceId: "test",
@@ -37,7 +37,7 @@ const headerlessTwoNotificationGroups = {
       readFileSync(
         join(
           import.meta.dir,
-          "../fixtures/observe/ctrlproxy-headerless-two-notification-group-collapsed.json",
+          "../../fixtures/observe/ctrlproxy-headerless-two-notification-group-collapsed.json",
         ),
         "utf8",
       ),
@@ -48,7 +48,7 @@ const headerlessTwoNotificationGroups = {
       readFileSync(
         join(
           import.meta.dir,
-          "../fixtures/observe/ctrlproxy-headerless-two-notification-group-expanded.json",
+          "../../fixtures/observe/ctrlproxy-headerless-two-notification-group-expanded.json",
         ),
         "utf8",
       ),

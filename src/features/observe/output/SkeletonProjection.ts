@@ -807,7 +807,7 @@ function indexSelectorGroup(
  * Deliberately an ALLOWLIST, not a `com.android.systemui:id/` prefix match
  * (PR #6242 review PRRT_kwDOP-GF5M6fq3iH): the notification SHADE lives under
  * the same `com.android.systemui` namespace (e.g. `:id/notification_row_1`,
- * `:id/notification_stack_scroller` — see `test/server/systemTray.test.ts`),
+ * `:id/notification_stack_scroller` — see `test/features/systemTray/systemTray.test.ts`),
  * and those rows are ACTIONABLE and must stay individually selectable, never
  * folded into this summary. Only genuine status-bar chrome collapses; a new
  * systemui id that isn't on this list simply stays its own `context` entry

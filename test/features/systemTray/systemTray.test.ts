@@ -1,4 +1,4 @@
-import { warmedTests } from "../helpers/warmedTests";
+import { warmedTests } from "../../helpers/warmedTests";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -7,9 +7,9 @@ import {
   resetSystemTrayDependencies,
   setSystemTrayDependencies,
   waitForNotificationMatch,
-} from "../../src/server/interactionTools";
-import { ToolRegistry } from "../../src/server/toolRegistry";
-import { ListInstalledApps } from "../../src/features/observe/ListInstalledApps";
+} from "../../../src/server/interactionTools";
+import { ToolRegistry } from "../../../src/server/toolRegistry";
+import { ListInstalledApps } from "../../../src/features/observe/ListInstalledApps";
 import {
   observeSystemTrayAfterTap,
   ensureSystemTrayClosed,
@@ -23,14 +23,19 @@ import {
   resolveNotificationGroupExpansionState,
   resolveNotificationSwipeElement,
   resolveNotificationTapElement,
-} from "../../src/server/systemTrayHelpers";
-import type { SystemTrayIosClient } from "../../src/server/systemTrayHelpers";
-import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
-import { logger } from "../../src/utils/logger";
-import { serverConfig } from "../../src/utils/ServerConfig";
-import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../src/models";
+} from "../../../src/features/systemTray/systemTrayHelpers";
+import type { SystemTrayIosClient } from "../../../src/features/systemTray/systemTrayHelpers";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { logger } from "../../../src/utils/logger";
+import { serverConfig } from "../../../src/utils/ServerConfig";
+import type {
+  BootedDevice,
+  Element,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../../src/models";
 
 const POLL_INTERVAL_MS = 250;
 // Mirrors the private SYSTEM_TRAY_REEXPAND_INTERVAL_MS in systemTrayHelpers.ts.
@@ -54,7 +59,7 @@ const mockInstalledApps = (packageNames: string[]) =>
 // compact tuples so this coverage exercises the server compact-bounds parser.
 const CTRL_PROXY_COMPACT_BOUNDS_GROUP_FIXTURE_PATH = join(
   import.meta.dir,
-  "../fixtures/observe/ctrlproxy-notification-group-compact-bounds.json",
+  "../../fixtures/observe/ctrlproxy-notification-group-compact-bounds.json",
 );
 const realCtrlProxyCompactBoundsGroups = JSON.parse(
   readFileSync(CTRL_PROXY_COMPACT_BOUNDS_GROUP_FIXTURE_PATH, "utf8"),
@@ -64,7 +69,7 @@ const headerlessTwoNotificationGroups = {
     readFileSync(
       join(
         import.meta.dir,
-        "../fixtures/observe/ctrlproxy-headerless-two-notification-group-collapsed.json",
+        "../../fixtures/observe/ctrlproxy-headerless-two-notification-group-collapsed.json",
       ),
       "utf8",
     ),
@@ -73,7 +78,7 @@ const headerlessTwoNotificationGroups = {
     readFileSync(
       join(
         import.meta.dir,
-        "../fixtures/observe/ctrlproxy-headerless-two-notification-group-expanded.json",
+        "../../fixtures/observe/ctrlproxy-headerless-two-notification-group-expanded.json",
       ),
       "utf8",
     ),

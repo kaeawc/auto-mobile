@@ -1744,7 +1744,7 @@ describe("toSkeleton — acceptance criteria", () => {
 
     test("notification-shade rows under the same com.android.systemui namespace are NEVER folded into the status-bar summary (PR #6242 review PRRT_kwDOP-GF5M6fq3iH)", () => {
       // The notification shade lives under the same `com.android.systemui`
-      // namespace as the status bar (see test/server/systemTray.test.ts's
+      // namespace as the status bar (see test/features/systemTray/systemTray.test.ts's
       // `notification_row_1` fixture), but its rows are ACTIONABLE and must stay
       // individually tappable — never collapsed into the synthetic status-bar
       // summary just because the id shares a package prefix.

@@ -25,7 +25,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetSystemTrayDependencies,
   setSystemTrayDependencies,
-} from "../../src/server/systemTrayHelpers";
+} from "../../src/features/systemTray/systemTrayHelpers";
 import { throwIfAborted } from "../../src/utils/toolUtils";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";

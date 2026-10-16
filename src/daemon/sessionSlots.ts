@@ -1,5 +1,16 @@
-/** Assignment and creation facets retain the legacy maps' identity and insertion order. */
-export class SessionSlots<A, Sh, C, R extends object, Rel> {
+/** Lifecycle facets retain the legacy maps' identity and insertion order. */
+export class SessionSlots<
+  A,
+  Sh,
+  C,
+  R extends object,
+  Rel,
+  Reb,
+  Cleanup,
+  Op,
+  Snapshot,
+  S extends object,
+> {
   /** Automatic device assignments that have not yet started their creation write. */
   private readonly pendingSessionAssignments = new Map<string, A>();
   private readonly sharedSessionAssignments = new Map<string, Sh>();
@@ -11,6 +22,85 @@ export class SessionSlots<A, Sh, C, R extends object, Rel> {
   private readonly claimedRecoverableRows = new WeakSet<R>();
   /** Releases received before an assignment has published its session. */
   private readonly pendingSessionReleases = new Map<string, Rel>();
+
+  /** Rebinds that a release must await before it can remove the live binding. */
+  private readonly pendingRebinds = new Map<string, Reb>();
+  private readonly deferredCleanupOwners = new Map<
+    Cleanup,
+    { sessionId: string; deviceId: string }
+  >();
+
+  private readonly releasePromises = new Map<string, Op>();
+  /** Every release still running, including an older session that reused a UUID. */
+  private readonly activeReleasePromises = new Set<Op>();
+  /** Forced non-terminal snapshots belong to the exact incarnation, even if teardown stays stuck. */
+  private readonly forcedNonTerminalReleases = new WeakMap<S, Snapshot>();
+  /** Sessions whose teardown has closed admission for further device-state setup. */
+  private readonly releasingSessions = new WeakSet<S>();
+
+  get releaseOps(): ReadonlyMap<string, Op> {
+    return this.releasePromises;
+  }
+
+  getReleaseOp(id: string): Op | undefined {
+    return this.releasePromises.get(id);
+  }
+
+  hasReleaseOp(id: string): boolean {
+    return this.releasePromises.has(id);
+  }
+
+  setReleaseOp(id: string, value: Op): void {
+    this.releasePromises.set(id, value);
+  }
+
+  deleteReleaseOp(id: string): boolean {
+    return this.releasePromises.delete(id);
+  }
+
+  get activeReleases(): ReadonlySet<Op> {
+    return this.activeReleasePromises;
+  }
+
+  addActiveRelease(op: Op): void {
+    this.activeReleasePromises.add(op);
+  }
+
+  hasActiveRelease(op: Op): boolean {
+    return this.activeReleasePromises.has(op);
+  }
+
+  deleteActiveRelease(op: Op): boolean {
+    return this.activeReleasePromises.delete(op);
+  }
+
+  markReleasing(session: S): void {
+    this.releasingSessions.add(session);
+  }
+
+  unmarkReleasing(session: S): boolean {
+    return this.releasingSessions.delete(session);
+  }
+
+  isReleasing(session: S): boolean {
+    return this.releasingSessions.has(session);
+  }
+
+  getForcedNonTerminal(session: S): Snapshot | undefined {
+    return this.forcedNonTerminalReleases.get(session);
+  }
+
+  setForcedNonTerminal(session: S, snapshot: Snapshot): void {
+    this.forcedNonTerminalReleases.set(session, snapshot);
+  }
+
+  hasForcedNonTerminal(session: S): boolean {
+    return this.forcedNonTerminalReleases.has(session);
+  }
+
+  deleteForcedNonTerminal(session: S): boolean {
+    return this.forcedNonTerminalReleases.delete(session);
+  }
 
   get assignments(): ReadonlyMap<string, A> {
     return this.pendingSessionAssignments;
@@ -102,6 +192,39 @@ export class SessionSlots<A, Sh, C, R extends object, Rel> {
 
   deleteReleaseRequest(id: string): boolean {
     return this.pendingSessionReleases.delete(id);
+  }
+
+  get rebinds(): ReadonlyMap<string, Reb> {
+    return this.pendingRebinds;
+  }
+
+  getRebind(id: string): Reb | undefined {
+    return this.pendingRebinds.get(id);
+  }
+
+  hasRebind(id: string): boolean {
+    return this.pendingRebinds.has(id);
+  }
+
+  setRebind(id: string, value: Reb): void {
+    this.pendingRebinds.set(id, value);
+  }
+
+  deleteRebind(id: string): boolean {
+    return this.pendingRebinds.delete(id);
+  }
+
+  /** Live iteration lets cleanup commits delete receipts while a flush is in progress. */
+  get deferredCleanups(): ReadonlyMap<Cleanup, { sessionId: string; deviceId: string }> {
+    return this.deferredCleanupOwners;
+  }
+
+  setDeferredCleanup(cleanup: Cleanup, owner: { sessionId: string; deviceId: string }): void {
+    this.deferredCleanupOwners.set(cleanup, owner);
+  }
+
+  deleteDeferredCleanup(cleanup: Cleanup): boolean {
+    return this.deferredCleanupOwners.delete(cleanup);
   }
 
   markRowClaimed(row: R): void {

@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import type AdmZip from "adm-zip";
 import { ActionableError } from "../../models/ActionableError";
+import { isPathInside } from "../filesystem/pathContainment";
 
 /**
  * Defensive zip-slip containment check (issue #4761). adm-zip >= 0.5.10 already
@@ -17,11 +18,7 @@ export function assertZipEntriesContained(
 ): void {
   const resolvedRoot = path.resolve(destination);
   for (const entry of zip.getEntries()) {
-    const target = path.resolve(resolvedRoot, entry.entryName);
-    const relative = path.relative(resolvedRoot, target);
-    const escapes =
-      relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
-    if (escapes) {
+    if (!isPathInside(resolvedRoot, entry.entryName)) {
       throw new ActionableError(
         `Refusing to extract ${bundleName}: entry "${entry.entryName}" resolves outside the ` +
           `extraction directory ${resolvedRoot} (zip-slip / path traversal).`,

@@ -568,3 +568,46 @@ describe("swipeAt device lock (#4280)", () => {
     expect(result).not.toHaveProperty("deviceLockWarning");
   });
 });
+
+describe("swipeAt iOS hierarchy cache", () => {
+  const options = { from: { x: 10, y: 20 }, to: { x: 60, y: 120 } };
+
+  test("is invalidated after a delivered swipe", async () => {
+    const { swipeAt, iosCacheInvalidations } = createSwipeAt(iosDevice);
+
+    await swipeAt.execute(options);
+
+    expect(iosCacheInvalidations()).toBe(1);
+  });
+
+  test("is invalidated when the swipe was dispatched but its outcome is unknown", async () => {
+    const { swipeAt, gesture, iosCacheInvalidations } = createSwipeAt(iosDevice);
+    gesture.failWith = "runner reply lost";
+    gesture.indeterminate = true;
+
+    const result = await swipeAt.execute(options);
+
+    expect(result).toMatchObject({ success: false, outcomeIndeterminate: true });
+    expect(iosCacheInvalidations()).toBe(1);
+  });
+
+  test("is kept when the swipe was refused before it moved anything", async () => {
+    const { swipeAt, gesture, iosCacheInvalidations } = createSwipeAt(iosDevice);
+    gesture.failWith = "runner refused";
+
+    const result = await swipeAt.execute(options);
+
+    expect(result.success).toBe(false);
+    expect(iosCacheInvalidations()).toBe(0);
+  });
+
+  test("is an iOS concern: an indeterminate Android swipe leaves it alone", async () => {
+    const { swipeAt, gesture, iosCacheInvalidations } = createSwipeAt(androidDevice);
+    gesture.failWith = "no acknowledgement";
+    gesture.indeterminate = true;
+
+    await swipeAt.execute(options);
+
+    expect(iosCacheInvalidations()).toBe(0);
+  });
+});

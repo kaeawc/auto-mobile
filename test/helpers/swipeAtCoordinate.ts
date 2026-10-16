@@ -25,6 +25,8 @@ class RecordingGesture implements Pick<ExecuteGesture, "swipe"> {
   /** Per dispatch: whether it received the in-flight display fence. */
   readonly fences: boolean[] = [];
   failWith?: string;
+  /** With `failWith`: the swipe was dispatched but never acknowledged. */
+  indeterminate = false;
 
   async swipe(...[x1, y1, x2, y2, options]: SwipeArgs): Promise<SwipeResult> {
     // The real dispatch asserts the fence before any input is sent.
@@ -32,7 +34,16 @@ class RecordingGesture implements Pick<ExecuteGesture, "swipe"> {
     this.swipes.push({ x1, y1, x2, y2, duration: options?.duration });
     this.fences.push(options?.displayFence !== undefined);
     return this.failWith
-      ? { success: false, x1, y1, x2, y2, duration: 0, error: this.failWith }
+      ? {
+          success: false,
+          x1,
+          y1,
+          x2,
+          y2,
+          duration: 0,
+          error: this.failWith,
+          ...(this.indeterminate ? { outcomeIndeterminate: true } : {}),
+        }
       : { success: true, x1, y1, x2, y2, duration: options?.duration ?? 0 };
   }
 }
@@ -49,8 +60,12 @@ export function createSwipeAt(
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const gesture = new RecordingGesture();
+  let iosCacheInvalidations = 0;
   const swipeAt = new SwipeAtCoordinate(device, new FakeAdbExecutor(), {
     timer,
+    invalidateIosCache: () => {
+      iosCacheInvalidations++;
+    },
     snapshotReferences,
     executeGesture: gesture,
     ...fence,
@@ -58,5 +73,13 @@ export function createSwipeAt(
   // Coordinate dispatch tests must not read the persistent per-device window cache.
   swipeAt.window = new FakeWindow();
   swipeAt.observeScreen = observeScreen;
-  return { swipeAt, observeScreen, gesture, swipes: gesture.swipes, fences: gesture.fences, timer };
+  return {
+    swipeAt,
+    observeScreen,
+    gesture,
+    swipes: gesture.swipes,
+    fences: gesture.fences,
+    timer,
+    iosCacheInvalidations: () => iosCacheInvalidations,
+  };
 }

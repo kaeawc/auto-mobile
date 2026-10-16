@@ -203,7 +203,9 @@ export class SwipeAtCoordinate extends BaseVisualChange {
               signal,
             ),
           );
-          if (this.device.platform === "ios" && result.success) {
+          // An unacknowledged dispatch may already have moved the UI, so the cached hierarchy is as
+          // stale as after a delivered swipe (swipeOn's `swipeMayHaveMoved`).
+          if (this.device.platform === "ios" && (result.success || result.outcomeIndeterminate)) {
             iosDispatchTimestamp = this.timer.now();
             this.invalidateIosCache();
           }

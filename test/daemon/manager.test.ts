@@ -169,26 +169,14 @@ describe("DaemonManager restart", () => {
   test("preserves PID-recorded global and daemon-wide tool options", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      undefined,
-      undefined,
-      undefined,
-      {
+      processFinder: {
         findDaemonProcesses: () => [],
         isProcessRunning: () => false,
       },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-    );
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+    });
     const recordedOptions: DaemonOptions = {
       debug: true,
       toolOutputsDir: "/tmp/automobile-artifacts",
@@ -265,23 +253,11 @@ describe("DaemonManager restart", () => {
     async ({ requested, recorded, expected }) => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const manager = new DaemonManager(
-        undefined,
-        undefined,
+      const manager = new DaemonManager({
         timer,
-        undefined,
-        undefined,
-        undefined,
-        { findDaemonProcesses: () => [], isProcessRunning: () => false },
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        new FakeDaemonPortAvailabilityChecker(),
-      );
+        processFinder: { findDaemonProcesses: () => [], isProcessRunning: () => false },
+        portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+      });
       const statusSpy = spyOn(manager, "status").mockResolvedValue({
         running: false,
         options: recorded,
@@ -322,23 +298,12 @@ describe("DaemonManager restart", () => {
         livePids.delete(pid);
       }
     });
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      undefined,
-      undefined,
-      undefined,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+    });
     const successorStatus: DaemonStatus = {
       running: true,
       pid: successorPid,
@@ -385,18 +350,14 @@ describe("DaemonManager restart", () => {
       accepted: false,
       reason: "restart_pending",
     });
-    const manager = new DaemonManager(
-      () => client,
-      undefined,
-      new FakeTimer(),
-      undefined,
-      undefined,
-      undefined,
-      {
+    const manager = new DaemonManager({
+      clientFactory: () => client,
+      timer: new FakeTimer(),
+      processFinder: {
         findDaemonProcesses: () => [],
         isProcessRunning: () => true,
       },
-    );
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue(expected);
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
@@ -433,26 +394,16 @@ describe("DaemonManager restart", () => {
       livePids.delete(incumbentPid);
       return { accepted: true };
     });
-    const manager = new DaemonManager(
-      (options) => {
+    const manager = new DaemonManager({
+      clientFactory: (options) => {
         clientOptions = options;
         return client;
       },
-      undefined,
       timer,
-      undefined,
-      undefined,
-      undefined,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+    });
     const expected: DaemonStatus = {
       running: true,
       pid: incumbentPid,
@@ -496,22 +447,15 @@ describe("DaemonManager restart", () => {
       accepted: false,
       reason: "active_operations",
     });
-    const manager = new DaemonManager(
-      () => client,
-      undefined,
+    const manager = new DaemonManager({
+      clientFactory: () => client,
       timer,
-      undefined,
-      undefined,
-      undefined,
-      {
+      processFinder: {
         findDaemonProcesses: () => [],
         isProcessRunning: (pid) => livePids.has(pid),
       },
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-    );
+      processSignaler: signaler,
+    });
     const expected: DaemonStatus = {
       running: true,
       pid: incumbentPid,
@@ -563,23 +507,13 @@ describe("DaemonManager restart", () => {
       accepted: false,
       reason: "generation_changed",
     });
-    const manager = new DaemonManager(
-      () => client,
-      undefined,
-      new FakeTimer(),
-      undefined,
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
+      clientFactory: () => client,
+      timer: new FakeTimer(),
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue(expected);
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
@@ -624,15 +558,14 @@ describe("DaemonManager restart", () => {
       isProcessRunning: (candidatePid) =>
         candidatePid === process.pid || livePids.has(candidatePid),
     };
-    const contender = new DaemonManager(
-      () => new FakeDaemonClient({}),
-      undefined,
+    const contender = new DaemonManager({
+      clientFactory: () => new FakeDaemonClient({}),
       timer,
-      lockPath,
+      lockFilePath: lockPath,
       pidFilePath,
       socketPath,
       processFinder,
-    );
+    });
     const client = new FakeDaemonClient({});
     const admissionSpy = spyOn(client, "callDaemonMethod").mockImplementation(async (method) => {
       expect(method).toBe(DAEMON_RESTART_ADMITTED_METHOD);
@@ -640,15 +573,14 @@ describe("DaemonManager restart", () => {
       livePids.delete(pid);
       return { accepted: true };
     });
-    const manager = new DaemonManager(
-      () => client,
-      undefined,
+    const manager = new DaemonManager({
+      clientFactory: () => client,
       timer,
-      lockPath,
+      lockFilePath: lockPath,
       pidFilePath,
       socketPath,
       processFinder,
-    );
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid,
@@ -685,22 +617,15 @@ describe("DaemonManager restart", () => {
     };
     const client = new FakeDaemonClient();
     const signaler = new FakeDaemonProcessSignaler();
-    const manager = new DaemonManager(
-      () => client,
-      undefined,
-      new FakeTimer(),
-      undefined,
-      undefined,
-      undefined,
-      {
+    const manager = new DaemonManager({
+      clientFactory: () => client,
+      timer: new FakeTimer(),
+      processFinder: {
         findDaemonProcesses: () => [],
         isProcessRunning: (pid) => pid === expected.pid,
       },
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-    );
+      processSignaler: signaler,
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue(expected);
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
@@ -736,14 +661,10 @@ describe("DaemonManager acceptance-session restart", () => {
       throw new Error("rollback transport failed");
     });
     const signaler = new FakeDaemonProcessSignaler();
-    const manager = new DaemonManager(
-      () => client,
-      undefined,
-      new FakeTimer(),
-      undefined,
-      undefined,
-      undefined,
-      {
+    const manager = new DaemonManager({
+      clientFactory: () => client,
+      timer: new FakeTimer(),
+      processFinder: {
         findDaemonProcesses: () => [
           {
             pid,
@@ -755,11 +676,8 @@ describe("DaemonManager acceptance-session restart", () => {
         ],
         isProcessRunning: () => true,
       },
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-    );
+      processSignaler: signaler,
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid,
@@ -818,14 +736,13 @@ describe("DaemonManager acceptance-session restart", () => {
       return { released: false };
     });
     const signaler = new FakeDaemonProcessSignaler();
-    const manager = new DaemonManager(
-      () => client,
-      undefined,
-      new FakeTimer(),
-      join(directory, "daemon.lock"),
-      join(directory, "daemon.pid"),
-      join(directory, "daemon.sock"),
-      {
+    const manager = new DaemonManager({
+      clientFactory: () => client,
+      timer: new FakeTimer(),
+      lockFilePath: join(directory, "daemon.lock"),
+      pidFilePath: join(directory, "daemon.pid"),
+      socketPath: join(directory, "daemon.sock"),
+      processFinder: {
         findDaemonProcesses: () => [
           {
             pid,
@@ -837,11 +754,8 @@ describe("DaemonManager acceptance-session restart", () => {
         ],
         isProcessRunning: (candidatePid) => candidatePid === pid || candidatePid === process.pid,
       },
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-    );
+      processSignaler: signaler,
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid,
@@ -918,14 +832,13 @@ describe("DaemonManager acceptance-session restart", () => {
     timer.enableAutoAdvance();
     const socketPath = join(directory, "daemon.sock");
     const lockPath = join(directory, "daemon.lock");
-    const manager = new DaemonManager(
-      () => client,
-      undefined,
+    const manager = new DaemonManager({
+      clientFactory: () => client,
       timer,
-      lockPath,
-      join(directory, "daemon.pid"),
+      lockFilePath: lockPath,
+      pidFilePath: join(directory, "daemon.pid"),
       socketPath,
-      {
+      processFinder: {
         findDaemonProcesses: () =>
           livePids.has(pid)
             ? [
@@ -940,11 +853,8 @@ describe("DaemonManager acceptance-session restart", () => {
             : [],
         isProcessRunning: (candidatePid) => livePids.has(candidatePid),
       },
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-    );
+      processSignaler: signaler,
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid,
@@ -1036,22 +946,18 @@ describe("DaemonManager acceptance-session restart", () => {
         writeFileSync(socketPath, "replacement socket");
       }
     });
-    const manager = new DaemonManager(
-      () => client,
-      undefined,
+    const manager = new DaemonManager({
+      clientFactory: () => client,
       timer,
-      join(directory, "daemon.lock"),
+      lockFilePath: join(directory, "daemon.lock"),
       pidFilePath,
       socketPath,
-      {
+      processFinder: {
         findDaemonProcesses: () => records,
         isProcessRunning: (targetPid) => targetPid === pid,
       },
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-    );
+      processSignaler: signaler,
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid,
@@ -1140,14 +1046,12 @@ describe("DaemonManager control-state recovery", () => {
         writeFileSync(socketPath, "replacement socket");
       }
     });
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
+      lockFilePath: join(directory, "daemon.lock"),
       pidFilePath,
       socketPath,
-      {
+      processFinder: {
         findDaemonProcesses: (timeoutMs) => {
           const found = processFinder.findDaemonProcesses(timeoutMs);
           if (records[0]?.processGenerationToken === "replacement-generation") {
@@ -1157,15 +1061,9 @@ describe("DaemonManager control-state recovery", () => {
         },
         isProcessRunning: processFinder.isProcessRunning,
       },
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid,
@@ -1216,25 +1114,14 @@ describe("DaemonManager stop", () => {
         return livePids.has(pid);
       },
     };
-    return new DaemonManager(
-      undefined,
-      undefined,
+    return new DaemonManager({
       timer,
       lockFilePath,
       pidFilePath,
       socketPath,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
       processSignaler,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
+      identityRecoveryIO: {
         socketExists: () => existsSync(socketPath),
         readRecord: () => readPidFileDataSync(pidFilePath),
         // These fixtures are ordinary files, not listening daemon sockets, so a connect is
@@ -1243,7 +1130,7 @@ describe("DaemonManager stop", () => {
           throw new Error(`connect ECONNREFUSED ${socketPath}`);
         },
       },
-    );
+    });
   }
 
   test("fails without cleanup when the daemon remains live after SIGKILL", async () => {
@@ -1479,19 +1366,14 @@ describe("DaemonManager stop", () => {
         writeFileSync(socketPath, "replacement daemon socket");
       }
     });
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
+      lockFilePath: join(directory, "daemon.lock"),
       pidFilePath,
       socketPath,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-    );
+      processSignaler: signaler,
+    });
 
     try {
       await expect(manager.stop()).resolves.toBeUndefined();
@@ -1522,18 +1404,16 @@ describe("DaemonManager stop", () => {
       startedAt: 2,
       processGenerationToken: "foreign-generation",
     };
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
+      lockFilePath: join(directory, "daemon.lock"),
       pidFilePath,
       socketPath,
-      {
+      processFinder: {
         findDaemonProcesses: () => [replacement],
         isProcessRunning: (targetPid) => targetPid === pid,
       },
-    );
+    });
 
     try {
       await expect(
@@ -1561,21 +1441,19 @@ describe("DaemonManager stop", () => {
       processGenerationToken: "old-generation",
     };
     let scans = 0;
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
-      join(directory, "daemon.pid"),
-      join(directory, "daemon.sock"),
-      {
+      lockFilePath: join(directory, "daemon.lock"),
+      pidFilePath: join(directory, "daemon.pid"),
+      socketPath: join(directory, "daemon.sock"),
+      processFinder: {
         findDaemonProcesses: () => {
           scans++;
           return [];
         },
         isProcessRunning: (targetPid) => targetPid === pid,
       },
-    );
+    });
 
     try {
       await expect(manager.waitForStop(pid, 100, expected)).resolves.toEqual({
@@ -1601,18 +1479,16 @@ describe("DaemonManager stop", () => {
       startedAt: 1,
       processGenerationToken: "old-generation",
     };
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
-      join(directory, "daemon.pid"),
-      join(directory, "daemon.sock"),
-      {
+      lockFilePath: join(directory, "daemon.lock"),
+      pidFilePath: join(directory, "daemon.pid"),
+      socketPath: join(directory, "daemon.sock"),
+      processFinder: {
         findDaemonProcesses: () => [expected],
         isProcessRunning: (targetPid) => targetPid === pid,
       },
-    );
+    });
 
     try {
       await expect(manager.waitForStop(pid, 100, expected)).resolves.toEqual({
@@ -1639,18 +1515,16 @@ describe("DaemonManager stop", () => {
       startedAt: 2,
       processGenerationToken: "foreign-generation",
     };
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
+      lockFilePath: join(directory, "daemon.lock"),
       pidFilePath,
       socketPath,
-      {
+      processFinder: {
         findDaemonProcesses: () => [replacement],
         isProcessRunning: (targetPid) => targetPid === pid,
       },
-    );
+    });
 
     try {
       await expect(
@@ -1696,19 +1570,14 @@ describe("DaemonManager stop", () => {
       ],
       isProcessRunning: (targetPid) => targetPid === pid && processAlive,
     };
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
+      lockFilePath: join(directory, "daemon.lock"),
       pidFilePath,
       socketPath,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-    );
+      processSignaler: signaler,
+    });
 
     try {
       await expect(manager.stop(100)).resolves.toBeUndefined();
@@ -1756,19 +1625,14 @@ describe("DaemonManager stop", () => {
       },
       isProcessRunning: (targetPid) => targetPid === pid && processAlive,
     };
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
+      lockFilePath: join(directory, "daemon.lock"),
       pidFilePath,
       socketPath,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-    );
+      processSignaler: signaler,
+    });
 
     try {
       await expect(manager.stop(100)).resolves.toBeUndefined();
@@ -1820,19 +1684,14 @@ describe("DaemonManager stop", () => {
         }, 300);
       }
     });
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
+      lockFilePath: join(directory, "daemon.lock"),
       pidFilePath,
       socketPath,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-    );
+      processSignaler: signaler,
+    });
 
     try {
       await expect(manager.stop(250)).resolves.toBeUndefined();
@@ -1947,19 +1806,14 @@ describe("DaemonManager stop", () => {
       isProcessRunning: (targetPid) => targetPid === pid,
     };
     const signaler = new FakeDaemonProcessSignaler();
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
+      lockFilePath: join(directory, "daemon.lock"),
       pidFilePath,
       socketPath,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-    );
+      processSignaler: signaler,
+    });
 
     try {
       await expect(manager.stop()).rejects.toThrow("verified daemon PID was reused");
@@ -2282,25 +2136,13 @@ describe("DaemonManager status", () => {
           findDaemonProcesses: () => [],
           isProcessRunning: () => false,
         };
-        const manager = new DaemonManager(
-          undefined,
-          undefined,
-          undefined,
-          join(tmpdir(), "unused-daemon-lock"),
+        const manager = new DaemonManager({
+          lockFilePath: join(tmpdir(), "unused-daemon-lock"),
           pidFilePath,
           socketPath,
           processFinder,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          platformOverride,
-          undefined,
-          undefined,
-          undefined,
-          {
+          platform: platformOverride,
+          identityRecoveryIO: {
             socketExists: () => existsSync(socketPath),
             readRecord: () => readPidFileDataSync(pidFilePath),
             // The fixture socket is an ordinary file; a real connect would race
@@ -2310,7 +2152,7 @@ describe("DaemonManager status", () => {
               throw new Error(`connect ECONNREFUSED ${socketPath}`);
             },
           },
-        );
+        });
 
         const status = await manager.status();
 
@@ -2335,15 +2177,12 @@ describe("DaemonManager status", () => {
         findDaemonProcesses: () => [],
         isProcessRunning: () => true,
       };
-      const manager = new DaemonManager(
-        undefined,
-        undefined,
-        undefined,
-        join(tmpdir(), "unused-daemon-lock"),
+      const manager = new DaemonManager({
+        lockFilePath: join(tmpdir(), "unused-daemon-lock"),
         pidFilePath,
         socketPath,
         processFinder,
-      );
+      });
 
       const status = await manager.status();
 
@@ -3264,26 +3103,11 @@ describe("Daemon manager process detection", () => {
       identityRecoveryIO?: IdentityRecoveryIO;
     } = {},
   ): DaemonManager {
-    return new DaemonManager(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      options.pidFilePath,
-      undefined,
-      new FakeDaemonProcessFinder(records, options.livePids),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      options.identityRecoveryIO,
-    );
+    return new DaemonManager({
+      pidFilePath: options.pidFilePath,
+      processFinder: new FakeDaemonProcessFinder(records, options.livePids),
+      identityRecoveryIO: options.identityRecoveryIO,
+    });
   }
 
   function writeDaemonPidFile(pidFilePath: string, pid: number): void {
@@ -3351,14 +3175,12 @@ describe("Daemon manager process detection", () => {
 
     let scans = 0;
     return {
-      manager: new TestDaemonManager(
-        undefined,
-        undefined,
+      manager: new TestDaemonManager({
         timer,
-        join(directory, "daemon.lock"),
-        join(directory, "daemon.pid"),
-        join(directory, "daemon.sock"),
-        {
+        lockFilePath: join(directory, "daemon.lock"),
+        pidFilePath: join(directory, "daemon.pid"),
+        socketPath: join(directory, "daemon.sock"),
+        processFinder: {
           // The observed incumbent is attributable to this namespace. After the
           // mocked stop, later scans see no surviving namespace candidate.
           findDaemonProcesses: () =>
@@ -3375,7 +3197,7 @@ describe("Daemon manager process detection", () => {
           isProcessRunning: (pid) => pid === 101,
         },
         processSpawner,
-      ),
+      }),
       status,
       timer,
     };
@@ -3683,19 +3505,13 @@ describe("Daemon manager process detection", () => {
   });
 
   test("fails closed when the process table cannot be inspected", () => {
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
+    const manager = new DaemonManager({
+      processFinder: {
         findDaemonProcesses() {
           throw new Error("spawn ENOBUFS");
         },
       },
-    );
+    });
 
     expect(() => manager.findAllDaemonProcesses()).toThrow(
       "Failed to inspect daemon process table: spawn ENOBUFS",
@@ -3734,16 +3550,14 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        undefined,
-        undefined,
+      const manager = new TestDaemonManager({
         timer,
-        join(directory, "daemon.lock"),
-        join(directory, "daemon.pid"),
-        join(directory, "daemon.sock"),
+        lockFilePath: join(directory, "daemon.lock"),
+        pidFilePath: join(directory, "daemon.pid"),
+        socketPath: join(directory, "daemon.sock"),
         processFinder,
         processSpawner,
-      );
+      });
 
       await expect(manager.start()).resolves.toBe("started");
       expect(processFinder.calls).toBe(2);
@@ -3759,23 +3573,14 @@ describe("Daemon manager process detection", () => {
     timer.enableAutoAdvance();
     const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
     const portChecker = new FakeDaemonPortAvailabilityChecker(true);
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
-      join(directory, "daemon.pid"),
-      join(directory, "daemon.sock"),
+      lockFilePath: join(directory, "daemon.lock"),
+      pidFilePath: join(directory, "daemon.pid"),
+      socketPath: join(directory, "daemon.sock"),
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      portChecker,
-    );
+      portAvailabilityChecker: portChecker,
+    });
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => undefined);
 
     try {
@@ -3824,23 +3629,16 @@ describe("Daemon manager process detection", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
+    const manager = new TestDaemonManager({
       timer,
-      join(directory, "daemon.lock"),
-      join(directory, "daemon.pid"),
-      join(directory, "daemon.sock"),
+      lockFilePath: join(directory, "daemon.lock"),
+      pidFilePath: join(directory, "daemon.pid"),
+      socketPath: join(directory, "daemon.sock"),
       processFinder,
-      undefined,
-      undefined,
       launcher,
-      undefined,
-      undefined,
-      { isReachable: async () => false },
-      undefined,
-      portChecker,
-    );
+      peerSocketReachability: { isReachable: async () => false },
+      portAvailabilityChecker: portChecker,
+    });
 
     try {
       await expect(manager.start()).rejects.toBe(strictPortFailure);
@@ -3866,23 +3664,14 @@ describe("Daemon manager process detection", () => {
     timer.enableAutoAdvance();
     const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
     const portChecker = new FakeDaemonPortAvailabilityChecker(false);
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
-      join(directory, "daemon.pid"),
-      join(directory, "daemon.sock"),
+      lockFilePath: join(directory, "daemon.lock"),
+      pidFilePath: join(directory, "daemon.pid"),
+      socketPath: join(directory, "daemon.sock"),
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      portChecker,
-    );
+      portAvailabilityChecker: portChecker,
+    });
 
     try {
       const findForStart = manager.findLiveDaemonProcessesForStart.bind(manager);
@@ -3917,23 +3706,14 @@ describe("Daemon manager process detection", () => {
     timer.enableAutoAdvance();
     const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
     const portChecker = new FakeDaemonPortAvailabilityChecker((port) => port !== 7654);
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
+      lockFilePath: join(directory, "daemon.lock"),
       pidFilePath,
-      join(directory, "daemon.sock"),
+      socketPath: join(directory, "daemon.sock"),
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      portChecker,
-    );
+      portAvailabilityChecker: portChecker,
+    });
 
     const findForStart = manager.findLiveDaemonProcessesForStart.bind(manager);
 
@@ -3976,8 +3756,8 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        () => ({
+      const manager = new TestDaemonManager({
+        clientFactory: () => ({
           async connect() {
             throw new Error("connection refused");
           },
@@ -3992,21 +3772,14 @@ describe("Daemon manager process detection", () => {
             return {};
           },
         }),
-        undefined,
         timer,
-        join(directory, "daemon.lock"),
-        join(directory, "daemon.pid"),
-        join(directory, "daemon.sock"),
+        lockFilePath: join(directory, "daemon.lock"),
+        pidFilePath: join(directory, "daemon.pid"),
+        socketPath: join(directory, "daemon.sock"),
         processFinder,
-        undefined,
-        undefined,
         launcher,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        portChecker,
-      );
+        portAvailabilityChecker: portChecker,
+      });
 
       await expect(manager.start({ port: 4567 })).resolves.toBe("started");
       expect(portChecker.checkedProbes).toEqual([
@@ -4048,30 +3821,21 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        () => new FakeDaemonClient({}),
-        undefined,
+      const manager = new TestDaemonManager({
+        clientFactory: () => new FakeDaemonClient({}),
         timer,
-        join(directory, "daemon.lock"),
-        join(directory, "daemon.pid"),
-        join(directory, "daemon.sock"),
+        lockFilePath: join(directory, "daemon.lock"),
+        pidFilePath: join(directory, "daemon.pid"),
+        socketPath: join(directory, "daemon.sock"),
         processFinder,
-        undefined,
-        undefined,
         launcher,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        portChecker,
-        undefined,
-        undefined,
-        {
+        portAvailabilityChecker: portChecker,
+        identityRecoveryIO: {
           socketExists: () => false,
           readRecord: () => null,
           probe: async () => ({ running: true, pid: 301 }),
         },
-      );
+      });
 
       await expect(manager.start({ port: 4567 })).resolves.toBe("joined");
       expect(portChecker.checkedProbes).toEqual([]);
@@ -4092,23 +3856,14 @@ describe("Daemon manager process detection", () => {
     const portChecker = new FakeDaemonPortAvailabilityChecker(
       (port, host) => !(port === 3000 && host === "127.0.0.1"),
     );
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
-      join(directory, "daemon.pid"),
-      join(directory, "daemon.sock"),
+      lockFilePath: join(directory, "daemon.lock"),
+      pidFilePath: join(directory, "daemon.pid"),
+      socketPath: join(directory, "daemon.sock"),
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      portChecker,
-    );
+      portAvailabilityChecker: portChecker,
+    });
     try {
       const findForStart = manager.findLiveDaemonProcessesForStart.bind(manager);
 
@@ -4134,23 +3889,14 @@ describe("Daemon manager process detection", () => {
     timer.enableAutoAdvance();
     const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
     const portChecker = new SlowFakeDaemonPortAvailabilityChecker(timer, 5_000);
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      join(directory, "daemon.lock"),
-      join(directory, "daemon.pid"),
-      join(directory, "daemon.sock"),
+      lockFilePath: join(directory, "daemon.lock"),
+      pidFilePath: join(directory, "daemon.pid"),
+      socketPath: join(directory, "daemon.sock"),
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      portChecker,
-    );
+      portAvailabilityChecker: portChecker,
+    });
     try {
       const findForStart = manager.findLiveDaemonProcessesForStart.bind(manager);
 
@@ -4177,23 +3923,11 @@ describe("Daemon manager process detection", () => {
     timer.enableAutoAdvance();
     const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
     const portChecker = new FakeDaemonPortAvailabilityChecker(false);
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      undefined,
-      undefined,
-      undefined,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      portChecker,
-    );
+      portAvailabilityChecker: portChecker,
+    });
     const findForStart = manager.findLiveDaemonProcessesForStart.bind(manager);
 
     // The scans alone consume the whole budget: the retry backoff (200 + 500 ms)
@@ -4233,8 +3967,8 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        () => ({
+      const manager = new TestDaemonManager({
+        clientFactory: () => ({
           async connect() {
             throw new Error("connection refused");
           },
@@ -4249,13 +3983,12 @@ describe("Daemon manager process detection", () => {
             return {};
           },
         }),
-        undefined,
         timer,
-        join(directory, "daemon.lock"),
-        join(directory, "daemon.pid"),
-        join(directory, "daemon.sock"),
+        lockFilePath: join(directory, "daemon.lock"),
+        pidFilePath: join(directory, "daemon.pid"),
+        socketPath: join(directory, "daemon.sock"),
         processFinder,
-      );
+      });
 
       const error = await manager.start().then(
         () => {
@@ -4292,15 +4025,14 @@ describe("Daemon manager process detection", () => {
         return true;
       }
     }
-    const manager = new TestDaemonManager(
-      () => client,
-      undefined,
+    const manager = new TestDaemonManager({
+      clientFactory: () => client,
       timer,
-      join(directory, "daemon.lock"),
-      join(directory, "daemon.pid"),
-      join(directory, "daemon.sock"),
+      lockFilePath: join(directory, "daemon.lock"),
+      pidFilePath: join(directory, "daemon.pid"),
+      socketPath: join(directory, "daemon.sock"),
       processFinder,
-    );
+    });
     const waitSpy = spyOn(manager, "waitForExistingDaemon");
     try {
       await expect(manager.start()).resolves.toBe("started");
@@ -4341,23 +4073,15 @@ describe("Daemon manager process detection", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
+    const manager = new TestDaemonManager({
       timer,
-      join(directory, "daemon.lock"),
-      join(directory, "daemon.pid"),
-      join(directory, "daemon.sock"),
+      lockFilePath: join(directory, "daemon.lock"),
+      pidFilePath: join(directory, "daemon.pid"),
+      socketPath: join(directory, "daemon.sock"),
       processFinder,
-      undefined,
-      undefined,
       launcher,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      portChecker,
-    );
+      portAvailabilityChecker: portChecker,
+    });
 
     try {
       await expect(manager.start()).rejects.toBeInstanceOf(ActionableError);
@@ -4429,16 +4153,15 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        () => new FakeDaemonClient({}),
-        undefined,
-        fakeTimer,
-        join(dir, "daemon.lock"),
+      const manager = new TestDaemonManager({
+        clientFactory: () => new FakeDaemonClient({}),
+        timer: fakeTimer,
+        lockFilePath: join(dir, "daemon.lock"),
         pidFilePath,
-        join(dir, "daemon.sock"),
+        socketPath: join(dir, "daemon.sock"),
         processFinder,
         processSpawner,
-      );
+      });
 
       await manager.start();
 
@@ -4497,8 +4220,8 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        () => ({
+      const manager = new TestDaemonManager({
+        clientFactory: () => ({
           async connect() {
             throw new Error("connection refused");
           },
@@ -4513,14 +4236,13 @@ describe("Daemon manager process detection", () => {
             return {};
           },
         }),
-        undefined,
-        fakeTimer,
-        join(dir, "daemon.lock"),
+        timer: fakeTimer,
+        lockFilePath: join(dir, "daemon.lock"),
         pidFilePath,
-        join(dir, "daemon.sock"),
+        socketPath: join(dir, "daemon.sock"),
         processFinder,
         processSpawner,
-      );
+      });
 
       await expect(manager.start()).rejects.toThrow(
         "Refusing to terminate a live daemon during start",
@@ -4569,8 +4291,8 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        () => ({
+      const manager = new TestDaemonManager({
+        clientFactory: () => ({
           // A live-but-useless daemon: every reachability probe is refused, so it
           // never becomes reachable and the start must give up at the budget.
           async connect() {
@@ -4587,14 +4309,13 @@ describe("Daemon manager process detection", () => {
             return {};
           },
         }),
-        undefined,
-        fakeTimer,
-        join(dir, "daemon.lock"),
+        timer: fakeTimer,
+        lockFilePath: join(dir, "daemon.lock"),
         pidFilePath,
-        join(dir, "daemon.sock"),
+        socketPath: join(dir, "daemon.sock"),
         processFinder,
         processSpawner,
-      );
+      });
 
       const startedAt = fakeTimer.now();
       const error = await manager.start().then(
@@ -4652,8 +4373,8 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new ContentionDaemonManager(
-        () => ({
+      const manager = new ContentionDaemonManager({
+        clientFactory: () => ({
           async connect() {
             throw new Error("connection refused");
           },
@@ -4668,14 +4389,13 @@ describe("Daemon manager process detection", () => {
             return {};
           },
         }),
-        undefined,
-        fakeTimer,
-        lockPath,
-        join(dir, "daemon.pid"),
-        join(dir, "daemon.sock"),
+        timer: fakeTimer,
+        lockFilePath: lockPath,
+        pidFilePath: join(dir, "daemon.pid"),
+        socketPath: join(dir, "daemon.sock"),
         processFinder,
         processSpawner,
-      );
+      });
 
       const startedAt = fakeTimer.now();
       const error = await manager.start().then(
@@ -4729,8 +4449,8 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new ContentionDaemonManager(
-        () => ({
+      const manager = new ContentionDaemonManager({
+        clientFactory: () => ({
           async connect() {
             throw new Error("connection refused");
           },
@@ -4745,14 +4465,13 @@ describe("Daemon manager process detection", () => {
             return {};
           },
         }),
-        undefined,
-        fakeTimer,
-        lockPath,
-        join(dir, "daemon.pid"),
-        join(dir, "daemon.sock"),
+        timer: fakeTimer,
+        lockFilePath: lockPath,
+        pidFilePath: join(dir, "daemon.pid"),
+        socketPath: join(dir, "daemon.sock"),
         processFinder,
         processSpawner,
-      );
+      });
 
       const startedAt = fakeTimer.now();
       await manager.start().then(
@@ -4807,8 +4526,8 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new ContentionDaemonManager(
-        () => ({
+      const manager = new ContentionDaemonManager({
+        clientFactory: () => ({
           async connect() {
             // The socket is not connectable until the holder finishes publishing it.
             if (fakeTimer.now() < publishAtMs) {
@@ -4826,14 +4545,13 @@ describe("Daemon manager process detection", () => {
             return {};
           },
         }),
-        undefined,
-        fakeTimer,
-        lockPath,
-        join(dir, "daemon.pid"),
+        timer: fakeTimer,
+        lockFilePath: lockPath,
+        pidFilePath: join(dir, "daemon.pid"),
         socketPath,
         processFinder,
         processSpawner,
-      );
+      });
 
       const startedAt = fakeTimer.now();
       // Resolves (reuse) rather than rejecting — the slow-but-alive cold start is
@@ -4880,8 +4598,8 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new ContentionDaemonManager(
-        () => ({
+      const manager = new ContentionDaemonManager({
+        clientFactory: () => ({
           async connect(_timeoutMs?: number, signal?: AbortSignal) {
             // Never resolves; only the probe's own abort ends it — modelling a
             // socket that accepts but never completes the handshake.
@@ -4906,14 +4624,13 @@ describe("Daemon manager process detection", () => {
             return {};
           },
         }),
-        undefined,
-        fakeTimer,
-        lockPath,
-        join(dir, "daemon.pid"),
+        timer: fakeTimer,
+        lockFilePath: lockPath,
+        pidFilePath: join(dir, "daemon.pid"),
         socketPath,
         processFinder,
         processSpawner,
-      );
+      });
 
       const startedAt = fakeTimer.now();
       const error = await manager.start().then(
@@ -4966,8 +4683,8 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new ContentionDaemonManager(
-        () => ({
+      const manager = new ContentionDaemonManager({
+        clientFactory: () => ({
           async connect() {}, // reachable
           async close() {},
           async callTool() {
@@ -4980,14 +4697,13 @@ describe("Daemon manager process detection", () => {
             return {};
           },
         }),
-        undefined,
-        fakeTimer,
-        lockPath,
-        join(dir, "daemon.pid"),
+        timer: fakeTimer,
+        lockFilePath: lockPath,
+        pidFilePath: join(dir, "daemon.pid"),
         socketPath,
         processFinder,
         processSpawner,
-      );
+      });
 
       // Resolves (reuse) rather than throwing the lock-holder startup failure.
       await manager.start();
@@ -5013,8 +4729,8 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new RunningDaemonManager(
-        () => ({
+      const manager = new RunningDaemonManager({
+        clientFactory: () => ({
           async connect() {
             // Never accepts within the probe budget — models a slow first accept.
             throw new Error("connection refused");
@@ -5030,12 +4746,11 @@ describe("Daemon manager process detection", () => {
             return {};
           },
         }),
-        undefined,
-        fakeTimer,
-        join(dir, "daemon.lock"),
-        join(dir, "daemon.pid"),
+        timer: fakeTimer,
+        lockFilePath: join(dir, "daemon.lock"),
+        pidFilePath: join(dir, "daemon.pid"),
         socketPath,
-      );
+      });
 
       // A liveness predicate that reports the holder gone forces the capped probe.
       const ready = await manager.waitForReady(5000, undefined, () => false);
@@ -5092,8 +4807,8 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new HandoffDaemonManager(
-        () => ({
+      const manager = new HandoffDaemonManager({
+        clientFactory: () => ({
           async connect() {
             throw new Error("connection refused");
           },
@@ -5108,14 +4823,13 @@ describe("Daemon manager process detection", () => {
             return {};
           },
         }),
-        undefined,
-        fakeTimer,
-        lockPath,
-        join(dir, "daemon.pid"),
-        join(dir, "daemon.sock"),
+        timer: fakeTimer,
+        lockFilePath: lockPath,
+        pidFilePath: join(dir, "daemon.pid"),
+        socketPath: join(dir, "daemon.sock"),
         processFinder,
         processSpawner,
-      );
+      });
 
       const startedAt = fakeTimer.now();
       await manager.start().then(
@@ -5175,8 +4889,8 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new ChurnDaemonManager(
-        () => ({
+      const manager = new ChurnDaemonManager({
+        clientFactory: () => ({
           async connect() {
             throw new Error("connection refused");
           },
@@ -5191,14 +4905,13 @@ describe("Daemon manager process detection", () => {
             return {};
           },
         }),
-        undefined,
-        fakeTimer,
-        lockPath,
-        join(dir, "daemon.pid"),
-        join(dir, "daemon.sock"),
+        timer: fakeTimer,
+        lockFilePath: lockPath,
+        pidFilePath: join(dir, "daemon.pid"),
+        socketPath: join(dir, "daemon.sock"),
         processFinder,
         processSpawner,
-      );
+      });
 
       const startedAt = fakeTimer.now();
       await manager.start().then(
@@ -5246,28 +4959,16 @@ describe("Daemon manager process detection", () => {
         livePids.delete(pid);
       }
     });
-    const manager = new DaemonManager(
-      () => {
+    const manager = new DaemonManager({
+      clientFactory: () => {
         throw new Error("unreachable daemon socket must not block explicit restart");
       },
-      undefined,
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
+      timer: fakeTimer,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-      undefined,
-      undefined,
-      new FakeAbsentDaemonIdentity(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+      identityRecoveryIO: new FakeAbsentDaemonIdentity(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
@@ -5306,26 +5007,13 @@ describe("Daemon manager process detection", () => {
         replacementInstalled = true;
       }
     });
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-      undefined,
-      undefined,
-      new FakeAbsentDaemonIdentity(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+      identityRecoveryIO: new FakeAbsentDaemonIdentity(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
@@ -5377,14 +5065,12 @@ describe("Daemon manager process detection", () => {
         ];
       }
     });
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      join(directory, "daemon.lock"),
+    const manager = new DaemonManager({
+      timer: fakeTimer,
+      lockFilePath: join(directory, "daemon.lock"),
       pidFilePath,
       socketPath,
-      {
+      processFinder: {
         findDaemonProcesses: (timeoutMs) => {
           const found = processFinder.findDaemonProcesses(timeoutMs);
           if (records[0]?.processGenerationToken === "replacement-generation") {
@@ -5394,15 +5080,9 @@ describe("Daemon manager process detection", () => {
         },
         isProcessRunning: processFinder.isProcessRunning,
       },
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
@@ -5439,25 +5119,18 @@ describe("Daemon manager process detection", () => {
         livePids.delete(pid);
       }
     });
-    const manager = new DaemonManager(
-      () => {
+    const manager = new DaemonManager({
+      clientFactory: () => {
         throw new Error("unreachable daemon socket must not block explicit restart");
       },
-      undefined,
-      fakeTimer,
-      join(dir, "daemon.lock"),
-      join(dir, "daemon.pid"),
-      join(dir, "daemon.sock"),
+      timer: fakeTimer,
+      lockFilePath: join(dir, "daemon.lock"),
+      pidFilePath: join(dir, "daemon.pid"),
+      socketPath: join(dir, "daemon.sock"),
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
@@ -5496,26 +5169,13 @@ describe("Daemon manager process detection", () => {
         livePids.delete(pid);
       }
     });
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-      undefined,
-      undefined,
-      new FakeAbsentDaemonIdentity(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+      identityRecoveryIO: new FakeAbsentDaemonIdentity(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid: recordedPid,
@@ -5574,26 +5234,16 @@ describe("Daemon manager process detection", () => {
         }, 1_000);
       }
     });
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      join(directory, "daemon.lock"),
-      join(directory, "daemon.pid"),
+    const manager = new DaemonManager({
+      timer: fakeTimer,
+      lockFilePath: join(directory, "daemon.lock"),
+      pidFilePath: join(directory, "daemon.pid"),
       socketPath,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-      undefined,
-      undefined,
-      new FakeAbsentDaemonIdentity(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+      identityRecoveryIO: new FakeAbsentDaemonIdentity(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid: recordedPid,
@@ -5650,26 +5300,13 @@ describe("Daemon manager process detection", () => {
     const signaler = new FakeDaemonProcessSignaler(() => {
       throw new Error("EPERM");
     });
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-      undefined,
-      undefined,
-      new FakeAbsentDaemonIdentity(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+      identityRecoveryIO: new FakeAbsentDaemonIdentity(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid: recordedPid,
@@ -5733,26 +5370,13 @@ describe("Daemon manager process detection", () => {
         }, 1_000);
       }
     });
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-      undefined,
-      undefined,
-      new FakeAbsentDaemonIdentity(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+      identityRecoveryIO: new FakeAbsentDaemonIdentity(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
     const restart = manager.restart();
@@ -5810,26 +5434,13 @@ describe("Daemon manager process detection", () => {
       },
     };
     const signaler = new FakeDaemonProcessSignaler();
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      new FakeDaemonPortAvailabilityChecker(),
-      undefined,
-      undefined,
-      new FakeAbsentDaemonIdentity(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: new FakeDaemonPortAvailabilityChecker(),
+      identityRecoveryIO: new FakeAbsentDaemonIdentity(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
@@ -5875,26 +5486,13 @@ describe("Daemon manager process detection", () => {
     };
     const signaler = new FakeDaemonProcessSignaler();
     const portChecker = new FakeDaemonPortAvailabilityChecker();
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      portChecker,
-      undefined,
-      undefined,
-      new FakeAbsentDaemonIdentity(),
-    );
+      processSignaler: signaler,
+      portAvailabilityChecker: portChecker,
+      identityRecoveryIO: new FakeAbsentDaemonIdentity(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
@@ -5939,26 +5537,12 @@ describe("Daemon manager process detection", () => {
     // entirely). Restart must fail rather than let start() silently take the
     // next port in range.
     const portChecker = new FakeDaemonPortAvailabilityChecker(false);
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      portChecker,
-      undefined,
-      undefined,
-      new FakeAbsentDaemonIdentity(),
-    );
+      portAvailabilityChecker: portChecker,
+      identityRecoveryIO: new FakeAbsentDaemonIdentity(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
 
@@ -5987,26 +5571,12 @@ describe("Daemon manager process detection", () => {
       isProcessRunning: (pid) => livePids.has(pid),
     };
     const portChecker = new FakeDaemonPortAvailabilityChecker();
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      fakeTimer,
-      undefined,
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
+      timer: fakeTimer,
       processFinder,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      portChecker,
-      undefined,
-      undefined,
-      new FakeAbsentDaemonIdentity(),
-    );
+      portAvailabilityChecker: portChecker,
+      identityRecoveryIO: new FakeAbsentDaemonIdentity(),
+    });
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid: recordedPid,
@@ -6084,34 +5654,19 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        undefined,
-        undefined,
-        fakeTimer,
-        join(dir, "daemon.lock"),
+      const manager = new TestDaemonManager({
+        timer: fakeTimer,
+        lockFilePath: join(dir, "daemon.lock"),
         pidFilePath,
         socketPath,
         processFinder,
         processSpawner,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        // The default probe would open a real client connection to the socket
-        // file; with a long macOS tmpdir path the connect fails synchronously and
-        // the auto-advancing FakeTimer can fire the connect timeout in the same
-        // tick, before the client's socket binding exists.
-        {
+        identityRecoveryIO: {
           socketExists: () => existsSync(socketPath),
           readRecord: () => readPidFileDataSync(pidFilePath),
           probe: async () => ({ running: false }),
         },
-      );
+      });
 
       await manager.start();
 
@@ -6159,21 +5714,20 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        undefined,
-        undefined,
-        fakeTimer,
-        join(dir, "daemon.lock"),
-        join(dir, "daemon.pid"),
-        join(dir, "daemon.sock"),
-        new FakeDaemonProcessFinder([]),
+      const manager = new TestDaemonManager({
+        timer: fakeTimer,
+        lockFilePath: join(dir, "daemon.lock"),
+        pidFilePath: join(dir, "daemon.pid"),
+        socketPath: join(dir, "daemon.sock"),
+        processFinder: new FakeDaemonProcessFinder([]),
         processSpawner,
-        cleaner,
-        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] }),
-        undefined,
-        undefined,
-        { isReachable: async () => false },
-      );
+        extractionCleaner: cleaner,
+        launchCommandResolver: () => ({
+          command: process.execPath,
+          args: [entryScript, "--daemon-mode"],
+        }),
+        peerSocketReachability: { isReachable: async () => false },
+      });
 
       await expect(manager.start()).rejects.toThrow(
         "remove the incomplete extraction directory and re-run",
@@ -6227,21 +5781,20 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        undefined,
-        undefined,
-        fakeTimer,
-        join(dir, "daemon.lock"),
-        join(dir, "daemon.pid"),
-        join(dir, "daemon.sock"),
-        new FakeDaemonProcessFinder([]),
+      const manager = new TestDaemonManager({
+        timer: fakeTimer,
+        lockFilePath: join(dir, "daemon.lock"),
+        pidFilePath: join(dir, "daemon.pid"),
+        socketPath: join(dir, "daemon.sock"),
+        processFinder: new FakeDaemonProcessFinder([]),
         processSpawner,
-        cleaner,
-        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] }),
-        undefined,
-        undefined,
-        { isReachable: async () => false },
-      );
+        extractionCleaner: cleaner,
+        launchCommandResolver: () => ({
+          command: process.execPath,
+          args: [entryScript, "--daemon-mode"],
+        }),
+        peerSocketReachability: { isReachable: async () => false },
+      });
 
       await manager.start({ port: 1234 });
 
@@ -6294,18 +5847,15 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        undefined,
-        undefined,
-        fakeTimer,
-        join(dir, "daemon.lock"),
-        join(dir, "daemon.pid"),
-        join(dir, "daemon.sock"),
-        new FakeDaemonProcessFinder([]),
-        undefined,
-        cleaner,
+      const manager = new TestDaemonManager({
+        timer: fakeTimer,
+        lockFilePath: join(dir, "daemon.lock"),
+        pidFilePath: join(dir, "daemon.pid"),
+        socketPath: join(dir, "daemon.sock"),
+        processFinder: new FakeDaemonProcessFinder([]),
+        extractionCleaner: cleaner,
         launcher,
-      );
+      });
 
       await expect(manager.start()).resolves.toBe("started");
 
@@ -6365,18 +5915,18 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        undefined,
-        undefined,
-        fakeTimer,
-        join(dataDir, "daemon.lock"),
-        join(dataDir, "daemon.pid"),
-        join(dataDir, "daemon.sock"),
-        new FakeDaemonProcessFinder([]),
+      const manager = new TestDaemonManager({
+        timer: fakeTimer,
+        lockFilePath: join(dataDir, "daemon.lock"),
+        pidFilePath: join(dataDir, "daemon.pid"),
+        socketPath: join(dataDir, "daemon.sock"),
+        processFinder: new FakeDaemonProcessFinder([]),
         processSpawner,
-        undefined,
-        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] }),
-      );
+        launchCommandResolver: () => ({
+          command: process.execPath,
+          args: [entryScript, "--daemon-mode"],
+        }),
+      });
 
       await manager.start();
 
@@ -6430,21 +5980,20 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        undefined,
-        undefined,
-        fakeTimer,
-        join(dir, "daemon.lock"),
-        join(dir, "daemon.pid"),
-        join(dir, "daemon.sock"),
-        new FakeDaemonProcessFinder([]),
+      const manager = new TestDaemonManager({
+        timer: fakeTimer,
+        lockFilePath: join(dir, "daemon.lock"),
+        pidFilePath: join(dir, "daemon.pid"),
+        socketPath: join(dir, "daemon.sock"),
+        processFinder: new FakeDaemonProcessFinder([]),
         processSpawner,
-        cleaner,
-        () => ({ command: process.execPath, args: [entryScript, "--daemon-mode"] }),
-        undefined,
-        undefined,
-        { isReachable: async () => false },
-      );
+        extractionCleaner: cleaner,
+        launchCommandResolver: () => ({
+          command: process.execPath,
+          args: [entryScript, "--daemon-mode"],
+        }),
+        peerSocketReachability: { isReachable: async () => false },
+      });
 
       await expect(manager.start()).rejects.toThrow(
         "remove the incomplete extraction directory and re-run",
@@ -6482,21 +6031,20 @@ describe("Daemon manager process detection", () => {
     }
 
     try {
-      const manager = new TestDaemonManager(
-        undefined,
-        undefined,
-        fakeTimer,
-        join(dir, "daemon.lock"),
-        join(dir, "daemon.pid"),
-        join(dir, "daemon.sock"),
-        new FakeDaemonProcessFinder([]),
+      const manager = new TestDaemonManager({
+        timer: fakeTimer,
+        lockFilePath: join(dir, "daemon.lock"),
+        pidFilePath: join(dir, "daemon.pid"),
+        socketPath: join(dir, "daemon.sock"),
+        processFinder: new FakeDaemonProcessFinder([]),
         processSpawner,
-        cleaner,
-        () => ({ command: process.execPath, args: [join(dir, "entry.js"), "--daemon-mode"] }),
-        undefined,
-        undefined,
-        { isReachable: async () => false },
-      );
+        extractionCleaner: cleaner,
+        launchCommandResolver: () => ({
+          command: process.execPath,
+          args: [join(dir, "entry.js"), "--daemon-mode"],
+        }),
+        peerSocketReachability: { isReachable: async () => false },
+      });
 
       await expect(manager.start()).rejects.toThrow(
         "Daemon subprocess exited before becoming ready (exit code 1)",

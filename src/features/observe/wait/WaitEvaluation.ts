@@ -1,27 +1,21 @@
 /**
  * waitFor / settle evaluation moved out of observeTools.ts (#11828): the condition DSL, display-wait
  * evidence, the poll loop and its orchestration helpers. The element search lives in
- * observeWaitElement.ts, the condition predicates in observeWaitPredicates.ts and the settle
- * hashing in observeWaitSettle.ts (#12676); this module re-exports their public names.
+ * WaitElement.ts, the condition predicates in WaitPredicates.ts and the settle
+ * hashing in WaitSettle.ts (#12676); this module re-exports their public names.
  * Behaviour is unchanged; observeTools.ts re-exports the public names.
  */
-import {
-  DEFAULT_WAIT_FOR_TIMEOUT_MS,
-  DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS,
-} from "../features/observe/waitForTimeout";
-import { canDisplayExist, type DisplayInventoryClassification } from "../utils/deviceMatcher";
-import type { DisplayPanel } from "../models/DisplayPanel";
-import { type ObserveScreenshotOptions } from "../features/observe/screenshot/screenshotOptions";
-import { ActionableError } from "../models/ActionableError";
-import { hasUsableHierarchy } from "../features/observe/ObserveScreen";
-import type {
-  ObserveScreen,
-  ObserveScreenExecuteOptions,
-} from "../features/observe/interfaces/ObserveScreen";
-import { RealSettleObserve } from "../features/observe/SettleObserve";
-import { RealWaitForCondition } from "../features/observe/WaitForCondition";
-import { hierarchyUpdatedAtToMillis } from "../features/observe/observeTimestamp";
-import type { ConditionPredicate } from "../features/observe/interfaces/WaitForCondition";
+import { DEFAULT_WAIT_FOR_TIMEOUT_MS, DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS } from "../waitForTimeout";
+import { canDisplayExist, type DisplayInventoryClassification } from "../../../utils/deviceMatcher";
+import type { DisplayPanel } from "../../../models/DisplayPanel";
+import { type ObserveScreenshotOptions } from "../screenshot/screenshotOptions";
+import { ActionableError } from "../../../models/ActionableError";
+import { hasUsableHierarchy } from "../ObserveScreen";
+import type { ObserveScreen, ObserveScreenExecuteOptions } from "../interfaces/ObserveScreen";
+import { RealSettleObserve } from "../SettleObserve";
+import { RealWaitForCondition } from "../WaitForCondition";
+import { hierarchyUpdatedAtToMillis } from "../observeTimestamp";
+import type { ConditionPredicate } from "../interfaces/WaitForCondition";
 import {
   appear,
   disappear,
@@ -30,44 +24,47 @@ import {
   countStable,
   ConditionSelector,
   waitCaptureUnavailableReason,
-} from "../features/observe/ConditionPredicates";
-import { throwIfAborted, awaitWhileRequestIsLive } from "../utils/toolUtils";
-import { isDeviceLostError, throwDeviceLostFromAbortSignal } from "./deviceLossOutcome";
-import { BootedDevice, Element, ObserveResult } from "../models";
-import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
+} from "../ConditionPredicates";
+import { throwIfAborted, awaitWhileRequestIsLive } from "../../../utils/toolUtils";
+import {
+  isDeviceLostError,
+  throwDeviceLostFromAbortSignal,
+} from "../../../server/deviceLossOutcome";
+import { BootedDevice, Element, ObserveResult } from "../../../models";
+import { createGlobalPerformanceTracker } from "../../../utils/PerformanceTracker";
 import {
   ElementResolver,
   type MatchMode,
   type ContainerFailure,
-} from "../features/utility/ElementResolver";
-import type { ConditionResolver } from "../features/observe/ConditionPredicates";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { logger } from "../utils/logger";
-import { serverConfig } from "../utils/ServerConfig";
+} from "../../utility/ElementResolver";
+import type { ConditionResolver } from "../ConditionPredicates";
+import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
+import { logger } from "../../../utils/logger";
+import { serverConfig } from "../../../utils/ServerConfig";
 import {
   resolveScreenshotMode,
   shouldSkipObserveWaitForScreenshot,
   type ScreenshotMode,
-} from "../features/observe/automaticScreenshotPolicy";
+} from "../automaticScreenshotPolicy";
 import type {
   ObserveWaitForOptions,
   SettledOptions,
   WaitForWithSettled,
   WaitForConditionDsl,
   WaitForConditionKind,
-} from "./observeWaitForSchemas";
-import { hasElementPredicate } from "./observeWaitElement";
+} from "./WaitForSchemas";
+import { hasElementPredicate } from "./WaitElement";
 import {
   type ObserveConditionEvaluation,
   containerFailureMetadata,
   trackContainerFailure,
   layerScopedObservation,
   evaluateWaitForObservation,
-} from "./observeWaitPredicates";
-import { hashHierarchyForSettle } from "./observeWaitSettle";
+} from "./WaitPredicates";
+import { hashHierarchyForSettle } from "./WaitSettle";
 
-export { findWaitForElement, hasElementPredicate } from "./observeWaitElement";
-export { hashHierarchyForSettle } from "./observeWaitSettle";
+export { findWaitForElement, hasElementPredicate } from "./WaitElement";
+export { hashHierarchyForSettle } from "./WaitSettle";
 
 const WAIT_FOR_POLL_INTERVAL_MS = 100;
 

@@ -140,16 +140,13 @@ describe("session broker provider restart handoff", () => {
       const assigner: SessionDeviceAssigner = {
         async assignDeviceToSession(id, _platform, target) {
           return (
-            await next.sessions.createSession(
-              id,
-              target?.deviceId ?? "sim-fake",
-              "ios",
-              target?.liveness?.sessionTimeoutMs,
-              target?.liveness?.heartbeatTimeoutMs,
-              target?.stableDeviceId,
-              target?.liveness,
-              target?.initialOwnership,
-            )
+            await next.sessions.createSession(id, target?.deviceId ?? "sim-fake", "ios", {
+              timeoutMs: target?.liveness?.sessionTimeoutMs,
+              heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+              stableDeviceId: target?.stableDeviceId,
+              recoveredLiveness: target?.liveness,
+              initialOwnership: target?.initialOwnership,
+            })
           ).assignedDevice;
         },
       };

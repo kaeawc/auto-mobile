@@ -37,6 +37,7 @@ enum PrototypeAgentProtocol {
         swipeActionsCapability,
         textFieldActionsCapability,
         carouselCapability,
+        textFieldLeadingIconCapability,
         refreshCapability,
         searchBarCapability,
         richTextCapability,
@@ -106,6 +107,8 @@ enum PrototypeAgentProtocol {
     static let textFieldActionsCapability = "prototype_text_field_actions_v1"
     /// The `carousel` node and the pager `indicator` option (#12071).
     static let carouselCapability = "prototype_carousel_v1"
+    /// Text field `leadingIcon` drawn as an SF Symbol (#12066).
+    static let textFieldLeadingIconCapability = "prototype_text_field_leading_icon_v1"
     /// Pull-to-refresh on a vertical scroll bound to a boolean state key (#12065).
     static let refreshCapability = "prototype_refresh_v1"
     /// Drawn search field with authored expansion, submit actions and in-window results (#12069).

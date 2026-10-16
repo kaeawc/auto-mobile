@@ -671,6 +671,9 @@ Android draws `trailingIcon` as an `IconButton` (its `label` is the content desc
 `ImeAction` with `KeyboardActions`; `next` also moves focus. iOS maps `imeAction` to `submitLabel`
 and `onSubmit`, and draws the trailing icon as an SF Symbol button inside the field.
 
+`leadingIcon` is a built-in icon name drawn in the field's leading slot (decoration, no actions; an
+SF Symbol on iOS), gated by `prototype_text_field_leading_icon_v1`.
+
 Open question: a `secure` field's value still lives in state and in `change` events/`inspect`;
 this slice does not redact it.
 

@@ -459,7 +459,9 @@ describe("handleDaemonRequest", () => {
       const devicePool = new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 });
       const state = new FakeDaemonState(sessionManager, devicePool);
       const sessionId = "liveness-owner-session";
-      await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", {
+        timeoutMs: 60_000,
+      });
       const lastToolActivity = fakeTimer.now();
 
       await handleDaemonRequest(
@@ -580,7 +582,9 @@ describe("handleDaemonRequest", () => {
       });
 
     async function stateWithSession(): Promise<FakeDaemonState> {
-      await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", {
+        timeoutMs: 60_000,
+      });
       return new FakeDaemonState(
         sessionManager,
         new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
@@ -728,7 +732,9 @@ describe("handleDaemonRequest", () => {
       });
 
     async function stateWithSession(): Promise<FakeDaemonState> {
-      await sessionManager.createSession(sessionId, "emulator-5554", "android", 60_000);
+      await sessionManager.createSession(sessionId, "emulator-5554", "android", {
+        timeoutMs: 60_000,
+      });
       return new FakeDaemonState(
         sessionManager,
         new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
@@ -869,12 +875,9 @@ describe("handleDaemonRequest", () => {
       sessionManager,
       new FakeDevicePool({ total: 1, idle: 0, assigned: 1, error: 0 }),
     );
-    const session = await sessionManager.createSession(
-      sessionId,
-      "emulator-5554",
-      "android",
-      60_000,
-    );
+    const session = await sessionManager.createSession(sessionId, "emulator-5554", "android", {
+      timeoutMs: 60_000,
+    });
     for (const [token, policy] of [
       ["keeper", "cli"],
       ["proxy", "heartbeat"],
@@ -972,14 +975,9 @@ describe("handleDaemonRequest", () => {
     const restartedManager = new SessionManager(fakeTimer, persistence);
     const recoverer: SessionDeviceAssigner = {
       async assignDeviceToSession(recoveredSessionId, _platform, target): Promise<string> {
-        await restartedManager.createSession(
-          recoveredSessionId,
-          "emulator-5560",
-          "android",
-          undefined,
-          undefined,
-          target?.stableDeviceId,
-        );
+        await restartedManager.createSession(recoveredSessionId, "emulator-5560", "android", {
+          stableDeviceId: target?.stableDeviceId,
+        });
         return "emulator-5560";
       },
     };

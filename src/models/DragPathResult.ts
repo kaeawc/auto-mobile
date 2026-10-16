@@ -1,4 +1,4 @@
-import type { BaseActionResult } from "./BaseActionResult";
+import { BaseActionResult } from "./BaseActionResult";
 
 /** Result of a polyline drag. Coordinates are the native points actually driven. */
 export interface DragPathResult extends BaseActionResult {

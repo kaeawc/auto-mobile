@@ -35,8 +35,8 @@ describe("proxy restarted with a stable owner token", () => {
   beforeEach(async () => {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    await sessionManager.createSession(FIRST, "emulator-5554", "android", 60_000);
-    await sessionManager.createSession(SECOND, "emulator-5556", "android", 60_000);
+    await sessionManager.createSession(FIRST, "emulator-5554", "android", { timeoutMs: 60_000 });
+    await sessionManager.createSession(SECOND, "emulator-5556", "android", { timeoutMs: 60_000 });
     state = {
       isInitialized: () => true,
       getSessionManager: () => sessionManager,

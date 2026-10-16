@@ -53,7 +53,7 @@ describe("unsettled-execution veto ceiling (#10663)", () => {
       },
       timer,
     );
-    await sessionManager.createSession(SESSION, DEVICE, "android", 60_000);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     expect(await sessionManager.claimLivenessOwnership(SESSION, OWNER)).toBe("claimed");
     sessionManager.recordHeartbeat(SESSION);
   });

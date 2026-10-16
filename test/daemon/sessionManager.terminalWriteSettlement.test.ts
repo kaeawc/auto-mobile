@@ -31,7 +31,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
     manager.stopCleanupTimer();
     manager.attachDaemonSessionId("daemon-1");
-    await manager.createSession(SESSION, DEVICE, "android", 60_000);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     journal = createDaemonTerminalReleaseJournal({
       dataDir: "/data",
       daemonSessionId: "daemon-1",
@@ -171,7 +171,9 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     await expect(release).resolves.toEqual({ superseded: true });
     store.park = undefined;
     await manager.releaseSession(SESSION, "plan-auto-release");
-    const replacement = await manager.createSession(SESSION, DEVICE, "android", 60_000);
+    const replacement = await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: 60_000,
+    });
     expect(replacement).not.toBe(original);
 
     await store.markReleased(SESSION, "expired", timer.now(), "daemon-restart");

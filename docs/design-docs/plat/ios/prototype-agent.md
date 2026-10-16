@@ -619,6 +619,9 @@ iOS uses a custom `DragGesture` reveal inside the existing `ScrollView` (not a S
 `accessibilityAction` per entry for VoiceOver, SF Symbols for icons and the same thresholds
 (`PrototypeSwipe.swift`).
 
+`leadingIcon` (`prototype_text_field_leading_icon_v1`) is a built-in icon name drawn before the
+text as an SF Symbol, decoration only, hidden from accessibility.
+
 ## Prototype gesture action lists
 
 `onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as

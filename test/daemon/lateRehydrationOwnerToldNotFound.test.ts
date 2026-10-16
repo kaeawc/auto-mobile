@@ -117,16 +117,13 @@ async function ownerOutcomeAfterRestart(recovery: "lands-before-owner" | "lands-
     const slowPool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
         await deviceResolved.promise;
-        const session = await manager.createSession(
-          sessionId,
-          target?.deviceId ?? SIM,
-          "ios",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await manager.createSession(sessionId, target?.deviceId ?? SIM, "ios", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };

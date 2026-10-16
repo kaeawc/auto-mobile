@@ -8,6 +8,7 @@ import {
   PROTOTYPE_SWIPE_ACTIONS_CAPABILITY,
   PROTOTYPE_TEXT_FIELD_ACTIONS_CAPABILITY,
   PROTOTYPE_CAROUSEL_CAPABILITY,
+  PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY,
   PROTOTYPE_REFRESH_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
   PROTOTYPE_RICH_TEXT_CAPABILITY,
@@ -25,6 +26,8 @@ import { PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY } from "../observe/android/ctrl
 import {
   prototypeTextFieldActionFields,
   prototypeTextFieldActionsUnsupportedMessage,
+  prototypeTextFieldLeadingIconFields,
+  prototypeTextFieldLeadingIconUnsupportedMessage,
   prototypeTextFieldOptionFields,
   prototypeTextFieldOptionsUnsupportedMessage,
 } from "./prototypeTextFieldOptions";
@@ -82,6 +85,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_TEXT_FIELD_ACTIONS_CAPABILITY,
     fields: prototypeTextFieldActionFields,
     unsupportedMessage: prototypeTextFieldActionsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY,
+    fields: prototypeTextFieldLeadingIconFields,
+    unsupportedMessage: prototypeTextFieldLeadingIconUnsupportedMessage,
   },
   {
     capability: PROTOTYPE_FLOW_GRID_CAPABILITY,

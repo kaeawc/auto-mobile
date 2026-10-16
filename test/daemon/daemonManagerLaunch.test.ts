@@ -116,16 +116,13 @@ describe("DaemonManager launch", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      join(stateDir, "daemon.lock"),
-      join(stateDir, "daemon.pid"),
-      join(stateDir, "daemon.sock"),
-      undefined,
+    const manager = new TestDaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: join(stateDir, "daemon.lock"),
+      pidFilePath: join(stateDir, "daemon.pid"),
+      socketPath: join(stateDir, "daemon.sock"),
       processSpawner,
-    );
+    });
 
     await manager.start({
       debug: true,
@@ -188,16 +185,13 @@ describe("DaemonManager launch", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      join(stateDir, "daemon.lock"),
-      join(stateDir, "daemon.pid"),
-      join(stateDir, "daemon.sock"),
-      undefined,
+    const manager = new TestDaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: join(stateDir, "daemon.lock"),
+      pidFilePath: join(stateDir, "daemon.pid"),
+      socketPath: join(stateDir, "daemon.sock"),
       processSpawner,
-    );
+    });
 
     await manager.start();
 
@@ -243,16 +237,13 @@ describe("DaemonManager launch", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      join(stateDir, "daemon.lock"),
-      join(stateDir, "daemon.pid"),
-      join(stateDir, "daemon.sock"),
-      undefined,
+    const manager = new TestDaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: join(stateDir, "daemon.lock"),
+      pidFilePath: join(stateDir, "daemon.pid"),
+      socketPath: join(stateDir, "daemon.sock"),
       processSpawner,
-    );
+    });
 
     await manager.start();
 
@@ -302,16 +293,13 @@ describe("DaemonManager launch", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      join(stateDir, "daemon.lock"),
-      join(stateDir, "daemon.pid"),
-      join(stateDir, "daemon.sock"),
-      undefined,
+    const manager = new TestDaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: join(stateDir, "daemon.lock"),
+      pidFilePath: join(stateDir, "daemon.pid"),
+      socketPath: join(stateDir, "daemon.sock"),
       processSpawner,
-    );
+    });
 
     await manager.start();
 
@@ -360,16 +348,13 @@ describe("DaemonManager launch", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      join(stateDir, "daemon.lock"),
-      join(stateDir, "daemon.pid"),
-      join(stateDir, "daemon.sock"),
-      undefined,
+    const manager = new TestDaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: join(stateDir, "daemon.lock"),
+      pidFilePath: join(stateDir, "daemon.pid"),
+      socketPath: join(stateDir, "daemon.sock"),
       processSpawner,
-    );
+    });
 
     await manager.start();
 
@@ -414,16 +399,13 @@ describe("DaemonManager launch", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      join(stateDir, "daemon.lock"),
-      join(stateDir, "daemon.pid"),
-      join(stateDir, "daemon.sock"),
-      undefined,
+    const manager = new TestDaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: join(stateDir, "daemon.lock"),
+      pidFilePath: join(stateDir, "daemon.pid"),
+      socketPath: join(stateDir, "daemon.sock"),
       processSpawner,
-    );
+    });
 
     const toolOutputsDir = "/tmp/auto mobile artifacts";
     await manager.start({ toolOutputsDir });
@@ -469,16 +451,13 @@ describe("DaemonManager launch", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      join(stateDir, "daemon.lock"),
-      join(stateDir, "daemon.pid"),
-      join(stateDir, "daemon.sock"),
-      undefined,
+    const manager = new TestDaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: join(stateDir, "daemon.lock"),
+      pidFilePath: join(stateDir, "daemon.pid"),
+      socketPath: join(stateDir, "daemon.sock"),
       processSpawner,
-    );
+    });
 
     await manager.start({ eventAllMarkers: [], eventAllMarkersCliOverride: true });
 
@@ -522,16 +501,13 @@ describe("DaemonManager launch", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      join(stateDir, "daemon.lock"),
-      join(stateDir, "daemon.pid"),
-      join(stateDir, "daemon.sock"),
-      undefined,
+    const manager = new TestDaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: join(stateDir, "daemon.lock"),
+      pidFilePath: join(stateDir, "daemon.pid"),
+      socketPath: join(stateDir, "daemon.sock"),
       processSpawner,
-    );
+    });
 
     await manager.start({ eventAllMarkers: [] });
 
@@ -582,16 +558,13 @@ describe("DaemonManager launch", () => {
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      join(".auto-mobile", "daemon.lock"),
-      join(".auto-mobile", "daemon.pid"),
-      join(".auto-mobile", "daemon.sock"),
-      undefined,
+    const manager = new TestDaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: join(".auto-mobile", "daemon.lock"),
+      pidFilePath: join(".auto-mobile", "daemon.pid"),
+      socketPath: join(".auto-mobile", "daemon.sock"),
       processSpawner,
-    );
+    });
 
     await manager.start();
 

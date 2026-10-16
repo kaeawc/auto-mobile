@@ -168,8 +168,8 @@ function createHarness(
   };
   const ports: number[] = [];
   let defaultPortOccupied = true;
-  const manager = new ReadyNamespaceManager(
-    () => ({
+  const manager = new ReadyNamespaceManager({
+    clientFactory: () => ({
       async connect() {},
       async close() {},
       async callTool() {
@@ -182,29 +182,24 @@ function createHarness(
         return {};
       },
     }),
-    undefined,
     timer,
-    lockPath,
-    pidPath,
-    socket,
-    processes,
-    spawner,
-    undefined,
-    () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
-    signaler,
-    { next: () => "namespace-test-owner" },
-    { isReachable: async () => false },
-    undefined,
-    {
+    lockFilePath: lockPath,
+    pidFilePath: pidPath,
+    socketPath: socket,
+    processFinder: processes,
+    processSpawner: spawner,
+    launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+    processSignaler: signaler,
+    idGenerator: { next: () => "namespace-test-owner" },
+    peerSocketReachability: { isReachable: async () => false },
+    portAvailabilityChecker: {
       isPortFree: async (port) => {
         ports.push(port);
         return port !== 3000 || !defaultPortOccupied;
       },
     },
-    undefined,
-    undefined,
-    identity,
-  );
+    identityRecoveryIO: identity,
+  });
   const addForeign = (marked = false) => {
     processes.records.push({
       pid: 101,

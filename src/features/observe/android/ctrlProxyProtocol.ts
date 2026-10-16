@@ -1153,6 +1153,9 @@ export const PROTOTYPE_TEXT_FIELD_ACTIONS_CAPABILITY = "prototype_text_field_act
 /** Draws the `carousel` node and the pager `indicator` option. */
 export const PROTOTYPE_CAROUSEL_CAPABILITY = "prototype_carousel_v1";
 
+/** Draws the textField `leadingIcon` in the field's leading slot. */
+export const PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY = "prototype_text_field_leading_icon_v1";
+
 /** Draws pull-to-refresh on a vertical prototype `scroll` bound to a boolean state key. */
 export const PROTOTYPE_REFRESH_CAPABILITY = "prototype_refresh_v1";
 

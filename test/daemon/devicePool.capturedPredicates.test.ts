@@ -123,7 +123,10 @@ async function createContext(autolock: boolean): Promise<PredicateContext> {
     createDevicePoolDependencies(manager, "predicate-daemon", { timer, deviceManager: utils }),
   );
   await pool.initializeWithDevices([booted]);
-  const session = await manager.createSession("owner", booted.deviceId, "android", 1_000, 1_000);
+  const session = await manager.createSession("owner", booted.deviceId, "android", {
+    timeoutMs: 1_000,
+    heartbeatTimeoutMs: 1_000,
+  });
   await pool.bindOrReuseDeviceSession(session.sessionId, booted.deviceId, "android");
   manager.stopCleanupTimer();
   const device = pool.getDevice(booted.deviceId)!;

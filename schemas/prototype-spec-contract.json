@@ -3035,6 +3035,13 @@
               },
               "optional": true
             },
+            "leadingIcon": {
+              "rule": {
+                "kind": "ref",
+                "name": "iconName"
+              },
+              "optional": true
+            },
             "trailingIcon": {
               "rule": {
                 "kind": "ref",

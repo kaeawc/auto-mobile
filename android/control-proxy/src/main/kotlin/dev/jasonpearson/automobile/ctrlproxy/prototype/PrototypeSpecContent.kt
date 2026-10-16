@@ -859,6 +859,10 @@ private fun RenderPrototypeTextField(
           onSend = submit,
           onGo = submit,
         )
+    val leadingIcon: (@Composable () -> Unit)? =
+      prototypeIcon(source.leadingIcon)?.let { icon ->
+        { Icon(icon, contentDescription = null) }
+      }
     val trailingIcon: (@Composable () -> Unit)? =
       source.trailingIcon?.let { action ->
         { PrototypeTextFieldTrailingIcon(node, action, interact) }
@@ -883,6 +887,7 @@ private fun RenderPrototypeTextField(
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
           keyboardActions = keyboardActions,
+          leadingIcon = leadingIcon,
           trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
         )
@@ -899,6 +904,7 @@ private fun RenderPrototypeTextField(
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
           keyboardActions = keyboardActions,
+          leadingIcon = leadingIcon,
           trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
           singleLine = !multiline,
@@ -920,6 +926,7 @@ private fun RenderPrototypeTextField(
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
           keyboardActions = keyboardActions,
+          leadingIcon = leadingIcon,
           trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
         )
@@ -936,6 +943,7 @@ private fun RenderPrototypeTextField(
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
           keyboardActions = keyboardActions,
+          leadingIcon = leadingIcon,
           trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
           singleLine = !multiline,

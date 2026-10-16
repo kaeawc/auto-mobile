@@ -34,7 +34,6 @@ import { packageListingContains } from "../utils/android-cmdline-tools/shellOutp
 import { shellQuote } from "../utils/shellQuote";
 import { registerDeviceIncarnationListener } from "../utils/deviceIncarnation";
 import * as fs from "fs/promises";
-import type { Dirent } from "fs";
 import * as path from "path";
 import { ActionableError, BootedDevice, ExecResult } from "../models";
 import { requireBootedDevice } from "../devices/requireBootedDevice";
@@ -64,13 +63,15 @@ import type {
   ProxySetupResult,
 } from "../utils/interfaces/ProxyManager";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
-import { getTempDir } from "../utils/tempDir";
 import {
   type AndroidPrerequisiteDetector,
   DefaultAndroidPrerequisiteDetector,
 } from "../utils/android-cmdline-tools/AndroidPrerequisiteDetector";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT, CTRL_PROXY_PACKAGE } from "./constants";
-import { sortedReaddirEntries } from "../utils/io";
+import {
+  DefaultCtrlProxyApkPrefetcher,
+  type CtrlProxyApkPrefetcher,
+} from "./CtrlProxyApkPrefetcher";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import {
@@ -79,8 +80,10 @@ import {
   type ForeignCtrlProxyForwardEvidence,
 } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 
-export const MAX_STALE_PREFETCH_DIRS_PER_STARTUP = 20;
-export const STALE_PREFETCH_SWEEP_DEADLINE_MS = 5_000;
+export {
+  MAX_STALE_PREFETCH_DIRS_PER_STARTUP,
+  STALE_PREFETCH_SWEEP_DEADLINE_MS,
+} from "./CtrlProxyApkPrefetcher";
 // API 36 can take about 6 seconds to bind CtrlProxy after a force-stop; allow
 // another 2 seconds for scheduler and adb polling delay before giving up.
 export const REBIND_BIND_WAIT_BUDGET_MS = 8_000;
@@ -292,11 +295,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private static foreignForwardEvidenceOverride: ForeignCtrlProxyForwardEvidence | null = null;
   private readonly foreignForwardGuardContext = new AsyncLocalStorage<boolean>();
 
-  // Static prefetch state for APK download optimization
-  private static prefetchPromise: Promise<string | null> | null = null;
-  private static prefetchedApkPath: string | null = null;
-  private static prefetchError: Error | null = null;
-
   // Static factory for creating ADB clients
   private static adbFactory: AdbClientFactory = defaultAdbClientFactory;
 
@@ -324,6 +322,29 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   // Test seam for the static prefetch's downloader; null uses defaultFileDownloader.
   private static prefetchFileDownloaderOverride: FileDownloader | null = null;
   private static prefetchCacheDirOverride: string | null = null;
+  // Seam for tests that stage a completed prefetch without a download.
+  private static get prefetchedApkPath(): string | null {
+    return AndroidCtrlProxyManager.prefetcher.completedPath();
+  }
+  private static set prefetchedApkPath(apkPath: string | null) {
+    AndroidCtrlProxyManager.prefetcher.adoptCompletedPath(apkPath);
+  }
+  // Process-wide prefetch state lives in the prefetcher; its collaborators resolve lazily so the
+  // ForTesting setters above keep taking effect.
+  private static readonly prefetcher: CtrlProxyApkPrefetcher = new DefaultCtrlProxyApkPrefetcher({
+    downloader: () =>
+      AndroidCtrlProxyManager.prefetchFileDownloaderOverride ??
+      AndroidCtrlProxyManager.defaultFileDownloader,
+    checksumCalculator: () => AndroidCtrlProxyManager.defaultChecksumCalculator,
+    prerequisiteDetector: () => AndroidCtrlProxyManager.androidPrerequisiteDetector,
+    cacheDirOverride: () => AndroidCtrlProxyManager.prefetchCacheDirOverride,
+    expectedChecksumOverride: () => AndroidCtrlProxyManager.expectedChecksumOverride,
+    isPinnedVersionUnverifiable: () => AndroidCtrlProxyManager.isPinnedVersionUnverifiable(),
+    describePinnedVersion: () => resolvePinnedVersion(),
+    resolveApkUrl: () => resolveApkUrl(),
+    resolveApkChecksum: () => resolveApkChecksum(),
+    localApkPathOverride: () => process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH,
+  });
 
   private constructor(
     device: BootedDevice,
@@ -496,426 +517,46 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * This is a no-op if prefetch is already in progress or completed.
    */
   public static prefetchApk(): Promise<string | null> {
-    // Skip if already prefetching or prefetched
-    if (AndroidCtrlProxyManager.prefetchPromise !== null) {
-      logger.info("[CTRL_PROXY] APK prefetch already initiated, skipping");
-      return AndroidCtrlProxyManager.prefetchPromise;
-    }
-
-    // Skip if there's an override path (local APK)
-    const overridePath = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH?.trim();
-    if (overridePath && overridePath.length > 0) {
-      logger.info("[CTRL_PROXY] Using local APK override, skipping prefetch");
-      return Promise.resolve(null);
-    }
-
-    logger.info("[CTRL_PROXY] Starting APK prefetch");
-    const startTime = defaultTimer.now();
-    AndroidCtrlProxyManager.prefetchError = null;
-
-    AndroidCtrlProxyManager.prefetchPromise = AndroidCtrlProxyManager.doPrefetch()
-      .then((apkPath) => {
-        const duration = defaultTimer.now() - startTime;
-        if (apkPath) {
-          AndroidCtrlProxyManager.prefetchedApkPath = apkPath;
-          logger.info(`[CTRL_PROXY] APK prefetch completed in ${duration}ms`, { path: apkPath });
-        }
-        return apkPath;
-      })
-      .catch((error) => {
-        const duration = defaultTimer.now() - startTime;
-        AndroidCtrlProxyManager.prefetchError =
-          error instanceof Error ? error : new Error(String(error));
-        logger.warn(`[CTRL_PROXY] APK prefetch failed after ${duration}ms`, {
-          error: AndroidCtrlProxyManager.prefetchError.message,
-        });
-        AndroidCtrlProxyManager.prefetchPromise = null;
-        return null;
-      });
-    return AndroidCtrlProxyManager.prefetchPromise;
-  }
-
-  /**
-   * Internal prefetch implementation
-   */
-  private static async doPrefetch(): Promise<string | null> {
-    // Skip cleanly in environments that cannot consume the APK. Without ADB (and
-    // the SDK tooling behind it) no Android device work is possible, so there is
-    // no reason to download and verify the APK during startup (#4404). Returning
-    // null (not throwing) keeps the daemon healthy and non-Android workflows intact.
-    if (!(await AndroidCtrlProxyManager.androidPrerequisiteDetector.hasAndroidPrerequisites())) {
-      logger.info(
-        "[CTRL_PROXY] Prefetch skipped: Android prerequisites (adb/SDK) not detected; " +
-          "the APK is only needed for Android device work",
-      );
-      return null;
-    }
-
-    // Fail closed before touching the network: don't background-download and cache
-    // an unverifiable APK for an unknown explicit pin (#2746). Skipping (not
-    // throwing) keeps daemon startup alive; the install path still fails closed.
-    if (AndroidCtrlProxyManager.isPinnedVersionUnverifiable()) {
-      logger.warn(
-        `[CTRL_PROXY] Prefetch skipped: AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the ` +
-          `release checksum registry, so the APK cannot be integrity-verified`,
-      );
-      return null;
-    }
-
-    const apkUrl = resolveApkUrl();
-    const expectedChecksum =
-      AndroidCtrlProxyManager.expectedChecksumOverride ?? resolveApkChecksum();
-    const cacheKey = crypto
-      .createHash("sha256")
-      .update(`${apkUrl}\n${expectedChecksum.toLowerCase()}`)
-      .digest("hex");
-    const cachePath = path.join(
-      AndroidCtrlProxyManager.prefetchCacheDirOverride ?? getTempDir("cache/ctrl-proxy"),
-      `control-proxy-${cacheKey}.apk`,
-    );
-    const cacheDir = path.dirname(cachePath);
-
-    await fs.mkdir(cacheDir, { recursive: true });
-    await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(cacheDir);
-    if (await AndroidCtrlProxyManager.isValidPrefetchCache(cachePath, expectedChecksum)) {
-      logger.info("[CTRL_PROXY] Prefetch: reused cached APK", { path: cachePath });
-      return cachePath;
-    }
-
-    const tempDir = await fs.mkdtemp(path.join(cacheDir, "auto-mobile-prefetch-"));
-    const apkPath = path.join(tempDir, "control-proxy.apk");
-
-    try {
-      // Download the APK (URL honors AUTOMOBILE_VERSION + AUTOMOBILE_ASSET_BASE_URL)
-      logger.info("[CTRL_PROXY] Prefetch: downloading APK", { url: apkUrl, destination: apkPath });
-      const downloader =
-        AndroidCtrlProxyManager.prefetchFileDownloaderOverride ??
-        AndroidCtrlProxyManager.defaultFileDownloader;
-      await downloader.download(apkUrl, apkPath);
-
-      const size = await AndroidCtrlProxyManager.verifyPrefetchedApk(apkPath, expectedChecksum);
-      const publishedPath = await AndroidCtrlProxyManager.publishPrefetchedApk(
-        apkPath,
-        cachePath,
-        expectedChecksum,
-      );
-      logger.info("[CTRL_PROXY] Prefetch: APK ready", { path: publishedPath, size });
-      return publishedPath;
-    } catch (error) {
-      throw error;
-    } finally {
-      try {
-        await fs.rm(tempDir, { recursive: true, force: true });
-      } catch (cleanupError) {
-        // A failed staging cleanup is safe to defer to the startup stale sweep.
-        logger.debug(
-          `[CTRL_PROXY] Failed to remove prefetch staging directory ${tempDir}: ${errorMessage(cleanupError)}`,
-          cleanupError,
-        );
-      }
-    }
-  }
-
-  private static async verifyPrefetchedApk(
-    apkPath: string,
-    expectedChecksum: string,
-  ): Promise<number> {
-    const stats = await fs.stat(apkPath);
-    if (stats.size < 10000) {
-      throw new Error(`Prefetched APK is too small (${stats.size} bytes), likely invalid`);
-    }
-    AndroidCtrlProxyManager.verifyApkIntegrityStatic(apkPath);
-    if (expectedChecksum.length === 0) {
-      return stats.size;
-    }
-    const { checksum: actualChecksum } =
-      await AndroidCtrlProxyManager.defaultChecksumCalculator.computeFileSha256(apkPath);
-    if (actualChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
-      throw new Error(
-        `APK checksum verification failed. Expected: ${expectedChecksum}, Got: ${actualChecksum}`,
-      );
-    }
-    logger.info("[CTRL_PROXY] Prefetch: checksum verified", { checksum: actualChecksum });
-    return stats.size;
-  }
-
-  private static async publishPrefetchedApk(
-    apkPath: string,
-    cachePath: string,
-    expectedChecksum: string,
-  ): Promise<string> {
-    try {
-      await fs.rename(apkPath, cachePath);
-      return cachePath;
-    } catch (error) {
-      // Another daemon can win publication while this download was in flight.
-      if (await AndroidCtrlProxyManager.isValidPrefetchCache(cachePath, expectedChecksum)) {
-        logger.info("[CTRL_PROXY] Prefetch: reused concurrently published APK", {
-          path: cachePath,
-        });
-        return cachePath;
-      }
-      throw error;
-    }
-  }
-
-  private static async isValidPrefetchCache(
-    cachePath: string,
-    expectedChecksum: string,
-  ): Promise<boolean> {
-    try {
-      const stats = await fs.stat(cachePath);
-      if (stats.size < 10000) {
-        throw new Error(`cached APK is too small (${stats.size} bytes)`);
-      }
-      AndroidCtrlProxyManager.verifyApkIntegrityStatic(cachePath);
-      if (expectedChecksum.length > 0) {
-        const { checksum } =
-          await AndroidCtrlProxyManager.defaultChecksumCalculator.computeFileSha256(cachePath);
-        if (checksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
-          throw new Error("cached APK checksum does not match the expected release");
-        }
-      }
-      return true;
-    } catch (error) {
-      // Invalid or missing cache entries are expected during refresh and can be replaced.
-      logger.debug(`[CTRL_PROXY] Prefetch cache miss for ${cachePath}: ${errorMessage(error)}`);
-      try {
-        await fs.rm(cachePath, { force: true });
-      } catch (cleanupError) {
-        // Cache cleanup is best-effort; the download can still publish a replacement.
-        logger.debug(
-          `[CTRL_PROXY] Failed to remove invalid prefetch cache ${cachePath}: ${errorMessage(cleanupError)}`,
-          cleanupError,
-        );
-      }
-      return false;
-    }
+    return AndroidCtrlProxyManager.prefetcher.prefetch();
   }
 
   /**
    * Get the prefetched APK path, waiting for prefetch to complete if in progress.
    * Returns null if prefetch failed or was not initiated.
    */
-  public static async getPrefetchedApkPath(): Promise<string | null> {
-    if (AndroidCtrlProxyManager.prefetchPromise === null) {
-      return null;
-    }
-
-    try {
-      await AndroidCtrlProxyManager.prefetchPromise;
-      return AndroidCtrlProxyManager.prefetchedApkPath;
-    } catch (error) {
-      // APK prefetch is an optimization; callers can proceed without a prefetched APK.
-      logger.debug(`[CTRL_PROXY] Prefetched APK unavailable: ${errorMessage(error)}`, error);
-      return null;
-    }
+  public static getPrefetchedApkPath(): Promise<string | null> {
+    return AndroidCtrlProxyManager.prefetcher.getPrefetchedPath();
   }
 
   /**
    * Consume the prefetched APK path by copying it to a new location.
    * This allows multiple devices to use the prefetched APK.
-   * Returns null if no prefetched APK is available.
+   * Returns false if no prefetched APK is available.
    */
-  public static async consumePrefetchedApk(destinationPath: string): Promise<boolean> {
-    const prefetchedPath = await AndroidCtrlProxyManager.getPrefetchedApkPath();
-    if (!prefetchedPath) {
-      return false;
-    }
-
-    try {
-      // Ensure destination directory exists
-      await fs.mkdir(path.dirname(destinationPath), { recursive: true });
-      await fs.copyFile(prefetchedPath, destinationPath);
-      logger.info("[CTRL_PROXY] Copied prefetched APK", {
-        source: prefetchedPath,
-        destination: destinationPath,
-      });
-      return true;
-    } catch (error) {
-      logger.warn("[CTRL_PROXY] Failed to copy prefetched APK", {
-        error: errorMessage(error),
-      });
-      return false;
-    }
+  public static consumePrefetchedApk(destinationPath: string): Promise<boolean> {
+    return AndroidCtrlProxyManager.prefetcher.consume(destinationPath);
   }
 
   /**
    * Consume only an already-completed prefetch. Unlike consumePrefetchedApk(),
    * this never waits for an in-progress network download.
    */
-  private static async consumeCompletedPrefetchedApk(destinationPath: string): Promise<boolean> {
-    if (!AndroidCtrlProxyManager.prefetchedApkPath) {
-      return false;
-    }
-
-    try {
-      await fs.mkdir(path.dirname(destinationPath), { recursive: true });
-      await fs.copyFile(AndroidCtrlProxyManager.prefetchedApkPath, destinationPath);
-      logger.info("[CTRL_PROXY] Copied completed prefetched APK", {
-        source: AndroidCtrlProxyManager.prefetchedApkPath,
-        destination: destinationPath,
-      });
-      return true;
-    } catch (error) {
-      logger.warn("[CTRL_PROXY] Failed to copy completed prefetched APK", {
-        error: errorMessage(error),
-      });
-      return false;
-    }
+  private static consumeCompletedPrefetchedApk(destinationPath: string): Promise<boolean> {
+    return AndroidCtrlProxyManager.prefetcher.consumeCompleted(destinationPath);
   }
 
-  /**
-   * Clean up the prefetched APK file
-   */
-  public static async cleanupPrefetchedApk(): Promise<void> {
-    // Published cache assets are reusable across daemon lifecycles; only reset
-    // process-local references here. Staging directories are cleaned by doPrefetch.
-    const prefetchedApkPath = AndroidCtrlProxyManager.prefetchedApkPath;
-    AndroidCtrlProxyManager.prefetchedApkPath = null;
-    AndroidCtrlProxyManager.prefetchPromise = null;
-    AndroidCtrlProxyManager.prefetchError = null;
-    const prefetchDir = prefetchedApkPath && path.dirname(prefetchedApkPath);
-    if (
-      prefetchDir &&
-      path.dirname(prefetchDir) === os.tmpdir() &&
-      path.basename(prefetchDir).startsWith(AndroidCtrlProxyManager.PREFETCH_DIR_PREFIX)
-    ) {
-      try {
-        await fs.rm(prefetchDir, { recursive: true, force: true });
-      } catch (error) {
-        logger.warn("[CTRL_PROXY] Failed to clean up legacy prefetched APK", {
-          error: errorMessage(error),
-        });
-      }
-    }
+  /** Clean up the prefetched APK file */
+  public static cleanupPrefetchedApk(): Promise<void> {
+    return AndroidCtrlProxyManager.prefetcher.cleanup();
   }
 
   public static setPrefetchCacheDirForTesting(cacheDir: string | null): void {
     AndroidCtrlProxyManager.prefetchCacheDirOverride = cacheDir;
   }
 
-  /** Prefix shared by every prefetch scratch dir, including the `-upgrade-` variant. */
-  private static readonly PREFETCH_DIR_PREFIX = "auto-mobile-prefetch-";
-  /**
-   * Only prefetch dirs older than this are swept, so an in-flight prefetch
-   * (this process's or a concurrent one's) is never removed. Matches the
-   * `-mmin +60` guard from the issue's workaround (#4334).
-   */
-  private static readonly STALE_PREFETCH_MAX_AGE_MS = 60 * 60 * 1000;
-
-  /**
-   * Best-effort startup sweep for orphaned `auto-mobile-prefetch-*` scratch
-   * directories. Successful prefetched APKs are published outside their staging
-   * directory into the reusable cache. A process that is SIGKILLed or crashes
-   * can still leave its staging dir behind, so this reclaims those artifacts
-   * without touching the published cache asset (#4334).
-   */
-  public static async sweepStalePrefetchDirsOnStartup(
-    tempRoot: string = os.tmpdir(),
-    timer: Timer = defaultTimer,
-  ): Promise<void> {
-    let entries: Dirent[];
-    try {
-      entries = await sortedReaddirEntries(tempRoot);
-    } catch (error) {
-      // A missing/unreadable temp root is expected on some hosts; nothing to sweep.
-      logger.debug(`[CTRL_PROXY] Prefetch sweep skipped: cannot read ${tempRoot}: ${error}`);
-      return;
-    }
-
-    const candidates = entries.filter(
-      (entry) =>
-        entry.isDirectory() && entry.name.startsWith(AndroidCtrlProxyManager.PREFETCH_DIR_PREFIX),
-    );
-    const now = timer.now();
-    const deadline = now + STALE_PREFETCH_SWEEP_DEADLINE_MS;
-    let reclaimed = 0;
-    for (const [index, entry] of candidates.entries()) {
-      if (timer.now() >= deadline) {
-        AndroidCtrlProxyManager.logPrefetchSweepDeadline();
-        return;
-      }
-      const dir = path.join(tempRoot, entry.name);
-      const result = await AndroidCtrlProxyManager.reclaimStalePrefetchDir(
-        dir,
-        now,
-        deadline,
-        timer,
-      );
-      if (result === "deadline_exhausted") {
-        AndroidCtrlProxyManager.logPrefetchSweepDeadline();
-        return;
-      }
-      if (result !== "reclaimed") {
-        continue;
-      }
-      reclaimed++;
-      if (reclaimed === MAX_STALE_PREFETCH_DIRS_PER_STARTUP) {
-        AndroidCtrlProxyManager.logSkippedPrefetchCandidates(candidates.length - index - 1);
-        break;
-      }
-    }
-
-    if (reclaimed > 0) {
-      logger.info(`[CTRL_PROXY] Swept ${reclaimed} stale prefetch dir(s) from ${tempRoot}`);
-    }
-  }
-
-  private static async reclaimStalePrefetchDir(
-    dir: string,
-    now: number,
-    deadline: number,
-    timer: Timer,
-  ): Promise<"reclaimed" | "not_stale" | "deadline_exhausted"> {
-    try {
-      const stats = await fs.stat(dir);
-      if (timer.now() >= deadline) {
-        return "deadline_exhausted";
-      }
-      if (now - stats.mtimeMs < AndroidCtrlProxyManager.STALE_PREFETCH_MAX_AGE_MS) {
-        return "not_stale";
-      }
-      await fs.rm(dir, { recursive: true, force: true });
-      return "reclaimed";
-    } catch (error) {
-      // Per-entry best-effort: a concurrent process may remove the same dir,
-      // or it may vanish mid-sweep. Skip it and keep going.
-      logger.debug(`[CTRL_PROXY] Failed to inspect stale prefetch dir ${dir}: ${error}`);
-      return "not_stale";
-    }
-  }
-
-  private static logPrefetchSweepDeadline(): void {
-    logger.warn(
-      `[CTRL_PROXY] Prefetch sweep timed out after ${STALE_PREFETCH_SWEEP_DEADLINE_MS}ms ` +
-        `while inspecting stale prefetch directories`,
-    );
-  }
-
-  private static logSkippedPrefetchCandidates(skippedCandidateCount: number): void {
-    if (skippedCandidateCount > 0) {
-      logger.warn(
-        `[CTRL_PROXY] Prefetch sweep skipped ${skippedCandidateCount} uninspected prefetch dir candidate(s) after ` +
-          `reaching the ${MAX_STALE_PREFETCH_DIRS_PER_STARTUP}-directory startup cap`,
-      );
-    }
-  }
-
-  /**
-   * Static APK integrity verification for prefetch
-   */
-  private static verifyApkIntegrityStatic(apkPath: string): void {
-    try {
-      const zip = new AdmZip(apkPath);
-      const entries = zip.getEntries();
-      const hasManifest = entries.some((entry) => entry.entryName === "AndroidManifest.xml");
-      if (!hasManifest) {
-        throw new Error("AndroidManifest.xml missing");
-      }
-    } catch (error) {
-      throw new Error(`APK integrity check failed: ${errorMessage(error)}`);
-    }
+  /** Best-effort startup sweep for orphaned `auto-mobile-prefetch-*` scratch directories (#4334). */
+  public static sweepStalePrefetchDirsOnStartup(tempRoot?: string, timer?: Timer): Promise<void> {
+    return AndroidCtrlProxyManager.prefetcher.sweepStaleDirs(tempRoot, timer);
   }
 
   public static setExpectedChecksumForTesting(checksum: string | null): void {
@@ -1957,7 +1598,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     result: AccessibilityVersionCheckResult,
     perf: PerformanceTracker,
   ): Promise<AccessibilityVersionCheckResult | null> {
-    if (!AndroidCtrlProxyManager.prefetchedApkPath) {
+    if (!AndroidCtrlProxyManager.prefetcher.completedPath()) {
       return null;
     }
 

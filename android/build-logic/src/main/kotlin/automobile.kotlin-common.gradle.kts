@@ -58,8 +58,6 @@ tasks.withType<KotlinCompile>().configureEach {
       "-opt-in=kotlin.time.ExperimentalTime,kotlin.RequiresOptIn",
       "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
       "-opt-in=kotlin.ExperimentalUnsignedTypes",
-      "-opt-in=kotlin.time.ExperimentalTime",
-      "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
       "-opt-in=kotlinx.coroutines.FlowPreview",
     )
   }

@@ -256,7 +256,7 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     controller.abort();
 
     await expect(
-      adb.executeCommand("shell true", undefined, undefined, true, controller.signal),
+      adb.executeCommand("shell true", { noRetry: true, signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
   });
 

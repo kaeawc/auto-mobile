@@ -41,7 +41,7 @@ export async function executeTouchscreenInput(
           options?.onDispatch?.();
         },
       })
-    : await adb.executeCommand(command, options?.timeoutMs, undefined, undefined, signal);
+    : await adb.executeCommand(command, { timeoutMs: options?.timeoutMs, signal });
   assertTouchscreenInputSucceeded(command, result);
 }
 

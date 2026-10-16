@@ -377,13 +377,11 @@ export async function checkAdbVersion(
   try {
     const currentProbe = remainingDoctorProbe(probe);
     const adb = adbFactory.create();
-    const result = await adb.executeCommand(
-      "--version",
-      currentProbe.timeoutMs,
-      undefined,
-      true,
-      currentProbe.signal,
-    );
+    const result = await adb.executeCommand("--version", {
+      timeoutMs: currentProbe.timeoutMs,
+      noRetry: true,
+      signal: currentProbe.signal,
+    });
 
     // The banner reports the protocol version; the Version line reports platform-tools.
     const versionMatch = result.stdout.match(/^Version (\d+\.\d+\.\d+)(?:-(\S+))?/m);

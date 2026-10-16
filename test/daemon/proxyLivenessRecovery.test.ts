@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { parseGuardSource } from "../lint/astGuard";
+import { collectSourceFacts, type SourceFactsOptions } from "../lint/sourceFacts";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import {
   DAEMON_STALLED_CODE,
@@ -630,37 +632,49 @@ describe("handover payload", () => {
 describe("a proxy never stops or restarts the daemon (#10053)", () => {
   const root = path.resolve(__dirname, "../..");
 
-  function codeOnly(source: string): string {
-    return source
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/^\s*\/\/.*$/gm, "")
-      .replace(/`[^`]*`/g, "``")
-      .replace(/"[^"\n]*"/g, '""');
-  }
+  const factsOf = (rel: string, options?: SourceFactsOptions) => {
+    const file = path.join(root, rel);
+    return collectSourceFacts(parseGuardSource(file, readFileSync(file, "utf8")), options);
+  };
+
+  // Substring semantics, as the original regexes had: `getDaemonManager`, `#daemonManager`
+  // and `Bun.spawnSync` all count.
+  const lifecycleIdentifier = /daemonmanager|spawn|startdaemon|restartdaemon/i;
+  const lifecycleCalls = [
+    "exec",
+    "execSync",
+    "execFile",
+    "kill",
+    "restart",
+    "stop",
+    "start",
+    "shutdown",
+  ];
 
   test("the recovery module has no daemon-management dependency or call", () => {
-    const source = codeOnly(
-      readFileSync(path.join(root, "src/daemon/proxyLivenessRecovery.ts"), "utf8"),
-    );
+    const facts = factsOf("src/daemon/proxyLivenessRecovery.ts");
 
-    expect(source).not.toMatch(/from "\.\/manager"/);
-    expect(source).not.toMatch(/daemonManager|DaemonManager/);
-    expect(source).not.toMatch(/child_process|spawn|exec\(|kill\(/);
-    expect(source).not.toMatch(/\.(restart|stop|start|shutdown|kill)\(/);
+    expect(facts.moduleSpecifiers).not.toContain("./manager");
+    expect(facts.moduleSpecifiers.filter((name) => /child_process/.test(name))).toEqual([]);
+    expect(facts.identifierNames.filter((name) => lifecycleIdentifier.test(name))).toEqual([]);
+    for (const call of lifecycleCalls) {
+      expect(facts.calledNames).not.toContain(call);
+      expect(facts.calledMethodNames).not.toContain(call);
+    }
   });
 
   test("the proxy's recovery methods never reach the daemon manager", () => {
-    const proxy = codeOnly(readFileSync(path.join(root, "src/daemon/daemonMcpProxy.ts"), "utf8"));
-    const from = proxy.indexOf("private createLivenessRecovery()");
-    const to = proxy.indexOf("private heartbeatHeldSession(");
-    expect(from).toBeGreaterThan(-1);
-    expect(to).toBeGreaterThan(from);
-    const recoveryMethods = proxy.slice(from, to);
+    const recovery = factsOf("src/daemon/daemonMcpProxy.ts", {
+      between: ["createLivenessRecovery", "heartbeatHeldSession"],
+    });
 
-    expect(recoveryMethods).not.toMatch(/daemonManager/);
-    expect(recoveryMethods).not.toMatch(/startDaemon|restartDaemon|\.restart\(|\.kill\(/);
+    expect(recovery.identifierNames.filter((name) => lifecycleIdentifier.test(name))).toEqual([]);
+    for (const call of ["restart", "kill"]) {
+      expect(recovery.calledNames).not.toContain(call);
+      expect(recovery.calledMethodNames).not.toContain(call);
+    }
     // The recovery attempt connects observation-only.
-    expect(recoveryMethods).toContain("runWithoutDaemonLifecycle");
+    expect(recovery.calledNames).toContain("runWithoutDaemonLifecycle");
   });
 
   test("a lifecycle-free context refuses lifecycle and the default allows it", async () => {

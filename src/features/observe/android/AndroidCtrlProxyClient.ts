@@ -7470,7 +7470,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const command = `shell "screencap ${displayArgument}-p ${quotedTempFile} && base64 ${quotedTempFile} && rm ${quotedTempFile}"`;
       const maxBuffer = 50 * 1024 * 1024;
       const result = await withAndroidScreenshotCaptureLock(this.device.deviceId, () =>
-        this.adb.executeCommand(command, undefined, maxBuffer),
+        this.adb.executeCommand(command, { maxBuffer }),
       );
 
       if (!result.stdout || result.stdout.trim().length === 0) {

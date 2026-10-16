@@ -1244,10 +1244,9 @@ export class Rotate extends BaseVisualChange {
 
   private async readCommittedDeviceState(): Promise<number> {
     try {
-      const { stdout } = await this.adb.executeCommand(
-        "shell cmd device_state state",
-        ROTATION_SETTING_CLEANUP_TIMEOUT_MS,
-      );
+      const { stdout } = await this.adb.executeCommand("shell cmd device_state state", {
+        timeoutMs: ROTATION_SETTING_CLEANUP_TIMEOUT_MS,
+      });
       const identifier = parseAndroidCommittedStateIdentifier(stdout);
       if (identifier !== undefined) {
         return identifier;
@@ -1450,13 +1449,11 @@ export class Rotate extends BaseVisualChange {
   private async assertDisplayExists(display: number, signal?: AbortSignal): Promise<void> {
     let availableDisplayIds: string[] = [];
     try {
-      const displayOutput = await this.adb.executeCommand(
-        "shell cmd display get-displays",
-        2000,
-        undefined,
-        true,
+      const displayOutput = await this.adb.executeCommand("shell cmd display get-displays", {
+        timeoutMs: 2000,
+        noRetry: true,
         signal,
-      );
+      });
       throwIfAborted(signal);
       availableDisplayIds = parseAndroidDisplayInfos(displayOutput.stdout).map(
         ({ logicalId }) => logicalId,

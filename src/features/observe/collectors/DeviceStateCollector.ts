@@ -124,13 +124,7 @@ export class DeviceStateCollector {
   async collectFocusedSystemUiSurface(signal?: AbortSignal): Promise<boolean> {
     const { adb } = this.opts;
     try {
-      const { stdout } = await adb.executeCommand(
-        `shell "dumpsys window"`,
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      );
+      const { stdout } = await adb.executeCommand(`shell "dumpsys window"`, { signal });
       return isFocusedSystemUiSurface(stdout);
     } catch (error) {
       // Connection/read failure must not fail observe; absence of the signal is

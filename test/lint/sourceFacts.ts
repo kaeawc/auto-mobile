@@ -13,6 +13,19 @@ export interface SourceFacts {
   calledNames: string[];
   /** `typeof <obj>.<prop> === "<literal>"` comparisons, as `obj.prop===literal`. */
   typeofComparisons: string[];
+  /** Property names of member calls on any receiver (`a.b.restart()` -> `restart`). */
+  calledMethodNames: string[];
+  /** `receiver.method` where receiver is the identifier or last property segment (`this.cfg.isX()` -> `cfg.isX`). */
+  calledMembers: string[];
+  /** Every identifier token, including property names (`this.daemonManager` -> `daemonManager`). */
+  identifierNames: string[];
+}
+
+export interface SourceFactsOptions {
+  /** Restrict the facts to the body of the class method with this name. */
+  method?: string;
+  /** Restrict to the source span from the start of one class method to the start of another. */
+  between?: [from: string, to: string];
 }
 
 function stringValue(node: Expression): string | undefined {
@@ -52,13 +65,44 @@ function memberPath(node: Expression): string | undefined {
     : undefined;
 }
 
-export function collectSourceFacts(program: Program): SourceFacts {
+function methodRange(program: Program, name: string): { start: number; end: number } {
+  let found: { start: number; end: number } | undefined;
+  new Visitor({
+    MethodDefinition(node) {
+      if (!found && node.key.type === "Identifier" && node.key.name === name) {
+        found = { start: node.start, end: node.end };
+      }
+    },
+  }).visit(program);
+  if (!found) {
+    throw new Error(`method ${name} not found`);
+  }
+  return found;
+}
+
+export function collectSourceFacts(
+  program: Program,
+  options: SourceFactsOptions = {},
+): SourceFacts {
+  const range = options.between
+    ? {
+        start: methodRange(program, options.between[0]).start,
+        end: methodRange(program, options.between[1]).start,
+      }
+    : options.method
+      ? methodRange(program, options.method)
+      : undefined;
+  const inScope = (node: { start: number; end: number }) =>
+    !range || (node.start >= range.start && node.end <= range.end);
   const facts: SourceFacts = {
     moduleSpecifiers: [],
     importedNames: [],
     declaredNames: [],
     calledNames: [],
     typeofComparisons: [],
+    calledMethodNames: [],
+    calledMembers: [],
+    identifierNames: [],
   };
   const addDeclared = (id: { type: string; name?: string } | null | undefined) => {
     if (id?.type === "Identifier" && id.name) {
@@ -67,6 +111,9 @@ export function collectSourceFacts(program: Program): SourceFacts {
   };
   new Visitor({
     ImportDeclaration(node) {
+      if (!inScope(node)) {
+        return;
+      }
       facts.moduleSpecifiers.push(node.source.value);
       if (node.importKind === "type") {
         return;
@@ -86,6 +133,9 @@ export function collectSourceFacts(program: Program): SourceFacts {
       }
     },
     TSImportEqualsDeclaration(node) {
+      if (!inScope(node)) {
+        return;
+      }
       if (node.moduleReference.type === "TSExternalModuleReference") {
         const specifier = stringValue(node.moduleReference.expression);
         if (specifier) {
@@ -94,20 +144,59 @@ export function collectSourceFacts(program: Program): SourceFacts {
       }
     },
     ExportAllDeclaration(node) {
+      if (!inScope(node)) {
+        return;
+      }
       facts.moduleSpecifiers.push(node.source.value);
     },
     ExportNamedDeclaration(node) {
+      if (!inScope(node)) {
+        return;
+      }
       if (node.source) {
         facts.moduleSpecifiers.push(node.source.value);
       }
     },
     ImportExpression(node) {
+      if (!inScope(node)) {
+        return;
+      }
       const specifier = stringValue(node.source);
       if (specifier) {
         facts.moduleSpecifiers.push(specifier);
       }
     },
+    PrivateIdentifier(node) {
+      if (inScope(node)) {
+        facts.identifierNames.push(node.name);
+      }
+    },
+    Identifier(node) {
+      if (inScope(node)) {
+        facts.identifierNames.push(node.name);
+      }
+    },
     CallExpression(node) {
+      if (!inScope(node)) {
+        return;
+      }
+      const callee = unwrapCallee(node.callee);
+      if (callee.type === "MemberExpression" && !callee.computed) {
+        if (callee.property.type === "Identifier") {
+          facts.calledMethodNames.push(callee.property.name);
+          const receiver =
+            callee.object.type === "Identifier"
+              ? callee.object.name
+              : callee.object.type === "MemberExpression" &&
+                  !callee.object.computed &&
+                  callee.object.property.type === "Identifier"
+                ? callee.object.property.name
+                : undefined;
+          if (receiver) {
+            facts.calledMembers.push(`${receiver}.${callee.property.name}`);
+          }
+        }
+      }
       const name = calleeName(node.callee);
       if (name) {
         facts.calledNames.push(name);
@@ -121,15 +210,27 @@ export function collectSourceFacts(program: Program): SourceFacts {
       }
     },
     VariableDeclarator(node) {
+      if (!inScope(node)) {
+        return;
+      }
       addDeclared(node.id);
     },
     FunctionDeclaration(node) {
+      if (!inScope(node)) {
+        return;
+      }
       addDeclared(node.id);
     },
     ClassDeclaration(node) {
+      if (!inScope(node)) {
+        return;
+      }
       addDeclared(node.id);
     },
     BinaryExpression(node) {
+      if (!inScope(node)) {
+        return;
+      }
       if (!["===", "==", "!==", "!="].includes(node.operator)) {
         return;
       }

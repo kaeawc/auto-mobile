@@ -33,7 +33,8 @@ import { getDefaultToolOutputsDir } from "../../utils/toolOutputArtifacts";
 import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
 import { isClientCancelled } from "../../utils/AbortContext";
 import { deleteInternalToolParams } from "../../daemon/constants";
-import { isRecord, type ToolTraits } from "../toolRegistry";
+import type { ToolTraits } from "../toolRegistry";
+import { isRecord } from "./isRecord";
 
 interface AfterToolCallInput {
   name: string;

@@ -5,7 +5,7 @@ import { MemoryAudit } from "../../features/memory/MemoryAudit";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger, type Logger } from "../../utils/logger";
-import { type ProgressCallback, type DeviceAwareToolHandler } from "../toolRegistry";
+import type { ProgressCallback, DeviceAwareToolHandler } from "../toolRegistry";
 
 export interface AuditRunnerInput {
   name: string;

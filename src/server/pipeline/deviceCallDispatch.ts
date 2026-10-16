@@ -41,12 +41,12 @@ import {
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import { executionTracker } from "../executionTracker";
 import { toAdvertisedJsonSchema } from "./advertisedSchema";
-import {
-  type ProgressCallback,
-  type DeviceAwareToolHandler,
-  type ToolTraits,
-  type DeviceAwareToolOptions,
-  type RegisteredTool,
+import type {
+  ProgressCallback,
+  DeviceAwareToolHandler,
+  ToolTraits,
+  DeviceAwareToolOptions,
+  RegisteredTool,
 } from "../toolRegistry";
 import type { ExecutionTargetContext } from "./executionTarget";
 import type { AuditRunner } from "./audit";

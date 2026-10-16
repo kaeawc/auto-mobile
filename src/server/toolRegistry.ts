@@ -314,9 +314,7 @@ export function toolHasOutputSchema(tool: Pick<RegisteredTool, "outputSchema">):
   return tool.outputSchema !== undefined && tool.outputSchema !== null;
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
+export { isRecord } from "./pipeline/isRecord";
 
 /** The collaborators a test may read and swap on the ToolRegistry singleton. */
 export interface ToolRegistryCollaborators {

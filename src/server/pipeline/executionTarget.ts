@@ -20,7 +20,7 @@ import {
   type DeviceObservationAccess,
 } from "../deviceObservationAccess";
 import { createToolExecutionContext } from "../ToolExecutionContext";
-import { resolveTransportDeadlineMs } from "../formTools";
+import { resolveTransportDeadlineMs } from "../transportDeadline";
 import { getDeviceLabelMap } from "../deviceLabelMapping";
 import { resolveDirectSessionDevice } from "../directSessionDeviceRegistry";
 import { captureAutolockPolicy } from "../../daemon/deviceAutolockPolicy";
@@ -28,7 +28,7 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { INTERNAL_NO_DIFF_PARAM } from "../internalToolCall";
 import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
 import { executionTracker } from "../executionTracker";
-import { type SessionlessDeviceRead, type DeviceAwareToolOptions } from "../toolRegistry";
+import type { SessionlessDeviceRead, DeviceAwareToolOptions } from "../toolRegistry";
 import {
   markDeviceCallKind,
   assertSessionDeviceRouting,

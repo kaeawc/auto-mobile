@@ -39,10 +39,10 @@ import { getToolSelectionContext } from "../../features/toolSelection/toolSelect
 import { nonBlankSessionUuid } from "../planCallerIdentity";
 import { combineAbortSignals, runWithAbortSignal } from "../../utils/AbortContext";
 import { executionTracker } from "../executionTracker";
-import {
-  type SessionlessDeviceRead,
-  type DeviceAwareToolOptions,
-  type RegisteredTool,
+import type {
+  SessionlessDeviceRead,
+  DeviceAwareToolOptions,
+  RegisteredTool,
 } from "../toolRegistry";
 import type { ExecutionTargetInput, ExecutionTargetContext } from "./executionTarget";
 import { unidentifiedToolTargetRow, bindingPlatformsFor } from "./deviceCallDispatch";

@@ -424,3 +424,24 @@ test.each([false, true])(
     await harness.close();
   },
 );
+test("a failed close of one client still closes its siblings and then reports the failure", async () => {
+  const f = fixture();
+  const closed: string[] = [];
+  f.deps.proxyCommand = async (argv) => {
+    if (argv[0] === "close") {
+      closed.push(argv[2]);
+      return closed.length === 1 ? { code: 1, output: "boom" } : { code: 0, output: "" };
+    }
+    return { code: 1, output: "" };
+  };
+  const harness = await createBrokerLiveContext(f.batchDir, f.evidence, {}, f.deps);
+  const ops = harness.context.deviceOps!;
+  expect(harness.context.clients.length).toBeGreaterThanOrEqual(2);
+  for (const c of harness.context.clients) {
+    // Launch failures still count as started: partially launched drivers must be cleaned up.
+    await ops.acquire(c, { disposableOwner: false, resume: false }).catch(() => {});
+  }
+  await expect(harness.close()).rejects.toThrow(/Broker proxy close failed: boom/);
+  expect(new Set(closed)).toEqual(new Set(harness.context.clients.map((c) => c.name)));
+  expect(closed).toHaveLength(harness.context.clients.length);
+});

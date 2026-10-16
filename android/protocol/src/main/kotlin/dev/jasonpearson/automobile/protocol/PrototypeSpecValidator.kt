@@ -83,6 +83,11 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_DATA_POINTER_LENGTH: Int = limit("MAX_PROTOTYPE_DATA_POINTER_LENGTH")
   val MAX_PROTOTYPE_STACK_SCREENS: Int = limit("MAX_PROTOTYPE_STACK_SCREENS")
   val MAX_PROTOTYPE_STACK_DEPTH: Int = limit("MAX_PROTOTYPE_STACK_DEPTH")
+  val DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS: Int = limit("DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS")
+  val MAX_PROTOTYPE_REQUEST_TIMEOUT_MS: Int = limit("MAX_PROTOTYPE_REQUEST_TIMEOUT_MS")
+  val MAX_PROTOTYPE_RESPONSE_BYTES: Int = limit("MAX_PROTOTYPE_RESPONSE_BYTES")
+  val MAX_PROTOTYPE_REQUESTS_IN_FLIGHT: Int = limit("MAX_PROTOTYPE_REQUESTS_IN_FLIGHT")
+  val MAX_PROTOTYPE_ACTION_DEPTH: Int = limit("MAX_PROTOTYPE_ACTION_DEPTH")
   internal val maxRepeatItems: Int =
     definitions
       .getValue("repeat")
@@ -184,7 +189,8 @@ object PrototypeSpecValidator {
     }
   }
 
-  private val stateWriteActionTypes = setOf("setState", "toggle", "increment", "decrement")
+  private val stateWriteActionTypes =
+    setOf("setState", "toggle", "increment", "decrement", "request")
 
   private fun fullStateWrites(spec: PrototypeSpec, encoder: Json) =
     PrototypeStateWriteValidator { state ->
@@ -195,7 +201,7 @@ object PrototypeSpecValidator {
 
   // JsonElement's tree parser retains unquoted literals; validate number tokens
   // structurally instead of relying on primitive coercion or exception messages.
-  private fun validNumberTokens(root: JsonElement): Boolean {
+  internal fun validNumberTokens(root: JsonElement): Boolean {
     val pending = ArrayDeque<JsonElement>()
     pending.add(root)
     while (pending.isNotEmpty()) {
@@ -263,6 +269,7 @@ object PrototypeSpecValidator {
         ?: gridSpanErrors(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: dataActionErrors(context, value)
+        ?: requestActionErrors(context)
         ?: pagerErrors(context)
         ?: stackErrors(context)
         ?: stateTypeErrors(value, context, repeats)
@@ -522,6 +529,7 @@ object PrototypeSpecValidator {
     var images = 0
     var selectorDepth = 0
     var conditionDepth = 0
+    var actionDepth = 0
   }
 
   private fun fail(path: String, message: String) =
@@ -581,6 +589,7 @@ object PrototypeSpecValidator {
       if (context.images > MAX_PROTOTYPE_IMAGES) return fail("$path.image", "Image limit exceeded")
     }
     if (rule.text("name") == "condition") return visitCondition(value, target, path, context, depth)
+    if (rule.text("name") == "action") return visitAction(value, target, path, context, depth)
     if (rule.text("name") != "node") return walk(value, target, path, context, depth)
     val node = value as? JsonObject ?: return fail(path, "Expected object")
     context.nodes.add(Located(node, path))
@@ -619,6 +628,22 @@ object PrototypeSpecValidator {
       return fail(path, "Condition depth limit exceeded")
     val error = walk(value, target, path, context, depth)
     context.conditionDepth--
+    return error
+  }
+
+  /** A `request` nests actions in `onSuccess` and `onError`; a top-level action is level 1. */
+  private fun visitAction(
+    value: JsonElement,
+    target: JsonObject,
+    path: String,
+    context: Context,
+    depth: Int,
+  ): PrototypeSpecError? {
+    context.actionDepth++
+    if (context.actionDepth > MAX_PROTOTYPE_ACTION_DEPTH)
+      return fail(path, "Action nesting limit exceeded")
+    val error = walk(value, target, path, context, depth)
+    context.actionDepth--
     return error
   }
 
@@ -932,6 +957,96 @@ object PrototypeSpecValidator {
     }
     return null
   }
+
+  private val headerNamePattern = Regex("^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$")
+
+  /**
+   * Static checks for `request` (#12523) that the contract cannot express (the twin of
+   * `prototypeRequestsError`): the URL scheme, bodies on GET and HEAD, the `into` path and its
+   * `__meta` sibling, header names and literal entries, and the emit name reserved for request
+   * events.
+   */
+  private fun requestActionErrors(context: Context): PrototypeSpecError? {
+    for ((value, path) in context.actions) {
+      val error =
+        when (value.text("type")) {
+          "emit" ->
+            if (value.text("name") == PrototypeRequests.EVENT_NAME)
+              fail(
+                "$path.name",
+                "The emit name ${PrototypeRequests.EVENT_NAME} is reserved for request events",
+              )
+            else null
+          "request" -> requestError(value, path)
+          else -> null
+        }
+      if (error != null) return error
+    }
+    return null
+  }
+
+  private fun requestError(action: JsonObject, at: String): PrototypeSpecError? {
+    action.text("url")?.let(::requestUrlError)?.let {
+      return fail("$at.url", it)
+    }
+    val method = action.text("method") ?: PrototypeRequests.DEFAULT_METHOD
+    if (action["body"] != null && method in PrototypeRequests.BODYLESS_METHODS) {
+      return fail("$at.body", "A GET or HEAD request cannot have a body")
+    }
+    action.text("into")?.let(::requestIntoError)?.let {
+      return fail("$at.into", it)
+    }
+    return requestEntryError(action["headers"], at, "headers")
+      ?: requestEntryError(action["query"], at, "query")
+  }
+
+  private fun requestUrlError(url: String): String? =
+    if ('{' in url) {
+      if (
+        url.startsWith("http://", ignoreCase = true) ||
+          url.startsWith("https://", ignoreCase = true)
+      )
+        null
+      else "A templated request url must start with a literal http:// or https://"
+    } else if (PrototypeUrl.parse(url) is PrototypeUrl.Result.Absolute) null
+    else "A request url must be an absolute http or https URL"
+
+  private fun requestIntoError(into: String): String? {
+    val pointer =
+      PrototypeDataWriter.pathPointer(PrototypeRepeatTemplate.bindDataPath(into, 0))
+        ?: return "request into is /data/<RFC 6901 pointer> and addresses a member of data"
+    val last = pointer.substring(pointer.lastIndexOf('/') + 1)
+    return if (last == "-" || (last.isNotEmpty() && last.all { it in '0'..'9' }))
+      "request into must name an object member, not an array element, so into__meta can be written beside it"
+    else null
+  }
+
+  private fun requestEntryError(
+    entries: JsonElement?,
+    at: String,
+    field: String,
+  ): PrototypeSpecError? {
+    for ((name, value) in (entries as? JsonObject).orEmpty()) {
+      val entryPath = keyPath("$at.$field", name)
+      if (field == "headers" && !headerNamePattern.matches(name)) {
+        return fail(entryPath, "Invalid header name")
+      }
+      val literal = (value as? JsonObject)?.get("value")
+      if (
+        literal != null &&
+          !(literal is JsonPrimitive && literal != JsonNull && isScalarLiteral(literal))
+      ) {
+        return fail(
+          "$entryPath.value",
+          "A header or query literal must be a string, number or boolean",
+        )
+      }
+    }
+    return null
+  }
+
+  private fun isScalarLiteral(value: JsonPrimitive): Boolean =
+    value.isString || value.booleanOrNull != null || value.doubleOrNull != null
 
   private fun dataChildren(value: JsonElement, path: String): List<Pair<JsonElement, String>> =
     when (value) {
@@ -1362,12 +1477,35 @@ object PrototypeSpecValidator {
     return null
   }
 
+  /**
+   * `statusKey` must be a declared state key holding a string, because the runtime writes
+   * `loading`, `success` and `error` to it.
+   */
+  private fun requestStatusKeyError(
+    action: JsonObject,
+    path: String,
+    state: JsonObject,
+  ): PrototypeSpecError? {
+    val key = action.text("statusKey") ?: return null
+    if (!state.containsKey(key))
+      return fail("$path.statusKey", "statusKey must name a declared state key")
+    val stored = state.getValue(key) as? JsonPrimitive
+    return if (stored != null && stored.isString) null
+    else fail("$path.statusKey", "statusKey requires a string state key")
+  }
+
   private fun stateActionErrors(context: Context, data: JsonObject): PrototypeSpecError? {
     val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
     for (action in context.actions) {
       val (value, path, item) = action
       if (value.text("type") == "setState") {
         setStateBindingErrors(action, context, state)?.let {
+          return it.forItem(item)
+        }
+        continue
+      }
+      if (value.text("type") == "request") {
+        requestStatusKeyError(value, path, state)?.let {
           return it.forItem(item)
         }
         continue

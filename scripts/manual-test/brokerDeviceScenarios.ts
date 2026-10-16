@@ -33,6 +33,15 @@ export interface BrokerDeviceScenarioOps {
   /** Authoritative resource ledger sample, including destroying/destroyed rows. */
   resources(): Promise<BrokerResourceSamples>;
   tools?(client: BrokerScenarioClient): Promise<readonly unknown[]>;
+  /**
+   * Send a gated CONTROL call (tapOn with a no-match target) carrying `foreign`'s session UUID
+   * through `client`'s own bound wire connection. Returns the refusal code (null when the call
+   * was not refused). Only sessions recorded in the same batch dir may be named.
+   */
+  foreignControl?(
+    client: BrokerScenarioClient,
+    foreign: BrokerScenarioClient,
+  ): Promise<{ code: string | null }>;
 }
 function ops(ctx: BrokerScenarioContext): BrokerDeviceScenarioOps {
   assert(ctx.deviceOps, "Device scenario requires injected proxy-session operations.");
@@ -333,6 +342,36 @@ async function crashIsolation(ctx: BrokerScenarioContext) {
   await assertSiblingsHeld(ctx, [survivor], [survivorGrant]);
   await release(ctx, survivor, survivorGrant);
 }
+/** Live variant: each client's connection refuses a control call aimed at the other's session. */
+async function crossClientIsolation(ctx: BrokerScenarioContext) {
+  assert(ctx.clients.length >= 2, "cross-client-isolation-live needs at least two clients.");
+  const control = ops(ctx).foreignControl;
+  assert(control, "cross-client-isolation-live requires proxy foreignControl.");
+  const [a, b] = ctx.clients;
+  const grants = await acquireTogether(ctx, [a, b]);
+  assert.notEqual(uuid(grants[0]), uuid(grants[1]));
+  const before = ctx.ledger.devices().map((row) => row.device?.deviceId);
+  for (const [from, to] of [
+    [a, b],
+    [b, a],
+  ]) {
+    const refusal = await ctx.record(
+      "proxy/foreign-control",
+      { client: from.name, to: to.name },
+      () => control(from, to),
+    );
+    assert.equal(refusal.code, "device_outside_broker_grant");
+  }
+  // Neither grant, device nor connection was disturbed by the refused probes.
+  await assertSiblingsHeld(ctx, [a, b], grants);
+  assert.deepEqual(
+    ctx.ledger.devices().map((row) => row.device?.deviceId),
+    before,
+  );
+  for (const [i, c] of [a, b].entries()) {
+    await release(ctx, c, grants[i]);
+  }
+}
 async function ownerAbandon(ctx: BrokerScenarioContext) {
   const { c } = await ownerDeath(ctx);
   const next = successor(ctx, c),
@@ -533,6 +572,7 @@ export const brokerDeviceScenarios: readonly BrokerScenario[] = [
   entry("release-destroy-verification", 1, releaseDestroy),
   entry("owner-death-and-abandon", 1, ownerAbandon),
   entry("multi-client-crash-isolation", 2, crashIsolation),
+  entry("cross-client-isolation-live", 2, crossClientIsolation),
   entry("daemon-restart-with-live-sessions", 1, restart),
   entry("#12451-restart-handoff", 1, restart),
   entry("#12452-prep-timeout", 1, timeout),

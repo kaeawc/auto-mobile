@@ -137,7 +137,10 @@ import {
 } from "./constants";
 import { getSessionIdleTimeoutMs } from "./sessionLivenessWindows";
 import {
+  DAEMON_SESSION_NOT_ACTIVE_CODE,
   DAEMON_SESSION_NOT_FOUND_CODE,
+  DAEMON_UNKNOWN_TOOL_CODE,
+  errorCodeOf,
   releaseReasonFromError,
   daemonInstanceFromError,
   DAEMON_TOOL_UNAVAILABLE_CODE,
@@ -589,6 +592,7 @@ export class DaemonMcpProxy {
   private reconciliationSnapshot?: Promise<DaemonStatus>;
   // Connection-scoped: tools/list_changed invalidates status, but does not replace its daemon.
   private structuredSessionNotFound = false;
+  private structuredToolErrorCodes = false;
   private readonly timer: Timer;
   private readonly heartbeatKeeper: SingleFlightInterval;
   private readonly proxyHeartbeatKeeper: HeartbeatKeeper;
@@ -1664,6 +1668,7 @@ export class DaemonMcpProxy {
     this.throwIfClosing();
     this.reconciliationSnapshot = undefined;
     this.structuredSessionNotFound = false;
+    this.structuredToolErrorCodes = false;
     // Check if daemon is available
     const socketPath = this.config.socketPath ?? SOCKET_PATH;
     // This is an observation-only probe (issue #6140: isAvailable never touches
@@ -1689,6 +1694,7 @@ export class DaemonMcpProxy {
     if (this.daemonStatusProbe) {
       const status = await this.reconciliationStatus();
       this.structuredSessionNotFound = status.structuredSessionNotFound === true;
+      this.structuredToolErrorCodes = status.structuredToolErrorCodes === true;
     }
 
     // Create and connect client
@@ -2930,13 +2936,41 @@ export class DaemonMcpProxy {
   private isPreDispatchDaemonSessionError(error: unknown): boolean {
     return (
       this.isUnknownToolError(error) ||
-      errorMessage(error).includes("is not an active daemon session")
+      errorCodeOf(error) === DAEMON_SESSION_NOT_ACTIVE_CODE ||
+      this.matchesLegacyMessage(error, "is not an active daemon session")
     );
   }
 
   private isUnknownToolError(error: unknown): boolean {
-    const message = errorMessage(error);
-    return this.isGatedToolError(error) || message.includes("Unknown tool:");
+    return (
+      this.isGatedToolError(error) ||
+      errorCodeOf(error) === DAEMON_UNKNOWN_TOOL_CODE ||
+      this.matchesLegacyMessage(error, "Unknown tool:")
+    );
+  }
+
+  /**
+   * Message-text classification, kept only for daemons that predate the structured codes: a daemon
+   * advertising `structuredToolErrorCodes` always sends the code, so its prose is never evidence.
+   */
+  private matchesLegacyMessage(error: unknown, text: string): boolean {
+    return !this.structuredToolErrorCodes && errorMessage(error).includes(text);
+  }
+
+  /** The tool an unknown-tool refusal names, from the frame's evidence or (old daemons) its prose. */
+  private unknownToolName(error: unknown): string | undefined {
+    if (errorCodeOf(error) === DAEMON_UNKNOWN_TOOL_CODE) {
+      const details: unknown = error instanceof Error ? Reflect.get(error, "details") : undefined;
+      const toolName: unknown =
+        details !== null && typeof details === "object"
+          ? Reflect.get(details, "toolName")
+          : undefined;
+      return typeof toolName === "string" ? toolName : "";
+    }
+    if (this.structuredToolErrorCodes) {
+      return undefined;
+    }
+    return errorMessage(error).match(/Unknown tool:\s*(\S+)/)?.[1];
   }
 
   /**
@@ -2957,11 +2991,11 @@ export class DaemonMcpProxy {
     if (this.isGatedToolError(error)) {
       return false;
     }
-    const match = errorMessage(error).match(/Unknown tool:\s*(\S+)/);
-    if (!match) {
+    const rawName = this.unknownToolName(error);
+    if (rawName === undefined) {
       return this.isUnknownToolError(error);
     }
-    const name = match[1].replace(/[.,;:!?]+$/, "");
+    const name = rawName.replace(/[.,;:!?]+$/, "");
     return name.length === 0 || this.frontendRegistersTool(name);
   }
 
@@ -6249,6 +6283,7 @@ export class DaemonMcpProxy {
     this.resourceSubscriptions.clear();
     this.resourceUpdatedListeners.clear();
     this.structuredSessionNotFound = false;
+    this.structuredToolErrorCodes = false;
     this.completeDaemonShutdownDisconnect();
     this.cancelBackgroundConnectRetry();
     this.cancelConnectedFallbackReconcile();

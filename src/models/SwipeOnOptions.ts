@@ -63,6 +63,7 @@ export interface SwipeOnOptions {
 
   // Gesture options
   speed?: "slow" | "normal" | "fast"; // Speed preset
+  durationMs?: number; // Public forward-stroke duration override (ms); excludes speed (#12538)
   duration?: number; // Manual duration override (ms) - internal only
   scrollMode?: "adb" | "a11y"; // Execution mode (Android only) - internal only
 }

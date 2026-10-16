@@ -297,6 +297,10 @@ private struct Instance {
         }
         bindStateKeys(&fields)
         bindPartFields(&fields)
+        if case var .object(refresh)? = fields["refresh"], case let .array(actions)? = refresh["onRefresh"] {
+            refresh["onRefresh"] = .array(actions.map(bindAction))
+            fields["refresh"] = .object(refresh)
+        }
         for key in ["visibleWhen", "enabledWhen"] {
             if let condition = fields[key] { fields[key] = bindCondition(condition) }
         }
@@ -347,7 +351,7 @@ private struct Instance {
         for key in ["stateKey", "hourKey", "minuteKey", "activeKey"] {
             bindString(key, in: &fields)
         }
-        for (part, key) in [("trailing", "stateKey"), ("openWhen", "key")] {
+        for (part, key) in [("trailing", "stateKey"), ("openWhen", "key"), ("refresh", "stateKey")] {
             guard case var .object(partFields)? = fields[part] else { continue }
             bindString(key, in: &partFields)
             fields[part] = .object(partFields)

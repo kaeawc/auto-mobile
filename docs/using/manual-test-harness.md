@@ -427,7 +427,14 @@ bun scripts/manual-test/private-daemon.ts boot-gate --batch-dir "$B" --role a-ph
   `up` captures native info best-effort within 5 seconds after readiness; `info`
   saves the current native descriptor to `info.json` and feeds the ledger.
 - `close --client NAME` cleanly closes MCP/stdin and waits up to 240 seconds for
-  a released receipt. `status` shows initialize/live outcome, grant/profile,
+  a released receipt of a granted session. A refused or failed attempt (for example
+  `daemon_unavailable`, or an abandoned request) has no released receipt to wait for:
+  `close` returns at once with exit 0 and `release.outcome: "failed"` in `closed.json`
+  (`receiptMissing: true` when the daemon holds no receipt or is unreachable). After the
+  receipt settles, `close` also joins the driver's exit (5 s), including a driver resumed by
+  `up --resume`, so the next `up` never sees "Previous attempt driver is alive". A driver that
+  lingers is signalled only when its recorded start identity (`driver-identity`) still matches;
+  otherwise `close` exits 2 without signalling. `status` shows initialize/live outcome, grant/profile,
   typed failure, owner liveness and `daemonSocketAlive`; `--all` prints all clients.
 - `call` accepts inline JSON or `@file`, `--timeout-ms` (default 900000), and
   `--full`. It requires a ready grant and live driver. Explicit selectors must
@@ -493,6 +500,9 @@ Use `{{ownSessionId}}`, `{{clientSessionId:<name>}}` for cross-client tests, and
 
 `--expect-refused` is send-mode only and requires every response to be an error
 with a product refusal code or message (success or unrelated errors exit 2).
+Product refusal codes are `device_outside_broker_grant` (labels and unbound devices),
+`device_outside_bound_session` (a bound connection naming another session or device, as in the
+`cross-client-isolation-live` probe) and `session_ownership_lost`.
 Lifecycle probes accept only `{}` or an object containing only the client's own `sessionUuid`; device names and selectors always refuse before sending.
 These constrained probes exercise the product gate. Resources/list, `automobile:devices/*` reads, and
 `--allow-selector` remain forbidden. `--token-of OTHER` changes only the user

@@ -186,7 +186,7 @@ function fixture(clientCount = 2, timeoutCode = "timeout") {
       calls.push(`foreign:${c.name}->${foreign.name}`);
       const ready = (x: BrokerScenarioClient) =>
         receipts.get(x.config.requestId)?.outcome === "ready";
-      return { code: ready(c) && ready(foreign) ? "device_outside_broker_grant" : null };
+      return { code: ready(c) && ready(foreign) ? "device_outside_bound_session" : null };
     },
   };
   const privateDaemon: PrivateDaemonControl = {

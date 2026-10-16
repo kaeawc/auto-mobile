@@ -56,54 +56,6 @@ export interface SearchableNode {
   categories: { clickable: boolean; scrollable: boolean; text: boolean };
 }
 
-/**
- * The text a button-like text match reads: the captured `text` when the capture has any
- * (even blank), otherwise the content description. Mirrors `text || content-desc` on the raw
- * node; a blank value reads as empty because `toSearchable` drops it.
- */
-export function textOrDescription(node: SearchableNode): string {
-  const sources = node.textSources;
-  return (node.capturedTextLength ?? 0) > 0
-    ? (sources.text ?? "")
-    : (sources["content-desc"] ?? "");
-}
-
-/** The capture's `resource-id` as `toSearchable` reads it (blank ids are absent), without building the node. */
-export function searchableNativeId(properties: SearchableProperties): string | undefined {
-  return nonEmptyString(properties["resource-id"]);
-}
-
-/**
- * The captured label fields exactly as the capture carries them: an absent value, an empty string
- * and a blank string stay distinguishable, unlike {@link SearchableNode}, which drops blank ones.
- * For fingerprints and label sets that must not coarsen the capture.
- */
-export function capturedLabelFields(properties: SearchableProperties): {
-  text: unknown;
-  contentDescription: unknown;
-  resourceId: unknown;
-} {
-  return {
-    text: properties.text,
-    contentDescription: properties["content-desc"],
-    resourceId: properties["resource-id"],
-  };
-}
-
-/**
- * Whether `node` is a `Button`- or `TextView`-class node whose text or description contains
- * any of `options`, ignoring case. `node` must come from `toSearchable` with `className` taken
- * from the capture's `class` field alone (the Android class), as the intent chooser buttons are.
- */
-export function isButtonLikeWithText(node: SearchableNode, options: readonly string[]): boolean {
-  const className = node.className ?? "";
-  if (!className.includes("Button") && !className.includes("TextView")) {
-    return false;
-  }
-  const text = textOrDescription(node).toLowerCase();
-  return options.some((option) => text.includes(option.toLowerCase()));
-}
-
 type SearchableProperties = Omit<Partial<Element>, "bounds"> & { bounds?: unknown };
 
 const IOS_EDITABLE_HINT_CLASSES = new Set([

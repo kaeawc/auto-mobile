@@ -1,5 +1,5 @@
 import type { Generated } from "kysely";
-import type { SlotProcessIdentity } from "../managedSlots/slotRegistry";
+import type { BindingProcessIdentity } from "./registry/bindingRegistry";
 import type { AdmissionRefusalReason, BrokerLimits, ResourceState } from "./admission";
 
 export type BrokerRequestState = "acquiring" | "active" | "releasing" | "released" | "failed";
@@ -9,7 +9,7 @@ export interface BrokerRequestRecord {
   requestId: string;
   fingerprint: string;
   parameters: unknown;
-  owner: SlotProcessIdentity;
+  owner: BindingProcessIdentity;
   state: BrokerRequestState;
   resourceId: string | null;
   sessionId: string | null;
@@ -58,7 +58,7 @@ export interface BrokerAdmissionInput {
   /** Canonical requirements + initialization + consumer ownership, excluding transport details. */
   fingerprint: string;
   parameters: unknown;
-  owner: SlotProcessIdentity;
+  owner: BindingProcessIdentity;
   limits: BrokerLimits;
   /** Pure catalog resolver. Called on a miss before reserving or evicting, never on a hit. */
   resolveCreation: () => unknown;

@@ -86,8 +86,7 @@ class DeviceOwnershipRefusalWireTest {
     cases.forEach { case ->
       val error = decoded(case)
       assertEquals(case.code, error.code, "${case.name}: code")
-      // Rows without a wire `retryable` (managed-slot failures carry it only in a nested
-      // acquisitionFailure) expect false.
+      // Rows without a wire `retryable` expect false.
       assertEquals(case.retryable ?: false, error.retryable ?: false, "${case.name}: retryable")
       assertEquals(case.retryAfterMs, error.retryAfterMs, "${case.name}: retryAfterMs")
       assertEquals(

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
-  openSqliteSlotRegistry,
-  type SqliteSlotRegistry,
-} from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
-import type { SlotProcessIdentity } from "../../../src/daemon/managedSlots/slotRegistry";
+  openSqliteBindingRegistry,
+  type SqliteBindingRegistry,
+} from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
+import type { BindingProcessIdentity } from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import type { SqliteSessionBrokerStore } from "../../../src/daemon/sessionBroker/sqliteStore";
 import {
@@ -13,8 +13,12 @@ import {
 } from "../../../src/daemon/sessionBroker/store";
 import { sessionRequestFingerprint } from "../../../src/daemon/sessionBroker/requestIdentity";
 
-const OWNER: SlotProcessIdentity = { daemonId: "daemon-a", pid: 101, processGenerationToken: "a" };
-const SUCCESSOR: SlotProcessIdentity = {
+const OWNER: BindingProcessIdentity = {
+  daemonId: "daemon-a",
+  pid: 101,
+  processGenerationToken: "a",
+};
+const SUCCESSOR: BindingProcessIdentity = {
   daemonId: "daemon-b",
   pid: 102,
   processGenerationToken: "b",
@@ -24,7 +28,7 @@ const TABLET = { platform: "ios", model: "tablet", runtime: "27.0" };
 const CONSUMER_TOKEN = "consumer-owner";
 
 describe("session broker durable admission", () => {
-  let registry: SqliteSlotRegistry;
+  let registry: SqliteBindingRegistry;
   let store: SqliteSessionBrokerStore;
   let scopeKey: string;
   const livePids = new Set<number>();
@@ -32,7 +36,7 @@ describe("session broker durable admission", () => {
   beforeEach(async () => {
     livePids.clear();
     livePids.add(OWNER.pid);
-    registry = await openSqliteSlotRegistry({
+    registry = await openSqliteBindingRegistry({
       dbPath: ":memory:",
       isExecOwnerLive: (owner) => livePids.has(owner.pid),
     });
@@ -69,13 +73,13 @@ describe("session broker durable admission", () => {
   }
 
   function key(resource: BrokerResourceRecord) {
-    return { scopeKey: resource.scopeKey, slotIndex: resource.allocationIndex };
+    return { scopeKey: resource.scopeKey, bindingIndex: resource.allocationIndex };
   }
 
   async function prepare(
     requestId: string,
     extra: Partial<BrokerAdmissionInput> = {},
-    claimOwner: SlotProcessIdentity = OWNER,
+    claimOwner: BindingProcessIdentity = OWNER,
   ) {
     const admission = await store.admit(input(requestId, extra));
     if (admission.kind !== "create" && admission.kind !== "reuse") {
@@ -84,7 +88,7 @@ describe("session broker durable admission", () => {
     const resource = admission.resource;
     const sessionId = `session-${requestId}`;
     if (admission.kind === "create") {
-      await registry.initSlot(key(resource), {
+      await registry.initBinding(key(resource), {
         platform: "ios",
         role: "primary",
         requestedSpec: resource.profile,
@@ -390,12 +394,12 @@ describe("session broker durable admission", () => {
       throw new Error("Expected create");
     }
     const resource = outcome.resource;
-    await registry.initSlot(key(resource), {
+    await registry.initBinding(key(resource), {
       platform: "ios",
       role: "primary",
       requestedSpec: PHONE,
     });
-    const journal = await registry.openSlotJournal(key(resource), {
+    const journal = await registry.openBindingJournal(key(resource), {
       kind: "create",
       phase: "creating",
       owner: OWNER,

@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
-  openSqliteSlotRegistry,
-  type SqliteSlotRegistry,
-} from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
+  openSqliteBindingRegistry,
+  type SqliteBindingRegistry,
+} from "../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import {
-  computeSlotScopeKey,
-  type SlotProcessIdentity,
-} from "../../../src/daemon/managedSlots/slotRegistry";
+  computeBindingScopeKey,
+  type BindingProcessIdentity,
+} from "../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
 import {
   parseSessionBrokerHostConfig,
@@ -22,12 +22,12 @@ import type { SqliteSessionBrokerStore } from "../../../src/daemon/sessionBroker
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { iosCatalog, iosDefaults } from "../../devices/sessionRequirements/fixtures";
 
-const OWNER: SlotProcessIdentity = {
+const OWNER: BindingProcessIdentity = {
   daemonId: "broker-daemon",
   pid: 101,
   processGenerationToken: "process-a",
 };
-const BROKER_SCOPE_KEY = computeSlotScopeKey(SESSION_BROKER_SCOPE);
+const BROKER_SCOPE_KEY = computeBindingScopeKey(SESSION_BROKER_SCOPE);
 
 const unusedNativeCall = async (): Promise<never> => {
   throw new Error("native work must not run in this test");
@@ -89,10 +89,10 @@ class ControlledBroker extends SessionBroker {
 }
 
 describe("session broker service lifecycle", () => {
-  let registry: SqliteSlotRegistry;
+  let registry: SqliteBindingRegistry;
 
   beforeEach(async () => {
-    registry = await openSqliteSlotRegistry({
+    registry = await openSqliteBindingRegistry({
       dbPath: ":memory:",
       isExecOwnerLive: () => true,
     });
@@ -111,7 +111,7 @@ describe("session broker service lifecycle", () => {
       registry,
       acquisition: { acquire: unusedNativeCall },
       release: { releaseExecution: unusedNativeCall },
-      journal: { owner: OWNER, redriveSlot: unusedNativeCall },
+      journal: { owner: OWNER, redriveBinding: unusedNativeCall },
       owner: OWNER,
       timer,
       sessionDisposition: () => "live",
@@ -173,8 +173,8 @@ describe("session broker service lifecycle", () => {
     if (scope.kind !== "ready") {
       throw new Error(`foreign scope unavailable: ${scope.kind}`);
     }
-    const key = { scopeKey: scope.scope.scopeKey, slotIndex: 0 };
-    await registry.initSlot(key, {
+    const key = { scopeKey: scope.scope.scopeKey, bindingIndex: 0 };
+    await registry.initBinding(key, {
       role: "primary",
       platform: "ios",
       requestedSpec: {},

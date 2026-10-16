@@ -1,3 +1,4 @@
+import * as bindingRegistryModule from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { PlatformVideoCaptureBackend } from "../../src/features/video/PlatformVideoCaptureBackend";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import type { BootedDevice } from "../../src/models";
@@ -45,6 +46,11 @@ interface DaemonStartInternals {
   initializeDevicePoolWithTimeout(timeoutMs: number): Promise<void>;
   initializeIosServices(): Promise<void>;
   stopSessionTimers(): void;
+  startHost: DaemonStartHost;
+  sessionBrokerConfigPath: string | undefined;
+  socketBindCommitted: boolean;
+  openBindingRegistry(signal?: AbortSignal): Promise<unknown>;
+  closeManagedExecutionRelease(): Promise<void>;
 }
 
 class StartupStopped extends Error {}
@@ -304,6 +310,96 @@ describe("Daemon.start() tool-call-end wiring", () => {
     } finally {
       spies.reverse().forEach((spy) => spy.mockRestore());
       internals.stopSessionTimers();
+    }
+  });
+
+  test.each([
+    { broker: false, bound: false, migrate: false },
+    { broker: false, bound: true, migrate: true },
+    { broker: true, bound: false, migrate: true },
+  ])("registry open policy before/after bind: %j", async ({ broker, bound, migrate }) => {
+    const { internals, timer } = await makeDaemon({ port: 3161, debug: true });
+    const open = spyOn(bindingRegistryModule, "openSqliteBindingRegistry").mockRejectedValue(
+      new Error("fake open refused"),
+    );
+    internals.sessionBrokerConfigPath = broker ? "/memory/broker.json" : undefined;
+    internals.socketBindCommitted = bound;
+    try {
+      await expect(internals.openBindingRegistry()).rejects.toThrow("fake open refused");
+      expect(open).toHaveBeenCalledWith(expect.objectContaining({ migrate }));
+    } finally {
+      open.mockRestore();
+      internals.stopSessionTimers();
+      timer.reset();
+    }
+  });
+
+  test.each([false, true])("registry retirement startup ordering (broker: %s)", async (broker) => {
+    const { internals, timer } = await makeDaemon({ port: 3161, debug: true });
+    const events: string[] = [];
+    let stopped = false;
+    const spies = [
+      spyOn(bindingRegistryModule, "bindingRegistryFileExists").mockReturnValue(true),
+      spyOn(internals, "initializeDatabase").mockResolvedValue(undefined),
+      spyOn(internals, "initializeDevicePoolWithTimeout").mockImplementation(async () => {
+        events.push("pool");
+      }),
+      spyOn(internals, "initializeIosServices").mockResolvedValue(undefined),
+      spyOn(logger, "info").mockImplementation(() => {}),
+      spyOn(logger, "warn").mockImplementation(() => {}),
+      spyOn(internals, "openBindingRegistry").mockImplementation(async (signal) => {
+        events.push("retirement");
+        if (broker) {
+          throw new Error("legacy owner still live");
+        }
+        await new Promise<void>((resolve) =>
+          signal?.addEventListener(
+            "abort",
+            () => {
+              stopped = true;
+              resolve();
+            },
+            { once: true },
+          ),
+        );
+      }),
+    ];
+    internals.sessionBrokerConfigPath = broker ? "/memory/broker.json" : undefined;
+    internals.startHost = {
+      ...internals.processStartHost(),
+      enterProcess: () => {},
+      publishForwardLeaseOwner: () => {},
+      writeExitRecord: () => {},
+      writeEarlyOwnerRecord: async () => {},
+      openTerminalReleaseJournal: () => new NoopTerminalReleaseJournal(),
+      startHttpIngress: async () => {
+        events.push("ingress");
+      },
+      sweepStaleAppearanceConfigs: async () => {},
+      redriveRecorderTeardowns: async () => true,
+      bindControlSocket: async () => {
+        events.push("bind");
+        return null as unknown as Awaited<ReturnType<DaemonStartHost["bindControlSocket"]>>;
+      },
+    };
+    try {
+      if (broker) {
+        await expect(internals.startThroughSocketBind()).rejects.toThrow(
+          "Session broker cannot start",
+        );
+        expect(events).toEqual(["retirement"]);
+      } else {
+        await internals.startThroughSocketBind();
+        expect(events).toEqual(["ingress", "pool", "bind", "retirement"]);
+        expect(stopped).toBe(false);
+        await internals.closeManagedExecutionRelease();
+        expect(stopped).toBe(true);
+        expect(timer.now()).toBe(0);
+      }
+    } finally {
+      spies.reverse().forEach((spy) => spy.mockRestore());
+      internals.stopSessionTimers();
+      timer.reset();
     }
   });
 

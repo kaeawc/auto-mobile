@@ -90,9 +90,6 @@ src/daemon/foreignDeviceOwnership.ts	ADB_SERVER_SOCKET
 src/daemon/foreignDeviceOwnership.ts	ANDROID_ADB_SERVER_ADDRESS
 src/daemon/foreignDeviceOwnership.ts	ANDROID_ADB_SERVER_PORT
 src/daemon/liveAcceptanceCapability.ts	AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET
-src/daemon/managedSlots/defaultAbandonedScopeReclaimer.ts	NODE_ENV
-src/daemon/managedSlots/defaultFreeDeviceReclaimer.ts	NODE_ENV
-src/daemon/managedSlots/managedSlotResourceBudget.ts	AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES
 src/daemon/manager.ts	AUTOMOBILE_DAEMON_LOCK_FILE_PATH
 src/daemon/manager.ts	AUTOMOBILE_DAEMON_PID_FILE_PATH
 src/daemon/manager.ts	AUTOMOBILE_DAEMON_SOCKET_PATH
@@ -203,7 +200,6 @@ src/features/webrtc/webrtcStreamingConfig.ts	AUTOMOBILE_WEBRTC_WHIP_TOKEN
 src/index.ts	AUTOMOBILE_APPEARANCE_SYNC
 src/index.ts	AUTOMOBILE_DISABLED_TOOLS
 src/index.ts	AUTOMOBILE_ENABLED_TOOLS
-src/models/managedSlotConfig.ts	AUTOMOBILE_MANAGED_SLOT_CONFIG
 src/server/appFileService.ts	AUTOMOBILE_APP_FILE_BACKUP
 src/server/appFileService.ts	AUTOMOBILE_APP_FILE_DESTINATION_IS_DIRECTORY
 src/server/planHealthSummary.ts	AUTOMOBILE_PLAN_HEALTH_DIR

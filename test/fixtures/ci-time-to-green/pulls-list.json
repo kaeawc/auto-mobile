@@ -32,7 +32,7 @@
     "updated_at": "2026-10-13T02:01:24Z",
     "head": {
       "sha": "30d6cd68693b9c1fa0d0dc90fb5f72b6d20c084d",
-      "ref": "work/managed-slot-budget-wire-12051",
+      "ref": "work/broker-binding-budget-wire-12051",
       "repo": {
         "full_name": "kaeawc/auto-mobile"
       }

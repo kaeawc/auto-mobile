@@ -84,10 +84,10 @@ beforeAll(async () => {
   await warm.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
   await warm.stop();
   // Warm only the managed registry/policy/proxy setup; the rows below run their own scenarios.
-  const managedWarm = await LivenessScenario.start({ managedSlots: true });
+  const managedWarm = await LivenessScenario.start({ bindings: true });
   const managed = await managedWarm.acquire();
   await managedWarm.holdAsManagedExecution(managed);
-  await managedWarm.proxy.holdManagedExecutionSession(managed);
+  await managedWarm.holdBrokerExecution(managed);
   await managedWarm.daemonRestart();
   await managedWarm.idle(KEEPER_INTERVAL_MS);
   await managedWarm.stop();
@@ -99,10 +99,10 @@ afterEach(async () => {
 
 describe("managed execution owner exemption (#11340)", () => {
   test("managed execution idle 30 min with live owner is held", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+    scenario = await LivenessScenario.start({ bindings: true });
     const managed = await scenario.acquire();
     await scenario.holdAsManagedExecution(managed);
-    await scenario.proxy.holdManagedExecutionSession(managed);
+    await scenario.holdBrokerExecution(managed);
     const original = scenario.daemon.manager.getSession(managed)!;
     const clocks = [original.lastUsedAt, original.expiresAt];
     // This sleep-pausing clock counts a forward wall-only jump as sleep, without interval replay.
@@ -127,10 +127,10 @@ describe("managed execution owner exemption (#11340)", () => {
   });
 
   test("managed execution heartbeat loss releases at lease plus grace", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+    scenario = await LivenessScenario.start({ bindings: true });
     const managed = await scenario.acquire();
     await scenario.holdAsManagedExecution(managed);
-    await scenario.proxy.holdManagedExecutionSession(managed);
+    await scenario.holdBrokerExecution(managed);
     await scenario.idle(KEEPER_INTERVAL_MS);
     expectHeld(managed);
     const lastBeat = scenario.daemon.manager.getSession(managed)!.lastOwnerHeartbeat!;
@@ -149,12 +149,12 @@ describe("managed execution owner exemption (#11340)", () => {
   });
 
   test("plain session in the same daemon idle-releases at 2 minutes", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true, devices: [DEVICE_A, DEVICE_B] });
+    scenario = await LivenessScenario.start({ bindings: true, devices: [DEVICE_A, DEVICE_B] });
     const startedAt = scenario.timer.now();
     const plain = await scenario.acquire(DEVICE_B);
     const managed = await scenario.acquire(DEVICE_A);
     await scenario.holdAsManagedExecution(managed);
-    await scenario.proxy.holdManagedExecutionSession(managed);
+    await scenario.holdBrokerExecution(managed);
     scenario.timer.stepWallClock(IDLE_WINDOW_MS + 1);
     await scenario.idleUntilReleased(plain, RELEASE_SLACK_MS);
     const release = scenario.releaseOf(plain)!;
@@ -166,10 +166,10 @@ describe("managed execution owner exemption (#11340)", () => {
   });
 
   test("a managed execution reclaims after restarting beyond its persisted idle deadline", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+    scenario = await LivenessScenario.start({ bindings: true });
     const managed = await scenario.acquire();
     await scenario.holdAsManagedExecution(managed);
-    await scenario.proxy.holdManagedExecutionSession(managed);
+    await scenario.holdBrokerExecution(managed);
     scenario.timer.stepWallClock(30 * 60_000);
     await scenario.idle(KEEPER_INTERVAL_MS);
     expectHeld(managed);
@@ -182,10 +182,10 @@ describe("managed execution owner exemption (#11340)", () => {
   });
 
   test("a managed execution whose proxy never returns ends on the existing owner path", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+    scenario = await LivenessScenario.start({ bindings: true });
     const absent = await scenario.acquire();
     await scenario.holdAsManagedExecution(absent);
-    await scenario.proxy.holdManagedExecutionSession(absent);
+    await scenario.holdBrokerExecution(absent);
     scenario.timer.stepWallClock(30 * 60_000);
     await scenario.idle(KEEPER_INTERVAL_MS);
     expectHeld(absent);
@@ -2189,12 +2189,12 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     expect(scenario.sessionsWithOpenTransport).toEqual([]);
   });
 
-  test("a managed slot names the daemon that holds its execution: the restarted daemon records itself as the owner", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+  test("a binding names the daemon that holds its execution: the restarted daemon records itself as the owner", async () => {
+    scenario = await LivenessScenario.start({ bindings: true });
     const session = await scenario.acquire();
     await scenario.holdAsManagedExecution(session);
     const firstDaemon = scenario.daemonId;
-    expect(await scenario.managedSlotOwnerOf(session)).toMatchObject({
+    expect(await scenario.bindingOwnerOf(session)).toMatchObject({
       daemonId: firstDaemon,
       sessionUuid: session,
     });
@@ -2203,17 +2203,17 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     await scenario.daemonRestart();
     expect(scenario.daemonId).not.toBe(firstDaemon);
     expectHeld(session);
-    expect(await scenario.managedSlotOwnerOf(session)).toMatchObject({
+    expect(await scenario.bindingOwnerOf(session)).toMatchObject({
       daemonId: scenario.daemonId,
       sessionUuid: session,
     });
   });
 
   test("a managed execution reclaims within one keeper interval after a 20 s daemon restart beyond recovery (#11901)", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+    scenario = await LivenessScenario.start({ bindings: true });
     const session = await scenario.acquire();
     await scenario.holdAsManagedExecution(session);
-    await scenario.proxy.holdManagedExecutionSession(session);
+    await scenario.holdBrokerExecution(session);
     const handovers: LivenessHandover[] = [];
     scenario.proxy.onLivenessHandover((handover) => handovers.push(handover));
     await scenario.idle(KEEPER_INTERVAL_MS);
@@ -2239,7 +2239,7 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
   });
 
   test("a managed execution whose session finishes rehydrating after the startup deadline is re-owned when it does", async () => {
-    scenario = await LivenessScenario.start({ managedSlots: true });
+    scenario = await LivenessScenario.start({ bindings: true });
     const session = await scenario.acquire();
     await scenario.holdAsManagedExecution(session);
     const firstDaemon = scenario.daemonId;
@@ -2249,12 +2249,12 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     // The device's claim takes 5 s longer than the startup deadline, so the daemon starts first.
     scenario.deviceClaimDelayMs = SESSION_REHYDRATION_DEADLINE_MS + 5_000;
     await scenario.daemonRestart();
-    expect(await scenario.managedSlotOwnerOf(session)).toMatchObject({ daemonId: firstDaemon });
+    expect(await scenario.bindingOwnerOf(session)).toMatchObject({ daemonId: firstDaemon });
 
     // The claim lands: the session is this daemon's, and so is its slot.
     await scenario.idle(5_000 + KEEPER_INTERVAL_MS);
     expectHeld(session);
-    expect(await scenario.managedSlotOwnerOf(session)).toMatchObject({
+    expect(await scenario.bindingOwnerOf(session)).toMatchObject({
       daemonId: scenario.daemonId,
       sessionUuid: session,
     });

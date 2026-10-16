@@ -3,7 +3,7 @@ import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
 import type { OnObservationRequestedCallback } from "../../src/daemon/deviceDataStreamSocketServer";
-import { DeviceAssignedToManagedSlotError } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
@@ -13,7 +13,7 @@ import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // A read must never perform control-like side effects (service rebind, CtrlProxy setup) on a
-// device another session, a managed slot or another daemon holds: request_observation on such a
+// device another session, a broker binding or another daemon holds: request_observation on such a
 // device takes the connect-only read, never the session observe pipeline, and is never refused.
 
 const SLOT_EXEC = "slot-exec-session";
@@ -40,7 +40,7 @@ interface Internals {
     getDevice(deviceId: string): unknown;
     getAllDevices(): unknown[];
     assertDeviceActionable(deviceId: string, purpose: string): void;
-    assertNotAssignedToManagedSlot(input: {
+    assertNotAssignedToBinding(input: {
       requesterSessionUuid?: string;
       deviceId: string;
     }): Promise<void>;
@@ -84,17 +84,17 @@ async function observeAs(options: {
   internals.sessionManager.getSession = () => ({});
   internals.sessionManager.getSessionForDevice = () => options.localHolder ?? null;
   internals.sessionManager.getDeviceLabels = () => undefined;
-  internals.devicePool.assertNotAssignedToManagedSlot = async (input) => {
+  internals.devicePool.assertNotAssignedToBinding = async (input) => {
     if (options.slotCheckFails) {
-      throw new Error("slot registry unreadable");
+      throw new Error("binding registry unreadable");
     }
     if (options.slotHeld && input.requesterSessionUuid !== SLOT_EXEC) {
-      throw new DeviceAssignedToManagedSlotError("observe", input.deviceId, {
+      throw new DeviceAssignedToBindingError("observe", input.deviceId, {
         platform: "ios",
         stableDeviceId: "Pixel_9",
-        holder: "slot",
+        holder: "session_broker",
         scopeKey: "scope",
-        slotIndex: 0,
+        bindingIndex: 0,
         scopeState: null,
         execSessionUuid: SLOT_EXEC,
       });
@@ -149,13 +149,13 @@ async function observeAs(options: {
 }
 
 describe("request_observation on a device someone else holds", () => {
-  test("a viewer on an idle managed-slot device takes the connect-only read", async () => {
+  test("a viewer on an idle binding device takes the connect-only read", async () => {
     const { paths, error } = await observeAs({ requester: "viewer", slotHeld: true });
     expect(error).toBeUndefined();
     expect(paths).toEqual(["device-read"]);
   });
 
-  test("the slot's own execution keeps the session pipeline", async () => {
+  test("the binding's own execution keeps the session pipeline", async () => {
     const { paths } = await observeAs({ requester: SLOT_EXEC, slotHeld: true });
     expect(paths).toEqual(["session-pipeline"]);
   });
@@ -174,8 +174,8 @@ describe("request_observation on a device someone else holds", () => {
   test("an ownership lookup that fails outright takes the connect-only read", async () => {
     const foreign = await observeAs({ requester: "viewer", foreign: "unexpectedFailure" });
     expect(foreign.paths).toEqual(["device-read"]);
-    const slot = await observeAs({ requester: "viewer", slotCheckFails: true });
-    expect(slot.paths).toEqual(["device-read"]);
+    const binding = await observeAs({ requester: "viewer", slotCheckFails: true });
+    expect(binding.paths).toEqual(["device-read"]);
   });
 
   test("a free device keeps the session pipeline", async () => {

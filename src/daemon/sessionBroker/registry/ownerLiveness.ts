@@ -1,0 +1,163 @@
+import { isProcessRunning } from "../../../utils/processLiveness";
+import {
+  compareProcessGenerationTokens,
+  currentDaemonProcessGenerationToken,
+  readDarwinProcessGenerationToken,
+  readLinuxProcessGenerationToken,
+} from "../../processGeneration";
+import type { BindingExecOwnerLiveness, BindingProcessIdentity } from "./bindingRegistry";
+
+/**
+ * Owner liveness for bindings (#11242 item 5): a recorded execution owner is live while its
+ * PID runs AND that PID is still the same process generation (start time) that claimed the binding.
+ * A PID the OS has reused for an unrelated process is dead, so it can never pin a binding.
+ *
+ * Process start identity is the daemon's canonical process-generation token (`processGeneration`):
+ * Linux procfs start tick plus boot id, Darwin `ps lstart` in UTC. It is best effort: an owner
+ * recorded without a token, a token that cannot be read now, or tokens from incomparable schemes
+ * fall back to the PID probe alone, which keeps a possibly-live owner rather than evicting it.
+ */
+export interface BindingOwnerProcessProbe {
+  isRunning(pid: number): boolean;
+  /** The PID's current process-generation token, or undefined when it cannot be read. */
+  readGenerationToken(pid: number): string | undefined;
+}
+
+export function createBindingOwnerProcessProbe(
+  platform: NodeJS.Platform = process.platform,
+): BindingOwnerProcessProbe {
+  return {
+    isRunning: (pid) => isProcessRunning(pid),
+    readGenerationToken: (pid) => {
+      if (platform === "linux") {
+        return readLinuxProcessGenerationToken(pid);
+      }
+      if (platform === "darwin") {
+        return readDarwinProcessGenerationToken(pid);
+      }
+      return undefined;
+    },
+  };
+}
+
+export function createBindingExecOwnerLiveness(
+  probe: BindingOwnerProcessProbe = createBindingOwnerProcessProbe(),
+): BindingExecOwnerLiveness {
+  return (owner: BindingProcessIdentity): boolean => {
+    if (!probe.isRunning(owner.pid)) {
+      return false;
+    }
+    const recorded = owner.processGenerationToken;
+    if (!recorded) {
+      return true;
+    }
+    const current = probe.readGenerationToken(owner.pid);
+    if (current === undefined) {
+      return true;
+    }
+    return compareProcessGenerationTokens(recorded, current) !== "different";
+  };
+}
+
+/** The default for the registry and the reconciler: PID plus process start identity. */
+export const defaultBindingExecOwnerLiveness: BindingExecOwnerLiveness =
+  createBindingExecOwnerLiveness();
+
+/** The sessions this daemon holds as live managed executions (#11275). */
+export interface LiveExecutionSessions {
+  isLiveManagedExecutionSession(sessionUuid: string): boolean;
+  /**
+   * Whether this daemon still holds the session at all, whatever its liveness policy. Covers the
+   * window between a binding claim and the session adopting the managed-execution policy. Absent:
+   * only live managed executions count.
+   */
+  hasSession?(sessionUuid: string): boolean;
+}
+
+/**
+ * Reservation ids (`reserve-*`) this process has recorded as a binding's execution owner and not yet
+ * superseded or released (#11339). A reservation names no session, so while its attempt runs it is
+ * the only thing keeping the binding in use.
+ */
+export class InFlightBindingReservations {
+  private readonly ids = new Set<string>();
+
+  add(reservation: string): void {
+    this.ids.add(reservation);
+  }
+
+  delete(reservation: string): void {
+    this.ids.delete(reservation);
+  }
+
+  has(reservation: string): boolean {
+    return this.ids.has(reservation);
+  }
+}
+
+/** The process-wide set the reconciler records into and the daemon's liveness reads. */
+export const inFlightBindingReservations = new InFlightBindingReservations();
+
+export interface LiveExecutionSessionsOptions {
+  /** This process, whose own records are judged by session, never by PID. Default: this process. */
+  thisProcess?: Pick<BindingProcessIdentity, "pid">;
+  reservations?: Pick<InFlightBindingReservations, "has">;
+}
+
+/**
+ * Owner liveness as one daemon judges it (#11275, #11339). A record that names another process is
+ * live while that process is (`processLiveness`), or while this daemon still holds the owner's
+ * session as a live managed execution: a daemon restart leaves the binding naming the previous, dead
+ * daemon until the execution is re-owned, and the session's own liveness keeps the binding in use
+ * meanwhile.
+ *
+ * A record this process wrote is never judged by its PID: that PID is alive for as long as the
+ * daemon is, so a record whose clear failed (a busy registry) would pin the binding forever. It is
+ * judged only by its session (held by this daemon) or, for a `reserve-*` placeholder, by whether
+ * that reservation is still in flight. Settlers and journal owners carry no session and are judged
+ * by their process alone.
+ *
+ * An id this daemon holds in flight keeps its record live whichever process wrote it. The drain
+ * holds a released session whose work still runs, and that session's record may still name the
+ * previous daemon (a restart not re-owned yet) or another one; judging such a record by its
+ * process would hand the binding out under the running work. The hold is this process's own view.
+ * Other daemons need a host-visible record naming this daemon: `ManagedExecutionReowner` confirms
+ * it before resumed work is admitted, and the drain retains it until settlement is recorded.
+ * Release-time re-stamping alone cannot fence peers when the registry rejects both writes.
+ */
+export function withLiveExecutionSessions(
+  processLiveness: BindingExecOwnerLiveness,
+  sessions: LiveExecutionSessions,
+  options: LiveExecutionSessionsOptions = {},
+): BindingExecOwnerLiveness {
+  const thisPid = (options.thisProcess ?? { pid: process.pid }).pid;
+  const reservations = options.reservations ?? inFlightBindingReservations;
+  return (owner) => {
+    const sessionUuid =
+      "sessionUuid" in owner && typeof owner.sessionUuid === "string" ? owner.sessionUuid : null;
+    if (sessionUuid !== null && reservations.has(sessionUuid)) {
+      return true;
+    }
+    if (sessionUuid !== null && owner.pid === thisPid) {
+      return (
+        sessions.isLiveManagedExecutionSession(sessionUuid) ||
+        (sessions.hasSession?.(sessionUuid) ?? false)
+      );
+    }
+    return (
+      processLiveness(owner) ||
+      (sessionUuid !== null && sessions.isLiveManagedExecutionSession(sessionUuid))
+    );
+  };
+}
+
+/**
+ * The identity this process records when it claims a binding: its PID and its process-generation
+ * token (when the platform exposes one).
+ */
+export function currentBindingOwnerProcess(
+  readToken: () => string | undefined = currentDaemonProcessGenerationToken,
+  pid: number = process.pid,
+): Pick<BindingProcessIdentity, "pid" | "processGenerationToken"> {
+  return { pid, processGenerationToken: readToken() ?? null };
+}

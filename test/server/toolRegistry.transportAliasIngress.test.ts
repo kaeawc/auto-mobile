@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
-import { DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { DEVICE_ASSIGNED_TO_BINDING_CODE } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -313,7 +313,7 @@ describe("a transport the pool has not folded yet (#11618)", () => {
       });
       expect(outcome).not.toBe("discovery_incomplete");
       expect(outcome).not.toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-      expect(outcome).not.toBe(DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE);
+      expect(outcome).not.toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
       expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
       expect(h.tools.runs).toEqual([]);
     },
@@ -660,11 +660,11 @@ describe("unidentified transports use the held-alias rule (#11596)", () => {
 });
 
 describe("devices the alias fold does not concern (#11618)", () => {
-  test("an emulator's loopback adb address is its console serial for a managed slot", async () => {
+  test("an emulator's loopback adb address is its console serial for a broker binding", async () => {
     const h = await harness({
       pooledRows: [booted(EMULATOR, "Pixel"), booted(EMULATOR_TCP)],
       avd: "Pixel",
-      managedSlotStableId: "Pixel",
+      bindingStableId: "Pixel",
     });
     expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([EMULATOR]);
 
@@ -681,9 +681,9 @@ describe("devices the alias fold does not concern (#11618)", () => {
       deviceId: EMULATOR_TCP,
     });
 
-    expect(byCanonical).toBe(DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE);
-    expect(byAlias).toBe(DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE);
-    // #11641: even an idle managed slot's device is read-only, on the canonical device, without readiness.
+    expect(byCanonical).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
+    expect(byAlias).toBe(DEVICE_ASSIGNED_TO_BINDING_CODE);
+    // #11641: even an idle broker binding's device is read-only, on the canonical device, without readiness.
     expect(readByAlias).toBe("ran");
     expect(h.reads).toEqual([EMULATOR]);
     expect(h.tools.runs).toEqual([]);

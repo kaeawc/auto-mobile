@@ -296,7 +296,7 @@ export function createListingHandlers() {
       matchingBooted,
       deps.timer,
     );
-    // Refresh the managed-slot snapshot so held devices are not reported as free.
+    // Refresh the broker binding snapshot so held devices are not reported as free.
     await pool?.refreshInventoryOwnership();
     const devices = listDevicePayloads(
       matchingBooted,

@@ -23,13 +23,6 @@ export type VersionMismatchReason =
 
 export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMismatch";
 
-/** Preserve the registration boundary so claim refusals keep their narrower retry policy. */
-class ManagedExecutionRegistrationError extends ActionableError {
-  constructor(cause: unknown) {
-    super(`Managed execution registration failed: ${errorMessage(cause)}`, { cause });
-  }
-}
-
 /** A transport failed before dispatch, rather than a reconciliation policy gate. */
 class DaemonPreflightConnectionError extends DaemonUnavailableError {
   constructor(readonly cause: DaemonUnavailableError) {
@@ -337,7 +330,6 @@ export class DaemonToolUnavailableError extends Error {
 
 /** Internal errors shared with the proxy without widening its public error exports. */
 export const daemonInternalErrors = {
-  ManagedExecutionRegistrationError,
   DaemonPreflightConnectionError,
   HeldSessionNotFoundError,
 };

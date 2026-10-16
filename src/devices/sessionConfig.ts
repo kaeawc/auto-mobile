@@ -9,8 +9,8 @@ import type { LockOwnerGenerationProbe } from "../utils/fileLock";
 import { ActionableError } from "../models/ActionableError";
 import {
   compareExecutionOwnerIdentity,
-  type ManagedSlotOwnerIdentityVerdict,
-} from "../models/managedSlotConfig";
+  type ExecutionOwnerIdentityVerdict,
+} from "../models/executionOwnerIdentity";
 
 export const SESSION_CONFIG_FLAG = "--session-config";
 export const SESSION_CONFIG_ENV = ENV_SPECS.SESSION_CONFIG.name;
@@ -106,7 +106,6 @@ export interface SessionConfigLaunch {
   envValue?: string;
   readFile: (path: string) => string;
   hasInitialSessionUuid?: boolean;
-  hasManagedSlotConfig?: boolean;
   noProxy?: boolean;
 }
 
@@ -116,9 +115,9 @@ export function resolveSessionConfig(launch: SessionConfigLaunch): SessionConfig
   if (source === undefined) {
     return undefined;
   }
-  if (launch.hasInitialSessionUuid || launch.hasManagedSlotConfig || launch.noProxy) {
+  if (launch.hasInitialSessionUuid || launch.noProxy) {
     throw new SessionConfigError(
-      "session config is incompatible with managed-slot config, --initial-session-uuid, and --no-proxy",
+      "session config is incompatible with --initial-session-uuid, and --no-proxy",
     );
   }
   return parseSessionConfigSource(source, launch.readFile);
@@ -139,7 +138,7 @@ export function assertSessionOwnerRunning(
 export function assertSessionOwnerIdentity(
   config: SessionConfig | undefined,
   compare: LockOwnerGenerationProbe["compare"],
-): ManagedSlotOwnerIdentityVerdict | undefined {
+): ExecutionOwnerIdentityVerdict | undefined {
   const pid = config?.executionOwnerPid;
   if (pid === undefined) {
     return undefined;

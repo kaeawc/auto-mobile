@@ -373,6 +373,12 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "PooledDevice.lastUsedAt is the pool's LRU order (assigned, or stored with a new pool " +
       "entry), not a session idle clock.",
   },
+  "src/daemon/devicePool.ts DevicePool.restoreSessionAssignment": {
+    writes: 1,
+    reason:
+      "Allocation rollback restores the captured lastUsedAt without reading the clock; " +
+      "explicit bookkeeping projection keeps binding and health writes in their owner (#11802).",
+  },
   "src/daemon/devicePool.ts DevicePool.initializeWithDevices": {
     writes: 1,
     reason: "PooledDevice LRU order seeded for each discovered device, not a session idle clock.",

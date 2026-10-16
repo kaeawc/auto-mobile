@@ -1,6 +1,8 @@
+import { statusOf, type BindingFields } from "../../src/daemon/deviceBinding";
 import { describe, expect, test } from "bun:test";
 import {
   deviceHold,
+  classifyPoolStatus,
   genericAvailabilityOf,
   holdAllowsHealthRecovery,
   holdAllowsObservationServiceStart,
@@ -217,6 +219,21 @@ describe("pure device holds", () => {
       ]).toEqual(answers);
     });
   }
+
+  test.each(["idle", "busy"] as const)(
+    "health error wins over %s binding at legacy boundaries",
+    (status) => {
+      const device: BindingFields = { sessionId: "owner", status, health: "error" };
+      const effective = statusOf(device);
+      expect(effective).toBe("error");
+      expect(classifyPoolStatus(effective, false)).toBe("error");
+      expect(classifyPoolStatus(effective, true)).toBe("error");
+      const hold = deviceHold({ sessionId: device.sessionId, status: effective });
+      expect(hold.reasons).toContainEqual({ kind: "error" });
+      expect(poolBucketOf(hold)).toBe("error");
+      expect(JSON.stringify(hold)).not.toContain('"health"');
+    },
+  );
 
   test("known holders and simultaneous reasons survive classification", () => {
     const owner = Symbol("identity-owner");

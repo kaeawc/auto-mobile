@@ -254,6 +254,124 @@ describe("session broker proxy acquisition", () => {
     });
   });
 
+  function stalledHoldRig() {
+    const releases: string[] = [];
+    const { ports, held, timer } = rig((method, params) => {
+      if (method === "daemon/capabilities") {
+        return { capabilities: ["session-broker/v1"] };
+      }
+      if (method === DAEMON_RELEASE_BROKER_SESSION_METHOD) {
+        releases.push(String(params.sessionId));
+        return { sessionUuid: params.sessionId, outcome: "released" };
+      }
+      return ready;
+    }, false);
+    const hold = Promise.withResolvers<void>();
+    ports.holdSession = async (requestId, sessionUuid) => {
+      held.push({ requestId, sessionUuid });
+      await hold.promise;
+    };
+    return { ports, held, timer, hold, releases };
+  }
+
+  function track(acquisition: Promise<SessionBrokerResult>) {
+    const state: { result?: SessionBrokerResult } = {};
+    void acquisition.then((result) => {
+      state.result = result;
+    });
+    return state;
+  }
+
+  test.each(["late success", "late failure"] as const)(
+    "a stalled ownership hold settles at the preparation deadline and cleans up its %s (#12770)",
+    async (late) => {
+      const { ports, held, timer, hold, releases } = stalledHoldRig();
+      const acquisition = track(acquireSessionThroughDaemon(config, ports));
+      await drainMicrotasks(32);
+      expect(held).toEqual([{ requestId: "request-1", sessionUuid: "session-1" }]);
+
+      timer.advanceTime(config.preparationTimeoutMs! + 1);
+      await drainMicrotasks(32);
+
+      expect(acquisition.result).toMatchObject({
+        outcome: "failed",
+        sessionUuid: null,
+        cleanupPending: false,
+        failure: { code: "timeout", retryable: true },
+      });
+      expect(releases).toEqual(["session-1"]);
+
+      if (late === "late success") {
+        hold.resolve();
+      } else {
+        hold.reject(new Error("heartbeat refused late"));
+      }
+      await drainMicrotasks(32);
+      expect(acquisition.result?.outcome).toBe("failed");
+      // A late success must not restore the cancelled grant; a late failure holds nothing.
+      expect(releases).toEqual(
+        late === "late success" ? ["session-1", "session-1"] : ["session-1"],
+      );
+    },
+  );
+
+  test("cancellation settles a stalled ownership hold and releases its grant (#12770)", async () => {
+    const { ports, timer, hold, releases } = stalledHoldRig();
+    const controller = new AbortController();
+    const acquisition = track(acquireSessionThroughDaemon(config, ports, controller.signal));
+    await drainMicrotasks(32);
+
+    controller.abort();
+    await drainMicrotasks(32);
+
+    expect(acquisition.result).toMatchObject({
+      outcome: "failed",
+      sessionUuid: null,
+      failure: { code: "cancelled" },
+    });
+    expect(releases).toEqual(["session-1"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+
+    hold.resolve();
+    await drainMicrotasks(32);
+    expect(acquisition.result?.outcome).toBe("failed");
+    expect(releases).toEqual(["session-1", "session-1"]);
+  });
+
+  test("an unconfirmed release after a stalled hold keeps cleanup pending (#12770)", async () => {
+    const { ports, timer, hold } = stalledHoldRig();
+    ports.releaseSession = async () => {
+      throw new Error("daemon gone");
+    };
+    const acquisition = track(acquireSessionThroughDaemon(config, ports));
+    await drainMicrotasks(32);
+
+    timer.advanceTime(config.preparationTimeoutMs! + 1);
+    await drainMicrotasks(32);
+
+    expect(acquisition.result).toMatchObject({
+      outcome: "failed",
+      cleanupPending: true,
+      failure: { code: "timeout" },
+    });
+    hold.resolve();
+    await drainMicrotasks(32);
+  });
+
+  test("a hold that resolves after cancellation in the same turn is fenced (#12770)", async () => {
+    const { ports, hold, releases } = stalledHoldRig();
+    const controller = new AbortController();
+    const acquisition = track(acquireSessionThroughDaemon(config, ports, controller.signal));
+    await drainMicrotasks(32);
+
+    hold.resolve();
+    controller.abort();
+    await drainMicrotasks(32);
+
+    expect(acquisition.result).toMatchObject({ outcome: "failed", failure: { code: "cancelled" } });
+    expect(releases).toContain("session-1");
+  });
+
   test("missing capability fails before prepare", async () => {
     const { ports, calls } = rig(() => ({ capabilities: [] }));
     expect(await acquireSessionThroughDaemon(config, ports)).toMatchObject({

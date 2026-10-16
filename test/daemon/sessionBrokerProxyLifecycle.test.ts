@@ -92,7 +92,7 @@ function setup(
     livenessOwnerToken: TOKEN,
   });
   proxies.push(proxy);
-  return { proxy, clients };
+  return { proxy, clients, timer };
 }
 
 class AbortablePendingConnectClient extends FakeDaemonClient {
@@ -223,6 +223,95 @@ describe("session broker proxy lifecycle", () => {
       outcome: "failed",
       failure: { code: "cancelled" },
     });
+  });
+
+  function parkedFirstHeartbeat() {
+    const heartbeat = Promise.withResolvers<unknown>();
+    let parked = false;
+    const rig = setup((method) => {
+      if (method === DAEMON_HEARTBEAT_METHOD && !parked) {
+        parked = true;
+        return heartbeat.promise;
+      }
+      return undefined;
+    });
+    const brokerReleases = () =>
+      rig.clients
+        .flatMap((client) => client.callDaemonMethodCalls)
+        .filter(({ method }) => method === DAEMON_RELEASE_BROKER_SESSION_METHOD);
+    return { ...rig, heartbeat, brokerReleases };
+  }
+
+  function track(acquisition: Promise<SessionBrokerResult>) {
+    const state: { result?: SessionBrokerResult } = {};
+    void acquisition.then((result) => {
+      state.result = result;
+    });
+    return state;
+  }
+
+  test("a stalled first ownership heartbeat settles at the preparation deadline (#12770)", async () => {
+    const { proxy, heartbeat, brokerReleases, timer } = parkedFirstHeartbeat();
+    const acquisition = track(proxy.acquireBrokerSession(config));
+    await drainMicrotasks(64);
+    expect(acquisition.result).toBeUndefined();
+
+    timer.advanceTime(config.preparationTimeoutMs! + 1);
+    await drainMicrotasks(64);
+
+    expect(acquisition.result).toMatchObject({
+      outcome: "failed",
+      sessionUuid: null,
+      failure: { code: "timeout" },
+    });
+    expect(brokerReleases().length).toBeGreaterThan(0);
+
+    heartbeat.resolve({});
+    await drainMicrotasks(64);
+    expect(proxy.getSessionBrokerResult()?.outcome).toBe("failed");
+  });
+
+  test("close settles a stalled first ownership heartbeat without storing ready (#12770)", async () => {
+    const { proxy, heartbeat, brokerReleases } = parkedFirstHeartbeat();
+    const acquisition = track(proxy.acquireBrokerSession(config));
+    await drainMicrotasks(64);
+    expect(acquisition.result).toBeUndefined();
+
+    const closing = proxy.close();
+    await drainMicrotasks(64);
+
+    expect(acquisition.result).toMatchObject({
+      outcome: "failed",
+      sessionUuid: null,
+      failure: { code: "cancelled" },
+    });
+    expect(brokerReleases().length).toBeGreaterThan(0);
+
+    heartbeat.resolve({});
+    await closing;
+    await drainMicrotasks(64);
+    expect(proxy.getSessionBrokerResult()?.outcome).toBe("failed");
+  });
+
+  test("terminal release evidence during the first ownership heartbeat fences ready (#12770)", async () => {
+    const { proxy, clients, heartbeat, brokerReleases } = parkedFirstHeartbeat();
+    const acquisition = track(proxy.acquireBrokerSession(config));
+    await drainMicrotasks(64);
+
+    clients[0]!.emitNotification(
+      SESSION_RELEASED_NOTIFICATION_METHOD,
+      SESSION,
+      "heartbeat-timeout",
+    );
+    heartbeat.resolve({});
+    await drainMicrotasks(64);
+
+    expect(acquisition.result).toMatchObject({
+      outcome: "failed",
+      sessionUuid: null,
+      failure: { code: "session_hold_failed" },
+    });
+    expect(brokerReleases().length).toBeGreaterThan(0);
   });
 
   test("terminal reconnect refusal fences broker tools and is never retried", async () => {

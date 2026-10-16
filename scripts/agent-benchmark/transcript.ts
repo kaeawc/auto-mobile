@@ -163,8 +163,12 @@ function handleUser(event: JsonRecord, state: AuditState): void {
     if (block.type !== "tool_result") {
       continue;
     }
-    const record = state.callsById.get(asString(block.tool_use_id) ?? "");
+    const id = asString(block.tool_use_id) ?? "";
+    const record = state.callsById.get(id);
     if (!record) {
+      // A result for a call the stream never showed means the transcript is incomplete, and
+      // its outcome (an error, say) would otherwise go uncounted.
+      state.audit.parseErrors.push(`tool_result for unknown tool_use_id ${id || "(missing)"}`);
       continue;
     }
     const text = toolResultText(block.content);

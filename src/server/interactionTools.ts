@@ -3481,11 +3481,10 @@ export function registerInteractionTools() {
     const transportDeadlineMs = (args as Record<string, unknown>)[
       INTERNAL_MCP_REQUEST_DEADLINE_PARAM
     ];
-    const result = await wakeAndUnlock.execute(
-      args.pin,
-      typeof transportDeadlineMs === "number" ? transportDeadlineMs : undefined,
+    const result = await wakeAndUnlock.execute(args.pin, {
+      deadlineMs: typeof transportDeadlineMs === "number" ? transportDeadlineMs : undefined,
       signal,
-    );
+    });
     const message = result.success
       ? result.wasLocked
         ? "Device unlocked"
@@ -3516,7 +3515,7 @@ export function registerInteractionTools() {
     }
 
     const openUrl = openUrlFactory(device);
-    const opened = await openUrl.execute(args.url, signal);
+    const opened = await openUrl.execute(args.url, { signal });
     throwIfAborted(signal);
     const result = args.chooserAppPackage
       ? await selectAndroidOpenLinkChooser(

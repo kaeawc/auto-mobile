@@ -34,7 +34,7 @@ import type {
   HierarchySyncDiagnostics,
   ObserverHierarchyRequestOptions,
 } from "./types";
-import { generateSecureId } from "./types";
+import { createTimestampedId } from "../../../utils/IdGenerator";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 import { applyStableViewIdRewrites, assignStableViewIds } from "./StableNodeIdentity";
 import { maxObservationAgeMs } from "../observationFreshness";
@@ -1132,7 +1132,7 @@ export class CtrlProxyHierarchy {
           );
         }
         logger.debug("[CTRL_PROXY] Falling back to ADB broadcast");
-        const uuid = `sync_${this.context.timer.now()}_${generateSecureId()}`;
+        const uuid = createTimestampedId("sync", this.context.timer, this.context.idGenerator);
         broadcastRequestId = uuid;
         request.onRequestId?.(uuid);
         await perf.track("sendBroadcast", async () => {
@@ -1733,7 +1733,7 @@ export class CtrlProxyHierarchy {
       return null;
     }
 
-    const requestId = `req_${this.context.timer.now()}_${generateSecureId()}`;
+    const requestId = createTimestampedId("req", this.context.timer, this.context.idGenerator);
     const isolated = isolatedHierarchyRequest({ observerMode, displayId });
     try {
       onRequestId?.(requestId);
@@ -1779,7 +1779,7 @@ export class CtrlProxyHierarchy {
     }
 
     try {
-      const requestId = `stale_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId("stale", this.context.timer, this.context.idGenerator);
       const message = serializeCtrlProxyRequest(
         ctrlProxyRequests.requestHierarchyIfStale({ requestId, sinceTimestamp }),
       );
@@ -1805,7 +1805,7 @@ export class CtrlProxyHierarchy {
     }
 
     try {
-      const requestId = `recomp_${this.context.timer.now()}_${generateSecureId()}`;
+      const requestId = createTimestampedId("recomp", this.context.timer, this.context.idGenerator);
       const message = serializeCtrlProxyRequest(
         ctrlProxyRequests.setRecompositionTracking({ requestId, enabled }),
       );

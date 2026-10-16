@@ -47,11 +47,6 @@ function identity(): ArtifactIdentityRecord {
       expectedIntegrity: null,
     },
     nativeResources: { from: "none", entries: {}, localAssets: [] },
-    managedSlotContract: {
-      present: true,
-      contractVersions: [1],
-      capabilities: ["managed-slots/v1"],
-    },
     checks: [],
   };
 }

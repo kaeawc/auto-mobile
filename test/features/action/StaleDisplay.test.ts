@@ -19,7 +19,7 @@ import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClie
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import { prepareTargetDisplayAction } from "../../../src/features/action/TargetDisplayAction";
 import { ActionableError } from "../../../src/models/ActionableError";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import type { BaseActionResult } from "../../../src/models/BaseActionResult";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { SnapshotReferenceStore } from "../../../src/features/observe/SnapshotReferenceStore";

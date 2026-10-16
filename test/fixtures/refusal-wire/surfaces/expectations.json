@@ -1,6 +1,65 @@
 {
-  "description": "Refusals that cross the wire outside an MCP tool result, which the runners' refusal classifier never reads: socket-frame (the control socket failure frame, from mcpRequestFailureDetails), delete-device (deleteDevice's failure result, fields under failure), managed-slots-result (the ManagedSlotsResult of the MCP initialize outcome and the automobile:managed-slots resource, failure on the slot), overload-frame (the control socket failure with typed fields under overloadFailure) and webrtc-stream-response (the aux-socket viewer refusal with errorCode beside error). Each file is <surface>.<name>.json, regenerated with UPDATE_CAPTURED_FIXTURES=1 bun test test/daemon/refusalWireContract.test.ts test/daemon/webrtcStreamSocketServer.viewerSubscription.test.ts. expected uses the vocabulary of ../expectations.json; fields pins the code, retryable, acquireNewSession (nextAction is acquire_new_session), a positive retryAfterMs, and the evidence (details, or capacity for a slot failure). A field absent from a row is absent on the wire. Additional surfaces pin production refusal results (recording-start-result, proxy-tool-result, provision-envelope), device-loss-outcome and liveness-handover bodies, managed-slots-response, and the code-bearing serializer fragments device-session-error-fields and request-failure-fields. Synchronous fixtures are regenerated with bun scripts/generate-refusal-wire-fixtures.ts; asynchronous captures are checked and updated by their declared owning tests. retryable is omitted from fields when the wire carries no retry intent.",
+  "description": "Typed refusals outside MCP tool results. Each <surface>.<name>.json file pins the wire fields and evidence declared below. Regenerate synchronous captures with bun scripts/generate-refusal-wire-fixtures.ts; asynchronous captures are owned by their serializer tests. Missing fields carry no retry intent.",
   "fixtures": {
+    "device-loss-outcome.device_lost": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_lost",
+        "acquireNewSession": false
+      }
+    },
+    "device-session-error-fields.DEVICE_SESSION_SUPERSEDED_BY_RESTORE": {
+      "expected": "fail",
+      "fields": {
+        "code": "DEVICE_SESSION_SUPERSEDED_BY_RESTORE",
+        "acquireNewSession": false
+      }
+    },
+    "recording-start-result.no_active_device_session": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "no_active_device_session",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "proxy-tool-result.device_control_transport_failure": {
+      "expected": "retry",
+      "fields": {
+        "code": "device_control_transport_failure",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "request-failure-fields.daemon_tool_unavailable": {
+      "expected": "fail",
+      "fields": {
+        "code": "daemon_tool_unavailable",
+        "acquireNewSession": false
+      }
+    },
+    "liveness-handover.daemon_stalled": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_stalled",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "overload-frame.daemon_overloaded": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_overloaded",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 250,
+        "details": {
+          "queueWaitMs": 950,
+          "remainingTimeoutMs": 50,
+          "reason": "insufficient_forward_budget"
+        }
+      }
+    },
     "press-button-result.unsupported_button": {
       "expected": "fail",
       "fields": {
@@ -15,7 +74,9 @@
         "code": "prototype_hidden",
         "retryable": false,
         "acquireNewSession": false,
-        "details": { "prototypeHiddenReason": "app_layer_window_hidden" }
+        "details": {
+          "prototypeHiddenReason": "app_layer_window_hidden"
+        }
       }
     },
     "socket-frame.prototype_suspended": {
@@ -24,7 +85,155 @@
         "code": "prototype_suspended",
         "retryable": false,
         "acquireNewSession": false,
-        "details": { "prototypeSuspended": true }
+        "details": {
+          "prototypeSuspended": true
+        }
+      }
+    },
+    "socket-frame.device_unhealthy": {
+      "expected": "wait",
+      "fields": {
+        "code": "device_unhealthy",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 12863,
+        "details": {
+          "deviceId": "emulator-5554",
+          "reason": "network-condition",
+          "recovering": true,
+          "devices": [
+            {
+              "deviceId": "emulator-5554",
+              "reason": "network-condition",
+              "recovering": true,
+              "retryAfterMs": 12863
+            }
+          ]
+        }
+      }
+    },
+    "socket-frame.device_unhealthy.permanent": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_unhealthy",
+        "retryable": false,
+        "acquireNewSession": false,
+        "details": {
+          "deviceId": "emulator-5554",
+          "reason": "network-condition",
+          "recovering": false,
+          "devices": [
+            {
+              "deviceId": "emulator-5554",
+              "reason": "network-condition",
+              "recovering": false
+            }
+          ]
+        }
+      }
+    },
+    "socket-frame.discovery_incomplete.android": {
+      "expected": "wait",
+      "fields": {
+        "code": "discovery_incomplete",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.timeout.shutdown": {
+      "expected": "retry",
+      "fields": {
+        "code": "timeout",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.timeout.iosHomeLaunch": {
+      "expected": "retry",
+      "fields": {
+        "code": "timeout",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.timeout.boot": {
+      "expected": "retry",
+      "fields": {
+        "code": "timeout",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.daemon_handoff_interrupted": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_handoff_interrupted",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.target_identity_unresolved": {
+      "expected": "retry",
+      "fields": {
+        "code": "target_identity_unresolved",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000,
+        "details": {
+          "candidateSerials": ["emulator-5554"],
+          "deviceId": "emulator-5554",
+          "avdName": "Pixel_8_API_35"
+        }
+      }
+    },
+    "socket-frame.daemon_session_suspect": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_session_suspect",
+        "retryable": true,
+        "acquireNewSession": false,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "remainingMs": 8000
+        }
+      }
+    },
+    "socket-frame.session_ownership_lost.admission_heartbeat_timeout": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "heartbeat-timeout"
+        }
+      }
+    },
+    "socket-frame.session_ownership_lost.admission_cli_idle_timeout": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "cli-idle-timeout",
+          "idle": true
+        }
+      }
+    },
+    "socket-frame.session_ownership_lost.admission_expired": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "expired",
+          "idle": true
+        }
       }
     },
     "socket-frame.device_owned_by_other_session": {
@@ -46,6 +255,44 @@
         "acquireNewSession": false
       }
     },
+    "socket-frame.session_recovery_pending": {
+      "expected": "retry",
+      "fields": {
+        "code": "session_recovery_pending",
+        "retryable": true,
+        "acquireNewSession": false,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "platform": "android",
+          "deviceId": "emulator-5554",
+          "stableDeviceId": "Pixel_8_API_35",
+          "recoveryWindowRemainingMs": 120000,
+          "code": "session_recovery_pending",
+          "retryable": true,
+          "recovery": {
+            "action": "acquire_replacement_session",
+            "tools": ["getAndroid", "getApple"]
+          }
+        }
+      }
+    },
+    "socket-frame.daemon_restart_deferred": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_restart_deferred",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000
+      }
+    },
+    "socket-frame.daemon_restart_pending": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_restart_pending",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
     "socket-frame.device_outside_bound_session": {
       "expected": "fail",
       "fields": {
@@ -56,6 +303,30 @@
           "boundSessionUuid": "11111111-1111-4111-8111-111111111111",
           "boundDeviceId": "emulator-5556",
           "deviceId": "emulator-5554"
+        }
+      }
+    },
+    "socket-frame.binding_ownership_unconfirmed": {
+      "expected": "retry",
+      "fields": {
+        "code": "binding_ownership_unconfirmed",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555"
+        }
+      }
+    },
+    "socket-frame.session_ownership_lost.binding_ownership_lost_at_gate": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "binding-ownership-lost"
         }
       }
     },
@@ -85,10 +356,10 @@
         "acquireNewSession": false
       }
     },
-    "socket-frame.device_outside_managed_slots": {
+    "socket-frame.device_outside_broker_grant": {
       "expected": "fail",
       "fields": {
-        "code": "device_outside_managed_slots",
+        "code": "device_outside_broker_grant",
         "retryable": false,
         "acquireNewSession": false,
         "details": {
@@ -99,10 +370,10 @@
         }
       }
     },
-    "socket-frame.device_outside_managed_slots.tool": {
+    "socket-frame.device_outside_broker_grant.tool": {
       "expected": "fail",
       "fields": {
-        "code": "device_outside_managed_slots",
+        "code": "device_outside_broker_grant",
         "retryable": false,
         "acquireNewSession": false,
         "details": {
@@ -112,34 +383,10 @@
         }
       }
     },
-    "socket-frame.managed_slot_ownership_unconfirmed": {
-      "expected": "retry",
-      "fields": {
-        "code": "managed_slot_ownership_unconfirmed",
-        "retryable": true,
-        "acquireNewSession": false,
-        "retryAfterMs": 1000,
-        "details": {
-          "sessionUuid": "11111111-2222-4333-8444-555555555555"
-        }
-      }
-    },
-    "socket-frame.session_ownership_lost.managed_slot_ownership_lost_at_gate": {
-      "expected": "acquire-new-session",
-      "fields": {
-        "code": "session_ownership_lost",
-        "retryable": false,
-        "acquireNewSession": true,
-        "details": {
-          "sessionUuid": "11111111-2222-4333-8444-555555555555",
-          "reason": "managed-slot-ownership-lost"
-        }
-      }
-    },
-    "socket-frame.device_assigned_to_managed_slot": {
+    "socket-frame.device_assigned_to_binding": {
       "expected": "fail",
       "fields": {
-        "code": "device_assigned_to_managed_slot",
+        "code": "device_assigned_to_binding",
         "retryable": false,
         "acquireNewSession": false,
         "details": {
@@ -147,7 +394,7 @@
           "platform": "android",
           "stableId": "amslot-0123abcd-0-g1",
           "scopeKey": "0123abcd",
-          "declaredSlot": 0
+          "declaredBinding": 0
         }
       }
     },
@@ -231,6 +478,18 @@
         }
       }
     },
+    "socket-frame.session_ownership_lost.released_binding_ownership_lost": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "binding-ownership-lost"
+        }
+      }
+    },
     "socket-frame.session_ownership_lost.released_explicit_release": {
       "expected": "acquire-new-session",
       "fields": {
@@ -264,241 +523,26 @@
         "retryAfterMs": 2000
       }
     },
-    "managed-slots-result.capacity_exhausted.capacity": {
-      "expected": "wait",
-      "fields": {
-        "code": "capacity_exhausted",
-        "retryable": true,
-        "acquireNewSession": false,
-        "capacity": {
-          "limit": 2,
-          "booted": 2,
-          "retryAfterMs": 5000
-        }
-      }
-    },
-    "managed-slots-result.capacity_exhausted.capacity_external": {
-      "expected": "wait",
-      "fields": {
-        "code": "capacity_exhausted",
-        "retryable": true,
-        "acquireNewSession": false,
-        "capacity": {
-          "limit": 2,
-          "booted": 2,
-          "retryAfterMs": 5000,
-          "externalDevices": ["emulator-5560"]
-        }
-      }
-    },
-    "socket-frame.daemon_session_suspect": {
-      "expected": "retry",
-      "fields": {
-        "code": "daemon_session_suspect",
-        "retryable": true,
-        "acquireNewSession": false,
-        "details": {
-          "sessionUuid": "11111111-2222-4333-8444-555555555555",
-          "remainingMs": 8000
-        }
-      }
-    },
-    "socket-frame.session_ownership_lost.admission_heartbeat_timeout": {
+    "proxy-tool-result.session_ownership_lost.bound_loss": {
       "expected": "acquire-new-session",
       "fields": {
         "code": "session_ownership_lost",
-        "retryable": false,
-        "acquireNewSession": true,
-        "details": {
-          "sessionUuid": "11111111-2222-4333-8444-555555555555",
-          "reason": "heartbeat-timeout"
-        }
-      }
-    },
-    "socket-frame.session_ownership_lost.admission_cli_idle_timeout": {
-      "expected": "acquire-new-session",
-      "fields": {
-        "code": "session_ownership_lost",
-        "retryable": false,
-        "acquireNewSession": true,
-        "details": {
-          "sessionUuid": "11111111-2222-4333-8444-555555555555",
-          "reason": "cli-idle-timeout",
-          "idle": true
-        }
-      }
-    },
-    "socket-frame.session_recovery_pending": {
-      "expected": "retry",
-      "fields": {
-        "code": "session_recovery_pending",
-        "retryable": true,
-        "acquireNewSession": false,
-        "details": {
-          "sessionUuid": "11111111-2222-4333-8444-555555555555",
-          "platform": "android",
-          "deviceId": "emulator-5554",
-          "stableDeviceId": "Pixel_8_API_35",
-          "recoveryWindowRemainingMs": 120000,
-          "code": "session_recovery_pending",
-          "retryable": true,
-          "recovery": {
-            "action": "acquire_replacement_session",
-            "tools": ["getAndroid", "getApple"]
-          }
-        }
-      }
-    },
-    "socket-frame.daemon_restart_deferred": {
-      "expected": "retry",
-      "fields": {
-        "code": "daemon_restart_deferred",
-        "retryable": true,
-        "acquireNewSession": false,
-        "retryAfterMs": 1000
-      }
-    },
-    "socket-frame.daemon_restart_pending": {
-      "expected": "retry",
-      "fields": {
-        "code": "daemon_restart_pending",
-        "retryable": true,
-        "acquireNewSession": false
-      }
-    },
-    "socket-frame.session_ownership_lost.admission_expired": {
-      "expected": "acquire-new-session",
-      "fields": {
-        "code": "session_ownership_lost",
-        "retryable": false,
-        "acquireNewSession": true,
-        "details": {
-          "sessionUuid": "11111111-2222-4333-8444-555555555555",
-          "reason": "expired",
-          "idle": true
-        }
-      }
-    },
-    "overload-frame.daemon_overloaded": {
-      "expected": "retry",
-      "fields": {
-        "code": "daemon_overloaded",
-        "retryable": true,
-        "acquireNewSession": false,
-        "retryAfterMs": 250,
-        "details": {
-          "queueWaitMs": 950,
-          "remainingTimeoutMs": 50,
-          "reason": "insufficient_forward_budget"
-        }
-      }
-    },
-    "socket-frame.target_identity_unresolved": {
-      "expected": "retry",
-      "fields": {
-        "code": "target_identity_unresolved",
-        "retryable": true,
-        "acquireNewSession": false,
-        "retryAfterMs": 1000,
-        "details": {
-          "candidateSerials": ["emulator-5554"],
-          "deviceId": "emulator-5554",
-          "avdName": "Pixel_8_API_35"
-        }
-      }
-    },
-    "webrtc-stream-response.viewer_read_only": {
-      "expected": "fail",
-      "fields": {
-        "code": "viewer_read_only",
-        "acquireNewSession": false
-      }
-    },
-    "socket-frame.discovery_incomplete.android": {
-      "expected": "wait",
-      "fields": {
-        "code": "discovery_incomplete",
-        "retryable": true,
-        "acquireNewSession": false
-      }
-    },
-    "socket-frame.timeout.shutdown": {
-      "expected": "retry",
-      "fields": {
-        "code": "timeout",
-        "retryable": true,
-        "acquireNewSession": false
-      }
-    },
-    "socket-frame.timeout.boot": {
-      "expected": "retry",
-      "fields": {
-        "code": "timeout",
-        "retryable": true,
-        "acquireNewSession": false
-      }
-    },
-    "socket-frame.daemon_handoff_interrupted": {
-      "expected": "retry",
-      "fields": {
-        "code": "daemon_handoff_interrupted",
-        "retryable": true,
-        "acquireNewSession": false
-      }
-    },
-    "socket-frame.timeout.iosHomeLaunch": {
-      "expected": "retry",
-      "fields": {
-        "code": "timeout",
-        "retryable": true,
-        "acquireNewSession": false
-      }
-    },
-    "aux-socket-response.device_owned_by_other_session": {
-      "expected": "wait",
-      "fields": {
-        "code": "device_owned_by_other_session",
-        "retryable": false,
-        "acquireNewSession": false,
-        "details": {
-          "deviceId": "emu-held"
-        }
-      }
-    },
-    "device-loss-outcome.device_lost": {
-      "expected": "fail",
-      "fields": {
-        "code": "device_lost",
-        "acquireNewSession": false
-      }
-    },
-    "recording-start-result.no_active_device_session": {
-      "expected": "acquire-new-session",
-      "fields": {
-        "code": "no_active_device_session",
         "retryable": false,
         "acquireNewSession": true
       }
     },
-    "proxy-tool-result.device_control_transport_failure": {
-      "expected": "retry",
+    "proxy-tool-result.session_ownership_lost.expired": {
+      "expected": "acquire-new-session",
       "fields": {
-        "code": "device_control_transport_failure",
-        "retryable": true,
-        "acquireNewSession": false
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
       }
     },
-    "request-failure-fields.daemon_tool_unavailable": {
-      "expected": "fail",
-      "fields": {
-        "code": "daemon_tool_unavailable",
-        "acquireNewSession": false
-      }
-    },
-    "liveness-handover.daemon_stalled": {
+    "proxy-tool-result.daemon_shutting_down": {
       "expected": "retry",
       "fields": {
-        "code": "daemon_stalled",
+        "code": "daemon_shutting_down",
         "retryable": true,
         "acquireNewSession": false
       }
@@ -527,152 +571,22 @@
         "acquireNewSession": false
       }
     },
-    "proxy-tool-result.session_ownership_lost.expired": {
-      "expected": "acquire-new-session",
-      "fields": {
-        "code": "session_ownership_lost",
-        "retryable": false,
-        "acquireNewSession": true
-      }
-    },
-    "proxy-tool-result.daemon_shutting_down": {
-      "expected": "retry",
-      "fields": {
-        "code": "daemon_shutting_down",
-        "retryable": true,
-        "acquireNewSession": false
-      }
-    },
-    "proxy-tool-result.session_ownership_lost.bound_loss": {
-      "expected": "acquire-new-session",
-      "fields": {
-        "code": "session_ownership_lost",
-        "retryable": false,
-        "acquireNewSession": true
-      }
-    },
-    "managed-slots-response.managed_slot_config_invalid": {
-      "expected": "fail",
-      "fields": {
-        "code": "managed_slot_config_invalid",
-        "acquireNewSession": false
-      }
-    },
-    "device-session-error-fields.DEVICE_SESSION_SUPERSEDED_BY_RESTORE": {
-      "expected": "fail",
-      "fields": {
-        "code": "DEVICE_SESSION_SUPERSEDED_BY_RESTORE",
-        "acquireNewSession": false
-      }
-    },
-    "socket-frame.session_ownership_lost.released_managed_slot_ownership_lost": {
-      "expected": "acquire-new-session",
-      "fields": {
-        "code": "session_ownership_lost",
-        "retryable": false,
-        "acquireNewSession": true,
-        "details": {
-          "sessionUuid": "11111111-2222-4333-8444-555555555555",
-          "reason": "managed-slot-ownership-lost"
-        }
-      }
-    },
-    "socket-frame.device_unhealthy": {
+    "aux-socket-response.device_owned_by_other_session": {
       "expected": "wait",
       "fields": {
-        "code": "device_unhealthy",
-        "retryable": true,
-        "acquireNewSession": false,
-        "retryAfterMs": 12863,
-        "details": {
-          "deviceId": "emulator-5554",
-          "reason": "network-condition",
-          "recovering": true,
-          "devices": [
-            {
-              "deviceId": "emulator-5554",
-              "reason": "network-condition",
-              "recovering": true,
-              "retryAfterMs": 12863
-            }
-          ]
-        }
-      }
-    },
-    "socket-frame.device_unhealthy.permanent": {
-      "expected": "fail",
-      "fields": {
-        "code": "device_unhealthy",
+        "code": "device_owned_by_other_session",
         "retryable": false,
         "acquireNewSession": false,
         "details": {
-          "deviceId": "emulator-5554",
-          "reason": "network-condition",
-          "recovering": false,
-          "devices": [
-            {
-              "deviceId": "emulator-5554",
-              "reason": "network-condition",
-              "recovering": false
-            }
-          ]
+          "deviceId": "emu-held"
         }
       }
     },
-    "managed-slots-result.managed_slot_budget_exhausted.budget": {
-      "expected": "retry",
+    "webrtc-stream-response.viewer_read_only": {
+      "expected": "fail",
       "fields": {
-        "code": "managed_slot_budget_exhausted",
-        "retryable": true,
-        "acquireNewSession": false,
-        "budget": {
-          "limit": 2,
-          "usage": {
-            "total": 3,
-            "active": 1,
-            "assignedIdle": 0,
-            "cached": 0,
-            "preparing": 1,
-            "deleting": 1,
-            "orphaned": 0
-          },
-          "retained": [
-            {
-              "platform": "android",
-              "stableDeviceId": "amslot-kept",
-              "reason": "deletion_pending",
-              "attempts": 2,
-              "failedDeletes": 1,
-              "lastError": "delete failed"
-            },
-            {
-              "platform": "android",
-              "stableDeviceId": "amslot-stuck",
-              "reason": "deletion_stuck",
-              "attempts": 5,
-              "failedDeletes": 3,
-              "lastError": "native delete keeps failing",
-              "uncounted": true
-            }
-          ],
-          "charged": [
-            { "platform": "android", "stableDeviceId": "active-device", "kind": "assigned_active" },
-            { "platform": "android", "stableDeviceId": "amslot-kept", "kind": "deletion_stuck" },
-            {
-              "platform": "android",
-              "stableDeviceId": "amslot-stuck",
-              "kind": "deletion_stuck",
-              "uncounted": true
-            }
-          ],
-          "evictionFailures": [
-            {
-              "platform": "android",
-              "stableDeviceId": "amslot-kept",
-              "message": "delete failed"
-            }
-          ]
-        }
+        "code": "viewer_read_only",
+        "acquireNewSession": false
       }
     }
   }

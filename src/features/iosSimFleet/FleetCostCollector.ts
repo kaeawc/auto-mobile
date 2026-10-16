@@ -24,6 +24,9 @@ export const SLOT_OCCUPYING_STATES: ReadonlySet<string> = new Set([
   "Shutting Down",
 ]);
 
+/** Shared simulator-capacity states, independent of device bindings. */
+export { SLOT_OCCUPYING_STATES as OCCUPYING_SIMULATOR_STATES };
+
 /** UDIDs of simulators holding a capacity slot, optionally leaving out the boot's own target. */
 export function occupyingUdids(report: FleetCostReport, excludeUdid?: string): string[] {
   return report.simulators

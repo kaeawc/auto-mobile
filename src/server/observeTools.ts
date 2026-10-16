@@ -506,6 +506,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       defaultEnabled: true,
       // Watching is allowed on any device, whichever session holds it (#10730).
       deviceReadOnly: true,
+      loudArtifactWrites: true,
       transportRecovery: "replay",
       outputSchema: observeToolResultSchema,
       appUiResourceUri: OBSERVE_APP_RESOURCE_URI,

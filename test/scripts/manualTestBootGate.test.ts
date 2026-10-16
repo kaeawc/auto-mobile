@@ -47,13 +47,13 @@ function gate(overrides: Partial<BootGateCommand> = {}): BootGateCommand {
 function document(f: { logs: string[] }) {
   return JSON.parse(f.logs.at(-1)!);
 }
-test("grants immediately, records epoch and role, warns slot ends at exit", async () => {
+test("grants immediately, records epoch and role, warns permit ends at exit", async () => {
   const f = gateFixture();
   expect(await bootGate(gate(), f.deps)).toBe(0);
   expect(document(f)).toMatchObject({
     role: "A1",
     outcome: "granted",
-    slot: 0,
+    permit: 0,
     waitedMs: 0,
     loadAverage1m: 0,
     maxLoad: 16,
@@ -61,14 +61,15 @@ test("grants immediately, records epoch and role, warns slot ends at exit", asyn
   });
   expect(JSON.parse(f.files.get(grantPath)!)).toEqual({ at: 0, role: "A1" });
   expect(f.locks.size).toBe(0);
-  expect(f.releases).toEqual([join(root, "slot-0.lock")]);
+  expect(f.releases).toEqual([join(root, "permit-0.lock")]);
   expect(f.timer.getSleepHistory()).toEqual([]);
+  expect(document(f)).not.toHaveProperty("slot");
 });
-test("second role polls a held single slot and grants after first command releases", async () => {
+test("second role polls a held single permit and grants after first command releases", async () => {
   const f = gateFixture();
   const command = f.deps.runCommand;
   f.deps.runCommand = async (...args) => {
-    expect(f.locks.has(join(root, "slot-0.lock"))).toBe(true);
+    expect(f.locks.has(join(root, "permit-0.lock"))).toBe(true);
     await f.timer.sleep(20);
     return command(...args);
   };
@@ -88,7 +89,7 @@ test("load threshold is strict and polls until load falls", async () => {
   expect(document(f)).toMatchObject({ waitedMs: 20, loadAverage1m: 2, maxLoad: 3 });
   expect(f.timer.getSleepHistory()).toEqual([10, 10]);
 });
-test("waits minimum interval while holding slot", async () => {
+test("waits minimum interval while holding permit", async () => {
   const f = gateFixture();
   f.files.set(grantPath, JSON.stringify({ at: 0, role: "previous" }));
   expect(await bootGate(gate({ minIntervalMs: 30 }), f.deps)).toBe(0);
@@ -104,16 +105,16 @@ test.each(["garbage", '{"at":"bad","role":"A"}', '{"at":0}'])(
     expect(f.timer.getSleepHistory()).toEqual([]);
   },
 );
-test("two-slot gate takes second slot when first is held", async () => {
+test("two-permit gate takes second permit when first is held", async () => {
   const f = gateFixture();
-  f.locks.add(join(root, "slot-0.lock"));
+  f.locks.add(join(root, "permit-0.lock"));
   expect(await bootGate(gate({ maxConcurrent: 2 }), f.deps)).toBe(0);
-  expect(document(f).slot).toBe(1);
-  expect(f.releases).toEqual([join(root, "slot-1.lock")]);
-  expect(f.locks.has(join(root, "slot-0.lock"))).toBe(true);
+  expect(document(f).permit).toBe(1);
+  expect(f.releases).toEqual([join(root, "permit-1.lock")]);
+  expect(f.locks.has(join(root, "permit-0.lock"))).toBe(true);
 });
 test.each([0, 7])(
-  "command holds slot and returns exit %i with own environment",
+  "command holds permit and returns exit %i with own environment",
   async (exitCode) => {
     const f = gateFixture();
     f.deps.env = { KEEP: "own", AUTOMOBILE_DB_PATH: "/own/path", OMIT: undefined };
@@ -130,7 +131,7 @@ test.each([0, 7])(
     expect(f.locks.size).toBe(0);
   },
 );
-test("command rejection releases slot and CLI reports I/O exit 2", async () => {
+test("command rejection releases permit and CLI reports I/O exit 2", async () => {
   const f = gateFixture();
   await runPrivateDaemonCommand({ op: "init", options }, f.deps);
   f.deps.runCommand = async () => {
@@ -141,12 +142,12 @@ test("command rejection releases slot and CLI reports I/O exit 2", async () => {
   expect(f.locks.size).toBe(0);
   expect(f.logs.at(-1)).toContain("command rejected");
 });
-test.each(["slot", "load", "interval"] as const)(
-  "%s timeout releases only own slot and never runs command",
+test.each(["permit", "load", "interval"] as const)(
+  "%s timeout releases only own permit and never runs command",
   async (waitingFor) => {
     const f = gateFixture();
-    if (waitingFor === "slot") {
-      f.locks.add(join(root, "slot-0.lock"));
+    if (waitingFor === "permit") {
+      f.locks.add(join(root, "permit-0.lock"));
     }
     if (waitingFor === "load") {
       const stats = f.deps.hostStats();
@@ -166,7 +167,7 @@ test.each(["slot", "load", "interval"] as const)(
     });
     expect(f.timer.getSleepHistory()).toEqual([10, 10, 10]);
     expect(f.launches).toEqual([]);
-    expect(f.releases).toHaveLength(waitingFor === "slot" ? 0 : 1);
+    expect(f.releases).toHaveLength(waitingFor === "permit" ? 0 : 1);
   },
 );
 test("boot gate needs initialized batch; wrapped tokens bypass daemon flags", async () => {

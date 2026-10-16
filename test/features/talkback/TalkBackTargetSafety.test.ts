@@ -4,7 +4,7 @@ import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapS
 import { FocusNavigationExecutor } from "../../../src/features/talkback/FocusNavigationExecutor";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { ActionableError } from "../../../src/models/ActionableError";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { HierarchyTalkBackDriver } from "./HierarchyTalkBackDriver";

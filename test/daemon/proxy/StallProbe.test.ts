@@ -25,7 +25,6 @@ function record(overrides: Partial<StallHandoverRecord> = {}): StallHandoverReco
 function harness() {
   const timer = new FakeTimer();
   const stallHandovers = new Map<string, StallHandoverRecord>();
-  const managedExecutionSessions = new Set<string>();
   const calls: string[] = [];
   const state = {
     closing: false,
@@ -68,8 +67,8 @@ function harness() {
     startProbeInterval: () => calls.push("start"),
     stopProbeInterval: () => calls.push("stop"),
   };
-  const probe = new StallProbe({ timer, stallHandovers, managedExecutionSessions, port });
-  return { probe, timer, stallHandovers, managedExecutionSessions, calls, state, restores, lost };
+  const probe = new StallProbe({ timer, stallHandovers, port });
+  return { probe, timer, stallHandovers, calls, state, restores, lost };
 }
 
 describe("StallProbe", () => {
@@ -219,30 +218,6 @@ describe("StallProbe", () => {
       h.state.notFound = isNotFound;
       expect(h.probe.awaitManagedReclaimNotFound("a", r, notFound("p1", reason))).toBe(false);
       expect(h.calls).toEqual([]);
-    });
-
-    test("a release reason only keeps the wait going when it is a recoverable handoff", () => {
-      const h = harness();
-      h.state.notFound = true;
-      h.managedExecutionSessions.add("a");
-      expect(
-        h.probe.awaitManagedReclaimNotFound("a", record(), notFound("p1", "daemon-restart")),
-      ).toBe(true);
-      expect(
-        h.probe.awaitManagedReclaimNotFound("a", record(), notFound("p1", "device-restart:x")),
-      ).toBe(false);
-      expect(
-        h.probe.awaitManagedReclaimNotFound("a", record(), notFound("p1", "not-a-reason")),
-      ).toBe(false);
-    });
-
-    test("a managed execution session waits even before reclaim starts", () => {
-      const h = harness();
-      h.state.notFound = true;
-      h.managedExecutionSessions.add("a");
-      const r = record();
-      expect(h.probe.awaitManagedReclaimNotFound("a", r, notFound("p1"))).toBe(true);
-      expect(r.managedReclaimSince).toBe(h.timer.now());
     });
   });
 });

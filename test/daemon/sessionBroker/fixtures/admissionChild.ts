@@ -1,5 +1,5 @@
 /** Real process contender. Parent gates admission after every child has opened the same file. */
-import { openSqliteSlotRegistry } from "../../../../src/daemon/managedSlots/sqliteSlotRegistry";
+import { openSqliteBindingRegistry } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 
 const [dbPath, scopeKey, requestId] = process.argv.slice(2);
 const begin = Promise.withResolvers<void>();
@@ -9,7 +9,7 @@ process.on("message", (message) => {
   }
 });
 
-const registry = await openSqliteSlotRegistry({ dbPath });
+const registry = await openSqliteBindingRegistry({ dbPath });
 try {
   process.send?.({ phase: "ready" });
   await begin.promise;

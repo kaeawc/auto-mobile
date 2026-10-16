@@ -911,7 +911,7 @@ function summarizePoolStatus(
             ?.observationComplete !== true),
     );
   for (const pooled of unknown) {
-    // Whether an unlisted, unverified entry is free is unknown (it may be gone, or slot-held:
+    // Whether an unlisted, unverified entry is free is unknown (it may be gone, or broker-held:
     // #11455), so it is never tallied idle. Assigned/error are the pool's own facts and stay.
     const status = devicePool.poolBucket(pooled.id) ?? "idle";
     if (!listed.has(pooled.id) && status !== "idle") {
@@ -1066,7 +1066,7 @@ async function discoverBootedDevicesForPlatform(
     // resolver -- still trusting the stale label
     // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
     await devicePool?.reconcileDiscoveryObservation(discovery.devices, "booted-devices-resource");
-    // Refresh the managed-slot snapshot so held devices are not reported as free, as listDevices does.
+    // Refresh the broker binding snapshot so held devices are not reported as free, as listDevices does.
     await devicePool?.refreshInventoryOwnership();
     options.onDiscovery(
       discovery.devices.map((device) =>

@@ -4,10 +4,7 @@ import {
   DAEMON_LAUNCH_VALUE_FLAGS,
   parseDaemonArgs,
 } from "../../src/daemon/cli/daemonArgs";
-import {
-  daemonCommandArgumentError,
-  parseResetSlotScopeCommandArgs,
-} from "../../src/daemon/cli/runDaemonCommand";
+import { daemonCommandArgumentError } from "../../src/daemon/cli/runDaemonCommand";
 
 const warnings: string[] = [];
 const log = { warn: (message: string) => warnings.push(message) };
@@ -25,17 +22,6 @@ describe("a --flag=value option the validator accepts must reach the parser", ()
   ])("%s %j", (command, args, pick, expected) => {
     expect(daemonCommandArgumentError(command, args)).toBeUndefined();
     expect(pick(parseDaemonArgs(args, {}, log))).toEqual(expected);
-  });
-
-  const base = ["--runner-namespace", "ns", "--incarnation", "inc"];
-
-  test.each([
-    [["--managed-host-scope=hostA"], { managedHostScope: "hostA" }],
-    [["--wait-ms=0"], { waitMs: 0 }],
-    [["--force=true"], { force: true }],
-  ])("reset-slot-scope %j", (extra, expected) => {
-    expect(daemonCommandArgumentError("reset-slot-scope", [...base, ...extra])).toBeUndefined();
-    expect(parseResetSlotScopeCommandArgs([...base, ...extra])).toMatchObject(expected);
   });
 });
 
@@ -64,7 +50,6 @@ const VALUE_SAMPLES: Record<string, string> = {
   "--accessibility-min-severity": "warning",
   "--a11y-min-severity": "warning",
   "--event-all-markers": "@,#",
-  "--managed-slot-config": "/tmp/slots.json",
   "--daemon-socket-path": "/tmp/x.sock",
 };
 
@@ -147,74 +132,5 @@ describe("value shape", () => {
       parseDaemonArgs(["--plan-execution-lock-scope=bogus"], {}, log).planExecutionLockScope,
     ).toBeUndefined();
     expect(warnings.join("\n")).toContain("--plan-execution-lock-scope");
-  });
-});
-
-describe("reset-slot-scope flags", () => {
-  const base = ["--runner-namespace", "ns", "--incarnation", "inc"];
-  const pairs: Array<[string, string]> = [
-    ["--runner-namespace", "ns2"],
-    ["--incarnation", "boot-9"],
-    ["--managed-host-scope", "hostB"],
-    ["--wait-ms", "1500"],
-  ];
-
-  test.each(pairs)("%s %s parses the same in both forms", (flag, value) => {
-    const options: Record<string, string> = {
-      "--runner-namespace": "ns",
-      "--incarnation": "inc",
-      [flag]: value,
-    };
-    const separate = Object.entries(options).flat();
-    const inline = Object.entries(options).map(([name, operand]) => `${name}=${operand}`);
-    expect(parseResetSlotScopeCommandArgs(inline)).toEqual(
-      parseResetSlotScopeCommandArgs(separate),
-    );
-    expect(daemonCommandArgumentError("reset-slot-scope", inline)).toBeUndefined();
-  });
-
-  test("--force: bare, =true and =false", () => {
-    expect(parseResetSlotScopeCommandArgs([...base, "--force"]).force).toBe(true);
-    expect(parseResetSlotScopeCommandArgs([...base, "--force=true"]).force).toBe(true);
-    expect(parseResetSlotScopeCommandArgs([...base, "--force=false"]).force).toBeUndefined();
-    expect(
-      parseResetSlotScopeCommandArgs([...base, "--force=true", "--force=false"]).force,
-    ).toBeUndefined();
-    expect(daemonCommandArgumentError("reset-slot-scope", [...base, "--force=maybe"])).toContain(
-      "expected true or false",
-    );
-  });
-
-  test("a scope containing = or starting with -- survives in the inline form", () => {
-    expect(
-      parseResetSlotScopeCommandArgs([...base, "--managed-host-scope=a=b"]).managedHostScope,
-    ).toBe("a=b");
-    expect(
-      parseResetSlotScopeCommandArgs([...base, "--managed-host-scope=--odd"]).managedHostScope,
-    ).toBe("--odd");
-  });
-
-  test("an empty inline value is a usage error, never an absent option", () => {
-    expect(() => parseResetSlotScopeCommandArgs([...base, "--wait-ms="])).toThrow(
-      "--wait-ms requires a non-empty value",
-    );
-  });
-
-  test("a negative wait is rejected in both forms", () => {
-    expect(() => parseResetSlotScopeCommandArgs([...base, "--wait-ms=-5"])).toThrow(
-      "--wait-ms must be an integer",
-    );
-    expect(() => parseResetSlotScopeCommandArgs([...base, "--wait-ms", "-5"])).toThrow(
-      "--wait-ms must be an integer",
-    );
-  });
-
-  test("a repeated flag with different values is refused, with equal values accepted", () => {
-    expect(() =>
-      parseResetSlotScopeCommandArgs([...base, "--wait-ms=1", "--wait-ms", "2"]),
-    ).toThrow("more than once");
-    expect(parseResetSlotScopeCommandArgs([...base, "--wait-ms=1", "--wait-ms", "1"]).waitMs).toBe(
-      1,
-    );
   });
 });

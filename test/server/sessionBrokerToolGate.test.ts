@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { runAsManagedSlotReconciler } from "../../src/daemon/managedSlots/managedSlotExclusion";
-import { computeSlotScopeKey } from "../../src/daemon/managedSlots/slotRegistry";
+import { runAsBindingReconciler } from "../../src/daemon/sessionBroker/provisioning/exclusion";
+import { computeBindingScopeKey } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { SESSION_BROKER_SCOPE } from "../../src/daemon/sessionBroker/hostConfig";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
@@ -84,12 +84,12 @@ describe("session broker tool admission", () => {
   });
 
   test("only the provider's private async scope may provision; caller arguments cannot grant it", async () => {
-    await runAsManagedSlotReconciler(
-      { scopeKey: computeSlotScopeKey(SESSION_BROKER_SCOPE), slotIndex: 1 },
+    await runAsBindingReconciler(
+      { scopeKey: computeBindingScopeKey(SESSION_BROKER_SCOPE), bindingIndex: 1 },
       () => assertSessionBrokerToolCall("provisionDevice", false, {}, state),
     );
     await expect(
-      runAsManagedSlotReconciler({ scopeKey: "legacy-scope", slotIndex: 1 }, () =>
+      runAsBindingReconciler({ scopeKey: "legacy-scope", bindingIndex: 1 }, () =>
         assertSessionBrokerToolCall("provisionDevice", false, {}, state),
       ),
     ).rejects.toThrow("owns device lifecycle");
@@ -97,7 +97,7 @@ describe("session broker tool admission", () => {
       assertSessionBrokerToolCall(
         "provisionDevice",
         false,
-        { scopeKey: computeSlotScopeKey(SESSION_BROKER_SCOPE) },
+        { scopeKey: computeBindingScopeKey(SESSION_BROKER_SCOPE) },
         state,
       ),
     ).rejects.toThrow("owns device lifecycle");

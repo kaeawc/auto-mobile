@@ -25,7 +25,7 @@ import {
   staleDisplayError,
   StaleDisplayError,
   type StaleDisplayDetails,
-} from "../../models/StaleDisplayError";
+} from "../observe/StaleDisplayError";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import type {

@@ -6,7 +6,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { Element, ViewHierarchyResult } from "../../../src/models";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { logger } from "../../../src/utils/logger";

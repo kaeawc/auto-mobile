@@ -15,9 +15,9 @@ import {
 } from "../utils/displayCutout";
 
 /**
- * Spec-to-device matchers shared by exact provisioning (#11100) and managed-slot reconciliation
+ * Spec-to-device matchers shared by exact provisioning (#11100) and broker binding reconciliation
  * (#11175). One definition of "this existing device satisfies this spec", so the generic adopt
- * path and the slot reuse/replace decision can never disagree.
+ * path and the binding reuse/replace decision can never disagree.
  *
  * Omitted optional fields are unconstrained: an absent `configuration` key or `displayCutout`
  * accepts any value the device has (owner decision Q4, #11172).

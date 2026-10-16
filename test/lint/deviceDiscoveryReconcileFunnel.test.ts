@@ -121,6 +121,12 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason: "Interface declaration only.",
     },
 
+    "src/daemon/sessionBroker/registry/platformLegacySlotDeviceStopper.ts": {
+      calls: 1,
+      reason:
+        "Pre-migration retirement runs before pool discovery/session rehydration. It verifies native identity and shutdown directly and never reads pooled identity.",
+    },
+
     // --- Routed through the funnel ------------------------------------------
     "src/daemon/daemon.ts": {
       calls: 1,

@@ -68,7 +68,7 @@ describe("--json keeps the idle flag of an idle-window release", () => {
   } as never);
 
   test("the wire client error carries idle: true (premise)", () => {
-    expect((idleReleased as unknown as { idle?: boolean }).idle).toBe(true);
+    expect((idleReleased as { idle?: boolean }).idle).toBe(true);
   });
 
   test("session-info --json reports idle: true", async () => {

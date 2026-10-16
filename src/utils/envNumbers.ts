@@ -1,3 +1,4 @@
+import type { EnvVarSpec } from "../config/env";
 import { logger } from "./logger";
 
 /** The slice of the logger the env readers need. */
@@ -86,5 +87,24 @@ function warnOnce(
   log.warn(
     `Ignoring ${name}=${JSON.stringify(raw)}: expected a plain integer${floor}; ` +
       `using the default${options.fallback === undefined ? "" : ` ${options.fallback}`}`,
+  );
+}
+
+/**
+ * Registry-driven {@link readEnvPositiveInteger}: the spec supplies the names and `min`;
+ * the default comes from `options.fallback` or `spec.fallback`. Parsing is strict-positive, so
+ * `spec.min` should be at least 1; callers should always supply a fallback.
+ */
+export function readEnvInt(
+  spec: EnvVarSpec,
+  env: NodeJS.ProcessEnv = process.env,
+  options: { fallback?: number; log?: EnvNumberLogger } = {},
+): number {
+  return readEnvPositiveInteger(
+    spec.name,
+    spec.legacyName,
+    { fallback: options.fallback ?? spec.fallback ?? 0, min: spec.min },
+    env,
+    options.log ?? logger,
   );
 }

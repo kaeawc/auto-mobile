@@ -16,7 +16,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { AUTOMOBILE_APPLE_TEAM_ID } from "../../src/constants/appleTeam";
+import { AUTOMOBILE_APPLE_TEAM_ID } from "./appleTeam";
 
 export interface NetworkFilterIdentity {
   teamId: string;

@@ -1,5 +1,5 @@
 import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import {

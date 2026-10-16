@@ -438,11 +438,6 @@ const FAILURE_RETRYABILITY: Readonly<Record<BindingReconcileFailureCode, boolean
   cancelled: true,
 };
 
-/** Every code the reconciler can fail with; the `Record` key keeps it complete. */
-export const BINDING_RECONCILE_FAILURE_CODES = Object.keys(
-  FAILURE_RETRYABILITY,
-) as BindingReconcileFailureCode[];
-
 const FAILURE_NEXT_ACTION: Readonly<Record<BindingReconcileFailureCode, string>> = {
   spec_unsupported: "Fix the requested spec; nothing was changed.",
   runtime_incompatible: "Request a model/runtime pair the host supports; nothing was changed.",

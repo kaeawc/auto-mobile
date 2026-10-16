@@ -3,7 +3,7 @@ import { DragAndDrop, getIosDragTimeoutMs } from "../../../src/features/action/D
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { raceWithDeadline } from "../../../src/utils/raceWithDeadline";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { ActionableError } from "../../../src/models/ActionableError";

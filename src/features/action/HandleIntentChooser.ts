@@ -6,6 +6,7 @@ import { BootedDevice, IntentChooserResult, ObserveResult } from "../../models";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 export class HandleIntentChooser extends BaseVisualChange {
   private readonly deepLinkManagerFactory: (
@@ -73,7 +74,7 @@ export class HandleIntentChooser extends BaseVisualChange {
       {
         signal,
         changeExpected: false,
-        timeoutMs: 500,
+        timeoutMs: SETTLE_BUDGET_MS.brief,
         perf,
       },
     );

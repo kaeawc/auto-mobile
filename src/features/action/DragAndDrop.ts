@@ -56,6 +56,7 @@ import {
   type ScreenshotCapturer,
 } from "../navigation/SelectionStateTracker";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { OBSERVED_INTERACTION_PROFILES } from "./observedInteractionProfiles";
 
 // Minimums also match the documented defaults (press 600, drag 300, hold 100 ms)
 // shared by default-display, explicit-display CtrlProxy/adb (drag only), and iOS paths.
@@ -272,7 +273,7 @@ export class DragAndDrop extends BaseVisualChange {
           return await this.observedInteraction(
             () => this.executeOnAndroidDisplay(options, target, signal),
             {
-              changeExpected: false,
+              ...OBSERVED_INTERACTION_PROFILES.rawCoordinateGesture,
               display: target.observation.display.key,
               previousObservation: target.observation,
               signal,
@@ -408,9 +409,8 @@ export class DragAndDrop extends BaseVisualChange {
           };
         },
         {
-          changeExpected: false,
+          ...OBSERVED_INTERACTION_PROFILES.selectorResolvedGesture,
           display: options.display,
-          resolvesTargetFromRead: true,
           progress,
           perf,
           signal,

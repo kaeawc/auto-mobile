@@ -59,6 +59,7 @@ import {
   type ScreenshotCapturer,
 } from "../navigation/SelectionStateTracker";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 export const PINCH_DURATION_MIN_MS = 1;
 export const PINCH_DURATION_MAX_MS = 10000;
@@ -459,7 +460,7 @@ export class PinchOn extends BaseVisualChange {
         usesObservationForResolution: Boolean(options.container || options.autoTarget),
         changeExpected: false,
         display: options.display,
-        timeoutMs: 8000,
+        timeoutMs: SETTLE_BUDGET_MS.longGesture,
         progress,
         perf,
         signal,

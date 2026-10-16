@@ -66,6 +66,7 @@ import {
   parseLauncherActivitiesFromPackageDump,
   resolveComponentActivity,
 } from "./launcherActivityParsing";
+import { OBSERVED_INTERACTION_PROFILES } from "./observedInteractionProfiles";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -696,15 +697,13 @@ export class LaunchApp extends BaseVisualChange {
           };
         },
         {
-          changeExpected: false,
+          ...OBSERVED_INTERACTION_PROFILES.appLaunch,
           perf,
-          skipPreviousObserve: true,
           foregroundAppMayChange: true,
           // Use minTimestamp=0 so finalObserve returns cached hierarchy without a sync fetch.
           // iOS hierarchy timestamps (Swift Date) and TS timestamps (Date.now) are from
           // different clocks, causing minTimestamp checks to fail and force ~130ms round-trips.
           overrideMinTimestamp: 0,
-          deferPostActionScreenshot: true,
           signal,
         },
       );
@@ -1182,13 +1181,11 @@ export class LaunchApp extends BaseVisualChange {
           };
         },
         {
-          changeExpected: false,
+          ...OBSERVED_INTERACTION_PROFILES.appLaunch,
           perf,
           packageName,
           signal,
-          skipPreviousObserve: true,
           skipUiStability: skipUiStability ?? false,
-          deferPostActionScreenshot: true,
         },
       );
       // The foreground read and this observation are two separate device reads,
@@ -1257,14 +1254,12 @@ export class LaunchApp extends BaseVisualChange {
         return launchOutcome;
       },
       {
-        changeExpected: false,
+        ...OBSERVED_INTERACTION_PROFILES.appLaunch,
         perf,
-        skipPreviousObserve: true,
         skipUiStability: skipUiStability ?? false,
         packageName,
         foregroundAppMayChange: true,
         observationTimestampProvider: () => observationTimestampMs,
-        deferPostActionScreenshot: true,
         signal,
       },
     ).catch((error: unknown) => {

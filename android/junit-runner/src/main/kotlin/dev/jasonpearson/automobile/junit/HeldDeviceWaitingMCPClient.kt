@@ -8,10 +8,10 @@ package dev.jasonpearson.automobile.junit
  * runner can take the device in the gap. The first call then comes back `device_owned_by_other_
  * session` (or `device_cleanup_in_progress` while the daemon is still releasing it). This is the
  * same held-device wait [AutoMobilePlanExecutor] applies to `executePlan`: exponential sleeps
- * within [AutoMobilePlanExecutor.deviceOwnedWaitBudgetMs], cancellable (an interrupt ends the
- * wait), never an exception that skips the bound. Once a control or lifecycle call succeeds the
- * device is ours and calls pass straight through; a successful read proves nothing about ownership
- * (reads are never refused and never hold a device), so it confirms nothing.
+ * within [PlanExecutorTimings.deviceOwnedWaitBudgetMs] (its default), cancellable (an interrupt
+ * ends the wait), never an exception that skips the bound. Once a control or lifecycle call
+ * succeeds the device is ours and calls pass straight through; a successful read proves nothing
+ * about ownership (reads are never refused and never hold a device), so it confirms nothing.
  *
  * Whether a refusal is waited on is decided by [AutoMobilePlanExecutor.classifyRefusalText], the
  * same typed-field rule the `executePlan` loop uses, and its `retryAfterMs` lengthens the step
@@ -28,7 +28,7 @@ internal class HeldDeviceWaitingMCPClient(
     { waits, waited, retryAfterMs, code ->
       AutoMobilePlanExecutor.deviceOwnedBackoffDelayMs(waits, waited, retryAfterMs, code)
     },
-  private val sleeper: (Long) -> Unit = { AutoMobilePlanExecutor.deviceOwnedSleeper(it) },
+  private val sleeper: (Long) -> Unit = { Thread.sleep(it) },
 ) : AutoMobileAgent.MCPClient {
   @Volatile private var deviceConfirmed = false
   private var waits = 0

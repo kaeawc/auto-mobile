@@ -15,7 +15,16 @@ import org.junit.runners.model.FrameworkMethod
  * (heartbeat, memory monitoring). Tests use the [AutoMobilePlan] DSL inside standard @Test methods
  * to execute YAML plans with AI-assisted recovery.
  */
-class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(klass) {
+class AutoMobileRunner
+private constructor(private val klass: Class<*>, private val timings: TestTimingSource) :
+  BlockJUnit4ClassRunner(klass) {
+
+  constructor(klass: Class<*>) : this(klass, TestTimingCache)
+
+  internal constructor(
+    klass: Class<*>,
+    store: TestTimingStore,
+  ) : this(klass, store as TestTimingSource)
 
   private val orderedChildren: List<FrameworkMethod> by lazy {
     val children = super.getChildren()
@@ -31,7 +40,7 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
         1
       }
     val selection = resolveTimingOrderingSelection(requestedStrategy, parallelForks)
-    val timingAvailable = TestTimingCache.hasTimings()
+    val timingAvailable = timings.hasTimings()
     logTimingOrdering(selection, timingAvailable)
 
     val timingOrderingActive = selection.resolved != TimingOrderingStrategy.NONE && timingAvailable
@@ -179,7 +188,7 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
 
   /** History is keyed by fully qualified class name; pre-#10091 rows used the simple name. */
   private fun timingFor(method: FrameworkMethod): TestTimingEntry? =
-    TestTimingCache.getTiming(klass.name, method.name, legacySimpleName = klass.simpleName)
+    timings.getTiming(klass.name, method.name, legacySimpleName = klass.simpleName)
 
   private fun orderChildrenByTiming(
     children: List<FrameworkMethod>,

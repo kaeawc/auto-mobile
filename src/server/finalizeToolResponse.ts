@@ -317,6 +317,8 @@ function resolveDiffTruncationReasons(
  */
 export interface FinalizeToolResponseContext {
   name: string;
+  /** The tool is read-only, so its artifact write failure stays loud (`loudArtifactWrites` trait). */
+  loudArtifactWrites?: boolean;
   /** Injectable JSON clone boundary for deterministic clone-count tests. */
   cloneObservation?: ObserveResultCloner;
   /**
@@ -887,12 +889,6 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
 }
 
 /**
- * Tools whose artifact write failure stays loud. They are read-only: nothing has
- * happened on the device, so an error result invites at most a harmless re-read.
- */
-const READ_ONLY_ARTIFACT_TOOLS: ReadonlySet<string> = new Set(["observe", "getNetworkGraph"]);
-
-/**
  * Run an artifact write whose failure must not erase a completed action (#10080).
  *
  * For a tool that can mutate the device the action has already run, so throwing
@@ -906,7 +902,7 @@ function artifactWriteOrInline<T>(
   write: () => T,
   inline: T,
 ): T {
-  if (READ_ONLY_ARTIFACT_TOOLS.has(ctx.name)) {
+  if (ctx.loudArtifactWrites === true) {
     return write();
   }
   try {

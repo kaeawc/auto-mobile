@@ -140,6 +140,7 @@ const socketIdentityStatusSchema = z.object({
   processGenerationTokenUtc: z.string().optional(),
   activeProvisioning: z.boolean().optional(),
   structuredSessionNotFound: z.boolean().optional(),
+  structuredToolErrorCodes: z.boolean().optional(),
   acceptanceCapabilityFingerprint: z.string().nullable().optional(),
 });
 

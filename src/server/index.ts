@@ -51,7 +51,7 @@ import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
 import { SessionReleasedDuringCreationError } from "../daemon/deviceAcquisitionRefusals";
 import { isDeviceInventoryTool } from "../daemon/daemonMcpProxy";
-import { ToolUnavailableError } from "./toolUnavailableError";
+import { ToolUnavailableError, UnknownToolError } from "./toolUnavailableError";
 import { stripInternalToolParams } from "./internalToolParams";
 export { stripInternalToolParams } from "./internalToolParams";
 import { daemonShuttingDownMcpOutcome } from "../daemon/daemonShutdownOutcome";
@@ -975,7 +975,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         );
       }
       const hint = getRemovedToolHint(name);
-      throw new ActionableError(`Unknown tool: ${name}${hint ? `. ${hint}` : ""}`);
+      throw new UnknownToolError(name, hint);
     }
 
     if (name === SET_TOOL_ENABLED_TOOL_NAME) {

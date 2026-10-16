@@ -8,8 +8,9 @@ const ROOT = join(import.meta.dir, "../..");
 const CAP = 1000;
 
 function rows(): Array<{ count: number; file: string }> {
+  // Windows checkouts are CRLF; split on either line ending so file names carry no "\r".
   return readFileSync(join(ROOT, "scripts/file-size-baseline.txt"), "utf8")
-    .split("\n")
+    .split(/\r?\n/)
     .filter((line) => line !== "" && !line.startsWith("#"))
     .map((line) => {
       const [count, file] = line.split("\t");
@@ -34,7 +35,7 @@ describe("file-size baseline", () => {
   test("recorded counts are at least the current non-blank line counts", () => {
     for (const { count, file } of rows()) {
       const actual = readFileSync(join(ROOT, file), "utf8")
-        .split("\n")
+        .split(/\r?\n/)
         .filter((line) => /\S/.test(line)).length;
       expect({ file, ok: actual <= count }).toEqual({ file, ok: true });
     }

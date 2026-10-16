@@ -1416,6 +1416,78 @@ posixTest("broker close joins a terminal refusal without inventing a device rele
   expect(f.files.has("/batch/evidence/ledger.jsonl")).toBe(false);
 });
 
+posixTest("broker close on a failed attempt with no daemon receipt returns at once", async () => {
+  const f = brokerFixture("failed");
+  expect(await f.up(["--expect", "failed:capacity_exhausted"])).toBe(0);
+  const broker = new FakeBrokerDaemonClient();
+  f.deps.brokerDaemonClient = broker;
+  broker.statusResults = [undefined];
+  f.files.set(join(brokerDir, "closed.json"), '{"reason":"closed"}');
+  // No timer advance: waiting out the 240 s cleanup budget would never resolve under FakeTimer.
+  expect(await runProxySessionCommand(parsed(["close", "--client", "a-phone"]), f.deps)).toBe(0);
+  expect(JSON.parse(f.files.get(join(brokerDir, "closed.json"))!)).toMatchObject({
+    release: { outcome: "failed", sessionUuid: null, receiptMissing: true },
+  });
+  expect(broker.calls.map((c) => c.method)).toEqual(["status"]);
+});
+posixTest("broker close on a failed attempt tolerates an unreachable daemon", async () => {
+  const f = brokerFixture("failed");
+  expect(await f.up(["--expect", "failed:capacity_exhausted"])).toBe(0);
+  const broker = new FakeBrokerDaemonClient();
+  broker.status = async () => {
+    throw new Error("connect ENOENT");
+  };
+  f.deps.brokerDaemonClient = broker;
+  f.files.set(join(brokerDir, "closed.json"), '{"reason":"closed"}');
+  expect(await runProxySessionCommand(parsed(["close", "--client", "a-phone"]), f.deps)).toBe(0);
+  expect(f.logs.join(" ")).toContain("Broker status unavailable");
+});
+async function lingeringDriver(identityCompare: "same" | "unknown") {
+  const f = brokerFixture("failed");
+  await f.up(["--expect", "failed:capacity_exhausted"]);
+  const broker = new FakeBrokerDaemonClient();
+  broker.statusResults = [f.session];
+  f.deps.brokerDaemonClient = broker;
+  f.files.set(join(brokerDir, "closed.json"), '{"reason":"closed"}');
+  f.files.set(join(brokerDir, "driver.pid"), "4321\n");
+  f.files.set(join(brokerDir, "driver-identity"), "driver-generation");
+  const signals: Array<[number, string]> = [];
+  let alive = true;
+  f.deps.isPidAlive = (pid) => pid === 4321 && alive;
+  f.deps.compareOwnerIdentity = () => identityCompare;
+  f.deps.signalPid = (pid, signal) => {
+    signals.push([pid, signal]);
+    alive = false;
+  };
+  return { f, signals, exit: () => (alive = false) };
+}
+posixTest("broker close joins a resumed driver that is still exiting", async () => {
+  const { f, signals, exit } = await lingeringDriver("same");
+  const closing = runProxySessionCommand(parsed(["close", "--client", "a-phone"]), f.deps);
+  await drainUntilQuiescent(f.timer);
+  exit();
+  f.timer.advanceTime(50);
+  expect(await closing).toBe(0);
+  expect(signals).toEqual([]);
+});
+posixTest("broker close stops a lingering driver only when its identity matches", async () => {
+  const { f, signals } = await lingeringDriver("same");
+  const closing = runProxySessionCommand(parsed(["close", "--client", "a-phone"]), f.deps);
+  await drainUntilQuiescent(f.timer);
+  f.timer.advanceTime(5000);
+  expect(await closing).toBe(0);
+  expect(signals).toEqual([[4321, "SIGTERM"]]);
+});
+posixTest("broker close never signals a driver whose identity is unconfirmed", async () => {
+  const { f, signals } = await lingeringDriver("unknown");
+  const closing = runProxySessionCommand(parsed(["close", "--client", "a-phone"]), f.deps);
+  await drainUntilQuiescent(f.timer);
+  f.timer.advanceTime(5000);
+  expect(await closing).toBe(2);
+  expect(signals).toEqual([]);
+  expect(f.logs.join(" ")).toContain("identity is unconfirmed");
+});
+
 posixTest.each(["failed", "pending"] as const)(
   "release and info on a %s client report nothing to release instead of a schema crash",
   async (outcome) => {

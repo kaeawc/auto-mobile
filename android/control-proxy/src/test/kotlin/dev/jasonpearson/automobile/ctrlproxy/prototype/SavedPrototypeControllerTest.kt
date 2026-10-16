@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
+import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode
 import dev.jasonpearson.automobile.protocol.SavedPrototypeInfo
@@ -71,6 +73,8 @@ class SavedPrototypeControllerTest {
   private fun TestScope.controller(
     backing: SavedPrototypeStore = store,
     shortcutPinner: PrototypeShortcutPinner = pinner,
+    clearStorage: suspend (String) -> Int = { 0 },
+    sessions: PrototypeStorageSessionRegistry = PrototypeStorageSessionRegistry(),
   ) =
     SavedPrototypeController(
       backing,
@@ -79,6 +83,8 @@ class SavedPrototypeControllerTest {
       sink,
       StandardTestDispatcher(testScheduler),
       shortcutPinner,
+      clearStorage,
+      sessions,
     )
 
   private fun onlyReply(id: String): PrototypeResult {
@@ -215,6 +221,85 @@ class SavedPrototypeControllerTest {
       listOf(listOf(shortcutIdFor("panel")) to "This prototype was deleted"),
       shortcuts.disabled,
     )
+  }
+
+  @Test
+  fun `a failed storage cleanup keeps the entry so the retry cleans up`() = runTest {
+    val cleared = mutableListOf<String>()
+    var failing = true
+    val controller =
+      controller(
+        clearStorage = { id ->
+          if (failing) throw java.io.IOException("disk")
+          cleared += id
+          1
+        },
+      )
+    controller.save("save", spec, "Panel", null)
+    replies.clear()
+
+    controller.delete("first", "panel")
+    assertEquals(SavedPrototypeErrorCode.STORAGE_FAILURE, onlyReply("first").errorCode)
+    assertEquals(1, store.stored.size)
+    replies.clear()
+
+    failing = false
+    controller.delete("second", "panel")
+    assertTrue(onlyReply("second").success)
+    assertEquals(listOf("panel"), cleared)
+    assertTrue(store.stored.isEmpty())
+  }
+
+  @Test
+  fun `deleting an entry that is already gone still removes its orphaned storage`() = runTest {
+    val cleared = mutableListOf<String>()
+    val controller =
+      controller(
+        clearStorage = { id ->
+          cleared += id
+          1
+        },
+      )
+
+    controller.delete("orphan", "panel")
+
+    assertEquals(SavedPrototypeErrorCode.NOT_FOUND, onlyReply("orphan").errorCode)
+    assertEquals(listOf("panel"), cleared)
+  }
+
+  @Test
+  fun `delete silences the open screen's storage session`() = runTest {
+    val registry = PrototypeStorageSessionRegistry()
+    val disk = FakePrototypeStorageStore()
+    val timer = FakePrototypeTimer()
+    val session =
+      PrototypeStoragePersistence(
+          disk,
+          timer,
+          kotlin.coroutines.EmptyCoroutineContext,
+          registry = registry,
+        )
+        .open(storageSpec())
+        .session!!
+    session.record(storageSpec(dark = true))
+    val controller = controller(sessions = registry)
+    controller.save("save", spec, "Panel", null)
+    replies.clear()
+
+    controller.delete("delete", "prefs")
+    timer.advance(PROTOTYPE_STORAGE_DEBOUNCE_MILLIS)
+    session.record(storageSpec(dark = false))
+    session.flush()
+
+    assertEquals(emptyList<Any>(), disk.saves)
+    assertEquals(null, disk.stored("prefs"))
+  }
+
+  private fun storageSpec(dark: Boolean = false): PrototypeSpec {
+    val input =
+      """{"id":"prefs","window":{"placement":{"type":"fullscreen"}},"state":{"dark":$dark},""" +
+        """"storage":{"version":1,"keys":["state:dark"]},"root":{"type":"text","text":"x"}}"""
+    return (PrototypeSpecValidator.validate(input) as PrototypeSpecValidation.Success).spec
   }
 
   @Test

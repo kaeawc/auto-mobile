@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeStorageReport
 import dev.jasonpearson.automobile.protocol.PrototypeStorageRestorer
 import dev.jasonpearson.automobile.protocol.PrototypeStoredValues
 import java.io.IOException
+import java.lang.ref.WeakReference
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +29,33 @@ fun interface PrototypeStorageWarn {
 
 private val logWarn = PrototypeStorageWarn { message, error ->
   Log.w("PrototypeStorage", message, error)
+}
+
+/**
+ * The live sessions of screens that own their storage outside the service (a saved prototype's
+ * activity), by id, held weakly. Deleting a saved prototype silences every one of them first, so a
+ * pending debounce or a later flush cannot recreate what the delete removed.
+ */
+class PrototypeStorageSessionRegistry {
+  private val sessions = ArrayList<WeakReference<PrototypeStorageSession>>()
+
+  @Synchronized
+  fun register(session: PrototypeStorageSession) {
+    sessions.removeAll { it.get() == null }
+    sessions += WeakReference(session)
+  }
+
+  /** Stops every live session of [id] from writing again; returns how many were live. */
+  @Synchronized
+  fun invalidate(id: String): Int {
+    sessions.removeAll { it.get() == null }
+    return sessions.mapNotNull { it.get() }.filter { it.id == id }.onEach { it.invalidate() }.size
+  }
+
+  companion object {
+    /** The process-wide registry the service and the saved activity share. */
+    val Shared = PrototypeStorageSessionRegistry()
+  }
 }
 
 /**
@@ -63,6 +91,8 @@ class PrototypeStoragePersistence(
   private val io: CoroutineContext = Dispatchers.IO,
   private val debounceMillis: Long = PROTOTYPE_STORAGE_DEBOUNCE_MILLIS,
   private val warn: PrototypeStorageWarn = logWarn,
+  /** Where a session is listed so a delete of its id can silence it; null for no listing. */
+  private val registry: PrototypeStorageSessionRegistry? = null,
 ) {
   /**
    * [fits] says whether a restored spec is still acceptable to the device (it was validated before
@@ -127,6 +157,7 @@ class PrototypeStoragePersistence(
         stored = kept,
         baseline = PrototypeStorageRestorer.currentValues(restore.spec),
       )
+    registry?.register(session)
     return PrototypeStorageOpen(restore.spec, session, plan)
   }
 
@@ -187,6 +218,9 @@ internal constructor(
   /** Bumped by [clear]: a snapshot taken before it must never reach the disk afterwards. */
   private var generation = 0L
 
+  /** Set once the id was deleted: nothing this session holds may reach the disk again. */
+  private var invalidated = false
+
   /** Orders every disk operation of this session, so a clear cannot overtake an older save. */
   private val diskLock = Mutex()
 
@@ -223,6 +257,7 @@ internal constructor(
   }
 
   private fun markDirty() {
+    if (invalidated) return
     dirty = true
     if (pending == null)
       pending = scheduler.schedule(debounceMillis) { write(cancelPending = false) }
@@ -238,7 +273,7 @@ internal constructor(
         // The scheduled task is the caller when it is not cancelled: it must not cancel itself.
         if (cancelPending) pending?.cancel()
         pending = null
-        if (!dirty) return
+        if (!dirty || invalidated) return
         dirty = false
         snapshotGeneration = generation
         PrototypeStoredValues(version, LinkedHashMap(values))
@@ -262,6 +297,20 @@ internal constructor(
 
   private fun markDirtyUnlessCleared(snapshotGeneration: Long) =
     synchronized(lock) { if (generation == snapshotGeneration) dirty = true }
+
+  /** The id was deleted: drop the pending write and every later one. Touches no disk. */
+  internal fun invalidate() {
+    synchronized(lock) {
+      invalidated = true
+      pending?.cancel()
+      pending = null
+      dirty = false
+      generation++
+      values.clear()
+      sizes.clear()
+      skipped.clear()
+    }
+  }
 
   /** Forgets every stored value of this id, writes nothing pending; returns the keys removed. */
   suspend fun clear(): Int {

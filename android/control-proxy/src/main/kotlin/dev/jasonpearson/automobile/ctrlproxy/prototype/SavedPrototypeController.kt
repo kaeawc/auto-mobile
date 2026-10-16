@@ -27,6 +27,9 @@ class SavedPrototypeController(
   private val pinner: PrototypeShortcutPinner = UnsupportedShortcutPinner,
   /** Clears the values the deleted prototype's `storage` block kept; returns the keys removed. */
   private val clearStorage: suspend (String) -> Int = { 0 },
+  /** Silences open saved-prototype screens' storage sessions of a deleted id. */
+  private val storageSessions: PrototypeStorageSessionRegistry =
+    PrototypeStorageSessionRegistry.Shared,
 ) {
   private val json = Json {
     prettyPrint = false
@@ -104,11 +107,24 @@ class SavedPrototypeController(
 
   suspend fun delete(requestId: String?, id: String) =
     reply(requestId) {
+      // Storage goes first and does not depend on the entry: a failed cleanup leaves the entry in
+      // place, and a retry of an entry that is already gone still removes the orphaned values.
+      storageSessions.invalidate(id)
+      try {
+        clearStorage(id)
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Exception) {
+        Log.w(TAG, "Saved prototype storage cleanup failed", error)
+        return@reply refusal(
+          SavedPrototypeErrorCode.STORAGE_FAILURE,
+          "Could not remove the stored values of $id",
+        )
+      }
       if (!store.delete(id)) {
         refusal(SavedPrototypeErrorCode.NOT_FOUND, "Saved prototype not found: $id")
       } else {
         disableShortcut(id)
-        clearStorage(id)
         PrototypeResult(timestamp = 0, success = true)
       }
     }

@@ -1071,13 +1071,16 @@ class WebSocketServer(
   }
 
   /** Internal method to send a message to a single client connection. */
-  internal fun sendToClient(connection: ConnectedClient, message: String) {
+  internal fun sendToClient(connection: ConnectedClient, message: String): Boolean {
     val frame = outgoingFrame(message)
+    var enqueued = false
     val overflowed =
       synchronized(connections) {
-        connections.contains(connection) && !enqueueForClient(connection, frame)
+        connections.contains(connection) &&
+          !enqueueForClient(connection, frame).also { enqueued = it }
       }
     if (overflowed) disconnectClient(connection, "Outgoing buffer full")
+    return enqueued
   }
 
   /**
@@ -1087,8 +1090,8 @@ class WebSocketServer(
    */
   internal fun sendToHost(message: String): ConnectedClient? {
     val host = synchronized(connections) { connections.lastOrNull() } ?: return null
-    sendToClient(host, message)
-    return host
+    // A full queue disconnects the host on the spot, so it must not be reported as the owner.
+    return host.takeIf { sendToClient(it, message) }
   }
 
   /** Send a typed terminal failure only to the client whose inbound message failed. */

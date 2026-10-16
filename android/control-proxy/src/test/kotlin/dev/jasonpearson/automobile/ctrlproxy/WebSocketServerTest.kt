@@ -635,6 +635,23 @@ class WebSocketServerTest {
     }
 
   @Test
+  fun `a host whose queue is full is disconnected and not reported as the request's owner`() =
+    runTest(testScope.testScheduler) {
+      val stalled = StalledTransport()
+      server.registerClient(1, stalled)
+      server.broadcast("""{"type":"must_deliver","index":-1}""")
+      runCurrent() // The stalled sender is blocked on its first frame.
+      repeat(WebSocketServer.OUTGOING_HARD_CEILING) {
+        server.broadcast("""{"type":"must_deliver","index":$it}""")
+      }
+
+      assertNull(server.sendToHost("""{"type":"prototype_request","requestId":"r-1"}"""))
+      runCurrent()
+
+      assertEquals(0, server.getConnectionCount())
+    }
+
+  @Test
   fun `with no connected host a prototype request is not sent`() {
     assertNull(server.sendToHost("""{"type":"prototype_request","requestId":"r-1"}"""))
   }

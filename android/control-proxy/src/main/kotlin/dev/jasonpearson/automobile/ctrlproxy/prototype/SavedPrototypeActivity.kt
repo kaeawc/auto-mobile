@@ -130,6 +130,7 @@ class SavedPrototypeActivity : ComponentActivity() {
           SavedPrototypeActivityDependencies.storageStore(this),
           CoroutinePrototypeScheduler(scope),
           SavedPrototypeActivityDependencies.ioDispatcher,
+          registry = PrototypeStorageSessionRegistry.Shared,
         )
         .prepare(loaded.spec) { restored ->
           PrototypeSpecValidator.validate(Json.encodeToString(restored)) is

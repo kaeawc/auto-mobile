@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { record, BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
+import { prototypeStorageSchema } from "./prototypeStorageSchema";
 export const {
   MAX_PROTOTYPE_SPEC_BYTES,
   MAX_PROTOTYPE_TEXT_SPANS,
@@ -1181,6 +1182,7 @@ const specSchema = z
       )
       .optional(),
     motion: z.enum(["none", "standard"]).optional(),
+    storage: prototypeStorageSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),
   })
   .strict();

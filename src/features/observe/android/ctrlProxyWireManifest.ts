@@ -29,6 +29,11 @@ export const CTRL_PROXY_REQUEST_FIELDS: {
     packageName: "required",
     fileName: "required",
   },
+  clear_prototype_storage: {
+    type: "required",
+    requestId: "required",
+    id: "required",
+  },
   delete_saved_prototype: {
     type: "required",
     requestId: "required",
@@ -916,6 +921,7 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
     prototypes: "optional",
     droppedEvents: "optional",
     appearance: "optional",
+    cleared: "optional",
   },
   remove_preference_result: {
     packageName: "optional",

@@ -385,6 +385,9 @@ export class AndroidInboundResponseHandlers {
         ...(typeof message.droppedEvents === "number"
           ? { droppedEvents: message.droppedEvents }
           : {}),
+        ...(Number.isSafeInteger(message.cleared) && message.cleared! >= 0
+          ? { cleared: message.cleared }
+          : {}),
       })),
 
     highlight_response: (message) =>

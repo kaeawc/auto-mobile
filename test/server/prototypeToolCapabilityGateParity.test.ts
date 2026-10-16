@@ -100,6 +100,11 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     ...label,
     onTap: [{ type: "setData", path: "/data/count", value: { value: 1 } }],
   }),
+  // A root-level block: a patch cannot introduce it, so only the show half applies (empty ops).
+  prototype_storage_v1: {
+    minimalSpec: { ...base, storage: { version: 1, keys: ["state:liked"] } },
+    ops: [],
+  },
 };
 function fixture(root: { type: string; id: string } & Record<string, unknown>) {
   return {
@@ -197,6 +202,9 @@ test.each(cases)(
     expect(proxy.getPrototypeHistory()).toEqual([]);
     expect(agent.requests).toEqual([]);
     expect((await show(device, base)).success).toBe(true);
+    if (ops.length === 0) {
+      return;
+    }
     const before = store.shownSpecs.read(device.deviceId, base.id);
     const sent = agent.requests.length;
     const refusedPatch = await patch(device, ops);
@@ -229,7 +237,9 @@ test.each(cases)(
       ).success,
     ).toBe(true);
     expect((await show(device, base)).success).toBe(true);
-    expect((await patch(device, ops)).success).toBe(true);
+    if (ops.length > 0) {
+      expect((await patch(device, ops)).success).toBe(true);
+    }
   },
 );
 test.each(["android", "ios"] as const)(

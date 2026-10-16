@@ -326,6 +326,51 @@ refused on a device without it, before anything is shown or sent.
 
 `;
 
+export const GUIDE_STORAGE = `### Storage
+
+A show resets \`state\` and \`data\` to the spec's values, so what the user typed or a data action
+changed is lost on the next show, and saved prototypes keep the spec but no user data. A root-level
+\`storage\` block keeps chosen values on the device, for example
+\`"storage": {"version": 1, "keys": ["state:darkMode", "data:/cart"]}\`.
+
+\`version\` is an integer from 1; \`keys\` holds 1 to \`MAX_PROTOTYPE_STORAGE_KEYS\` unique entries.
+\`state:<key>\` names a key declared in \`state\`. \`data:<pointer>\` is an RFC 6901 pointer to a member of
+\`data\` (the pointer is relative to \`data\`: \`data:/cart\` is \`/data/cart\`, the path a data action
+uses; the whole document is refused). Listing a pointer and its ancestor or descendant is rejected,
+and the values the spec itself holds for the listed keys must fit \`MAX_PROTOTYPE_STORAGE_BYTES\`
+(counted as the UTF-8 bytes of each storage key plus its compact JSON value).
+
+The device saves each listed key, keyed by the spec \`id\`, after every write: a user edit, a device
+data action or a request response. A write that would take the stored total over
+\`MAX_PROTOTYPE_STORAGE_BYTES\` still applies on screen but is not stored (\`skippedKeys\` in inspect).
+Stored values survive a dismiss, a process restart and a saved prototype's relaunch.
+
+Precedence on the next show of the same \`id\` (the adopted decision of #12522):
+
+- Stored values replace the spec's values for the listed keys. The spec's \`state\` is otherwise still
+  authoritative.
+- A different \`storage.version\` than the values were stored under discards all of them: the spec's
+  values stand. Bump \`version\` when you change what a key means.
+- A stored key the spec no longer lists is dropped, and a show without a \`storage\` block drops every
+  stored value of that id.
+- A stored value that no longer fits the spec is dropped and the spec's value stands: a \`state\` value
+  whose type (string, number, boolean) differs from the spec's, a state key the spec no longer
+  declares, a \`data\` value of another JSON kind than the spec's value at that pointer, or one that
+  cannot be written there (missing parent, a data limit).
+- Restoring happens before the first draw and emits no \`change\` event. After a show, read the real
+  values with inspect: the show result and the host's cached copy carry the spec's values.
+- A host \`patch\` against a stored key wins: it applies under the usual \`baseRevision\` conflict rules
+  and the device then stores the new value.
+
+\`inspect\` reports \`storage: {version, keys: [{key, bytes}], totalBytes, skippedKeys?}\` per prototype
+for the keys that currently hold a stored value, or omits it when the device does not report it.
+\`{action: "clearStorage", id}\` wipes the stored values of an id (the next show starts from the spec;
+the result has \`cleared\`, the number of keys removed). \`deleteSaved\` also clears that id's storage.
+\`storage\`, \`clearStorage\` and the report need \`prototype_storage_v1\`: a spec with \`storage\` is refused
+before anything is shown, and \`clearStorage\` before anything is sent, on a device without it.
+
+`;
+
 export const GUIDE_DATA = `## Data
 
 \`data\` is agent-owned, read-only content: nested objects, arrays, strings, finite numbers and

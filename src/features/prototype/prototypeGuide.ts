@@ -22,6 +22,7 @@ import {
   GUIDE_INTRO,
   GUIDE_PATCH,
   GUIDE_REPEAT,
+  GUIDE_STORAGE,
 } from "./prototypeGuideProse";
 import { MAX_PROTOTYPE_COMPONENT_DEPTH } from "./prototypeComponents";
 
@@ -250,6 +251,7 @@ export function renderPrototypeGuide(): string {
     GUIDE_REPEAT,
     GUIDE_DATA,
     GUIDE_DATA_ACTIONS,
+    GUIDE_STORAGE,
     GUIDE_EMIT_CONTEXT,
     GUIDE_CHECKS,
     GUIDE_PATCH,

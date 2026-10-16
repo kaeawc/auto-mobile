@@ -83,14 +83,12 @@ describe("RecentApps inner result", () => {
     recentApps.observeScreen = observe;
     recentApps.window = window;
     recentApps.awaitIdle = new FakeAwaitIdle();
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      adb,
-      () => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+      webSocketFactory: () => {
         throw new Error("Unexpected socket connection");
       },
       timer,
-    );
+    });
     globalActionSpy = spyOn(client, "requestGlobalAction").mockResolvedValue({
       success: false,
       error: "Global action failed",

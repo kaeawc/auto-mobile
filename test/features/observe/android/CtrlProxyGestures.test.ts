@@ -117,7 +117,9 @@ describe("Android gesture duration wire", () => {
         name: "Fake",
       } as const;
       const adb = new FakeAdbExecutor();
-      const client = AndroidCtrlProxyClient.createForTesting(device, adb, undefined, timer);
+      const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+        timer,
+      });
       client["_gestures"] = new CtrlProxyGestures(context);
       const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
       try {
@@ -155,8 +157,9 @@ describe("Android swipe request duration bounds", () => {
     const client = AndroidCtrlProxyClient.createForTesting(
       { deviceId: "maximum-swipe", platform: "android", name: "Fake" },
       new FakeAdbExecutor(),
-      undefined,
-      timer,
+      {
+        timer,
+      },
     );
     client["_gestures"] = new CtrlProxyGestures(context);
     const forwardDuration = new DefaultElementGeometry().getSwipeDurationFromSpeed("slow");
@@ -238,7 +241,9 @@ describe("Android swipe request duration bounds", () => {
       name: "Fake",
     } as const;
     const adb = new FakeAdbExecutor();
-    const client = AndroidCtrlProxyClient.createForTesting(device, adb, undefined, timer);
+    const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+      timer,
+    });
     client["_gestures"] = new CtrlProxyGestures(context);
     const getInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     try {
@@ -574,8 +579,9 @@ describe("Android client forwards gesture displayId", () => {
     const client = AndroidCtrlProxyClient.createForTesting(
       { deviceId: "client-swipe-cancel", platform: "android", name: "Fake" },
       new FakeAdbExecutor(),
-      undefined,
-      timer,
+      {
+        timer,
+      },
     );
     client["_gestures"] = new CtrlProxyGestures(context);
     const controller = new AbortController();
@@ -652,8 +658,9 @@ describe("Android client forwards gesture displayId", () => {
       const client = AndroidCtrlProxyClient.createForTesting(
         { deviceId: "client-forward", platform: "android", name: "Fake" },
         new FakeAdbExecutor(),
-        undefined,
-        timer,
+        {
+          timer,
+        },
       );
       client["_gestures"] = new CtrlProxyGestures(context);
       const pending = send(client);
@@ -702,8 +709,9 @@ describe("Android display gesture cancellation", () => {
         const client = AndroidCtrlProxyClient.createForTesting(
           { deviceId: `cancel-${name}-${phase}`, platform: "android", name: "Fake" },
           new FakeAdbExecutor(),
-          undefined,
-          timer,
+          {
+            timer,
+          },
         );
         client["_gestures"] = new CtrlProxyGestures(context);
         const pending = send(client, controller.signal);
@@ -784,8 +792,9 @@ describe("gesture pre-send display fence during reconnect", () => {
         const client = AndroidCtrlProxyClient.createForTesting(
           { deviceId: `pre-send-${name}-${phase}`, platform: "android", name: "Fake" },
           new FakeAdbExecutor(),
-          undefined,
-          timer,
+          {
+            timer,
+          },
         );
         client["_gestures"] = new CtrlProxyGestures(context);
         const controller = new AbortController();
@@ -841,8 +850,9 @@ it("tap cancellation inside the pre-send guard prevents dispatch and cleans regi
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "cancel-at-send", platform: "android", name: "Fake" },
     new FakeAdbExecutor(),
-    undefined,
-    timer,
+    {
+      timer,
+    },
   );
   client["_gestures"] = new CtrlProxyGestures(context);
   const controller = new AbortController();
@@ -967,8 +977,9 @@ it("atomic tap capability requires explicit advertisement even on legacy handsha
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "atomic-tap-capability", platform: "android", name: "Fake" },
     new FakeAdbExecutor(),
-    undefined,
-    new FakeTimer(),
+    {
+      timer: new FakeTimer(),
+    },
   );
   for (const commands of [null, new Set<string>(), new Set(["full_command_set_v1"])]) {
     client["supportedCommands"] = commands;
@@ -986,8 +997,9 @@ describe("Android client drag dispatch hook", () => {
     const client = AndroidCtrlProxyClient.createForTesting(
       { deviceId: "client-drag-dispatch", platform: "android", name: "Fake" },
       new FakeAdbExecutor(),
-      undefined,
-      timer,
+      {
+        timer,
+      },
     );
     client["_gestures"] = new CtrlProxyGestures(context);
     const controller = new AbortController();

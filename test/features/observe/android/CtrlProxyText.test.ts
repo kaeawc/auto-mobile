@@ -517,15 +517,13 @@ describe("Android CtrlProxyText", () => {
       name: "Test Device",
     };
     let socket: CapturingWebSocket | null = null;
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      fakeAdb,
-      (url: string) => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, fakeAdb, {
+      webSocketFactory: (url: string) => {
         socket = new CapturingWebSocket(url, "none", 0, timer);
         return socket;
       },
       timer,
-    );
+    });
 
     try {
       expect(await client.ensureConnected()).toBe(true);
@@ -694,15 +692,13 @@ describe("Android CtrlProxyText", () => {
       name: "Test Device",
     };
     let socket: CapturingWebSocket | null = null;
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      fakeAdb,
-      (url: string) => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, fakeAdb, {
+      webSocketFactory: (url: string) => {
         socket = new CapturingWebSocket(url, "none", 0, timer);
         return socket;
       },
       timer,
-    );
+    });
     try {
       expect(await client.ensureConnected()).toBe(true);
       if (!socket) {
@@ -746,15 +742,13 @@ describe("Android CtrlProxyText", () => {
       name: "Test Device",
     };
     let socket: CapturingWebSocket | null = null;
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      fakeAdb,
-      (url: string) => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, fakeAdb, {
+      webSocketFactory: (url: string) => {
         socket = new CapturingWebSocket(url, "none", 0, timer);
         return socket;
       },
       timer,
-    );
+    });
     try {
       expect(await client.ensureConnected()).toBe(true);
       if (!socket) {
@@ -853,15 +847,13 @@ test("client insert_text_result projection preserves optional fields and old APK
     name: "Test Device",
   };
   let socket: CapturingWebSocket | null = null;
-  const client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    (url: string) => {
+  const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: (url: string) => {
       socket = new CapturingWebSocket(url, "none", 0, timer);
       return socket;
     },
     timer,
-  );
+  });
   try {
     expect(await client.ensureConnected()).toBe(true);
     if (!socket) {
@@ -952,15 +944,13 @@ test("pre-dispatch state read round-trips and insert baseline is optional", asyn
     name: "Test Device",
   };
   let socket: CapturingWebSocket | null = null;
-  const client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    (url: string) => {
+  const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: (url: string) => {
       socket = new CapturingWebSocket(url, "none", 0, timer);
       return socket;
     },
     timer,
-  );
+  });
   try {
     expect(await client.ensureConnected()).toBe(true);
     if (!socket) {
@@ -1139,8 +1129,10 @@ test("Android client forwards appended transport controls for insert and IME", a
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "text-transport-controls", platform: "android", name: "Fake" },
     new FakeAdbExecutor(),
-    (url) => new CapturingWebSocket(url, "none", 0, timer),
-    timer,
+    {
+      webSocketFactory: (url) => new CapturingWebSocket(url, "none", 0, timer),
+      timer,
+    },
   );
   const text = (client as unknown as { text: CtrlProxyText }).text;
   const insert = spyOn(text, "requestInsertText").mockResolvedValue({
@@ -1238,15 +1230,13 @@ describe("IME commit trace wire response", () => {
       name: "Fake",
     };
     let socket: CapturingWebSocket | null = null;
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      fakeAdb,
-      (url) => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, fakeAdb, {
+      webSocketFactory: (url) => {
         socket = new CapturingWebSocket(url, "none", 0, timer);
         return socket;
       },
       timer,
-    );
+    });
     try {
       expect(await client.ensureConnected()).toBe(true);
       if (!socket) {

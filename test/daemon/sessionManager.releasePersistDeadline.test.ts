@@ -175,9 +175,9 @@ describe("a release whose DB write never settles is bounded by a deadline (#1083
       h.persistence.park = new Promise<void>(() => {});
       const pending = reap(h);
       await flush();
-      const snapshot = h.manager["terminalReleaseSnapshots"].get("old")!;
+      const snapshot = h.manager["sessionSlots"].getTerminalSnapshot("old")!;
       // Reason reconciliation copies snapshots even when the winning reason stays the same.
-      h.manager["terminalReleaseSnapshots"].set(
+      h.manager["sessionSlots"].setTerminalSnapshot(
         "old",
         h.manager["withReleaseReason"](snapshot, snapshot.releaseReason),
       );
@@ -564,7 +564,7 @@ describe("a superseded device-loss release leaves the live session's row active 
         () => !superseded,
       );
       await flush();
-      const snapshot = h.manager["terminalReleaseSnapshots"].get("old")!;
+      const snapshot = h.manager["sessionSlots"].getTerminalSnapshot("old")!;
       superseded = true;
       await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
       await expect(release).resolves.toEqual({ superseded: true });
@@ -636,7 +636,7 @@ describe("a superseded device-loss release leaves the live session's row active 
       await flush();
       await h.timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
       await pending.done;
-      const snapshot = h.manager["terminalReleaseSnapshots"].get("old")!;
+      const snapshot = h.manager["sessionSlots"].getTerminalSnapshot("old")!;
       const row = (await h.persistence.getSession("old"))!;
       const handedBackGeneration = row.stable_identity_generation! + 2;
       h.persistence.seed({

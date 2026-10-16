@@ -92,7 +92,6 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
   "src/daemon/cli/runDaemonCommand.ts": ["recordLocalDaemonHeartbeat"],
   "src/daemon/daemonMcpProxy.ts": [
     "DaemonMcpProxy.sendFirstBoundSessionHeartbeat",
-    "DaemonMcpProxy.sendBoundSessionHeartbeat",
     "DaemonMcpProxy.recordBoundSessionHeartbeatSuccess",
     "DaemonMcpProxy.heartbeatHeldSession",
   ],
@@ -104,6 +103,8 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
     "HeldSessionHeartbeatOutcomes.handleHeldSessionHeartbeatError",
     "HeldSessionHeartbeatOutcomes.noteLateHeartbeatAck",
   ],
+  // Reached through `this.latestBindingKeeper` from the HeartbeatKeeper port.
+  "src/daemon/proxy/LatestBindingKeeper.ts": ["LatestBindingKeeper.runLatestBindingHeartbeatTick"],
   // Likewise reached through `this.boundHeartbeat` from the proxy's named forwarders.
   "src/daemon/proxy/BoundSessionHeartbeat.ts": [
     "BoundSessionHeartbeat.sendBoundSessionHeartbeat",

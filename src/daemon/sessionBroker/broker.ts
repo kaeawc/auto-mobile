@@ -42,7 +42,18 @@ export interface SessionBrokerOptions {
   sessionDisposition?: (sessionUuid: string) => SessionLiveness | Promise<SessionLiveness>;
   /** Opt in only after the native reset baseline has passed contamination tests. */
   reuseCleanDevices?: boolean;
+  /** How long a terminal receipt keeps answering replay; defaults to {@link RECEIPT_RETENTION_MS}. */
+  receiptRetentionMs?: number;
 }
+
+/**
+ * Terminal receipts answer exact replay for 30 days after they become terminal. The protocol
+ * promises a durable receipt for an ambiguous reply but names no horizon; this is far beyond any
+ * preparation or release budget, so only a long-finished identity is ever forgotten.
+ */
+export const RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+/** Rows deleted per retention call, so one pass never holds the write lock for long. */
+export const RECEIPT_PRUNE_BATCH = 500;
 
 function unwrap<T>(result: RequirementResult<T>): T {
   if (!result.ok) {
@@ -296,7 +307,15 @@ export class SessionBroker {
       this.options.owner,
       prepared.sessionId,
     );
-    return this.resultUnlessAborted(request, signal);
+    // Activation committed: the session now belongs to the request identity. A caller abort from
+    // here on hands it back for a replay of that identity instead of destroying it; the session's
+    // own liveness policy releases it if the caller never returns. Abandonment is separate and
+    // durable, so an aborted caller re-reads the receipt rather than reporting a stale one.
+    return this.result(
+      signal.aborted
+        ? ((await this.options.store.getRequest(config.requestId)) ?? request)
+        : request,
+    );
   }
 
   async status(requestId: string): Promise<SessionBrokerResult | undefined> {
@@ -393,7 +412,7 @@ export class SessionBroker {
       preparation.controller.abort(new ActionableError("Session broker is stopping"));
     }
     await Promise.allSettled([...this.preparationOwners.keys()]);
-    const requests = await this.options.store.listRequests();
+    const requests = await this.options.store.listRecoverableRequests();
     await Promise.allSettled(
       requests
         .filter(
@@ -409,7 +428,7 @@ export class SessionBroker {
 
   /** Full bounded snapshot, not a repeatedly scanned prefix that can starve later cleanup. */
   async recover(): Promise<void> {
-    for (const request of await this.options.store.listRequests()) {
+    for (const request of await this.options.store.listRecoverableRequests()) {
       try {
         await this.recoverOneRequest(request);
       } catch (error) {
@@ -451,8 +470,18 @@ export class SessionBroker {
         await this.release(request.sessionId);
       }
       await this.redriveAbandonedSession(request);
+      return;
     }
+    // Only another process generation's receipt can need takeover; ours never does.
     await this.options.store.recoverRequest(request.requestId, this.options.owner);
+  }
+
+  /** Forgets terminal receipts past their replay window. Returns how many were pruned. */
+  pruneReceipts(): Promise<number> {
+    return this.options.store.pruneTerminalRequests(
+      this.options.receiptRetentionMs ?? RECEIPT_RETENTION_MS,
+      RECEIPT_PRUNE_BATCH,
+    );
   }
 
   private async redriveAbandonedSession(request: BrokerRequestRecord): Promise<void> {

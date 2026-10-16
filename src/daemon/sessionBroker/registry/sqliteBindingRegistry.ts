@@ -515,7 +515,7 @@ export class SqliteBindingRegistry implements BindingRegistry {
 
   /** Shares this connection, transaction lock and physical authority; never opens another DB. */
   sessionBrokerStore(scopeKey: string, ids?: IdGenerator): SqliteSessionBrokerStore {
-    return new SqliteSessionBrokerStore(this.db, scopeKey, this.isExecOwnerLive, ids);
+    return new SqliteSessionBrokerStore(this.db, scopeKey, this.isExecOwnerLive, ids, this.timer);
   }
 
   async ensureScope(identity: BindingScopeIdentity): Promise<EnsureScopeResult> {

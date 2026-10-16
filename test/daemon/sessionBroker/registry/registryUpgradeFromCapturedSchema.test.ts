@@ -532,7 +532,15 @@ test.each([false, true])(
       } else {
         await run.upgrade();
       }
-      expect(brokerRows(sqlite)).toEqual(before);
+      // 009 (receipt retention) only adds a null terminal time to each existing receipt.
+      const [scopes, assignments, journal, requests, resources] = before;
+      expect(brokerRows(sqlite)).toEqual([
+        scopes,
+        assignments,
+        journal,
+        requests.map((row) => ({ ...(row as object), terminal_at_ms: null })),
+        resources,
+      ]);
       expect(rows(sqlite, "slot_assignments")).toHaveLength(2);
       expect(rows(sqlite, "slot_journal")).toHaveLength(3);
       expect(rows(sqlite, "slot_scopes")).toHaveLength(1);

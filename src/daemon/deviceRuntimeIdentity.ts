@@ -1,3 +1,4 @@
+import { holderOf } from "./deviceBinding";
 import { DeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuarantinedError";
 import { ActionableError, type BootedDevice } from "../models";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
@@ -796,7 +797,7 @@ export class DeviceRuntimeIdentity {
     pooled: PooledDevice,
     options: DiscoveryReconcileOptions,
   ): Promise<void> {
-    await this.cancelPooledDeviceExecutions(pooled, options, pooled.sessionId);
+    await this.cancelPooledDeviceExecutions(pooled, options, holderOf(pooled));
   }
 
   /** A confirmed shutdown retires serial-bound work even without quarantine. */
@@ -808,7 +809,7 @@ export class DeviceRuntimeIdentity {
     if (options.cancelDeviceBoundExecutions === false) {
       return;
     }
-    await this.cancelPooledDeviceExecutions(pooled, options, deferred ? pooled.sessionId : null);
+    await this.cancelPooledDeviceExecutions(pooled, options, deferred ? holderOf(pooled) : null);
   }
 
   private async cancelPooledDeviceExecutions(

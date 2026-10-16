@@ -1,3 +1,4 @@
+import { holderOf } from "../../daemon/deviceBinding";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { DefaultFileSystem, type FileSystem } from "../../utils/filesystem/DefaultFileSystem";
 import path from "path";
@@ -242,7 +243,7 @@ export class TakeScreenshot implements ScreenshotService {
     const daemon = DaemonState.getInstance();
     if (
       daemon.isInitialized() &&
-      daemon.getDevicePool().getDevice(this.device.deviceId)?.sessionId
+      holderOf(daemon.getDevicePool().getDevice(this.device.deviceId))
     ) {
       return { success: false, error: "Owned iOS device has no connected screenshot service" };
     }

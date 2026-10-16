@@ -1,3 +1,4 @@
+import { holderOf } from "../daemon/deviceBinding";
 import { DaemonState } from "../daemon/daemonState";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
@@ -337,7 +338,7 @@ function assertNotForeignManagedSlotFromSnapshot(
     if (
       gate.managedSlotSnapshotRetainedAfterFailedRead?.() &&
       requesterSessionUuid &&
-      pool.getDevice(input.device.deviceId)?.sessionId === requesterSessionUuid
+      holderOf(pool.getDevice(input.device.deviceId)) === requesterSessionUuid
     ) {
       logger.debug(`[DeviceTools] ${input.toolName} preserves failed-read holder admission.`);
       return;

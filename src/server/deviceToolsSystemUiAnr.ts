@@ -1,3 +1,4 @@
+import { holderOf } from "../daemon/deviceBinding";
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../models";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
@@ -550,10 +551,7 @@ async function retireSystemUiAnrReplacement(
 ): Promise<void> {
   const currentReplacement = devicePool?.getDevice(replacementBoot.device.deviceId);
   // Exact binds can also arrive after handoff, while replacement readiness is pending.
-  if (
-    currentReplacement?.sessionId &&
-    currentReplacement.sessionId !== preservedSession.sessionId
-  ) {
+  if (holderOf(currentReplacement) && holderOf(currentReplacement) !== preservedSession.sessionId) {
     return;
   }
   if (replacementBoot.runningBeforeCall) {

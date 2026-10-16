@@ -13,7 +13,7 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { segmentGraphemes } from "../SendKeys";
 import {
-  buildAndroidInputTextCommand,
+  buildAndroidInputTextPlan,
   canJoinAndroidInputText,
 } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
 
@@ -300,7 +300,7 @@ export class EventAllTyper implements AndroidModeTyper {
     }
     // The process may have typed part of the run before failing, so any failure is partial.
     return this.host.executeKeyEventPlanSafely(
-      { commands: [buildAndroidInputTextCommand(run.join(""))], textLength: run.join("").length },
+      buildAndroidInputTextPlan(run.join("")),
       true,
       signal,
     );

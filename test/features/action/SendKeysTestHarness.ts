@@ -174,10 +174,17 @@ function createAdbFactory(adb: FakeAdbExecutor, deliveries: TextDelivery[]): Adb
   return { create: () => catalogAdb };
 }
 
+/** API 31+ input text paces its call on the timer; tests that do not steer time need it to flow. */
+function autoAdvancingTimer(): FakeTimer {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  return timer;
+}
+
 export function createSendKeysHarness(
   device: BootedDevice,
   observe: SendKeysObserver = observer,
-  timer = new FakeTimer(),
+  timer = autoAdvancingTimer(),
 ) {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [

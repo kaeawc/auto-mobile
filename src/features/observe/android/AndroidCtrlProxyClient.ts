@@ -79,11 +79,9 @@ import {
 } from "../../../models";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
-import type { ProxySetupResult } from "../../../utils/interfaces/ProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
-import { fixedBackoff } from "../../../utils/Backoff";
 import {
   ForcedRestartBudget,
   type ForcedRestartSnapshot,
@@ -106,6 +104,11 @@ import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../../db/installedAppsCacheWriteCoordinator";
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
+import {
+  AndroidServiceRecovery,
+  OBSERVE_RECOVERY_WAIT_MS,
+  type AndroidServiceManagerFactory,
+} from "./AndroidServiceRecovery";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import {
   WEBSOCKET_NOT_CONNECTED_MESSAGE,
@@ -642,21 +645,10 @@ function portAllocationIdForClient(
   return transientObserver ? `${deviceId}:observer:${ids.next()}` : deviceId;
 }
 
-/**
- * Narrow Android manager seam for connection-failure escalation (issue #7532),
- * analogous to `IOSCtrlProxyClient`'s `serviceManagerFactory`. Exposes only what
- * recovery needs: the binding-health probe, the crashed/unbound rebind added by
- * #7470, a wait for an existing bind, and full setup for a service that is
- * missing or not installed at all. `AndroidCtrlProxyManager` implements all four.
- */
-export interface AndroidServiceRecoveryManager {
-  isAccessibilityServiceHealthy(): Promise<boolean>;
-  rebindIfUnhealthy?(): Promise<boolean>;
-  waitForAccessibilityServiceBinding?(): Promise<"already-bound" | "recovered" | "unhealthy">;
-  setup(force?: boolean, perf?: PerformanceTracker): Promise<ProxySetupResult>;
-}
-
-export type AndroidServiceManagerFactory = (device: BootedDevice) => AndroidServiceRecoveryManager;
+export type {
+  AndroidServiceRecoveryManager,
+  AndroidServiceManagerFactory,
+} from "./AndroidServiceRecovery";
 
 export interface AndroidCtrlProxyClientDeps {
   /** Creates the client's WebSocket transport. */
@@ -782,19 +774,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   /** A socket must survive this interval before it can rearm a restart. */
   private static readonly RESTART_REARM_STABILITY_MS = 2000;
   private restartRearmTimeout: NodeJS.Timeout | null = null;
-  private pendingRecoveryStability:
-    | {
-        token: number;
-        resolve: (stable: boolean) => void;
-        eligible: boolean;
-        stableSocket: WebSocket | null;
-      }
-    | undefined;
   /** One client exists per device; this budget gates both failure bursts and observe calls. */
   private readonly forcedRestartBudget: ForcedRestartBudget;
-  /** Set when recovery found the device absent; consumed by the next offline-to-online rearm. */
-  private deviceSeenAbsent = false;
-  public static readonly OBSERVE_RECOVERY_WAIT_MS = 10_000;
+  private serviceRecovery: AndroidServiceRecovery | undefined;
+  public static readonly OBSERVE_RECOVERY_WAIT_MS = OBSERVE_RECOVERY_WAIT_MS;
   private readonly serviceManagerFactory: AndroidServiceManagerFactory;
 
   // Delegate instances (lazy initialized)
@@ -1119,11 +1102,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   private rearmAfterDeviceOnline(): void {
-    if (!this.deviceSeenAbsent) {
-      return;
-    }
-    this.deviceSeenAbsent = false;
-    this.forcedRestartBudget.rearm("device back online");
+    this.getServiceRecovery().rearmAfterDeviceOnline();
   }
 
   /** Remove only the singleton captured before asynchronous incarnation cleanup began. */
@@ -1533,6 +1512,66 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /** Keep mutable test seams and post-await state live without exposing connection lifecycle. */
+  private getServiceRecovery(): AndroidServiceRecovery {
+    if (!this.serviceRecovery) {
+      const client = this;
+      this.serviceRecovery = new AndroidServiceRecovery({
+        get adb() {
+          return client.adb;
+        },
+        get timer() {
+          return client.timer;
+        },
+        get deviceId() {
+          return client.device.deviceId;
+        },
+        get device() {
+          return client.device;
+        },
+        get closed() {
+          return client.closed;
+        },
+        get connectionGeneration() {
+          return client.connectionGeneration;
+        },
+        get consecutiveConnectionFailures() {
+          return client.consecutiveConnectionFailures;
+        },
+        set consecutiveConnectionFailures(value: number) {
+          client.consecutiveConnectionFailures = value;
+        },
+        get isRecoveringService() {
+          return client.isRecoveringService;
+        },
+        set isRecoveringService(value: boolean) {
+          client.isRecoveringService = value;
+        },
+        get recoveryPromise() {
+          return client.recoveryPromise;
+        },
+        set recoveryPromise(value: Promise<boolean> | null) {
+          client.recoveryPromise = value;
+        },
+        get forcedRestartBudget() {
+          return client.forcedRestartBudget;
+        },
+        get serviceManagerFactory() {
+          return client.serviceManagerFactory;
+        },
+        get restartRearmPending() {
+          return client.restartRearmTimeout !== null;
+        },
+        get socket() {
+          return client.ws;
+        },
+        isConnected: () => client.isConnected(),
+        resetConnectionBudget: () => client.resetConnectionBudget(),
+        connectBackgroundWebSocket: () => client.connectBackgroundWebSocket(),
+      });
+    }
+    return this.serviceRecovery;
+  }
+
   private getPortForwarder(): AndroidCtrlProxyPortForwarder {
     if (!this.portForwarder) {
       const client = this;
@@ -1979,19 +2018,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
     this.restartRearmTimeout = this.timer.setTimeout(() => {
       this.restartRearmTimeout = null;
-      if (!this.isConnected()) {
-        if (this.pendingRecoveryStability?.eligible) {
-          this.failPendingRecoveryStability("WebSocket closed before stable reconnect");
-        }
-        return;
-      }
-      const pending = this.pendingRecoveryStability;
-      if (pending) {
-        pending.stableSocket = this.ws;
-        this.completePendingRecoveryStability();
-      } else if (this.forcedRestartBudget.snapshot().state !== "suspended") {
-        this.forcedRestartBudget.recordSuccess();
-      }
+      this.getServiceRecovery().onStabilityTimerFired();
     }, AndroidCtrlProxyClient.RESTART_REARM_STABILITY_MS);
     this.syncNetworkStateToDevice();
     this.syncAccessibilityFlagsToDevice();
@@ -2109,16 +2136,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   public onConnectionClosed(): void {
+    const rearmTimerWasArmed = this.restartRearmTimeout !== null;
     if (this.restartRearmTimeout) {
       this.timer.clearTimeout(this.restartRearmTimeout);
       this.restartRearmTimeout = null;
-      if (this.pendingRecoveryStability?.eligible) {
-        this.failPendingRecoveryStability("WebSocket closed before stable reconnect");
-      }
     }
-    if (this.pendingRecoveryStability) {
-      this.pendingRecoveryStability.stableSocket = null;
-    }
+    this.getServiceRecovery().onSocketClosed(rearmTimerWasArmed);
     this.supportedCommands = null;
     this.rejectedCommands.clear();
     this.lateCancelledScreenshotRequestIds.clear();
@@ -2162,45 +2185,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.stopWorkProfileMonitor();
   }
 
-  private failPendingRecoveryStability(reason: string): void {
-    const pending = this.pendingRecoveryStability;
-    if (pending) {
-      this.pendingRecoveryStability = undefined;
-      this.forcedRestartBudget.recordFailure(reason, pending.token);
-      pending.resolve(false);
-    }
-  }
-
-  /**
-   * An absent device never exercised the runner, so its attempt is given back instead of burning
-   * a forced-restart slot (#11246); every other unrecovered outcome is a recorded failure.
-   */
-  private settleUnrecoveredAttempt(outcome: string, token: number): void {
-    if (!this.closed && outcome === "unavailable") {
-      this.releasePendingRecoveryStability(token);
-      return;
-    }
-    this.failPendingRecoveryStability(`service recovery ${outcome}`);
-    this.forcedRestartBudget.recordFailure(`service recovery ${outcome}`, token);
-  }
-
-  private releasePendingRecoveryStability(token: number): void {
-    const pending = this.pendingRecoveryStability;
-    if (pending?.token === token) {
-      this.pendingRecoveryStability = undefined;
-      pending.resolve(false);
-    }
-    this.forcedRestartBudget.releaseAttempt(token);
-  }
-
-  private completePendingRecoveryStability(): void {
-    const pending = this.pendingRecoveryStability;
-    if (pending?.eligible && pending.stableSocket === this.ws && this.isConnected()) {
-      this.pendingRecoveryStability = undefined;
-      pending.resolve(this.forcedRestartBudget.recordSuccess(pending.token));
-    }
-  }
-
   /** Every app id with cached or in-flight build-context state (#4984). */
   private knownBuildContextApps(): string[] {
     return Array.from(
@@ -2221,145 +2205,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   protected override onConnectionFailureThresholdReached(): void {
     if (!this.isRecoveringService) {
-      this.triggerServiceRecovery();
+      this.getServiceRecovery().trigger();
     }
-  }
-
-  /**
-   * Trigger CtrlProxy accessibility-service recovery through the manager.
-   * Called when repeated WebSocket connection failures indicate the service
-   * may be crashed, unbound, or missing (issue #7532). Guarded by
-   * `isRecoveringService` so a failure burst cannot start a second, overlapping
-   * recovery while one is already in flight.
-   */
-  private triggerServiceRecovery(): void {
-    if (this.isRecoveringService) {
-      return;
-    }
-    const token = this.forcedRestartBudget.tryBeginAttempt();
-    if (token === undefined) {
-      return;
-    }
-
-    this.isRecoveringService = true;
-    logger.info(
-      `[AndroidCtrlProxyClient] Triggering CtrlProxy recovery after ${this.consecutiveConnectionFailures} connection failures`,
-    );
-
-    // A background reconnect can stabilize while the async health probe is
-    // pending. Claim its stability signal with this recovery's token now.
-    const replaceStabilityWaiter = (): Promise<boolean> => {
-      this.pendingRecoveryStability?.resolve(false);
-      return new Promise<boolean>((resolve) => {
-        this.pendingRecoveryStability = { token, resolve, eligible: false, stableSocket: null };
-      });
-    };
-    let stableConnection = replaceStabilityWaiter();
-
-    const generation = this.connectionGeneration;
-    const recovery = this.recoverAccessibilityService(generation, () => {
-      stableConnection = replaceStabilityWaiter();
-    })
-      .then(async (outcome) => {
-        if (this.closed || outcome === "failed" || outcome === "unavailable") {
-          this.settleUnrecoveredAttempt(outcome, token);
-          return false;
-        }
-        // A repaired service may clear the foreground connection cooldown;
-        // the failure counter and restart budget reset only after reconnect.
-        if (outcome === "repaired") {
-          // Only an actual rebind/setup or a completed in-progress bind
-          // justifies resetting the foreground cooldown early — the service
-          // was demonstrably broken and is now fixed. When it was already
-          // healthy (#6260: WS refused for an unrelated reason), leave the
-          // connection budget alone so the cooldown still gates a background
-          // reconnect instead of hammering a socket unrelated to service health.
-          // resetConnectionBudget() (issue #7538) also clears the cooldown
-          // clock and un-pauses a paused background reconnect, not just the
-          // attempt counter.
-          this.resetConnectionBudget();
-        }
-        if (this.pendingRecoveryStability) {
-          this.pendingRecoveryStability.eligible = true;
-          this.completePendingRecoveryStability();
-        }
-        logger.info(
-          `[AndroidCtrlProxyClient] Recovery completed (${outcome}); reconnecting WebSocket`,
-        );
-        // Background reconnect respects the #7537 background-attempt cap
-        // rather than consuming the caller's foreground connect budget.
-        const connected =
-          outcome === "repaired"
-            ? await this.connectBackgroundWebSocketAfterRecovery(generation)
-            : await this.connectBackgroundWebSocket();
-        if (!connected) {
-          logger.warn(
-            `[AndroidCtrlProxyClient] WebSocket reconnect failed after CtrlProxy recovery`,
-          );
-        }
-        if (!connected || !this.isConnected()) {
-          this.failPendingRecoveryStability("WebSocket reconnect failed");
-          return false;
-        }
-        if (this.pendingRecoveryStability && !this.restartRearmTimeout) {
-          this.failPendingRecoveryStability("No stable WebSocket reconnect observed");
-        }
-        this.consecutiveConnectionFailures = 0;
-        return await stableConnection;
-      })
-      .catch((error) => {
-        this.failPendingRecoveryStability(String(error));
-        this.forcedRestartBudget.recordFailure(String(error), token);
-        logger.warn(`[AndroidCtrlProxyClient] CtrlProxy recovery failed: ${error}`);
-        return false;
-      })
-      .finally(() => {
-        // A superseded recovery must not clear a newer attempt's state.
-        if (this.recoveryPromise === recovery) {
-          this.isRecoveringService = false;
-          this.recoveryPromise = null;
-        }
-      });
-    this.recoveryPromise = recovery;
-  }
-
-  /** Retry the post-bind socket dial while the accessibility service finishes starting its server. */
-  private async connectBackgroundWebSocketAfterRecovery(generation: number): Promise<boolean> {
-    const startedAt = this.timer.now();
-    const backoff = fixedBackoff(100);
-    let attempt = 1;
-
-    while (
-      !this.closed &&
-      generation === this.connectionGeneration &&
-      this.timer.now() - startedAt < AndroidCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS
-    ) {
-      const connected = await this.connectBackgroundWebSocket();
-      if (connected) {
-        return (
-          !this.closed &&
-          generation === this.connectionGeneration &&
-          this.timer.now() - startedAt <= AndroidCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS
-        );
-      }
-
-      const remainingMs =
-        AndroidCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS - (this.timer.now() - startedAt);
-      if (this.closed || generation !== this.connectionGeneration || remainingMs <= 0) {
-        break;
-      }
-      await this.timer.sleep(Math.min(backoff.delayForAttempt(attempt), remainingMs));
-      attempt++;
-    }
-
-    return false;
   }
 
   /** Start a recovery for this observed transport failure if none is pending. */
   public ensureRecoveryStarted(): void {
-    if (!this.closed && this.autoReconnectEnabled && !this.recoveryPromise) {
-      this.triggerServiceRecovery();
-    }
+    this.getServiceRecovery().ensureStarted(this.autoReconnectEnabled);
   }
 
   /** Current forced-restart admission state, for typed observe/action failure reasons. */
@@ -2369,131 +2221,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   public isRecoveryInFlight(): boolean {
     return this.recoveryPromise !== null;
-  }
-
-  /**
-   * Check device presence, then the accessibility service's health. A healthy
-   * service is left untouched — no rebind, no setup — the caller only
-   * reconnects in the background without resetting the foreground cooldown
-   * (issue #6260). An unhealthy service is rebound per #7470 (force-stop,
-   * re-add, bounded health poll), falling back to a full `setup()` when the
-   * rebind alone does not restore health (e.g. CtrlProxy is missing from
-   * `enabled_accessibility_services` or not installed at all).
-   */
-  private async recoverAccessibilityService(
-    generation: number,
-    onEscalation: () => void,
-  ): Promise<"healthy" | "repaired" | "unavailable" | "failed"> {
-    if (this.closed) {
-      return "failed";
-    }
-    const present = await this.isDevicePresent();
-    if (generation !== this.connectionGeneration) {
-      return "failed";
-    }
-    if (!present) {
-      this.deviceSeenAbsent = true;
-      logger.info(
-        `[AndroidCtrlProxyClient] Device ${this.device.deviceId} is offline or missing; skipping recovery`,
-      );
-      return "unavailable";
-    }
-
-    const manager = this.serviceManagerFactory(this.device);
-    const healthy = await manager.isAccessibilityServiceHealthy();
-    if (generation !== this.connectionGeneration) {
-      return "failed";
-    }
-    if (healthy) {
-      logger.info(
-        `[AndroidCtrlProxyClient] Accessibility service already healthy; skipping rebind`,
-      );
-      return "healthy";
-    }
-
-    onEscalation();
-    logger.info(`[AndroidCtrlProxyClient] Accessibility service unhealthy; attempting rebind`);
-    const rebound = (await manager.rebindIfUnhealthy?.()) ?? false;
-    if (generation !== this.connectionGeneration) {
-      return "failed";
-    }
-    const rebindOutcome = await this.rebindRecoveryOutcome(manager, rebound);
-    if (generation !== this.connectionGeneration) {
-      return "failed";
-    }
-    if (rebindOutcome) {
-      return rebindOutcome;
-    }
-
-    onEscalation();
-    logger.info(`[AndroidCtrlProxyClient] Rebind did not restore health; running full setup`);
-    return this.setupRecoveryService(manager, generation);
-  }
-
-  private async rebindRecoveryOutcome(
-    manager: AndroidServiceRecoveryManager,
-    rebound: boolean,
-  ): Promise<"repaired" | "healthy" | null> {
-    if (rebound) {
-      return (await manager.isAccessibilityServiceHealthy()) ? "repaired" : null;
-    }
-    // A no-op rebind can mean the service was already binding. Let that bind
-    // finish before escalating to setup, which would force-stop it again.
-    const binding = await manager.waitForAccessibilityServiceBinding?.();
-    return binding === "recovered" ? "repaired" : binding === "already-bound" ? "healthy" : null;
-  }
-
-  private async setupRecoveryService(
-    manager: AndroidServiceRecoveryManager,
-    generation: number,
-  ): Promise<"repaired" | "failed"> {
-    const result = await manager.setup(true);
-    if (generation !== this.connectionGeneration) {
-      return "failed";
-    }
-    if (!result.success) {
-      logger.warn(
-        `[AndroidCtrlProxyClient] CtrlProxy setup failed during recovery: ${result.message}`,
-      );
-      return "failed";
-    }
-    const healthy = await manager.isAccessibilityServiceHealthy();
-    if (generation !== this.connectionGeneration) {
-      return "failed";
-    }
-    if (!healthy) {
-      logger.warn(`[AndroidCtrlProxyClient] Accessibility service remained unhealthy after setup`);
-      return "failed";
-    }
-    return "repaired";
-  }
-
-  /**
-   * Whether adb still reports this device as present and online. Recovery must
-   * not touch a stopped or disconnected device (issue #7532), mirroring the
-   * `bootedDeviceLister` check `IOSCtrlProxyClient.ensureConnected` runs before
-   * its own auto-setup.
-   */
-  private async isDevicePresent(): Promise<boolean> {
-    const getDeviceStates = this.adb.getDeviceStates?.bind(this.adb);
-    if (!getDeviceStates) {
-      // The executor cannot report raw device states; fail open rather than
-      // block recovery on a capability the executor doesn't provide.
-      return true;
-    }
-    try {
-      const states = await getDeviceStates();
-      const match = states.find((state) => state.deviceId === this.device.deviceId);
-      // "unauthorized" is not a state recovery can act on either — adb cannot
-      // run shell commands against it, so it is not meaningfully "present".
-      return match !== undefined && match.state !== "offline" && match.state !== "unauthorized";
-    } catch (error) {
-      // Diagnostic failure only: do not block recovery on it.
-      logger.warn(
-        `[AndroidCtrlProxyClient] Failed to check device state during recovery: ${error}`,
-      );
-      return true;
-    }
   }
 
   protected async setupBeforeConnect(perf: PerformanceTracker, signal: AbortSignal): Promise<void> {
@@ -4497,7 +4224,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.timer.clearTimeout(this.restartRearmTimeout);
       this.restartRearmTimeout = null;
     }
-    this.failPendingRecoveryStability("Client closed before stable reconnect");
+    this.getServiceRecovery().failPendingStability("Client closed before stable reconnect");
     try {
       // Stop work profile monitor if running
       this.stopWorkProfileMonitor();

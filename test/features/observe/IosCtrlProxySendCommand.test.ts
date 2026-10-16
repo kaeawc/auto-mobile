@@ -237,6 +237,23 @@ for (const method of methods) {
       });
     }
 
+    test("refuses unsupported commands without dispatch or pending timers", async () => {
+      const h = await harness();
+      h.context.isCommandSupported = () => false;
+      h.context.unsupportedCommandError = (command) => `Refused command: ${command}`;
+      let dispatches = 0;
+      const pending = method.invoke(h, () => dispatches++);
+      await expect(pending).rejects.toThrow(`Refused command: ${method.type}`);
+      await expect(pending).rejects.toBeInstanceOf(method.database ? Error : ActionableError);
+      if (method.database) {
+        await expect(pending).rejects.not.toBeInstanceOf(ActionableError);
+      }
+      expect(h.socket.frames).toEqual([]);
+      expect(dispatches).toBe(0);
+      expect(h.manager.getPendingCount()).toBe(0);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    });
+
     test("retains failed-connect error before socket dispatch", async () => {
       const h = await harness();
       h.context.ensureConnected = async () => false;

@@ -6,12 +6,14 @@ setup() {
   cat > "$FIX/writer.sh" << 'WRITER'
 #!/usr/bin/env bash
 # A builtin writer: >2 MiB, with no external producer to obscure PIPESTATUS.
+# A SIGPIPE ignored on entry (inherited from the runner) cannot be trapped, so
+# printf then fails with EPIPE instead; both paths record why the writer died.
 trap 'printf "SIGPIPE\n" > "$PROOF"; exit 141' PIPE
 printf '%s\n' "${FIRST:-needle}"
 if [[ -n ${ACK:-} ]]; then read -r ack < "$ACK"; fi
 printf -v bulk '%2048s' x
 for ((i=0; i<1024; i++)); do
-  printf '%s\n' "$bulk" || exit 141
+  printf '%s\n' "$bulk" || { printf "EPIPE\n" > "$PROOF"; exit 141; }
 done
 exit "${WRITER_EXIT:-0}"
 WRITER
@@ -38,7 +40,8 @@ teardown() { rm -rf "$FIX"; }
   ' bash "$FIX"
   [ "$status" -eq 0 ]
   [[ "$output" == *"pipeline=141 writer=141 grep=0"* ]]
-  [ "$(cat "$PROOF")" = SIGPIPE ]
+  proof="$(cat "$PROOF")"
+  [[ "$proof" == SIGPIPE || "$proof" == EPIPE ]]
 }
 
 @test "capture drains the same large writer and both match idioms always succeed" {

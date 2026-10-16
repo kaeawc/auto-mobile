@@ -1700,7 +1700,7 @@ describe("client-supplied tool names that match inherited object members", () =>
           type: "mcp_request",
           method: "tools/call",
           params: { name, arguments: args },
-        } as unknown as Parameters<typeof resolveMcpRequestTimeoutMs>[0];
+        } as Parameters<typeof resolveMcpRequestTimeoutMs>[0];
         expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
       }
     },

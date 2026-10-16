@@ -28,7 +28,6 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
-import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import {
   createSharedStorageServiceForTesting,
   type StageSharedStorageRequest,
@@ -870,7 +869,7 @@ describe("AppFileService", () => {
         dataRoot,
       );
       const service = createAppFileServiceForTesting({
-        simctlFactory: () => simctl as unknown as SimCtlClient,
+        simctlFactory: () => simctl,
         fileSystem,
       });
       return { service, fileSystem, simctl };
@@ -1975,7 +1974,7 @@ describe("AppFileService", () => {
       "/simulators/SIM-1/data",
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as unknown as SimCtlClient,
+      simctlFactory: () => simctl,
       fileSystem,
     });
 
@@ -2015,7 +2014,7 @@ describe("AppFileService", () => {
         "/simulators/SIM-1/data",
       );
       const service = createAppFileServiceForTesting({
-        simctlFactory: () => simctl as unknown as SimCtlClient,
+        simctlFactory: () => simctl,
         fileSystem,
       });
 
@@ -2060,7 +2059,7 @@ describe("AppFileService", () => {
       "/simulators/SIM-1/data",
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as unknown as SimCtlClient,
+      simctlFactory: () => simctl,
       fileSystem,
     });
 
@@ -2103,7 +2102,7 @@ describe("AppFileService", () => {
       "/simulators/SIM-1/data",
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as unknown as SimCtlClient,
+      simctlFactory: () => simctl,
       fileSystem,
     });
     const put = (contentText: string) =>
@@ -2161,7 +2160,7 @@ describe("AppFileService", () => {
       const simctl = new FakeSimCtlClient();
       simctl.setCommandResult(command, dataRoot);
       const service = createAppFileServiceForTesting({
-        simctlFactory: () => simctl as unknown as SimCtlClient,
+        simctlFactory: () => simctl,
         fileSystem,
       });
       // The service rejects duplicate destinations and accepts only one target per batch.
@@ -2349,7 +2348,7 @@ describe("AppFileService", () => {
         const simctl = new FakeSimCtlClient();
         simctl.setCommandResult(command, dataRoot);
         const service = createAppFileServiceForTesting({
-          simctlFactory: () => simctl as unknown as SimCtlClient,
+          simctlFactory: () => simctl,
           fileSystem,
         });
         const put = (...names: string[]) =>
@@ -2440,7 +2439,7 @@ describe("AppFileService", () => {
         const simctl = new FakeSimCtlClient();
         simctl.setCommandResult(command, dataRoot);
         const service = createAppFileServiceForTesting({
-          simctlFactory: () => simctl as unknown as SimCtlClient,
+          simctlFactory: () => simctl,
           fileSystem,
         });
         await fileSystem.writeFileBuffer(join(documents, "a.txt"), Buffer.from("original"));

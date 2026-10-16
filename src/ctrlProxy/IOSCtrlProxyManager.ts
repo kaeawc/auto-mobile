@@ -1,3 +1,4 @@
+import { getOrCreateDeviceInstance } from "./deviceInstanceRegistry";
 import { buildSimctlArgs } from "../utils/ios-cmdline-tools/simctlArgs";
 import { DefaultIosTunnelClient, type IosTunnelClient } from "./ios/IosTunnelClient";
 import {
@@ -562,13 +563,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public static getInstance(device: BootedDevice, timer?: Timer): IOSCtrlProxyManager {
     requireBootedDevice(device, "IOSCtrlProxyManager.getInstance");
-    if (!IOSCtrlProxyManager.instances.has(device.deviceId)) {
-      IOSCtrlProxyManager.instances.set(
-        device.deviceId,
-        new IOSCtrlProxyManager({ device, timer }),
-      );
-    }
-    return IOSCtrlProxyManager.instances.get(device.deviceId)!;
+    return getOrCreateDeviceInstance(
+      IOSCtrlProxyManager.instances,
+      device.deviceId,
+      () => new IOSCtrlProxyManager({ device, timer }),
+    );
   }
 
   public static getExistingInstance(deviceId: string): IOSCtrlProxyManager | undefined {

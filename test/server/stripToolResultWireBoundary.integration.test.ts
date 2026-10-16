@@ -97,7 +97,7 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
     if (fixture) {
       await fixture.teardown();
     }
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(TOOL);
+    ToolRegistry.removeToolForTesting(TOOL);
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
   });
 
@@ -216,9 +216,9 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
     if (fixture) {
       await fixture.teardown();
     }
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(SCHEMA_TOOL);
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(NOSCHEMA_TOOL);
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(PLAIN_TOOL);
+    ToolRegistry.removeToolForTesting(SCHEMA_TOOL);
+    ToolRegistry.removeToolForTesting(NOSCHEMA_TOOL);
+    ToolRegistry.removeToolForTesting(PLAIN_TOOL);
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
   });
 

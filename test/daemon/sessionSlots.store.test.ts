@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { SessionSlots } from "../../src/daemon/sessionSlots";
+import { SessionSlots, type FinalizationRegistryLike } from "../../src/daemon/sessionSlots";
 
 interface FakePayload {
   name: string;
@@ -447,4 +447,277 @@ test("releasing marks and forced snapshots use independent Session identities", 
   expect(slots.hasForcedNonTerminal(session)).toBe(false);
   expect(slots.getForcedNonTerminal(session)).toBeUndefined();
   expect(slots.deleteForcedNonTerminal(session)).toBe(false);
+});
+
+type FenceSlots = SessionSlots<
+  object,
+  object,
+  object,
+  object,
+  object,
+  object,
+  object,
+  object,
+  FakePayload,
+  { sessionId: string },
+  FakePayload,
+  FakePayload,
+  FakePayload,
+  FakePayload
+>;
+
+const fenceFacets = [
+  [
+    "terminalSnapshots",
+    "getTerminalSnapshot",
+    "hasTerminalSnapshot",
+    "setTerminalSnapshot",
+    "deleteTerminalSnapshot",
+  ],
+  [
+    "terminalReasonStates",
+    "getTerminalReasonState",
+    "hasTerminalReasonState",
+    "setTerminalReasonState",
+    "deleteTerminalReasonState",
+  ],
+  [
+    "terminalReservations",
+    "getTerminalReservation",
+    "hasTerminalReservation",
+    "setTerminalReservation",
+    "deleteTerminalReservation",
+  ],
+  [
+    "recoveredTerminalIntents",
+    "getRecoveredTerminalIntent",
+    "hasRecoveredTerminalIntent",
+    "setRecoveredTerminalIntent",
+    "deleteRecoveredTerminalIntent",
+  ],
+] as const;
+
+function fenceSlots(): FenceSlots {
+  return new SessionSlots();
+}
+
+test.each(fenceFacets)(
+  "%s preserves payload identity, membership, order and live views",
+  (view, get, has, set, remove) => {
+    const slots = fenceSlots();
+    const borrowed = slots[view];
+    const first = { name: "first" };
+    const equalFirst = { name: "first" };
+    const second = { name: "second" };
+    expect(slots[get]("first")).toBeUndefined();
+    expect(slots[has]("first")).toBe(false);
+    expect(slots[remove]("first")).toBe(false);
+    slots[set]("first", first);
+    slots[set]("second", second);
+    expect(slots[view]).toBe(borrowed);
+    expect(slots[get]("first")).toBe(first);
+    expect(slots[has]("first")).toBe(true);
+    expect(borrowed.get("first")).toBe(first);
+    slots[set]("first", equalFirst);
+    expect(slots[get]("first")).toBe(equalFirst);
+    expect([...borrowed.keys()]).toEqual(["first", "second"]);
+    expect(slots[remove]("first")).toBe(true);
+    expect(slots[has]("first")).toBe(false);
+    expect(borrowed.has("first")).toBe(false);
+    slots[set]("first", first);
+    expect([...borrowed]).toEqual([
+      ["second", second],
+      ["first", first],
+    ]);
+  },
+);
+
+test.each(fenceFacets)(
+  "%s retains native mutation during iteration",
+  (view, _get, _has, set, remove) => {
+    const slots = fenceSlots();
+    const borrowed = slots[view];
+    const value = { name: "held" };
+    slots[set]("first", value);
+    slots[set]("skipped", value);
+    slots[set]("last", value);
+    const visited: string[] = [];
+    for (const [id, payload] of borrowed) {
+      visited.push(id);
+      expect(payload).toBe(value);
+      slots[remove](id);
+      if (id === "first") {
+        slots[remove]("skipped");
+        slots[set]("added", value);
+      }
+    }
+    expect(visited).toEqual(["first", "last", "added"]);
+    expect(borrowed.size).toBe(0);
+  },
+);
+
+test("adopted owners preserve live map identity and insertion order", () => {
+  const slots = fenceSlots();
+  const borrowed = slots.adoptedTerminalOwners;
+  expect(slots.getAdoptedTerminalOwner("first")).toBeUndefined();
+  expect(slots.hasAdoptedTerminalOwner("first")).toBe(false);
+  expect(slots.deleteAdoptedTerminalOwner("first")).toBe(false);
+  slots.setAdoptedTerminalOwner("first", "daemon-a");
+  slots.setAdoptedTerminalOwner("second", "daemon-b");
+  slots.setAdoptedTerminalOwner("first", "daemon-c");
+  expect(slots.adoptedTerminalOwners).toBe(borrowed);
+  expect(slots.getAdoptedTerminalOwner("first")).toBe("daemon-c");
+  expect(slots.hasAdoptedTerminalOwner("first")).toBe(true);
+  expect([...borrowed]).toEqual([
+    ["first", "daemon-c"],
+    ["second", "daemon-b"],
+  ]);
+  expect(slots.deleteAdoptedTerminalOwner("first")).toBe(true);
+  expect(slots.hasAdoptedTerminalOwner("first")).toBe(false);
+  slots.setAdoptedTerminalOwner("first", "daemon-a");
+  expect([...borrowed.keys()]).toEqual(["second", "first"]);
+});
+
+test("adopted owner iteration observes additions and deletions", () => {
+  const slots = fenceSlots();
+  const borrowed = slots.adoptedTerminalOwners;
+  slots.setAdoptedTerminalOwner("first", "daemon-a");
+  slots.setAdoptedTerminalOwner("skipped", "daemon-b");
+  slots.setAdoptedTerminalOwner("last", "daemon-c");
+  const visited: string[] = [];
+  for (const [id] of borrowed) {
+    visited.push(id);
+    slots.deleteAdoptedTerminalOwner(id);
+    if (id === "first") {
+      slots.deleteAdoptedTerminalOwner("skipped");
+      slots.setAdoptedTerminalOwner("added", "daemon-d");
+    }
+  }
+  expect(visited).toEqual(["first", "last", "added"]);
+  expect(borrowed.size).toBe(0);
+});
+
+test("adopted journals retain live set membership, order and mutation during iteration", () => {
+  const slots = fenceSlots();
+  const borrowed = slots.adoptedDeadJournals;
+  expect(slots.hasAdoptedDeadJournal("first")).toBe(false);
+  expect(slots.deleteAdoptedDeadJournal("first")).toBe(false);
+  slots.addAdoptedDeadJournal("first");
+  slots.addAdoptedDeadJournal("first");
+  slots.addAdoptedDeadJournal("skipped");
+  slots.addAdoptedDeadJournal("last");
+  expect(slots.adoptedDeadJournals).toBe(borrowed);
+  expect(slots.hasAdoptedDeadJournal("first")).toBe(true);
+  expect([...borrowed]).toEqual(["first", "skipped", "last"]);
+  const visited: string[] = [];
+  for (const id of borrowed) {
+    visited.push(id);
+    expect(slots.deleteAdoptedDeadJournal(id)).toBe(true);
+    if (id === "first") {
+      slots.deleteAdoptedDeadJournal("skipped");
+      slots.addAdoptedDeadJournal("added");
+    }
+  }
+  expect(visited).toEqual(["first", "last", "added"]);
+  expect(borrowed.size).toBe(0);
+  expect(slots.hasAdoptedDeadJournal("first")).toBe(false);
+});
+
+type FinalizedIdentity = { sessionId: string; identity: WeakRef<{ sessionId: string }> };
+
+class FakeFinalizationRegistry implements FinalizationRegistryLike<FinalizedIdentity> {
+  readonly registrations: { target: object; held: FinalizedIdentity }[] = [];
+
+  constructor(readonly cleanup: (held: FinalizedIdentity) => void) {}
+
+  register(target: object, held: FinalizedIdentity): void {
+    this.registrations.push({ target, held });
+  }
+}
+
+function identitySlots() {
+  const collected: string[] = [];
+  const registries: FakeFinalizationRegistry[] = [];
+  const slots: FenceSlots = new SessionSlots({
+    onFinalizedIdentityCollected: (id) => collected.push(id),
+    createFinalizationRegistry: (cleanup) => {
+      const registry = new FakeFinalizationRegistry(cleanup);
+      registries.push(registry);
+      return registry;
+    },
+  });
+  return { slots, registry: registries[0]!, collected };
+}
+
+test("finalized identities register once per new identity and retain a live ordered map", () => {
+  const { slots, registry } = identitySlots();
+  const borrowed = slots.latestFinalizedIdentities;
+  const session = { sessionId: "id" };
+  const replacement = { sessionId: "id" };
+  const other = { sessionId: "other" };
+  expect(slots.getFinalizedIdentity("id")).toBeUndefined();
+  expect(slots.hasFinalizedIdentity("id")).toBe(false);
+  slots.recordFinalizedIdentity(session);
+  const identity = slots.getFinalizedIdentity("id")!;
+  slots.recordFinalizedIdentity(session);
+  expect(registry.registrations).toHaveLength(1);
+  expect(registry.registrations[0]!.target).toBe(session);
+  expect(registry.registrations[0]!.held.identity).toBe(identity);
+  expect(registry.registrations[0]!.held.sessionId).toBe("id");
+  expect(slots.getFinalizedIdentity("id")).toBe(identity);
+  slots.recordFinalizedIdentity(other);
+  slots.recordFinalizedIdentity(replacement);
+  slots.recordFinalizedIdentity(replacement);
+  expect(registry.registrations).toHaveLength(3);
+  expect(slots.latestFinalizedIdentities).toBe(borrowed);
+  expect(borrowed.get("id")?.deref()).toBe(replacement);
+  expect(borrowed.get("id")).not.toBe(identity);
+  expect(slots.hasFinalizedIdentity("id")).toBe(true);
+  expect([...borrowed.keys()]).toEqual(["id", "other"]);
+});
+
+test("finalization cleanup removes only its exact WeakRef and leaves replacement identities", () => {
+  const { slots, registry, collected } = identitySlots();
+  const borrowed = slots.latestFinalizedIdentities;
+  const session = { sessionId: "id" };
+  slots.recordFinalizedIdentity(session);
+  const original = registry.registrations[0]!.held;
+  slots.recordFinalizedIdentity({ sessionId: "id" });
+  const replacement = registry.registrations[1]!.held;
+  registry.cleanup(original);
+  expect(collected).toEqual([]);
+  expect(borrowed.get("id")).toBe(replacement.identity);
+  registry.cleanup(replacement);
+  expect(collected).toEqual(["id"]);
+  expect(borrowed.has("id")).toBe(false);
+  expect(slots.hasFinalizedIdentity("id")).toBe(false);
+  slots.recordFinalizedIdentity(session);
+  const sameSessionIdentity = slots.getFinalizedIdentity("id")!;
+  registry.cleanup(original);
+  expect(slots.getFinalizedIdentity("id")).toBe(sameSessionIdentity);
+  registry.cleanup(registry.registrations[2]!.held);
+  expect(collected).toEqual(["id", "id"]);
+  expect(slots.getFinalizedIdentity("id")).toBeUndefined();
+  expect(borrowed.size).toBe(0);
+});
+
+test("finalized identity accessors retain native deletion and iteration semantics", () => {
+  const { slots } = identitySlots();
+  const borrowed = slots.latestFinalizedIdentities;
+  expect(slots.deleteFinalizedIdentity("first")).toBe(false);
+  for (const sessionId of ["first", "skipped", "last"]) {
+    slots.recordFinalizedIdentity({ sessionId });
+  }
+  const visited: string[] = [];
+  for (const [id, value] of borrowed) {
+    visited.push(id);
+    expect(value.deref()?.sessionId).toBe(id);
+    expect(slots.deleteFinalizedIdentity(id)).toBe(true);
+    if (id === "first") {
+      slots.deleteFinalizedIdentity("skipped");
+      slots.recordFinalizedIdentity({ sessionId: "added" });
+    }
+  }
+  expect(visited).toEqual(["first", "last", "added"]);
+  expect(borrowed.size).toBe(0);
 });

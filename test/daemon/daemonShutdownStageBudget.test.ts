@@ -56,15 +56,6 @@ async function stopLeavingWorkRunning(daemon: Daemon): Promise<string[]> {
   return [];
 }
 
-interface DaemonSocketServerInternals {
-  socketServer: {
-    liftSessionlessStrokesOn(deviceId: string): void;
-    quiesce(): Promise<void>;
-    drainSessionReleaseNotifications(): Promise<void>;
-    close(): Promise<void>;
-  } | null;
-}
-
 describe("Daemon shutdown stage budget (#11156)", () => {
   const restores: Array<() => void> = [];
   let warnings: string[] = [];
@@ -171,7 +162,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     restores.push(unsubscribe);
-    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+    daemon.setSocketServerForTesting({
       liftSessionlessStrokesOn: () => {},
       quiesce: async () => {},
       drainSessionReleaseNotifications: async () => {
@@ -181,7 +172,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
       close: async () => {
         events.push("socket:close");
       },
-    };
+    });
 
     await sessionManager.createSession("wedged-session", "emulator-5560", "android");
     const terminalRelease = sessionManager.releaseSession("wedged-session", "heartbeat-timeout");
@@ -312,7 +303,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     restores.push(unsubscribe);
-    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+    daemon.setSocketServerForTesting({
       liftSessionlessStrokesOn: () => {},
       // The control socket waits up to 1 s for in-flight request handlers; this one needs it all.
       quiesce: async () => {
@@ -321,7 +312,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
       },
       drainSessionReleaseNotifications: async () => {},
       close: async () => {},
-    };
+    });
     await daemon.getSessionManager().createSession("busy-session", "emulator-5560", "android");
 
     await daemon.stop();

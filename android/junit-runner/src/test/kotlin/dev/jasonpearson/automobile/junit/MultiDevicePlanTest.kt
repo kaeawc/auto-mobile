@@ -48,7 +48,6 @@ class TwoDevicePlainPlanTest {
     AutoMobileSharedUtils.testDeviceChecker = null
     DaemonHeartbeat.testController = null
     SystemPropertyCache.clear()
-    PlanCache.clear()
     RegexCache.clear()
     TestTimingCache.clear()
   }
@@ -246,7 +245,6 @@ class TwoDeviceCriticalSectionPlanTest {
     AutoMobileSharedUtils.testDeviceChecker = null
     DaemonHeartbeat.testController = null
     SystemPropertyCache.clear()
-    PlanCache.clear()
     RegexCache.clear()
     TestTimingCache.clear()
   }

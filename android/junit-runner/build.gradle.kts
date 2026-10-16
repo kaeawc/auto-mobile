@@ -8,6 +8,7 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
   `java-library`
   alias(libs.plugins.mavenPublish)
+  id("automobile.published-library")
 }
 
 java {
@@ -76,42 +77,6 @@ tasks.withType<KotlinCompile>().configureEach {
       ),
     )
     apiVersion.set(KotlinVersion.fromVersion(libs.versions.build.kotlin.consumer.api.get()))
-  }
-}
-
-mavenPublishing {
-  // Coordinates: group and version from root, artifact from local gradle.properties
-  coordinates(
-    property("GROUP").toString(),
-    property("POM_ARTIFACT_ID").toString(),
-    version.toString(),
-  )
-
-  pom {
-    name.set(property("POM_NAME").toString())
-    description.set(property("POM_DESCRIPTION").toString())
-    inceptionYear.set("2025")
-    url.set(property("POM_URL").toString())
-    licenses {
-      license {
-        name.set(property("POM_LICENCE_NAME").toString())
-        url.set(property("POM_LICENCE_URL").toString())
-        distribution.set("repo")
-      }
-    }
-    developers {
-      developer {
-        id.set(property("POM_DEVELOPER_ID").toString())
-        name.set(property("POM_DEVELOPER_NAME").toString())
-        url.set("https://github.com/${property("POM_DEVELOPER_ID")}/")
-        email.set(property("POM_DEVELOPER_EMAIL").toString())
-      }
-    }
-    scm {
-      url.set(property("POM_SCM_URL").toString())
-      connection.set(property("POM_SCM_CONNECTION").toString())
-      developerConnection.set(property("POM_SCM_DEV_CONNECTION").toString())
-    }
   }
 }
 

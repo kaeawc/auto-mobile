@@ -9,6 +9,7 @@ kotlin { jvmToolchain(libs.versions.build.java.target.get().toInt()) }
 dependencies {
   implementation(libs.kgp)
   implementation(libs.agp)
+  implementation(libs.mavenPublishPlugin)
   implementation("dev.detekt:detekt-gradle-plugin:${libs.versions.detekt.get()}")
   testImplementation(libs.junit)
 }

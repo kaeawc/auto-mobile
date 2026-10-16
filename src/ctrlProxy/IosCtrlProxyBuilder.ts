@@ -27,6 +27,7 @@ import {
   type Sha256Source,
 } from "../utils/IOSCtrlProxyBundleDownloader";
 import { defaultIdGenerator } from "../utils/IdGenerator";
+import { IosCtrlProxyPrefetcher } from "./IosCtrlProxyPrefetcher";
 import { VerifiedArtifactCache } from "../utils/VerifiedArtifactCache";
 import { hashAppBundle } from "../utils/ios-cmdline-tools/AppBundleHasher";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
@@ -151,7 +152,7 @@ interface LocalRunnerHashPin {
 }
 
 /**
- * The narrow builder surface {@link IosCtrlProxyBuilder.doPrefetch} drives.
+ * The narrow builder surface {@link IosCtrlProxyPrefetcher} drives.
  * Exposed so the prefetch gate can be tested without a real build/download
  * (issue #4407); grow it only when the prefetch needs another method.
  */
@@ -219,13 +220,15 @@ export class IosCtrlProxyBuilder {
   private static readonly METADATA_FILENAME = "ctrl-proxy-ios-bundle.json";
   private static readonly MIN_BUNDLE_SIZE_BYTES = 10000;
 
-  // Build state
-  private static prefetchPromise: Promise<CtrlProxyIosBuildResult | null> | null = null;
-  // True from prefetchBuild() until its promise settles (#7032); pendingPrefetch()
-  // exposes the promise only in that window.
-  private static prefetchInFlight = false;
-  private static prefetchResult: CtrlProxyIosBuildResult | null = null;
-  private static prefetchError: Error | null = null;
+  // The process-wide startup prefetch (single flight, result, error). Its collaborators are
+  // the static seams below, read lazily so test overrides keep applying.
+  private static readonly prefetcher = new IosCtrlProxyPrefetcher({
+    timer: { now: () => IosCtrlProxyBuilder.timer.now() },
+    prerequisiteDetector: {
+      hasIosPrerequisites: () => IosCtrlProxyBuilder.iosPrerequisiteDetector.hasIosPrerequisites(),
+    },
+    builder: () => IosCtrlProxyBuilder.prefetchBuilderOverride ?? IosCtrlProxyBuilder.getInstance(),
+  });
   private static expectedChecksumOverride: string | null = null;
   private static expectedRunnerChecksumOverride: string | null = null;
   private static expectedRunnerChecksumTargetOverride: RunnerSha256Target | null = null;
@@ -353,10 +356,7 @@ export class IosCtrlProxyBuilder {
    */
   public static resetInstances(): void {
     IosCtrlProxyBuilder.instances.clear();
-    IosCtrlProxyBuilder.prefetchPromise = null;
-    IosCtrlProxyBuilder.prefetchInFlight = false;
-    IosCtrlProxyBuilder.prefetchResult = null;
-    IosCtrlProxyBuilder.prefetchError = null;
+    IosCtrlProxyBuilder.prefetcher.reset();
     IosCtrlProxyBuilder.expectedChecksumOverride = null;
     IosCtrlProxyBuilder.expectedRunnerChecksumOverride = null;
     IosCtrlProxyBuilder.expectedRunnerChecksumTargetOverride = null;
@@ -887,49 +887,7 @@ export class IosCtrlProxyBuilder {
    * Prefetch download at startup (background, non-blocking)
    */
   public static prefetchBuild(): Promise<CtrlProxyIosBuildResult | null> {
-    // Only run on macOS
-    if (process.platform !== "darwin") {
-      logger.info("[IOSCtrlProxyBuilder] Prefetch skipped (not macOS)");
-      return Promise.resolve(null);
-    }
-
-    if (IosCtrlProxyBuilder.prefetchPromise !== null) {
-      logger.info("[IOSCtrlProxyBuilder] Prefetch already initiated, skipping");
-      return IosCtrlProxyBuilder.prefetchPromise;
-    }
-
-    logger.info("[IOSCtrlProxyBuilder] Starting download prefetch");
-    const startTime = IosCtrlProxyBuilder.timer.now();
-
-    IosCtrlProxyBuilder.prefetchInFlight = true;
-    IosCtrlProxyBuilder.prefetchPromise = IosCtrlProxyBuilder.doPrefetch()
-      .then((result) => {
-        const duration = IosCtrlProxyBuilder.timer.now() - startTime;
-        if (result && result.success) {
-          IosCtrlProxyBuilder.prefetchResult = result;
-          logger.info(`[IOSCtrlProxyBuilder] Prefetch completed in ${duration}ms`, {
-            buildPath: result.buildPath,
-          });
-        } else {
-          logger.info(`[IOSCtrlProxyBuilder] Prefetch skipped or failed in ${duration}ms`, {
-            message: result?.message,
-          });
-        }
-        return result;
-      })
-      .catch((error) => {
-        const duration = IosCtrlProxyBuilder.timer.now() - startTime;
-        IosCtrlProxyBuilder.prefetchError =
-          error instanceof Error ? error : new Error(String(error));
-        logger.warn(`[IOSCtrlProxyBuilder] Prefetch failed after ${duration}ms`, {
-          error: IosCtrlProxyBuilder.prefetchError.message,
-        });
-        return null;
-      })
-      .finally(() => {
-        IosCtrlProxyBuilder.prefetchInFlight = false;
-      });
-    return IosCtrlProxyBuilder.prefetchPromise;
+    return IosCtrlProxyBuilder.prefetcher.prefetch();
   }
 
   /**
@@ -941,74 +899,28 @@ export class IosCtrlProxyBuilder {
    * failures via {@link getPrefetchError} and resolves null.
    */
   public static pendingPrefetch(): Promise<CtrlProxyIosBuildResult | null> | null {
-    return IosCtrlProxyBuilder.prefetchInFlight ? IosCtrlProxyBuilder.prefetchPromise : null;
-  }
-
-  /**
-   * Internal prefetch implementation
-   */
-  private static async doPrefetch(): Promise<CtrlProxyIosBuildResult | null> {
-    // Skip cleanly on hosts that cannot consume the runner. Without the Xcode
-    // toolchain (xcrun/xcodebuild) the bundle can never be installed or run, so
-    // there is no reason to download and extract it at startup (issue #4407).
-    // Returning null (not throwing) keeps the daemon healthy and non-iOS
-    // workflows intact; the on-demand build path still runs when a device connects.
-    if (!(await IosCtrlProxyBuilder.iosPrerequisiteDetector.hasIosPrerequisites())) {
-      logger.info(
-        "[IOSCtrlProxyBuilder] Prefetch skipped: iOS prerequisites (xcrun/xcodebuild) not detected; " +
-          "the runner bundle is only needed for iOS device work",
-      );
-      return null;
-    }
-
-    const builder: PrefetchBuilder =
-      IosCtrlProxyBuilder.prefetchBuilderOverride ?? IosCtrlProxyBuilder.getInstance();
-    const needsDownload = await builder.needsRebuild();
-    if (!needsDownload) {
-      const buildPath = await builder.getBuildProductsPath();
-      const xctestrunPath = await builder.getXctestrunPath();
-      return {
-        success: true,
-        message: "CtrlProxy artifacts are up to date",
-        buildPath: buildPath || undefined,
-        xctestrunPath: xctestrunPath || undefined,
-      };
-    }
-
-    return builder.build();
+    return IosCtrlProxyBuilder.prefetcher.pending();
   }
 
   /**
    * Wait for prefetch to complete
    */
-  public static async waitForPrefetch(): Promise<CtrlProxyIosBuildResult | null> {
-    if (IosCtrlProxyBuilder.prefetchPromise === null) {
-      return null;
-    }
-
-    try {
-      await IosCtrlProxyBuilder.prefetchPromise;
-      return IosCtrlProxyBuilder.prefetchResult;
-    } catch (error) {
-      // Background prefetch already failed and recorded its error via getPrefetchError();
-      // returning null here just means "no prefetched result", callers build on demand.
-      logger.debug(`src/ctrlProxy/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
-      return null;
-    }
+  public static waitForPrefetch(): Promise<CtrlProxyIosBuildResult | null> {
+    return IosCtrlProxyBuilder.prefetcher.wait();
   }
 
   /**
    * Get the prefetched build result (non-blocking)
    */
   public static getPrefetchedResult(): CtrlProxyIosBuildResult | null {
-    return IosCtrlProxyBuilder.prefetchResult;
+    return IosCtrlProxyBuilder.prefetcher.getResult();
   }
 
   /**
    * Check if prefetch had an error
    */
   public static getPrefetchError(): Error | null {
-    return IosCtrlProxyBuilder.prefetchError;
+    return IosCtrlProxyBuilder.prefetcher.getError();
   }
 
   /**

@@ -8,7 +8,11 @@ final class PathGesturePlanTests: XCTestCase {
 
     private func assertInvalid(_ points: [PathGesturePoint], contains text: String, line: UInt = #line) {
         XCTAssertThrowsError(try PathGesturePlan.validate(points), line: line) { error in
-            XCTAssertTrue("\(error)".contains(text) || error.localizedDescription.contains(text), "\(error)", line: line)
+            XCTAssertTrue(
+                "\(error)".contains(text) || error.localizedDescription.contains(text),
+                "\(error)",
+                line: line
+            )
         }
     }
 
@@ -52,7 +56,8 @@ final class PathGesturePlanTests: XCTestCase {
     }
 
     func testRequestDecodesFromTheWireShape() throws {
-        let json = #"{"type":"request_path_gesture","requestId":"r","points":[{"x":1,"y":2,"offsetMs":0},{"x":3,"y":4,"offsetMs":250}]}"#
+        let json =
+            #"{"type":"request_path_gesture","requestId":"r","points":[{"x":1,"y":2,"offsetMs":0},{"x":3,"y":4,"offsetMs":250}]}"#
         let request = try JSONDecoder().decode(WebSocketRequest.self, from: Data(json.utf8))
         guard case let .pathGesture(payload) = request else { return XCTFail("decoded \(request)") }
         XCTAssertEqual(payload.points, [point(1, 2, 0), point(3, 4, 250)])

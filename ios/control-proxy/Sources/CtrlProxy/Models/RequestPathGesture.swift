@@ -38,7 +38,10 @@ public enum PathGesturePlan {
             throw CommandError.invalidParameter("points", "at most \(maxPoints) points, got \(points.count)")
         }
         guard points[0].offsetMs == 0 else {
-            throw CommandError.invalidParameter("points[0].offsetMs", "\(points[0].offsetMs); the first point must be 0")
+            throw CommandError.invalidParameter(
+                "points[0].offsetMs",
+                "\(points[0].offsetMs); the first point must be 0"
+            )
         }
         var previous = 0
         for (index, point) in points.enumerated() {

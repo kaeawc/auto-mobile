@@ -533,6 +533,7 @@ const messageDecoders = new Map<
   ["voiceover_set_result", decodeVoiceoverSetResult],
   ["highlight_response", decodeHighlightResponse],
   ["multi_finger_swipe_result", decodeMultiFingerSwipeResult],
+  ["path_gesture_result", decodeMultiFingerSwipeResult],
   ["clipboard_result", decodeClipboardResult],
   ["preference_files", decodePreferenceFiles],
   ["preferences", decodePreferences],

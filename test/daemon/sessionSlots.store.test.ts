@@ -636,15 +636,17 @@ class FakeFinalizationRegistry implements FinalizationRegistryLike<FinalizedIden
 }
 
 function identitySlots() {
+  const collected: string[] = [];
   const registries: FakeFinalizationRegistry[] = [];
   const slots: FenceSlots = new SessionSlots({
+    onFinalizedIdentityCollected: (id) => collected.push(id),
     createFinalizationRegistry: (cleanup) => {
       const registry = new FakeFinalizationRegistry(cleanup);
       registries.push(registry);
       return registry;
     },
   });
-  return { slots, registry: registries[0]! };
+  return { slots, registry: registries[0]!, collected };
 }
 
 test("finalized identities register once per new identity and retain a live ordered map", () => {
@@ -675,7 +677,7 @@ test("finalized identities register once per new identity and retain a live orde
 });
 
 test("finalization cleanup removes only its exact WeakRef and leaves replacement identities", () => {
-  const { slots, registry } = identitySlots();
+  const { slots, registry, collected } = identitySlots();
   const borrowed = slots.latestFinalizedIdentities;
   const session = { sessionId: "id" };
   slots.recordFinalizedIdentity(session);
@@ -683,39 +685,37 @@ test("finalization cleanup removes only its exact WeakRef and leaves replacement
   slots.recordFinalizedIdentity({ sessionId: "id" });
   const replacement = registry.registrations[1]!.held;
   registry.cleanup(original);
+  expect(collected).toEqual([]);
   expect(borrowed.get("id")).toBe(replacement.identity);
   registry.cleanup(replacement);
+  expect(collected).toEqual(["id"]);
   expect(borrowed.has("id")).toBe(false);
   expect(slots.hasFinalizedIdentity("id")).toBe(false);
-  // Even another WeakRef to the same object is a different registration's identity.
-  const sameSessionIdentity = new WeakRef(session);
-  slots.setFinalizedIdentity("id", sameSessionIdentity);
+  slots.recordFinalizedIdentity(session);
+  const sameSessionIdentity = slots.getFinalizedIdentity("id")!;
   registry.cleanup(original);
   expect(slots.getFinalizedIdentity("id")).toBe(sameSessionIdentity);
-  slots.setFinalizedIdentity("id", original.identity);
-  registry.cleanup(original);
+  registry.cleanup(registry.registrations[2]!.held);
+  expect(collected).toEqual(["id", "id"]);
   expect(slots.getFinalizedIdentity("id")).toBeUndefined();
-  registry.cleanup(original);
   expect(borrowed.size).toBe(0);
 });
 
 test("finalized identity accessors retain native deletion and iteration semantics", () => {
   const { slots } = identitySlots();
   const borrowed = slots.latestFinalizedIdentities;
-  const session = { sessionId: "id" };
-  const identity = new WeakRef(session);
   expect(slots.deleteFinalizedIdentity("first")).toBe(false);
-  slots.setFinalizedIdentity("first", identity);
-  slots.setFinalizedIdentity("skipped", identity);
-  slots.setFinalizedIdentity("last", identity);
+  for (const sessionId of ["first", "skipped", "last"]) {
+    slots.recordFinalizedIdentity({ sessionId });
+  }
   const visited: string[] = [];
   for (const [id, value] of borrowed) {
     visited.push(id);
-    expect(value).toBe(identity);
+    expect(value.deref()?.sessionId).toBe(id);
     expect(slots.deleteFinalizedIdentity(id)).toBe(true);
     if (id === "first") {
       slots.deleteFinalizedIdentity("skipped");
-      slots.setFinalizedIdentity("added", identity);
+      slots.recordFinalizedIdentity({ sessionId: "added" });
     }
   }
   expect(visited).toEqual(["first", "last", "added"]);

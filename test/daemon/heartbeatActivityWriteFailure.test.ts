@@ -50,7 +50,7 @@ describe("heartbeat activity writes (#11079)", () => {
     timer = new FakeTimer();
     barrier = new InMemoryDbWriteBarrier(timer);
     persistence = new ScriptedActivityPersistence();
-    manager = new SessionManager(timer, persistence, () => barrier);
+    manager = new SessionManager(timer, persistence, { barrier: () => barrier });
     released = [];
     monitor = new SessionHeartbeatMonitor(
       manager,

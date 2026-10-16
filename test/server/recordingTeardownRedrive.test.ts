@@ -64,11 +64,9 @@ describe("restart recorder teardown redrive", () => {
   beforeEach(() => {
     timer = new FakeTimer();
     repo = new FakeVideoRecordingRepository();
-    manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     markers = new InMemoryDeviceHealthMarkers(timer);
     manager.setDeviceHealthMarkers(
       markers,

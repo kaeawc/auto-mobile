@@ -455,7 +455,7 @@ describe("SessionManager.waitForSessionReleaseWithin", () => {
   beforeEach(() => {
     timer = new FakeTimer();
     persistence = new DeferredReleaseDeviceSessionPersistence();
-    manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, persistence, { barrier: () => new FakeDbWriteBarrier() });
   });
 
   afterEach(() => {
@@ -538,7 +538,9 @@ describe("SessionManager.waitForSessionReleaseWithin", () => {
   test("waits for a release admitted while session creation is pending", async () => {
     const deferredCreation = new DeferredDeviceSessionPersistence();
     manager.stopCleanupTimer();
-    manager = new SessionManager(timer, deferredCreation, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, deferredCreation, {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     deferredCreation.deferNextUpsert();
     const creation = manager.createSession("pending", "device-a", "android");
     await deferredCreation.waitForUpsert();
@@ -2073,15 +2075,17 @@ describe("SessionManager", () => {
           async markReleased(): Promise<void> {},
           async markStaleActiveSessionsExpired(): Promise<void> {},
         } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
-        () => new FakeDbWriteBarrier(),
-        () => ({
-          restore: async (): Promise<{ status: "restored" }> => {
-            restoreStarted();
-            await restoration;
+        {
+          barrier: () => new FakeDbWriteBarrier(),
+          keepScreenAwakeRestorer: () => ({
+            restore: async (): Promise<{ status: "restored" }> => {
+              restoreStarted();
+              await restoration;
 
-            return { status: "restored" as const };
-          },
-        }),
+              return { status: "restored" as const };
+            },
+          }),
+        },
       );
       const assignedSessionIds: string[] = [];
       const devicePool: SessionDeviceAssigner = {
@@ -2152,15 +2156,17 @@ describe("SessionManager", () => {
           async markReleased(): Promise<void> {},
           async markStaleActiveSessionsExpired(): Promise<void> {},
         } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
-        () => new FakeDbWriteBarrier(),
-        () => ({
-          restore: async (): Promise<{ status: "restored" }> => {
-            restoreStarted();
-            await restoration;
+        {
+          barrier: () => new FakeDbWriteBarrier(),
+          keepScreenAwakeRestorer: () => ({
+            restore: async (): Promise<{ status: "restored" }> => {
+              restoreStarted();
+              await restoration;
 
-            return { status: "restored" as const };
-          },
-        }),
+              return { status: "restored" as const };
+            },
+          }),
+        },
       );
       try {
         const session = await manager.createSession("s1", "device-1", "android", 1);
@@ -2197,7 +2203,7 @@ describe("SessionManager", () => {
           },
           async markStaleActiveSessionsExpired(): Promise<void> {},
         } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
-        () => new FakeDbWriteBarrier(),
+        { barrier: () => new FakeDbWriteBarrier() },
       );
       const assignedSessionIds: string[] = [];
       const devicePool: SessionDeviceAssigner = {
@@ -2278,17 +2284,15 @@ describe("SessionManager", () => {
   describe("rebindSession", () => {
     test("bounds a rebind whose keep-awake restoration never settles", async () => {
       const restorationStarted = Promise.withResolvers<void>();
-      const manager = new SessionManager(
-        fakeTimer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({
           restore: () => {
             restorationStarted.resolve();
             return new Promise<{ status: "restored" }>(() => {});
           },
         }),
-      );
+      });
       try {
         await manager.createSession("s1", "device-1", "android");
         manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
@@ -2320,11 +2324,9 @@ describe("SessionManager", () => {
         const restorationStarted = Promise.withResolvers<void>();
         const restored: Array<{ deviceId: string; state: KeepScreenAwakeState }> = [];
         const warning = spyOn(logger, "warn").mockImplementation(() => {});
-        const manager = new SessionManager(
-          fakeTimer,
-          new FakeDeviceSessionPersistence(),
-          () => new FakeDbWriteBarrier(),
-          (device) => ({
+        const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence(), {
+          barrier: () => new FakeDbWriteBarrier(),
+          keepScreenAwakeRestorer: (device) => ({
             restore: async (state) => {
               restorationStarted.resolve();
               await restoration.promise;
@@ -2333,7 +2335,7 @@ describe("SessionManager", () => {
               return { status: "restored" as const };
             },
           }),
-        );
+        });
         const state: KeepScreenAwakeState = { applied: true, method: "svc", svcWasEnabled: false };
         try {
           const session = await manager.createSession("s1", "device-1", "android");
@@ -2383,18 +2385,16 @@ describe("SessionManager", () => {
 
     test("rebinds without advancing time when keep-awake restoration completes immediately", async () => {
       const restoredDevices: string[] = [];
-      const manager = new SessionManager(
-        fakeTimer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        (device) => ({
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: (device) => ({
           restore: async () => {
             restoredDevices.push(device.deviceId);
 
             return { status: "restored" as const };
           },
         }),
-      );
+      });
       try {
         await manager.createSession("s1", "device-1", "android");
         manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
@@ -2412,16 +2412,14 @@ describe("SessionManager", () => {
 
     test("warns, rebinds and retries when keep-awake restoration rejects immediately (#11145)", async () => {
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
-      const manager = new SessionManager(
-        fakeTimer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({
           restore: async () => {
             throw new Error("immediate keep-awake restore failure");
           },
         }),
-      );
+      });
       try {
         await manager.createSession("s1", "device-1", "android");
         manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
@@ -2504,13 +2502,15 @@ describe("SessionManager", () => {
     test("clears device-scoped state when a new runtime reuses the serial", async () => {
       const repository = new FakeDeviceSessionPersistence();
       const restoredDevices: string[] = [];
-      const manager = new SessionManager(fakeTimer, repository, undefined, (device) => ({
-        restore: async () => {
-          restoredDevices.push(device.deviceId);
+      const manager = new SessionManager(fakeTimer, repository, {
+        keepScreenAwakeRestorer: (device) => ({
+          restore: async () => {
+            restoredDevices.push(device.deviceId);
 
-          return { status: "restored" as const };
-        },
-      }));
+            return { status: "restored" as const };
+          },
+        }),
+      });
       const unboundDevices: string[] = [];
 
       try {
@@ -2536,13 +2536,15 @@ describe("SessionManager", () => {
     test("serializes a pending rebind with release and clears device-scoped state", async () => {
       const repository = new DeferredDeviceSessionPersistence();
       const restoredDevices: string[] = [];
-      const manager = new SessionManager(fakeTimer, repository, undefined, (device) => ({
-        restore: async () => {
-          restoredDevices.push(device.deviceId);
+      const manager = new SessionManager(fakeTimer, repository, {
+        keepScreenAwakeRestorer: (device) => ({
+          restore: async () => {
+            restoredDevices.push(device.deviceId);
 
-          return { status: "restored" as const };
-        },
-      }));
+            return { status: "restored" as const };
+          },
+        }),
+      });
       const unboundDevices: string[] = [];
 
       try {
@@ -2574,11 +2576,13 @@ describe("SessionManager", () => {
 
     test("publishes live heartbeat and label routing updates after deferred persistence", async () => {
       const repository = new DeferredDeviceSessionPersistence();
-      const manager = new SessionManager(fakeTimer, repository, undefined, () => ({
-        restore: async () => {
-          return { status: "restored" as const };
-        },
-      }));
+      const manager = new SessionManager(fakeTimer, repository, {
+        keepScreenAwakeRestorer: () => ({
+          restore: async () => {
+            return { status: "restored" as const };
+          },
+        }),
+      });
       const labels = {
         primary: "session-1",
         secondary: "session-2",
@@ -2702,7 +2706,9 @@ describe("SessionManager", () => {
 
     test("serializes expiry cleanup with a pending rebind", async () => {
       const repository = new DeferredDeviceSessionPersistence();
-      const manager = new SessionManager(fakeTimer, repository, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(fakeTimer, repository, {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
 
       try {
         await manager.createSession("session-1", "emulator-old", "android", 1);
@@ -2973,12 +2979,10 @@ describe("SessionManager", () => {
         },
         async markStaleActiveSessionsExpired(): Promise<void> {},
       } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>);
-      const manager = new SessionManager(
-        fakeTimer,
-        repository,
-        () => new FakeDbWriteBarrier(),
-        () => restorer,
-      );
+      const manager = new SessionManager(fakeTimer, repository, {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => restorer,
+      });
       try {
         await manager.createSession("s1", "device-1", "android");
         manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
@@ -3013,7 +3017,7 @@ describe("SessionManager", () => {
           async markReleased(): Promise<void> {},
           async markStaleActiveSessionsExpired(): Promise<void> {},
         } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
-        () => new FakeDbWriteBarrier(),
+        { barrier: () => new FakeDbWriteBarrier() },
       );
       try {
         const session = await manager.createSession("s1", "device-1", "android");
@@ -3051,7 +3055,7 @@ describe("SessionManager", () => {
           async markReleased(): Promise<void> {},
           async markStaleActiveSessionsExpired(): Promise<void> {},
         } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
-        () => new FakeDbWriteBarrier(),
+        { barrier: () => new FakeDbWriteBarrier() },
       );
       try {
         const session = await manager.createSession("s1", "emulator-5554", "android");
@@ -3130,7 +3134,7 @@ describe("SessionManager", () => {
           async markReleased(): Promise<void> {},
           async markStaleActiveSessionsExpired(): Promise<void> {},
         } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
-        () => new FakeDbWriteBarrier(),
+        { barrier: () => new FakeDbWriteBarrier() },
       );
       try {
         const session = await manager.createSession("s1", "device-1", "android");
@@ -3168,7 +3172,7 @@ describe("SessionManager", () => {
           async markReleased(): Promise<void> {},
           async markStaleActiveSessionsExpired(): Promise<void> {},
         } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
-        () => new FakeDbWriteBarrier(),
+        { barrier: () => new FakeDbWriteBarrier() },
       );
       try {
         const session = await manager.createSession("s1", "device-1", "android", 1);
@@ -3204,13 +3208,15 @@ describe("SessionManager", () => {
           async markReleased(): Promise<void> {},
           async markStaleActiveSessionsExpired(): Promise<void> {},
         } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
-        () => new FakeDbWriteBarrier(),
-        () => ({
-          restore: async () => {
-            await restoreFinished;
-            return { status: "restored" as const };
-          },
-        }),
+        {
+          barrier: () => new FakeDbWriteBarrier(),
+          keepScreenAwakeRestorer: () => ({
+            restore: async () => {
+              await restoreFinished;
+              return { status: "restored" as const };
+            },
+          }),
+        },
       );
       try {
         await manager.createSession("s1", "device-1", "android");
@@ -3258,7 +3264,9 @@ describe("SessionManager", () => {
         },
         async markStaleActiveSessionsExpired(): Promise<void> {},
       } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>);
-      const manager = new SessionManager(fakeTimer, repository, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(fakeTimer, repository, {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       try {
         await manager.createSession("s1", "device-1", "android");
         const first = manager.releaseSession("s1", "first");
@@ -3292,13 +3300,15 @@ describe("SessionManager", () => {
           },
           async markStaleActiveSessionsExpired(): Promise<void> {},
         } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
-        () => new FakeDbWriteBarrier(),
-        () => ({
-          restore: async () => {
-            await new Promise<void>(() => {});
-            return { status: "restored" as const };
-          },
-        }),
+        {
+          barrier: () => new FakeDbWriteBarrier(),
+          keepScreenAwakeRestorer: () => ({
+            restore: async () => {
+              await new Promise<void>(() => {});
+              return { status: "restored" as const };
+            },
+          }),
+        },
       );
       try {
         await manager.createSession("s1", "device-1", "android");
@@ -3335,15 +3345,17 @@ describe("SessionManager", () => {
           async markReleased(): Promise<void> {},
           async markStaleActiveSessionsExpired(): Promise<void> {},
         } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
-        () => new FakeDbWriteBarrier(),
-        () => ({
-          restore: async () => {
-            restoreStarted();
-            await restoration;
+        {
+          barrier: () => new FakeDbWriteBarrier(),
+          keepScreenAwakeRestorer: () => ({
+            restore: async () => {
+              restoreStarted();
+              await restoration;
 
-            return { status: "restored" as const };
-          },
-        }),
+              return { status: "restored" as const };
+            },
+          }),
+        },
       );
       const device = { name: "device-1", deviceId: "device-1", platform: "android" as const };
       const deviceManager = new FakeDeviceManager();
@@ -3416,13 +3428,15 @@ describe("SessionManager", () => {
           },
           async markStaleActiveSessionsExpired(): Promise<void> {},
         } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>),
-        () => new FakeDbWriteBarrier(),
-        () => ({
-          restore: async () => {
-            await restore;
-            return { status: "restored" as const };
-          },
-        }),
+        {
+          barrier: () => new FakeDbWriteBarrier(),
+          keepScreenAwakeRestorer: () => ({
+            restore: async () => {
+              await restore;
+              return { status: "restored" as const };
+            },
+          }),
+        },
       );
       try {
         await manager.createSession("s1", "device-1", "android");
@@ -3460,7 +3474,9 @@ describe("SessionManager", () => {
   describe("durable heartbeat ownership rollback", () => {
     test("a heartbeat after the first one writes nothing and renews the lease (#11079)", async () => {
       const persistence = new FakeDeviceSessionPersistence();
-      const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(fakeTimer, persistence, {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       const write = spyOn(persistence, "recordActivity");
       try {
         const session = await manager.createSession(
@@ -3498,7 +3514,9 @@ describe("SessionManager", () => {
     test("a failed heartbeat write keeps the acknowledged liveness and the next heartbeat stores it (#11079)", async () => {
       const persistence = new FakeDeviceSessionPersistence();
       const write = spyOn(persistence, "recordActivity");
-      const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(fakeTimer, persistence, {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       try {
         const session = await manager.createSession(
           "kept-owner",
@@ -3548,7 +3566,9 @@ describe("SessionManager", () => {
     test("reclaim restores all liveness fields after one failed write and allows a successful retry", async () => {
       const persistence = new FakeDeviceSessionPersistence();
       const write = spyOn(persistence, "recordActivity");
-      const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(fakeTimer, persistence, {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       try {
         const session = await manager.createSession(
           "rollback-owner",
@@ -3608,7 +3628,9 @@ describe("SessionManager", () => {
     test("a failed first-heartbeat write does not expire under missing-first-heartbeat grace (#11079)", async () => {
       const persistence = new FakeDeviceSessionPersistence();
       const write = spyOn(persistence, "recordActivity");
-      const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(fakeTimer, persistence, {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       try {
         const session = await manager.createSession(
           "first-heartbeat",
@@ -3654,7 +3676,9 @@ describe("SessionManager", () => {
     test("failed reclaim still expires under awaiting-owner timeout", async () => {
       const persistence = new FakeDeviceSessionPersistence();
       const write = spyOn(persistence, "recordActivity");
-      const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(fakeTimer, persistence, {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       try {
         const session = await manager.createSession(
           "awaiting-heartbeat",
@@ -3697,7 +3721,9 @@ describe("SessionManager", () => {
       async (operation) => {
         const persistence = new FakeDeviceSessionPersistence();
         const write = spyOn(persistence, "recordActivity");
-        const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
+        const manager = new SessionManager(fakeTimer, persistence, {
+          barrier: () => new FakeDbWriteBarrier(),
+        });
         try {
           const session = await manager.createSession(
             "success-owner",
@@ -3749,7 +3775,9 @@ describe("SessionManager", () => {
       const persistence = new FakeDeviceSessionPersistence();
       const recordActivity = persistence.recordActivity.bind(persistence);
       const write = spyOn(persistence, "recordActivity");
-      const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(fakeTimer, persistence, {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       try {
         const session = await manager.createSession(
           "pending-owner",
@@ -3822,7 +3850,9 @@ describe("SessionManager", () => {
       const failFirst = Promise.withResolvers<void>();
       const persistence = new FakeDeviceSessionPersistence();
       const write = spyOn(persistence, "recordActivity");
-      const manager = new SessionManager(fakeTimer, persistence, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(fakeTimer, persistence, {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       try {
         const session = await manager.createSession(
           "overlapping-owner",
@@ -3907,7 +3937,9 @@ describe("SessionManager", () => {
           async markReleased() {},
         } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
       );
-      const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+      const manager = new SessionManager(timer, persistence, {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       try {
         const session = await manager.createSession("activity-session", "emulator-5554", "android");
         const before = {
@@ -4140,13 +4172,11 @@ describe("SessionManager", () => {
           restored.push(enrollment);
         },
       };
-      const manager = new SessionManager(
-        fakeTimer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        () => restorer,
-      );
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: () => restorer,
+      });
       try {
         await manager.createSession("ios-biometric", "sim-1", "ios");
         manager.setBiometricEnrollment("ios-biometric", { initialEnrollment: "not_enrolled" });
@@ -4163,17 +4193,15 @@ describe("SessionManager", () => {
 
     test("restores the old simulator enrollment before a session rebinds", async () => {
       const restored: Array<{ deviceId: string; enrollment: string }> = [];
-      const manager = new SessionManager(
-        fakeTimer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        (device) => ({
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: (device) => ({
           restore: async (enrollment) => {
             restored.push({ deviceId: device.deviceId, enrollment });
           },
         }),
-      );
+      });
       try {
         await manager.createSession("ios-rebind", "sim-a", "ios");
         manager.setBiometricEnrollment("ios-rebind", { initialEnrollment: "enrolled" });
@@ -4189,13 +4217,13 @@ describe("SessionManager", () => {
 
     test("waits for an active biometric setup before restoring the old simulator", async () => {
       const restored: string[] = [];
-      const manager = new SessionManager(
-        fakeTimer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        () => ({ restore: async (enrollment) => restored.push(enrollment) }),
-      );
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: () => ({
+          restore: async (enrollment) => restored.push(enrollment),
+        }),
+      });
       const started = Promise.withResolvers<void>();
       const finished = Promise.withResolvers<void>();
       try {
@@ -4224,12 +4252,10 @@ describe("SessionManager", () => {
     test("keeps the device quarantined and retries when the restore fails", async () => {
       const timer = new FakeTimer();
       let attempts = 0;
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        () => ({
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: () => ({
           restore: async () => {
             attempts += 1;
             if (attempts === 1) {
@@ -4237,7 +4263,7 @@ describe("SessionManager", () => {
             }
           },
         }),
-      );
+      });
       try {
         await manager.createSession("ios-restore-retry", "sim-dirty", "ios");
         manager.setBiometricEnrollment("ios-restore-retry", { initialEnrollment: "not_enrolled" });
@@ -4262,18 +4288,16 @@ describe("SessionManager", () => {
     test("stops retrying the restore after the bounded attempts are exhausted", async () => {
       const timer = new FakeTimer();
       let attempts = 0;
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        () => ({
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: () => ({
           restore: async () => {
             attempts += 1;
             throw new Error("simctl rejected the restore");
           },
         }),
-      );
+      });
       try {
         await manager.createSession("ios-restore-exhausted", "sim-dirty-2", "ios");
         manager.setBiometricEnrollment("ios-restore-exhausted", {
@@ -4298,17 +4322,15 @@ describe("SessionManager", () => {
   describe("biometric enrollment restoration platform independence", () => {
     test("restores cached enrollment even when the session declares a non-iOS platform", async () => {
       const restored: Array<{ deviceId: string; enrollment: string }> = [];
-      const manager = new SessionManager(
-        fakeTimer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        (device) => ({
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: (device) => ({
           restore: async (enrollment) => {
             restored.push({ deviceId: device.deviceId, enrollment });
           },
         }),
-      );
+      });
       try {
         // setActiveDevice stores the caller-declared platform, which can
         // disagree with the simulator actually bound. The cached enrollment is
@@ -4329,12 +4351,10 @@ describe("SessionManager", () => {
     test("quarantines the old simulator and retries when the rebind restore fails", async () => {
       const timer = new FakeTimer();
       const attempts: string[] = [];
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        (device) => ({
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: (device) => ({
           restore: async () => {
             attempts.push(device.deviceId);
             if (attempts.length === 1) {
@@ -4342,7 +4362,7 @@ describe("SessionManager", () => {
             }
           },
         }),
-      );
+      });
       try {
         await manager.createSession("ios-rebind-dirty", "sim-old", "ios");
         manager.setBiometricEnrollment("ios-rebind-dirty", { initialEnrollment: "not_enrolled" });
@@ -4371,18 +4391,18 @@ describe("SessionManager", () => {
 
     test("restores normal connectivity when a session that degraded the network releases", async () => {
       const restored: Array<{ deviceId: string; profile: string }> = [];
-      const manager = new SessionManager(
-        fakeTimer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        noopBiometric,
-        (device): NetworkConditionRestorer => ({
-          restore: async (profile) => {
-            restored.push({ deviceId: device.deviceId, profile });
-          },
-        }),
-      );
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: noopBiometric,
+        restorers: {
+          networkCondition: (device): NetworkConditionRestorer => ({
+            restore: async (profile) => {
+              restored.push({ deviceId: device.deviceId, profile });
+            },
+          }),
+        },
+      });
       try {
         await manager.createSession("net-1", "emulator-5554", "android");
         // Write-once: the first captured baseline wins over a later change.
@@ -4399,18 +4419,18 @@ describe("SessionManager", () => {
 
     test("does not attempt a network restore for a session that never degraded it", async () => {
       const restored: string[] = [];
-      const manager = new SessionManager(
-        fakeTimer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        noopBiometric,
-        (): NetworkConditionRestorer => ({
-          restore: async (profile) => {
-            restored.push(profile);
-          },
-        }),
-      );
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: noopBiometric,
+        restorers: {
+          networkCondition: (): NetworkConditionRestorer => ({
+            restore: async (profile) => {
+              restored.push(profile);
+            },
+          }),
+        },
+      });
       try {
         await manager.createSession("net-clean", "emulator-5554", "android");
         await manager.releaseSession("net-clean");
@@ -4430,20 +4450,20 @@ describe("SessionManager", () => {
         restoreStarted = resolve;
       });
       const restored: string[] = [];
-      const manager = new SessionManager(
-        fakeTimer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        noopBiometric,
-        (): NetworkConditionRestorer => ({
-          restore: async (profile) => {
-            restored.push(profile);
-            restoreStarted();
-            await restoration;
-          },
-        }),
-      );
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: noopBiometric,
+        restorers: {
+          networkCondition: (): NetworkConditionRestorer => ({
+            restore: async (profile) => {
+              restored.push(profile);
+              restoreStarted();
+              await restoration;
+            },
+          }),
+        },
+      });
       try {
         await manager.createSession("net-expiry", "emulator-5554", "android", 1);
         manager.setNetworkCondition("net-expiry", { initialProfile: "none" });
@@ -4464,18 +4484,18 @@ describe("SessionManager", () => {
     test("waits for a tracked network setup before restoring none on release (#6012 review P1)", async () => {
       const timer = new FakeTimer();
       const restored: string[] = [];
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        noopBiometric,
-        (): NetworkConditionRestorer => ({
-          restore: async (profile) => {
-            restored.push(profile);
-          },
-        }),
-      );
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: noopBiometric,
+        restorers: {
+          networkCondition: (): NetworkConditionRestorer => ({
+            restore: async (profile) => {
+              restored.push(profile);
+            },
+          }),
+        },
+      });
       const started = Promise.withResolvers<void>();
       const finished = Promise.withResolvers<void>();
       try {
@@ -4512,21 +4532,21 @@ describe("SessionManager", () => {
     test("keeps the device quarantined and retries when the network restore fails (#6012 review)", async () => {
       const timer = new FakeTimer();
       let attempts = 0;
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        () => ({ restore: async () => {} }),
-        (): NetworkConditionRestorer => ({
-          restore: async () => {
-            attempts += 1;
-            if (attempts === 1) {
-              throw new Error("emulator console rejected the restore");
-            }
-          },
-        }),
-      );
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+        restorers: {
+          networkCondition: (): NetworkConditionRestorer => ({
+            restore: async () => {
+              attempts += 1;
+              if (attempts === 1) {
+                throw new Error("emulator console rejected the restore");
+              }
+            },
+          }),
+        },
+      });
       try {
         await manager.createSession("net-restore-retry", "emulator-5554", "android");
         manager.setNetworkCondition("net-restore-retry", { initialProfile: "none" });
@@ -4551,19 +4571,19 @@ describe("SessionManager", () => {
     test("stops retrying the network restore after bounded attempts are exhausted", async () => {
       const timer = new FakeTimer();
       let attempts = 0;
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        () => ({ restore: async () => {} }),
-        (): NetworkConditionRestorer => ({
-          restore: async () => {
-            attempts += 1;
-            throw new Error("emulator console rejected the restore");
-          },
-        }),
-      );
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+        restorers: {
+          networkCondition: (): NetworkConditionRestorer => ({
+            restore: async () => {
+              attempts += 1;
+              throw new Error("emulator console rejected the restore");
+            },
+          }),
+        },
+      });
       try {
         await manager.createSession("net-restore-exhausted", "emulator-5556", "android");
         manager.setNetworkCondition("net-restore-exhausted", { initialProfile: "none" });
@@ -4585,18 +4605,18 @@ describe("SessionManager", () => {
 
     test("restores the old emulator before a session rebinds to a new device", async () => {
       const restored: Array<{ deviceId: string; profile: string }> = [];
-      const manager = new SessionManager(
-        fakeTimer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        noopBiometric,
-        (device): NetworkConditionRestorer => ({
-          restore: async (profile) => {
-            restored.push({ deviceId: device.deviceId, profile });
-          },
-        }),
-      );
+      const manager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: noopBiometric,
+        restorers: {
+          networkCondition: (device): NetworkConditionRestorer => ({
+            restore: async (profile) => {
+              restored.push({ deviceId: device.deviceId, profile });
+            },
+          }),
+        },
+      });
       try {
         await manager.createSession("net-rebind", "emulator-5554", "android");
         // Baseline recorded before the session degraded the network.
@@ -4618,18 +4638,18 @@ describe("SessionManager", () => {
       timer: FakeTimer,
       restored: Array<{ deviceId: string; profile: string }>,
     ): SessionManager =>
-      new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        noopBiometric,
-        (device): NetworkConditionRestorer => ({
-          restore: async (profile) => {
-            restored.push({ deviceId: device.deviceId, profile });
-          },
-        }),
-      );
+      new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: noopBiometric,
+        restorers: {
+          networkCondition: (device): NetworkConditionRestorer => ({
+            restore: async (profile) => {
+              restored.push({ deviceId: device.deviceId, profile });
+            },
+          }),
+        },
+      });
 
     test("resets the device to none when the per-condition TTL elapses", async () => {
       const timer = new FakeTimer();
@@ -4772,21 +4792,21 @@ describe("SessionManager", () => {
     test("routes TTL expiry through the bounded retry, keeping the device quarantined on a transient failure (#6085 review)", async () => {
       const timer = new FakeTimer();
       let attempts = 0;
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        noopBiometric,
-        (): NetworkConditionRestorer => ({
-          restore: async () => {
-            attempts += 1;
-            if (attempts === 1) {
-              throw new Error("emulator console transiently rejected the reset");
-            }
-          },
-        }),
-      );
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: noopBiometric,
+        restorers: {
+          networkCondition: (): NetworkConditionRestorer => ({
+            restore: async () => {
+              attempts += 1;
+              if (attempts === 1) {
+                throw new Error("emulator console transiently rejected the reset");
+              }
+            },
+          }),
+        },
+      });
       try {
         const session = await manager.createSession("net-ttl-retry", "emulator-5554", "android");
         manager.setNetworkCondition("net-ttl-retry", { initialProfile: "none" });
@@ -4814,19 +4834,19 @@ describe("SessionManager", () => {
     test("retains the restore slot when TTL retries are exhausted so a later release still restores (#6085 review)", async () => {
       const timer = new FakeTimer();
       let attempts = 0;
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        noopBiometric,
-        (): NetworkConditionRestorer => ({
-          restore: async () => {
-            attempts += 1;
-            throw new Error("emulator console rejected the reset");
-          },
-        }),
-      );
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: noopBiometric,
+        restorers: {
+          networkCondition: (): NetworkConditionRestorer => ({
+            restore: async () => {
+              attempts += 1;
+              throw new Error("emulator console rejected the reset");
+            },
+          }),
+        },
+      });
       try {
         const session = await manager.createSession("net-ttl-exhaust", "emulator-5556", "android");
         manager.setNetworkCondition("net-ttl-exhaust", { initialProfile: "none" });
@@ -4878,25 +4898,25 @@ describe("SessionManager", () => {
       const timer = new FakeTimer();
       const restoreCalls: string[] = [];
       let releaseFirstRestore: (() => void) | undefined;
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        noopBiometric,
-        (): NetworkConditionRestorer => ({
-          restore: async (profile) => {
-            restoreCalls.push(profile);
-            if (restoreCalls.length === 1) {
-              // Condition A's TTL-expiry restore: deferred so the test can apply
-              // condition B while it is still in flight.
-              await new Promise<void>((resolve) => {
-                releaseFirstRestore = resolve;
-              });
-            }
-          },
-        }),
-      );
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: noopBiometric,
+        restorers: {
+          networkCondition: (): NetworkConditionRestorer => ({
+            restore: async (profile) => {
+              restoreCalls.push(profile);
+              if (restoreCalls.length === 1) {
+                // Condition A's TTL-expiry restore: deferred so the test can apply
+                // condition B while it is still in flight.
+                await new Promise<void>((resolve) => {
+                  releaseFirstRestore = resolve;
+                });
+              }
+            },
+          }),
+        },
+      });
       try {
         const sessionId = "net-ttl-generation";
         const session = await manager.createSession(sessionId, "emulator-5554", "android");
@@ -4939,25 +4959,25 @@ describe("SessionManager", () => {
       const timer = new FakeTimer();
       const restoreCalls: string[] = [];
       let releaseDeferredRestore: (() => void) | undefined;
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => ({ status: "restored" as const }) }),
-        noopBiometric,
-        (): NetworkConditionRestorer => ({
-          restore: async (profile) => {
-            restoreCalls.push(profile);
-            if (restoreCalls.length === 1) {
-              // Condition B's TTL-expiry restore: deferred so condition C can be
-              // applied while it is still in flight.
-              await new Promise<void>((resolve) => {
-                releaseDeferredRestore = resolve;
-              });
-            }
-          },
-        }),
-      );
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+        keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+        biometricEnrollmentRestorer: noopBiometric,
+        restorers: {
+          networkCondition: (): NetworkConditionRestorer => ({
+            restore: async (profile) => {
+              restoreCalls.push(profile);
+              if (restoreCalls.length === 1) {
+                // Condition B's TTL-expiry restore: deferred so condition C can be
+                // applied while it is still in flight.
+                await new Promise<void>((resolve) => {
+                  releaseDeferredRestore = resolve;
+                });
+              }
+            },
+          }),
+        },
+      });
       try {
         const sessionId = "net-ttl-three-way-generation";
         const session = await manager.createSession(sessionId, "emulator-5554", "android");
@@ -5178,7 +5198,7 @@ describe("SessionManager", () => {
     test("routes fire-and-forget session activity writes through the barrier", async () => {
       const { repo, activity } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      const mgr = new SessionManager(fakeTimer, repo, { barrier: () => barrier });
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         mgr.recordHeartbeat("s1");
@@ -5197,7 +5217,7 @@ describe("SessionManager", () => {
     test("skips fire-and-forget session writes while draining", async () => {
       const { repo, activity } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      const mgr = new SessionManager(fakeTimer, repo, { barrier: () => barrier });
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         barrier.beginDrain();
@@ -5219,7 +5239,7 @@ describe("SessionManager", () => {
     test("cleanup timer routes an expired-session release through the barrier", async () => {
       const { repo, released } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      const mgr = new SessionManager(fakeTimer, repo, { barrier: () => barrier });
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         // Past the idle window and a cleanup interval (5m): the timer fires.
@@ -5237,7 +5257,7 @@ describe("SessionManager", () => {
     test("stopCleanupTimer prevents the timer from routing any further tracked write", async () => {
       const { repo, released } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      const mgr = new SessionManager(fakeTimer, repo, { barrier: () => barrier });
       await mgr.createSession("s1", "emulator-5554", "android");
 
       // Model the shutdown ordering: stop the timer BEFORE the (would-be) drain.
@@ -5329,7 +5349,7 @@ describe("SessionManager", () => {
     test("EC3.2: the read records NO session activity", async () => {
       const { repo, activity } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      const mgr = new SessionManager(fakeTimer, repo, { barrier: () => barrier });
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         mgr.setLastRenderedObservation("s1", makeObservation("root"));
@@ -5357,7 +5377,7 @@ describe("SessionManager", () => {
       // is admitted and where it ends, so the baseline store adds no write at all.
       const { repo, activity } = makeRepo();
       const barrier = new FakeDbWriteBarrier();
-      const mgr = new SessionManager(fakeTimer, repo, () => barrier);
+      const mgr = new SessionManager(fakeTimer, repo, { barrier: () => barrier });
       try {
         await mgr.createSession("s1", "emulator-5554", "android");
         await Promise.resolve();

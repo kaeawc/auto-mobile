@@ -305,7 +305,9 @@ export async function runSessionRowInterleaving(
   const timer = new FakeTimer();
   timer.setCurrentTime(1_000);
   const repository = new ChaoticRepository(db, timer, random);
-  const manager = new SessionManager(timer, repository, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, repository, {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   manager.setSupersededRowReassertBackoff(fixedBackoff(REASSERT_RETRY_DELAY_MS));
   manager.setTerminalReleaseRetryBackoff(fixedBackoff(TERMINAL_RETRY_DELAY_MS));
@@ -902,7 +904,7 @@ export async function runSessionRowInterleaving(
       "daemon-restart",
       liveDaemons,
     );
-    const next = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    const next = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
     next.stopCleanupTimer();
     next.attachDaemonSessionId(RESTARTED_DAEMON);
     next.attachLiveDaemonSessionIds(() => liveDaemons);

@@ -27,7 +27,9 @@ const test = warmedTests(async () => {
 function setup() {
   const timer = new FakeTimer();
   const persistence = new FakeDeviceSessionPersistence();
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   managers.push(manager);
   const heartbeat = (sessionId = "S", token = "minter", claim = true) =>
@@ -459,7 +461,9 @@ test("rehydrated awaiting-owner keeps its release window and claim behaviour wit
     await persistence.recordLivenessOwnership(id, "minter");
     await persistence.markReleased(id, "released", 0, "daemon-restart");
   }
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   managers.push(manager);
   manager.stopCleanupTimer();
   const assigner: SessionDeviceAssigner = {

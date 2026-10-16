@@ -21,20 +21,25 @@ import {
   RECORDER_TEARDOWN_RECHECK_MS,
   recoverRecorderTeardowns,
 } from "./recorderTeardownRecovery";
+import {
+  defaultBiometricEnrollmentRestorer,
+  defaultClockRestorerFactory,
+  defaultKeepScreenAwakeRestorer,
+  defaultNetworkConditionRestorer,
+  defaultRotationRestorerFactory,
+  defaultScreenReaderRestorer,
+} from "./sessionDefaultRestorers";
 import { ignoresManagedExecutionIdleDeadline } from "./sessionBroker/provisioning/executionLiveness";
 import type { DeferredRebindCleanup } from "./acquisitionReceipt";
 import type { TimingData } from "../utils/PerformanceTracker";
-import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
-import { Rotate, type RotationRestoreState } from "../features/action/Rotate";
+import { type RotationRestoreState } from "../features/action/Rotate";
 import { RotationSettingManagedError } from "../models/RotationSettingManagedError";
 import {
-  restoreScreenReaderState,
   SCREEN_READER_RESTORE_TIMEOUT_MS,
   type ScreenReaderRestoreState,
 } from "../features/accessibility/ScreenReaderRestore";
-import { invalidateDisplayCaches } from "../features/observe/DisplayTransition";
 import { ExecNetworkFilterBridge } from "../features/networkFilter/NetworkFilterBridge";
 import {
   IOS_APP_NETWORK_RULE_LEASE_MS,
@@ -45,12 +50,9 @@ import {
 } from "../features/networkFilter/IosAppNetworkRuleClient";
 import { IosAppNetworkLeases, type IosAppNetworkRuleRestorer } from "./iosAppNetworkLease";
 import {
-  AndroidDeviceClockAdapter,
-  restoreDeviceClock,
   defaultDeviceClockRestoreRegistry,
   type DeviceClockRestoreState,
 } from "../features/utility/DeviceClock";
-import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
 import { resolveOwnershipSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
@@ -72,7 +74,6 @@ import { readEnvPositiveInteger } from "../utils/envNumbers";
 import { isDeviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
 import { BootedDevice, Platform } from "../models";
 import {
-  KeepScreenAwakeManager,
   KeepScreenAwakeState,
   type KeepScreenAwakeRestoreOutcome,
   type KeepAwakeRestoreReport,
@@ -105,7 +106,6 @@ import {
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
 import {
-  DeviceState,
   MAX_NETWORK_CONDITION_TTL_SECONDS,
   type BiometricEnrollment,
   type NetworkConditionProfile,
@@ -338,9 +338,10 @@ interface PendingScreenReaderRestore {
 export interface ScreenReaderRestorer {
   restore(state: ScreenReaderSessionState, signal?: AbortSignal): Promise<void>;
 }
+/** Overrides for the per-session device-state restorers; each omitted one uses production wiring. */
 export interface DeviceStateRestorerFactories {
-  networkCondition: (device: BootedDevice) => NetworkConditionRestorer;
-  clock: (device: BootedDevice) => ClockRestorer;
+  networkCondition?: (device: BootedDevice) => NetworkConditionRestorer;
+  clock?: (device: BootedDevice) => ClockRestorer;
   rotation?: (device: BootedDevice) => RotationRestorer;
   /** Delay before each rotation restore retry; defaults to a short exponential backoff. */
   rotationBackoff?: BackoffPolicy;
@@ -351,35 +352,38 @@ export interface DeviceStateRestorerFactories {
   iosAppNetworkRule?: IosAppNetworkRuleRestorer;
 }
 
-/** The injected screen-reader restorer, else the real TalkBack/VoiceOver one. */
-function screenReaderRestorerFactoryFrom(
-  factories: ((device: BootedDevice) => NetworkConditionRestorer) | DeviceStateRestorerFactories,
-): (device: BootedDevice) => ScreenReaderRestorer {
-  const injected = typeof factories === "function" ? undefined : factories.screenReader;
-  return (
-    injected ??
-    ((device) => ({
-      restore: (state, signal) => restoreScreenReaderState(device, state, signal),
-    }))
-  );
+/**
+ * Everything SessionManager can be constructed with beyond `(timer, repository)`. Every field is
+ * optional and defaults to the production wiring (#11796).
+ */
+export interface SessionManagerOptions {
+  /**
+   * Resolve per write: closeDatabase() -> resetDbWriteBarrier() makes the next track()
+   * use a fresh barrier, not a pinned drained instance (#2912, #3154, #2885).
+   */
+  barrier?: () => DbWriteBarrier;
+  /** Keep-awake restore seam (#2973); tests assert the typed slot's payload reaches `restore`. */
+  keepScreenAwakeRestorer?: (device: BootedDevice) => KeepScreenAwakeRestorer;
+  /** Simulator enrollment restore seam, parallel to keep-awake so tests never invoke simctl. */
+  biometricEnrollmentRestorer?: (device: BootedDevice) => BiometricEnrollmentRestorer;
+  restorers?: DeviceStateRestorerFactories;
 }
 
-function rotationBackoffFrom(
-  factories: ((device: BootedDevice) => NetworkConditionRestorer) | DeviceStateRestorerFactories,
-): BackoffPolicy {
-  return (
-    (typeof factories === "function" ? undefined : factories.rotationBackoff) ??
-    DEFAULT_ROTATION_RESTORE_BACKOFF
-  );
-}
-
-function screenReaderBackoffFrom(
-  factories: ((device: BootedDevice) => NetworkConditionRestorer) | DeviceStateRestorerFactories,
-): BackoffPolicy {
-  return (
-    (typeof factories === "function" ? undefined : factories.screenReaderBackoff) ??
-    DEFAULT_SCREEN_READER_RESTORE_BACKOFF
-  );
+/** Production defaults for every restorer the options leave out (#11796). */
+function resolveDeviceStateRestorers(
+  timer: Timer,
+  overrides: DeviceStateRestorerFactories,
+): Required<Omit<DeviceStateRestorerFactories, "iosAppNetworkRule">> &
+  Pick<DeviceStateRestorerFactories, "iosAppNetworkRule"> {
+  return {
+    networkCondition: overrides.networkCondition ?? defaultNetworkConditionRestorer,
+    clock: overrides.clock ?? defaultClockRestorerFactory(timer),
+    rotation: overrides.rotation ?? defaultRotationRestorerFactory(timer),
+    rotationBackoff: overrides.rotationBackoff ?? DEFAULT_ROTATION_RESTORE_BACKOFF,
+    screenReader: overrides.screenReader ?? defaultScreenReaderRestorer,
+    screenReaderBackoff: overrides.screenReaderBackoff ?? DEFAULT_SCREEN_READER_RESTORE_BACKOFF,
+    iosAppNetworkRule: overrides.iosAppNetworkRule,
+  };
 }
 
 /** Narrow seam for restoring the device-wide network condition on release. */
@@ -2716,46 +2720,9 @@ export class SessionManager {
       undefined,
       timer,
     ),
-    // Resolve per write: closeDatabase() -> resetDbWriteBarrier() makes the next track()
-    // use a fresh barrier, not a pinned drained instance (#2912, #3154, #2885).
-    // Same-process reopen is tests-only; revisit if production adds that path.
-    getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
-    // Seam for keep-awake restore (issue #2973): defaults to the real manager;
-    // tests inject a fake to assert the typed slot's payload reaches `restore`.
-    keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer = (device) =>
-      new KeepScreenAwakeManager(device, defaultAdbClientFactory, (device) =>
-        AndroidCtrlProxyClient.getInstance(device),
-      ),
-    // Simulator enrollment is session-scoped state. Keep this seam parallel to
-    // keep-awake so lifecycle tests never invoke simctl.
-    biometricEnrollmentRestorerFactory: (device: BootedDevice) => BiometricEnrollmentRestorer = (
-      device,
-    ) => ({
-      restore: async (enrollment) => {
-        const result = await new DeviceState(device).setBiometricEnrollmentState(enrollment);
-        if (!result.supported || result.error || result.verified === false) {
-          throw new Error(result.error ?? "Failed to restore iOS Simulator biometric enrollment");
-        }
-      },
-    }),
-    // Device-wide network conditioning is session-scoped state (issue #6012).
-    // Factories inject restoration without adb in tests, preserving the positional contract.
-    // The default restores normal connectivity via the emulator console.
-    networkConditionRestorerFactory:
-      | ((device: BootedDevice) => NetworkConditionRestorer)
-      | DeviceStateRestorerFactories = (device) => ({
-      restore: async (profile) => {
-        const result = await new DeviceState(device).setState({
-          networkCondition: { profile },
-        });
-        if (!result.success) {
-          throw new Error(
-            result.networkCondition?.error ?? result.error ?? "Failed to restore network condition",
-          );
-        }
-      },
-    }),
+    options: SessionManagerOptions = {},
   ) {
+    const restorers = options.restorers ?? {};
     this.timer = timer;
     this.sessionClock = new SteadyWallClock(timer);
     // Rows are read by other processes on their own session clocks: stamps cross as wall ms (#11162).
@@ -2771,57 +2738,19 @@ export class SessionManager {
       timeoutMs: SESSION_RELEASE_PERSIST_TIMEOUT_MS,
       timeoutError: SessionReleasePersistTimeoutError,
     });
-    this.getBarrier = getBarrier;
-    this.keepScreenAwakeRestorerFactory = keepScreenAwakeRestorerFactory;
-    this.biometricEnrollmentRestorerFactory = biometricEnrollmentRestorerFactory;
-    this.networkConditionRestorerFactory =
-      typeof networkConditionRestorerFactory === "function"
-        ? networkConditionRestorerFactory
-        : networkConditionRestorerFactory.networkCondition;
-    this.clockRestorerFactory =
-      typeof networkConditionRestorerFactory === "function"
-        ? (device) => ({
-            restore: async (value, signal) => {
-              const adapter = new AndroidDeviceClockAdapter(
-                defaultAdbClientFactory.create(device),
-                signal,
-              );
-              const root = await adapter.ensureRoot();
-              if (!root.success) {
-                throw new Error(root.error);
-              }
-              value.rootedByUs ||= root.rootedByUs;
-              const result = await restoreDeviceClock(device, adapter, value, {
-                hostClock: this.timer,
-                invalidate: (deviceId) => {
-                  if (!signal?.aborted) {
-                    invalidateDisplayCaches(deviceId, "Device clock restored");
-                  }
-                },
-              });
-              if (!result.verified) {
-                throw new Error(result.error ?? "Clock restoration did not verify");
-              }
-            },
-          })
-        : networkConditionRestorerFactory.clock;
-    this.rotationRestorerFactory =
-      (typeof networkConditionRestorerFactory === "function"
-        ? undefined
-        : networkConditionRestorerFactory.rotation) ??
-      ((device) => ({
-        restore: (state, signal) =>
-          new Rotate(device, null, this.timer).restoreRotationSettings(state, signal),
-      }));
-    this.screenReaderRestorerFactory = screenReaderRestorerFactoryFrom(
-      networkConditionRestorerFactory,
-    );
-    this.screenReaderRestoreBackoff = screenReaderBackoffFrom(networkConditionRestorerFactory);
-    this.rotationRestoreBackoff = rotationBackoffFrom(networkConditionRestorerFactory);
-    this.injectedIosAppNetworkRuleRestorer =
-      typeof networkConditionRestorerFactory === "function"
-        ? undefined
-        : networkConditionRestorerFactory.iosAppNetworkRule;
+    this.getBarrier = options.barrier ?? getDbWriteBarrier;
+    this.keepScreenAwakeRestorerFactory =
+      options.keepScreenAwakeRestorer ?? defaultKeepScreenAwakeRestorer;
+    this.biometricEnrollmentRestorerFactory =
+      options.biometricEnrollmentRestorer ?? defaultBiometricEnrollmentRestorer;
+    const resolved = resolveDeviceStateRestorers(timer, restorers);
+    this.networkConditionRestorerFactory = resolved.networkCondition;
+    this.clockRestorerFactory = resolved.clock;
+    this.rotationRestorerFactory = resolved.rotation;
+    this.screenReaderRestorerFactory = resolved.screenReader;
+    this.screenReaderRestoreBackoff = resolved.screenReaderBackoff;
+    this.rotationRestoreBackoff = resolved.rotationBackoff;
+    this.injectedIosAppNetworkRuleRestorer = resolved.iosAppNetworkRule;
     this.iosAppNetworkLeases = new IosAppNetworkLeases(
       this.timer,
       () => this.iosAppNetworkRuleRestorer,

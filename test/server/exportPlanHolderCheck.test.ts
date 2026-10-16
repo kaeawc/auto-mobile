@@ -113,8 +113,10 @@ describe("exportPlan from a connection that does not hold the recording's device
       spyOn(logger, "error").mockImplementation(() => {}),
     ];
     timer = new FakeTimer();
-    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), () => {
-      return new FakeDbWriteBarrier();
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => {
+        return new FakeDbWriteBarrier();
+      },
     });
     manager.stopCleanupTimer();
     const discovery = new FakeDeviceUtils();

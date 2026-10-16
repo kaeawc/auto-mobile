@@ -61,19 +61,17 @@ async function harness(
       throw new Error("restore unavailable");
     }
   };
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
       restore: async () => {
         await restore();
         return { status: "restored" as const };
       },
     }),
-    () => ({ restore }),
-    { networkCondition: () => ({ restore }), clock: () => ({ restore }) },
-  );
+    biometricEnrollmentRestorer: () => ({ restore }),
+    restorers: { networkCondition: () => ({ restore }), clock: () => ({ restore }) },
+  });
   managers.push(manager);
   const utils = new FakeDeviceUtils();
   const devices = count === 1 ? [device] : [device, other];

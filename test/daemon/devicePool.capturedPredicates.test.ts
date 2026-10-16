@@ -113,11 +113,9 @@ const rows: PredicateRow[] = [
 
 async function createContext(autolock: boolean): Promise<PredicateContext> {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   const booted = { deviceId: "emulator-5554", name: "Pixel", platform: "android" as const };
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [booted]);

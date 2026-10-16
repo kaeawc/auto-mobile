@@ -24,11 +24,9 @@ test("keep-awake retries pending at commit advertise their remaining teardown ca
   timer.setCurrentTime(1_000);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   let attempts = 0;
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
       restore: async () => {
         attempts++;
         if (attempts === 1) {
@@ -42,7 +40,7 @@ test("keep-awake retries pending at commit advertise their remaining teardown ca
         return { status: "restored" as const };
       },
     }),
-  );
+  });
   dispose.push(() => {
     manager.stopCleanupTimer();
     timer.reset();
@@ -81,15 +79,13 @@ test("only the capped cleanup contributes a bound while an own-budget clock retr
   const clockRetry = Promise.withResolvers<void>();
   let clockAttempts = 0;
   let clockSignal: AbortSignal | undefined;
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
       restore: async () => ({ status: "restored" as const }),
     }),
-    () => ({ restore: async () => {} }),
-    {
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: {
       networkCondition: () => ({
         restore: () =>
           new Promise<void>((_resolve, reject) => {
@@ -108,7 +104,7 @@ test("only the capped cleanup contributes a bound while an own-budget clock retr
         },
       }),
     },
-  );
+  });
   dispose.push(() => {
     clockRetry.resolve();
     manager.retireClockRestoration(deviceId);
@@ -151,16 +147,14 @@ test("only the capped cleanup contributes a bound while an own-budget clock retr
 
 test("a release with no pending restores leaves no cleanup bound or timer", async () => {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
       restore: async () => ({ status: "restored" as const }),
     }),
-    () => ({ restore: async () => {} }),
-    () => ({ restore: async () => {} }),
-  );
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: { networkCondition: () => ({ restore: async () => {} }) },
+  });
   dispose.push(() => {
     manager.stopCleanupTimer();
     timer.reset();
@@ -187,22 +181,22 @@ test("a bind refused while a released session's capped network restore is still 
   timer.setCurrentTime(1_000);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   // A wedged emulator console: the restore settles only when the teardown shield aborts it.
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({
       restore: async () => ({ status: "restored" as const }),
     }),
-    () => ({ restore: async () => {} }),
-    () => ({
-      restore: () =>
-        new Promise<void>((_resolve, reject) => {
-          const signal = getAbortSignal();
-          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-        }),
-    }),
-  );
+    biometricEnrollmentRestorer: () => ({ restore: async () => {} }),
+    restorers: {
+      networkCondition: () => ({
+        restore: () =>
+          new Promise<void>((_resolve, reject) => {
+            const signal = getAbortSignal();
+            signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+          }),
+      }),
+    },
+  });
   dispose.push(() => {
     manager.stopCleanupTimer();
     timer.reset();

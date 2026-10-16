@@ -141,8 +141,10 @@ describe("videoRecording stop by id with no sessionUuid, over the MCP ingress", 
       spyOn(logger, "error").mockImplementation(() => {}),
     ];
     timer = new FakeTimer();
-    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), () => {
-      return new FakeDbWriteBarrier();
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => {
+        return new FakeDbWriteBarrier();
+      },
     });
     manager.stopCleanupTimer();
     const discovery = new FakeDeviceUtils();

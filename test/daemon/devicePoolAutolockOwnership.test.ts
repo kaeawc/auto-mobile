@@ -51,7 +51,7 @@ async function harness(deviceUtils?: FakeDeviceUtils) {
   const repository = new DeviceSessionRepository(db);
   const timer = new FakeTimer();
   const barrier = new FakeDbWriteBarrier();
-  const manager = new SessionManager(timer, repository, () => barrier);
+  const manager = new SessionManager(timer, repository, { barrier: () => barrier });
   const devices = new FakeDeviceManager(
     [],
     [{ deviceId: "emulator-5554", name: "Agent A AVD", platform: "android" }],

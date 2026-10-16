@@ -605,12 +605,10 @@ describe("managed execution release wiring", () => {
       status: "restored_to_baseline" as const,
       settings: [{ setting: "svc_stayon" as const, value: "false" }],
     };
-    const manager = new SessionManager(
-      new FakeTimer(),
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => report }),
-    );
+    const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({ restore: async () => report }),
+    });
     manager.stopCleanupTimer();
     try {
       await manager.createSession(S1, DEVICE, "android");

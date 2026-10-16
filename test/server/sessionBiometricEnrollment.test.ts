@@ -16,13 +16,13 @@ describe("runSessionBiometricMutation", () => {
   test("publishes enrollment before a tracked mutation and restores after it settles", async () => {
     const timer = new FakeTimer();
     const restored: string[] = [];
-    const manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => ({ status: "restored" as const }) }),
-      () => ({ restore: async (enrollment) => restored.push(enrollment) }),
-    );
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+      biometricEnrollmentRestorer: () => ({
+        restore: async (enrollment) => restored.push(enrollment),
+      }),
+    });
     const started = Promise.withResolvers<void>();
     const finished = Promise.withResolvers<void>();
     try {
@@ -55,13 +55,13 @@ describe("runSessionBiometricMutation", () => {
 
   test("does not cache enrollment, mutate, or restore when tracked setup is refused", async () => {
     const restored: string[] = [];
-    const manager = new SessionManager(
-      new FakeTimer(),
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => ({ status: "restored" as const }) }),
-      () => ({ restore: async (enrollment) => restored.push(enrollment) }),
-    );
+    const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+      biometricEnrollmentRestorer: () => ({
+        restore: async (enrollment) => restored.push(enrollment),
+      }),
+    });
     const finished = Promise.withResolvers<void>();
     let mutationStarted = false;
     try {
@@ -99,13 +99,13 @@ describe("runSessionBiometricMutation", () => {
 
   test("keeps enrollment and restores it when an admitted mutation throws", async () => {
     const restored: string[] = [];
-    const manager = new SessionManager(
-      new FakeTimer(),
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => ({ status: "restored" as const }) }),
-      () => ({ restore: async (enrollment) => restored.push(enrollment) }),
-    );
+    const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+      keepScreenAwakeRestorer: () => ({ restore: async () => ({ status: "restored" as const }) }),
+      biometricEnrollmentRestorer: () => ({
+        restore: async (enrollment) => restored.push(enrollment),
+      }),
+    });
     try {
       await manager.createSession("session-1", "sim-1", "ios");
 
@@ -132,11 +132,9 @@ describe("runSessionBiometricMutation", () => {
   });
 
   test("does not mutate an old simulator after the session rebinds", async () => {
-    const manager = new SessionManager(
-      new FakeTimer(),
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     let mutationStarted = false;
     try {
       await manager.createSession("session-1", "sim-a", "ios");

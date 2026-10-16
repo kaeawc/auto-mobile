@@ -11,17 +11,13 @@ import { FakeTimer } from "../fakes/FakeTimer";
 test("manager slots read pending from the injected writer on every call", async () => {
   const timer = new FakeTimer();
   const writer = new FakeSessionRowWriter();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    undefined,
-    undefined,
-    {
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    restorers: {
       networkCondition: () => ({ restore: () => Promise.resolve() }),
       clock: () => ({ restore: () => Promise.resolve() }),
     },
-  );
+  });
   manager.setRowWriter(writer);
   manager.stopCleanupTimer();
   const slots = Reflect.get(manager, "sessionSlots") as SessionManager["sessionSlots"];
@@ -48,11 +44,9 @@ test("manager slots read pending from the injected writer on every call", async 
 
 test("the default writer stays idle through manager create and release", async () => {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   const writer = Reflect.get(manager, "rowWriter") as SerializedSessionRowWriter;
   const slots = Reflect.get(manager, "sessionSlots") as SessionManager["sessionSlots"];
@@ -68,11 +62,9 @@ test("the default writer stays idle through manager create and release", async (
 test("manager delegates drain tracking and awaits writes added during the drain", async () => {
   const timer = new FakeTimer();
   const writer = new FakeSessionRowWriter();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.setRowWriter(writer);
   manager.stopCleanupTimer();
   const track = Reflect.get(manager, "trackReleaseDrainWrite") as (write: Promise<void>) => void;
@@ -109,11 +101,9 @@ test("manager drain excludes settled identities from its next writer snapshot", 
     // A third read ends a broken loop so the assertion fails without a timeout or real sleep.
     return new Set(reads <= 2 ? [completed] : []);
   };
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.setRowWriter(writer);
   manager.stopCleanupTimer();
   expect(await manager.drainReleasePromises(1000)).toBe(true);
@@ -124,11 +114,9 @@ test("manager drain excludes settled identities from its next writer snapshot", 
 
 test("manager retry callbacks retain instance dispatch and enter on the timer's turn", async () => {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   manager.setTerminalReleaseRetryBackoff({ delayForAttempt: () => 37 });
   const writer = Reflect.get(manager, "rowWriter") as SerializedSessionRowWriter;
@@ -164,11 +152,9 @@ test("manager retry callbacks retain instance dispatch and enter on the timer's 
 
 test("manager stop clears writer handles and drain retains the original retry promise", async () => {
   const timer = new FakeTimer();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   const writer = Reflect.get(manager, "rowWriter") as SerializedSessionRowWriter;
   const snapshot: SessionReleaseSnapshot = {
@@ -210,11 +196,9 @@ test("manager stop clears writer handles and drain retains the original retry pr
 
 test("startup replay retains its fence without lifting a successor writer desire", async () => {
   const writer = new FakeSessionRowWriter();
-  const manager = new SessionManager(
-    new FakeTimer(),
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.setRowWriter(writer);
   manager.stopCleanupTimer();
   const snapshot: SessionReleaseSnapshot = {
@@ -250,11 +234,9 @@ test("startup replay retains its fence without lifting a successor writer desire
 });
 
 test("non-terminal commit without a fence does not resolve or reload the journal", async () => {
-  const manager = new SessionManager(
-    new FakeTimer(),
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
+  const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   manager.stopCleanupTimer();
   const journal = new FileTerminalReleaseJournal(
     "/in-memory/unused.jsonl",

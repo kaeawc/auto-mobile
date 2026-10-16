@@ -58,11 +58,9 @@ describe("two recorder teardown failures on one device share one health recovery
   beforeEach(() => {
     timer = new FakeTimer();
     repo = new FakeVideoRecordingRepository();
-    manager = new SessionManager(
-      timer,
-      new FakeDeviceSessionPersistence(),
-      () => new FakeDbWriteBarrier(),
-    );
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
     manager.stopCleanupTimer();
     markers = new InMemoryDeviceHealthMarkers(timer);
     // The pool's rule: recovery acts only on a device with no cleanup in flight.

@@ -38,7 +38,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
     store = new BusyRewritePersistence();
-    manager = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    manager = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
     manager.stopCleanupTimer();
     manager.setSupersededRowReassertBackoff(fixedBackoff(RETRY_DELAY_MS));
     manager.setTerminalReleaseRetryBackoff(fixedBackoff(TERMINAL_RETRY_DELAY_MS));
@@ -60,7 +60,7 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
 
   test("successful own-row release and guarded rebind use the unguarded microtask budget", async () => {
     manager.attachDaemonSessionId("daemon-1");
-    const unguarded = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    const unguarded = new SessionManager(timer, store, { barrier: () => new FakeDbWriteBarrier() });
     unguarded.stopCleanupTimer();
     try {
       await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);

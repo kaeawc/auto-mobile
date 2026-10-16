@@ -49,8 +49,10 @@ describe("deviceId-only calls from the holder's own connection (#10994)", () => 
       spyOn(logger, "warn").mockImplementation(() => {}),
     ];
     timer = new FakeTimer();
-    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), () => {
-      return new FakeDbWriteBarrier();
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => {
+        return new FakeDbWriteBarrier();
+      },
     });
     manager.stopCleanupTimer();
     const discovery = new FakeDeviceUtils();

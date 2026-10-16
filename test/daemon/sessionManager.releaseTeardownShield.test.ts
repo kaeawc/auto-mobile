@@ -85,14 +85,12 @@ async function harness() {
   timer.setCurrentTime(1000);
   const markers = new FakeDeviceHealthMarkers(timer);
   const fake = new SignalAwareDevice();
-  const manager = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-    () => ({ restore: fake.restorer("keep-awake") }),
-    () => ({ restore: fake.restorer("biometric") }),
-    () => ({ restore: fake.restorer("network") }),
-  );
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+    barrier: () => new FakeDbWriteBarrier(),
+    keepScreenAwakeRestorer: () => ({ restore: fake.restorer("keep-awake") }),
+    biometricEnrollmentRestorer: () => ({ restore: fake.restorer("biometric") }),
+    restorers: { networkCondition: () => ({ restore: fake.restorer("network") }) },
+  });
   managers.push(manager);
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [device]);

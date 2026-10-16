@@ -75,7 +75,9 @@ async function stuckRelease(
   const timer = new FakeTimer();
   timer.setCurrentTime(0);
   const persistence = new ParkablePersistence();
-  const manager = new SessionManager(timer, persistence, () => new FakeDbWriteBarrier());
+  const manager = new SessionManager(timer, persistence, {
+    barrier: () => new FakeDbWriteBarrier(),
+  });
   cleanups.push(() => manager.stopCleanupTimer());
   const released: string[] = [];
   manager.onSessionRelease((sessionId, _deviceId, reason) => {
@@ -243,11 +245,9 @@ describe("a stuck idle release is held to the same deadline", () => {
     await quietly(async () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(0);
-      const manager = new SessionManager(
-        timer,
-        new FakeDeviceSessionPersistence(),
-        () => new FakeDbWriteBarrier(),
-      );
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+        barrier: () => new FakeDbWriteBarrier(),
+      });
       cleanups.push(() => manager.stopCleanupTimer());
       await manager.createSession("s", DEVICE, "android", DEFAULT_SESSION_IDLE_TIMEOUT_MS);
       const forced: string[] = [];

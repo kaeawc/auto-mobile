@@ -128,6 +128,10 @@ describe("agent benchmark preflight", () => {
       "sdk=36 model=sdk_gphone64_arm64 locale=en-US size=720x1600 density=420",
     );
     expect(await describeDevice(new FakeCommandRunner(), "emulator-5554")).toBe("unknown");
+    // The locale falls back to ro.product.locale on the device, in one line.
+    expect(runner.adbCalls().at(-1)).toContain(
+      'l=$(getprop persist.sys.locale); echo "${l:-$(getprop ro.product.locale)}"',
+    );
   });
 
   test("the app build fingerprint comes from dumpsys package", () => {

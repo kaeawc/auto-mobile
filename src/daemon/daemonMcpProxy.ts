@@ -39,6 +39,11 @@ export {
   type VersionMismatchReason,
   type BuildMismatchReason,
 } from "./proxy/daemonErrors";
+import {
+  HeldSessionLosses,
+  type HeldSessionLossesPort,
+  type PendingHeldSessionLoss,
+} from "./proxy/HeldSessionLosses";
 import { ReleaseEpochLedger } from "./proxy/ReleaseEpochLedger";
 import { ResourceSubscriptions } from "./proxy/ResourceSubscriptions";
 import {
@@ -743,15 +748,10 @@ export class DaemonMcpProxy {
    */
   private releaseSurfacedFor: string | undefined;
   /** Held terminal losses awaiting one platform-only control answer, in loss order (#12090). */
-  private readonly pendingHeldSessionPlatformLosses = new Map<
-    string,
-    {
-      platform: "android" | "ios";
-      reason: string;
-      release?: SessionReleaseSnapshot;
-      proxyJudged?: true;
-    }
-  >();
+  private readonly heldSessionLosses: HeldSessionLosses;
+  private get pendingHeldSessionPlatformLosses(): Map<string, PendingHeldSessionLoss> {
+    return this.heldSessionLosses.pending;
+  }
   /** Plain restart losses remain fenced by UUID after their stall handovers end (#12282). */
   private readonly plainRestartSessionLosses = new Map<string, string>();
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
@@ -1106,6 +1106,10 @@ export class DaemonMcpProxy {
     this.tickLateness = new TickLatenessClock(this.heartbeatIntervalMs);
     this.livenessRecovery = this.createLivenessRecovery();
     this.livenessOwnerToken = resolveLivenessOwnerToken(config);
+    this.heldSessionLosses = new HeldSessionLosses(
+      this.sessionPlatforms,
+      this.createHeldSessionLossesPort(),
+    );
     this.sessionBinding = new SessionBinding(this.createSessionBindingDependencies());
     this.proxyHeartbeatKeeper = new HeartbeatKeeper({
       timer: this.timer,
@@ -3887,7 +3891,7 @@ export class DaemonMcpProxy {
       callerArgs = { ...callerArgs, sessionUuid: ownSession };
     }
     this.refuseAmbiguousSessionSelector(name, callerArgs);
-    this.reportHeldSessionPlatformLoss(name, platformSelectorArgs);
+    this.heldSessionLosses.reportPlatformLoss(name, platformSelectorArgs);
     this.reportToolSessionLoss(name, callerArgs);
     if (this.stallHandovers.size > 0) {
       await this.resumeStalledSessionNamedBy(callerArgs);
@@ -4328,89 +4332,11 @@ export class DaemonMcpProxy {
     }
   }
 
+  // Kept as a named method: the liveness-clock guard follows the keeper's port to it.
   private recordHeldSessionTerminalLoss(
-    sessionUuid: string,
-    reason = "released",
-    release?: SessionReleaseSnapshot,
-    proxyJudged?: true,
+    ...args: Parameters<HeldSessionLosses["recordTerminalLoss"]>
   ): void {
-    const pending = this.pendingHeldSessionPlatformLosses.get(sessionUuid);
-    if (pending) {
-      pending.reason = reason === "released" ? pending.reason : reason;
-      pending.release = release ?? pending.release;
-      pending.proxyJudged = proxyJudged;
-      return;
-    }
-    const platform = this.sessionPlatforms.get(sessionUuid);
-    const handedOver = this.stallHandovers.get(sessionUuid);
-    if (
-      platform === undefined ||
-      sessionUuid === this.boundSessionUuid ||
-      sessionUuid === this.terminalBoundSession?.sessionUuid ||
-      (!this.otherHeldSessions.has(sessionUuid) && (!handedOver || handedOver.restore.bound))
-    ) {
-      return;
-    }
-    this.pendingHeldSessionPlatformLosses.set(sessionUuid, {
-      platform,
-      reason,
-      release,
-      proxyJudged,
-    });
-  }
-
-  private recordHeldSessionNotFoundLoss(sessionUuid: string, outcome: NotFoundAnswerOutcome): void {
-    if (outcome.kind === "ended") {
-      this.recordHeldSessionTerminalLoss(sessionUuid, outcome.reason);
-    }
-  }
-
-  private clearHeldSessionLossesForSelection(sessionUuid: string, callPlatform?: unknown): void {
-    this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
-    const platform = this.sessionPlatforms.get(sessionUuid) ?? callPlatform;
-    if (platform === "android" || platform === "ios") {
-      this.clearHeldSessionPlatformLosses(platform);
-    }
-  }
-
-  private clearHeldSessionPlatformLosses(platform: "android" | "ios" | undefined): void {
-    if (platform === undefined) {
-      return;
-    }
-    for (const [sessionUuid, loss] of this.pendingHeldSessionPlatformLosses) {
-      if (loss.platform === platform) {
-        this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
-      }
-    }
-  }
-
-  /** Ambiguity and the default fence win; reads leave these one-shot reports untouched. */
-  private reportHeldSessionPlatformLoss(name: string, args: Record<string, unknown>): void {
-    const platform = args.platform;
-    if (
-      this.terminalBoundSession ||
-      !this.isSessionlessControlDeviceTool(name, args) ||
-      (platform !== "android" && platform !== "ios") ||
-      typeof args.deviceId === "string" ||
-      this.sessionUuidFromArgs(args) !== undefined ||
-      args.device
-    ) {
-      return;
-    }
-    const live = [this.boundSessionUuid, ...this.otherHeldSessions.keys()];
-    if (live.some((id) => id !== undefined && this.sessionPlatforms.get(id) === platform)) {
-      this.clearHeldSessionPlatformLosses(platform);
-      return;
-    }
-    for (const [sessionUuid, loss] of this.pendingHeldSessionPlatformLosses) {
-      if (loss.platform === platform) {
-        // A terminal stall already has its typed answer; reporting it consumes both records.
-        this.reportPendingSessionLoss({ sessionUuid });
-        const answer = new DaemonBoundSessionExpiredError(sessionUuid, loss.reason, loss.release);
-        this.noteReleaseSurfacedBy(answer);
-        throw answer;
-      }
-    }
+    this.heldSessionLosses.recordTerminalLoss(...args);
   }
 
   private isDeviceReadOnlyTool(name: string, args?: Record<string, unknown>): boolean {
@@ -4509,7 +4435,7 @@ export class DaemonMcpProxy {
     if (selection) {
       this.throwIfSessionReleasedSince(selection.sessionUuid, releaseEpoch);
       this.sessionBinding.rememberSessionUuid(name, selection, releaseEpoch, true);
-      this.clearHeldSessionLossesForSelection(selection.sessionUuid, args.platform);
+      this.heldSessionLosses.clearForSelection(selection.sessionUuid, args.platform);
     }
   }
 
@@ -5704,6 +5630,20 @@ export class DaemonMcpProxy {
     };
   }
 
+  private createHeldSessionLossesPort(): HeldSessionLossesPort {
+    return {
+      boundSessionUuid: () => this.boundSessionUuid,
+      terminalBoundSessionUuid: () => this.terminalBoundSession?.sessionUuid,
+      isOtherHeldSession: (sessionUuid) => this.otherHeldSessions.has(sessionUuid),
+      otherHeldSessionUuids: () => this.otherHeldSessions.keys(),
+      stallHandover: (sessionUuid) => this.stallHandovers.get(sessionUuid),
+      isSessionlessControlDeviceTool: (...args) => this.isSessionlessControlDeviceTool(...args),
+      sessionUuidFromArgs: (...args) => this.sessionUuidFromArgs(...args),
+      reportPendingSessionLoss: (...args) => this.reportPendingSessionLoss(...args),
+      noteReleaseSurfacedBy: (...args) => this.noteReleaseSurfacedBy(...args),
+    };
+  }
+
   private createSessionBindingDependencies(): SessionBindingDependencies {
     return {
       timer: this.timer,
@@ -5733,7 +5673,7 @@ export class DaemonMcpProxy {
       notifyListChanged: (...args) => this.notifyListChanged(...args),
       holdPreviousBinding: (...args) => this.holdPreviousBinding(...args),
       clearHeldSessionLossesForSelection: (...args) =>
-        this.clearHeldSessionLossesForSelection(...args),
+        this.heldSessionLosses.clearForSelection(...args),
       syncHeartbeatKeeper: (...args) => this.syncHeartbeatKeeper(...args),
       stopBoundSessionHeartbeat: (...args) => this.stopBoundSessionHeartbeat(...args),
       establishBoundSessionHeartbeat: (...args) => this.establishBoundSessionHeartbeat(...args),
@@ -7003,7 +6943,7 @@ export class DaemonMcpProxy {
       logger.warn(
         `[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating it`,
       );
-      this.recordHeldSessionNotFoundLoss(sessionUuid, outcome);
+      this.heldSessionLosses.recordNotFoundLoss(sessionUuid, outcome);
       this.dropHeldSession(sessionUuid, false, outcome.kind !== "ended");
     } else if (!this.notFoundStopped.has(sessionUuid)) {
       logger.info(

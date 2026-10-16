@@ -7,16 +7,7 @@
 
 // Main client
 export { AndroidCtrlProxyClient } from "./AndroidCtrlProxyClient";
-export type { AndroidCtrlProxy, InteractionEvent } from "./AndroidCtrlProxyClient";
-
-// Delegate modules (for advanced usage)
-export { CtrlProxyGestures } from "./CtrlProxyGestures";
-export { CtrlProxyText } from "./CtrlProxyText";
-export { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
-export { CtrlProxyStorage } from "./CtrlProxyStorage";
-export { CtrlProxyCertificates } from "./CtrlProxyCertificates";
-export { CtrlProxyFocus } from "./CtrlProxyFocus";
-export { CtrlProxyHighlights } from "./CtrlProxyHighlights";
+export type { AndroidCtrlProxy } from "./AndroidCtrlProxyClient";
 
 // Types
 export type {
@@ -32,33 +23,6 @@ export type {
   A11yImeActionResult,
   A11ySelectAllResult,
   A11yActionResult,
-  A11yClipboardResult,
-  A11yCaCertResult,
-  A11yDeviceOwnerStatusResult,
-  A11yPermissionResult,
-  A11ySettingsGetResult,
-  A11ySettingsPutResult,
-  A11ySettingsListResult,
   SettingsNamespace,
-  SettingsValueType,
   AndroidPerfTiming,
-
-  // Internal types (for delegate usage)
-  DelegateContext,
-  HierarchyDelegateContext,
-  CertificatesDelegateContext,
-  AccessibilityNode,
-  CachedHierarchy,
-  NormalizedHighlightBounds,
 } from "./types";
-
-// Shared types
-export type {
-  PerfTiming,
-  BaseResult,
-  GestureTimingResult,
-  ActionTimingResult,
-} from "../shared/types";
-
-// Utility functions
-export { quoteForAdbArg } from "./types";

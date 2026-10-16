@@ -307,9 +307,20 @@ export function auditTranscript(jsonl: string, options: AuditOptions): Transcrip
       state.audit.parseErrors.push(`line ${index + 1}: ${String(error)}`);
       return;
     }
-    if (isRecord(event)) {
-      handleEvent(event, index + 1, state);
+    if (!isRecord(event)) {
+      // stream-json emits only objects; a scalar, array, or null line means a damaged stream.
+      state.audit.parseErrors.push(`line ${index + 1}: not a JSON object`);
+      return;
     }
+    if (state.audit.result && event.type !== "result") {
+      // The terminal result closes the run: its turns, cost, and answer predate anything
+      // after it, so later events cannot count toward this run.
+      state.audit.parseErrors.push(
+        `line ${index + 1}: ${String(event.type)} event after the result`,
+      );
+      return;
+    }
+    handleEvent(event, index + 1, state);
   });
   const { audit } = state;
   audit.totalToolCalls = audit.toolCalls.length;

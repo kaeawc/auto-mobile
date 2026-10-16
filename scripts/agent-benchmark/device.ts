@@ -307,7 +307,7 @@ async function verifyInstalledApk(
 // persist.sys.locale is unset until someone changes the locale (common on emulators), so
 // fall back to ro.product.locale on the device while still printing exactly one line.
 const DEVICE_PROPERTIES =
-  'getprop ro.build.version.sdk; getprop ro.product.model; l=$(getprop persist.sys.locale); echo "${l:-$(getprop ro.product.locale)}"; getprop ro.build.id; settings get secure enabled_accessibility_services; wm size; wm density; settings get system font_scale; settings get global window_animation_scale; settings get global transition_animation_scale; settings get global animator_duration_scale; cmd uimode night';
+  'getprop ro.build.version.sdk; getprop ro.product.model; l=$(getprop persist.sys.locale); echo "${l:-$(getprop ro.product.locale)}"; getprop ro.build.id; settings get secure enabled_accessibility_services; settings get secure navigation_mode; wm size; wm density; settings get system font_scale; settings get global window_animation_scale; settings get global transition_animation_scale; settings get global animator_duration_scale; cmd uimode night';
 
 /** The shared WindowManager reader, over this harness's command runner. */
 function adbCommands(runner: CommandRunner, serial: string): AdbCommandRunner {
@@ -348,6 +348,20 @@ function accessibilityServices(raw: string | undefined): string | undefined {
   return [...new Set(value.split(":").filter(Boolean))].sort().join("+");
 }
 
+/**
+ * `settings get secure navigation_mode`: 0 three-button, 1 two-button, 2 gesture. "null"
+ * (never set, as on releases before gesture navigation) is recorded as the device default.
+ */
+function navigationMode(raw: string | undefined): string | undefined {
+  const modes: Record<string, string> = {
+    "0": "3button",
+    "1": "2button",
+    "2": "gesture",
+    null: "default",
+  };
+  return raw === undefined ? undefined : modes[raw.trim()];
+}
+
 /** An animation scale setting: "null" is the 1.0 default, and 0 (animations off) is valid. */
 function parseAnimationScale(raw: string): number | undefined {
   const value = raw.trim();
@@ -386,7 +400,7 @@ async function liveRotation(runner: CommandRunner, serial: string): Promise<stri
 
 /**
  * The device environment a run measured against (SDK level, model, locale, screen size,
- * density, font and animation scales, theme, and live rotation, since `wm size` reports the natural size whatever the
+ * density, navigation mode, font and animation scales, theme, and live rotation, since `wm size` reports the natural size whatever the
  * orientation), since hierarchy shape, scrolling, and timing all depend on it. Best effort:
  * a device that cannot answer reports "unknown", which never matches a baseline.
  */
@@ -412,6 +426,8 @@ export async function describeDevice(runner: CommandRunner, serial: string): Pro
     ["build", lines[3]],
     // TalkBack and other services change how interaction tools tap and scroll.
     ["a11y", accessibilityServices(lines[4])],
+    // Gesture navigation turns edge swipes into Back/Home and changes the tappable bottom inset.
+    ["nav", navigationMode(lines[5])],
     ["size", lastValue("size")],
     ["density", lastValue("density")],
     ["font", scales.font],
@@ -421,7 +437,7 @@ export async function describeDevice(runner: CommandRunner, serial: string): Pro
     ["theme", parseNightMode(lines.filter(Boolean).at(-1) ?? "")],
     ["rotation", await liveRotation(runner, serial)],
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
-  return result.exitCode === 0 && parts.length === 11
+  return result.exitCode === 0 && parts.length === 12
     ? parts.map(([key, value]) => `${key}=${value}`).join(" ")
     : "unknown";
 }

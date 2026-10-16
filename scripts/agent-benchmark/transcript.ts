@@ -128,6 +128,11 @@ function identity(value: unknown): string | undefined {
 }
 
 function handleInit(event: JsonRecord, state: AuditState): void {
+  if (state.audit.mcpServerStatus !== undefined) {
+    // A second init would replace the first one's MCP status (a failure, say) and hide it.
+    state.audit.parseErrors.push("duplicate system/init event");
+    return;
+  }
   state.audit.observedModel ??= identity(event.model);
   state.audit.claudeCodeVersion ??= identity(event.claude_code_version);
   const servers = Array.isArray(event.mcp_servers) ? event.mcp_servers.filter(isRecord) : [];
@@ -185,6 +190,14 @@ function handleUser(event: JsonRecord, state: AuditState): void {
       // A second result would overwrite the first (an error, say) and hide it.
       state.audit.parseErrors.push(`duplicate tool_result for tool_use_id ${id}`);
       continue;
+    }
+    if (
+      block.content !== undefined &&
+      typeof block.content !== "string" &&
+      !Array.isArray(block.content)
+    ) {
+      // An unreadable container would read as empty text and hide failure evidence.
+      state.audit.parseErrors.push(`tool_result for ${id} has malformed content`);
     }
     const text = toolResultText(block.content);
     if (block.is_error !== undefined && typeof block.is_error !== "boolean") {

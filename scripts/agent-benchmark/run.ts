@@ -45,6 +45,10 @@ import {
 import { createForeignCtrlProxyForwardEvidence } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { resolveAndroidSdkRoot } from "../../src/utils/android-cmdline-tools/androidSdkRoot";
+import {
+  detectAndroidCommandLineTools,
+  getBestAndroidToolsLocation,
+} from "../../src/utils/android-cmdline-tools/detection";
 import { getSharedDevicectlDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import {
   readExclusiveLockContent,
@@ -452,6 +456,7 @@ export function dryRunReport(
     runtime: process.execPath,
     serverEntry: join(REPO_ROOT, "dist", "src", "index.js"),
     auxSocketDir: "<tmp>/amb-XXXXXX",
+    dataDir: "<run-dir>/data",
     dbDir: "<run-dir>/db",
     logDir: "<run-dir>/logs",
   };
@@ -594,26 +599,57 @@ function claudeCommandIdentity(command: string): Uint8Array {
  * the adb on PATH. Platform-tools releases differ in command behavior and latency, and the
  * version output names both the release and the install path.
  */
-export function adbClientIdentity(
+export async function adbClientIdentity(
   env: Record<string, string | undefined>,
   version: (adb: string) => string | undefined = (adb) => {
     const result = spawnSync(adb, ["version"], { encoding: "utf8", timeout: 5_000 });
     return result.status === 0 ? result.stdout : undefined;
   },
   onPath: (command: string) => string | null = (command) => Bun.which(command, { PATH: env.PATH }),
-): string {
+  detected: () => Promise<string | null> = detectedAdbPath,
+): Promise<string> {
+  // AdbClient's order: the SDK named by the environment, then PATH, then the
+  // command-line tools detection that finds typical and Homebrew SDK installs.
   const sdk = resolveAndroidSdkRoot(env);
-  const candidates = [...(sdk ? [`${sdk}/platform-tools/adb`] : []), onPath("adb") ?? "adb"];
+  const candidates = [...(sdk ? [`${sdk}/platform-tools/adb`] : [])];
+  const fromPath = onPath("adb");
+  if (fromPath) {
+    candidates.push(fromPath);
+  }
+  const tried = (adb: string) => version(adb)?.trim();
   for (const adb of candidates) {
-    const output = version(adb)?.trim();
+    const output = tried(adb);
     if (output) {
       return output;
     }
   }
+  const discovered = await detected();
+  if (discovered && !candidates.includes(discovered)) {
+    candidates.push(discovered);
+    const output = tried(discovered);
+    if (output) {
+      return output;
+    }
+  }
+  candidates.push("adb");
   return `unavailable:${candidates.join(",")}`;
 }
 
-function serverDigest(claudeCommand: string): string {
+/** The adb AdbClient's detection step would pick, derived the same way. */
+async function detectedAdbPath(): Promise<string | null> {
+  try {
+    const best = getBestAndroidToolsLocation(await detectAndroidCommandLineTools());
+    return best ? `${best.path.replace("/cmdline-tools/latest", "")}/platform-tools/adb` : null;
+  } catch (error) {
+    // Detection only refines the fingerprint; a failure leaves it "unavailable", which still
+    // differs from any working adb, so the run is not compared against the wrong client.
+    process.stderr.write(`adb detection failed: ${errorMessage(error)}\n`);
+    return null;
+  }
+}
+
+async function serverDigest(claudeCommand: string): Promise<string> {
+  const adb = await adbClientIdentity(process.env);
   const tree = (dir: string) =>
     readdirSync(join(REPO_ROOT, dir), { recursive: true, encoding: "utf8" })
       .filter((path) => statSync(join(REPO_ROOT, dir, path)).isFile())
@@ -638,7 +674,7 @@ function serverDigest(claudeCommand: string): string {
     { path: "claude-command", read: () => claudeCommandIdentity(claudeCommand) },
     // Provider and routing settings reach Claude unscrubbed; record which backend served it.
     { path: "provider", read: () => new TextEncoder().encode(providerIdentity(process.env)) },
-    { path: "adb", read: () => new TextEncoder().encode(adbClientIdentity(process.env)) },
+    { path: "adb", read: () => new TextEncoder().encode(adb) },
   ]);
 }
 
@@ -647,7 +683,7 @@ async function runSuites(options: CliOptions, deps: HarnessDeps): Promise<Benchm
   if (!existsSync(serverEntry)) {
     throw new Error(`${serverEntry} is missing; run \`bun run build\` first.`);
   }
-  const serverBuild = serverDigest(options.claude);
+  const serverBuild = await serverDigest(options.claude);
   const suites = suitePaths(options).map((path) => loadSuite(path, REPO_ROOT));
   const results: BenchmarkResult[] = [];
   for (const suite of suites) {

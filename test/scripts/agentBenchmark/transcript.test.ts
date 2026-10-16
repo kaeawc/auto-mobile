@@ -323,6 +323,7 @@ describe("agent benchmark transcript audit", () => {
       subtype: "success",
       num_turns: 1,
       total_cost_usd: 0,
+      permission_denials: [],
       is_error: "true",
       result: "done",
     });
@@ -348,7 +349,7 @@ describe("agent benchmark transcript audit", () => {
 
   test("terminal metrics outside the baseline domains fail the transcript", () => {
     const result = (fields: Record<string, unknown>) =>
-      `${INIT}${JSON.stringify({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0, is_error: false, result: "done", ...fields })}\n`;
+      `${INIT}${JSON.stringify({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0, permission_denials: [], is_error: false, result: "done", ...fields })}\n`;
     expect(auditTranscript(result({ num_turns: 2.5 }), NO_PATTERNS).parseErrors).toEqual([
       "result event has an invalid num_turns",
     ]);
@@ -372,6 +373,7 @@ describe("agent benchmark transcript audit", () => {
       subtype: "success",
       num_turns: 1,
       total_cost_usd: 0,
+      permission_denials: [],
       result: "done",
     });
     const audit = auditTranscript(`${INIT}${result}\n`, NO_PATTERNS);
@@ -404,7 +406,7 @@ describe("agent benchmark transcript audit", () => {
 
   test("token usage must be non-negative finite counts that sum finitely", () => {
     const result = (usage: unknown) =>
-      `${INIT}${JSON.stringify({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0, is_error: false, result: "done", usage })}\n`;
+      `${INIT}${JSON.stringify({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0, permission_denials: [], is_error: false, result: "done", usage })}\n`;
     expect(
       auditTranscript(
         result({
@@ -426,7 +428,7 @@ describe("agent benchmark transcript audit", () => {
     ).toEqual([]);
   });
 
-  test("a successful result must report num_turns and total_cost_usd", () => {
+  test("a successful result must report num_turns, total_cost_usd and permission_denials", () => {
     const result = JSON.stringify({
       type: "result",
       subtype: "success",
@@ -437,6 +439,7 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.parseErrors).toEqual([
       "result event has no num_turns",
       "result event has no total_cost_usd",
+      "result event has no permission_denials",
     ]);
   });
 
@@ -446,6 +449,7 @@ describe("agent benchmark transcript audit", () => {
       subtype: "success",
       num_turns: 1,
       total_cost_usd: 0,
+      permission_denials: [],
       is_error: false,
     });
     const audit = auditTranscript(`${INIT}${result}\n`, NO_PATTERNS);
@@ -469,6 +473,7 @@ describe("agent benchmark transcript audit", () => {
       subtype: "success",
       num_turns: 1,
       total_cost_usd: 0,
+      permission_denials: [],
       is_error: false,
       result: { text: "COUNT: 3" },
     });

@@ -391,9 +391,11 @@ function allocateRunDirectories(options: RunOptions, deps: HarnessDeps, runDirec
       runtime: options.runtime,
       serverEntry: options.serverEntry,
       auxSocketDir: makeTempDir("amb-"),
+      dataDir: join(runDirectory, "data"),
       dbDir: join(runDirectory, "db"),
       logDir: join(runDirectory, "logs"),
     };
+    deps.fs.mkdir(paths.dataDir);
     deps.fs.mkdir(paths.dbDir);
     deps.fs.mkdir(paths.logDir);
     return { paths, claudeCwd: makeTempDir("amb-cwd-") };

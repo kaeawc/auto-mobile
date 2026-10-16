@@ -17,6 +17,7 @@ const PATHS = {
   runtime: "/usr/bin/bun",
   serverEntry: "/repo/dist/src/index.js",
   auxSocketDir: "/tmp/amb-abc",
+  dataDir: "/run/data",
   dbDir: "/run/db",
   logDir: "/run/logs",
 };
@@ -120,6 +121,7 @@ describe("agent benchmark claude invocation", () => {
     expect(env.PATH).toBeUndefined();
     expect(env.AUTOMOBILE_DB_PATH).toBeUndefined();
     expect(env.AUTOMOBILE_DB_DIR).toBe("/run/db");
+    expect(env.AUTOMOBILE_DATA_DIR).toBe("/run/data");
   });
 
   test("the MCP server runs against a private daemon with fresh state", () => {
@@ -133,6 +135,7 @@ describe("agent benchmark claude invocation", () => {
             AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/amb-abc",
             AUTOMOBILE_HARNESS_PRIVATE_DAEMON: "1",
             AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: "5000",
+            AUTOMOBILE_DATA_DIR: "/run/data",
             AUTOMOBILE_DB_DIR: "/run/db",
             AUTOMOBILE_LOG_DIR: "/run/logs",
           },
@@ -149,6 +152,8 @@ describe("agent benchmark isolated server environment", () => {
         PATH: "/bin",
         HOME: "/home/me",
         UNSET: undefined,
+        // Inherited from a bun test parent, it would arm the server's test-only guards.
+        NODE_ENV: "test",
         AUTOMOBILE_DB_PATH: "/resident.db",
         AUTO_MOBILE_DB_PATH: "/legacy.db",
         AUTOMOBILE_DATA_DIR: "/resident-data",
@@ -168,6 +173,7 @@ describe("agent benchmark isolated server environment", () => {
       AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/amb-abc",
       AUTOMOBILE_HARNESS_PRIVATE_DAEMON: "1",
       AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: "5000",
+      AUTOMOBILE_DATA_DIR: "/run/data",
       AUTOMOBILE_DB_DIR: "/run/db",
       AUTOMOBILE_LOG_DIR: "/run/logs",
     });

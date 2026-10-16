@@ -341,7 +341,10 @@ function handleResult(event: JsonRecord, state: AuditState): void {
     ]),
     outputTokens: sumTokens(usage, ["output_tokens"]),
   };
-  if (event.permission_denials !== undefined && !Array.isArray(event.permission_denials)) {
+  if (event.permission_denials === undefined && event.subtype === "success") {
+    // A successful result always lists its denials; a missing list cannot be read as "none".
+    state.audit.parseErrors.push("result event has no permission_denials");
+  } else if (event.permission_denials !== undefined && !Array.isArray(event.permission_denials)) {
     // A malformed container could hide a denial, so it is not read as "none".
     state.audit.parseErrors.push("result event has a non-array permission_denials");
   }

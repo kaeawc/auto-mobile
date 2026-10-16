@@ -43,6 +43,8 @@ export interface ServerPaths {
   serverEntry: string;
   /** Short private directory for daemon aux sockets (kept under the sun_path limit). */
   auxSocketDir: string;
+  /** Private AUTOMOBILE_DATA_DIR for caches, temp files and other per-run state. */
+  dataDir: string;
   dbDir: string;
   logDir: string;
 }
@@ -52,6 +54,8 @@ export function privateServerEnv(paths: ServerPaths): Record<string, string> {
     AUTOMOBILE_AUX_SOCKET_DIR: paths.auxSocketDir,
     AUTOMOBILE_HARNESS_PRIVATE_DAEMON: "1",
     AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: PRIVATE_DAEMON_ORPHAN_IDLE_MS,
+    // Device coordination and claims ignore this and stay under the shared root.
+    AUTOMOBILE_DATA_DIR: paths.dataDir,
     AUTOMOBILE_DB_DIR: paths.dbDir,
     AUTOMOBILE_LOG_DIR: paths.logDir,
   };
@@ -187,8 +191,8 @@ export function claudeLaunchEnv(
 
 /**
  * The inherited environment with every AutoMobile variable removed except the
- * shared ADB coordination directory, then the run's private-daemon values on top,
- * so each run starts from a clean AutoMobile configuration.
+ * shared ADB coordination directory, and without NODE_ENV, then the run's private-daemon
+ * values on top, so each run starts from a clean AutoMobile configuration.
  */
 export function isolatedServerEnv(
   inherited: Record<string, string | undefined>,
@@ -198,6 +202,9 @@ export function isolatedServerEnv(
     Object.entries(inherited).filter(
       (entry): entry is [string, string] =>
         entry[1] !== undefined &&
+        // NODE_ENV=test (an operator's shell or a bun test parent) arms the server's
+        // test-only guards and changes its behavior, so the run never inherits it.
+        entry[0] !== "NODE_ENV" &&
         (SHARED_AUTOMOBILE_VARIABLES.has(entry[0]) || !isAutoMobileVariable(entry[0])),
     ),
   );

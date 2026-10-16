@@ -88,8 +88,11 @@ they can still affect results:
   and proxy variables are kept, including `ANTHROPIC_MODEL`, which Bedrock and Vertex need; the
   observed model is recorded in every result.
 - The server uses a **private daemon** (`AUTOMOBILE_AUX_SOCKET_DIR`), a **fresh database**
-  (`AUTOMOBILE_DB_DIR`, so no learned navigation graph carries over), and its own log directory
-  (`<run>/logs`). Every AutoMobile variable inherited from your shell (`AUTOMOBILE_*` and the
+  (`AUTOMOBILE_DB_DIR`, so no learned navigation graph carries over), its own data directory
+  (`AUTOMOBILE_DATA_DIR`, `<run>/data`, for caches and temp files), and its own log directory
+  (`<run>/logs`). Device claims and coordination ignore the data directory and stay shared.
+  `NODE_ENV` is not inherited, so a `bun test` parent cannot arm the server's test-only guards.
+  Every AutoMobile variable inherited from your shell (`AUTOMOBILE_*` and the
   legacy `AUTO_MOBILE_*` names) is removed first. Otherwise a state override such as
   `AUTOMOBILE_DB_PATH` would win over the run's values, and a setting such as
   `AUTOMOBILE_DISABLED_TOOLS` would quietly change the agent's toolset. The one exception is
@@ -230,7 +233,7 @@ built `dist/` with the schemas and vendor tools it loads at runtime, `bun.lock` 
 libraries the build leaves external, `package.json`, the harness sources under
 `scripts/agent-benchmark/` with every repository module they import (they run unbundled), the
 Bun version, and the host platform, architecture, and libc (which pick the native image build), the `--claude` command (a wrapper script by content), and a non-secret provider identity
-(provider selection, the scheme and host of every provider base URL and proxy with a digest of each path, proxy bypass list, regions, provider-specific region routing and service tiers, adb server endpoint, and model-routing variables), the `adb version` of the adb client the server will run (SDK platform-tools when it answers, else the adb on PATH, as the server resolves it). A stale build or changed scoring code is
+(provider selection, the scheme and host of every provider base URL and proxy with a digest of each path, proxy bypass list, regions, provider-specific region routing and service tiers, adb server endpoint, and model-routing variables), the `adb version` of the adb client the server will run (SDK platform-tools when it answers, else the adb on PATH, else the SDK the server's command-line tools detection finds, as the server resolves it). A stale build or changed scoring code is
 flagged rather than silently measured. The git commit is deliberately left out, since every
 unrelated commit would change it), and
 `baseline.observedModel`, the model Claude reported running. Suites without
@@ -256,7 +259,7 @@ runs of the same suite that start in the same second apart.
 | `claude.jsonl` / `claude.stderr` | Claude's stream-json transcript and stderr.                               |
 | `preflight.log`, `preflight/`    | Preflight steps and the staged preference files.                          |
 | `screen.xml`                     | The post-run `uiautomator` dump (suites with screen checks only).         |
-| `logs/`, `db/`                   | The private daemon's logs and database.                                   |
+| `logs/`, `db/`, `data/`          | The private daemon's logs, database, and data directory.                  |
 | `result.json`                    | The full result: run metadata, audit, checks, metrics, and sequence diff. |
 | `baseline.yml`                   | A baseline snippet (passing runs with no stumbles only).                  |
 

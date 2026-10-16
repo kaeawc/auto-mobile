@@ -23,12 +23,12 @@ describe("behaviour-driving JSON columns are validated on read (#11859)", () => 
     await db.destroy();
   });
 
-  test("device snapshot with a wrong-shaped manifest reads as null and logs", async () => {
+  const insertSnapshot = (snapshotName: string, manifestJson: string) => {
     const now = "2024-01-01T00:00:00.000Z";
-    await db
+    return db
       .insertInto("device_snapshots")
       .values({
-        snapshot_name: "bad",
+        snapshot_name: snapshotName,
         device_id: "emulator-5554",
         device_name: "Pixel_6",
         platform: "android",
@@ -38,12 +38,24 @@ describe("behaviour-driving JSON columns are validated on read (#11859)", () => 
         created_at: now,
         last_accessed_at: now,
         size_bytes: 1,
-        manifest_json: JSON.stringify({ snapshotName: 42 }),
+        manifest_json: manifestJson,
       } as never)
       .execute();
+  };
 
-    expect(await new DeviceSnapshotRepository(db).getSnapshot("bad")).toBeNull();
-    expect(warn).toHaveBeenCalled();
+  test("an off-schema manifest object logs but stays listed for retention", async () => {
+    await insertSnapshot("off-schema", JSON.stringify({ snapshotName: 42 }));
+    const repository = new DeviceSnapshotRepository(db);
+
+    expect((await repository.getSnapshot("off-schema"))?.snapshotName).toBe("off-schema");
+    expect((await repository.listSnapshots()).map((s) => s.snapshotName)).toEqual(["off-schema"]);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("failed validation");
+  });
+
+  test("a manifest that is not an object reads as null and logs", async () => {
+    await insertSnapshot("scalar", JSON.stringify(42));
+
+    expect(await new DeviceSnapshotRepository(db).getSnapshot("scalar")).toBeNull();
     expect(String(warn.mock.calls[0]?.[0])).toContain("failed validation");
   });
 

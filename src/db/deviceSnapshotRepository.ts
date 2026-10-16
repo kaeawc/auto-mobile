@@ -90,13 +90,18 @@ function parseManifest(snapshotName: string, manifestJson: string): DeviceSnapsh
     return null;
   }
   const result = deviceSnapshotManifestSchema.safeParse(parsed);
-  if (!result.success) {
-    logger.warn(
-      `[DeviceSnapshotRepository] Manifest for ${snapshotName} failed validation: ${result.error.message}`,
-    );
-    return null;
+  if (result.success) {
+    return result.data;
   }
-  return result.data;
+  logger.warn(
+    `[DeviceSnapshotRepository] Manifest for ${snapshotName} failed validation: ${result.error.message}`,
+  );
+  // Keep a well-formed but off-schema object (e.g. a manifest written by a newer or older
+  // version) so the row stays visible to retention and pending-reclaim sweeps, which read
+  // only listSnapshots; dropping it would leak its payload outside every budget.
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+    ? (parsed as DeviceSnapshotManifest)
+    : null;
 }
 
 function toRecord(row: DbDeviceSnapshot): DeviceSnapshotRecord | null {

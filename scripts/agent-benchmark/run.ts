@@ -317,6 +317,11 @@ export function createLauncher(timer: Timer): ClaudeLauncher {
               finishInterrupt();
               return;
             }
+            if (timedOut) {
+              // The wrapper may exit on SIGTERM while a descendant ignores it; settling cancels
+              // the pending SIGKILL, so kill whatever is left in the group before teardown.
+              killTree("SIGKILL");
+            }
             resolveExit({ exitCode: code, timedOut });
           }
         });

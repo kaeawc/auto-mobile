@@ -121,7 +121,10 @@ function isContentBlock(block: unknown): boolean {
     isRecord(block) &&
     typeof block.type === "string" &&
     block.type.trim() !== "" &&
-    (block.text === undefined || typeof block.text === "string")
+    // A text block must carry its text; other block types (an image) need none.
+    (block.type === "text"
+      ? typeof block.text === "string"
+      : block.text === undefined || typeof block.text === "string")
   );
 }
 

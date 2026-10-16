@@ -212,6 +212,10 @@ describe("agent benchmark transcript audit", () => {
     ).toEqual([]);
     // A nested block needs a type too, or it reads as empty text.
     expect(auditTranscript(`${base}${result([{}])}`, NO_PATTERNS).parseErrors).toEqual(malformed);
+    // A text block without its text would read as empty successful output.
+    expect(
+      auditTranscript(`${base}${result([{ type: "text" }])}`, NO_PATTERNS).parseErrors,
+    ).toEqual(malformed);
   });
 
   test("a second init event fails the transcript and keeps the first status", () => {

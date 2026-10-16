@@ -22,6 +22,8 @@ export interface ToolCallRecord {
   /** 1-based JSONL line of the tool_use. */
   line: number;
   isError: boolean;
+  /** True once the call's tool_result arrived; a call without one never finished. */
+  hasResult: boolean;
   /** True when the error result matched an `ignoredFailurePatterns` entry. */
   errorIgnored: boolean;
   /** Truncated tool result text; empty until the result arrives. */
@@ -147,6 +149,7 @@ function handleAssistant(event: JsonRecord, line: number, state: AuditState): vo
       isSubagent,
       line,
       isError: false,
+      hasResult: false,
       errorIgnored: false,
       resultText: "",
     };
@@ -167,6 +170,7 @@ function handleUser(event: JsonRecord, state: AuditState): void {
     const text = toolResultText(block.content);
     record.isError = block.is_error === true;
     record.resultText = truncate(text);
+    record.hasResult = true;
     state.fullResultText.set(record.id, text);
   }
 }

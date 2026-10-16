@@ -206,15 +206,19 @@ function missingFrom(haystack: string, needles: string[]): string[] {
 }
 
 function verifyChecks(audit: TranscriptAudit, outcome: RunOutcome, verify: VerifySpec) {
-  // A UI benchmark that never touched the device proved nothing, whatever it answered.
+  // A UI benchmark that never touched the device proved nothing, whatever it answered; a
+  // call that errored (bad arguments, refused) did not touch it either.
+  const succeeded = audit.toolCalls.filter(
+    (call) => call.isMcp && call.hasResult && !call.isError,
+  ).length;
   const checks: CheckResult[] = [
     {
       name: "used the device",
-      passed: audit.mcpToolCalls > 0,
+      passed: succeeded > 0,
       detail:
-        audit.mcpToolCalls > 0
-          ? `${audit.mcpToolCalls} auto-mobile tool call(s)`
-          : "no auto-mobile tool calls",
+        succeeded > 0
+          ? `${succeeded} successful auto-mobile tool call(s)`
+          : "no successful auto-mobile tool calls",
     },
   ];
   if (verify.answerIncludes.length > 0) {

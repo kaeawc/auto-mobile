@@ -27,11 +27,11 @@ export class TranscriptBuilder {
     return this;
   }
 
-  /** Append a tool_use and its tool_result; returns the builder for chaining. */
+  /** Append a tool_use and (unless `noResult`) its tool_result; returns the builder. */
   tool(
     name: string,
     result: string | Array<{ type: string; text?: string }>,
-    options: { isError?: boolean; parentToolUseId?: string } = {},
+    options: { isError?: boolean; parentToolUseId?: string; noResult?: boolean } = {},
   ): this {
     const id = `toolu_${this.nextId++}`;
     this.events.push({
@@ -43,6 +43,9 @@ export class TranscriptBuilder {
       },
       parent_tool_use_id: options.parentToolUseId ?? null,
     });
+    if (options.noResult) {
+      return this;
+    }
     const block: Event = { type: "tool_result", tool_use_id: id, content: result };
     if (options.isError) {
       block.is_error = true;
@@ -55,7 +58,7 @@ export class TranscriptBuilder {
     return this;
   }
 
-  mcp(tool: string, result = "ok", options: { isError?: boolean } = {}): this {
+  mcp(tool: string, result = "ok", options: { isError?: boolean; noResult?: boolean } = {}): this {
     return this.tool(`mcp__auto-mobile__${tool}`, [{ type: "text", text: result }], options);
   }
 

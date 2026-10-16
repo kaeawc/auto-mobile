@@ -9,6 +9,7 @@
  */
 
 import { amStartReportedFailure } from "../../src/features/action/LaunchApp";
+import { shellQuote } from "../../src/utils/shellQuote";
 
 export interface CommandResult {
   exitCode: number;
@@ -154,15 +155,45 @@ async function launchDeepLink(
   uri: string,
 ): Promise<void> {
   const args = ["-s", serial, "shell", "am", "start", "-W", "-a", "android.intent.action.VIEW"];
-  const result = await runner.run("adb", [...args, "-d", uri, packageName], ADB_TIMEOUT_MS);
+  // `adb shell` joins its arguments into one device-shell command line, so quote the
+  // URI (as OpenURL does): `&`, `$`, or spaces would otherwise split or expand it.
+  const result = await runner.run(
+    "adb",
+    [...args, "-d", shellQuote(uri), packageName],
+    ADB_TIMEOUT_MS,
+  );
   if (result.exitCode !== 0 || amStartReportedFailure(result.stdout, result.stderr)) {
     const output = `${result.stderr}${result.stdout}`.trim();
     throw new Error(`Deep link ${uri} did not start (exit ${result.exitCode}): ${output}`);
   }
 }
 
-/** Run preflight steps and return a log of what was done, one line per step. */
-export async function runPreflight(runner: CommandRunner, spec: PreflightSpec): Promise<string[]> {
+/**
+ * The installed build's fingerprint from `dumpsys package` (same fields as
+ * GetAppMetadata), so results from different builds are never mistaken as comparable.
+ */
+export function describeAppBuild(dumpsysOutput: string): string {
+  const field = (pattern: RegExp) => dumpsysOutput.match(pattern)?.[1]?.trim();
+  const parts = [
+    ["versionName", field(/versionName=(\S+)/)],
+    ["versionCode", field(/versionCode=(\d+)/)],
+    ["lastUpdateTime", field(/lastUpdateTime=(.+)/)],
+  ].filter((entry): entry is [string, string] => entry[1] !== undefined);
+  return parts.length > 0 ? parts.map(([key, value]) => `${key}=${value}`).join(" ") : "unknown";
+}
+
+export interface PreflightOutcome {
+  /** What was done, one line per step. */
+  log: string[];
+  /** Fingerprint of the installed app build (see describeAppBuild). */
+  appBuild: string;
+}
+
+/** Run preflight steps; returns the step log and the installed app build. */
+export async function runPreflight(
+  runner: CommandRunner,
+  spec: PreflightSpec,
+): Promise<PreflightOutcome> {
   const log: string[] = [];
   const target = ["-s", spec.serial];
   if (spec.apkPath) {
@@ -173,6 +204,9 @@ export async function runPreflight(runner: CommandRunner, spec: PreflightSpec): 
   if (!installed.includes("package:")) {
     throw new Error(`${spec.packageName} is not installed on ${spec.serial}; set app.apkPath.`);
   }
+  const dumpsys = await adb(runner, [...target, "shell", "dumpsys", "package", spec.packageName]);
+  const appBuild = describeAppBuild(dumpsys);
+  log.push(`app build: ${appBuild}`);
   await adb(runner, [...target, "shell", "am", "force-stop", spec.packageName]);
   log.push(`force-stopped ${spec.packageName}`);
   if (spec.clearAppData) {
@@ -191,7 +225,7 @@ export async function runPreflight(runner: CommandRunner, spec: PreflightSpec): 
     await launchDeepLink(runner, spec.serial, spec.packageName, spec.launchUri);
     log.push(`launched ${spec.launchUri}`);
   }
-  return log;
+  return { log, appBuild };
 }
 
 /**

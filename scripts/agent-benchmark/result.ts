@@ -13,7 +13,8 @@ export interface BenchmarkResult {
     observedModel?: string;
     version?: string;
   };
-  preflight: { log: string[]; durationSeconds: number };
+  /** appBuild: the installed app's versionName/versionCode/lastUpdateTime fingerprint. */
+  preflight: { log: string[]; durationSeconds: number; appBuild: string };
   outcome: RunOutcome;
   audit: TranscriptAudit;
   comparison: Comparison;

@@ -122,6 +122,7 @@ export function renderReport(result: BenchmarkResult): string {
     RULE,
     `${comparison.verdict.toUpperCase()}  ${result.suite}  ${formatDuration(outcome.wallClockSeconds)}`,
     `  device    ${result.deviceSerial} (preflight ${formatDuration(result.preflight.durationSeconds)}, not measured)`,
+    `  app       ${result.preflight.appBuild ?? "unknown"}`,
     `  claude    model=${model} version=${result.claude.version ?? "unknown"}`,
     `  artifacts ${result.runDirectory}`,
     "",

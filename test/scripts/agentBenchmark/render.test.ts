@@ -38,7 +38,7 @@ function result(
     startedAt: "20261016T010203Z",
     deviceSerial: "emulator-5554",
     claude: { requestedModel: "m", observedModel: "claude-test-model", version: "2.1.301" },
-    preflight: { log: [], durationSeconds: 4 },
+    preflight: { log: [], durationSeconds: 4, appBuild: "versionName=1.0 versionCode=7" },
     outcome,
     audit,
     comparison: compareRun(
@@ -64,6 +64,7 @@ describe("agent benchmark rendering", () => {
     const report = renderReport(result(passing()));
     expect(report).toContain("PASSED  demo  1m 15.5s");
     expect(report).toContain("device    emulator-5554 (preflight 4.0s, not measured)");
+    expect(report).toContain("app       versionName=1.0 versionCode=7");
     expect(report).toContain("model=claude-test-model version=2.1.301");
     expect(report).toContain("✓ mcp server connected   connected");
     expect(report).toMatch(/costUsd\s+0\.0123\s+0\.0100\s+\+0\.0023/);
@@ -118,6 +119,7 @@ describe("agent benchmark rendering", () => {
         platform: "android",
         prompt: "p.md",
         app: { packageName: "dev.example" },
+        verify: { answerIncludes: ["DONE"] },
         ...(load(snippet) as object),
       },
       "demo.yml",

@@ -1,0 +1,177 @@
+import { describe, expect, test } from "bun:test";
+import {
+  compareRun,
+  diffToolSequence,
+  type RunOutcome,
+} from "../../../scripts/agent-benchmark/compare";
+import { auditTranscript } from "../../../scripts/agent-benchmark/transcript";
+import { TranscriptBuilder } from "./transcriptBuilder";
+
+const OK_OUTCOME: RunOutcome = { claudeExitCode: 0, timedOut: false, wallClockSeconds: 60 };
+const NO_VERIFY = { answerIncludes: [], screenIncludes: [] };
+
+function audit(builder: TranscriptBuilder) {
+  return auditTranscript(builder.build(), { failurePatterns: [], ignoredFailurePatterns: [] });
+}
+
+const cleanRun = () =>
+  new TranscriptBuilder().init().mcp("observe").mcp("tapOn").result({ finalText: "COUNT: 3" });
+
+describe("diffToolSequence", () => {
+  test("identical sequences are all unchanged lines", () => {
+    expect(diffToolSequence(["a", "b"], ["a", "b"]).map((line) => line.kind)).toEqual([
+      "same",
+      "same",
+    ]);
+  });
+
+  test("reports baseline-only calls as missing and new calls as extra", () => {
+    const lines = diffToolSequence(
+      ["observe", "tapOn", "tapOn", "observe"],
+      ["observe", "tapOn", "swipeOn", "observe"],
+    );
+    expect(lines.map((line) => `${line.kind}:${line.tool}`)).toEqual([
+      "same:observe",
+      "same:tapOn",
+      "extra:swipeOn",
+      "missing:tapOn",
+      "same:observe",
+    ]);
+    expect(lines[2]).toEqual({ kind: "extra", tool: "swipeOn", actualIndex: 2 });
+    expect(lines[3]).toEqual({ kind: "missing", tool: "tapOn", baselineIndex: 2 });
+  });
+
+  test("handles empty sides", () => {
+    expect(diffToolSequence([], ["a"]).map((line) => line.kind)).toEqual(["extra"]);
+    expect(diffToolSequence(["a"], []).map((line) => line.kind)).toEqual(["missing"]);
+  });
+});
+
+describe("compareRun verdict", () => {
+  test("a clean run with matching answer passes", () => {
+    const result = compareRun(audit(cleanRun()), OK_OUTCOME, {
+      answerIncludes: ["count: 3"],
+      screenIncludes: [],
+    });
+    expect(result.verdict).toBe("passed");
+    expect(result.checks.every((check) => check.passed)).toBe(true);
+    expect(result.stumbles).toBe(0);
+  });
+
+  test("a wrong final answer fails without making the run incomplete", () => {
+    const result = compareRun(audit(cleanRun()), OK_OUTCOME, {
+      answerIncludes: ["COUNT: 4"],
+      screenIncludes: [],
+    });
+    expect(result.verdict).toBe("failed");
+    expect(result.checks.find((check) => check.name === "final answer")?.detail).toBe(
+      "missing: COUNT: 4",
+    );
+  });
+
+  test("the screen check needs a dump and every expected string", () => {
+    const verify = { answerIncludes: [], screenIncludes: ["Expected count: 3"] };
+    const noDump = compareRun(
+      audit(cleanRun()),
+      { ...OK_OUTCOME, screenError: "adb gone" },
+      verify,
+    );
+    expect(noDump.verdict).toBe("failed");
+    expect(noDump.checks.at(-1)?.detail).toBe("no screen dump (adb gone)");
+    const wrong = compareRun(
+      audit(cleanRun()),
+      { ...OK_OUTCOME, screenText: "Expected count: 2" },
+      verify,
+    );
+    expect(wrong.checks.at(-1)?.detail).toBe("missing: Expected count: 3");
+    const right = compareRun(
+      audit(cleanRun()),
+      { ...OK_OUTCOME, screenText: '<node text="Expected count: 3"/>' },
+      verify,
+    );
+    expect(right.verdict).toBe("passed");
+  });
+
+  test("timeouts, failed MCP servers, and missing or errored results are incomplete", () => {
+    expect(
+      compareRun(
+        audit(cleanRun()),
+        { ...OK_OUTCOME, timedOut: true, claudeExitCode: null },
+        NO_VERIFY,
+      ).verdict,
+    ).toBe("incomplete");
+    expect(
+      compareRun(audit(cleanRun()), { ...OK_OUTCOME, claudeExitCode: 1 }, NO_VERIFY).verdict,
+    ).toBe("incomplete");
+    const failedServer = new TranscriptBuilder().init({ mcpStatus: "failed" }).result();
+    expect(compareRun(audit(failedServer), OK_OUTCOME, NO_VERIFY).verdict).toBe("incomplete");
+    const noResult = new TranscriptBuilder().init().mcp("observe");
+    expect(compareRun(audit(noResult), OK_OUTCOME, NO_VERIFY).verdict).toBe("incomplete");
+    const budget = new TranscriptBuilder()
+      .init()
+      .result({ subtype: "error_max_budget_usd", isError: true });
+    const checks = compareRun(audit(budget), OK_OUTCOME, NO_VERIFY).checks;
+    expect(checks.find((check) => check.name === "result event")?.detail).toBe(
+      "error_max_budget_usd (is_error)",
+    );
+  });
+
+  test("baseline drift is reported but never changes the verdict", () => {
+    const result = compareRun(
+      audit(cleanRun()),
+      OK_OUTCOME,
+      NO_VERIFY,
+      {
+        totalToolCalls: 10,
+        wallClockSeconds: 30,
+        costUsd: 0.01,
+        tools: { observe: 3, swipeOn: 1 },
+      },
+      ["observe", "swipeOn", "tapOn"],
+    );
+    expect(result.verdict).toBe("passed");
+    expect(result.metrics.find((row) => row.name === "totalToolCalls")).toEqual({
+      name: "totalToolCalls",
+      actual: 2,
+      baseline: 10,
+      delta: -8,
+    });
+    expect(result.metrics.find((row) => row.name === "costUsd")?.delta).toBe(0.0023);
+    expect(result.toolRows.map((row) => [row.name, row.actual, row.baseline])).toEqual([
+      ["observe", 1, 3],
+      ["swipeOn", 0, 1],
+      ["tapOn", 1, 0],
+    ]);
+    expect(result.sequenceDiff).toMatchObject({ missing: 1, extra: 0 });
+  });
+
+  test("without a baseline, metrics carry no delta and there is no sequence diff", () => {
+    const result = compareRun(audit(cleanRun()), OK_OUTCOME, NO_VERIFY);
+    expect(result.metrics.every((row) => row.delta === undefined)).toBe(true);
+    expect(result.toolRows.every((row) => row.baseline === undefined)).toBe(true);
+    expect(result.sequenceDiff).toBeUndefined();
+  });
+
+  test("stumbles sum tool errors, pattern matches, and permission denials", () => {
+    const builder = new TranscriptBuilder()
+      .init()
+      .mcp("tapOn", "boom", { isError: true })
+      .mcp("observe", "WAIT_TIMEOUT")
+      .result({ permissionDenials: [{ tool_name: "Bash" }] });
+    const transcript = auditTranscript(builder.build(), {
+      failurePatterns: ["WAIT_TIMEOUT"],
+      ignoredFailurePatterns: [],
+    });
+    expect(compareRun(transcript, OK_OUTCOME, NO_VERIFY).stumbles).toBe(3);
+  });
+
+  test("subagent calls are left out of the compared sequence", () => {
+    const builder = new TranscriptBuilder()
+      .init()
+      .mcp("observe")
+      .tool("mcp__auto-mobile__tapOn", "ok", { parentToolUseId: "toolu_parent" })
+      .result();
+    const result = compareRun(audit(builder), OK_OUTCOME, NO_VERIFY, undefined, ["observe"]);
+    expect(result.sequenceDiff).toMatchObject({ missing: 0, extra: 0 });
+  });
+});

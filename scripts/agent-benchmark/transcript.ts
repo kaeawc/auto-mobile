@@ -1,0 +1,277 @@
+/**
+ * Audit a Claude Code `--output-format stream-json --verbose` transcript.
+ *
+ * The stream is one JSON object per line. The harness relies on four event kinds:
+ * `system/init` (model, MCP server connection status), `assistant` (tool_use blocks),
+ * `user` (tool_result blocks, `is_error`), and the final `result` (turns, cost,
+ * permission denials, final text). Every other event type is ignored, so new CLI
+ * event kinds never break parsing.
+ */
+import { MCP_TOOL_PREFIX, MCP_SERVER_NAME, shortToolName } from "./config";
+
+const RESULT_TEXT_LIMIT = 400;
+
+export interface ToolCallRecord {
+  id: string;
+  /** Full tool name as Claude saw it, e.g. `mcp__auto-mobile__observe`. */
+  name: string;
+  shortName: string;
+  isMcp: boolean;
+  /** True when the call was made by a subagent (parent_tool_use_id set). */
+  isSubagent: boolean;
+  /** 1-based JSONL line of the tool_use. */
+  line: number;
+  isError: boolean;
+  /** True when the error result matched an `ignoredFailurePatterns` entry. */
+  errorIgnored: boolean;
+  /** Truncated tool result text; empty until the result arrives. */
+  resultText: string;
+}
+
+export interface PatternMatch {
+  pattern: string;
+  tool: string;
+  line: number;
+}
+
+export interface TranscriptAudit {
+  observedModel?: string;
+  claudeCodeVersion?: string;
+  /** Status of the auto-mobile MCP server from system/init, e.g. `connected`/`failed`. */
+  mcpServerStatus?: string;
+  toolCalls: ToolCallRecord[];
+  toolCounts: Record<string, number>;
+  totalToolCalls: number;
+  mcpToolCalls: number;
+  /** Tool results with `is_error`, excluding ones matched by `ignoredFailurePatterns`. */
+  toolErrors: number;
+  patternMatches: PatternMatch[];
+  permissionDenials: string[];
+  parseErrors: string[];
+  result?: {
+    subtype: string;
+    isError: boolean;
+    numTurns?: number;
+    costUsd?: number;
+    durationMs?: number;
+    finalText: string;
+    terminalReason?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+  };
+}
+
+export interface AuditOptions {
+  failurePatterns: string[];
+  ignoredFailurePatterns: string[];
+}
+
+type JsonRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function asNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function contentBlocks(event: JsonRecord): JsonRecord[] {
+  const message = event.message;
+  if (!isRecord(message) || !Array.isArray(message.content)) {
+    return [];
+  }
+  return message.content.filter(isRecord);
+}
+
+/** tool_result content is either a string or an array of `{type:"text", text}` blocks. */
+export function toolResultText(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .filter(isRecord)
+    .map((block) => asString(block.text) ?? "")
+    .filter((text) => text.length > 0)
+    .join("\n");
+}
+
+function truncate(text: string): string {
+  return text.length > RESULT_TEXT_LIMIT ? `${text.slice(0, RESULT_TEXT_LIMIT)}…` : text;
+}
+
+function sumTokens(usage: unknown, keys: string[]): number | undefined {
+  if (!isRecord(usage)) {
+    return undefined;
+  }
+  return keys.reduce((total, key) => total + (asNumber(usage[key]) ?? 0), 0);
+}
+
+interface AuditState {
+  audit: TranscriptAudit;
+  callsById: Map<string, ToolCallRecord>;
+  fullResultText: Map<string, string>;
+}
+
+function handleInit(event: JsonRecord, state: AuditState): void {
+  state.audit.observedModel ??= asString(event.model);
+  state.audit.claudeCodeVersion ??= asString(event.claude_code_version);
+  const servers = Array.isArray(event.mcp_servers) ? event.mcp_servers.filter(isRecord) : [];
+  const ours = servers.find((server) => server.name === MCP_SERVER_NAME);
+  state.audit.mcpServerStatus = asString(ours?.status) ?? "missing";
+}
+
+function handleAssistant(event: JsonRecord, line: number, state: AuditState): void {
+  const message = event.message;
+  if (isRecord(message)) {
+    state.audit.observedModel ??= asString(message.model);
+  }
+  const isSubagent = event.parent_tool_use_id !== null && event.parent_tool_use_id !== undefined;
+  for (const block of contentBlocks(event)) {
+    if (block.type !== "tool_use") {
+      continue;
+    }
+    const name = asString(block.name) ?? "unknown";
+    const record: ToolCallRecord = {
+      id: asString(block.id) ?? `line-${line}`,
+      name,
+      shortName: shortToolName(name),
+      isMcp: name.startsWith(MCP_TOOL_PREFIX),
+      isSubagent,
+      line,
+      isError: false,
+      errorIgnored: false,
+      resultText: "",
+    };
+    state.audit.toolCalls.push(record);
+    state.callsById.set(record.id, record);
+  }
+}
+
+function handleUser(event: JsonRecord, state: AuditState): void {
+  for (const block of contentBlocks(event)) {
+    if (block.type !== "tool_result") {
+      continue;
+    }
+    const record = state.callsById.get(asString(block.tool_use_id) ?? "");
+    if (!record) {
+      continue;
+    }
+    const text = toolResultText(block.content);
+    record.isError = block.is_error === true;
+    record.resultText = truncate(text);
+    state.fullResultText.set(record.id, text);
+  }
+}
+
+function handleResult(event: JsonRecord, state: AuditState): void {
+  const usage = event.usage;
+  state.audit.result = {
+    subtype: asString(event.subtype) ?? "unknown",
+    isError: event.is_error === true,
+    numTurns: asNumber(event.num_turns),
+    costUsd: asNumber(event.total_cost_usd),
+    durationMs: asNumber(event.duration_ms),
+    finalText: asString(event.result) ?? "",
+    terminalReason: asString(event.terminal_reason),
+    inputTokens: sumTokens(usage, [
+      "input_tokens",
+      "cache_creation_input_tokens",
+      "cache_read_input_tokens",
+    ]),
+    outputTokens: sumTokens(usage, ["output_tokens"]),
+  };
+  const denials = Array.isArray(event.permission_denials) ? event.permission_denials : [];
+  state.audit.permissionDenials = denials.map((denial) =>
+    isRecord(denial) ? (asString(denial.tool_name) ?? JSON.stringify(denial)) : String(denial),
+  );
+}
+
+function handleEvent(event: JsonRecord, line: number, state: AuditState): void {
+  switch (event.type) {
+    case "system":
+      if (event.subtype === "init") {
+        handleInit(event, state);
+      }
+      return;
+    case "assistant":
+      handleAssistant(event, line, state);
+      return;
+    case "user":
+      handleUser(event, state);
+      return;
+    case "result":
+      handleResult(event, state);
+      return;
+    default:
+      return;
+  }
+}
+
+function findPatternMatches(state: AuditState, options: AuditOptions): PatternMatch[] {
+  const ignored = (text: string) =>
+    options.ignoredFailurePatterns.some((pattern) => text.includes(pattern));
+  return state.audit.toolCalls.flatMap((call) => {
+    const text = state.fullResultText.get(call.id) ?? "";
+    if (ignored(text)) {
+      call.errorIgnored = call.isError;
+      return [];
+    }
+    return options.failurePatterns
+      .filter((pattern) => text.includes(pattern))
+      .map((pattern) => ({ pattern, tool: call.shortName, line: call.line }));
+  });
+}
+
+export function auditTranscript(jsonl: string, options: AuditOptions): TranscriptAudit {
+  const state: AuditState = {
+    audit: {
+      toolCalls: [],
+      toolCounts: {},
+      totalToolCalls: 0,
+      mcpToolCalls: 0,
+      toolErrors: 0,
+      patternMatches: [],
+      permissionDenials: [],
+      parseErrors: [],
+    },
+    callsById: new Map(),
+    fullResultText: new Map(),
+  };
+  jsonl.split("\n").forEach((rawLine, index) => {
+    const text = rawLine.trim();
+    if (text.length === 0) {
+      return;
+    }
+    let event: unknown;
+    try {
+      event = JSON.parse(text);
+    } catch (error) {
+      // A truncated final line (killed process) is reported as a parse error, not thrown.
+      state.audit.parseErrors.push(`line ${index + 1}: ${String(error)}`);
+      return;
+    }
+    if (isRecord(event)) {
+      handleEvent(event, index + 1, state);
+    }
+  });
+  const { audit } = state;
+  audit.totalToolCalls = audit.toolCalls.length;
+  audit.mcpToolCalls = audit.toolCalls.filter((call) => call.isMcp).length;
+  audit.patternMatches = findPatternMatches(state, options);
+  audit.toolErrors = audit.toolCalls.filter((call) => call.isError && !call.errorIgnored).length;
+  audit.toolCounts = Object.fromEntries(
+    [...new Set(audit.toolCalls.map((call) => call.shortName))].map((name) => [
+      name,
+      audit.toolCalls.filter((call) => call.shortName === name).length,
+    ]),
+  );
+  return audit;
+}

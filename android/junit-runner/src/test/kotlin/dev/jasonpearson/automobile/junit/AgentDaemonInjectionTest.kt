@@ -1,49 +1,50 @@
 package dev.jasonpearson.automobile.junit
 
 import ai.koog.agents.core.agent.AIAgent
+import java.io.Closeable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
 class AgentDaemonInjectionTest {
+  private var previousCiMode: String? = null
+
   @Before
   fun setUp() {
     LazyInitializer.clear()
+    previousCiMode = System.getProperty("automobile.ci.mode")
+    System.setProperty("automobile.ci.mode", "false")
   }
 
   @After
   fun tearDown() {
     LazyInitializer.clear()
+    val previous = previousCiMode
+    if (previous == null) System.clearProperty("automobile.ci.mode")
+    else System.setProperty("automobile.ci.mode", previous)
   }
 
   @Test
   fun `recovery reads config and calls a tool through the injected daemon`() {
     val daemon = FakeDaemon()
     val factory = ToolCallingFactory()
-    val config =
-      object : AutoMobileAgent.ConfigProvider by AutoMobileAgent.DefaultConfigProvider() {
-        override fun getModelConfig() =
-          AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "unused-test-key")
-
-        override fun getMcpServerUrl() = "unused"
-      }
     val agent =
       AutoMobileAgent.forDaemon(
         daemon,
-        connectivity = FakeConnectivity(),
-        configProvider = config,
+        configProvider = FakeConfig,
         aiAgentFactory = factory,
       )
     assertEquals(emptyList<Pair<String, Long>>(), daemon.reads)
     assertEquals(emptyList<Pair<String, JsonObject>>(), daemon.calls)
+    assertEquals(0, daemon.aliveChecks)
 
     val result =
       agent.attemptAiRecovery(
@@ -63,28 +64,100 @@ class AgentDaemonInjectionTest {
       daemon.calls,
     )
     assertEquals(listOf(30_000L), daemon.toolTimeouts)
+    assertEquals(1, daemon.aliveChecks)
     assertFalse(agent.recoveryConfigProvider.isRecoveryEnabled())
     assertEquals(1, daemon.reads.size)
   }
 
   @Test
-  fun `custom daemon agents are fresh and do not replace the default cached agent`() {
+  fun `executor resolves one agent lazily and shares its config across failure and recovery`() {
     val defaultAgent = LazyInitializer.getAgent()
-    val daemon = FakeDaemon()
-    val collaborators = PlanExecutorCollaborators(daemon = daemon)
+    val daemon = FakeDaemon(recoveryEnabled = true)
+    val factory = ToolCallingFactory()
+    var resolutions = 0
+    val collaborators =
+      PlanExecutorCollaborators(
+        daemon = daemon,
+        agent = {
+          resolutions++
+          AutoMobileAgent.forDaemon(daemon, configProvider = FakeConfig, aiAgentFactory = factory)
+        },
+        deviceChecker = FakeDevices,
+        heartbeat = FakeHeartbeat,
+      )
+    val executor = PlanExecutor(collaborators)
+    assertEquals(0, resolutions)
     assertEquals(0, daemon.reads.size)
     assertEquals(0, daemon.calls.size)
 
-    val first = collaborators.agent()
-    val second = collaborators.agent()
+    repeat(2) {
+      val result =
+        executor.execute(
+          "test-plans/launch-clock-app.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(),
+        )
 
-    assertNotSame(first, second)
-    assertNotSame(first, LazyInitializer.getAgent(daemon))
+      assertFalse(result.success)
+      assertTrue(result.aiRecoveryAttempted)
+      assertEquals(1, resolutions)
+      assertEquals(1, daemon.reads.size)
+    }
+    assertEquals(9, factory.maxToolCalls)
+    assertEquals(
+      listOf(
+        "setToolEnabled",
+        "executePlan",
+        "observe",
+        "setToolEnabled",
+        "executePlan",
+        "observe",
+      ),
+      daemon.calls.map { it.first },
+    )
     assertSame(defaultAgent, LazyInitializer.getAgent())
-    assertEquals(9, first.recoveryConfigProvider.getMaxRecoveryToolCalls())
-    assertEquals(9, second.recoveryConfigProvider.getMaxRecoveryToolCalls())
-    assertEquals(2, daemon.reads.size)
-    assertEquals(0, daemon.calls.size)
+  }
+
+  @Test
+  fun `executor default agent shares one config read between failure checks`() {
+    val daemon = FakeDaemon()
+    val executor =
+      PlanExecutor(
+        PlanExecutorCollaborators(
+          daemon = daemon,
+          deviceChecker = FakeDevices,
+          heartbeat = FakeHeartbeat,
+        ),
+      )
+
+    val result =
+      executor.execute(
+        "test-plans/launch-clock-app.yaml",
+        emptyMap(),
+        AutoMobilePlanExecutionOptions(),
+      )
+
+    assertFalse(result.success)
+    assertFalse(result.aiRecoveryAttempted)
+    assertEquals(1, daemon.reads.size)
+    assertEquals(listOf("setToolEnabled", "executePlan"), daemon.calls.map { it.first })
+  }
+
+  @Test
+  fun `connectivity adapter forwards liveness and wait timeout to its daemon`() {
+    val daemon = FakeDaemon()
+    val checker = DefaultDaemonConnectivityChecker(daemon)
+
+    assertTrue(checker.isDaemonAlive())
+    daemon.alive = false
+    assertFalse(checker.isDaemonAlive())
+    assertFalse(checker.waitForDaemon(123L))
+    daemon.alive = true
+    assertTrue(checker.waitForDaemon(456L))
+    assertEquals(2, daemon.aliveChecks)
+    assertEquals(listOf(123L, 456L), daemon.waitTimeouts)
+    assertTrue(daemon.reads.isEmpty())
+    assertTrue(daemon.calls.isEmpty())
   }
 
   @Test
@@ -122,10 +195,28 @@ class AgentDaemonInjectionTest {
     assertSame(previousClient, clients.get())
   }
 
-  private class FakeConnectivity : DaemonConnectivityChecker {
-    override fun isDaemonAlive() = true
+  private object FakeConfig :
+    AutoMobileAgent.ConfigProvider by AutoMobileAgent.DefaultConfigProvider() {
+    override fun getModelConfig() =
+      AutoMobileAgent.ModelConfig(AutoMobileAgent.ModelProvider.OPENAI, "unused-test-key")
 
-    override fun waitForDaemon(timeoutMs: Long) = true
+    override fun getMcpServerUrl() = "unused"
+  }
+
+  private object FakeDevices : DeviceChecker {
+    override fun checkDeviceAvailability() = Unit
+
+    override fun areDevicesAvailable() = true
+
+    override fun getDeviceCount() = 1
+  }
+
+  private object FakeHeartbeat : DaemonHeartbeatController {
+    override fun startBackground(intervalMs: Long) = Closeable {}
+
+    override fun registerSession(sessionId: String) = Unit
+
+    override fun unregisterSession(sessionId: String) = Unit
   }
 
   private class ToolCallingFactory : AutoMobileAgent.AIAgentFactory {
@@ -146,11 +237,27 @@ class AgentDaemonInjectionTest {
     }
   }
 
-  private class FakeDaemon : DaemonToolClient {
+  private class FakeDaemon(private val recoveryEnabled: Boolean = false) : DaemonToolClient {
     override var sessionUuid = "unused-test-session"
     val reads = mutableListOf<Pair<String, Long>>()
     val calls = mutableListOf<Pair<String, JsonObject>>()
     val toolTimeouts = mutableListOf<Long>()
+    var alive = true
+    var aliveChecks = 0
+    val waitTimeouts = mutableListOf<Long>()
+
+    override fun isAlive(): Boolean {
+      aliveChecks++
+      return alive
+    }
+
+    override fun awaitAlive(timeoutMs: Long): Boolean {
+      waitTimeouts += timeoutMs
+      return alive
+    }
+
+    override fun callDaemonMethod(method: String, params: JsonObject, timeoutMs: Long) =
+      DaemonResponse("control", "daemon_response", true)
 
     override fun callTool(
       toolName: String,
@@ -159,6 +266,28 @@ class AgentDaemonInjectionTest {
     ): DaemonResponse {
       calls += toolName to arguments
       toolTimeouts += timeoutMs
+      if (toolName == "executePlan") {
+        return DaemonResponse(
+          "plan",
+          "mcp_response",
+          true,
+          JsonObject(
+            mapOf(
+              "content" to
+                JsonArray(
+                  listOf(
+                    JsonObject(
+                      mapOf(
+                        "type" to JsonPrimitive("text"),
+                        "text" to JsonPrimitive(FAILED_PLAN),
+                      ),
+                    ),
+                  ),
+                ),
+            ),
+          ),
+        )
+      }
       return DaemonResponse(
         "tool",
         "mcp_response",
@@ -180,7 +309,10 @@ class AgentDaemonInjectionTest {
                 listOf(
                   JsonObject(
                     mapOf(
-                      "text" to JsonPrimitive("""{"enabled":false,"config":{"maxToolCalls":9}}"""),
+                      "text" to
+                        JsonPrimitive(
+                          """{"enabled":$recoveryEnabled,"config":{"maxToolCalls":9}}""",
+                        ),
                     ),
                   ),
                 ),
@@ -188,6 +320,11 @@ class AgentDaemonInjectionTest {
           ),
         ),
       )
+    }
+
+    private companion object {
+      const val FAILED_PLAN =
+        """{"success":false,"sessionHeld":true,"deviceId":"fake-device","failedStep":{"stepIndex":0,"tool":"tapOn","error":"blocked"}}"""
     }
   }
 }

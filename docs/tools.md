@@ -1089,7 +1089,7 @@ the call is a session observe, and `deviceId` must match that session's device.
 A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
 A sessionless read that names a running device nobody holds may ready it in order to answer: on Android it may
 install the CtrlProxy APK, write the accessibility settings, and force-stop and rebind the service; on an iOS
-simulator it may install and launch the runner. The exception never applies to a device held, slot-assigned or
+simulator it may install and launch the runner. The exception never applies to a device held or
 reserved by another session: those reads use what is already installed and never run readiness.
 (Owner decision 2026-10-12, #11964.) See
 [Which read tools ready an unheld device](using/device-ownership.md#which-read-tools-ready-an-unheld-device)

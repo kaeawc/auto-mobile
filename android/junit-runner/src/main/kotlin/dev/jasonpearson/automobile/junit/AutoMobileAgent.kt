@@ -36,7 +36,7 @@ open class AutoMobileAgent(
     /** Construct both daemon-backed collaborators together without opening a connection. */
     internal fun forDaemon(
       daemon: DaemonToolClient,
-      connectivity: DaemonConnectivityChecker = DefaultDaemonConnectivityChecker(),
+      connectivity: DaemonConnectivityChecker = DefaultDaemonConnectivityChecker(daemon),
       configProvider: ConfigProvider = DefaultConfigProvider(),
       aiAgentFactory: AIAgentFactory = DefaultAIAgentFactory(),
     ): AutoMobileAgent =
@@ -108,7 +108,7 @@ open class AutoMobileAgent(
    * finishes, we call observe ourselves (outside the tool budget) as a device-liveness gate: a
    * non-null result means the device is still responsive and worth resuming on. The authoritative
    * check that recovery actually worked is the caller re-running the failed step (see
-   * [AutoMobilePlanExecutor]) — if the obstruction is gone that step now passes.
+   * [PlanExecutor]) — if the obstruction is gone that step now passes.
    */
   /**
    * Backwards-compatible one-argument recovery hook (the pre-#6094 signature). Kept as an explicit
@@ -473,7 +473,7 @@ open class AutoMobileAgent(
 
     internal constructor(
       daemon: DaemonToolClient,
-      connectivity: DaemonConnectivityChecker = DefaultDaemonConnectivityChecker(),
+      connectivity: DaemonConnectivityChecker = DefaultDaemonConnectivityChecker(daemon),
     ) : this(DaemonToolCaller(daemon::callTool), connectivity)
 
     @Volatile private var connected = false

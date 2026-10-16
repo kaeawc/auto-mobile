@@ -2034,6 +2034,100 @@ describe("IosCtrlProxyBuilder", function () {
       expect(downloader.extractedPaths).toHaveLength(0);
     });
 
+    describe("download-to-temp keeps the cached bundle (#11857)", function () {
+      const bundleName = "control-proxy.ipa";
+
+      async function cachedBuilder(downloader: FakeIOSCtrlProxyBundleDownloader, cached = true) {
+        const derivedDataPath = path.join(tempDir, "DerivedData");
+        const productsDir = path.join(derivedDataPath, "Build", "Products");
+        await fs.mkdir(path.join(productsDir, "Debug-iphonesimulator"), { recursive: true });
+        await fs.writeFile(
+          path.join(productsDir, "AutoMobileTest_iphonesimulator.xctestrun"),
+          "mock",
+        );
+        const cacheDir = path.join(tempDir, "cache");
+        await fs.mkdir(cacheDir, { recursive: true });
+        if (cached) {
+          await fs.writeFile(path.join(cacheDir, bundleName), "c".repeat(12000));
+        }
+        return {
+          cacheDir,
+          builder: IosCtrlProxyBuilder.getInstance(
+            { derivedDataPath, bundleCacheDir: cacheDir },
+            { downloader },
+          ),
+        };
+      }
+
+      test("a download that fails midway leaves the old bundle and no temp file", async function () {
+        const downloader = new FakeIOSCtrlProxyBundleDownloader();
+        downloader.download = async (_url, destination) => {
+          await fs.writeFile(destination, "partial");
+          throw new Error("connection reset");
+        };
+        let calls = 0;
+        downloader.computeFileSha256 = async () => ({
+          checksum: ++calls === 1 ? "stale" : "expected-checksum",
+          source: "node" as const,
+        });
+        IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+        const { builder, cacheDir } = await cachedBuilder(downloader);
+
+        const result = await builder.build("simulator");
+
+        expect(result.success).toBe(true); // fell back to the verified cached bundle
+        expect(await fs.readFile(path.join(cacheDir, bundleName), "utf8")).toBe("c".repeat(12000));
+        expect((await fs.readdir(cacheDir)).filter((n) => n.endsWith(".download"))).toEqual([]);
+      });
+
+      test("a checksum mismatch on the fresh download keeps the old bundle and does not fall back", async function () {
+        const downloader = new FakeIOSCtrlProxyBundleDownloader();
+        let calls = 0;
+        downloader.computeFileSha256 = async () => ({
+          checksum: ++calls === 1 ? "stale" : "tampered",
+          source: "node" as const,
+        });
+        IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+        const { builder, cacheDir } = await cachedBuilder(downloader);
+
+        const result = await builder.build("simulator");
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("checksum verification failed");
+        expect(await fs.readFile(path.join(cacheDir, bundleName), "utf8")).toBe("c".repeat(12000));
+        expect((await fs.readdir(cacheDir)).filter((n) => n.endsWith(".download"))).toEqual([]);
+      });
+
+      test("a too-small download is rejected without replacing the old bundle", async function () {
+        const downloader = new FakeIOSCtrlProxyBundleDownloader();
+        downloader.download = async (_url, destination) => {
+          await fs.writeFile(destination, "tiny");
+        };
+        downloader.checksum = "stale";
+        IosCtrlProxyBuilder.setExpectedChecksumForTesting("expected-checksum");
+        const { builder, cacheDir } = await cachedBuilder(downloader);
+
+        const result = await builder.build("simulator");
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("too small");
+        expect(await fs.readFile(path.join(cacheDir, bundleName), "utf8")).toBe("c".repeat(12000));
+      });
+
+      test("with no checksum configured the download is published without hashing it", async function () {
+        const downloader = new FakeIOSCtrlProxyBundleDownloader();
+        IosCtrlProxyBuilder.setExpectedChecksumForTesting("");
+        const { builder, cacheDir } = await cachedBuilder(downloader, false);
+
+        const result = await builder.build("simulator");
+
+        expect(result.success).toBe(true);
+        expect(downloader.downloadedUrls).toHaveLength(1);
+        expect(await fs.readFile(path.join(cacheDir, bundleName), "utf8")).toBe("a".repeat(12000));
+        expect(downloader.checksummedFilePaths.some((p) => p.endsWith(bundleName))).toBe(false);
+      });
+    });
+
     test("rejects a plaintext http:// bundle URL override by default (#4761)", async function () {
       const prevUrl = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL;
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_URL = "http://mirror.test/control-proxy.ipa";

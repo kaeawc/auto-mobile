@@ -153,7 +153,7 @@ function sessionRenderedDisplayRevision(deviceId: string): number | undefined {
  */
 export const FINAL_OBSERVATION_MAX_RETRY_ATTEMPTS = 4;
 
-interface ObservedChangeOptions {
+export interface ObservedChangeOptions {
   changeExpected: boolean;
   /** Retire pre-action trees before the post-action capture, including partial dispatch failures. */
   foregroundAppMayChange?: boolean;

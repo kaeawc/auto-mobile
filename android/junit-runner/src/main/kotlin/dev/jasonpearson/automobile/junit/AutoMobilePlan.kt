@@ -61,7 +61,7 @@ internal constructor(
     // Ensure device availability is checked
     collaborators.deviceChecker.checkDeviceAvailability()
 
-    return AutoMobilePlanExecutor.execute(planPath, parameterMap, options, collaborators)
+    return PlanExecutors.default(collaborators).execute(planPath, parameterMap, options)
   }
 
   /** Builder class for constructing parameter maps using a DSL-like syntax. */

@@ -4499,7 +4499,17 @@ export class SessionManager {
    * Get existing session
    */
   getSession(sessionId: string): Session | null {
-    return this.getSessionInternal(sessionId, false);
+    return this.expireIfDue(sessionId, false);
+  }
+
+  /** @internal Pure lookup with getSession's default expiry judgement, apart from the stall probe. */
+  findSession(sessionId: string): Session | null {
+    this.stallProbe?.();
+    if (this.sessionSlots.hasTerminalSnapshot(sessionId)) {
+      return null;
+    }
+    const session = this.sessions.get(sessionId);
+    return session && !this.isSessionExpired(session) ? session : null;
   }
 
   /**
@@ -4512,10 +4522,10 @@ export class SessionManager {
     sessionId: string,
     execution?: SessionExecutionMetadata,
   ): Session | null {
-    return this.unlessBaseEnded(this.getSessionInternal(sessionId, true, execution));
+    return this.unlessBaseEnded(this.expireIfDue(sessionId, true, execution));
   }
 
-  private getSessionInternal(
+  private expireIfDue(
     sessionId: string,
     expireDespiteActiveExecution: boolean,
     execution?: SessionExecutionMetadata,
@@ -4602,7 +4612,7 @@ export class SessionManager {
     if (this.deviceHeldForLateRead(sessionId, execution) !== undefined) {
       return null;
     }
-    return this.unlessBaseEnded(this.getSessionInternal(sessionId, true, execution, false));
+    return this.unlessBaseEnded(this.expireIfDue(sessionId, true, execution, false));
   }
 
   /**
@@ -6539,7 +6549,7 @@ export class SessionManager {
    * Side-effect free apart from the stall probe every lookup runs.
    */
   isLiveManagedExecutionSession(sessionId: string): boolean {
-    const session = this.getSessionInternal(sessionId, false, undefined, false);
+    const session = this.expireIfDue(sessionId, false, undefined, false);
     return (
       session !== null &&
       session.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY &&
@@ -6689,7 +6699,7 @@ export class SessionManager {
       allowExpired || this.sessionSlots.hasTerminalSnapshot(sessionId)
         ? (this.sessions.get(sessionId) ?? null)
         : // Not `getSession`: a label whose base has ended is still there to release (#11640).
-          this.getSessionInternal(sessionId, false);
+          this.expireIfDue(sessionId, false);
     if (!session) {
       return await this.releaseUnpublishedSession(sessionId, releaseReason, allowExpired);
     }
@@ -11390,7 +11400,7 @@ export class SessionManager {
     sessionId: string,
     deviceId: string,
   ): Readonly<Record<string, unknown>> | undefined {
-    const record = this.getSession(sessionId)?.cacheData.lastActionMetadata;
+    const record = this.findSession(sessionId)?.cacheData.lastActionMetadata;
     return record?.deviceId === deviceId ? record.blocks : undefined;
   }
 
@@ -11408,14 +11418,13 @@ export class SessionManager {
    * baseline on every non-observe action; routing that read through
    * `getSessionCache` would fire a second `recordActivity` UPDATE on top of the
    * `set` that follows (get + set = two fire-and-forget writes per diffed action).
-   * This reader goes straight through `getSession`, which does not record activity
-   * (its only mutation is lazy expiry — the same GC any session lookup triggers),
-   * so a diffed action records activity once — from the baseline `set` — not twice.
+   * This reader uses `findSession`, which neither records activity nor releases an expired
+   * session, so a diffed action records activity once — from the baseline `set` — not twice.
    * Returns `undefined` for an unknown/expired session or when no observation has
    * been rendered yet.
    */
   getLastRenderedObservation(sessionId: string): ObserveResult | undefined {
-    return this.getSession(sessionId)?.cacheData.lastRenderedObservation;
+    return this.findSession(sessionId)?.cacheData.lastRenderedObservation;
   }
 
   /** Keep the caller's revision even when a fold clears the hierarchy and diff baseline. */
@@ -11433,7 +11442,7 @@ export class SessionManager {
   }
 
   getLastRenderedDisplayGeneration(sessionId: string): number | undefined {
-    return this.getSession(sessionId)?.cacheData.lastRenderedDisplayGeneration;
+    return this.findSession(sessionId)?.cacheData.lastRenderedDisplayGeneration;
   }
 
   setDisplayPin(sessionId: string, pin: string | null): void {
@@ -11447,15 +11456,15 @@ export class SessionManager {
   }
 
   getDisplayPin(sessionId: string): string | undefined {
-    return this.getSession(sessionId)?.cacheData.displayPin;
+    return this.findSession(sessionId)?.cacheData.displayPin;
   }
 
   getLastRenderedDisplayKey(sessionId: string): string | undefined {
-    return this.getSession(sessionId)?.cacheData.lastRenderedDisplayKey;
+    return this.findSession(sessionId)?.cacheData.lastRenderedDisplayKey;
   }
 
   getLastRenderedDisplayRevision(sessionId: string): number | undefined {
-    return this.getSession(sessionId)?.cacheData.lastRenderedDisplayRevision;
+    return this.findSession(sessionId)?.cacheData.lastRenderedDisplayRevision;
   }
 
   /**
@@ -11476,7 +11485,7 @@ export class SessionManager {
    * Returns `undefined` for an unknown/expired session or before setup ran.
    */
   getKeepScreenAwake(sessionId: string): KeepScreenAwakeState | undefined {
-    return this.getSession(sessionId)?.cacheData.keepScreenAwake;
+    return this.findSession(sessionId)?.cacheData.keepScreenAwake;
   }
 
   /**
@@ -11515,7 +11524,7 @@ export class SessionManager {
    * session or before any setup has recorded a level.
    */
   getDeviceReadiness(sessionId: string): DeviceReadinessLevel | undefined {
-    return this.getSession(sessionId)?.cacheData.deviceReadiness;
+    return this.findSession(sessionId)?.cacheData.deviceReadiness;
   }
 
   /** Drop stale automation readiness after its service becomes unavailable. */
@@ -11574,7 +11583,7 @@ export class SessionManager {
     session.cacheData.clock ??= state;
   }
   getClock(sessionId: string): ClockSessionState | undefined {
-    return this.getSession(sessionId)?.cacheData.clock;
+    return this.findSession(sessionId)?.cacheData.clock;
   }
   runClockMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
     return this.runDeviceStateMutationExclusive(this.clockMutationQueues, sessionId, fn);
@@ -11616,7 +11625,7 @@ export class SessionManager {
     session.cacheData.rotation ??= state;
   }
   getRotation(sessionId: string): RotationSessionState | undefined {
-    return this.getSession(sessionId)?.cacheData.rotation;
+    return this.findSession(sessionId)?.cacheData.rotation;
   }
   runRotationMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
     return this.runDeviceStateMutationExclusive(this.rotationMutationQueues, sessionId, fn);
@@ -11663,7 +11672,7 @@ export class SessionManager {
     session.cacheData.screenReader ??= state;
   }
   getScreenReader(sessionId: string): ScreenReaderSessionState | undefined {
-    return this.getSession(sessionId)?.cacheData.screenReader;
+    return this.findSession(sessionId)?.cacheData.screenReader;
   }
   runScreenReaderMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
     return this.runDeviceStateMutationExclusive(this.screenReaderMutationQueues, sessionId, fn);
@@ -11683,7 +11692,7 @@ export class SessionManager {
 
   /** Read the original enrollment state without recording session activity. */
   getBiometricEnrollment(sessionId: string): BiometricEnrollmentSessionState | undefined {
-    return this.getSession(sessionId)?.cacheData.biometricEnrollment;
+    return this.findSession(sessionId)?.cacheData.biometricEnrollment;
   }
 
   /**
@@ -11759,7 +11768,7 @@ export class SessionManager {
 
   /** Read the original network condition without recording session activity. */
   getNetworkCondition(sessionId: string): NetworkConditionSessionState | undefined {
-    return this.getSession(sessionId)?.cacheData.networkCondition;
+    return this.findSession(sessionId)?.cacheData.networkCondition;
   }
 
   /**
@@ -12004,7 +12013,7 @@ export class SessionManager {
    * Get session cache data. A read: it records no activity (#10703), like the typed getters.
    */
   getSessionCache(sessionId: string): SessionCacheData | null {
-    return this.getSession(sessionId)?.cacheData ?? null;
+    return this.findSession(sessionId)?.cacheData ?? null;
   }
 
   /**
@@ -12180,7 +12189,7 @@ export class SessionManager {
    * an expired session the scan has not reached is reported gone and is not released here.
    */
   peekSession(sessionId: string): Session | null {
-    return this.unlessBaseEnded(this.getSessionInternal(sessionId, false, undefined, false));
+    return this.unlessBaseEnded(this.expireIfDue(sessionId, false, undefined, false));
   }
 
   /**

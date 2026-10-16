@@ -371,7 +371,7 @@ test("a retry during an unpublished same-UUID resume leaves the new row active",
     };
     const resume = manager.createSession("racing-session", "emulator-new", "android");
     await upsertStarted.promise;
-    expect(Reflect.get(manager, "pendingSessionCreations").has("racing-session")).toBe(true);
+    expect(Reflect.get(manager, "sessionSlots").creations.has("racing-session")).toBe(true);
     expect(manager.getSession("racing-session")).toBeNull();
     expect(await persistence.getSession("racing-session")).toMatchObject({
       device_id: "emulator-new",

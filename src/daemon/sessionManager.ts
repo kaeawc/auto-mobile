@@ -1,5 +1,5 @@
 import { createLegacyLifecycleView } from "./legacyLifecycleView";
-import { isLegacySessionIdKnown, type LegacyLifecycleView } from "./sessionSlots";
+import { SessionSlots, isLegacySessionIdKnown, type LegacyLifecycleView } from "./sessionSlots";
 import { SessionSlotShadowProbe, type SlotShadowProbeMode } from "./sessionSlotShadowProbe";
 import {
   RecorderTeardownRetries,
@@ -1798,17 +1798,15 @@ export class SessionManager {
    * see {@link runNetworkConditionMutationExclusive}.
    */
   private readonly networkConditionMutationQueues: Map<string, Promise<unknown>> = new Map();
-  /** Creation writes that must finish before a session becomes visible to callers. */
-  private readonly pendingSessionCreations: Map<string, PendingSessionCreation> = new Map();
+  private readonly sessionSlots = new SessionSlots<
+    Promise<Session>,
+    SharedSessionAssignment,
+    PendingSessionCreation,
+    DeviceSession,
+    PendingSessionRelease
+  >();
   /** False once daemon shutdown fences acquisitions that outlive request quiescence. */
   private acceptingSessionCreations = true;
-  /** Automatic device assignments that have not yet started their creation write. */
-  private readonly pendingSessionAssignments: Map<string, Promise<Session>> = new Map();
-  private readonly sharedSessionAssignments = new Map<string, SharedSessionAssignment>();
-  /** Persisted recovery state consumed by createSession before it publishes an assigned session. */
-  private readonly pendingPersistedRecoveries: Map<string, DeviceSession> = new Map();
-  /** Rows this daemon claimed for recovery (#11200); their upsert is conditioned on the claim. */
-  private readonly claimedRecoverableRows = new WeakSet<DeviceSession>();
   /**
    * Last tool-call activity (a call starting, joining, or ending) against a session that is
    * waiting out a device restart. The released row's `expires_at_ms` froze at the device loss,
@@ -1847,8 +1845,6 @@ export class SessionManager {
    */
   private readonly owedSupersededRowReasserts: Map<string, OwedSupersededRowReassert> = new Map();
   private supersededRowReassertBackoff: BackoffPolicy = DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF;
-  /** Releases received before an assignment has published its session. */
-  private readonly pendingSessionReleases: Map<string, PendingSessionRelease> = new Map();
   /** Rebinds that a release must await before it can remove the live binding. */
   private readonly pendingSessionRebinds: Map<string, PendingSessionRebind> = new Map();
   private readonly deferredRebindCleanups = new Map<
@@ -3601,14 +3597,14 @@ export class SessionManager {
       }
     }
 
-    const pendingCreation = this.pendingSessionCreations.get(sessionId);
+    const pendingCreation = this.sessionSlots.getCreation(sessionId);
     if (pendingCreation) {
       return await this.withinCreateDeadline(sessionId, assignedDevice, pendingCreation.promise);
     }
 
     this.keepAwakeRestoreReports.delete(sessionId);
     const now = this.sessionNow();
-    const persistedRecovery = this.pendingPersistedRecoveries.get(sessionId);
+    const persistedRecovery = this.sessionSlots.getRecovery(sessionId);
     const creatorSource = this.creatorSourceForCreation(sessionId, persistenceSource);
     const liveness = sessionCreationLiveness(
       timeoutMs,
@@ -3653,7 +3649,7 @@ export class SessionManager {
       this.claimedIncarnation(persistedRecovery),
     );
     settleRecovery(creation.promise);
-    this.pendingSessionCreations.set(sessionId, creation);
+    this.sessionSlots.setCreation(sessionId, creation);
     this.slotShadowProbe.check(sessionId, "creation-start");
     try {
       const created = await this.withinCreateDeadline(
@@ -3669,8 +3665,8 @@ export class SessionManager {
       await this.retryAbandonedScreenReaderRestore(created.assignedDevice);
       return created;
     } finally {
-      if (this.pendingSessionCreations.get(sessionId) === creation) {
-        this.pendingSessionCreations.delete(sessionId);
+      if (this.sessionSlots.getCreation(sessionId) === creation) {
+        this.sessionSlots.deleteCreation(sessionId);
         this.slotShadowProbe.check(sessionId, "creation-end");
       }
     }
@@ -3759,7 +3755,7 @@ export class SessionManager {
 
   /** The claimed incarnation a recovery's upsert is conditioned on, when `row` is a claim. */
   private claimedIncarnation(row: DeviceSession | undefined): ClaimedCreationRow | undefined {
-    if (!row || !this.claimedRecoverableRows.has(row)) {
+    if (!row || !this.sessionSlots.isRowClaimed(row)) {
       return undefined;
     }
     return {
@@ -4230,7 +4226,7 @@ export class SessionManager {
       persisted &&
       (!persisted.release_reason || isReissuableByNameReleaseReason(persisted.release_reason)) &&
       isRecoverableDeviceSession(persisted, this.sessionNow()) &&
-      (this.claimedRecoverableRows.has(persisted) ||
+      (this.sessionSlots.isRowClaimed(persisted) ||
         this.isRowOwnedByLivePeer(persisted) ||
         !hasLapsedRestartRecoveryWindow(persisted, this.sessionNow())),
     );
@@ -4899,13 +4895,13 @@ export class SessionManager {
     access: SessionAccess,
     requestDeadlineMs?: number,
   ): Promise<Session> {
-    const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
+    const pendingAssignment = this.sessionSlots.getAssignment(sessionId);
     if (pendingAssignment) {
       // Only a control call joining the recovery is use; a read joins without extending (#11281).
       if (access === "acquire" && this.restartRecoveryActivityAt.has(sessionId)) {
         this.recordRestartRecoveryActivity(sessionId);
       }
-      const shared = this.sharedSessionAssignments.get(sessionId);
+      const shared = this.sessionSlots.getShared(sessionId);
       if (shared?.controller.signal.aborted) {
         await this.waitForAbortedAssignment(pendingAssignment, shared, requestDeadlineMs);
         return await this.getOrCreateSession(
@@ -4930,7 +4926,7 @@ export class SessionManager {
       return joined;
     }
 
-    const pendingCreation = this.pendingSessionCreations.get(sessionId);
+    const pendingCreation = this.sessionSlots.getCreation(sessionId);
     if (pendingCreation) {
       return await pendingCreation.promise;
     }
@@ -4944,13 +4940,13 @@ export class SessionManager {
       shared,
     ).finally(() => {
       shared.recoveryWait.resolve(undefined);
-      if (this.pendingSessionAssignments.get(sessionId) === assignment) {
-        this.pendingSessionAssignments.delete(sessionId);
-        this.sharedSessionAssignments.delete(sessionId);
+      if (this.sessionSlots.getAssignment(sessionId) === assignment) {
+        this.sessionSlots.deleteAssignment(sessionId);
+        this.sessionSlots.deleteShared(sessionId);
         this.slotShadowProbe.check(sessionId, "assignment-end");
       }
     });
-    this.pendingSessionAssignments.set(sessionId, assignment);
+    this.sessionSlots.setAssignment(sessionId, assignment);
     this.slotShadowProbe.check(sessionId, "assignment-start");
     return await this.waitForSharedAssignment(sessionId, assignment, requestDeadlineMs);
   }
@@ -4961,7 +4957,7 @@ export class SessionManager {
       waiters: 0,
       recoveryWait: Promise.withResolvers<RecoveryAssignmentWait | undefined>(),
     };
-    this.sharedSessionAssignments.set(sessionId, shared);
+    this.sessionSlots.setShared(sessionId, shared);
     return shared;
   }
 
@@ -5003,7 +4999,7 @@ export class SessionManager {
     assignment: Promise<Session>,
     requestDeadlineMs?: number,
   ): Promise<Session> {
-    const shared = this.sharedSessionAssignments.get(sessionId);
+    const shared = this.sessionSlots.getShared(sessionId);
     if (!shared) {
       return await assignment;
     }
@@ -5254,7 +5250,7 @@ export class SessionManager {
     );
     // A re-issue with no usable target still writes over its claimed row, as a recovery does.
     if (persisted && (recoveryTarget || this.isNameReissueOnlyRow(persisted))) {
-      this.pendingPersistedRecoveries.set(sessionId, persisted);
+      this.sessionSlots.setRecovery(sessionId, persisted);
     }
     try {
       const assign = () =>
@@ -5289,8 +5285,8 @@ export class SessionManager {
     } finally {
       // A successful recovery already resolved; every other exit rejects and drops its signal.
       this.settleManagedExecutionRecovery(sessionId, false);
-      if (this.pendingPersistedRecoveries.get(sessionId) === persisted) {
-        this.pendingPersistedRecoveries.delete(sessionId);
+      if (this.sessionSlots.getRecovery(sessionId) === persisted) {
+        this.sessionSlots.deleteRecovery(sessionId);
       }
     }
   }
@@ -5377,7 +5373,7 @@ export class SessionManager {
       stable_identity_generation: generation,
       daemon_session_id: daemonSessionId,
     };
-    this.claimedRecoverableRows.add(claimed);
+    this.sessionSlots.markRowClaimed(claimed);
     return {
       row: claimed,
       // This daemon's own stale claim is handed back unowned, so a peer can take it.
@@ -5474,7 +5470,7 @@ export class SessionManager {
     if (this.sessions.has(sessionId)) {
       return "already-live";
     }
-    if (this.pendingSessionAssignments.has(sessionId)) {
+    if (this.sessionSlots.hasAssignment(sessionId)) {
       return "already-pending";
     }
     return undefined;
@@ -5495,12 +5491,12 @@ export class SessionManager {
       shared,
     ).finally(() => {
       shared.recoveryWait.resolve(undefined);
-      if (this.pendingSessionAssignments.get(sessionId) === recoveryPromise) {
-        this.pendingSessionAssignments.delete(sessionId);
-        this.sharedSessionAssignments.delete(sessionId);
+      if (this.sessionSlots.getAssignment(sessionId) === recoveryPromise) {
+        this.sessionSlots.deleteAssignment(sessionId);
+        this.sessionSlots.deleteShared(sessionId);
       }
     });
-    this.pendingSessionAssignments.set(sessionId, recoveryPromise);
+    this.sessionSlots.setAssignment(sessionId, recoveryPromise);
     return this.waitForSharedAssignment(sessionId, recoveryPromise);
   }
 
@@ -5659,7 +5655,7 @@ export class SessionManager {
     devicePool: SessionDeviceAssigner,
   ): void {
     const release = (): void => devicePool.releaseRehydrationReservation?.(sessionId);
-    const pending = this.pendingSessionAssignments.get(sessionId);
+    const pending = this.sessionSlots.getAssignment(sessionId);
     if (pending) {
       void pending.then(release, release);
     } else {
@@ -6448,9 +6444,9 @@ export class SessionManager {
   ): SessionReleaseSnapshot | undefined {
     if (
       this.sessions.has(sessionId) ||
-      this.pendingSessionAssignments.has(sessionId) ||
-      this.pendingSessionCreations.has(sessionId) ||
-      this.pendingPersistedRecoveries.has(sessionId) ||
+      this.sessionSlots.hasAssignment(sessionId) ||
+      this.sessionSlots.hasCreation(sessionId) ||
+      this.sessionSlots.hasRecovery(sessionId) ||
       this.releasePromises.has(sessionId)
     ) {
       return undefined;
@@ -6581,9 +6577,9 @@ export class SessionManager {
     return createLegacyLifecycleView(
       {
         sessions: this.sessions,
-        pendingAssignments: this.pendingSessionAssignments,
-        pendingCreations: this.pendingSessionCreations,
-        pendingReleases: this.pendingSessionReleases,
+        pendingAssignments: this.sessionSlots.assignments,
+        pendingCreations: this.sessionSlots.creations,
+        pendingReleases: this.sessionSlots.releaseRequests,
         pendingRebinds: this.pendingSessionRebinds,
         releaseOps: this.releasePromises,
         terminalSnapshots: this.terminalReleaseSnapshots,
@@ -6647,8 +6643,8 @@ export class SessionManager {
       return current === session;
     }
     if (
-      this.pendingSessionCreations.has(session.sessionId) ||
-      (!options.ignorePendingAssignment && this.pendingSessionAssignments.has(session.sessionId))
+      this.sessionSlots.hasCreation(session.sessionId) ||
+      (!options.ignorePendingAssignment && this.sessionSlots.hasAssignment(session.sessionId))
     ) {
       return false;
     }
@@ -6897,10 +6893,7 @@ export class SessionManager {
     if (session) {
       return null;
     }
-    if (
-      this.pendingSessionAssignments.has(sessionId) ||
-      this.pendingSessionCreations.has(sessionId)
-    ) {
+    if (this.sessionSlots.hasAssignment(sessionId) || this.sessionSlots.hasCreation(sessionId)) {
       return null;
     }
     const inFlightRelease = this.releasePromises.get(sessionId);
@@ -6966,8 +6959,8 @@ export class SessionManager {
         ? pendingSnapshot.deviceId
         : null;
     }
-    const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
-    const pendingCreation = this.pendingSessionCreations.get(sessionId);
+    const pendingAssignment = this.sessionSlots.getAssignment(sessionId);
+    const pendingCreation = this.sessionSlots.getCreation(sessionId);
     const pendingSession = pendingAssignment ?? pendingCreation?.promise;
     if (!pendingSession) {
       return await this.releasePersistedRestartRecovery(sessionId, releaseReason);
@@ -7114,7 +7107,7 @@ export class SessionManager {
     allowExpired: boolean,
     pendingSession: Promise<Session>,
   ): Promise<string | null> {
-    const existingRelease = this.pendingSessionReleases.get(sessionId);
+    const existingRelease = this.sessionSlots.getReleaseRequest(sessionId);
     if (existingRelease) {
       this.upgradeReleaseReason(existingRelease.reason, releaseReason);
       return await existingRelease.promise;
@@ -7125,12 +7118,12 @@ export class SessionManager {
       promise: this.releaseAfterPendingSessionWork(sessionId, reason, allowExpired, pendingSession),
       reason,
     };
-    this.pendingSessionReleases.set(sessionId, release);
+    this.sessionSlots.setReleaseRequest(sessionId, release);
     try {
       return await release.promise;
     } finally {
-      if (this.pendingSessionReleases.get(sessionId) === release) {
-        this.pendingSessionReleases.delete(sessionId);
+      if (this.sessionSlots.getReleaseRequest(sessionId) === release) {
+        this.sessionSlots.deleteReleaseRequest(sessionId);
       }
     }
   }
@@ -7251,7 +7244,7 @@ export class SessionManager {
 
   /** Wait for a release already admitted for this session, if any. */
   async waitForSessionRelease(sessionId: string): Promise<void> {
-    const pendingSessionRelease = this.pendingSessionReleases.get(sessionId);
+    const pendingSessionRelease = this.sessionSlots.getReleaseRequest(sessionId);
     if (pendingSessionRelease) {
       await pendingSessionRelease.promise;
       return;
@@ -7266,7 +7259,7 @@ export class SessionManager {
   /** Wait for this session's admitted release to settle, including failure, within a bound. */
   async waitForSessionReleaseWithin(sessionId: string, timeoutMs: number): Promise<boolean> {
     const release =
-      this.pendingSessionReleases.get(sessionId) ?? this.releasePromises.get(sessionId);
+      this.sessionSlots.getReleaseRequest(sessionId) ?? this.releasePromises.get(sessionId);
     if (!release) {
       return true;
     }
@@ -8395,8 +8388,8 @@ export class SessionManager {
   private async waitOutRecreationOf(sessionId: string): Promise<void> {
     for (;;) {
       const issue =
-        this.pendingSessionAssignments.get(sessionId) ??
-        this.pendingSessionCreations.get(sessionId)?.promise;
+        this.sessionSlots.getAssignment(sessionId) ??
+        this.sessionSlots.getCreation(sessionId)?.promise;
       if (!issue) {
         return;
       }
@@ -8413,8 +8406,8 @@ export class SessionManager {
       await Promise.resolve();
       if (
         issue ===
-        (this.pendingSessionAssignments.get(sessionId) ??
-          this.pendingSessionCreations.get(sessionId)?.promise)
+        (this.sessionSlots.getAssignment(sessionId) ??
+          this.sessionSlots.getCreation(sessionId)?.promise)
       ) {
         return;
       }
@@ -8804,8 +8797,8 @@ export class SessionManager {
           const ownAdvance =
             incarnation !== undefined &&
             (!held || held === incarnation) &&
-            !this.pendingSessionCreations.has(snapshot.sessionId) &&
-            !this.pendingSessionAssignments.has(snapshot.sessionId) &&
+            !this.sessionSlots.hasCreation(snapshot.sessionId) &&
+            !this.sessionSlots.hasAssignment(snapshot.sessionId) &&
             row?.stable_identity_generation !== undefined &&
             this.persistedRowGenerations.get(incarnation) === row.stable_identity_generation;
           return ownAdvance ? row!.stable_identity_generation : precondition.expectedRowGeneration;
@@ -9523,8 +9516,8 @@ export class SessionManager {
   private isSessionBeingRecreated(sessionId: string): boolean {
     return (
       this.sessions.has(sessionId) ||
-      this.pendingSessionCreations.has(sessionId) ||
-      this.pendingSessionAssignments.has(sessionId)
+      this.sessionSlots.hasCreation(sessionId) ||
+      this.sessionSlots.hasAssignment(sessionId)
     );
   }
 
@@ -11933,7 +11926,7 @@ export class SessionManager {
    * {@link getOrCreateSession}, and an id whose prefix is no live session is a session of its own.
    */
   private refuseLabelMintOutsidePlanAllocation(sessionId: string, deviceId: string): void {
-    if (this.planLabelMints.has(sessionId) || this.pendingPersistedRecoveries.has(sessionId)) {
+    if (this.planLabelMints.has(sessionId) || this.sessionSlots.hasRecovery(sessionId)) {
       return;
     }
     const baseSessionId = this.liveBaseOfDerivedId(sessionId);
@@ -13251,10 +13244,10 @@ export class SessionManager {
     return Array.from(
       new Set([
         ...this.sessions.keys(),
-        ...this.pendingSessionCreations.keys(),
-        ...this.pendingSessionAssignments.keys(),
+        ...this.sessionSlots.creations.keys(),
+        ...this.sessionSlots.assignments.keys(),
         ...this.pendingSessionRebinds.keys(),
-        ...this.pendingSessionReleases.keys(),
+        ...this.sessionSlots.releaseRequests.keys(),
         ...this.releasePromises.keys(),
       ]),
     );

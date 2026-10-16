@@ -22,6 +22,7 @@ import {
 import {
   buildClaudeArgs,
   buildMcpConfig,
+  claudeLaunchEnv,
   fillPlaceholders,
   isolatedServerEnv,
   systemPromptFor,
@@ -232,7 +233,7 @@ async function launchClaude(
     args,
     cwd: run.claudeCwd,
     env: {
-      ...isolatedServerEnv(deps.env, run.paths),
+      ...claudeLaunchEnv(deps.env, run.paths),
       // User-level CLAUDE.md and auto-memory differ per operator; keep runs comparable.
       CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",
       AUTOMOBILE_AGENT_BENCH_SERIAL: run.serial,

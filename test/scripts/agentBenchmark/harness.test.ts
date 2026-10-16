@@ -239,6 +239,27 @@ describe("agent benchmark harness", () => {
     }
   });
 
+  test("inherited run-shaping Claude variables are dropped; auth variables are kept", async () => {
+    const { launches, deps, options } = setup(PASSING);
+    deps.env = {
+      PATH: "/bin",
+      CLAUDE_CODE_MAX_TURNS: "3",
+      MCP_CONNECTION_NONBLOCKING: "1",
+      MCP_TOOL_TIMEOUT: "100",
+      MAX_THINKING_TOKENS: "0",
+      ANTHROPIC_API_KEY: "sk-test",
+      CLAUDE_CODE_USE_BEDROCK: "1",
+    };
+    await runSuite(loadedSuite(), options, deps);
+    const env = launches[0].env;
+    expect(env.CLAUDE_CODE_MAX_TURNS).toBeUndefined();
+    expect(env.MCP_CONNECTION_NONBLOCKING).toBeUndefined();
+    expect(env.MCP_TOOL_TIMEOUT).toBeUndefined();
+    expect(env.MAX_THINKING_TOKENS).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBe("sk-test");
+    expect(env.CLAUDE_CODE_USE_BEDROCK).toBe("1");
+  });
+
   test("runs of one suite in the same second get separate directories", async () => {
     const first = setup(PASSING);
     const second = setup(PASSING);

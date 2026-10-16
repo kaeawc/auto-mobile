@@ -73,6 +73,10 @@ Each run is isolated so earlier runs and your own setup cannot change the result
   so your hooks and enabled plugins don't apply either. (`--bare` would do this too, but it
   requires API-key auth and would break subscription sign-in.) Two operators get comparable results
   for the same suite and model.
+- Inherited Claude Code variables that change run behavior (`CLAUDE_CODE_MAX_TURNS`,
+  `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, `MAX_THINKING_TOKENS`, `MAX_MCP_OUTPUT_TOKENS`,
+  `MCP_CONNECTION_NONBLOCKING`, `MCP_TIMEOUT`, `MCP_TOOL_TIMEOUT`) are removed from Claude's
+  environment. Auth and provider variables (API keys, Bedrock/Vertex settings) are kept.
 - The server uses a **private daemon** (`AUTOMOBILE_AUX_SOCKET_DIR`), a **fresh database**
   (`AUTOMOBILE_DB_DIR`, so no learned navigation graph carries over), and its own log directory
   (`<run>/logs`). Every AutoMobile variable inherited from your shell (`AUTOMOBILE_*` and the

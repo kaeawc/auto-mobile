@@ -56,6 +56,34 @@ function isAutoMobileVariable(key: string): boolean {
 }
 
 /**
+ * Inherited Claude Code variables that change how a run behaves (turn caps, output and
+ * thinking budgets, MCP startup and tool timeouts). They are dropped from the launch
+ * environment so an operator's shell cannot skew results; auth and provider variables
+ * are kept, so subscription, API-key, Bedrock, and Vertex sign-in all still work.
+ */
+export const RUN_SHAPING_CLAUDE_VARIABLES: ReadonlySet<string> = new Set([
+  "CLAUDE_CODE_MAX_TURNS",
+  "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+  "MAX_THINKING_TOKENS",
+  "MAX_MCP_OUTPUT_TOKENS",
+  "MCP_CONNECTION_NONBLOCKING",
+  "MCP_TIMEOUT",
+  "MCP_TOOL_TIMEOUT",
+]);
+
+/** The launch environment for Claude: isolated server env without run-shaping Claude overrides. */
+export function claudeLaunchEnv(
+  inherited: Record<string, string | undefined>,
+  paths: ServerPaths,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(isolatedServerEnv(inherited, paths)).filter(
+      ([key]) => !RUN_SHAPING_CLAUDE_VARIABLES.has(key),
+    ),
+  );
+}
+
+/**
  * The inherited environment with every AutoMobile variable removed except the
  * shared ADB coordination directory, then the run's private-daemon values on top,
  * so each run starts from a clean AutoMobile configuration.

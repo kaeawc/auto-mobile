@@ -94,7 +94,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   }
 
   constructor(
-    private readonly logger: Logger = logger,
+    private readonly log: Logger = logger,
     private readonly displayInventory: DisplayInventoryProvider = defaultDisplayInventoryProvider,
     deviceReadAccess: DeviceObservationAccess = defaultDeviceObservationAccess,
   ) {
@@ -475,7 +475,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         try {
           return await this.displayInventory.hydrate(resolvedDevice, identityToken, signal);
         } catch (error) {
-          this.logger.warn(
+          this.log.warn(
             `[ToolRegistry] Display inventory unavailable for ${resolvedDevice.deviceId}: ${error}`,
             error,
           );
@@ -662,7 +662,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           IOSCtrlProxyClient.getInstance(device).bindSession(sessionUuid);
         }
       } catch (error) {
-        this.logger.debug(
+        this.log.debug(
           `[ToolRegistry] Best-effort CtrlProxy session bind skipped for ${name}: ${error}`,
         );
       }

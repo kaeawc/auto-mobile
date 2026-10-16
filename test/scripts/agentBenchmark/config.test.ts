@@ -89,6 +89,43 @@ describe("agent benchmark suite config", () => {
     });
   });
 
+  test("non-integer preferences must survive Android's 32-bit float", () => {
+    const prefs = (value: number) => ({
+      ...MINIMAL,
+      preflight: { sharedPreferences: { p: { value } } },
+    });
+    // Every double past 2^53 is an integer, so overflow is already the safe-integer rule's job.
+    expect(() => parseSuiteDefinition(prefs(1e100), "x.yml")).toThrow(/must be safe integers/);
+    for (const value of [1e-100, -1e-50, 1e-46]) {
+      expect(() => parseSuiteDefinition(prefs(value), "x.yml")).toThrow(/32-bit float/);
+    }
+    // Float32's smallest subnormal and ordinary fractions survive.
+    for (const value of [1.401298464324817e-45, 1.5e-40, 0.1, 123456.75]) {
+      expect(parseSuiteDefinition(prefs(value), "x.yml").preflight.sharedPreferences).toEqual({
+        p: { value },
+      });
+    }
+  });
+
+  test("extraArgs cannot resume or continue an earlier conversation", () => {
+    for (const extraArgs of [
+      ["--resume", "abc"],
+      ["--resume=abc"],
+      ["-r"],
+      ["--continue"],
+      ["-c"],
+      ["--fork-session"],
+    ]) {
+      expect(() => parseSuiteDefinition({ ...MINIMAL, claude: { extraArgs } }, "x.yml")).toThrow(
+        /must not resume or continue a session/,
+      );
+    }
+    expect(
+      parseSuiteDefinition({ ...MINIMAL, claude: { extraArgs: ["--effort", "high"] } }, "x.yml")
+        .claude.extraArgs,
+    ).toEqual(["--effort", "high"]);
+  });
+
   test("a suite with no verification check is rejected", () => {
     const withoutVerify = { ...MINIMAL, verify: undefined };
     expect(() => parseSuiteDefinition(withoutVerify, "x.yml")).toThrow(

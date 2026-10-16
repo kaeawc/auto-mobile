@@ -49,6 +49,8 @@ export interface Comparison {
   toolRows: MetricRow[];
   sequenceDiff?: { missing: number; extra: number; lines: SequenceDiffLine[] };
   stumbles: number;
+  /** Set when the baseline records the app build it was measured against. */
+  appBuild?: { baseline: string; current: string; matches: boolean };
 }
 
 export interface VerifySpec {
@@ -196,6 +198,7 @@ export function compareRun(
   verify: VerifySpec,
   baseline?: SuiteBaseline,
   baselineToolSequence?: string[],
+  appBuild?: string,
 ): Comparison {
   const lifecycle = processChecks(audit, outcome);
   const verification = verifyChecks(audit, outcome, verify);
@@ -220,5 +223,12 @@ export function compareRun(
       lines,
     },
     stumbles: audit.toolErrors + audit.patternMatches.length + audit.permissionDenials.length,
+    appBuild: baseline?.appBuild
+      ? {
+          baseline: baseline.appBuild,
+          current: appBuild ?? "unknown",
+          matches: baseline.appBuild === appBuild,
+        }
+      : undefined,
   };
 }

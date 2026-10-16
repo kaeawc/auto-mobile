@@ -18,6 +18,22 @@ export const MCP_TOOL_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
 
 const DEFAULT_TIMEOUT_SECONDS = 900;
 
+/** Claude flags that load an earlier conversation, which would contaminate a run. */
+const SESSION_RESUME_FLAGS = ["--resume", "-r", "--continue", "-c", "--fork-session"];
+
+function matchesFlag(arg: string, flags: readonly string[]): boolean {
+  return flags.some((flag) => arg === flag || arg.startsWith(`${flag}=`));
+}
+
+/**
+ * Android stores <float> preferences as Float32. Non-integers are all below 2^53, so the
+ * only loss to reject is underflow: a tiny nonzero value that would be stored as 0.
+ */
+function fitsFloat32(value: number): boolean {
+  const stored = Math.fround(value);
+  return Number.isFinite(stored) && (stored !== 0 || value === 0);
+}
+
 const baselineSchema = z
   .object({
     totalToolCalls: z.number().int().nonnegative().optional(),
@@ -27,6 +43,8 @@ const baselineSchema = z
     costUsd: z.number().nonnegative().optional(),
     wallClockSeconds: z.number().nonnegative().optional(),
     tools: z.record(z.number().int().nonnegative()).optional(),
+    /** The preflight app fingerprint the baseline was recorded against. */
+    appBuild: z.string().min(1).optional(),
   })
   .strict();
 
@@ -41,8 +59,11 @@ const claudeSchema = z
     extraArgs: z
       .array(z.string())
       .default([])
-      .refine((args) => !args.some((arg) => arg === "--model" || arg.startsWith("--model=")), {
+      .refine((args) => !args.some((arg) => matchesFlag(arg, ["--model"])), {
         message: "set claude.model (or pass --model on the command line), not --model in extraArgs",
+      })
+      .refine((args) => !args.some((arg) => matchesFlag(arg, SESSION_RESUME_FLAGS)), {
+        message: "extraArgs must not resume or continue a session; every run starts fresh",
       }),
   })
   .strict();
@@ -80,6 +101,9 @@ const suiteSchema = z
                   .finite()
                   .refine((value) => !Number.isInteger(value) || Number.isSafeInteger(value), {
                     message: "integer preference values must be safe integers",
+                  })
+                  .refine((value) => Number.isInteger(value) || fitsFloat32(value), {
+                    message: "non-integer preference values must fit Android's 32-bit float",
                   }),
                 z.string(),
               ]),

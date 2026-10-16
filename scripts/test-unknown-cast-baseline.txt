@@ -51,7 +51,6 @@
 1	test/daemon/daemonToolCallEndWiring.test.ts
 6	test/daemon/deviceDataStreamSocketServer.test.ts
 1	test/daemon/deviceGestureRecordingSocketServerAuth.test.ts
-1	test/daemon/deviceGestureRecordingSocketServerReadinessSession.test.ts
 1	test/daemon/devicePool.allocationDiscoveryOutsideMutex.test.ts
 1	test/daemon/devicePool.assignDevice.test.ts
 3	test/daemon/devicePool.assignMultipleDevices.test.ts
@@ -410,9 +409,8 @@
 1	test/scripts/optimizeSourcemap.test.ts
 2	test/server/CriticalSectionCoordinator.test.ts
 1	test/server/DeviceIncarnationInvalidator.test.ts
-2	test/server/DeviceSessionManager.appearanceSync.test.ts
-2	test/server/DeviceSessionManager.foreignForward.test.ts
-1	test/server/DeviceSessionManager.readBoot.test.ts
+1	test/server/DeviceSessionManager.appearanceSync.test.ts
+1	test/server/DeviceSessionManager.foreignForward.test.ts
 1	test/server/androidStartLifecycleDiscoveryTyped.test.ts
 1	test/server/appFileService.test.ts
 1	test/server/appTools.listApps.test.ts
@@ -464,7 +462,6 @@
 1	test/server/prototypeResources.test.ts
 1	test/server/prototypeTools.test.ts
 1	test/server/proxyServerProgress.test.ts
-1	test/server/readToolsExplicitDeviceIdRule.test.ts
 1	test/server/releaseCallerOrderingPreservedSession.test.ts
 10	test/server/resourceDeviceResolver.test.ts
 2	test/server/resourceNotifySlowSibling.test.ts
@@ -487,7 +484,6 @@
 2	test/server/toolRegistry.collaborators.integration.test.ts
 1	test/server/toolRegistry.reachability.test.ts
 1	test/server/toolRegistry.readOnlyDeviceAccess.test.ts
-1	test/server/toolRegistry.sessionlessReadHeldElsewhere.test.ts
 11	test/server/toolRegistryNotifyToolListChanged.test.ts
 1	test/server/tools/structuredContentGating.test.ts
 1	test/server/transportAliasRuleParity.test.ts

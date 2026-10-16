@@ -615,14 +615,136 @@ describe("session-only broker lifecycle", () => {
     expect(releases).toBe(1);
   });
 
-  test("shutdown relinquishes already active sessions before closing", async () => {
+  test("shutdown keeps active sessions for the restarted provider instead of releasing them", async () => {
     const first = await ready("active-at-close");
     await broker.close();
-    expect(devices.sessions.size).toBe(0);
+    expect(devices.released).toEqual([]);
+    expect(devices.destroyed).toEqual([]);
+    expect(devices.sessions.has(first)).toBe(true);
+    expect(await options.store.getRequest("active-at-close")).toMatchObject({
+      state: "active",
+      restartHandoff: true,
+      owner: OWNER,
+    });
     expect(await broker.status("active-at-close")).toMatchObject({
-      outcome: "released",
+      outcome: "ready",
       sessionUuid: first,
       cleanupPending: false,
+    });
+  });
+
+  describe("provider restart (#12451)", () => {
+    const SUCCESSOR: BindingProcessIdentity = {
+      daemonId: "successor",
+      pid: 202,
+      processGenerationToken: "start-b",
+    };
+
+    function successor(disposition: "live" | "recoverable-handoff" | "gone") {
+      return new SessionBroker({
+        ...options,
+        owner: SUCCESSOR,
+        sessionDisposition: () => disposition,
+      });
+    }
+
+    /** What the restarted daemon's execution reowner does for a rehydrated managed session. */
+    async function reownNatively(sessionUuid: string) {
+      const resource = devices.sessions.get(sessionUuid)!;
+      const key = { scopeKey: resource.scopeKey, bindingIndex: resource.allocationIndex };
+      const assignment = (await registry.getAssignment(key))!;
+      const claimed = await registry.claimExecution(key, assignment, {
+        ...SUCCESSOR,
+        sessionUuid,
+      });
+      expect(claimed.kind).toBe("claimed");
+    }
+
+    test("graceful restart adopts the same session once its binding is re-owned", async () => {
+      const uuid = await ready("graceful");
+      await broker.close();
+      ownerLive = false;
+      const next = successor("live");
+      // Rehydrated but not yet re-owned natively: nothing is released or terminalized.
+      await next.recover();
+      expect(await options.store.getRequest("graceful")).toMatchObject({
+        state: "active",
+        owner: OWNER,
+        restartHandoff: true,
+      });
+      expect(await next.hasActiveSession(uuid)).toBe(false);
+      await reownNatively(uuid);
+      await next.recover();
+      const adopted = await options.store.getRequest("graceful");
+      expect(adopted).toMatchObject({ state: "active", owner: SUCCESSOR, sessionId: uuid });
+      expect(adopted?.restartHandoff).toBeUndefined();
+      expect(await next.ownedStatus("graceful", "owner-token")).toMatchObject({
+        outcome: "ready",
+        sessionUuid: uuid,
+        cleanupPending: false,
+      });
+      expect(await next.hasActiveSession(uuid)).toBe(true);
+      expect(devices.released).toEqual([]);
+      expect(devices.destroyed).toEqual([]);
+      // The adopted session still ends through the consumer's ordinary release.
+      expect(await next.release(uuid)).toEqual({ sessionUuid: uuid, outcome: "released" });
+      expect(devices.destroyed).toHaveLength(1);
+      await next.close();
+    });
+
+    test("a restart reservation that is still valid is adopted too", async () => {
+      const uuid = await ready("reserved");
+      await broker.close();
+      ownerLive = false;
+      await reownNatively(uuid);
+      const next = successor("recoverable-handoff");
+      await next.recover();
+      expect(await next.status("reserved")).toMatchObject({ outcome: "ready", sessionUuid: uuid });
+      expect(devices.destroyed).toEqual([]);
+      await next.close();
+    });
+
+    test("graceful handoff whose session did not survive is terminal, never a release", async () => {
+      const uuid = await ready("lost-handoff");
+      await broker.close();
+      ownerLive = false;
+      const next = successor("gone");
+      await next.recover();
+      expect(await next.status("lost-handoff")).toMatchObject({
+        outcome: "failed",
+        sessionUuid: uuid,
+        failure: { code: "session_owner_exited" },
+      });
+      expect(devices.destroyed).toHaveLength(1);
+      await next.close();
+    });
+
+    test("a crashed owner never relinquished, so its session is retired", async () => {
+      const uuid = await ready("crashed");
+      ownerLive = false;
+      await reownNatively(uuid);
+      const next = successor("live");
+      await next.recover();
+      expect(await next.status("crashed")).toMatchObject({
+        outcome: "failed",
+        sessionUuid: uuid,
+        failure: { code: "session_owner_exited" },
+      });
+      expect(devices.destroyed).toHaveLength(1);
+      await next.close();
+    });
+
+    test("a still-live previous owner is never adopted from", async () => {
+      const uuid = await ready("live-owner");
+      await broker.close();
+      await reownNatively(uuid);
+      const next = successor("live");
+      await next.recover();
+      expect(await options.store.getRequest("live-owner")).toMatchObject({
+        state: "active",
+        owner: OWNER,
+      });
+      await next.close();
     });
   });
 });

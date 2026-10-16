@@ -320,7 +320,12 @@ operate without a live broker-granted session.
 Interrupted requests retain durable cleanup ownership. Recovery never promotes
 an interrupted device to a clean pool entry, and failure of one request does not
 starve later cleanup. Shutdown cancels and joins broker work before closing its
-registry; recovery-loop waits are interruptible. A forcibly terminated process
+registry; recovery-loop waits are interruptible. A graceful shutdown does not
+release granted sessions: it durably marks each active one as handed off, and the
+restarted provider adopts the same session UUID once rehydration has re-owned its
+native binding. A handed-off session that did not survive the restart, and every
+session of a crashed provider, ends as `session_owner_exited` with its device
+destroyed. A forcibly terminated process
 can leave native work pending, so restart qualification must exercise the durable
 journal rather than assume graceful shutdown always completes.
 

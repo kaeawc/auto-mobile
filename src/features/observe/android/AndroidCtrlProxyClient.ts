@@ -140,21 +140,29 @@ import {
   withAndroidScreenshotCaptureLock,
 } from "./AndroidPhysicalDisplayId";
 import {
-  normalizeAnr,
-  normalizeCrash,
   withResolvedTimestamp,
   type SdkAnrPayload,
   type SdkAnrWirePayload,
   type SdkCrashPayload,
   type SdkCrashWirePayload,
 } from "../crash/sdkCrashIngestion";
-import { AndroidSdkEventIngestor, DefaultAndroidSdkEventIngestor } from "./AndroidSdkEventIngestor";
+import {
+  AndroidSdkEventIngestor,
+  DefaultAndroidSdkEventIngestor,
+  type AndroidHandledExceptionEvent as HandledExceptionEvent,
+} from "./AndroidSdkEventIngestor";
 import { FailureEventRepository } from "../../../db/failureEventRepository";
 import type { CrashEventSink } from "../../../utils/interfaces/CrashMonitor";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { getSdkFrameMetricsStore } from "../../performance/SdkFrameMetricsStore";
+import {
+  AndroidAppEventRecorder,
+  parseStackTrace,
+  type AndroidPackageEvent as PackageEvent,
+  type AndroidFrameMetricsEvent,
+} from "./AndroidAppEventRecorder";
 import {
   deviceIncarnationToken,
   registerDeviceIncarnationListener,
@@ -239,11 +247,7 @@ import type {
   PrototypeResult,
 } from "./ctrlProxyProtocol";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
-import {
-  CtrlProxyPackages,
-  packageEventAndroidUserId,
-  type PackageInfoOptions,
-} from "./CtrlProxyPackages";
+import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages";
 
 // Import types
 import type { DelegateContext } from "../shared/types";
@@ -305,43 +309,6 @@ export interface InteractionEvent {
   text?: string;
   scrollDeltaX?: number;
   scrollDeltaY?: number;
-}
-
-/**
- * Interface for package event from accessibility service
- */
-interface PackageEvent {
-  action: "added" | "removed" | "replaced";
-  packageName: string;
-  /** Android user id; APKs before #10067 sent the package uid here. */
-  userId: number;
-  /** Raw package uid; present only on APKs whose `userId` is a real user id (#10067). */
-  uid?: number | null;
-  isSystem?: boolean | null;
-  removedForAllUsers?: boolean | null;
-}
-
-/**
- * Interface for handled exception event from SDK
- */
-interface HandledExceptionEvent {
-  timestamp?: number;
-  exceptionClass: string;
-  /** The wire name the device writes (#10068). */
-  message?: string | null;
-  /** Legacy name from before #10068; read only when `message` is absent. */
-  exceptionMessage?: string;
-  stackTrace: string;
-  customMessage?: string;
-  currentScreen?: string;
-  packageName: string;
-  appVersion?: string;
-  deviceInfo: {
-    model: string;
-    manufacturer: string;
-    osVersion: string;
-    sdkInt: number;
-  };
 }
 
 /**
@@ -864,13 +831,7 @@ interface WsAnrEventMessage extends WsMessageBase {
 /** Real per-frame metrics from the in-app SDK FrameMetricsCollector (issue #5076). */
 interface WsFrameMetricsMessage extends WsMessageBase {
   type: "frame_metrics_event";
-  frameMetrics?: {
-    applicationId?: string;
-    fps?: number;
-    frameTimeMs?: number;
-    jankFrames?: number;
-    totalFrames?: number;
-  };
+  frameMetrics?: AndroidFrameMetricsEvent;
 }
 
 interface WsNetworkEventMessage extends WsMessageBase {
@@ -1795,6 +1756,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
   private readonly certificateFileSystem: CertificateFileSystem | undefined;
 
+  private appEventRecorder: AndroidAppEventRecorder | null = null;
+
   /**
    * Owns SDK telemetry/crash/ANR ingestion (issue #2764). Lazily built so it can
    * close over instance methods (`parseStackTrace`, session-bound nav manager);
@@ -2432,6 +2395,28 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       });
     }
     return this.sdkEventIngestorInstance;
+  }
+
+  /** Resolve collaborators lazily so injected stores and session-bound ingestors stay live. */
+  private getAppEventRecorder(): AndroidAppEventRecorder {
+    if (!this.appEventRecorder) {
+      this.appEventRecorder = new AndroidAppEventRecorder({
+        deviceId: this.device.deviceId,
+        platform: this.device.platform,
+        timer: this.timer,
+        crashEventSink: this.crashEventSink,
+        getSdkEventIngestor: () => this.getSdkEventIngestor(),
+        getInstalledAppsStore: () => this.getInstalledAppsRepository(),
+        getWorkProfileMonitor: () => this.workProfileMonitor,
+        invalidateBuildContext: (appId) => this.invalidateBuildContext(appId),
+        getLastForegroundPackage: () => this.lastForegroundPackage,
+        // Resolve the module exports per call so later spies and singleton swaps are honoured.
+        getFrameMetricsStore: () => getSdkFrameMetricsStore(),
+        getInstalledAppsCacheWriteCoordinator: () => getInstalledAppsCacheWriteCoordinator(),
+        getDbWriteBarrier: () => getDbWriteBarrier(),
+      });
+    }
+    return this.appEventRecorder;
   }
 
   /**
@@ -7433,53 +7418,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private async handlePackageEvent(event: PackageEvent, timestamp?: number): Promise<void> {
-    if (this.device.platform !== "android") {
-      return;
-    }
-
-    if (!event.packageName || !Number.isInteger(event.userId) || event.userId < 0) {
-      logger.warn("[CTRL_PROXY] Ignoring package event with missing data");
-      return;
-    }
-
-    const deviceId = this.device.deviceId;
-    const androidUserId = packageEventAndroidUserId(event);
-    const eventTimestamp = typeof timestamp === "number" ? timestamp : this.timer.now();
-    const repo = this.getInstalledAppsRepository();
-
-    // Invalidate cached build/content-hash provenance for this package (#4984) so the
-    // next nav event re-resolves the hash. Fires for every action (add/replace/remove)
-    // — a rebuild+reinstall, INCLUDING the same-versionCode/different-content daily-dev
-    // case, must not keep recording against the previous build's hash.
-    this.invalidateBuildContext(event.packageName);
-
-    try {
-      if (event.action === "removed") {
-        if (event.removedForAllUsers) {
-          await repo.removeInstalledAppForDevice(deviceId, event.packageName);
-        } else {
-          await repo.removeInstalledApp(deviceId, androidUserId, event.packageName);
-        }
-      } else {
-        const isSystem = event.isSystem === true;
-        await repo.upsertInstalledApp(
-          deviceId,
-          androidUserId,
-          event.packageName,
-          isSystem,
-          eventTimestamp,
-        );
-      }
-
-      // Notify work profile monitor that this user has accessibility service
-      // (if we're receiving package events, the service is working for this user)
-      if (androidUserId > 0 && this.workProfileMonitor) {
-        this.workProfileMonitor.setProfileHasAccessibilityService(androidUserId, true);
-      }
-    } catch (error) {
-      logger.warn(`[CTRL_PROXY] Failed to apply package event: ${error}`);
-    }
+  private handlePackageEvent(event: PackageEvent, timestamp?: number): Promise<void> {
+    return this.getAppEventRecorder().handlePackageEvent(event, timestamp);
   }
 
   private enqueueNavigationGraphWrite(received: NavigationEvent): Promise<void> {
@@ -7497,11 +7437,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return navWrite;
   }
 
-  private async handleHandledExceptionEvent(event: HandledExceptionEvent): Promise<void> {
-    logger.info(
-      `[CTRL_PROXY] Received handled exception: ${event.exceptionClass} from ${event.packageName}`,
-    );
-    await this.getSdkEventIngestor().recordHandledException(event);
+  private handleHandledExceptionEvent(event: HandledExceptionEvent): Promise<void> {
+    return this.getAppEventRecorder().handleHandledExceptionEvent(event);
   }
 
   private isCommandSupported(messageType: string): boolean {
@@ -7553,110 +7490,32 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return this.awaitActionWork(work, signal);
   }
 
-  private async persistCrash(event: SdkCrashPayload): Promise<void> {
-    try {
-      await this.crashEventSink.saveCrash(normalizeCrash(event, this.device.deviceId));
-    } catch (error) {
-      logger.error(`[CTRL_PROXY] Failed to persist crash: ${error}`);
-    }
+  private persistCrash(event: SdkCrashPayload): Promise<void> {
+    return this.getAppEventRecorder().persistCrash(event);
   }
 
-  /**
-   * Ingest a live frame-metrics event from the in-app SDK (issue #5076) into the
-   * shared store. `PerformanceMonitor` prefers this real app-frame data over the
-   * dumpsys scrape when it is fresh. The event's applicationId identifies the
-   * app; fall back to the last-known foreground package if the SDK omitted it.
-   */
   private handleFrameMetricsEvent(data: NonNullable<WsFrameMetricsMessage["frameMetrics"]>): void {
-    const packageName = data.applicationId ?? this.lastForegroundPackage;
-    if (!packageName) {
-      return;
-    }
-    getSdkFrameMetricsStore().ingest(this.device.deviceId, packageName, {
-      fps: data.fps ?? null,
-      frameTimeMs: data.frameTimeMs ?? null,
-      jankFrames: data.jankFrames ?? null,
-      receivedAt: this.timer.now(),
-    });
+    return this.getAppEventRecorder().handleFrameMetricsEvent(data);
   }
 
-  private async handleCrashEvent(event: SdkCrashPayload): Promise<void> {
-    logger.info(
-      `[CTRL_PROXY] Received crash: ${event.exceptionClass} on thread ${event.threadName} from ${event.packageName}`,
-    );
-    await Promise.all([
-      this.persistCrash(event),
-      this.getSdkEventIngestor().recordCrashAnalytics(event),
-    ]);
+  private handleCrashEvent(event: SdkCrashPayload): Promise<void> {
+    return this.getAppEventRecorder().handleCrashEvent(event);
   }
 
-  private async persistAnr(event: SdkAnrPayload): Promise<void> {
-    try {
-      await this.crashEventSink.saveAnr(normalizeAnr(event, this.device.deviceId));
-    } catch (error) {
-      logger.error(`[CTRL_PROXY] Failed to persist ANR: ${error}`);
-    }
+  private persistAnr(event: SdkAnrPayload): Promise<void> {
+    return this.getAppEventRecorder().persistAnr(event);
   }
 
-  private async handleAnrEvent(event: SdkAnrPayload): Promise<void> {
-    logger.info(
-      `[CTRL_PROXY] Received ANR: pid=${event.pid}, process=${event.processName}, importance=${event.importance}`,
-    );
-    const packageName = event.packageName ?? event.processName;
-    await Promise.all([
-      this.persistAnr(event),
-      this.getSdkEventIngestor().recordAnrAnalytics(event, packageName),
-    ]);
+  private handleAnrEvent(event: SdkAnrPayload): Promise<void> {
+    return this.getAppEventRecorder().handleAnrEvent(event);
   }
 
   private parseStackTrace(stackTrace: string, packageName: string): StackTraceElement[] {
-    const elements: StackTraceElement[] = [];
-    const lines = stackTrace.split("\n");
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      const match = trimmed.match(
-        /^at\s+([a-zA-Z0-9$_.]+)\.([a-zA-Z0-9$_<>]+)\(([^:)]+):?(\d+)?\)$/,
-      );
-      if (match) {
-        const [, fullClassName, methodName, fileName, lineNumberStr] = match;
-        const lineNumber = lineNumberStr ? parseInt(lineNumberStr, 10) : undefined;
-
-        const isAppCode =
-          fullClassName.startsWith(packageName) ||
-          fullClassName.includes(packageName.split(".").slice(0, 2).join("."));
-
-        elements.push({
-          className: fullClassName,
-          methodName,
-          fileName,
-          lineNumber,
-          isAppCode,
-        });
-      }
-    }
-
-    return elements;
+    return parseStackTrace(stackTrace, packageName);
   }
 
-  private async markInstalledAppsStale(reason: string): Promise<void> {
-    if (this.device.platform !== "android") {
-      return;
-    }
-
-    try {
-      // Fired fire-and-forget on WS close, which happens during shutdown socket
-      // teardown — route through the barrier so it drains (or is skipped) before
-      // closeDatabase() rather than racing the closing connection (issue #2792).
-      await getInstalledAppsCacheWriteCoordinator().invalidate(this.device.deviceId, () =>
-        getDbWriteBarrier()
-          .track(() => this.getInstalledAppsRepository().markDeviceStale(this.device.deviceId))
-          .then(() => undefined),
-      );
-      logger.info(`[CTRL_PROXY] Marked installed apps cache stale (${reason})`);
-    } catch (error) {
-      logger.warn(`[CTRL_PROXY] Failed to mark installed apps stale: ${error}`);
-    }
+  private markInstalledAppsStale(reason: string): Promise<void> {
+    return this.getAppEventRecorder().markInstalledAppsStale(reason);
   }
 }
 

@@ -173,8 +173,8 @@ src/features/observe/Window.ts	NODE_ENV
 src/features/observe/ios/CtrlProxyExchangeRecorder.ts	AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR
 src/features/observe/ios/CtrlProxyGestures.ts	AUTOMOBILE_IOS_TAP_STRATEGY
 src/features/observe/shared/ctrlProxyForwardLeaseOwnership.ts	AUTOMOBILE_CTRL_PROXY_LEASE_IDLE_MS
-src/features/prototype-agent/PrototypeAgentProvider.ts	AUTOMOBILE_IOS_PROTOTYPE_AGENT
-src/features/prototype-agent/PrototypeAgentProvider.ts	AUTOMOBILE_SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD
+src/features/prototype/ios/PrototypeAgentProvider.ts	AUTOMOBILE_IOS_PROTOTYPE_AGENT
+src/features/prototype/ios/PrototypeAgentProvider.ts	AUTOMOBILE_SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD
 src/features/prototype/ios/iosPrototypeViewerTemplateProvider.ts	AUTOMOBILE_IOS_PROTOTYPE_VIEWER
 src/features/prototype/ios/iosPrototypeViewerTemplateProvider.ts	AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD
 src/features/telemetry/TelemetryRecorder.ts	NODE_ENV

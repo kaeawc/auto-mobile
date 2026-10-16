@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { buildAndroidAvdCapabilityInventory } from "../../src/models/virtualDeviceCapabilities";
-import { buildAndroidAvdCapabilityInventory as featureProjection } from "../../src/features/device-control/virtualDeviceCapabilities";
+import { buildAndroidAvdCapabilityInventory as featureProjection } from "../../src/features/device/virtualDeviceCapabilities";
 
 test("the feature module preserves the model projection export", () => {
   expect(featureProjection).toBe(buildAndroidAvdCapabilityInventory);

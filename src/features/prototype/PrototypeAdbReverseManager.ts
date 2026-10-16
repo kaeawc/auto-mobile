@@ -38,7 +38,9 @@ export function createPrototypeReverseAdb(
       return devicePortsFromList(result.stdout);
     },
     async addReverse(port) {
-      await adb.executeCommand(`reverse tcp:${port} tcp:${port}`, { timeoutMs: REVERSE_TIMEOUT_MS });
+      await adb.executeCommand(`reverse tcp:${port} tcp:${port}`, {
+        timeoutMs: REVERSE_TIMEOUT_MS,
+      });
     },
     async removeReverse(port) {
       await adb.executeCommand(`reverse --remove tcp:${port}`, { timeoutMs: REVERSE_TIMEOUT_MS });

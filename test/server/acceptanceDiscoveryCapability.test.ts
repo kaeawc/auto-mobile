@@ -98,8 +98,8 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
 
   afterAll(async () => {
     await Promise.all([configuredFixture.teardown(), unconfiguredFixture.teardown()]);
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(TOOL);
-    (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(NO_SCHEMA_TOOL);
+    ToolRegistry.removeToolForTesting(TOOL);
+    ToolRegistry.removeToolForTesting(NO_SCHEMA_TOOL);
   });
 
   afterEach(() => {

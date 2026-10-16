@@ -24,7 +24,6 @@ src/ctrlProxy/CtrlProxyManager.ts	AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM
 src/ctrlProxy/CtrlProxyManager.ts	AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED
 src/ctrlProxy/CtrlProxyManager.ts	AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK
 src/ctrlProxy/CtrlProxyManager.ts	HOME
-src/ctrlProxy/CtrlProxyManager.ts	toLowerCase
 src/ctrlProxy/IOSCtrlProxyManager.ts	AUTOMOBILE_CTRLPROXY_VERBOSE
 src/ctrlProxy/IOSCtrlProxyManager.ts	AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS
 src/ctrlProxy/IOSCtrlProxyManager.ts	AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH
@@ -43,7 +42,6 @@ src/ctrlProxy/IosCtrlProxyBuilder.ts	AUTOMOBILE_IOS_CTRL_PROXY_APP_HASH
 src/ctrlProxy/IosCtrlProxyBuilder.ts	AUTOMOBILE_IOS_HELPER_REQUIRE_CODESIGN
 src/ctrlProxy/IosCtrlProxyBuilder.ts	AUTOMOBILE_IOS_HELPER_TEAM_ID
 src/ctrlProxy/IosCtrlProxyBuilder.ts	AUTOMOBILE_PROJECT_ROOT
-src/ctrlProxy/ios/IosCtrlProxyProcessClient.ts	includes
 src/ctrlProxy/ios/IosTunnelClient.ts	AUTOMOBILE_IPROXY_START_TIMEOUT_MS
 src/ctrlProxy/ios/IosTunnelClient.ts	AUTO_MOBILE_IPROXY_START_TIMEOUT_MS
 src/daemon/DaemonLauncher.ts	PATH
@@ -122,7 +120,6 @@ src/daemon/privateDaemonOrphanWatchdog.ts	AUTOMOBILE_AUX_SOCKET_DIR
 src/daemon/privateDaemonOrphanWatchdog.ts	AUTOMOBILE_DAEMON_LAUNCHER_PID
 src/daemon/privateDaemonOrphanWatchdog.ts	AUTOMOBILE_DAEMON_SOCKET_PATH
 src/daemon/privateDaemonOrphanWatchdog.ts	AUTOMOBILE_HARNESS_PRIVATE_DAEMON
-src/daemon/privateDaemonOrphanWatchdog.ts	AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS
 src/daemon/privateDaemonOrphanWatchdog.ts	AUTO_MOBILE_DAEMON_SOCKET_PATH
 src/daemon/sessionLivenessWindows.ts	AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS
 src/daemon/sessionLivenessWindows.ts	AUTOMOBILE_SESSION_IDLE_TIMEOUT_MS
@@ -162,7 +159,6 @@ src/db/navigationRetention.ts	AUTOMOBILE_NAV_RETENTION_STRUCTURE_TTL_MS
 src/devices/deviceBootRecovery.ts	CI
 src/devices/deviceBootRecovery.ts	GITHUB_ACTIONS
 src/devices/deviceCreationGate.ts	AUTOMOBILE_ALLOW_DEVICE_CREATE
-src/devices/deviceCreationGate.ts	get
 src/doctor/checks/android.ts	JAVA_HOME
 src/features/bootAdmission/AndroidBootAdmissionGate.ts	AUTOMOBILE_ANDROID_MAX_BOOTED
 src/features/bootAdmission/BootAdmissionGate.ts	AUTOMOBILE_BOOT_CAPACITY_GATE
@@ -179,13 +175,8 @@ src/features/observe/automaticScreenshotPolicy.ts	AUTOMOBILE_OBSERVE_SETTLED_SCR
 src/features/observe/automaticScreenshotPolicy.ts	AUTOMOBILE_OBSERVE_WAIT_FOR_SKIP_SCREENSHOT
 src/features/observe/ios/CtrlProxyExchangeRecorder.ts	AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR
 src/features/observe/ios/CtrlProxyGestures.ts	AUTOMOBILE_IOS_TAP_STRATEGY
-src/features/observe/ios/CtrlProxyGestures.ts	getEnvVar
 src/features/observe/observationFreshness.ts	AUTOMOBILE_MAX_OBSERVATION_AGE_MS
 src/features/observe/shared/ctrlProxyForwardLeaseOwnership.ts	AUTOMOBILE_CTRL_PROXY_LEASE_IDLE_MS
-src/features/performance/observePerfSnapshotConfig.ts	AUTOMOBILE_OBSERVE_PERF_SNAPSHOT
-src/features/performance/observePerfSnapshotConfig.ts	AUTOMOBILE_OBSERVE_PERF_WINDOW_MS
-src/features/performance/observePerfSnapshotConfig.ts	AUTO_MOBILE_OBSERVE_PERF_SNAPSHOT
-src/features/performance/observePerfSnapshotConfig.ts	AUTO_MOBILE_OBSERVE_PERF_WINDOW_MS
 src/features/performance/performanceAuditConfig.ts	AUTOMOBILE_DISABLE_PERF_AUDIT
 src/features/performance/performanceAuditConfig.ts	AUTOMOBILE_TOUCH_LATENCY_SAMPLING
 src/features/prototype-agent/PrototypeAgentProvider.ts	AUTOMOBILE_IOS_PROTOTYPE_AGENT
@@ -231,20 +222,6 @@ src/server/proxyServer.ts	AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER
 src/server/proxyServer.ts	AUTOMOBILE_ACCEPTANCE_LIVE
 src/server/sharedStorageService.ts	AUTOMOBILE_SHARED_STORAGE_BACKUP
 src/server/toolRegistry.ts	AUTOMOBILE_ALWAYS_LOAD_TOOLS
-src/server/videoRecordingManager.ts	AUTOMOBILE_VIDEO_INPROGRESS_CHECK_SECONDS
-src/server/videoRecordingManager.ts	AUTOMOBILE_VIDEO_RETENTION_DAYS
-src/server/videoRecordingManager.ts	AUTOMOBILE_VIDEO_RETENTION_SWEEP_MINUTES
-src/server/videoRecordingManager.ts	AUTO_MOBILE_VIDEO_INPROGRESS_CHECK_SECONDS
-src/server/videoRecordingManager.ts	AUTO_MOBILE_VIDEO_RETENTION_DAYS
-src/server/videoRecordingManager.ts	AUTO_MOBILE_VIDEO_RETENTION_SWEEP_MINUTES
-src/utils/PortManager.ts	AUTOMOBILE_PORT_RANGE_END
-src/utils/PortManager.ts	AUTOMOBILE_PORT_RANGE_SIZE
-src/utils/PortManager.ts	AUTOMOBILE_PORT_RANGE_START
-src/utils/PortManager.ts	AUTO_MOBILE_PORT_RANGE_END
-src/utils/PortManager.ts	AUTO_MOBILE_PORT_RANGE_SIZE
-src/utils/PortManager.ts	AUTO_MOBILE_PORT_RANGE_START
-src/utils/PortManager.ts	trim
-src/utils/WorkProfileMonitor.ts	AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS
 src/utils/android-cmdline-tools/AdbClient.ts	AUTOMOBILE_TEST_MODE
 src/utils/android-cmdline-tools/AdbClient.ts	DEBUG_ADB_EXEC
 src/utils/android-cmdline-tools/AdbServerLifecycle.ts	AUTOMOBILE_MANAGED_ADB_SERVER
@@ -284,7 +261,6 @@ src/utils/android-cmdline-tools/androidSdkRoot.ts	ANDROID_SDK_ROOT
 src/utils/appearance/appearanceSyncPolicy.ts	AUTOMOBILE_APPEARANCE_SYNC
 src/utils/bunTestRunnerProcess.ts	NODE_ENV
 src/utils/ctrlProxyDownloadControl.ts	AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD
-src/utils/diagnosticTimeouts.ts	AUTOMOBILE_DOCTOR_TIMEOUT_MS
 src/utils/envBootstrap.ts	ANDROID_HOME
 src/utils/envBootstrap.ts	ANDROID_SDK_ROOT
 src/utils/envBootstrap.ts	LOCALAPPDATA
@@ -327,10 +303,6 @@ src/utils/startupBenchmark.ts	AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT
 src/utils/startupBenchmark.ts	AUTO_MOBILE_STARTUP_BENCHMARK
 src/utils/startupBenchmark.ts	AUTO_MOBILE_STARTUP_BENCHMARK_LABEL
 src/utils/startupBenchmark.ts	AUTO_MOBILE_STARTUP_BENCHMARK_OUTPUT
-src/utils/tempDir.ts	ADB_SERVER_COORDINATION_DIR
-src/utils/tempDir.ts	COORDINATION_DIR
-src/utils/tempDir.ts	DATA_DIR
-src/utils/tempDir.ts	LOG_DIR
 src/utils/tempDir.ts	NODE_ENV
 src/utils/toolOutputArtifacts.ts	AUTOMOBILE_TOOL_OUTPUTS_DIR
 src/utils/toolOutputArtifacts.ts	AUTO_MOBILE_TOOL_OUTPUTS_DIR

@@ -18,6 +18,8 @@ const REGISTRY_FILE = "src/config/env.ts";
 const BASELINE = path.join(import.meta.dir, "env-registry-baseline.txt");
 const DOCS = path.join(ROOT, "docs/using/environment-variables.md");
 const PRODUCT_NAME = /^(?:AUTOMOBILE_|AUTO_MOBILE_)[A-Z0-9_]+$/;
+/** The registry table itself (`ENV.DATA_DIR`) is not an environment object. */
+const REGISTRY_IDENTIFIER = "ENV";
 const ENV_OBJECT = /(?:^|[a-z])(?:env|environment)$/i;
 
 function staticName(node: Expression): string | undefined {
@@ -32,10 +34,13 @@ function staticName(node: Expression): string | undefined {
 function isEnvObject(node: Expression): boolean {
   switch (node.type) {
     case "Identifier":
-      return ENV_OBJECT.test(node.name);
+      return node.name !== REGISTRY_IDENTIFIER && ENV_OBJECT.test(node.name);
     case "MemberExpression":
       return (
-        !node.computed && node.property.type === "Identifier" && ENV_OBJECT.test(node.property.name)
+        !node.computed &&
+        node.property.type === "Identifier" &&
+        node.property.name !== REGISTRY_IDENTIFIER &&
+        ENV_OBJECT.test(node.property.name)
       );
     case "ParenthesizedExpression":
     case "TSAsExpression":
@@ -50,9 +55,14 @@ function isEnvObject(node: Expression): boolean {
 /** Statically named reads of `env.X`, `env["X"]`, `const { X } = env`, plus AUTOMOBILE_ literals. */
 function findEnvNames(file: string, source: string): Set<string> {
   const names = new Set<string>();
+  const callees = new Set<unknown>();
   new Visitor({
+    CallExpression(node) {
+      // `rangeEndEnv.trim()` calls a method on a string; it does not read a variable.
+      callees.add(node.callee);
+    },
     MemberExpression(node) {
-      if (!isEnvObject(node.object)) {
+      if (callees.has(node) || !isEnvObject(node.object)) {
         return;
       }
       const name = node.computed
@@ -150,7 +160,7 @@ describe("environment variable registry", () => {
     const found = findEnvNames(
       "x.ts",
       `const a = process.env.DOT; const b = env["BRACKET"]; const { DESTRUCTURED, "QUOTED": q } = process.env;
-       const c = deps.env.NESTED; const d = "AUTOMOBILE_LITERAL"; const e = "NOT_A_PRODUCT_LITERAL"; const f = other.PLAIN;`,
+       const c = deps.env.NESTED; const g = ENV.REGISTRY; rangeEnv.trim(); const d = "AUTOMOBILE_LITERAL"; const e = "NOT_A_PRODUCT_LITERAL"; const f = other.PLAIN;`,
     );
     expect([...found].sort()).toEqual([
       "AUTOMOBILE_LITERAL",

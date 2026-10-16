@@ -1618,7 +1618,6 @@ export function getDefaultPreFirstHeartbeatGraceMs(): number {
 export class SessionManager {
   private stallProbe: (() => void) | undefined;
   private sessions: Map<string, Session> = new Map();
-  private sessionDeviceMap: Map<string, string> = new Map(); // sessionId -> deviceId
   private deviceSessionMap: Map<string, string> = new Map(); // deviceId -> sessionId (reverse lookup)
   private cleanupTimer: NodeJS.Timeout | null = null;
   /** Pending follow-up sweep of rows the startup rehydration deadline skipped (#11114). */
@@ -3813,7 +3812,6 @@ export class SessionManager {
     this.sessions.set(session.sessionId, session);
     this.rowWriter.noteLive(session.sessionId);
     this.slotShadowProbe.check(session.sessionId, "published");
-    this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
     this.cancelSessionlessUseOnAcquisition(session.assignedDevice, session.sessionId);
     // Generation only: publishing an owner changes entitlement, not the screen/connection.
@@ -6090,7 +6088,6 @@ export class SessionManager {
     );
     const sessionId = existing.sessionId;
     this.rowWriter.noteLive(sessionId);
-    this.sessionDeviceMap.set(sessionId, assignedDevice);
     if (this.deviceSessionMap.get(previousDevice) === existing.sessionId) {
       this.deviceSessionMap.delete(previousDevice);
     }
@@ -13350,7 +13347,6 @@ export class SessionManager {
     this.endedLabelBases.delete(sessionId);
     // The session ended: its row is no longer rewritten live, and no retry timer outlives it.
     this.settleOwedSupersededRowReassert(session);
-    this.sessionDeviceMap.delete(sessionId);
     this.networkConditionGeneration.delete(sessionId);
     this.networkConditionMutationQueues.delete(sessionId);
     if (ownedDevice) {

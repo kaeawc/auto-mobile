@@ -3,7 +3,7 @@ import { ExecuteGesture } from "../../../src/features/action/ExecuteGesture";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { CtrlProxyGestures } from "../../../src/features/observe/ios/CtrlProxyGestures";
 import { ActionableError, type BootedDevice } from "../../../src/models";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { createIosDelegateHarness } from "../../helpers/iosDelegateHarness";
 

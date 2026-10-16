@@ -1,5 +1,5 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import type WebSocket from "ws";
 import { CtrlProxyGestures } from "../../../src/features/observe/android/CtrlProxyGestures";

@@ -1,4 +1,4 @@
-import { StaleDisplayError } from "../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../src/features/observe/StaleDisplayError";
 import { nodeAttributes } from "../../src/models/ViewHierarchyResult";
 import { readToolEnvelopePayload } from "../../src/server/toolEnvelopePayload";
 import {

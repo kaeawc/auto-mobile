@@ -301,7 +301,6 @@ interface DaemonDeferredRecoverySweepInternals {
 
 interface DevicePoolProcessExitInternals {
   trackStartedDeviceProcess(device: BootedDevice, child: ChildProcess): Promise<void>;
-  emulatorLossRecoverySettlements: Map<string, Promise<void>>;
 }
 
 interface DevicePoolPrivateRecoveryMembers {
@@ -1353,7 +1352,7 @@ test.each([
   },
   { onLoss: false, continuity: false, listed: false, outcome: "not-attempted", state: "released" },
 ] as const)("both process tracks preserve main's settlement fields: %j", async (config) => {
-  const { timer, store, sessions, manager, child, internals } = await setupProcessExitPool(
+  const { timer, store, sessions, pool, manager, child } = await setupProcessExitPool(
     config.onLoss,
     config.continuity,
   );
@@ -1366,7 +1365,7 @@ test.each([
   await drainUntilQuiescent(timer);
   const rows = await store.list();
   expect(rows).toHaveLength(1);
-  expect(internals.emulatorLossRecoverySettlements.size).toBe(0);
+  expect(recoveryInternals(pool).emulatorLossRecoverySettlements.size).toBe(0);
   for (const row of rows) {
     expect(row).toMatchObject({
       deviceId: original.deviceId,
@@ -1409,7 +1408,7 @@ test("a late dead-child track records a fresh loss and keeps its settlement guar
     }
   }
   const store = new GatedExhaustedStore(new FakeTimer());
-  const { timer, manager, child, internals } = await setupProcessExitPool(
+  const { timer, pool, manager, child, internals } = await setupProcessExitPool(
     true,
     true,
     store,
@@ -1420,7 +1419,7 @@ test("a late dead-child track records a fresh loss and keeps its settlement guar
   await drainUntilQuiescent(timer);
   const [first] = await store.list();
   expect(first).toMatchObject({ recovery: { outcome: "recovered" }, session: { state: "active" } });
-  expect(internals.emulatorLossRecoverySettlements.size).toBe(0);
+  expect(recoveryInternals(pool).emulatorLossRecoverySettlements.size).toBe(0);
   manager.bootedDevices = [];
   const late = internals
     .trackStartedDeviceProcess(original, child)
@@ -1429,7 +1428,7 @@ test("a late dead-child track records a fresh loss and keeps its settlement guar
     const secondId = await store.completed.promise;
     // An exhausted outcome is visible before cleanup finishes. The early-error
     // guard must still see this new row as pending throughout that interval.
-    expect(internals.emulatorLossRecoverySettlements.has(secondId)).toBe(true);
+    expect(recoveryInternals(pool).emulatorLossRecoverySettlements.has(secondId)).toBe(true);
     expect(secondId).not.toBe(first.id);
     expect(await store.get(first.id)).toEqual(first);
   } finally {
@@ -1444,7 +1443,7 @@ test("a late dead-child track records a fresh loss and keeps its settlement guar
     recovery: { outcome: "exhausted" },
     session: { sessionUuid: "session", state: "awaiting-device" },
   });
-  expect(internals.emulatorLossRecoverySettlements.size).toBe(0);
+  expect(recoveryInternals(pool).emulatorLossRecoverySettlements.size).toBe(0);
 });
 
 async function setupSettledRestart(outcome: "not-attempted" | "exhausted" = "not-attempted") {
@@ -3932,10 +3931,7 @@ test("same-AVD replacement is reserved while session tracking persistence stalls
     finishTracking.resolve();
     await expect(recovery).resolves.toBe("recovered");
     expect(sessions.getSession("session")?.assignedDevice).toBe(replacement.deviceId);
-    expect(
-      (pool as unknown as { androidRecoveryHandoffOwners: Map<string, symbol> })
-        .androidRecoveryHandoffOwners.size,
-    ).toBe(0);
+    expect(recoveryInternals(pool).androidRecoveryHandoffOwners.size).toBe(0);
     // End the ordinary allocator's bounded wait without any wall-clock timers.
     await settleWithFakeTime(
       timer,

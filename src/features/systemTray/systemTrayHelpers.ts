@@ -56,7 +56,7 @@ import {
   traverseForHint,
 } from "./notificationHints";
 import type { ProgressCallback } from "../../server/toolRegistry";
-import type { SystemTrayNotificationArgs } from "../../server/interactionToolTypes";
+import type { SystemTrayNotificationArgs } from "./systemTrayTypes";
 import { boundsArea, boundsEqual } from "../../utils/bounds";
 import { logger } from "../../utils/logger";
 import {

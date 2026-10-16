@@ -199,10 +199,11 @@ Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (its
 exit code is authoritative; CI disables fixes so even auto-fixable violations
 exit non-zero). The ratchet only gates the rules set to `warn` because they carry
 pre-existing violations: `complexity`, `max-depth`, `max-params`,
-`max-lines-per-function`, `auto-mobile/catch-convention`,
-`auto-mobile/no-unknown-cast`,
-`auto-mobile/no-caught-error-interpolation`, and the two type-aware promise rules
-(`typescript/no-floating-promises`, `typescript/no-misused-promises`). The baseline
+`max-lines-per-function`, `auto-mobile/catch-convention`, and the two type-aware
+promise rules (`typescript/no-floating-promises`, `typescript/no-misused-promises`,
+currently at a zero baseline but kept here because the fast stage is not type-aware).
+`auto-mobile/no-unknown-cast` and `auto-mobile/no-caught-error-interpolation` are
+fully burned down and are `error` in `.oxlintrc.json`. The baseline
 is keyed per file + per rule with only a **count**, so it does not churn on line
 shifts. Because the type-aware rules need type info, the ratchet script runs
 `oxlint --type-aware` (tsgolint) — which is why the initial oxlint stage does not,

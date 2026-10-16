@@ -43,3 +43,12 @@ export const rejected = defineDeviceTool({
   // @ts-expect-error `b` is not produced by the input schema.
   handler: async (_device, args: { b: string }) => args.b,
 });
+
+// Argument types derived from the interaction tool schemas stay real types, not `any`.
+import type { PressButtonArgs, RotateArgs } from "../../src/server/interactionToolTypes";
+
+export const pressOk: PressButtonArgs = { button: "back" };
+// @ts-expect-error `nope` is not a button in the schema.
+export const pressBad: PressButtonArgs = { button: "nope" };
+// @ts-expect-error `orientation` is required by the rotate schema.
+export const rotateBad: RotateArgs = {};

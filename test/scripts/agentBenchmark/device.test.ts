@@ -58,9 +58,9 @@ describe("agent benchmark device selection", () => {
 
 describe("agent benchmark preflight", () => {
   test("resets the app, seeds preferences, then deep-links to the start screen", async () => {
-    const runner = new FakeCommandRunner().onAdb("pm path", {
-      stdout: `package:/data/app/${PACKAGE}/base.apk`,
-    });
+    const runner = new FakeCommandRunner()
+      .onAdb("pm path", { stdout: `package:/data/app/${PACKAGE}/base.apk` })
+      .onAdb("pm clear", { stdout: "Success\n" });
     const log = await runPreflight(
       runner,
       preflightSpec({
@@ -99,6 +99,16 @@ describe("agent benchmark preflight", () => {
     ]);
   });
 
+  test("a pm clear that does not report Success stops the run before seeding", async () => {
+    const runner = new FakeCommandRunner()
+      .onAdb("pm path", { stdout: "package:/x.apk" })
+      .onAdb("pm clear", { stdout: "Failed\n" });
+    await expect(
+      runPreflight(runner, preflightSpec({ sharedPreferences: { p: { a: true } } })),
+    ).rejects.toThrow(/pm clear dev.example.app did not succeed: Failed/);
+    expect(runner.adbCalls().some((call) => call.includes("run-as"))).toBe(false);
+  });
+
   test("a missing app fails before touching app state", async () => {
     const runner = new FakeCommandRunner();
     await expect(runPreflight(runner, preflightSpec())).rejects.toThrow(
@@ -114,16 +124,44 @@ describe("agent benchmark preflight", () => {
         '<float name="ratio" value="0.5" /><string name="name">A &amp; &quot;B&quot; &lt;c&gt;</string></map>\n',
     );
   });
+
+  test("integers outside 32 bits use <long>, at both boundaries", () => {
+    const xml = sharedPreferencesXml({
+      max: 2147483647,
+      over: 2147483648,
+      min: -2147483648,
+      under: -2147483649,
+    });
+    expect(xml).toContain('<int name="max" value="2147483647" />');
+    expect(xml).toContain('<long name="over" value="2147483648" />');
+    expect(xml).toContain('<int name="min" value="-2147483648" />');
+    expect(xml).toContain('<long name="under" value="-2147483649" />');
+  });
 });
 
 describe("agent benchmark screen capture", () => {
-  test("returns the hierarchy and rejects anything else", async () => {
+  test("dumps to a device file, reads it back, and removes it", async () => {
     const xml =
       '<?xml version="1.0"?><hierarchy rotation="0"><node text="Hi &amp; bye"/></hierarchy>';
-    const ok = new FakeCommandRunner().onAdb("uiautomator", { stdout: xml });
+    const ok = new FakeCommandRunner()
+      .onAdb("uiautomator dump", {
+        stdout: "UI hierarchy dumped to: /sdcard/agent-benchmark-ui.xml",
+      })
+      .onAdb("exec-out cat", { stdout: xml });
     expect(await captureScreen(ok, "emulator-5554")).toBe(xml);
-    const bad = new FakeCommandRunner().onAdb("uiautomator", { stdout: "ERROR: null root node" });
+    expect(ok.adbCalls()).toEqual([
+      "-s emulator-5554 shell uiautomator dump /sdcard/agent-benchmark-ui.xml",
+      "-s emulator-5554 exec-out cat /sdcard/agent-benchmark-ui.xml",
+      "-s emulator-5554 shell rm -f /sdcard/agent-benchmark-ui.xml",
+    ]);
+  });
+
+  test("a read-back without a hierarchy fails and still removes the file", async () => {
+    const bad = new FakeCommandRunner().onAdb("exec-out cat", { stdout: "ERROR: null root node" });
     await expect(captureScreen(bad, "emulator-5554")).rejects.toThrow(/no hierarchy: ERROR/);
+    expect(bad.adbCalls().at(-1)).toBe(
+      "-s emulator-5554 shell rm -f /sdcard/agent-benchmark-ui.xml",
+    );
   });
 
   test("entity decoding restores visible text, decoding &amp; last", () => {

@@ -141,7 +141,6 @@ import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
 import dev.jasonpearson.automobile.protocol.SdkCrashEvent
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
-import dev.jasonpearson.automobile.protocol.SdkEventBatchBroadcastContract
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.protocol.SdkHandledExceptionEvent
 import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
@@ -1918,29 +1917,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
 
-  private val anrReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != AutoMobileAnr.ACTION_ANR) return
-        try {
-          val ordered = isOrderedBroadcast
-          val setBroadcastResult = this::setResultCode
-          anrBroadcastHandler.handle(
-            intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON),
-            object : SdkEventBatchBroadcastHandler.ResultSink {
-              override val isOrdered = ordered
-
-              override fun setResultCode(code: Int) {
-                setBroadcastResult(code)
-              }
-            },
-            deliveryId = intent.getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID),
-          )
-        } catch (e: Exception) {
-          Log.e(TAG, "Error handling ANR broadcast", e)
-        }
-      }
-    }
+  private val anrReceiver = AnrReceiver(anrBroadcastHandler)
 
   private val eventBatchBroadcastHandler =
     SdkEventBatchBroadcastHandler(
@@ -1957,32 +1934,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
 
-  private val eventBatchReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != SdkEventSerializer.ACTION_SDK_EVENT_BATCH) {
-          return
-        }
-
-        try {
-          val ordered = isOrderedBroadcast
-          val setBroadcastResult = this::setResultCode
-          eventBatchBroadcastHandler.handle(
-            intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON),
-            object : SdkEventBatchBroadcastHandler.ResultSink {
-              override val isOrdered = ordered
-
-              override fun setResultCode(code: Int) {
-                setBroadcastResult(code)
-              }
-            },
-            batchId = intent.getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID),
-          )
-        } catch (e: Exception) {
-          Log.e(TAG, "Error handling event batch broadcast", e)
-        }
-      }
-    }
+  private val eventBatchReceiver = EventBatchReceiver(eventBatchBroadcastHandler)
 
   override fun onCreate() {
     super.onCreate()

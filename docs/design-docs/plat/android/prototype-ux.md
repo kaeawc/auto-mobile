@@ -1669,6 +1669,25 @@ a child's span does not fit. Optional integer `span >= 1` is valid only on a
 direct grid child and cannot exceed fixed columns; the renderer clamps spans
 to the resolved runtime count. Shared fixtures define host validation behavior.
 
+## Carousel and pager indicator (not device-verified)
+
+`prototype_carousel_v1` gates two additions from #12071. A pager may declare `indicator: "dots"`
+(default `none`): page dots drawn over the pager (a centred row at the bottom, or a column at the
+end edge for a vertical pager) with the current page filled. The dots are decoration and add no
+semantics node.
+
+A `carousel` node is a horizontally scrolling, snapping row with one item per child (at least one;
+`repeat` expands like `row`). `itemWidth` (dp, > 0, <= 10000) is required; `variant` is
+`multiBrowse` (default), `hero` or `uncontained`; `itemSpacing` is dp >= 0. It has no page index,
+event or `setPage` target; use a `pager` when the page matters. The host refuses a show on a
+CtrlProxy or iOS agent without the capability before sending it, and the iOS result carries a
+`carousel` platform note.
+
+Android maps `multiBrowse`, `hero` and `uncontained` to `HorizontalMultiBrowseCarousel`,
+`HorizontalCenteredHeroCarousel` and `HorizontalUncontainedCarousel`; items are clipped with
+`maskClip` and only the visible items are composed, so off-screen items are absent from `observe`
+until scrolled in. A repeat that expands to no items draws nothing.
+
 ## Prototype gesture action lists
 
 `onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as

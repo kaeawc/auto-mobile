@@ -34,6 +34,7 @@ enum PrototypeAgentProtocol {
         dataModelCapability,
         textFieldOptionsCapability,
         gesturesCapability,
+        carouselCapability,
         searchBarCapability,
         richTextCapability,
         menusCapability,
@@ -96,6 +97,8 @@ enum PrototypeAgentProtocol {
     static let textFieldOptionsCapability = "prototype_text_field_options_v1"
     /// Long press and double tap action lists on generic nodes, matching CtrlProxy (#12065).
     static let gesturesCapability = "prototype_gestures_v1"
+    /// The `carousel` node and the pager `indicator` option (#12071).
+    static let carouselCapability = "prototype_carousel_v1"
     /// Drawn search field with authored expansion, submit actions and in-window results (#12069).
     static let searchBarCapability = "prototype_search_bar_v1"
     /// Styled text runs with optional inline actions.

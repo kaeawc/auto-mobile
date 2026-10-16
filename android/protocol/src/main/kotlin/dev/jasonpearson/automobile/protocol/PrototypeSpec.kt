@@ -1179,6 +1179,33 @@ data class PrototypePagerNode(
   val pageSpacing: Double? = null,
   val peek: PrototypePagerPeek? = null,
   val pageSize: PrototypePagerPageSize? = null,
+  val indicator: String? = null,
+) : PrototypeNode()
+
+/**
+ * A horizontally scrolling, snapping row of [children] (one item each, expanded from [repeat]).
+ * [variant] is `multiBrowse` (default), `hero` or `uncontained`; [itemWidth] is the preferred or
+ * fixed item width in dp.
+ */
+@SerialName("carousel")
+@Serializable
+data class PrototypeCarouselNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  val children: List<PrototypeNode>,
+  val repeat: PrototypeRepeat? = null,
+  val variant: String? = null,
+  val itemWidth: Double,
+  val itemSpacing: Double? = null,
 ) : PrototypeNode()
 
 @Serializable data class PrototypePagerPeek(val start: Double? = null, val end: Double? = null)

@@ -654,6 +654,7 @@ require `prototype_data_model_v1`; the host refuses an unsupported device before
 require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show.
 `onLongPress`/`onDoubleTap` on box/row/column/text/image/icon/card require
 `prototype_gestures_v1`, with the same refusal before uploads or show.
+`carousel` nodes and `pager.indicator` require `prototype_carousel_v1`, with the same refusal.
 Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve
 once per show on the device; `status` remembers shown data beside state, `inspect` reports and
 adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).

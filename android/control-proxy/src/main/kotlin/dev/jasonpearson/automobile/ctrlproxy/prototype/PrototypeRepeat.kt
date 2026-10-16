@@ -9,6 +9,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeBottomSheetNode
 import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
 import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeCardNode
+import dev.jasonpearson.automobile.protocol.PrototypeCarouselNode
 import dev.jasonpearson.automobile.protocol.PrototypeCheck
 import dev.jasonpearson.automobile.protocol.PrototypeCheckboxNode
 import dev.jasonpearson.automobile.protocol.PrototypeChipNode
@@ -78,6 +79,7 @@ private fun PrototypeNode.repeatSpec(): PrototypeRepeat? =
     is PrototypeColumnNode -> repeat
     is PrototypeFlowNode -> repeat
     is PrototypeGridNode -> repeat
+    is PrototypeCarouselNode -> repeat
     else -> null
   }
 
@@ -168,6 +170,13 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         children = children.bound(),
       )
     is PrototypeGridNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        children = children.bound(),
+      )
+    is PrototypeCarouselNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,

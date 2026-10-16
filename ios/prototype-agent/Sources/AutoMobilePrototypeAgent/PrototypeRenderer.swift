@@ -305,6 +305,8 @@ struct NodeView: View {
             ) { children }
                 .clipped()
                 .animation(sizeAnimation, value: layoutSignature)
+        case "carousel":
+            PrototypeCarouselView(node: node, model: model)
         case "grid":
             PrototypeGridLayout(
                 columns: node.columns ?? .fixed(1), spacing: style?.spacing ?? 0, runSpacing: style?.runSpacing
@@ -1240,6 +1242,27 @@ struct PagerView: View {
     }
 
     var body: some View {
+        content.overlay(alignment: layout.vertical ? .trailing : .bottom) {
+            if PrototypeCarousel.showsIndicator(node) { indicator }
+        }
+    }
+
+    /// Page dots are decoration: they draw over the pages and stay out of the accessibility tree.
+    @ViewBuilder private var indicator: some View {
+        let dots = PrototypeCarousel.indicatorDots(count: pages.count, selected: selection.wrappedValue)
+        let layoutDots = layout.vertical
+            ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+        layoutDots {
+            ForEach(Array(dots.enumerated()), id: \.offset) { _, filled in
+                Circle().fill(Color.primary.opacity(filled ? 1 : 0.38)).frame(width: 6, height: 6)
+            }
+        }
+        .padding(8)
+        .accessibilityHidden(true)
+        .allowsHitTesting(false)
+    }
+
+    @ViewBuilder private var content: some View {
         if !layout.legacy {
             optionsPager
         } else if fills {
@@ -1341,5 +1364,26 @@ private struct PrototypeBottomSheetView: View {
             .coordinateSpace(name: "prototypeBottomSheet")
             .onChange(of: heights) { _, _ in settledHeight = nil }
         }
+    }
+}
+
+/// `carousel` on iOS: fixed-width items in a snapping horizontal scroll. Every variant draws the same
+/// way (no multiBrowse or hero size changes), and every item stays in the accessibility tree.
+private struct PrototypeCarouselView: View {
+    let node: PrototypeNode
+    let model: PrototypeModel
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: CGFloat(PrototypeCarousel.spacing(node))) {
+                ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+                    NodeView(node: entry.node, model: model)
+                        .frame(width: CGFloat(PrototypeCarousel.itemWidth(node)))
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollTargetBehavior(.viewAligned)
+        .scrollIndicators(.hidden)
     }
 }

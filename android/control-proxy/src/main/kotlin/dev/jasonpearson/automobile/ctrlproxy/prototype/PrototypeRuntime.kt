@@ -780,6 +780,7 @@ internal fun prototypeDescendants(node: PrototypeNode): List<PrototypeNode> =
     is PrototypeColumnNode -> node.children
     is PrototypeFlowNode -> node.children
     is PrototypeGridNode -> node.children
+    is PrototypeCarouselNode -> node.children
     is PrototypePagerNode -> node.children
     is PrototypeStackNode -> node.screens.values.toList()
     is PrototypeCardNode -> node.children

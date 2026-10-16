@@ -6,15 +6,7 @@ import {
   ConfigSocketServer,
 } from "../../../src/daemon/socketServer/ConfigSocketServer";
 import { DeviceSnapshotSocketServer } from "../../../src/daemon/deviceSnapshotSocketServer";
-import type {
-  DeviceSnapshotSocketRequest,
-  DeviceSnapshotSocketResponse,
-} from "../../../src/daemon/deviceSnapshotSocketTypes";
 import { VideoRecordingSocketServer } from "../../../src/daemon/videoRecordingSocketServer";
-import type {
-  VideoRecordingSocketRequest,
-  VideoRecordingSocketResponse,
-} from "../../../src/daemon/videoRecordingSocketTypes";
 import type {
   DeviceSnapshotConfig,
   DeviceSnapshotConfigInput,
@@ -33,6 +25,25 @@ interface TestConfigInput {
   enabled?: boolean;
   limit?: number;
 }
+
+type DeviceSnapshotSocketRequest = ConfigSocketRequest<
+  "device_snapshot_request",
+  DeviceSnapshotConfigInput
+>;
+type DeviceSnapshotSocketResponse = ConfigSocketResponse<
+  "device_snapshot_response",
+  DeviceSnapshotConfig,
+  "evictedSnapshotNames"
+>;
+type VideoRecordingSocketRequest = ConfigSocketRequest<
+  "video_recording_request",
+  VideoRecordingConfigInput
+>;
+type VideoRecordingSocketResponse = ConfigSocketResponse<
+  "video_recording_response",
+  VideoRecordingConfig,
+  "evictedRecordingIds"
+>;
 
 type TestRequest = ConfigSocketRequest<"test_config_request", TestConfigInput>;
 type TestResponse = ConfigSocketResponse<"test_config_response", TestConfig, "evictedItemIds">;

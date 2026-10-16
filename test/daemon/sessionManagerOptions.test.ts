@@ -21,12 +21,18 @@ function create(options?: SessionManagerOptions): SessionManager {
 function field<T>(manager: SessionManager, name: string): T {
   // The screen-reader restorer and backoff are owned by SessionDeviceStateRestore (#11795).
   const owner =
-    name.startsWith("screenReader") || name === "rotationRestoreBackoff"
+    name.startsWith("screenReader") ||
+    name === "rotationRestoreBackoff" ||
+    name === "keepScreenAwakeRestorerFactory"
       ? (Reflect.get(manager, "stateRestore") as object)
       : manager;
   return Reflect.get(
     owner,
-    name === "screenReaderRestorerFactory" ? "screenReaderRestorer" : name,
+    name === "screenReaderRestorerFactory"
+      ? "screenReaderRestorer"
+      : name === "keepScreenAwakeRestorerFactory"
+        ? "keepScreenAwakeRestorer"
+        : name,
   ) as T;
 }
 

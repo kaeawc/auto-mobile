@@ -14,6 +14,7 @@ import { errorMessage } from "../../src/utils/describeUnknownError";
 import { compareRun, containsBounded } from "./compare";
 import type { LoadedSuite } from "./config";
 import {
+  bootedIosSimulators,
   captureScreen,
   describeDevice,
   resolveSerial,
@@ -189,6 +190,13 @@ interface PreparedRun {
 
 async function prepare(suite: LoadedSuite, options: RunOptions, deps: HarnessDeps) {
   const serial = await resolveSerial(deps.runner, options.deviceSerial);
+  const simulators = await bootedIosSimulators(deps.runner);
+  if (simulators.length > 0) {
+    throw new Error(
+      `Booted iOS simulator(s) (${simulators.join(", ")}) would also be visible to the ` +
+        "benchmark's AutoMobile server and make device selection ambiguous; shut them down first.",
+    );
+  }
   // Preflight clears app data, so hold this device's allocation claim through it: another
   // AutoMobile session (or a concurrent benchmark) is refused instead of racing it.
   // launchClaude releases it just before the run's own private daemon needs to claim it.

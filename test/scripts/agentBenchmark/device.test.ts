@@ -3,6 +3,7 @@ import {
   captureScreen,
   describeAppBuild,
   describeDevice,
+  bootedIosSimulators,
   parseOnlineSerials,
   resolveSerial,
   runPreflight,
@@ -49,6 +50,25 @@ describe("agent benchmark device selection", () => {
     await expect(resolveSerial(one, "c")).rejects.toThrow(
       /Device c is not the online device \(a\)/,
     );
+  });
+
+  test("booted iOS simulators are found; no xcrun or bad output means none", async () => {
+    const booted = new FakeCommandRunner().on("xcrun", () => ({
+      stdout: JSON.stringify({
+        devices: {
+          "com.apple.CoreSimulator.SimRuntime.iOS-26-0": [
+            { name: "iPhone 17", state: "Booted" },
+            { name: "iPad", state: "Shutdown" },
+          ],
+        },
+      }),
+    }));
+    expect(await bootedIosSimulators(booted)).toEqual(["iPhone 17"]);
+    const missing = new FakeCommandRunner().on("xcrun", () => {
+      throw new Error("spawnSync xcrun ENOENT");
+    });
+    expect(await bootedIosSimulators(missing)).toEqual([]);
+    expect(await bootedIosSimulators(new FakeCommandRunner())).toEqual([]);
   });
 
   test("adb failures surface the command and its output", async () => {

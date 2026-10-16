@@ -454,6 +454,19 @@ describe("agent benchmark harness", () => {
     expect(claims).toEqual(["reserve emulator-5554", "release emulator-5554"]);
   });
 
+  test("a booted iOS simulator stops the run before anything touches the device", async () => {
+    const { runner, launches, claims, deps, options } = setup(PASSING);
+    runner.on("xcrun", () => ({
+      stdout: JSON.stringify({ devices: { ios: [{ name: "iPhone 17", state: "Booted" }] } }),
+    }));
+    await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(
+      /Booted iOS simulator\(s\) \(iPhone 17\).*shut them down first/,
+    );
+    expect(runner.adbCalls()).toEqual(["devices"]);
+    expect(claims).toEqual([]);
+    expect(launches).toHaveLength(0);
+  });
+
   test("an unreadable foreign claim also keeps the device untouched", async () => {
     const { runner, deps, options } = setup(PASSING);
     deps.deviceClaims = {

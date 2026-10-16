@@ -1176,9 +1176,20 @@ export class DaemonMcpProxy {
     try {
       await this.ensureConnected();
       await this.establishBoundSessionHeartbeat();
+      this.assertBrokerBindingStillHeld(trimmedRequestId, trimmedSessionUuid);
     } catch (error) {
       this.sessionBrokerBinding = undefined;
       throw toActionableError(error, `Failed to hold broker session ${trimmedSessionUuid}`);
+    }
+  }
+
+  /** Fence after the awaited claim: close or terminal evidence may have ended this binding (#12770). */
+  private assertBrokerBindingStillHeld(requestId: string, sessionUuid: string): void {
+    const held = this.heldSessionBrokerBinding();
+    if (this.closing || held?.requestId !== requestId || held.sessionUuid !== sessionUuid) {
+      throw new ActionableError(
+        `Broker session ${sessionUuid} was released or fenced while its ownership was being established.`,
+      );
     }
   }
 

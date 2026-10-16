@@ -220,7 +220,7 @@ the baseline itself, and the requested model. If the prompt, preflight, tool per
 patterns, or timeout change, the report flags that the baseline measured a different task.
 It also records `baseline.deviceFingerprint` (SDK level, model, locale, effective screen
 size and density, font and animation scales, light or dark theme, enabled accessibility
-services such as TalkBack, Android build ID, and live rotation, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
+services such as TalkBack, navigation mode (gesture or buttons), Android build ID, and live rotation, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
 tool handling), `baseline.serverBuild` (a SHA-256 prefix over what executes and scores the run: the
 built `dist/` with the schemas and vendor tools it loads at runtime, `bun.lock` for the image
 libraries the build leaves external, `package.json`, the harness sources under

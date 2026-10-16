@@ -139,6 +139,24 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.result?.finalText).toBe("first");
   });
 
+  test("a JSON line that is not an object fails the transcript", () => {
+    const audit = auditTranscript(`false\nnull\n[1]\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual([
+      "line 1: not a JSON object",
+      "line 2: not a JSON object",
+      "line 3: not a JSON object",
+    ]);
+  });
+
+  test("events after the terminal result fail the transcript and are not counted", () => {
+    const before = new TranscriptBuilder().init().result().build();
+    const after = new TranscriptBuilder().mcp("observe", "ok").build();
+    const audit = auditTranscript(`${before}${after}`, NO_PATTERNS);
+    expect(audit.parseErrors.length).toBeGreaterThan(0);
+    expect(audit.parseErrors.every((error) => error.includes("event after the result"))).toBe(true);
+    expect(audit.totalToolCalls).toBe(0);
+  });
+
   test("a reused tool_use id fails the transcript", () => {
     const use = (name: string) =>
       JSON.stringify({

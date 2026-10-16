@@ -117,7 +117,6 @@
 47	test/features/navigation/Explore.test.ts
 24	test/features/navigation/ExploreElementScoring.test.ts
 5	test/features/navigation/navigateToInternalNoDiffE2E.test.ts
-4	test/features/observe/DetectIntentChooser.test.ts
 1	test/features/observe/EdgeMatchIndex.test.ts
 2	test/features/observe/GetAppMetadata.test.ts
 2	test/features/observe/IdentifyMediaViews.test.ts

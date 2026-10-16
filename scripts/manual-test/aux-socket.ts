@@ -25,7 +25,7 @@ import type {
   VideoStreamSocketResponse,
 } from "../../src/daemon/videoStreamSocketTypes";
 import type { WebRtcStreamSocketRequest } from "../../src/daemon/webrtcStreamSocketTypes";
-import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
+import { sendWebRtcStreamRequest } from "../lib/webrtcStreamClient";
 import { defaultTimer, MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../src/utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 import { errorMessage } from "../../src/utils/describeUnknownError";

@@ -6,9 +6,8 @@
  * The flags use "skip" semantics so their default is backwards compatible:
  * absent (or any value other than `false`/`0`) means skip automatic capture.
  */
-export const ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV =
-  "AUTOMOBILE_ACTION_OBSERVATION_SKIP_SCREENSHOT";
-export const OBSERVE_WAIT_FOR_SKIP_SCREENSHOT_ENV = "AUTOMOBILE_OBSERVE_WAIT_FOR_SKIP_SCREENSHOT";
+export const ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV = ENV.ACTION_OBSERVATION_SKIP_SCREENSHOT.name;
+export const OBSERVE_WAIT_FOR_SKIP_SCREENSHOT_ENV = ENV.OBSERVE_WAIT_FOR_SKIP_SCREENSHOT.name;
 
 function isSkipEnabled(value: string | undefined): boolean {
   return value?.trim().toLowerCase() !== "false" && value?.trim() !== "0";
@@ -17,16 +16,17 @@ function isSkipEnabled(value: string | undefined): boolean {
 export function shouldSkipActionObservationScreenshot(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return isSkipEnabled(env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV]);
+  return isSkipEnabled(readEnvRaw(ENV.ACTION_OBSERVATION_SKIP_SCREENSHOT, env));
 }
 
 export function shouldSkipObserveWaitForScreenshot(env: NodeJS.ProcessEnv = process.env): boolean {
-  return isSkipEnabled(env[OBSERVE_WAIT_FOR_SKIP_SCREENSHOT_ENV]);
+  return isSkipEnabled(readEnvRaw(ENV.OBSERVE_WAIT_FOR_SKIP_SCREENSHOT, env));
 }
+import { ENV, readEnvRaw } from "../../config/env";
 import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 
 export type ScreenshotMode = "settled" | "async" | "none";
-export const OBSERVE_SETTLED_SCREENSHOT_ENV = "AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT";
+export const OBSERVE_SETTLED_SCREENSHOT_ENV = ENV.OBSERVE_SETTLED_SCREENSHOT.name;
 
 /**
  * Resolve capture mode in this order: an explicit `observe.screenshot` argument,
@@ -47,7 +47,7 @@ export function resolveScreenshotMode(
   if (screenshot !== undefined) {
     return screenshot;
   }
-  const configured = env[OBSERVE_SETTLED_SCREENSHOT_ENV];
+  const configured = readEnvRaw(ENV.OBSERVE_SETTLED_SCREENSHOT, env);
   if (configured !== undefined) {
     return ["true", "1"].includes(configured.trim().toLowerCase()) ? "settled" : "async";
   }

@@ -6,7 +6,7 @@
  * Uses the same wire protocol message types as the Android delegate.
  */
 
-import WebSocket from "ws";
+import { sendCommand } from "../DeviceServiceUtils";
 import { getAbortSignal } from "../../../utils/AbortContext";
 import { logger } from "../../../utils/logger";
 import { mapStorageSdkError } from "../../../server/storageSdkErrors";
@@ -79,25 +79,22 @@ export class CtrlProxyStorage {
     }
 
     const requestId = this.context.requestManager.generateId("list_preference_files");
-    const promise = this.context.requestManager.register<ListPreferenceFilesResult>(
-      requestId,
+    const promise = this.sendStorageCommand<ListPreferenceFilesResult>(
       "list_preference_files",
-      timeoutMs,
-      (_id, _type, _timeout) => ({
-        success: false,
-        totalTimeMs: this.context.timer.now() - startTime,
-        error: `List preference files timeout after ${timeoutMs}ms`,
-      }),
-    );
-
-    const message = JSON.stringify({
-      type: "list_preference_files",
       requestId,
-      appId: packageName,
-    });
-
-    const ws = this.context.getWebSocket();
-    ws?.send(message);
+      {
+        appId: packageName,
+      },
+      {
+        timeoutMs,
+        timeoutError: () => ({
+          success: false,
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: `List preference files timeout after ${timeoutMs}ms`,
+        }),
+        responseError: (error) => ({ success: false, totalTimeMs: 0, error }),
+      },
+    );
     logger.debug(`[CTRL_PROXY_IOS] Sent list_preference_files request (requestId: ${requestId})`);
 
     const result = await promise;
@@ -128,26 +125,23 @@ export class CtrlProxyStorage {
     }
 
     const requestId = this.context.requestManager.generateId("get_preferences");
-    const promise = this.context.requestManager.register<GetPreferencesResult>(
-      requestId,
+    const promise = this.sendStorageCommand<GetPreferencesResult>(
       "get_preferences",
-      timeoutMs,
-      (_id, _type, _timeout) => ({
-        success: false,
-        totalTimeMs: this.context.timer.now() - startTime,
-        error: `Get preferences timeout after ${timeoutMs}ms`,
-      }),
-    );
-
-    const message = JSON.stringify({
-      type: "get_preferences",
       requestId,
-      appId: packageName,
-      fileName,
-    });
-
-    const ws = this.context.getWebSocket();
-    ws?.send(message);
+      {
+        appId: packageName,
+        fileName,
+      },
+      {
+        timeoutMs,
+        timeoutError: () => ({
+          success: false,
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: `Get preferences timeout after ${timeoutMs}ms`,
+        }),
+        responseError: (error) => ({ success: false, totalTimeMs: 0, error }),
+      },
+    );
     logger.debug(
       `[CTRL_PROXY_IOS] Sent get_preferences request (requestId: ${requestId}, fileName: ${fileName})`,
     );
@@ -182,28 +176,25 @@ export class CtrlProxyStorage {
     }
 
     const requestId = this.context.requestManager.generateId("get_preference");
-    const promise = this.context.requestManager.register<GetPreferenceResult>(
-      requestId,
+    const promise = this.sendStorageCommand<GetPreferenceResult>(
       "get_preference",
-      timeoutMs,
-      (_id, _type, _timeout) => ({
-        success: false,
-        found: false,
-        totalTimeMs: this.context.timer.now() - startTime,
-        error: `Get preference timeout after ${timeoutMs}ms`,
-      }),
-    );
-
-    const message = JSON.stringify({
-      type: "get_preference",
       requestId,
-      appId: packageName,
-      fileName,
-      key,
-    });
-
-    const ws = this.context.getWebSocket();
-    ws?.send(message);
+      {
+        appId: packageName,
+        fileName,
+        key,
+      },
+      {
+        timeoutMs,
+        timeoutError: () => ({
+          success: false,
+          found: false,
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: `Get preference timeout after ${timeoutMs}ms`,
+        }),
+        responseError: (error) => ({ success: false, found: false, totalTimeMs: 0, error }),
+      },
+    );
     logger.debug(
       `[CTRL_PROXY_IOS] Sent get_preference request (requestId: ${requestId}, fileName: ${fileName}, key: ${key})`,
     );
@@ -216,18 +207,33 @@ export class CtrlProxyStorage {
     return result.found && result.entry ? result.entry : null;
   }
 
-  /** All three writes share the synchronous open-socket send and its admission hook. */
-  private sendWrite(message: string, onDispatch?: () => void): void {
-    const ws = this.context.getWebSocket();
-    // Preserve the missing-socket path: its pending request still settles as before.
-    if (!ws) {
-      return;
-    }
-    if (ws.readyState !== WebSocket.OPEN) {
-      throw new Error("WebSocket not connected");
-    }
-    ws.send(message);
-    onDispatch?.();
+  /** Already connected above; keep iOS serialization/deadlines without ambient in-flight abort. */
+  private sendStorageCommand<T>(
+    operation: string,
+    requestId: string,
+    params: Record<string, unknown>,
+    options: {
+      timeoutMs: number;
+      timeoutError: () => T;
+      responseError: (error: string) => T;
+      onDispatch?: () => void;
+    },
+  ): Promise<T> {
+    const { timeoutMs, timeoutError, responseError, onDispatch } = options;
+    return sendCommand<T>(this.context, {
+      idPrefix: operation,
+      createRequestId: () => requestId,
+      responseType: operation,
+      messageType: operation,
+      params,
+      timeoutMs,
+      timeoutError,
+      notConnectedError: () => responseError("WebSocket not connected"),
+      unsupportedCommandError: (_type, error) => responseError(error),
+      requireExistingConnection: true,
+      cancelScreenshotBackoff: false,
+      onDispatch,
+    });
   }
 
   /**
@@ -259,31 +265,29 @@ export class CtrlProxyStorage {
     const sessionId = this.sessionId?.();
     const mutationToken = this.mutationToken?.(packageName);
     const requestId = this.context.requestManager.generateId("set_preference");
-    const promise = this.context.requestManager.register<SetPreferenceResult>(
-      requestId,
+    const promise = this.sendStorageCommand<SetPreferenceResult>(
       "set_preference",
-      timeoutMs,
-      (_id, _type, _timeout) => ({
-        success: false,
-        totalTimeMs: this.context.timer.now() - startTime,
-        error: `Set preference timeout after ${timeoutMs}ms`,
-      }),
-    );
-
-    const message = JSON.stringify({
-      type: "set_preference",
       requestId,
-      ...this.context.wireDeadlineParams?.("set_preference", timeoutMs),
-      appId: packageName,
-      fileName,
-      key,
-      value,
-      valueType: type,
-      ...(sessionId ? { sessionId } : {}),
-      ...(mutationToken ? { mutationToken } : {}),
-    });
-
-    this.sendWrite(message, onDispatch);
+      {
+        appId: packageName,
+        fileName,
+        key,
+        value,
+        valueType: type,
+        ...(sessionId ? { sessionId } : {}),
+        ...(mutationToken ? { mutationToken } : {}),
+      },
+      {
+        timeoutMs,
+        timeoutError: () => ({
+          success: false,
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: `Set preference timeout after ${timeoutMs}ms`,
+        }),
+        responseError: (error) => ({ success: false, totalTimeMs: 0, error }),
+        onDispatch,
+      },
+    );
     logger.debug(
       `[CTRL_PROXY_IOS] Sent set_preference request (requestId: ${requestId}, fileName: ${fileName}, key: ${key})`,
     );
@@ -324,29 +328,27 @@ export class CtrlProxyStorage {
     const sessionId = this.sessionId?.();
     const mutationToken = this.mutationToken?.(packageName);
     const requestId = this.context.requestManager.generateId("remove_preference");
-    const promise = this.context.requestManager.register<RemovePreferenceResult>(
-      requestId,
+    const promise = this.sendStorageCommand<RemovePreferenceResult>(
       "remove_preference",
-      timeoutMs,
-      (_id, _type, _timeout) => ({
-        success: false,
-        totalTimeMs: this.context.timer.now() - startTime,
-        error: `Remove preference timeout after ${timeoutMs}ms`,
-      }),
-    );
-
-    const message = JSON.stringify({
-      type: "remove_preference",
       requestId,
-      ...this.context.wireDeadlineParams?.("remove_preference", timeoutMs),
-      appId: packageName,
-      fileName,
-      key,
-      ...(sessionId ? { sessionId } : {}),
-      ...(mutationToken ? { mutationToken } : {}),
-    });
-
-    this.sendWrite(message, onDispatch);
+      {
+        appId: packageName,
+        fileName,
+        key,
+        ...(sessionId ? { sessionId } : {}),
+        ...(mutationToken ? { mutationToken } : {}),
+      },
+      {
+        timeoutMs,
+        timeoutError: () => ({
+          success: false,
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: `Remove preference timeout after ${timeoutMs}ms`,
+        }),
+        responseError: (error) => ({ success: false, totalTimeMs: 0, error }),
+        onDispatch,
+      },
+    );
     logger.debug(
       `[CTRL_PROXY_IOS] Sent remove_preference request (requestId: ${requestId}, fileName: ${fileName}, key: ${key})`,
     );
@@ -381,28 +383,26 @@ export class CtrlProxyStorage {
     const sessionId = this.sessionId?.();
     const mutationToken = this.mutationToken?.(packageName);
     const requestId = this.context.requestManager.generateId("clear_preferences");
-    const promise = this.context.requestManager.register<ClearPreferencesResult>(
-      requestId,
+    const promise = this.sendStorageCommand<ClearPreferencesResult>(
       "clear_preferences",
-      timeoutMs,
-      (_id, _type, _timeout) => ({
-        success: false,
-        totalTimeMs: this.context.timer.now() - startTime,
-        error: `Clear preferences timeout after ${timeoutMs}ms`,
-      }),
-    );
-
-    const message = JSON.stringify({
-      type: "clear_preferences",
       requestId,
-      ...this.context.wireDeadlineParams?.("clear_preferences", timeoutMs),
-      appId: packageName,
-      fileName,
-      ...(sessionId ? { sessionId } : {}),
-      ...(mutationToken ? { mutationToken } : {}),
-    });
-
-    this.sendWrite(message, onDispatch);
+      {
+        appId: packageName,
+        fileName,
+        ...(sessionId ? { sessionId } : {}),
+        ...(mutationToken ? { mutationToken } : {}),
+      },
+      {
+        timeoutMs,
+        timeoutError: () => ({
+          success: false,
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: `Clear preferences timeout after ${timeoutMs}ms`,
+        }),
+        responseError: (error) => ({ success: false, totalTimeMs: 0, error }),
+        onDispatch,
+      },
+    );
     logger.debug(
       `[CTRL_PROXY_IOS] Sent clear_preferences request (requestId: ${requestId}, fileName: ${fileName})`,
     );

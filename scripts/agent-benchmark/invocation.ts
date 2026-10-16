@@ -300,11 +300,15 @@ const PROVIDER_URLS = [
   "ANTHROPIC_VERTEX_BASE_URL",
 ];
 const PROVIDER_REGIONS = ["AWS_REGION", "CLOUD_ML_REGION"];
+// Proxy routing passes through too (Claude may need it to reach the API at all), and a
+// different proxy changes latency. Upper- and lowercase forms are both honored.
+const PROXY_URLS = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
+const PROXY_BYPASS = ["NO_PROXY", "no_proxy"];
 
 /**
  * A non-secret identity of the backend Claude will use: which provider is selected, the
- * host (never credentials or paths) of any base URL, the region, and model-routing
- * variables. Provider settings pass through to Claude on purpose, so they are recorded
+ * host (never credentials or paths) of any base URL or proxy, the proxy bypass list, the
+ * region, and model-routing variables. Provider settings pass through to Claude on purpose, so they are recorded
  * rather than scrubbed: the same model through another backend can differ in latency.
  */
 export function providerIdentity(env: Record<string, string | undefined>): string {
@@ -322,8 +326,12 @@ export function providerIdentity(env: Record<string, string | undefined>): strin
     .filter(set);
   return [
     ...PROVIDER_FLAGS.filter(set).map((key) => `${key}=${env[key]}`),
-    ...PROVIDER_URLS.filter(set).map((key) => `${key}=${host(env[key] as string)}`),
-    ...[...PROVIDER_REGIONS, ...routing].filter(set).map((key) => `${key}=${env[key]}`),
+    ...[...PROVIDER_URLS, ...PROXY_URLS]
+      .filter(set)
+      .map((key) => `${key}=${host(env[key] as string)}`),
+    ...[...PROVIDER_REGIONS, ...PROXY_BYPASS, ...routing]
+      .filter(set)
+      .map((key) => `${key}=${env[key]}`),
   ]
     .sort()
     .join("\n");

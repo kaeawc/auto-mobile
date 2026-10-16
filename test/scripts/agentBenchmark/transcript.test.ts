@@ -152,6 +152,13 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.parseErrors).toEqual([`tool_result for ${id} has a non-boolean is_error`]);
   });
 
+  test("a non-boolean terminal is_error fails the transcript", () => {
+    const base = new TranscriptBuilder().init().build();
+    const result = JSON.stringify({ type: "result", subtype: "success", is_error: "true" });
+    const audit = auditTranscript(`${base}${result}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual(["result event has a non-boolean is_error"]);
+  });
+
   test("an empty transcript audits to zero calls with no init", () => {
     const audit = auditTranscript("", NO_PATTERNS);
     expect(audit.totalToolCalls).toBe(0);

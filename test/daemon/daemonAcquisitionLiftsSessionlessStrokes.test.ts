@@ -17,10 +17,6 @@ import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingReposit
 // real socket server in `socketServerInputSessionlessStrokeAtAcquisition.test.ts`; this pins the
 // daemon's own wiring of the hook.
 
-interface DaemonSocketServerInternals {
-  socketServer: { liftSessionlessStrokesOn(deviceId: string): void } | null;
-}
-
 describe("Daemon device acquisition lifts sessionless strokes (#11541)", () => {
   const restores: Array<() => void> = [];
   let daemon: Daemon;
@@ -61,11 +57,11 @@ describe("Daemon device acquisition lifts sessionless strokes (#11541)", () => {
 
   test("a session acquiring a device lifts the sessionless strokes on that device", async () => {
     const lifted: string[] = [];
-    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+    daemon.setSocketServerForTesting({
       liftSessionlessStrokesOn: (deviceId) => {
         lifted.push(deviceId);
       },
-    };
+    });
 
     await daemon.getSessionManager().createSession("new-owner", "emulator-5560", "android");
 
@@ -73,7 +69,7 @@ describe("Daemon device acquisition lifts sessionless strokes (#11541)", () => {
   });
 
   test("an acquisition before the socket server exists has no stroke to lift and succeeds", async () => {
-    (daemon as unknown as DaemonSocketServerInternals).socketServer = null;
+    daemon.setSocketServerForTesting(null);
 
     await daemon.getSessionManager().createSession("new-owner", "emulator-5560", "android");
 

@@ -22,25 +22,6 @@ import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncSchedul
 import { fakeDaemonShutdownIo } from "../helpers/daemonShutdownIoFakes";
 import { settlesOnMicrotasksAlone } from "../helpers/shutdownStageHarness";
 
-interface DaemonSocketServerInternals {
-  socketServer: {
-    liftSessionlessStrokesOn(deviceId: string): void;
-    quiesce(): Promise<void>;
-    drainSessionReleaseNotifications(): Promise<void>;
-    close(): Promise<void>;
-  } | null;
-}
-
-interface DaemonReleaseInternals {
-  cancelAndReleaseSession(
-    sessionId: string,
-    reason: string,
-    allowExpired?: boolean,
-    expectedSession?: Session,
-    shouldCommit?: () => boolean,
-  ): Promise<boolean>;
-}
-
 /**
  * Point a daemon-owned pool's discovery at a fake that lists exactly these
  * devices. A pooled Android entry is re-proved present against discovery before
@@ -257,7 +238,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       const info = spyOn(logger, "info").mockImplementation(() => {});
       const free = spyOn(pool, "releaseDevice");
-      const cancel = spyOn(daemon as unknown as DaemonReleaseInternals, "cancelAndReleaseSession");
+      const cancel = spyOn(daemon, "cancelAndReleaseSession");
       try {
         stubPoolDiscovery(pool, [device]);
         await pool.initializeWithDevices([device]);
@@ -337,7 +318,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       stubPoolDiscovery(pool, [device]);
       await pool.initializeWithDevices([device]);
       await pool.assignDeviceToSession("release-session", "android");
-      const result = (daemon as unknown as DaemonReleaseInternals).cancelAndReleaseSession(
+      const result = daemon.cancelAndReleaseSession(
         "release-session",
         "device-restart:Physical Android",
       );
@@ -394,7 +375,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
         if (!session) {
           throw new Error("expected session");
         }
-        const result = (daemon as unknown as DaemonReleaseInternals).cancelAndReleaseSession(
+        const result = daemon.cancelAndReleaseSession(
           "release-session",
           branch === "ordinary" ? "daemon-shutdown" : "device-disconnected:release-device",
           false,
@@ -454,7 +435,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
           throw new Error("expected session");
         }
         expect(
-          await (daemon as unknown as DaemonReleaseInternals).cancelAndReleaseSession(
+          await daemon.cancelAndReleaseSession(
             "release-session",
             "explicit-release",
             false,
@@ -501,10 +482,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       }
       original = session;
       await expect(
-        (daemon as unknown as DaemonReleaseInternals).cancelAndReleaseSession(
-          "release-session",
-          "device-restart:test",
-        ),
+        daemon.cancelAndReleaseSession("release-session", "device-restart:test"),
       ).rejects.toThrow("old incarnation persistence failed");
       expect(manager.hasSession("release-session")).toBe(true);
       expect(manager.getSession("release-session")).not.toBe(original);
@@ -823,7 +801,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
       events.push(`release:${sessionId}:${reason}`);
     });
-    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+    daemon.setSocketServerForTesting({
       liftSessionlessStrokesOn: () => {},
       quiesce: async () => {
         events.push("socket:quiesce");
@@ -834,7 +812,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       close: async () => {
         events.push("socket:close");
       },
-    };
+    });
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
@@ -882,7 +860,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       () => undefined,
       (error: unknown) => error,
     );
-    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+    daemon.setSocketServerForTesting({
       liftSessionlessStrokesOn: () => {},
       quiesce: async () => {
         continueAcquisition.resolve();
@@ -890,7 +868,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       },
       drainSessionReleaseNotifications: async () => {},
       close: async () => {},
-    };
+    });
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
@@ -931,7 +909,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
       events.push(`release:${sessionId}:${reason}`);
     });
-    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+    daemon.setSocketServerForTesting({
       liftSessionlessStrokesOn: () => {},
       quiesce: async () => {},
       drainSessionReleaseNotifications: async () => {
@@ -940,7 +918,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       close: async () => {
         events.push("socket:close");
       },
-    };
+    });
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
@@ -1026,7 +1004,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const unsubscribe = SessionReleaseBroadcaster.subscribe((sessionId, reason) => {
       events.push(`release:${sessionId}:${reason}`);
     });
-    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+    daemon.setSocketServerForTesting({
       liftSessionlessStrokesOn: () => {},
       quiesce: async () => {},
       drainSessionReleaseNotifications: async () => {
@@ -1035,7 +1013,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       close: async () => {
         events.push("socket:close");
       },
-    };
+    });
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
@@ -1101,7 +1079,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       events.push(`release:${sessionId}:${reason}`);
     });
     let ordinaryRelease: Promise<string | null> | undefined;
-    (daemon as unknown as DaemonSocketServerInternals).socketServer = {
+    daemon.setSocketServerForTesting({
       liftSessionlessStrokesOn: () => {},
       quiesce: async () => {
         ordinaryRelease = sessionManager.releaseSession("upgraded-release", "explicit-release");
@@ -1109,7 +1087,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       },
       drainSessionReleaseNotifications: async () => {},
       close: async () => {},
-    };
+    });
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
@@ -1142,9 +1120,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     timer.enableAutoAdvance();
     const repository = new FakeDeviceSessionRepository();
     const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
-    const internals = daemon as unknown as {
-      trackDeferredSessionRecoverySweep(sweep: Promise<void>): void;
-    };
+    const internals = daemon;
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
     const warnSpy = spyOn(logger, "warn");
 

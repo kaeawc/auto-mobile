@@ -1,6 +1,6 @@
 # AutoMobile test as-any ratchet baseline -- see scripts/test-as-any-baseline.sh
 32	test/ctrlProxy/CtrlProxyManager.test.ts
-13	test/ctrlProxy/IOSCtrlProxyManager.test.ts
+12	test/ctrlProxy/IOSCtrlProxyManager.test.ts
 3	test/daemon/appearanceSocketServer.test.ts
 1	test/daemon/canonicalPixels.test.ts
 5	test/daemon/clientRequestIdGenerator.test.ts

@@ -53,7 +53,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemBarsInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
-import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
@@ -1463,6 +1463,68 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 buildContent = buildContent,
               )
             }
+          }
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+        },
+    )
+  }
+  private val focusController by lazy {
+    FocusController(
+      host =
+        object : FocusController.Host {
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) {
+            this@CtrlProxy.launchRequestScope(requestId, block)
+          }
+
+          override fun findAccessibilityFocusedNode() = findNodeInDisplayWindows {
+            it.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+          }
+
+          override fun extractFocusedElementInfo(node: AccessibilityNodeInfo) =
+            viewHierarchyExtractor.extractFocusedElementInfo(node)
+
+          override fun extractTraversalOrder(): TraversalOrderResult? {
+            val allWindows = windows
+            val rootNode = rootInActiveWindow
+            val screenDimensions = getScreenDimensions()
+            if (allWindows.isNullOrEmpty() && rootNode == null) return null
+            return if (!allWindows.isNullOrEmpty()) {
+              viewHierarchyExtractor.extractTraversalOrderFromAllWindows(
+                allWindows,
+                rootNode,
+                screenDimensions,
+              )
+            } else {
+              viewHierarchyExtractor.extractTraversalOrderFromActiveWindow(
+                rootNode,
+                screenDimensions,
+              )
+            }
+          }
+
+          override fun currentOverlayDrawer() =
+            if (::overlayDrawer.isInitialized) overlayDrawer else null
+        },
+      perfProvider = perfProvider,
+      timeProvider = timeProvider,
+      resultBroadcaster = resultBroadcaster,
+      jsonCompact = jsonCompact,
+      responseSender =
+        object : FocusController.ResponseSender {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcast(message: String) {
+            webSocketServer.broadcast(message)
+          }
+
+          override suspend fun broadcastWithPerf(
+            messageBuilder: (perfTiming: JsonElement?) -> String,
+          ) {
+            webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
           }
 
           override fun connectionCount() = webSocketServer.getConnectionCount()
@@ -3427,15 +3489,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     remainingMs: Long?,
   ) = broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAtEpochMs, remainingMs)
 
-  override suspend fun getCurrentFocus(requestId: String?) = handleGetCurrentFocus(requestId)
+  override suspend fun getCurrentFocus(requestId: String?) =
+    focusController.handleGetCurrentFocus(requestId)
 
-  override suspend fun getTraversalOrder(requestId: String?) = handleGetTraversalOrder(requestId)
+  override suspend fun getTraversalOrder(requestId: String?) =
+    focusController.handleGetTraversalOrder(requestId)
 
   override suspend fun addHighlight(
     requestId: String?,
     highlightId: String?,
     shape: HighlightShape?,
-  ) = handleAddHighlight(requestId, highlightId, shape)
+  ) = focusController.handleAddHighlight(requestId, highlightId, shape)
 
   override suspend fun showPrototype(
     requestId: String?,
@@ -7483,288 +7547,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val result = permissionManager.getPermissionState(permission, requestPermission ?: true)
       val totalTime = System.currentTimeMillis() - startTime
       broadcastPermissionResult(requestId, result, totalTime)
-    }
-  }
-
-  /**
-   * Get the current accessibility focus element. Returns the element that currently has
-   * accessibility focus (TalkBack cursor position).
-   */
-  private fun handleGetCurrentFocus(requestId: String?) {
-    val startTime = System.currentTimeMillis()
-    Log.d(TAG, "handleGetCurrentFocus (requestId: $requestId)")
-    perfProvider.serial("getCurrentFocus")
-
-    try {
-      perfProvider.startOperation("findFocus")
-      val focusedNode = findNodeInDisplayWindows {
-        it.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-      }
-      perfProvider.endOperation("findFocus")
-
-      if (focusedNode == null) {
-        perfProvider.end()
-        val totalTime = System.currentTimeMillis() - startTime
-        Log.d(TAG, "No accessibility focus found")
-        launchRequestScope(requestId) { broadcastCurrentFocusResult(requestId, null, totalTime) }
-        return
-      }
-
-      perfProvider.startOperation("extractFocusInfo")
-      // Extract focus element information
-      val focusedElement = viewHierarchyExtractor.extractFocusedElementInfo(focusedNode)
-      focusedNode.recycle()
-      perfProvider.endOperation("extractFocusInfo")
-      perfProvider.end()
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "Current focus extracted in ${totalTime}ms")
-
-      launchRequestScope(requestId) {
-        broadcastCurrentFocusResult(requestId, focusedElement, totalTime)
-      }
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error getting current focus", e)
-      launchRequestScope(requestId) {
-        broadcastCurrentFocusError(requestId, e.message, errorTime - startTime)
-      }
-    }
-  }
-
-  /**
-   * Get the traversal order of focusable elements. Returns an ordered list of all
-   * accessibility-focusable elements in TalkBack traversal order.
-   */
-  private fun handleGetTraversalOrder(requestId: String?) {
-    val startTime = System.currentTimeMillis()
-    Log.d(TAG, "handleGetTraversalOrder (requestId: $requestId)")
-    perfProvider.serial("getTraversalOrder")
-
-    try {
-      perfProvider.startOperation("extractTraversalOrder")
-      val allWindows = windows
-      val rootNode = rootInActiveWindow
-      val screenDimensions = getScreenDimensions()
-
-      if (allWindows.isNullOrEmpty() && rootNode == null) {
-        perfProvider.endOperation("extractTraversalOrder")
-        perfProvider.end()
-        val totalTime = System.currentTimeMillis() - startTime
-        Log.w(TAG, "No windows or root node available for traversal order extraction")
-        launchRequestScope(requestId) {
-          broadcastTraversalOrderError(requestId, "No windows available", totalTime)
-        }
-        return
-      }
-
-      // Extract traversal order using ViewHierarchyExtractor
-      val traversalResult =
-        if (!allWindows.isNullOrEmpty()) {
-          viewHierarchyExtractor.extractTraversalOrderFromAllWindows(
-            allWindows,
-            rootNode,
-            screenDimensions,
-          )
-        } else {
-          viewHierarchyExtractor.extractTraversalOrderFromActiveWindow(rootNode, screenDimensions)
-        }
-      perfProvider.endOperation("extractTraversalOrder")
-      perfProvider.end()
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(
-        TAG,
-        "Traversal order extracted: ${traversalResult.elements.size} elements in ${totalTime}ms",
-      )
-
-      launchRequestScope(requestId) {
-        broadcastTraversalOrderResult(requestId, traversalResult, totalTime)
-      }
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error getting traversal order", e)
-      launchRequestScope(requestId) {
-        broadcastTraversalOrderError(requestId, e.message, errorTime - startTime)
-      }
-    }
-  }
-
-  private fun handleAddHighlight(
-    requestId: String?,
-    highlightId: String?,
-    shape: HighlightShape?,
-  ) {
-    launchRequestScope(requestId) {
-      if (!::overlayDrawer.isInitialized) {
-        broadcastHighlightResponse(requestId, false, "Overlay drawer not initialized")
-        return@launchRequestScope
-      }
-
-      val result =
-        try {
-          withContext(Dispatchers.Main) { overlayDrawer.addHighlight(highlightId, shape) }
-        } catch (e: CancellationException) {
-          // Let cooperative cancellation unwind cleanly rather than reporting a failed highlight
-          // result (#3130).
-          throw e
-        } catch (e: Exception) {
-          HighlightOperationResult(false, e.message ?: "Failed to add highlight")
-        }
-
-      broadcastHighlightResponse(requestId, result.success, result.error)
-    }
-  }
-
-  private suspend fun broadcastHighlightResponse(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping highlight response broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "highlight_response") {
-      val errorJson = jsonCompact.encodeToString<String?>(error)
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"highlight_response","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          append(""","success":$success""")
-          append(""","error":$errorJson""")
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
-      }
-      Log.d(
-        TAG,
-        "Broadcasted highlight response to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  /** Broadcast current focus result to WebSocket clients */
-  private suspend fun broadcastCurrentFocusResult(
-    requestId: String?,
-    focusedElement: UIElementInfo?,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping current focus result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "current_focus_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"current_focus_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          append(""","totalTimeMs":$totalTimeMs""")
-          if (focusedElement != null) {
-            val elementJson =
-              jsonCompact.encodeToString(serializer<UIElementInfo>(), focusedElement)
-            append(""","focusedElement":$elementJson""")
-          } else {
-            append(""","focusedElement":null""")
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
-      }
-      Log.d(
-        TAG,
-        "Broadcasted current focus result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  /** Broadcast current focus error to WebSocket clients */
-  private suspend fun broadcastCurrentFocusError(
-    requestId: String?,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping current focus error broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "current_focus_error") {
-      webSocketServer.broadcast(currentFocusErrorFrame(requestId, error, totalTimeMs))
-      Log.d(
-        TAG,
-        "Broadcasted current focus error to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  /** Broadcast traversal order result to WebSocket clients */
-  private suspend fun broadcastTraversalOrderResult(
-    requestId: String?,
-    traversalResult: dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping traversal order result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "traversal_order_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"traversal_order_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          append(""","totalTimeMs":$totalTimeMs""")
-          val resultJson =
-            jsonCompact.encodeToString(
-              serializer<dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult>(),
-              traversalResult,
-            )
-          append(""","result":$resultJson""")
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
-      }
-      Log.d(
-        TAG,
-        "Broadcasted traversal order result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  /** Broadcast traversal order error to WebSocket clients */
-  private suspend fun broadcastTraversalOrderError(
-    requestId: String?,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping traversal order error broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "traversal_order_error") {
-      webSocketServer.broadcast(traversalOrderErrorFrame(requestId, error, totalTimeMs))
-      Log.d(
-        TAG,
-        "Broadcasted traversal order error to ${webSocketServer.getConnectionCount()} clients",
-      )
     }
   }
 }

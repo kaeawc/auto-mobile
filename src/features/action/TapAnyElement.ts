@@ -45,7 +45,7 @@ import {
   resolveGestureCtrlProxyTimeoutMs as resolveTapAnyCtrlProxyTimeoutMs,
 } from "./gestureTransportTimeout";
 export { LONG_PRESS_TIMEOUT_HEADROOM_MS } from "./gestureTransportTimeout";
-import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
+import { withStaleDisplay, StaleDisplayError } from "../observe/StaleDisplayError";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import {
   DefaultHierarchyCapture,

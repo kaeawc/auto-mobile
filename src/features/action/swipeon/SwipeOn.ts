@@ -15,7 +15,7 @@ import {
   withStaleDisplay,
   StaleDisplayError,
   staleDisplayError,
-} from "../../../models/StaleDisplayError";
+} from "../../observe/StaleDisplayError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { SwipeSearchCancelledError } from "./searchCancellation";

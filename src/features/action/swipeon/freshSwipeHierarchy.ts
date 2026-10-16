@@ -5,7 +5,7 @@ import { getRequestContext } from "../../../utils/AbortContext";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { throwIfAborted } from "../../../utils/toolUtils";
-import { StaleDisplayError } from "../../../models/StaleDisplayError";
+import { StaleDisplayError } from "../../observe/StaleDisplayError";
 import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../../observe/DeviceHierarchyCapture";
 import { hasWrongWindowEvidence } from "../../observe/observationFreshness";
 import {

@@ -1,4 +1,4 @@
-import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
+import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";

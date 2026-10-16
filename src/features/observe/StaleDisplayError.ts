@@ -1,15 +1,11 @@
-import { DispatchedObservationError } from "./DispatchedObservationError";
-import { displayPinFailure, selectedDisplayPin } from "../features/observe/SessionDisplayContext";
-import { PinnedDisplayUnavailableError } from "./PinnedDisplayError";
-import { ActionableError } from "./ActionableError";
-import type { BaseActionResult } from "./BaseActionResult";
+import { DispatchedObservationError } from "../../models/DispatchedObservationError";
+import { displayPinFailure, selectedDisplayPin } from "./SessionDisplayContext";
+import { PinnedDisplayUnavailableError } from "../../models/PinnedDisplayError";
+import { ActionableError } from "../../models/ActionableError";
+import type { BaseActionResult } from "../../models/BaseActionResult";
+import type { StaleDisplayDetails } from "../../models/StaleDisplayDetails";
 
-export interface StaleDisplayDetails {
-  observedGeneration: number;
-  currentGeneration: number;
-  currentDisplayKey?: string;
-  retry: "observe";
-}
+export type { StaleDisplayDetails };
 
 /** One actionable refusal for coordinates crossing a display transition. */
 export class StaleDisplayError extends ActionableError {

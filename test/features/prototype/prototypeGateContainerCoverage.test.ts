@@ -43,6 +43,11 @@ const fixtures: Record<string, Node> = {
     refresh: { stateKey: "refreshing", onRefresh: [{ type: "emit", name: "refresh" }] },
     child: label,
   },
+  prototype_swipe_actions_v1: {
+    type: "row",
+    swipeActions: { end: [{ label: "Delete", onTap: [{ type: "emit", name: "delete" }] }] },
+    children: [label],
+  },
   prototype_search_bar_v1: {
     type: "searchBar",
     stateKey: "query",

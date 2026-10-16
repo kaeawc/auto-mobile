@@ -1935,7 +1935,7 @@ export class DevicePool {
   private createShutdownReservationsPort(): DeviceShutdownReservationsPoolPort {
     return {
       getDevices: () => this.devices,
-      getAssignmentMutex: () => this.assignmentMutex,
+      withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getIntentionalShutdowns: () => this.intentionalShutdowns,
       assertReadinessReservationOwner: (device, client) =>
         this.assertReadinessReservationOwner(device, client),
@@ -1960,7 +1960,7 @@ export class DevicePool {
       noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
       getDevices: () => this.devices,
       getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
-      getAssignmentMutex: () => this.assignmentMutex,
+      withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getDeviceManager: () => this.deviceManager,
       getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
       shouldRebootDisconnectedAndroidDevice: (device) =>
@@ -2010,7 +2010,7 @@ export class DevicePool {
       getTimer: () => this.timer,
       getDeviceManager: () => this.deviceManager,
       getDevices: () => this.devices,
-      getAssignmentMutex: () => this.assignmentMutex,
+      withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getCriteriaMatcher: () => this.criteriaMatcher,
       identityEvidenceForBootedDevice: (device) =>
         this.runtimeIdentity.identityEvidenceForBootedDevice(device),
@@ -2366,7 +2366,7 @@ export class DevicePool {
     return createAdbServerResetQuarantine(
       {
         noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
-        getAssignmentMutex: () => this.assignmentMutex,
+        withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
         getDevices: () => this.devices,
         getSessionManager: () => this.sessionManager,
         getStartedDeviceProcesses: () => this.startedDeviceProcesses,

@@ -43,6 +43,7 @@ final class PrototypeThemeModesTests: XCTestCase {
             "prototype_network_device_v1",
             "prototype_text_field_options_v1",
             "prototype_gestures_v1",
+            "prototype_swipe_actions_v1",
             "prototype_text_field_actions_v1",
             "prototype_carousel_v1",
             "prototype_text_field_leading_icon_v1",

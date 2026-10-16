@@ -7341,6 +7341,58 @@
         "hasDefault": false
       }
     ],
+    "dev.jasonpearson.automobile.protocol.PrototypeSwipeAction": [
+      {
+        "name": "label",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "icon",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "role",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "color",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onTap",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeSwipeActions": [
+      {
+        "name": "start",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "end",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "fullSwipe",
+        "type": "boolean",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
     "dev.jasonpearson.automobile.protocol.PrototypeTextSpan": [
       {
         "name": "text",
@@ -8523,6 +8575,12 @@
         "hasDefault": true
       },
       {
+        "name": "swipeActions",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSwipeActions",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
         "name": "enabledWhen",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeCondition",
         "nullable": true,
@@ -9113,6 +9171,12 @@
       {
         "name": "repeat",
         "type": "object:PrototypeRepeat",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "swipeActions",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeSwipeActions",
         "nullable": true,
         "hasDefault": true
       }

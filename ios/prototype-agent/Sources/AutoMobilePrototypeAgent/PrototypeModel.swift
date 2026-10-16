@@ -15,6 +15,8 @@ final class PrototypeModel {
     var expandedSelect: PrototypeNode?
     var menuBounds: [ObjectIdentifier: CGRect] = [:]
     private(set) var state: [String: JSONValue] = [:]
+    /// Which swipe-actions row is open; opening one closes the others. Presentation only.
+    private(set) var swipe = PrototypeSwipeCoordinator()
     private(set) var shownErrors: Set<String> = []
     private(set) var pages: [String: Int] = [:]
     private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
@@ -280,6 +282,14 @@ final class PrototypeModel {
             session.blur(node)
             return []
         }
+    }
+
+    func swipeOpened(_ node: PrototypeNode, side: PrototypeSwipe.Side) {
+        _ = swipe.opened(ObjectIdentifier(node), side: side)
+    }
+
+    func swipeClosed(_ node: PrototypeNode) {
+        swipe.closed(ObjectIdentifier(node))
     }
 
     func run(_ actions: [PrototypeAction]) {

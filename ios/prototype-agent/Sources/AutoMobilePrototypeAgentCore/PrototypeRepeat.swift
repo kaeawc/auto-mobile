@@ -99,6 +99,11 @@ enum PrototypeRepeat {
                 return .object(member)
             })
         }
+        if case var .object(swipe)? = fields["swipeActions"] {
+            list("start", in: &swipe)
+            list("end", in: &swipe)
+            fields["swipeActions"] = .object(swipe)
+        }
         if case let .array(checks)? = fields["checks"] {
             fields["checks"] = .array(checks.map { check in
                 guard case var .object(rule) = check else { return check }
@@ -325,6 +330,11 @@ private struct Instance {
 
     /// Part actions bind independently of the shared text-kind field mapping.
     private func bindComponentActions(_ fields: inout [String: JSONValue]) {
+        if case var .object(swipe)? = fields["swipeActions"] {
+            bindList("start", in: &swipe) { bindPartFields(&$0) }
+            bindList("end", in: &swipe) { bindPartFields(&$0) }
+            fields["swipeActions"] = .object(swipe)
+        }
         guard case let .string(type)? = fields["type"] else { return }
         switch type {
         case "topAppBar":

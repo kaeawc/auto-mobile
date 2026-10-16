@@ -46,7 +46,7 @@
 1385	src/features/navigation/Explore.ts
 2576	src/features/navigation/NavigationGraphManager.ts
 1568	src/features/observe/DeviceServiceClient.ts
-2684	src/features/observe/ObserveScreen.ts
+1866	src/features/observe/ObserveScreen.ts
 1032	src/features/observe/TakeScreenshot.ts
 1056	src/features/observe/ViewHierarchy.ts
 5122	src/features/observe/android/AndroidCtrlProxyClient.ts

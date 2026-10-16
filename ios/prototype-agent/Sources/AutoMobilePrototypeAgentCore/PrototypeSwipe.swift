@@ -122,6 +122,8 @@ enum PrototypeSwipe {
 
     /// Widths of the buttons on a side for a revealed `reveal`: the first (edge) one absorbs extra.
     static func buttonWidths(count: Int, reveal: Double) -> [Double] {
+        // `count` is the button count parameter, not a collection.
+        // swiftlint:disable:next empty_count
         guard count > 0 else { return [] }
         let extra = max(reveal - buttonWidth * Double(count), 0)
         return [buttonWidth + extra] + Array(repeating: buttonWidth, count: count - 1)

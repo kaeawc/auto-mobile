@@ -1,5 +1,9 @@
 import { ActionableError } from "../models/ActionableError";
-import { DAEMON_TOOL_UNAVAILABLE_CODE } from "../daemon/types";
+import {
+  DAEMON_SESSION_NOT_ACTIVE_CODE,
+  DAEMON_TOOL_UNAVAILABLE_CODE,
+  DAEMON_UNKNOWN_TOOL_CODE,
+} from "../daemon/types";
 
 /**
  * A tool this server registers but whose availability gate (debug-only,
@@ -22,19 +26,49 @@ export class ToolUnavailableError extends ActionableError {
   }
 }
 
+/** The structured `code` an error carries on its JSON-RPC `data` payload, if any. */
+function wireDataCode(error: unknown): unknown {
+  if (error === null || typeof error !== "object" || !("data" in error)) {
+    return undefined;
+  }
+  const data = error.data;
+  return data !== null && typeof data === "object" && "code" in data ? data.code : undefined;
+}
+
 /**
  * True for a {@link ToolUnavailableError} after it crossed the loopback MCP
  * transport, where it arrives as an `McpError` carrying the same `data`.
  */
 export function isToolUnavailableWireError(error: unknown): boolean {
-  if (error === null || typeof error !== "object" || !("data" in error)) {
-    return false;
+  return wireDataCode(error) === DAEMON_TOOL_UNAVAILABLE_CODE;
+}
+
+/**
+ * A tool this server does not register at all. Same message as ever; `data` lets the daemon
+ * proxy classify it by code instead of parsing "Unknown tool:" prose.
+ */
+export class UnknownToolError extends ActionableError {
+  readonly data: { code: typeof DAEMON_UNKNOWN_TOOL_CODE; toolName: string };
+
+  constructor(toolName: string, hint?: string) {
+    super(`Unknown tool: ${toolName}${hint ? `. ${hint}` : ""}`);
+    this.name = "UnknownToolError";
+    this.data = { code: DAEMON_UNKNOWN_TOOL_CODE, toolName };
   }
-  const data = error.data;
-  return (
-    data !== null &&
-    typeof data === "object" &&
-    "code" in data &&
-    data.code === DAEMON_TOOL_UNAVAILABLE_CODE
-  );
+}
+
+/** The tool name of an {@link UnknownToolError} after it crossed the loopback MCP transport. */
+export function unknownToolWireName(error: unknown): string | undefined {
+  if (wireDataCode(error) !== DAEMON_UNKNOWN_TOOL_CODE) {
+    return undefined;
+  }
+  const data: unknown = Reflect.get(error as object, "data");
+  const toolName: unknown =
+    data !== null && typeof data === "object" ? Reflect.get(data, "toolName") : undefined;
+  return typeof toolName === "string" ? toolName : "";
+}
+
+/** True for a refusal of a session UUID the daemon never issued or no longer holds. */
+export function isSessionNotActiveWireError(error: unknown): boolean {
+  return wireDataCode(error) === DAEMON_SESSION_NOT_ACTIVE_CODE;
 }

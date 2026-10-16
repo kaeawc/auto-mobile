@@ -438,10 +438,14 @@ async function main(argv: string[]): Promise<number> {
     fs: realFs,
     log: (line) => console.error(line),
     env: process.env,
+    platform: process.platform,
     physicalIosDevices: async () => {
-      // Never throws: hosts without Xcode or hardware list nothing.
+      // Never throws: non-macOS hosts list nothing, and a failed sweep is complete: false.
       const discovery = await getSharedDevicectlDeviceLister().listConnectedDevices();
-      return discovery.devices.map((device) => device.name);
+      return {
+        names: discovery.devices.map((device) => device.name),
+        complete: discovery.complete,
+      };
     },
   });
   emit(results, options.json);

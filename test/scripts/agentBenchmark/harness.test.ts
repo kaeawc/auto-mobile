@@ -106,7 +106,8 @@ function setup(transcript: string, launchMs = 42_000) {
     fs,
     log: (line) => logs.push(line),
     env: { PATH: "/bin", UNSET: undefined },
-    physicalIosDevices: async () => [],
+    platform: "linux",
+    physicalIosDevices: async () => ({ names: [], complete: true }),
     launcher: {
       async launch(spec) {
         launches.push(spec);
@@ -457,6 +458,7 @@ describe("agent benchmark harness", () => {
 
   test("a booted iOS simulator stops the run before anything touches the device", async () => {
     const { runner, launches, claims, deps, options } = setup(PASSING);
+    deps.platform = "darwin";
     runner.on("xcrun", () => ({
       stdout: JSON.stringify({ devices: { ios: [{ name: "iPhone 17", state: "Booted" }] } }),
     }));
@@ -470,9 +472,20 @@ describe("agent benchmark harness", () => {
 
   test("a connected physical iOS device stops the run before anything touches the device", async () => {
     const { runner, launches, claims, deps, options } = setup(PASSING);
-    deps.physicalIosDevices = async () => ["Test iPhone"];
+    deps.physicalIosDevices = async () => ({ names: ["Test iPhone"], complete: true });
     await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(
       /Connected iOS device\(s\) \(Test iPhone\).*disconnect them first/,
+    );
+    expect(runner.adbCalls()).toEqual(["devices"]);
+    expect(claims).toEqual([]);
+    expect(launches).toHaveLength(0);
+  });
+
+  test("an incomplete iOS device sweep stops the run instead of reading as none", async () => {
+    const { runner, launches, claims, deps, options } = setup(PASSING);
+    deps.physicalIosDevices = async () => ({ names: [], complete: false });
+    await expect(runSuite(loadedSuite(), options, deps)).rejects.toThrow(
+      /Could not list connected iOS devices/,
     );
     expect(runner.adbCalls()).toEqual(["devices"]);
     expect(claims).toEqual([]);

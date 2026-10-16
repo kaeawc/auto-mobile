@@ -10,6 +10,7 @@
 
 import { parseStringPromise } from "xml2js";
 import { amStartReportedFailure } from "../../src/features/action/LaunchApp";
+import { errorMessage } from "../../src/utils/describeUnknownError";
 import { shellQuote } from "../../src/utils/shellQuote";
 
 export interface CommandResult {
@@ -75,29 +76,44 @@ export async function resolveSerial(runner: CommandRunner, requested?: string): 
 /**
  * Names of booted iOS simulators. The private AutoMobile daemon discovers iOS too, so a
  * booted simulator would make selector-less tool calls ambiguous; `adb devices` cannot see
- * it. Hosts without `xcrun` (Linux, Windows) have none, so any failure here means none.
+ * it. Only macOS has simulators. There a failed scan throws rather than reading as "none",
+ * because the daemon's own later scan could still find one after preflight reset the app.
  */
-export async function bootedIosSimulators(runner: CommandRunner): Promise<string[]> {
+export async function bootedIosSimulators(
+  runner: CommandRunner,
+  platform: NodeJS.Platform,
+): Promise<string[]> {
+  if (platform !== "darwin") {
+    return [];
+  }
+  const failure = (detail: string) =>
+    new Error(
+      `Could not list iOS simulators (${detail}); the benchmark needs to know none is ` +
+        "booted, so fix xcrun simctl before running.",
+    );
+  let result: CommandResult;
   try {
-    const result = await runner.run(
+    result = await runner.run(
       "xcrun",
       ["simctl", "list", "devices", "booted", "-j"],
       ADB_TIMEOUT_MS,
     );
-    if (result.exitCode !== 0) {
-      return [];
-    }
-    const parsed = JSON.parse(result.stdout) as {
-      devices?: Record<string, Array<{ name?: string; state?: string }>>;
-    };
-    return Object.values(parsed.devices ?? {})
-      .flat()
-      .filter((device) => device.state === "Booted")
-      .map((device) => device.name ?? "unnamed simulator");
-  } catch {
-    // No xcrun (not macOS) or unparseable output: no simulator the daemon could see either.
-    return [];
+  } catch (error) {
+    throw failure(errorMessage(error));
   }
+  if (result.exitCode !== 0) {
+    throw failure(`exit ${result.exitCode}: ${result.stderr.trim()}`);
+  }
+  let parsed: { devices?: Record<string, Array<{ name?: string; state?: string }>> };
+  try {
+    parsed = JSON.parse(result.stdout) as typeof parsed;
+  } catch (error) {
+    throw failure(`unparseable output: ${errorMessage(error)}`);
+  }
+  return Object.values(parsed.devices ?? {})
+    .flat()
+    .filter((device) => device.state === "Booted")
+    .map((device) => device.name ?? "unnamed simulator");
 }
 
 export type PreferenceValue = boolean | number | string;

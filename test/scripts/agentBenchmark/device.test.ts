@@ -52,7 +52,7 @@ describe("agent benchmark device selection", () => {
     );
   });
 
-  test("booted iOS simulators are found; no xcrun or bad output means none", async () => {
+  test("booted iOS simulators are found on macOS; other hosts have none", async () => {
     const booted = new FakeCommandRunner().on("xcrun", () => ({
       stdout: JSON.stringify({
         devices: {
@@ -63,12 +63,27 @@ describe("agent benchmark device selection", () => {
         },
       }),
     }));
-    expect(await bootedIosSimulators(booted)).toEqual(["iPhone 17"]);
+    expect(await bootedIosSimulators(booted, "darwin")).toEqual(["iPhone 17"]);
+    expect(await bootedIosSimulators(booted, "linux")).toEqual([]);
+    expect(booted.calls).toHaveLength(1);
+  });
+
+  test("a failed simulator scan on macOS throws instead of reading as none", async () => {
     const missing = new FakeCommandRunner().on("xcrun", () => {
       throw new Error("spawnSync xcrun ENOENT");
     });
-    expect(await bootedIosSimulators(missing)).toEqual([]);
-    expect(await bootedIosSimulators(new FakeCommandRunner())).toEqual([]);
+    await expect(bootedIosSimulators(missing, "darwin")).rejects.toThrow(
+      /Could not list iOS simulators \(spawnSync xcrun ENOENT\)/,
+    );
+    const failing = new FakeCommandRunner().on("xcrun", () => ({
+      exitCode: 1,
+      stderr: "CoreSimulator is out of date\n",
+    }));
+    await expect(bootedIosSimulators(failing, "darwin")).rejects.toThrow(
+      /exit 1: CoreSimulator is out of date/,
+    );
+    const garbled = new FakeCommandRunner().on("xcrun", () => ({ stdout: "not json" }));
+    await expect(bootedIosSimulators(garbled, "darwin")).rejects.toThrow(/unparseable output/);
   });
 
   test("adb failures surface the command and its output", async () => {

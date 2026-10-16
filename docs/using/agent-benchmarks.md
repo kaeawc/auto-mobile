@@ -103,7 +103,8 @@ Each run is isolated so earlier runs and your own setup cannot change the result
   device is refused even after the handover; a crashed benchmark's lock is reclaimed.
 - No iOS simulator may be booted and no physical iOS device connected (checked with
   `xcrun simctl` and `devicectl` on macOS): the benchmark's AutoMobile server discovers iOS too,
-  which would make device selection ambiguous.
+  which would make device selection ambiguous. If either check itself fails on macOS, the run stops
+  rather than assuming none.
 - Exactly one Android device must be online. Nothing pins the MCP server to a serial, so with
   several online the agent could act on a device other than the one prepared and verified.
 - `Bash` is disallowed by default, so the agent cannot fall back to raw `adb`. A suite can disallow

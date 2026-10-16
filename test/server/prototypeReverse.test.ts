@@ -156,6 +156,18 @@ describe("reverseLifecycle", () => {
       expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([1111]);
     });
 
+    test("an indeterminate show keeps the staged ports and releases no sibling", async () => {
+      const { dependencies, second } = await replace();
+      await second.settle(false, true, true);
+      expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([2222]);
+    });
+
+    test("a definite failure still rolls the staged ports back", async () => {
+      const { dependencies, second } = await replace();
+      await second.settle(false, true, false);
+      expect(dependencies.reverses.ownedPorts(device.deviceId)).toEqual([1111]);
+    });
+
     test("an exception before dispatch does the same, and a settled call is not undone twice", async () => {
       const { adb, dependencies, second } = await replace();
       await second.abandon(false);

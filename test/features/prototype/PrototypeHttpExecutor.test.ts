@@ -203,6 +203,15 @@ describe("FetchPrototypeHttpExecutor", () => {
     expect(await word.execute(request, signal())).toMatchObject({ ok: true, body: "too_large" });
   });
 
+  test("a JSON number that overflows to Infinity makes the body its raw text, top-level or nested", async () => {
+    for (const text of ["1e400", '{"a":[1,{"b":-1e999}]}']) {
+      const { executor } = executorFor(async () => body(text));
+      expect(await executor.execute(request, signal())).toMatchObject({ ok: true, body: text });
+    }
+    const { executor } = executorFor(async () => body('{"a":[1e2]}'));
+    expect(await executor.execute(request, signal())).toMatchObject({ body: { a: [100] } });
+  });
+
   test("returns connection_refused as a typed error, not a throw", async () => {
     const { executor } = executorFor(async () => {
       throw Object.assign(new Error("Unable to connect"), { code: "ConnectionRefused" });

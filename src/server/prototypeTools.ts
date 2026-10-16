@@ -43,7 +43,7 @@ import {
   type AndroidPrototypeClient,
 } from "../features/prototype/androidPrototypeTransport";
 import { PrototypeAdbReverseManager } from "../features/prototype/PrototypeAdbReverseManager";
-import { markIndeterminate, shownSpecOutcome } from "./prototypeShownOutcome";
+import { isIndeterminate, markIndeterminate, shownSpecOutcome } from "./prototypeShownOutcome";
 import { subscribePrototypeCleanup, type PrototypeEventLifecycle } from "./prototypeLifecycle";
 import {
   patchReverseStaging,
@@ -1843,7 +1843,7 @@ async function performMutation(
         all: sendArgs.all,
       },
     );
-    await reversing.settle(result.success, previouslyShown);
+    await reversing.settle(result.success, previouslyShown, isIndeterminate(result));
     const placed = {
       ...placedDisplay(args, shown, comparable, result.success),
       chrome: resolved.chrome,

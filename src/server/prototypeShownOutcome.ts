@@ -13,6 +13,11 @@ export function markIndeterminate<T extends PrototypeResult>(result: T): T {
   return result;
 }
 
+/** Whether the show threw rather than being answered, so the device may have applied it. */
+export function isIndeterminate(result: PrototypeResult): boolean {
+  return indeterminate.has(result);
+}
+
 /** What the shown-spec mirror records once a show ends. */
 export function shownSpecOutcome(outcome: {
   action: string;
@@ -44,7 +49,7 @@ export function shownSpecOutcome(outcome: {
   }
   // An additive device refusal is atomic: only this id's tentative spec is at stake.
   if (outcome.replaceOthers === false && !outcome.success) {
-    return { refusal: indeterminate.has(outcome.result) ? "indeterminate" : "typed" };
+    return { refusal: isIndeterminate(outcome.result) ? "indeterminate" : "typed" };
   }
   return {};
 }

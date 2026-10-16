@@ -86,12 +86,29 @@ function isConnectionRefused(error: unknown): boolean {
 const TOO_LARGE = Symbol("too_large");
 const LITERAL_NULL = Symbol("literal_null");
 
+/** A number token such as `1e400` parses to Infinity, which JSON text cannot carry. */
+function hasNonFiniteNumber(value: PrototypeRequestJson): boolean {
+  if (typeof value === "number") {
+    return !Number.isFinite(value);
+  }
+  if (Array.isArray(value)) {
+    return value.some(hasNonFiniteNumber);
+  }
+  return (
+    typeof value === "object" && value !== null && Object.values(value).some(hasNonFiniteNumber)
+  );
+}
+
 function parseBody(text: string): PrototypeRequestJson | null | typeof LITERAL_NULL {
   if (text.length === 0) {
     return null;
   }
   try {
     const parsed = JSON.parse(text) as PrototypeRequestJson;
+    if (hasNonFiniteNumber(parsed)) {
+      // Not representable as JSON on the wire: like the device transports, the response carries the raw text.
+      return text;
+    }
     // `null` on the wire means "empty body", so a JSON `null` body is reported apart.
     return parsed === null ? LITERAL_NULL : parsed;
   } catch (error) {

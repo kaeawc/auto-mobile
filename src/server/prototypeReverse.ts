@@ -65,10 +65,13 @@ export function reverseLifecycle(
       staged = claim;
       return claim?.report;
     },
-    settle: async (success: boolean, previouslyShown: boolean) => {
+    // `maybeLanded`: the show threw after dispatch (a timeout or dropped socket), so the prototype
+    // may be on screen relying on the staged ports; they are kept, and only a definite failure rolls
+    // back. Siblings are released only for a confirmed replacing show.
+    settle: async (success: boolean, previouslyShown: boolean, maybeLanded = false) => {
       const claim = takeStaged();
       if (claim) {
-        await (success ? claim.commit() : claim.rollback());
+        await (success || maybeLanded ? claim.commit() : claim.rollback());
       }
       if (claim && success && args.replaceOthers !== false) {
         await releaseReplaced(dependencies.reverses, device.deviceId, target.id);

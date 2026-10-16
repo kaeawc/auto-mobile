@@ -13,7 +13,7 @@ never part of the unit suite or PR CI. The harness's own logic is covered by fas
 ## Quick start
 
 1. Boot one Android emulator and install a debug build of the Playground app
-   (`./gradlew -p android :playground:app:installDebug`), or set `app.apkPath` in the suite.
+   (`(cd android && ./gradlew :playground:app:installDebug)`), or set `app.apkPath` in the suite.
 2. Make sure `claude` is on `PATH` and signed in.
 3. Run a suite:
 
@@ -67,14 +67,20 @@ Each run is isolated so earlier runs and your own setup cannot change the result
 - Claude runs from an empty temp directory outside the repository. Claude Code loads `CLAUDE.md`
   from its working directory and every parent, so running from anywhere inside the checkout
   (including `scratch/`) would still pull in this repository's `CLAUDE.md` and skills.
+- `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` is always set, so your own `~/.claude/CLAUDE.md` and
+  auto-memory don't shape the run. Two operators get comparable results for the same suite and
+  model.
 - The server uses a **private daemon** (`AUTOMOBILE_AUX_SOCKET_DIR`), a **fresh database**
   (`AUTOMOBILE_DB_DIR`, so no learned navigation graph carries over), and its own log directory
-  (`<run>/logs`). AutoMobile state overrides inherited from your shell, such as
-  `AUTOMOBILE_DB_PATH`, `AUTOMOBILE_DAEMON_SOCKET_PATH`, and the legacy `AUTO_MOBILE_*` names, are
-  removed first, because an explicit override would otherwise win over the run's values. The ADB
-  coordination directory is shared on purpose, so a resident daemon's device claims are still
+  (`<run>/logs`). Every AutoMobile variable inherited from your shell (`AUTOMOBILE_*` and the
+  legacy `AUTO_MOBILE_*` names) is removed first. Otherwise a state override such as
+  `AUTOMOBILE_DB_PATH` would win over the run's values, and a setting such as
+  `AUTOMOBILE_DISABLED_TOOLS` would quietly change the agent's toolset. The one exception is
+  `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`, kept so a resident daemon's device claims are still
   respected. Stop other sessions on the target device before a run.
-- `Bash` is disallowed by default, so the agent cannot fall back to raw `adb`.
+- `Bash` is disallowed by default, so the agent cannot fall back to raw `adb`. A suite can disallow
+  more tools: `ux-flow` also blocks `openLink` and `navigateTo`, because the task is to navigate
+  by tapping.
 
 ## Verdicts
 

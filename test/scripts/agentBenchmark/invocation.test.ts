@@ -107,7 +107,7 @@ describe("agent benchmark claude invocation", () => {
 });
 
 describe("agent benchmark isolated server environment", () => {
-  test("strips inherited AutoMobile state overrides but keeps shared device claims", () => {
+  test("strips every inherited AutoMobile variable but keeps shared device claims", () => {
     const env = isolatedServerEnv(
       {
         PATH: "/bin",
@@ -118,6 +118,9 @@ describe("agent benchmark isolated server environment", () => {
         AUTOMOBILE_DATA_DIR: "/resident-data",
         AUTOMOBILE_DAEMON_SOCKET_PATH: "/tmp/resident.sock",
         AUTOMOBILE_DAEMON_LOCK_FILE_PATH: "/tmp/resident.lock",
+        AUTOMOBILE_DISABLED_TOOLS: "observe",
+        AUTOMOBILE_ENABLED_TOOLS: "tapOn",
+        AUTO_MOBILE_TOOLSET: "legacy",
         AUTOMOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/claims",
       },
       PATHS,

@@ -109,6 +109,21 @@ describe("agent benchmark preflight", () => {
     expect(runner.adbCalls().some((call) => call.includes("run-as"))).toBe(false);
   });
 
+  test("a deep link that prints an am start error fails even with exit 0", async () => {
+    const runner = new FakeCommandRunner()
+      .onAdb("pm path", { stdout: "package:/x.apk" })
+      .onAdb("pm clear", { stdout: "Success\n" })
+      .onAdb("am start", {
+        stdout:
+          "Starting: Intent { act=android.intent.action.VIEW }\nError: Activity not started, unable to resolve Intent\n",
+      });
+    await expect(
+      runPreflight(runner, preflightSpec({ launchUri: "example:missing" })),
+    ).rejects.toThrow(
+      /Deep link example:missing did not start \(exit 0\): .*Activity not started/s,
+    );
+  });
+
   test("a missing app fails before touching app state", async () => {
     const runner = new FakeCommandRunner();
     await expect(runPreflight(runner, preflightSpec())).rejects.toThrow(

@@ -1,5 +1,6 @@
 import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { holderOf } from "../../src/daemon/deviceBinding";
 import {
   BINDING_INPUT_SNAPSHOT_MAX_AGE_MS,
   assertInputNotOnForeignBindingDevice,
@@ -91,6 +92,8 @@ export type StepKind =
   | "kill"
   | "disconnect"
   | "reconnect"
+  | "rebind"
+  | "evict"
   | "closeConnection"
   | "reopenConnection"
   | "attachAutolock"
@@ -154,14 +157,21 @@ export function describeStep(step: Step, index: number): string {
   const target =
     step.kind === "advance"
       ? `${step.ms}ms`
-      : ["kill", "disconnect", "reconnect", "slotAssign", "slotExecStart", "slotExecEnd"].includes(
-            step.kind,
-          )
+      : [
+            "kill",
+            "disconnect",
+            "reconnect",
+            "evict",
+            "slotAssign",
+            "slotExecStart",
+            "slotExecEnd",
+          ].includes(step.kind)
         ? `d${step.device}`
         : [
               "acquireMcp",
               "acquireAutolock",
               "acquireCli",
+              "rebind",
               "attachAutolock",
               "restoreAutolock",
               "toolControl",
@@ -365,6 +375,11 @@ class OwnershipWorld {
   readonly released = new Map<string, ReleaseRecord>();
   /** Sessions created (or rehydrated) and not yet released, per the manager's callbacks. */
   readonly liveIncarnations = new Set<string>();
+  /**
+   * Per session, a refcount of its in-flight explicit rebinds and every device those rebinds (and
+   * any overlapping one that already finished) touched. See checkAlways.
+   */
+  private readonly rebinding = new Map<string, { inflight: number; devices: Set<string> }>();
   /** Who created each session: an MCP connection, or an anonymous one-shot CLI. */
   readonly origin = new Map<string, { kind: "mcp" | "cli"; client: number; connection?: string }>();
   /** Connections that were closed; they must never own a session again. */
@@ -565,6 +580,17 @@ class OwnershipWorld {
     }
   }
 
+  /**
+   * Both devices were touched by this session's overlapping rebinds. Rebinds of one session run
+   * serially in production, so a later one's real source is an earlier one's target (not the
+   * `from` read at launch), and an earlier one may finish while the later still releases its
+   * target: the exemption lasts until the last overlapping rebind ends.
+   */
+  private isInFlightRebindPair(sessionId: string, a: string, b: string): boolean {
+    const devices = this.rebinding.get(sessionId)?.devices;
+    return devices !== undefined && devices.has(a) && devices.has(b);
+  }
+
   /** Invariants that hold at every instant, even with operations in flight. */
   checkAlways(): void {
     // A close drops the connection's autolock routes synchronously, and nothing may publish them
@@ -584,7 +610,10 @@ class OwnershipWorld {
         continue;
       }
       const other = owners.get(device.sessionId);
-      if (other) {
+      // A rebind publishes the new device before it releases the old one, so the moving session
+      // legitimately names two of its in-flight rebind endpoints; any other pair, and every
+      // quiescent check, is strict.
+      if (other && !this.isInFlightRebindPair(device.sessionId, other, device.id)) {
         this.fail(
           "session-two-devices",
           `session ${device.sessionId} owns two devices: ${other} and ${device.id}`,
@@ -652,6 +681,19 @@ class OwnershipWorld {
           "pool-session-disagree",
           `live session ${session.sessionId} is on ${session.assignedDevice}, but the pool has ` +
             (device ? `it ${device.status} for ${device.sessionId ?? "nobody"}` : "no such device"),
+        );
+      }
+    }
+    // Holder agreement (#11802): at a quiescent point the pool's answer and the session manager's
+    // reverse lookup name the same session for every pooled device.
+    for (const device of devices) {
+      const poolHolder = holderOf(this.pool.getDevice(device.id)) ?? undefined;
+      const managerHolder = this.manager.getSessionForDevice(device.id) ?? undefined;
+      if (poolHolder !== managerHolder) {
+        this.fail(
+          "pool-session-disagree",
+          `device ${device.id}: binding holderOf(pool device) is ${poolHolder ?? "nobody"} but ` +
+            `sessionManager.getSessionForDevice is ${managerHolder ?? "nobody"}`,
         );
       }
     }
@@ -1258,6 +1300,66 @@ class OwnershipWorld {
     });
   }
 
+  /**
+   * The client's live session moves to another device through the pool's non-deferred explicit
+   * rebind branch (allowSessionRebind, no deferCleanup). It does not model setActiveDevice's
+   * receipt + deferRebindCleanup path. Rebinds of one session may overlap; production serialises
+   * them under DevicePool.assignmentMutex.
+   */
+  rebind(client: ClientState, deviceIndex: number): void {
+    const sessionId = client.sessionId;
+    if (!sessionId) {
+      return;
+    }
+    const device = DEVICES[deviceIndex]!;
+    this.log(`c${client.index} rebind ${sessionId} -> ${device.deviceId}`);
+    this.launch(`c${client.index} rebind ${device.deviceId}`, async () => {
+      const from = this.manager.getSession(sessionId)?.assignedDevice;
+      if (!from || from === device.deviceId) {
+        return;
+      }
+      const group = this.rebinding.get(sessionId) ?? { inflight: 0, devices: new Set<string>() };
+      group.inflight++;
+      group.devices.add(from).add(device.deviceId);
+      this.rebinding.set(sessionId, group);
+      try {
+        await this.pool.bindOrReuseDeviceSession(
+          sessionId,
+          device.deviceId,
+          "android",
+          undefined,
+          undefined,
+          undefined,
+          true,
+          undefined,
+          undefined,
+          undefined,
+          client.kind === "mcp" ? client.connection : undefined,
+          client.kind === "cli",
+        );
+      } catch (error) {
+        // Losing the race with the session's own release is the expected outcome of a rebind.
+        if (!errorMessage(error).startsWith("Cannot rebind released session")) {
+          throw error;
+        }
+        this.log(`  c${client.index} rebind refused: ${errorMessage(error)}`);
+      } finally {
+        if (--group.inflight === 0) {
+          this.rebinding.delete(sessionId);
+        }
+      }
+    });
+  }
+
+  /** The pool drops a pooled entry; a held device refuses removal, an idle one leaves the pool. */
+  evict(deviceIndex: number): void {
+    const device = DEVICES[deviceIndex]!;
+    this.log(`evict ${device.deviceId}`);
+    this.launch(`evict ${device.deviceId}`, async () => {
+      await this.pool.removeDevice(device.deviceId, false);
+    });
+  }
+
   reconnect(deviceIndex: number): void {
     const device = DEVICES[deviceIndex]!;
     if (this.online[deviceIndex]) {
@@ -1516,6 +1618,12 @@ class OwnershipWorld {
         break;
       case "reconnect":
         this.reconnect(step.device);
+        break;
+      case "rebind":
+        this.rebind(client, step.device);
+        break;
+      case "evict":
+        this.evict(step.device);
         break;
       case "closeConnection":
         this.closeConnection(client);

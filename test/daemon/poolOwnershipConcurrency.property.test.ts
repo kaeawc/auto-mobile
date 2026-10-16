@@ -133,6 +133,26 @@ const PROFILES: Record<string, HarnessProfile> = {
       settle: 2,
     },
   },
+  /** Sessions moving between devices while devices are evicted, lost and restored (#11802). */
+  rebindEvict: {
+    steps: STEPS,
+    weights: {
+      acquireMcp: 8,
+      acquireCli: 2,
+      rebind: 14,
+      evict: 2,
+      release: 2,
+      kill: 1,
+      disconnect: 1,
+      reconnect: 3,
+      closeConnection: 1,
+      reopenConnection: 1,
+      control: 1,
+      advance: 2,
+      monitorTick: 1,
+      settle: 8,
+    },
+  },
   /** Idle windows, heartbeat loss, reads vs control calls, owner reconnects, daemon restarts. */
   liveness: {
     steps: STEPS,

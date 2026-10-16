@@ -16,6 +16,8 @@ import {
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,
+  enableRebootOnDeath,
+  requirePooledDevice,
 } from "../helpers/devicePoolSuite";
 
 useSessionIdleWindowForSuite();
@@ -52,16 +54,11 @@ describe("DevicePool", () => {
     };
 
     const withRebootOnDeath = async (run: () => Promise<void>): Promise<void> => {
-      const original = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restore = enableRebootOnDeath();
       try {
         await run();
       } finally {
-        if (original === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = original;
-        }
+        restore();
       }
     };
 
@@ -140,10 +137,7 @@ describe("DevicePool", () => {
     test("assigns a fresh incarnation per pooled connection and keeps it across a rediscovery", async () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       await initializeLiveDevices([device]);
-      const first = devicePool.getDevice("emulator-5554");
-      if (!first) {
-        throw new Error("expected pooled device");
-      }
+      const first = requirePooledDevice(devicePool, "emulator-5554");
       const firstIncarnation = first.incarnation;
 
       // A refresh that rediscovers the same serial reuses the entry — same

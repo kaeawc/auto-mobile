@@ -20,6 +20,8 @@ import {
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,
+  enableRebootOnDeath,
+  requirePooledDevice,
 } from "../helpers/devicePoolSuite";
 
 useSessionIdleWindowForSuite();
@@ -37,6 +39,21 @@ describe("DevicePool", () => {
     fakeAppsRepo,
     fakeDeviceManager,
   }));
+
+  const bindAsMcpOwner = (sessionId: string, deviceId: string, mcpSessionId: string) =>
+    devicePool.bindOrReuseDeviceSession(
+      sessionId,
+      deviceId,
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      mcpSessionId,
+    );
 
   beforeEach(() => {
     ({ devicePool, sessionManager, fakeTimer, fakeAppsRepo, fakeDeviceManager } =
@@ -115,19 +132,7 @@ describe("DevicePool", () => {
   test("fences readiness side effects to the MCP session that owns a non-autolocked device", async () => {
     const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
     await initializeLiveDevices([device]);
-    await devicePool.bindOrReuseDeviceSession(
-      "owner-session",
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "owner-mcp-session",
-    );
+    await bindAsMcpOwner("owner-session", device.deviceId, "owner-mcp-session");
 
     await expect(
       devicePool.reserveDeviceForReadiness(device.deviceId, device, device.name, undefined, {
@@ -158,19 +163,7 @@ describe("DevicePool", () => {
       source: "local",
     };
     await initializeLiveDevices([device]);
-    await devicePool.bindOrReuseDeviceSession(
-      "owner-session",
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "owner-mcp-session",
-    );
+    await bindAsMcpOwner("owner-session", device.deviceId, "owner-mcp-session");
 
     await expect(
       devicePool.bindOrReuseDeviceSession(
@@ -199,19 +192,7 @@ describe("DevicePool", () => {
       source: "local",
     };
     await initializeLiveDevices([device]);
-    await devicePool.bindOrReuseDeviceSession(
-      "owner-session",
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "owner-mcp-session",
-    );
+    await bindAsMcpOwner("owner-session", device.deviceId, "owner-mcp-session");
 
     await expect(
       devicePool.bindOrReuseDeviceSession(
@@ -240,19 +221,7 @@ describe("DevicePool", () => {
       source: "local",
     };
     await initializeLiveDevices([device]);
-    await devicePool.bindOrReuseDeviceSession(
-      "owner-session",
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "owner-mcp-session",
-    );
+    await bindAsMcpOwner("owner-session", device.deviceId, "owner-mcp-session");
 
     await expect(
       devicePool.bindOrReuseDeviceSession(
@@ -283,19 +252,7 @@ describe("DevicePool", () => {
       source: "local",
     };
     await initializeLiveDevices([device]);
-    await devicePool.bindOrReuseDeviceSession(
-      "restored-session",
-      device.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      "owner-mcp-session",
-    );
+    await bindAsMcpOwner("restored-session", device.deviceId, "owner-mcp-session");
     // What startup rehydration leaves behind after a daemon restart.
     sessionManager.getSession("restored-session")!.ownership = "awaiting-owner";
 
@@ -596,10 +553,7 @@ describe("DevicePool", () => {
         },
       });
       await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
-      const pooled = devicePool.getDevice("emulator-5554");
-      if (!pooled) {
-        throw new Error("expected pooled device");
-      }
+      const pooled = requirePooledDevice(devicePool, "emulator-5554");
       const record = registry.onDeviceConnected({
         deviceId: pooled.id,
         platform: pooled.platform,
@@ -707,8 +661,7 @@ describe("DevicePool", () => {
     });
 
     test("an authoritative same-serial replacement clears an old intentional-stop marker", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       const ready = createBootedDevice("emulator-5554", "android", "Pixel");
       try {
         devicePool = makePool({ recoveryPolicy: { onLoss: true, maxAttempts: 2 } });
@@ -731,28 +684,20 @@ describe("DevicePool", () => {
 
         expect(fakeDeviceManager.startedDevices.map((device) => device.name)).toEqual(["Pixel 9"]);
       } finally {
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
     test("intentional shutdown remains a current disconnect for monitor cleanup", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
-      const device = devicePool.getDevice("emulator-5554");
-      if (!device) {
-        throw new Error("expected pooled device");
-      }
+      const device = requirePooledDevice(devicePool, "emulator-5554");
       devicePool.markIntentionalShutdown(device.id);
 
       expect(await devicePool.isCurrentDisconnectedDevice(device)).toBe("current");
     });
 
     test("does not accept a different AVD that reuses the disconnected emulator serial", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
       try {
         await devicePool.addDevice(ready, {
@@ -771,17 +716,12 @@ describe("DevicePool", () => {
 
         expect(await devicePool.isCurrentDisconnectedDevice(disconnected)).toBe("current");
       } finally {
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
     test("retains a same-serial Android emulator when its AVD name is unresolved", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
       try {
         devicePool = makePool({ recoveryPolicy: { onLoss: true, maxAttempts: 2 } });
@@ -801,17 +741,12 @@ describe("DevicePool", () => {
 
         expect(await devicePool.isCurrentDisconnectedDevice(disconnected)).toBe("recovered");
       } finally {
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
     test("reports an unknown disconnect state when Android rediscovery discovery fails", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
       try {
         devicePool = makePool({ recoveryPolicy: { onLoss: true, maxAttempts: 2 } });
@@ -829,17 +764,12 @@ describe("DevicePool", () => {
 
         expect(await devicePool.isCurrentDisconnectedDevice(disconnected)).toBe("unknown");
       } finally {
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
     test("stale disconnect validation rejects a same-serial replacement added during discovery", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       const manager = new DeferredDiscoveryFakeDeviceManager();
       devicePool = makePool({ deviceManager: manager });
       const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
@@ -867,17 +797,12 @@ describe("DevicePool", () => {
         expect(devicePool.getDevice(ready.deviceId)).toBe(replacement);
       } finally {
         manager.releaseDiscovery();
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
     test("stale disconnect cleanup preserves a same-serial replacement added during discovery", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       const manager = new DeferredDiscoveryFakeDeviceManager();
       devicePool = makePool({ deviceManager: manager });
       const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
@@ -901,17 +826,12 @@ describe("DevicePool", () => {
         expect(devicePool.getDevice(ready.deviceId)).toBe(replacement);
       } finally {
         manager.releaseDiscovery();
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
     test("retains a recovery-owned emulator when detailed discovery throws", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       const manager = new ThrowingDiscoveryFakeDeviceManager();
       devicePool = makePool({ deviceManager: manager });
       const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
@@ -928,11 +848,7 @@ describe("DevicePool", () => {
         expect(devicePool.getDevice(ready.deviceId)).not.toBeNull();
         expect(manager.startedDevices).toHaveLength(0);
       } finally {
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
   });

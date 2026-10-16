@@ -32,6 +32,7 @@ import {
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,
+  enableRebootOnDeath,
 } from "../helpers/devicePoolSuite";
 
 useSessionIdleWindowForSuite();
@@ -847,8 +848,7 @@ describe("DevicePool", () => {
     });
 
     test("assigns an unrelated healthy emulator while stale-device recovery is pending", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       const stale = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const healthy = createBootedDevice("emulator-5556", "android", "Pixel 9");
       const manager = new DeferredLivenessRecoveryDeviceManager(
@@ -877,11 +877,7 @@ describe("DevicePool", () => {
         expect(manager.startedDevices).toHaveLength(1);
       } finally {
         manager.releaseRecovery();
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 

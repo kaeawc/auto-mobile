@@ -357,6 +357,9 @@ function unknownFingerprints(result: BenchmarkResult): string[] {
     ...(result.preflight.appBuild === "unknown" ? ["app build"] : []),
     ...(result.preflight.device === "unknown" ? ["device"] : []),
     ...(result.claude.version === undefined ? ["Claude Code version"] : []),
+    // Suites without claude.model run the environment's default, so only the observed
+    // model can flag a later default change.
+    ...(result.claude.observedModel === undefined ? ["model"] : []),
   ];
 }
 
@@ -454,9 +457,11 @@ export async function runSuite(
   deps: HarnessDeps,
 ): Promise<BenchmarkResult> {
   const { definition } = suite;
+  // Probe before preflight: a slow --version wrapper must not stall between the verified
+  // start screen and the measured launch.
+  const version = await claudeVersion(deps, options.claudeCommand);
   const { startedAt, prepared } = await prepare(suite, options, deps);
   const digest = suiteDigest(suite, options.modelOverride);
-  const version = await claudeVersion(deps, options.claudeCommand);
   const { serverBuild } = options;
   let exit: Awaited<ReturnType<typeof launchClaude>>;
   let screen: { screenText?: string; screenError?: string } = {};

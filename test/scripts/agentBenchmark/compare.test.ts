@@ -246,6 +246,12 @@ describe("verification text matching", () => {
     expect(containsBounded("COUNT: \u22123 items", "3 items")).toBe(false);
     expect(containsBounded("COUNT: -3 items", "-3 items")).toBe(true);
     expect(containsBounded("Status -Done", "Done")).toBe(true);
+    // Fraction slashes and Arabic decimal/grouping marks also join digits into one number.
+    expect(containsBounded("EXPECTED_COUNT: 3/4", "EXPECTED_COUNT: 3")).toBe(false);
+    expect(containsBounded("EXPECTED_COUNT: 3\u20444", "EXPECTED_COUNT: 3")).toBe(false);
+    expect(containsBounded("\u0663\u066B\u0665", "\u0663")).toBe(false);
+    expect(containsBounded("1/2 done", "2 done")).toBe(false);
+    expect(containsBounded("done / 3 left", "3 left")).toBe(true);
     // Canonically equivalent forms match each other (NFC vs NFD).
     expect(containsBounded("Cafe\u0301", "Caf\u00e9")).toBe(true);
     expect(containsBounded("Caf\u00e9", "Cafe\u0301")).toBe(true);

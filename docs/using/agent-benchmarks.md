@@ -219,18 +219,18 @@ It also records `baseline.suiteDigest`, a digest of the prompt, every suite sett
 the baseline itself, and the requested model. If the prompt, preflight, tool permissions, failure
 patterns, or timeout change, the report flags that the baseline measured a different task.
 It also records `baseline.deviceFingerprint` (SDK level, model, locale, effective screen
-size and density, and live rotation, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
+size and density, font scale, and live rotation, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
 tool handling), `baseline.serverBuild` (a SHA-256 prefix over what executes and scores the run: the
 built `dist/` with the schemas and vendor tools it loads at runtime, `bun.lock` for the image
 libraries the build leaves external, `package.json`, the harness sources under
 `scripts/agent-benchmark/` with every repository module they import (they run unbundled), the
-Bun version, and the host platform and architecture (which pick the native image build). A stale build or changed scoring code is
+Bun version, and the host platform, architecture, and libc (which pick the native image build). A stale build or changed scoring code is
 flagged rather than silently measured. The git commit is deliberately left out, since every
 unrelated commit would change it), and
 `baseline.observedModel`, the model Claude reported running. Suites without
 `claude.model` use whatever model your environment selects, so a run on a different model is
 flagged too. A fingerprint that could not be read (`unknown`) never counts as a match. If the
-device, app build, or Claude Code version is unknown, the run writes no `baseline.yml` at all, because a
+device, app build, Claude Code version, or observed model is unknown, the run writes no `baseline.yml` at all, because a
 baseline missing them could never flag a later run on a different device, build, or CLI. The Claude Code version comes from the stream's init event, which names the CLI that
 actually ran; `claude --version` is only the fallback when the stream reports none.
 

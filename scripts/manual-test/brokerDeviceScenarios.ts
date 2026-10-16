@@ -539,6 +539,8 @@ async function capacity(ctx: BrokerScenarioContext) {
   const refusal = await acquire(ctx, refused);
   assert.equal(refusal.outcome, "failed");
   assert.equal(refusal.failure?.code, "capacity_exhausted");
+  assert.equal(refusal.failure?.retryable, true);
+  assert.equal(refusal.failure?.retryRequires, "new_request_id");
   assert.equal(refusal.cleanupPending, false);
   assert.equal(refusal.sessionUuid, null);
   resourceRows(ctx, await sample(ctx), "capacity refusal resource allocation");

@@ -114,7 +114,7 @@ function fixture(cap = 2) {
               failure: {
                 code: "capacity_exhausted",
                 message: "at cap",
-                retryable: false,
+                retryable: true,
               },
             }),
       };
@@ -294,7 +294,7 @@ test("report contains outcomes, failures, devices, durations and comparisons wit
   });
   expect(report.clients[2]).toMatchObject({
     outcome: "failed",
-    failure: { code: "capacity_exhausted", retryable: false },
+    failure: { code: "capacity_exhausted", retryable: true },
     matchesExpected: true,
     sessionUuid: null,
     devices: [],

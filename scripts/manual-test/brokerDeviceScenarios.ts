@@ -360,7 +360,9 @@ async function crossClientIsolation(ctx: BrokerScenarioContext) {
       { client: from.name, to: to.name },
       () => control(from, to),
     );
-    assert.equal(refusal.code, "device_outside_broker_grant");
+    // A bound connection probing another session's uuid is refused as a session/device mismatch;
+    // device_outside_broker_grant is for labels and unbound devices (docs/using/device-ownership.md).
+    assert.equal(refusal.code, "device_outside_bound_session");
   }
   // Neither grant, device nor connection was disturbed by the refused probes.
   await assertSiblingsHeld(ctx, [a, b], grants);

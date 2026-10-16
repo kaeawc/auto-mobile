@@ -51,6 +51,11 @@ describe("agent benchmark suite config", () => {
     expect(() => parseSuiteDefinition({ ...MINIMAL, platform: "ios", app: {} }, "x.yml")).toThrow(
       /platform: .*; app.packageName: Required/,
     );
+    for (const packageName of ["com.example; reboot", "example", "com.example app"]) {
+      expect(() => parseSuiteDefinition({ ...MINIMAL, app: { packageName } }, "x.yml")).toThrow(
+        /app.packageName: use an Android package name/,
+      );
+    }
   });
 
   test("loadSuite resolves the prompt beside the suite and the APK from the repo root", () => {

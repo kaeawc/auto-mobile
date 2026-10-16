@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { load } from "js-yaml";
 import { z } from "zod";
+import { ANDROID_PACKAGE_NAME_PATTERN } from "../../src/utils/androidPackageName";
 
 /** MCP server name the harness registers; tool names arrive as `mcp__auto-mobile__<tool>`. */
 export const MCP_SERVER_NAME = "auto-mobile";
@@ -52,7 +53,16 @@ const suiteSchema = z
     platform: z.literal("android"),
     prompt: z.string().min(1),
     app: z
-      .object({ packageName: z.string().min(1), apkPath: z.string().min(1).optional() })
+      .object({
+        // Interpolated into adb shell commands, so it must be a real package name.
+        packageName: z
+          .string()
+          .regex(
+            ANDROID_PACKAGE_NAME_PATTERN,
+            "use an Android package name such as com.example.app",
+          ),
+        apkPath: z.string().min(1).optional(),
+      })
       .strict(),
     preflight: z
       .object({

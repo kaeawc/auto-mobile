@@ -1,5 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "fs";
+import { parseGuardSource } from "../lint/astGuard";
+import { collectSourceFacts } from "../lint/sourceFacts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { buildAppFileResourceUri } from "../../src/server/appFileContract";
@@ -58,11 +60,12 @@ describe("resource URI encoders accept lone surrogates (#10135)", () => {
       ...readdirSync(`${import.meta.dir}/../../src/server`).map((name) => `src/server/${name}`),
       "src/utils/navigationResourceUri.ts",
     ].filter((path) => path.endsWith(".ts"));
-    offenders = roots.filter((path) =>
-      /(?<![`\w.])encodeURIComponent\(/.test(
-        readFileSync(`${import.meta.dir}/../../${path}`, "utf8"),
-      ),
-    );
+    offenders = roots.filter((path) => {
+      const file = `${import.meta.dir}/../../${path}`;
+      return collectSourceFacts(
+        parseGuardSource(file, readFileSync(file, "utf8")),
+      ).calledNames.includes("encodeURIComponent");
+    });
   });
 
   test("no resource URI builder calls encodeURIComponent directly", () => {

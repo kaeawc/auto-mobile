@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Script to detect dead code in TypeScript files using ts-prune and knip
+# Script to detect dead code in TypeScript files using knip
 # Usage: bash scripts/detect-dead-code-ts.sh [--json] [--threshold=<number>] [--output-dir=<dir>]
 #
 # Options:
@@ -58,81 +58,10 @@ fi
 TEMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
-TS_PRUNE_OUTPUT="$TEMP_DIR/ts-prune.txt"
 KNIP_OUTPUT="$TEMP_DIR/knip.json"
 ISSUES_JSON="$TEMP_DIR/issues.json"
 
-# Initialize issues array
-echo '[]' > "$ISSUES_JSON"
-
 echo "🔍 Running TypeScript dead code detection..."
-echo ""
-
-# ============================================================================
-# Run ts-prune
-# ============================================================================
-echo "📦 Running ts-prune..."
-
-# Run ts-prune (it exits with non-zero when issues found, that's okay).
-# `-i src/db/migrations` mirrors the `dead-code:ts:prune` package.json script:
-# Kysely migrations export `up`/`down` consumed dynamically by the migration
-# runner, which ts-prune cannot see (tsconfig `exclude` does not stop ts-prune
-# from analysing them).
-set +e  # Temporarily disable exit on error
-bunx ts-prune --error --project tsconfig.dead-code.json -i src/db/migrations > "$TS_PRUNE_OUTPUT" 2>&1
-TS_PRUNE_EXIT=$?
-set -e  # Re-enable exit on error
-
-if [ $TS_PRUNE_EXIT -eq 0 ] || [ -s "$TS_PRUNE_OUTPUT" ]; then
-    # Parse ts-prune output and convert to JSON
-    TS_PRUNE_COUNT=0
-    while IFS= read -r line; do
-        if [[ -z "$line" ]]; then
-            continue
-        fi
-
-        # ts-prune marks exports referenced within their own module separately;
-        # they are not dead-code candidates. Keep this aligned with
-        # dead-code:ts:prune in package.json.
-        if [[ "$line" == *" (used in module)" ]]; then
-            continue
-        fi
-
-        # Parse: src/file.ts:123 - exportName (used in module)
-        if [[ "$line" =~ ^(.+):([0-9]+)[[:space:]]*-[[:space:]]*(.+)$ ]]; then
-            file="${BASH_REMATCH[1]}"
-            linenum="${BASH_REMATCH[2]}"
-            name="${BASH_REMATCH[3]}"
-
-            # Remove optional (used in module) suffix using parameter expansion
-            name="${name%% \(*\)}"
-            # Trim whitespace from name
-            name=$(echo "$name" | xargs)
-
-            # Add to issues JSON
-            jq --arg file "$file" \
-               --arg location "${file}:${linenum}" \
-               --arg type "unused export" \
-               --arg name "$name" \
-               --arg tool "ts-prune" \
-               '. += [{
-                 file: $file,
-                 location: $location,
-                 type: $type,
-                 name: $name,
-                 tool: $tool
-               }]' "$ISSUES_JSON" > "$TEMP_DIR/issues.tmp" && mv "$TEMP_DIR/issues.tmp" "$ISSUES_JSON"
-
-            ((TS_PRUNE_COUNT++)) || true
-        fi
-    done < "$TS_PRUNE_OUTPUT"
-
-    echo "   Found $TS_PRUNE_COUNT issues"
-else
-    echo "❌ ts-prune failed"
-    exit 1
-fi
-
 echo ""
 
 # ============================================================================
@@ -140,103 +69,32 @@ echo ""
 # ============================================================================
 echo "🔪 Running knip..."
 
-# Run knip with JSON reporter (it exits with non-zero when issues found, that's okay)
+# Run knip with the JSON reporter (it exits non-zero when issues are found, that's okay).
+# stderr is kept out of the JSON document.
 set +e  # Temporarily disable exit on error
-bunx knip --reporter json > "$KNIP_OUTPUT" 2>&1
+bunx knip --reporter json > "$KNIP_OUTPUT" 2> "$TEMP_DIR/knip.stderr"
 KNIP_EXIT=$?
 set -e  # Re-enable exit on error
 
-if [ $KNIP_EXIT -eq 0 ] || [ -s "$KNIP_OUTPUT" ]; then
-    KNIP_COUNT=0
-
-    # Parse unused files
-    if jq -e '.files' "$KNIP_OUTPUT" > /dev/null 2>&1; then
-        while IFS= read -r file; do
-            if [[ -n "$file" ]]; then
-                basename=$(basename "$file")
-                jq --arg file "$file" \
-                   --arg location "$file" \
-                   --arg type "unused file" \
-                   --arg name "$basename" \
-                   --arg tool "knip" \
-                   '. += [{
-                     file: $file,
-                     location: $location,
-                     type: $type,
-                     name: $name,
-                     tool: $tool
-                   }]' "$ISSUES_JSON" > "$TEMP_DIR/issues.tmp" && mv "$TEMP_DIR/issues.tmp" "$ISSUES_JSON"
-                ((KNIP_COUNT++)) || true
-            fi
-        done < <(jq -r '.files[]?' "$KNIP_OUTPUT")
-    fi
-
-    # Parse unused exports
-    if jq -e '.exports' "$KNIP_OUTPUT" > /dev/null 2>&1; then
-        while IFS='|' read -r file export; do
-            if [[ -n "$file" && -n "$export" ]]; then
-                jq --arg file "$file" \
-                   --arg location "$file" \
-                   --arg type "unused export" \
-                   --arg name "$export" \
-                   --arg tool "knip" \
-                   '. += [{
-                     file: $file,
-                     location: $location,
-                     type: $type,
-                     name: $name,
-                     tool: $tool
-                   }]' "$ISSUES_JSON" > "$TEMP_DIR/issues.tmp" && mv "$TEMP_DIR/issues.tmp" "$ISSUES_JSON"
-                ((KNIP_COUNT++)) || true
-            fi
-        done < <(jq -r '.exports | to_entries[] | "\(.key)|\(.value[])"' "$KNIP_OUTPUT" 2>/dev/null || true)
-    fi
-
-    # Parse unused dependencies
-    if jq -e '.dependencies' "$KNIP_OUTPUT" > /dev/null 2>&1; then
-        while IFS= read -r dep; do
-            if [[ -n "$dep" ]]; then
-                jq --arg file "package.json" \
-                   --arg location "package.json" \
-                   --arg type "unused dependency" \
-                   --arg name "$dep" \
-                   --arg tool "knip" \
-                   '. += [{
-                     file: $file,
-                     location: $location,
-                     type: $type,
-                     name: $name,
-                     tool: $tool
-                   }]' "$ISSUES_JSON" > "$TEMP_DIR/issues.tmp" && mv "$TEMP_DIR/issues.tmp" "$ISSUES_JSON"
-                ((KNIP_COUNT++)) || true
-            fi
-        done < <(jq -r '.dependencies[]?' "$KNIP_OUTPUT")
-    fi
-
-    # Parse unused devDependencies
-    if jq -e '.devDependencies' "$KNIP_OUTPUT" > /dev/null 2>&1; then
-        while IFS= read -r dep; do
-            if [[ -n "$dep" ]]; then
-                jq --arg file "package.json" \
-                   --arg location "package.json" \
-                   --arg type "unused devDependency" \
-                   --arg name "$dep" \
-                   --arg tool "knip" \
-                   '. += [{
-                     file: $file,
-                     location: $location,
-                     type: $type,
-                     name: $name,
-                     tool: $tool
-                   }]' "$ISSUES_JSON" > "$TEMP_DIR/issues.tmp" && mv "$TEMP_DIR/issues.tmp" "$ISSUES_JSON"
-                ((KNIP_COUNT++)) || true
-            fi
-        done < <(jq -r '.devDependencies[]?' "$KNIP_OUTPUT")
-    fi
-
+if jq -e '.issues' "$KNIP_OUTPUT" > /dev/null 2>&1; then
+    # knip's JSON reporter emits {"issues": [{file, files, exports, types,
+    # dependencies, devDependencies, ...}]}: one entry per file. Flatten the
+    # categories this gate counts into the shared issue shape.
+    jq '
+      [ .issues[] as $i
+        | ( ($i.files // [])        | map({file: $i.file, location: $i.file, type: "unused file",          name: ($i.file | split("/") | last)})),
+          ( ($i.exports // [])      | map({file: $i.file, location: "\($i.file):\(.line // 0)", type: "unused export",        name: .name})),
+          ( ($i.types // [])        | map({file: $i.file, location: "\($i.file):\(.line // 0)", type: "unused export",        name: .name})),
+          ( ($i.dependencies // []) | map({file: "package.json", location: "package.json", type: "unused dependency",    name: .name})),
+          ( ($i.devDependencies // []) | map({file: "package.json", location: "package.json", type: "unused devDependency", name: .name}))
+        | .[]
+      ] | map(. + {tool: "knip"})
+    ' "$KNIP_OUTPUT" > "$ISSUES_JSON"
+    KNIP_COUNT=$(jq 'length' "$ISSUES_JSON")
     echo "   Found $KNIP_COUNT issues"
 else
-    echo "❌ knip failed"
+    echo "❌ knip failed (exit $KNIP_EXIT)"
+    cat "$TEMP_DIR/knip.stderr" >&2 || true
     exit 1
 fi
 
@@ -326,7 +184,6 @@ TIMESTAMP=$(iso_now_ms)
 TOTAL_ISSUES=$(jq 'length' "$ISSUES_JSON")
 
 # Count by tool
-TS_PRUNE_TOTAL=$(jq '[.[] | select(.tool == "ts-prune")] | length' "$ISSUES_JSON")
 KNIP_TOTAL=$(jq '[.[] | select(.tool == "knip")] | length' "$ISSUES_JSON")
 
 # Count by type
@@ -339,7 +196,6 @@ OTHER=$((TOTAL_ISSUES - UNUSED_EXPORTS - UNUSED_FILES - UNUSED_DEPS))
 REPORT_JSON=$(jq -n \
   --arg timestamp "$TIMESTAMP" \
   --argjson totalIssues "$TOTAL_ISSUES" \
-  --argjson tsPrune "$TS_PRUNE_TOTAL" \
   --argjson knip "$KNIP_TOTAL" \
   --argjson unusedExports "$UNUSED_EXPORTS" \
   --argjson unusedFiles "$UNUSED_FILES" \
@@ -350,7 +206,6 @@ REPORT_JSON=$(jq -n \
     timestamp: $timestamp,
     totalIssues: $totalIssues,
     byTool: {
-      tsPrune: $tsPrune,
       knip: $knip
     },
     byType: (
@@ -392,7 +247,6 @@ else
     echo "┌─────────────────────────────────────────────────────────┐"
     echo "│ Summary by Tool                                         │"
     echo "├─────────────────────────────────────────────────────────┤"
-    printf "│ ts-prune:             %4d │\n" "$TS_PRUNE_TOTAL"
     printf "│ knip:                 %4d │\n" "$KNIP_TOTAL"
     echo "└─────────────────────────────────────────────────────────┘"
     echo ""
@@ -459,7 +313,6 @@ if [ -n "$OUTPUT_DIR" ]; then
         echo ""
         echo "| Tool | Count |"
         echo "|------|-------|"
-        echo "| ts-prune | $TS_PRUNE_TOTAL |"
         echo "| knip | $KNIP_TOTAL |"
         echo ""
 

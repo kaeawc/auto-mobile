@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_WEBRTC_STREAM_REQUEST_TIMEOUT_MS,
   sendWebRtcStreamRequest,
-} from "../../src/daemon/webrtcStreamClient";
+} from "../../scripts/lib/webrtcStreamClient";
 import type {
   WebRtcStreamSocketRequest,
   WebRtcStreamSocketResponse,

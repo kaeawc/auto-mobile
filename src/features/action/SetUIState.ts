@@ -4,7 +4,11 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
-import { SetUIStateOptions, FieldSpec, ElementSelector } from "../../models/SetUIStateOptions";
+import {
+  SetUIStateOptions,
+  FieldSpec,
+  SetUIStateElementSelector,
+} from "../../models/SetUIStateOptions";
 import { SetUIStateResult, FieldResult, FieldType } from "../../models/SetUIStateResult";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import type { InputTextMode } from "./InputText";
@@ -14,6 +18,14 @@ import { ActionableError } from "../../models/ActionableError";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
+import {
+  CONTAINS_IGNORE_CASE,
+  FOCUS_INPUT_INSPECT_INTENT,
+  FOCUS_INPUT_INTENT,
+  FOCUS_INPUT_WITH_HINT_FALLBACK,
+  INSPECT_INTENT,
+  TOGGLE_INSPECT_INTENT,
+} from "../utility/SelectionPolicy";
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -1388,7 +1400,9 @@ export class SetUIState extends BaseVisualChange {
    * Find element in view hierarchy
    */
   private findElement(
-    selector: ElementSelector & { screenSizeOptions?: ScreenSizeForOffscreenCheckOptions },
+    selector: SetUIStateElementSelector & {
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
+    },
     viewHierarchy?: ViewHierarchyResult,
     wantsCheckable = false,
   ): Element | null {
@@ -1406,8 +1420,7 @@ export class SetUIState extends BaseVisualChange {
       if (this.device.platform === "ios") {
         return (
           this.selector.selectByText(viewHierarchy, selector.text, {
-            intentAction: "inspect",
-            selectionIntent: "focus-input",
+            ...FOCUS_INPUT_INSPECT_INTENT,
             screenSizeOptions: selector.screenSizeOptions,
           }).element ?? null
         );
@@ -1435,9 +1448,8 @@ export class SetUIState extends BaseVisualChange {
   ): Element | null {
     const android = this.device.platform !== "ios";
     const element = this.selector.selectByText(viewHierarchy, text, {
-      intentAction: "inspect",
-      selectionIntent: "toggle",
-      ...(android ? { partialMatch: true, caseSensitive: false } : {}),
+      ...TOGGLE_INSPECT_INTENT,
+      ...(android ? CONTAINS_IGNORE_CASE : {}),
       screenSizeOptions,
     }).element;
     if (!element) {
@@ -1458,7 +1470,7 @@ export class SetUIState extends BaseVisualChange {
   ): Element | null {
     return (
       this.selector.selectByResourceId(viewHierarchy, resourceId, {
-        intentAction: "inspect",
+        ...INSPECT_INTENT,
         screenSizeOptions,
       }).element ?? null
     );
@@ -1470,15 +1482,13 @@ export class SetUIState extends BaseVisualChange {
     screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
   ): Element | null {
     const matched = this.selector.selectByText(viewHierarchy, text, {
-      intentAction: "inspect",
-      partialMatch: true,
-      caseSensitive: false,
+      ...INSPECT_INTENT,
+      ...CONTAINS_IGNORE_CASE,
       screenSizeOptions,
     }).element;
     if (!matched) {
       return this.selector.selectByText(viewHierarchy, text, {
-        intentAction: "focus-input",
-        allowHintFallback: true,
+        ...FOCUS_INPUT_WITH_HINT_FALLBACK,
         screenSizeOptions,
       }).element;
     }
@@ -1489,15 +1499,14 @@ export class SetUIState extends BaseVisualChange {
     }
     const identity = matched["resource-id"] || matched["view-id"];
     const focusOptions = {
-      intentAction: "focus-input" as const,
+      ...FOCUS_INPUT_INTENT,
       screenSizeOptions,
     };
     let focused = identity
       ? this.selector.selectByResourceId(viewHierarchy, identity, focusOptions)
       : this.selector.selectByText(viewHierarchy, text, {
           ...focusOptions,
-          partialMatch: true,
-          caseSensitive: false,
+          ...CONTAINS_IGNORE_CASE,
         });
     const source = getHierarchyNodeSource(matched);
     if (identity && source !== getHierarchyNodeSource(focused.matchedElement ?? matched)) {
@@ -1951,7 +1960,7 @@ export class SetUIState extends BaseVisualChange {
    * Build tap options from selector
    */
   private buildTapOptions(
-    selector: ElementSelector,
+    selector: SetUIStateElementSelector,
     action: string,
   ): { text?: string; elementId?: string; action: string } {
     if (selector.text) {
@@ -1963,7 +1972,7 @@ export class SetUIState extends BaseVisualChange {
   /**
    * Describe a selector for error messages
    */
-  private describeSelector(selector: ElementSelector): string {
+  private describeSelector(selector: SetUIStateElementSelector): string {
     if (selector.text) {
       return `text="${selector.text}"`;
     }

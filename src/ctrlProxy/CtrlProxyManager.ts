@@ -1,3 +1,4 @@
+import { deleteDeviceInstanceIfCurrent, getOrCreateDeviceInstance } from "./deviceInstanceRegistry";
 import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
 import {
   defaultSavedPrototypeMirror,
@@ -369,7 +370,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
   ): AndroidCtrlProxyManager {
     requireBootedDevice(device, "AndroidCtrlProxyManager.getInstance");
-    if (!AndroidCtrlProxyManager.instances.has(device.deviceId)) {
+    return getOrCreateDeviceInstance(AndroidCtrlProxyManager.instances, device.deviceId, () => {
       let adb: AdbExecutor;
       let factory: AdbClientFactory;
       // Detect if the argument is a factory (has create method) or an executor
@@ -389,12 +390,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         adb = factory.create(device);
       }
       AndroidCtrlProxyManager.adbFactory = factory;
-      AndroidCtrlProxyManager.instances.set(
-        device.deviceId,
-        new AndroidCtrlProxyManager(device, adb),
-      );
-    }
-    return AndroidCtrlProxyManager.instances.get(device.deviceId)!;
+      return new AndroidCtrlProxyManager(device, adb);
+    });
   }
 
   /** Fresh diagnostic reads without registering or replacing live session dependencies. */
@@ -486,9 +483,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   public static evictInstance(instance: AndroidCtrlProxyManager): void {
-    if (AndroidCtrlProxyManager.instances.get(instance.device.deviceId) === instance) {
-      AndroidCtrlProxyManager.instances.delete(instance.device.deviceId);
-    }
+    deleteDeviceInstanceIfCurrent(
+      AndroidCtrlProxyManager.instances,
+      instance.device.deviceId,
+      instance,
+    );
   }
 
   public static evict(deviceId: string, avdName?: string): void {

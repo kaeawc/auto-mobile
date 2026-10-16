@@ -28,7 +28,7 @@ import {
   FocusNavigationUnavailableError,
   type FocusNavigationDriverFactory,
 } from "./FocusNavigationExecutor";
-import type { ElementSelector } from "./ElementSelector";
+import type { TalkBackElementSelector } from "./TalkBackElementSelector";
 import type { TalkBackNavigationDriver } from "./TalkBackNavigationDriver";
 
 export interface TalkBackTapResult {
@@ -227,7 +227,7 @@ export class TalkBackTapStrategy {
     elementText?: string;
     elementContentDesc?: string;
     bounds: Element["bounds"];
-  }): ElementSelector {
+  }): TalkBackElementSelector {
     return {
       ...(resourceId ? { resourceId } : {}),
       ...(elementText ? { text: elementText } : {}),
@@ -700,7 +700,7 @@ export class TalkBackTapStrategy {
   private async activationTraversal(
     driver: TalkBackNavigationDriver,
     orderedElements: Element[],
-    selector: ElementSelector,
+    selector: TalkBackElementSelector,
   ): Promise<Element[]> {
     let traversal: TraversalOrderResult | undefined;
     try {

@@ -27,6 +27,7 @@
         "scripts/**/*.ts",
         "scripts/**/*.sh",
         "scripts/*-baseline.txt",
+        "scripts/import-direction-baselines/*.txt",
         ".oxlintrc.json",
         "oxlint-plugins/**",
         ".oxfmtrc.json",

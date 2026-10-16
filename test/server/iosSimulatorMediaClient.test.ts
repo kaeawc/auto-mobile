@@ -5,7 +5,7 @@ import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 describe("SimctlIosSimulatorMediaClient", () => {
   test("imports media with exact simctl argv boundaries", async () => {
     const simctl = new FakeSimCtlClient();
-    const client = new SimctlIosSimulatorMediaClient(() => simctl as never);
+    const client = new SimctlIosSimulatorMediaClient(() => simctl);
     const device = {
       deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
       name: "iPhone",

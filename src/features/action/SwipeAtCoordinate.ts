@@ -1,4 +1,5 @@
 import { ActionableError } from "../../models/ActionableError";
+import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { logger } from "../../utils/logger";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice, ObserveResult, SwipeResult, TapAtOptions } from "../../models";
@@ -8,6 +9,7 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { layerGestureRefusal } from "../observe/hierarchyLayer";
+import { StaleDisplayError, withStaleDisplay } from "../observe/StaleDisplayError";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { snapshotReferences, type SnapshotReferenceStore } from "../observe/SnapshotReferenceStore";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
@@ -125,6 +127,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     const perf = createGlobalPerformanceTracker();
     perf.serial(TOOL_NAME);
     let iosDispatchTimestamp: number | undefined;
+    let preDispatchObservation: ObserveResult | null = null;
 
     const failure = (error: string): SwipeResult => ({
       success: false,
@@ -135,14 +138,15 @@ export class SwipeAtCoordinate extends BaseVisualChange {
 
     try {
       throwIfAborted(signal);
-      return await this.observedInteraction(
-        async () => {
+      const result = await this.observedInteraction(
+        async (_observed, fence) => {
           // Validate against the latest available frame immediately before dispatch.
           const observation = await this.observeScreen.execute({
             freshness: "cached-ok",
             signal,
             perf,
           });
+          preDispatchObservation = observation;
           const stale = options.snapshotId
             ? this.snapshotReferences.staleReason(
                 options.snapshotId,
@@ -175,7 +179,11 @@ export class SwipeAtCoordinate extends BaseVisualChange {
               resolved.from.y,
               resolved.to.x,
               resolved.to.y,
-              { duration: this.geometry.getSwipeDurationFromSpeed(options.speed) },
+              {
+                duration: this.geometry.getSwipeDurationFromSpeed(options.speed),
+                // A display change since the pre-dispatch read refuses just before the finger goes down.
+                displayFence: fence,
+              },
               perf,
               signal,
             ),
@@ -201,6 +209,16 @@ export class SwipeAtCoordinate extends BaseVisualChange {
           },
         },
       );
+      // The base reads the lock state from its own pre-action observation, which this call skips.
+      this.annotateDeviceLock(result, preDispatchObservation);
+      return result;
+    } catch (error) {
+      if (error instanceof StaleDisplayError || error instanceof DispatchedObservationError) {
+        // Typed like tapAt/swipeOn: the agent gets the canonical message plus `staleDisplay` details.
+        logger.warn(`${TOOL_NAME} refused after a display change: ${error.message}`);
+        return withStaleDisplay(failure(error.message), error);
+      }
+      throw error;
     } finally {
       perf.end();
     }

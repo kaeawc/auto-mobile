@@ -32361,7 +32361,7 @@
           "minLength": 1
         },
         "from": {
-          "description": "Where the finger goes down, in the selected coordinateSpace",
+          "description": "Where the finger goes down, in the selected coordinateSpace; required with to unless image is given",
           "type": "object",
           "properties": {
             "x": {
@@ -32377,7 +32377,7 @@
           "additionalProperties": false
         },
         "to": {
-          "description": "Where the finger lifts, in the selected coordinateSpace",
+          "description": "Where the finger lifts, in the selected coordinateSpace; required with from unless image is given",
           "type": "object",
           "properties": {
             "x": {
@@ -32656,14 +32656,15 @@
               ]
             },
             "from": {
+              "description": "Where the finger goes down, in the image",
               "type": "object",
               "properties": {
                 "x": {
-                  "description": "Screen x coordinate in the selected coordinateSpace",
+                  "description": "x in image.unit: a 0-1 fraction or a raster pixel",
                   "type": "number"
                 },
                 "y": {
-                  "description": "Screen y coordinate in the selected coordinateSpace",
+                  "description": "y in image.unit: a 0-1 fraction or a raster pixel",
                   "type": "number"
                 }
               },
@@ -32671,14 +32672,15 @@
               "additionalProperties": false
             },
             "to": {
+              "description": "Where the finger lifts, in the image",
               "type": "object",
               "properties": {
                 "x": {
-                  "description": "Screen x coordinate in the selected coordinateSpace",
+                  "description": "x in image.unit: a 0-1 fraction or a raster pixel",
                   "type": "number"
                 },
                 "y": {
-                  "description": "Screen y coordinate in the selected coordinateSpace",
+                  "description": "y in image.unit: a 0-1 fraction or a raster pixel",
                   "type": "number"
                 }
               },

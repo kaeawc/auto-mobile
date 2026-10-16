@@ -27,12 +27,19 @@ const swipeAtPointSchema = z
   })
   .strict();
 
+const imagePointSchema = z
+  .object({
+    x: z.number().finite().describe("x in image.unit: a 0-1 fraction or a raster pixel"),
+    y: z.number().finite().describe("y in image.unit: a 0-1 fraction or a raster pixel"),
+  })
+  .strict();
+
 const imageRelativeSwipeSchema = z
   .object({
     unit: imageRelativePointSchema.shape.unit,
     source: imageRelativePointSchema.shape.source,
-    from: swipeAtPointSchema,
-    to: swipeAtPointSchema,
+    from: imagePointSchema.describe("Where the finger goes down, in the image"),
+    to: imagePointSchema.describe("Where the finger lifts, in the image"),
   })
   .strict();
 
@@ -78,10 +85,14 @@ export const swipeAtSchema = withJsonSchemaOverride(
           ),
         from: swipeAtPointSchema
           .optional()
-          .describe("Where the finger goes down, in the selected coordinateSpace"),
+          .describe(
+            "Where the finger goes down, in the selected coordinateSpace; required with to unless image is given",
+          ),
         to: swipeAtPointSchema
           .optional()
-          .describe("Where the finger lifts, in the selected coordinateSpace"),
+          .describe(
+            "Where the finger lifts, in the selected coordinateSpace; required with from unless image is given",
+          ),
         coordinateSpace: z
           .enum(["absolute", "normalized", "percent"])
           .optional()

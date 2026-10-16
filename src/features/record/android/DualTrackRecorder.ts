@@ -902,8 +902,29 @@ function isDiagonalSwipe({ from, to }: SwipeEndpoints): boolean {
   return Math.min(dx, dy) >= Math.max(dx, dy) * DIAGONAL_SWIPE_MIN_OFF_AXIS_RATIO;
 }
 
+/** Four decimals keep a point within a quarter pixel on a 2400 px axis without float noise. */
+function normalizedAxis(value: number, size: number): number {
+  return Math.round(Math.min(1, Math.max(0, value / size)) * 10_000) / 10_000;
+}
+
 function buildSwipeAtStep(gesture: GestureEvent, endpoints: SwipeEndpoints): PlanStep {
   const params: Record<string, unknown> = { from: endpoints.from, to: endpoints.to };
+  const width = gesture.geometry?.deviceWidth;
+  const height = gesture.geometry?.deviceHeight;
+  if (width && height && width > 0 && height > 0) {
+    // Native pixels only replay on a screen of the same size, and a digitizer-edge touch can map
+    // to exactly the display size, which replay refuses. Fractions of the recorded screen adapt to
+    // the replay screen, and 1 resolves to its last pixel.
+    params.from = {
+      x: normalizedAxis(endpoints.from.x, width),
+      y: normalizedAxis(endpoints.from.y, height),
+    };
+    params.to = {
+      x: normalizedAxis(endpoints.to.x, width),
+      y: normalizedAxis(endpoints.to.y, height),
+    };
+    params.coordinateSpace = "normalized";
+  }
   if (gesture.speed === "fast") {
     params.speed = "fast";
   }

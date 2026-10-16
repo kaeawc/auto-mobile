@@ -335,14 +335,22 @@ swipeAt({
 });
 ```
 
-`image` is mutually exclusive with `from`, `to`, and `coordinateSpace`. Add
+`image` is mutually exclusive with `from`, `to`, and `coordinateSpace`; its `from` and `to`
+are in `image.unit`, not `coordinateSpace`. Add
 `snapshotId` to reject the swipe when the screen geometry changed since that
 observation, or the reference expired. `speed` selects `slow`, `normal` (the
 default), or `fast` as in `swipeOn`. `layer` is checked at the `from` point, because touches go to the window under the
 finger-down point. `swipeAt` does not accept `display`; use `swipeOn` for a
 non-default display.
 
-`tapAt`, `tapOn`, `tapAny`, `swipeOn`, `dragAndDrop`, and `pinchOn` fence
+`recordDeviceGestures` exports a swipe that is clearly diagonal (off-axis travel at least
+half the on-axis travel), or a swipe with a known path but no direction, as
+`swipeAt` with `coordinateSpace: "normalized"` fractions of the recorded screen, so
+replay adapts to a different screen size. Straighter swipes stay `swipeOn` with a
+direction. Replay on a different orientation maps the same fractions onto the rotated
+screen.
+
+`tapAt`, `tapOn`, `tapAny`, `swipeOn`, `swipeAt`, `dragAndDrop`, and `pinchOn` fence
 coordinates when the display transitions after the caller's observation or while
 the action is preparing or dispatching. These failures include `staleDisplay`
 with the observed and current identity generations and `retry: "observe"`.

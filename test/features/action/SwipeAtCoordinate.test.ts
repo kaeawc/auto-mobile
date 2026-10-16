@@ -3,6 +3,7 @@ import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import { SnapshotReferenceStore } from "../../../src/features/observe/SnapshotReferenceStore";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
+import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { cropSource } from "../../helpers/imageRelativePoint";
 import { createSwipeAt } from "../../helpers/swipeAtCoordinate";
@@ -448,5 +449,122 @@ describe("swipeAt layer", () => {
 
     expect(result.error).toBeUndefined();
     expect(swipes).toHaveLength(1);
+  });
+});
+
+describe("swipeAt display fence", () => {
+  const stamped = (): ObserveResult =>
+    ({
+      ...observation(100, 200),
+      displayRevision: 41,
+      display: { key: "inner", role: "inner", posture: "opened", generation: 7 },
+    }) as ObserveResult;
+
+  function fenced(callerKnowsRevision = true) {
+    const transitions = new FakeDisplayTransitionReader();
+    const harness = createSwipeAt(androidDevice, 100, 200, undefined, {
+      displayTransitions: transitions,
+      renderedDisplayRevision: () => (callerKnowsRevision ? 41 : undefined),
+      renderedDisplayGeneration: () => (callerKnowsRevision ? 7 : undefined),
+    });
+    harness.observeScreen.setObserveResult(stamped());
+    return { ...harness, transitions };
+  }
+
+  const staleResult = {
+    success: false,
+    staleDisplay: {
+      observedGeneration: 7,
+      currentGeneration: 8,
+      currentDisplayKey: "cover",
+      retry: "observe",
+    },
+    error: expect.stringContaining("Display changed since these coordinates were chosen"),
+  };
+
+  test("a display change since the caller observed returns a typed stale-display failure", async () => {
+    const { swipeAt, swipes, transitions } = fenced();
+    transitions.transition();
+
+    const result = await swipeAt.execute({ from: { x: 10, y: 20 }, to: { x: 60, y: 120 } });
+
+    expect(result).toMatchObject({ ...staleResult, x1: 10, y1: 20, x2: 60, y2: 120 });
+    expect(swipes).toEqual([]);
+  });
+
+  test("a display change while the pre-dispatch observation is read refuses before dispatch", async () => {
+    const { swipeAt, observeScreen, swipes, transitions } = fenced();
+    const read = observeScreen.execute.bind(observeScreen);
+    observeScreen.execute = async (options) => {
+      const observed = await read(options);
+      transitions.transition();
+      return observed;
+    };
+
+    const result = await swipeAt.execute({ from: { x: 10, y: 20 }, to: { x: 60, y: 120 } });
+
+    expect(result).toMatchObject(staleResult);
+    expect(swipes).toEqual([]);
+  });
+
+  test("the dispatch carries the in-flight display fence, so a late transition aborts it", async () => {
+    const { swipeAt, swipes, fences, transitions } = fenced();
+    const result = await swipeAt.execute({ from: { x: 10, y: 20 }, to: { x: 60, y: 120 } });
+
+    expect(result.success).toBe(true);
+    expect(swipes).toHaveLength(1);
+    expect(fences).toEqual([true]);
+    expect(transitions.fullRevision).toBe(41);
+  });
+
+  test("an unchanged display dispatches normally", async () => {
+    const { swipeAt, swipes } = fenced(false);
+
+    const result = await swipeAt.execute({ from: { x: 10, y: 20 }, to: { x: 60, y: 120 } });
+
+    expect(result.success).toBe(true);
+    expect(swipes).toHaveLength(1);
+  });
+});
+
+describe("swipeAt device lock (#4280)", () => {
+  const locked = (secure: boolean) =>
+    ({
+      ...observation(100, 200),
+      deviceLock: { locked: true, keyguardShowing: true, secure },
+    }) as ObserveResult;
+
+  test("a swipe on a locked keyguard still dispatches, but never reads as a clean success", async () => {
+    const { swipeAt, observeScreen, swipes } = createSwipeAt(androidDevice);
+    observeScreen.setObserveResult(locked(false));
+
+    const result = await swipeAt.execute({ from: { x: 50, y: 180 }, to: { x: 50, y: 20 } });
+
+    expect(swipes).toHaveLength(1);
+    expect(result.success).toBe(true);
+    expect(result).toMatchObject({
+      deviceLock: { locked: true, keyguardShowing: true, secure: false },
+      deviceLockWarning: expect.stringContaining("dismiss the keyguard"),
+    });
+  });
+
+  test("a secure lock tells the agent to ask the user to unlock", async () => {
+    const { swipeAt, observeScreen } = createSwipeAt(androidDevice);
+    observeScreen.setObserveResult(locked(true));
+
+    const result = await swipeAt.execute({ from: { x: 50, y: 180 }, to: { x: 50, y: 20 } });
+
+    expect(result).toMatchObject({
+      deviceLockWarning: expect.stringContaining("unlock the device"),
+    });
+  });
+
+  test("an unlocked device carries no lock fields", async () => {
+    const { swipeAt } = createSwipeAt(androidDevice);
+
+    const result = await swipeAt.execute({ from: { x: 50, y: 180 }, to: { x: 50, y: 20 } });
+
+    expect(result).not.toHaveProperty("deviceLock");
+    expect(result).not.toHaveProperty("deviceLockWarning");
   });
 });

@@ -5,7 +5,7 @@ import { sortedReaddirEntriesSync } from "../src/utils/io";
 
 const SOURCE_ROOT = "src/utils";
 const BASELINE = "scripts/utils-import-direction-baseline.txt";
-const ALLOWED_TIERS = new Set(["utils", "devices", "ctrlProxy", "models", "constants"]);
+const ALLOWED_TIERS = new Set(["utils", "devices", "ctrlProxy", "models", "constants", "config"]);
 
 interface Violation {
   readonly file: string;

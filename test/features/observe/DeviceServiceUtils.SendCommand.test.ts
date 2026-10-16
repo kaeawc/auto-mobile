@@ -49,6 +49,42 @@ async function flushDispatch(): Promise<void> {
 }
 
 describe("sendCommand lifecycle", () => {
+  test("creates a caller-owned wire ID after connecting and uses it for response correlation", async () => {
+    const h = harness();
+    let defaultIds = 0;
+    h.context.requestManager.generateId = (prefix) => `${prefix}_${++defaultIds}`;
+    const pending = sendCommand(h.context, {
+      ...h.options,
+      createRequestId: () => {
+        h.order.push("id");
+        return `tap_${h.timer.now()}_caller`;
+      },
+    });
+    expect(h.order).toEqual(["cancel", "connect"]);
+    h.timer.advanceTime(12);
+    await flushDispatch();
+    expect(h.order).toEqual(["cancel", "connect", "id", "send"]);
+    expect(h.sent).toEqual(['{"type":"request_tap","requestId":"tap_12_caller"}']);
+    h.context.requestManager.resolve("tap_12_caller", { success: true, totalTimeMs: 3 });
+    expect(await pending).toEqual({ success: true, totalTimeMs: 3 });
+    expect(h.context.requestManager.getPendingCount()).toBe(0);
+    // Supplying a hook does not consume the manager's default ID generator.
+    expect(defaultIds).toBe(0);
+    expect(h.context.requestManager.generateId("next")).toBe("next_1");
+  });
+
+  test("does not create a caller-owned ID when connecting fails", async () => {
+    const h = harness({ ensureConnected: async () => false });
+    const result = await sendCommand(h.context, {
+      ...h.options,
+      createRequestId: () => {
+        throw new Error("must not generate an ID before connecting");
+      },
+    });
+    expect(result.error).toBe("Not connected");
+    expect(h.context.requestManager.getPendingCount()).toBe(0);
+  });
+
   test("preserves cancellation, connection, serialization, fence, send and dispatch order", async () => {
     const h = harness();
     const controller = new AbortController();

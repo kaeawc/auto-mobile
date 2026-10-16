@@ -461,6 +461,7 @@ class PrototypeRuntime(
     writes: Map<Int, Pair<String, PrototypeSpec>>,
   ) {
     val baseline = current.state
+    val plannedData = current.spec.data
     val touched = LinkedHashSet<String>()
     for ((index, action) in actions.withIndex()) {
       if (!current.active) break
@@ -502,11 +503,13 @@ class PrototypeRuntime(
         is PrototypeRequestAction -> startRequest(action, touched)
         else ->
           writes[index]?.let { (key, planned) ->
-            // An earlier data write in this list may have added rows that bind this key, so the
+            // A data write earlier in this list may have added rows that bind this key, so a
             // value planned against the old data is checked again against the data as it is now.
-            writeInteractionSpec(
-              validated(current.spec, mapOf(key to planned.state.orEmpty().getValue(key))),
-            )
+            if (current.spec.data === plannedData) writeInteractionSpec(planned)
+            else
+              writeInteractionSpec(
+                validated(current.spec, mapOf(key to planned.state.orEmpty().getValue(key))),
+              )
             touched += key
           }
       }

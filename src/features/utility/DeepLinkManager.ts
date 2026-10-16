@@ -27,7 +27,7 @@ import {
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import type { Element } from "../../models/Element";
-import { nodeBounds } from "../../models/ViewHierarchyResult";
+import { nodeBounds, type ViewHierarchyNode } from "../../models/ViewHierarchyResult";
 import type { Timer } from "../../utils/interfaces/Timer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { DefaultElementParser } from "./ElementParser";
@@ -965,9 +965,11 @@ export class DeepLinkManager implements DeepLinkManager {
     textOptions: string[],
   ): Element | null {
     for (const rootNode of rootNodes) {
-      const targetElement = this.findButtonByText(rootNode, textOptions);
-      if (targetElement) {
-        return targetElement;
+      // The matcher returns the raw capture node; a tap needs its parsed bounds, not the raw array.
+      const node = this.findButtonByText(rootNode, textOptions);
+      const element = node ? this.parser.parseNodeBounds(node) : null;
+      if (element) {
+        return element;
       }
     }
     return null;
@@ -1167,12 +1169,15 @@ export class DeepLinkManager implements DeepLinkManager {
    * Find a button by text content in the view hierarchy
    * @param node - Root node to search from
    * @param textOptions - Array of text options to match
-   * @returns Found element or null
+   * @returns The raw capture node that matched, or null
    */
-  private findButtonByText(node: any, textOptions: string[]): any {
-    let foundElement: any = null;
+  private findButtonByText(
+    node: ViewHierarchyNode,
+    textOptions: string[],
+  ): ViewHierarchyNode | null {
+    let foundElement: ViewHierarchyNode | null = null;
 
-    this.parser.traverseNode(node, (currentNode: any) => {
+    this.parser.traverseNode(node, (currentNode: ViewHierarchyNode) => {
       if (foundElement) {
         return;
       } // Already found

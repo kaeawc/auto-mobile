@@ -19,14 +19,22 @@ export const SWIPE_RETURN_SPEED_MAX = SWIPE_RETURN_DURATION_MAX_MS / 1;
 export const SWIPE_APEX_PAUSE_MIN_MS = 0;
 export const SWIPE_RETURN_SPEED_EXCLUSIVE_MIN = 0;
 
+// Swipe requests use the fixed gesture transport timeout, so the stroke must finish with headroom
+// to spare (#12538); a longer value would time out rather than dispatch.
+export const SWIPE_DURATION_MIN_MS = 1;
+export const SWIPE_DURATION_MAX_MS = SWIPE_RETURN_DURATION_MAX_MS;
+
 type BoomerangOptions = Pick<SwipeOnOptions, "boomerang" | "apexPause" | "returnSpeed">;
 
 /** Keep the speed presets in geometry, including its unset-speed default. */
 export function resolveSwipeDuration(
-  options: Pick<SwipeOnOptions, "duration" | "speed"> & {
+  options: Pick<SwipeOnOptions, "duration" | "durationMs" | "speed"> & {
     geometry: Pick<ElementGeometry, "getSwipeDurationFromSpeed">;
   },
 ): number {
+  if (options.durationMs !== undefined) {
+    return options.durationMs;
+  }
   if (options.duration !== undefined) {
     return options.duration;
   }
@@ -93,10 +101,38 @@ function validateBoomerangDuration(
   return null;
 }
 
+/** durationMs replaces the speed preset for the forward stroke; reject ambiguity before dispatch. */
+function validateDurationMs(
+  options: Pick<SwipeOnOptions, "lookFor" | "durationMs" | "speed">,
+): string | null {
+  const { durationMs } = options;
+  if (durationMs === undefined) {
+    return null;
+  }
+  if (options.speed !== undefined) {
+    return "durationMs cannot be combined with speed; give one or the other";
+  }
+  if (options.lookFor) {
+    return "durationMs cannot be used with lookFor; search swipes choose their own pace";
+  }
+  if (
+    !Number.isInteger(durationMs) ||
+    durationMs < SWIPE_DURATION_MIN_MS ||
+    durationMs > SWIPE_DURATION_MAX_MS
+  ) {
+    return `durationMs must be an integer from ${SWIPE_DURATION_MIN_MS} to ${SWIPE_DURATION_MAX_MS} ms`;
+  }
+  return null;
+}
+
 export function validateSwipeTimingOptions(
-  options: BoomerangOptions & Pick<SwipeOnOptions, "lookFor" | "duration" | "speed">,
+  options: BoomerangOptions & Pick<SwipeOnOptions, "lookFor" | "duration" | "durationMs" | "speed">,
   forwardDuration = resolveSwipeDuration({ ...options, geometry: new DefaultElementGeometry() }),
 ): string | null {
+  const durationError = validateDurationMs(options);
+  if (durationError) {
+    return durationError;
+  }
   if (options.boomerang && options.lookFor) {
     return "boomerang cannot be used with lookFor";
   }

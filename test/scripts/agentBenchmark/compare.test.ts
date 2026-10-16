@@ -213,6 +213,15 @@ describe("compareRun verdict", () => {
     expect(result.sequenceDiff).toMatchObject({ missing: 1, extra: 0 });
   });
 
+  test("a huge finite metric keeps a finite delta", () => {
+    const huge = new TranscriptBuilder()
+      .init()
+      .mcp("observe")
+      .result({ finalText: "COUNT: 3", costUsd: 1e308 });
+    const result = compareRun(audit(huge), OK_OUTCOME, NO_VERIFY, { costUsd: 0 });
+    expect(result.metrics.find((row) => row.name === "costUsd")?.delta).toBe(1e308);
+  });
+
   test("without a baseline, metrics carry no delta and there is no sequence diff", () => {
     const result = compareRun(audit(cleanRun()), OK_OUTCOME, NO_VERIFY);
     expect(result.metrics.every((row) => row.delta === undefined)).toBe(true);

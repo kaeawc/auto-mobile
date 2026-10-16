@@ -154,7 +154,8 @@ export function diffToolSequence(baseline: string[], actual: string[]): Sequence
 function row(name: string, actual: number, baseline: number | undefined): MetricRow {
   return baseline === undefined
     ? { name, actual }
-    : { name, actual, baseline, delta: Math.round((actual - baseline) * 10_000) / 10_000 };
+    : // toFixed rounds without multiplying, so a huge finite delta cannot overflow to Infinity.
+      { name, actual, baseline, delta: Number((actual - baseline).toFixed(4)) };
 }
 
 function buildMetrics(audit: TranscriptAudit, outcome: RunOutcome, baseline?: SuiteBaseline) {

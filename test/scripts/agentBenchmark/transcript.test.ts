@@ -312,7 +312,12 @@ describe("agent benchmark transcript audit", () => {
 
   test("a non-boolean terminal is_error fails the transcript", () => {
     const base = new TranscriptBuilder().init().build();
-    const result = JSON.stringify({ type: "result", subtype: "success", is_error: "true" });
+    const result = JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: "true",
+      result: "done",
+    });
     const audit = auditTranscript(`${base}${result}\n`, NO_PATTERNS);
     expect(audit.parseErrors).toEqual(["result event has a missing or non-boolean is_error"]);
   });
@@ -335,7 +340,7 @@ describe("agent benchmark transcript audit", () => {
 
   test("terminal metrics outside the baseline domains fail the transcript", () => {
     const result = (fields: Record<string, unknown>) =>
-      `${INIT}${JSON.stringify({ type: "result", subtype: "success", is_error: false, ...fields })}\n`;
+      `${INIT}${JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "done", ...fields })}\n`;
     expect(auditTranscript(result({ num_turns: 2.5 }), NO_PATTERNS).parseErrors).toEqual([
       "result event has an invalid num_turns",
     ]);
@@ -370,6 +375,23 @@ describe("agent benchmark transcript audit", () => {
     ]);
   });
 
+  test("a terminal result without a final answer fails the transcript", () => {
+    const result = JSON.stringify({ type: "result", subtype: "success", is_error: false });
+    const audit = auditTranscript(`${INIT}${result}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual(["result event has a missing or non-string result"]);
+  });
+
+  test("a content block without a type fails the transcript; an unknown block type is skipped", () => {
+    const assistant = JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ id: "toolu_hidden", name: "mcp__auto-mobile__tapOn" }, { type: "future" }],
+      },
+    });
+    const audit = auditTranscript(`${INIT}${assistant}\n`, NO_PATTERNS);
+    expect(audit.parseErrors).toEqual(["line 4: assistant event has a block without a type"]);
+  });
+
   test("a non-string final answer fails the transcript", () => {
     const result = JSON.stringify({
       type: "result",
@@ -378,7 +400,7 @@ describe("agent benchmark transcript audit", () => {
       result: { text: "COUNT: 3" },
     });
     const audit = auditTranscript(`${INIT}${result}\n`, NO_PATTERNS);
-    expect(audit.parseErrors).toEqual(["result event has a non-string result"]);
+    expect(audit.parseErrors).toEqual(["result event has a missing or non-string result"]);
   });
 
   test("a non-array permission_denials fails the transcript", () => {
@@ -386,6 +408,7 @@ describe("agent benchmark transcript audit", () => {
       type: "result",
       subtype: "success",
       is_error: false,
+      result: "done",
       permission_denials: { tool_name: "Bash" },
     });
     const audit = auditTranscript(`${INIT}${result}\n`, NO_PATTERNS);

@@ -63,7 +63,7 @@ describe("EventAllTyper", () => {
 
   test("keeps password key events separate and redacts delivery failures", async () => {
     const { host, calls } = eventHost();
-    host.setPasswordField(true);
+    host.session.typingPasswordField = true;
     const typer = new EventAllTyper(host);
     expect(
       await typer.type({ text: "ab", operation: "insert", focusedInputVerified: true }),

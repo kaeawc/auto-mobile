@@ -3,7 +3,7 @@ import { registerHighlightTools } from "../../src/server/highlightTools";
 import { registerVideoRecordingTools } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
-afterEach(() => (ToolRegistry as any).tools.clear());
+afterEach(() => ToolRegistry.clearToolsForTesting());
 test("highlight and recording accept only unstyled circles", () => {
   registerHighlightTools();
   registerVideoRecordingTools();

@@ -8,8 +8,8 @@ import type { ResetAppLogsRequest, SessionLogService } from "../../src/server/se
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 
 describe("resetAppLogs tool (#7006)", () => {
-  beforeEach(() => (ToolRegistry as any).tools.clear());
-  afterEach(() => (ToolRegistry as any).tools.clear());
+  beforeEach(() => ToolRegistry.clearToolsForTesting());
+  afterEach(() => ToolRegistry.clearToolsForTesting());
 
   test("registers a discoverable, strict schema that defaults the container", () => {
     registerSessionLogTools();

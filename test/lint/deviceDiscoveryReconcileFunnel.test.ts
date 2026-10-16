@@ -97,10 +97,15 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "PlatformDeviceManager — declares and implements the discovery API. The ninth call is " +
         "the checked Android liveness guard before startDevice launches an AVD; it reads no pooled identity.",
     },
-    "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts": {
-      calls: 9,
+    "src/utils/android-cmdline-tools/EmulatorPortReservations.ts": {
+      calls: 1,
       reason:
-        "Android emulator discovery producer; runs below the pool. The 9th call (adoptsExistingAvdLaunch, line 1678) is #6906's in-flight-launch guard — a local adopt-vs-spawn decision, never joined to pooled identity.",
+        "The pre-launch snapshot of attached emulator serials that console-port reservation reads (moved verbatim out of AndroidEmulatorClient); a local port-allocation decision, never joined to pooled identity.",
+    },
+    "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts": {
+      calls: 8,
+      reason:
+        "Android emulator discovery producer; runs below the pool. The 8th call (adoptsExistingAvdLaunch) is #6906's in-flight-launch guard — a local adopt-vs-spawn decision, never joined to pooled identity.",
     },
     "src/utils/android-cmdline-tools/AdbClient.ts": {
       calls: 1,

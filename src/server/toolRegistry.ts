@@ -4124,6 +4124,16 @@ export class ToolRegistryClass {
     this.servers.clear();
   }
 
+  /** Test-only: forget every registered tool so a suite can register just the tools it exercises. */
+  clearToolsForTesting(): void {
+    this.tools.clear();
+  }
+
+  /** Test-only: unregister one tool by name; a no-op when it was never registered. */
+  removeToolForTesting(name: string): void {
+    this.tools.delete(name);
+  }
+
   // Register a per-transport server-side session-binding teardown handler (issue
   // #4611 Gap D) and return its unsubscribe. `createMcpServer` calls this once per
   // loopback transport and drops it on transport close, so a released session's

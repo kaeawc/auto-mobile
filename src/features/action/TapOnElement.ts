@@ -4233,14 +4233,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     request?: { requestDeadlineMs?: number },
   ): Promise<TapOnFocusResult> {
     // Validate before display resolution/observation can issue any device command.
-    if (options.action === "longPress") {
-      assertLongPressFitsRequestBudget(
-        this.getLongPressDuration(options),
-        request?.requestDeadlineMs === undefined
-          ? undefined
-          : request.requestDeadlineMs - this.timer.now(),
-      );
-    }
+    this.assertLongPressWithinRequestBudget(options, request);
     if (options.display !== undefined) {
       const result = await this.executeOnDisplay(options, signal, recovery);
       if (result) {
@@ -4760,19 +4753,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             : {}),
           predictionContext: {
             toolName: "tapOn",
-            toolArgs: {
-              text: options.text,
-              textAny: options.textAny,
-              id: options.elementId,
-              action: options.action,
-              duration: options.duration,
-              container: options.container,
-              searchUntil: options.searchUntil,
-              selectionStrategy: options.selectionStrategy,
-              accessibilityLink: options.accessibilityLink,
-              subtext: options.subtext,
-              platform: this.device.platform,
-            },
+            toolArgs: this.predictionToolArgs(options),
           },
         },
       );
@@ -4860,25 +4841,71 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       });
 
       // Return error result with debug info instead of throwing
-      const errorMsg = errorMessage(error);
-      return markFocusFailure(
+      return this.readScopeFailureResult(
         requestedAction,
-        {
-          success: false,
-          action: options.action,
-          error: `Failed to perform tap on element: ${errorMsg}`,
-          element: {
-            bounds: { left: 0, top: 0, right: 0, bottom: 0 },
-          } as Element,
-          ...(searchUntilStats ? { searchUntil: searchUntilStats } : {}),
-          ...(error instanceof ActionableError && error.containerFailure
-            ? { containerFailure: error.containerFailure }
-            : {}),
-          ...(debugContext ? { debug: { elementSearch: debugContext } } : {}),
-        },
+        options.action,
         error,
+        searchUntilStats,
+        debugContext,
       );
     }
+  }
+
+  private assertLongPressWithinRequestBudget(
+    options: TapOnElementOptions,
+    request?: { requestDeadlineMs?: number },
+  ): void {
+    if (options.action === "longPress") {
+      assertLongPressFitsRequestBudget(
+        this.getLongPressDuration(options),
+        request?.requestDeadlineMs === undefined
+          ? undefined
+          : request.requestDeadlineMs - this.timer.now(),
+      );
+    }
+  }
+
+  private predictionToolArgs(options: TapOnElementOptions) {
+    return {
+      text: options.text,
+      textAny: options.textAny,
+      id: options.elementId,
+      action: options.action,
+      duration: options.duration,
+      container: options.container,
+      searchUntil: options.searchUntil,
+      selectionStrategy: options.selectionStrategy,
+      accessibilityLink: options.accessibilityLink,
+      subtext: options.subtext,
+      platform: this.device.platform,
+    };
+  }
+
+  private readScopeFailureResult(
+    requestedAction: NonNullable<TapOnElementOptions["action"]>,
+    action: TapOnElementOptions["action"],
+    error: unknown,
+    searchUntilStats: SearchUntilStats | undefined,
+    debugContext: Awaited<ReturnType<typeof buildElementSearchDebugContext>>,
+  ): TapOnFocusResult {
+    const errorMsg = errorMessage(error);
+    return markFocusFailure(
+      requestedAction,
+      {
+        success: false,
+        action,
+        error: `Failed to perform tap on element: ${errorMsg}`,
+        element: {
+          bounds: { left: 0, top: 0, right: 0, bottom: 0 },
+        } as Element,
+        ...(searchUntilStats ? { searchUntil: searchUntilStats } : {}),
+        ...(error instanceof ActionableError && error.containerFailure
+          ? { containerFailure: error.containerFailure }
+          : {}),
+        ...(debugContext ? { debug: { elementSearch: debugContext } } : {}),
+      },
+      error,
+    );
   }
 
   /**

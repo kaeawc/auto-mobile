@@ -33,6 +33,7 @@ import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClien
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { ResolverElementSelector } from "../features/utility/ResolverElementSelector";
+import { ignoreCasePolicy, INSPECT_INTENT } from "../features/utility/SelectionPolicy";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import type { NotificationUIDetector } from "../utils/interfaces/NotificationUIDetector";
 import { createNotificationUIDetector } from "./system-tray/createNotificationUIDetector";
@@ -1216,9 +1217,8 @@ const hasTextMatch = (
   partialMatch: boolean,
 ): boolean =>
   selector.selectByText(viewHierarchy, text, {
-    partialMatch,
-    caseSensitive: false,
-    intentAction: "inspect",
+    ...ignoreCasePolicy(partialMatch),
+    ...INSPECT_INTENT,
   }).totalMatches > 0;
 
 const findTextMatch = (
@@ -1271,9 +1271,8 @@ const findFirstElementMatch = (
   for (const matchType of ["exact", "partial"] as const) {
     for (const text of candidates) {
       const { element } = selector.selectByText(viewHierarchy, text, {
-        partialMatch: matchType === "partial",
-        caseSensitive: false,
-        intentAction: "inspect",
+        ...ignoreCasePolicy(matchType === "partial"),
+        ...INSPECT_INTENT,
       });
       if (element) {
         return { text, matchType, element };

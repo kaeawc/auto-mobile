@@ -9,7 +9,8 @@ import org.gradle.kotlin.dsl.configure
 // is used, otherwise both build types fall back to debug signing — behavior
 // identical to the per-module blocks this replaces. Keystore paths resolve
 // against rootDir (build-level info, Isolated-Projects safe) rather than the
-// rootProject model. isMinifyEnabled/proguardFiles stay in the modules.
+// rootProject model. isMinifyEnabled stays in the modules; proguardFiles is in
+// automobile.android-application.
 
 val releaseStoreFilePath: String? =
   System.getenv("RELEASE_KEYSTORE_PATH") ?: findProperty("RELEASE_KEYSTORE_PATH") as String?

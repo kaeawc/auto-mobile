@@ -18,7 +18,11 @@ import { AndroidBootedDeviceDiscoveryIncompleteError } from "../models/BootedDev
 import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { SimCtlClient, SimctlUnavailableError } from "../utils/ios-cmdline-tools/SimCtlClient";
+import {
+  SimCtlClient,
+  SimctlUnavailableError,
+  type SimCtl,
+} from "../utils/ios-cmdline-tools/SimCtlClient";
 import {
   getSharedDevicectlDeviceLister,
   type IosPhysicalDeviceLister,
@@ -468,10 +472,24 @@ export interface AndroidColdBootAdmitter {
   }): Promise<BootAdmission>;
 }
 
+/** The simctl operations the device manager drives; `getSimulatorListingChecked` stays optional. */
+export type DeviceManagerSimCtl = Pick<
+  SimCtl,
+  | "isAvailable"
+  | "listSimulatorImages"
+  | "getBootedSimulators"
+  | "getBootedSimulatorsChecked"
+  | "getSimulatorListingChecked"
+  | "startSimulator"
+  | "deleteSimulator"
+  | "killSimulator"
+  | "waitForSimulatorReady"
+>;
+
 export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorForDeviceManager;
-  private simctl: SimCtlClient;
+  private simctl: DeviceManagerSimCtl;
   private readonly physicalIosDevices: IosPhysicalDeviceLister;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
   private readonly timer: Pick<Timer, "now">;
@@ -490,7 +508,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    */
   constructor(
     adb: AdbExecutor | null = null,
-    simctl: SimCtlClient | null = null,
+    simctl: DeviceManagerSimCtl | null = null,
     emulator: AndroidEmulatorForDeviceManager | null = null,
     lifecycleCoordinator: VirtualDeviceLifecycleCoordinator = getVirtualDeviceLifecycleCoordinator(),
     timer: Pick<Timer, "now"> = defaultTimer,

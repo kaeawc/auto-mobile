@@ -718,7 +718,7 @@ describe("Explore", () => {
       };
     }
 
-    function seedTargetGraph(): ExportedGraph {
+    async function seedTargetGraph(): Promise<ExportedGraph> {
       fakeGraph.setCurrentAppId("com.test.app");
       for (const screenName of ["Home", "Settings", "Profile"]) {
         fakeGraph.addNode({ screenName, firstSeenAt: 0, lastSeenAt: 0, visitCount: 1 });
@@ -730,7 +730,7 @@ describe("Explore", () => {
     }
 
     test("reports the target graph after leaving the app and exhausting return attempts", async () => {
-      const targetGraph = seedTargetGraph();
+      const targetGraph = await seedTargetGraph();
       const finalTargetGraph: ExportedGraph = {
         ...targetGraph,
         nodes: [
@@ -871,7 +871,7 @@ describe("Explore", () => {
     });
 
     test("a run that only re-traverses known transitions reports no edges added (#10194)", async () => {
-      const initialGraph = seedTargetGraph();
+      const initialGraph = await seedTargetGraph();
       // Re-traversal appends rows to the log; the distinct transitions are unchanged.
       const retraversed = spyOn(fakeGraph, "exportGraphForApp").mockResolvedValue({
         ...initialGraph,
@@ -944,7 +944,7 @@ describe("Explore", () => {
 
     for (const appId of ["com.test.app", null]) {
       test(`clamps report counts when the graph shrinks (initial appId ${appId})`, async () => {
-        const initialGraph = { ...seedTargetGraph(), appId };
+        const initialGraph = { ...(await seedTargetGraph()), appId };
         fakeGraph.clearCurrentGraph();
         explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
         const result = await recoverySeams().generateReport(initialGraph, fakeTimer.now(), false);
@@ -969,7 +969,7 @@ describe("Explore", () => {
         interactionsPerformed: 1,
         screensDiscovered: 0,
         edgesAdded: 0,
-        navigationGraph: fakeGraph.exportGraph(),
+        navigationGraph: await fakeGraph.exportGraph(),
         coverage: { totalScreens: 3, exploredScreens: 1, percentage: 33.33 },
         explorationPath: ["Home"],
         durationMs: 0,
@@ -987,7 +987,7 @@ describe("Explore", () => {
           interactionsPerformed: 1,
           screensDiscovered: 0,
           edgesAdded: 0,
-          navigationGraph: seedTargetGraph(),
+          navigationGraph: await seedTargetGraph(),
           explorationPath: ["Home"],
           coverage: { totalScreens: 3, exploredScreens: 1, percentage: 33.33 },
           durationMs: 0,
@@ -999,20 +999,12 @@ describe("Explore", () => {
         );
         try {
           registerNavigationTools();
-          const registry = ToolRegistry as unknown as {
-            tools: Map<
-              string,
-              {
-                deviceAwareHandler: (
-                  device: BootedDevice,
-                  args: object,
-                ) => Promise<{
-                  content: Array<{ text: string }>;
-                }>;
-              }
-            >;
+          const response = (await ToolRegistry.getRegisteredTool("explore")!.deviceAwareHandler!(
+            device,
+            {},
+          )) as {
+            content: Array<{ text: string }>;
           };
-          const response = await registry.tools.get("explore")!.deviceAwareHandler(device, {});
           const output = JSON.parse(response.content[0]!.text);
           expect(output.success).toBe(true);
           expect(output.stopReason).toBe(stopReason);
@@ -1840,7 +1832,7 @@ describe("Explore", () => {
       }
       fakeGraph.recordNavigationEvent(event("Settings"));
 
-      const [edge] = fakeGraph.getEdgesFrom("Home");
+      const [edge] = await fakeGraph.getEdgesFrom("Home");
       expect(edge.interaction?.toolName).toBe("tapOn");
       expect(edge.interaction?.args).toEqual({
         selector: { elementId: "com.test:id/settings_btn" },
@@ -1988,9 +1980,10 @@ describe("Explore", () => {
         // Back was recorded, so the edge the Back created is stamped pressButton back.
         expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(2);
         expect(
-          fakeGraph
-            .getEdgesFrom("Home")
-            .map((edge) => [edge.interaction?.toolName, edge.interaction?.args]),
+          (await fakeGraph.getEdgesFrom("Home")).map((edge) => [
+            edge.interaction?.toolName,
+            edge.interaction?.args,
+          ]),
         ).toEqual([["pressButton", { button: "back" }]]);
         // Only the Back's own record is held (the fake does not consume on navigation).
         expect(await historySize()).toBe(1);
@@ -2005,9 +1998,9 @@ describe("Explore", () => {
           press.mockRestore();
         }
 
-        expect(fakeGraph.getEdgesFrom("Home").map((edge) => edge.interaction?.toolName)).toEqual(
-          [],
-        );
+        expect(
+          (await fakeGraph.getEdgesFrom("Home")).map((edge) => edge.interaction?.toolName),
+        ).toEqual([]);
         expect(await historySize()).toBe(0);
       });
 
@@ -2024,9 +2017,9 @@ describe("Explore", () => {
         expect(fakeGraph.getMethodCallCount("recordToolCall")).toBe(2);
         expect(await historySize()).toBe(1);
         navigate("Settings");
-        expect(fakeGraph.getEdgesFrom("Home").map((edge) => edge.interaction?.toolName)).toEqual([
-          "tapOn",
-        ]);
+        expect(
+          (await fakeGraph.getEdgesFrom("Home")).map((edge) => edge.interaction?.toolName),
+        ).toEqual(["tapOn"]);
       });
     });
 
@@ -2056,7 +2049,7 @@ describe("Explore", () => {
         press.mockRestore();
       }
 
-      const [edge] = fakeGraph.getEdgesFrom("Home");
+      const [edge] = await fakeGraph.getEdgesFrom("Home");
       expect(edge.interaction?.toolName).toBe("tapOn");
       // The tap's record was withdrawn when the dead end began; only the Back's own
       // record is held (the fake does not consume records on navigation).
@@ -2125,7 +2118,7 @@ describe("Explore", () => {
       expect(toolName).toBe("pressButton");
       expect(args).toEqual({ button: "back" });
       expect(pressButtonSchema.safeParse(args).success).toBe(true);
-      const [edge] = fakeGraph.getEdgesFrom("Settings");
+      const [edge] = await fakeGraph.getEdgesFrom("Settings");
       expect(edge.to).toBe("Home");
       expect(edge.interaction?.toolName).toBe("pressButton");
       expect(edge.interaction?.args).toEqual({ button: "back" });

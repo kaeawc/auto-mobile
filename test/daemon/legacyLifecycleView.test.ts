@@ -39,16 +39,11 @@ test("adapter borrows every map and reflects later changes and WeakSet membershi
 test("real manager adapter follows publish, releasing, operation and finalized identities", async () => {
   const rig = slotAgreementRig();
   const view = rig.manager.getLegacyLifecycleView();
-  const mapNames = {
-    sessions: "sessions",
-    terminalSnapshots: "terminalReleaseSnapshots",
-    recoveredTerminalIntents: "recoveredTerminalReleaseIntents",
-    latestFinalizedIdentities: "latestFinalizedSessionIdentities",
-  };
-  for (const [viewName, privateName] of Object.entries(mapNames)) {
-    expect(Reflect.get(view, viewName)).toBe(Reflect.get(rig.manager, privateName));
-  }
+  expect(view.sessions).toBe(Reflect.get(rig.manager, "sessions"));
   const slots = Reflect.get(rig.manager, "sessionSlots");
+  expect(view.terminalSnapshots).toBe(slots.terminalSnapshots);
+  expect(view.recoveredTerminalIntents).toBe(slots.recoveredTerminalIntents);
+  expect(view.latestFinalizedIdentities).toBe(slots.latestFinalizedIdentities);
   expect(view.releaseOps).toBe(slots.releaseOps);
   expect(view.pendingAssignments).toBe(slots.assignments);
   expect(view.pendingCreations).toBe(slots.creations);

@@ -1582,7 +1582,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Terminate app by package name",
     terminateAppSchema,
     terminateAppHandler,
-    { defaultEnabled: true, outputSchema: terminateAppResultSchema },
+    { defaultEnabled: true, outputSchema: terminateAppResultSchema, stopsApp: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1590,7 +1590,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Intentionally crash a running app through the platform crash path",
     crashAppSchema,
     crashAppHandler,
-    { defaultEnabled: true, outputSchema: crashAppResultSchema },
+    { defaultEnabled: true, outputSchema: crashAppResultSchema, stopsApp: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1614,6 +1614,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
       // CtrlProxy runner is still starting, even though simctl install itself
       // does not use CtrlProxy.
       deviceReadiness: "booted",
+      replacesProcess: true,
     },
   );
 
@@ -1622,7 +1623,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Uninstall app by package name or bundle identifier",
     uninstallAppSchema,
     uninstallAppHandler,
-    { defaultEnabled: true },
+    { defaultEnabled: true, stopsApp: true },
   );
 
   ToolRegistry.registerDeviceAware(

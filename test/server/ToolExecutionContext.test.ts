@@ -1380,7 +1380,7 @@ describe("ToolExecutionContext", () => {
   // branch (`existingSession === session` is false for both) — and, before
   // this fix, that branch called `runDeviceReadinessSetup` directly,
   // unguarded by `readinessUpgradeInFlight`. Both callers join the same
-  // `pendingSessionAssignments` entry (so they resolve to the identical
+  // pending assignment entry (so they resolve to the identical
   // `Session` object), then both would concurrently call
   // `resetSetupState()`/`setup()` on the shared per-device CtrlProxy manager.
   // Routing the fresh-session branch through `ensureReadinessUpgraded` too
@@ -1419,7 +1419,7 @@ describe("ToolExecutionContext", () => {
     // Neither call awaits before the other starts: both synchronously
     // observe `getSessionForNewExecution` returning `null` for this
     // never-before-seen sessionUuid, then join the same
-    // `pendingSessionAssignments` entry once the second call reaches it —
+    // pending assignment entry once the second call reaches it —
     // exactly the race described above.
     const call1 = createToolExecutionContext(
       "session-race-fresh-both",

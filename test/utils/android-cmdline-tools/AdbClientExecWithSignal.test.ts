@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess } from "child_process";
 import {
@@ -22,7 +23,7 @@ type AdbClientInternals = {
     maxBuffer?: number,
     timeoutMs?: number,
     signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort?: boolean,
+    options?: { waitForProcessSettlementAfterAbort?: boolean; onStdout?: (chunk: string) => void },
   ) => Promise<unknown>;
 };
 
@@ -41,6 +42,40 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
     for (const child of children.splice(0)) {
       child.emit("exit", 0, null);
     }
+  });
+
+  test("streams stdout before host settlement and removes its listener afterwards", async () => {
+    const child = createChild();
+    const stdout = new PassThrough();
+    Object.assign(child, { stdout });
+    const pending = Promise.withResolvers<Awaited<ReturnType<AdbClient["execute"]>>>();
+    adbHostProcessExecutor.executeCommandWithChild = () => ({ child, result: pending.promise });
+    const client = new AdbClient(null, null, null, defaultRetryExecutor, new FakeTimer());
+    const internals = client as unknown as AdbClientInternals & {
+      getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
+    };
+    internals.isTestMode = false;
+    internals.getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
+    const chunks: string[] = [];
+    let settled = false;
+    const result = client
+      .execute(["shell", "echo $$; exec input text 'abc'"], {
+        noRetry: true,
+        onStdout: (chunk) => chunks.push(chunk),
+      })
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+    await Promise.resolve();
+    await Promise.resolve();
+    stdout.write(Buffer.from("42"));
+    stdout.write("42\n");
+    expect(chunks).toEqual(["42", "42\n"]);
+    expect(settled).toBe(false);
+    pending.resolve({ stdout: "4242\n", stderr: "" });
+    expect(await result).toMatchObject({ stdout: "4242\n" });
+    expect(stdout.listenerCount("data")).toBe(0);
   });
 
   for (const { name, explicitTimeoutMs, advanceBeforeKillMs, killAtMs } of [
@@ -195,14 +230,9 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
     const internals = client as unknown as AdbClientInternals;
     internals.isTestMode = false;
 
-    const result = internals.execWithSignal(
-      "adb",
-      ["shell", "getprop"],
-      undefined,
-      5,
-      undefined,
-      true,
-    );
+    const result = internals.execWithSignal("adb", ["shell", "getprop"], undefined, 5, undefined, {
+      waitForProcessSettlementAfterAbort: true,
+    });
     timer.advanceTime(5);
 
     await expect(result).rejects.toBeInstanceOf(AdbCommandTimeoutError);
@@ -226,14 +256,9 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
     const internals = client as unknown as AdbClientInternals;
     internals.isTestMode = false;
     let settled = false;
-    const result = internals.execWithSignal(
-      "adb",
-      ["shell", "getprop"],
-      undefined,
-      5,
-      undefined,
-      true,
-    );
+    const result = internals.execWithSignal("adb", ["shell", "getprop"], undefined, 5, undefined, {
+      waitForProcessSettlementAfterAbort: true,
+    });
     void result.then(
       () => {
         settled = true;
@@ -280,7 +305,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
       undefined,
       undefined,
       controller.signal,
-      true,
+      { waitForProcessSettlementAfterAbort: true },
     );
     void result.then(
       () => {
@@ -323,7 +348,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
         undefined,
         5,
         undefined,
-        true,
+        { waitForProcessSettlementAfterAbort: true },
       );
 
       timer.advanceTime(5);

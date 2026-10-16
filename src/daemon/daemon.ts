@@ -1,3 +1,4 @@
+import { holderOf } from "./deviceBinding";
 import { getNativeHelperRegistry } from "../utils/nativeHelpers/NativeHelperRegistry";
 import { terminateActiveAdbProcesses } from "../utils/android-cmdline-tools/AdbClient";
 import type { SessionReleaseReason } from "./releaseReasons";
@@ -13,6 +14,7 @@ import {
   cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
   cancelExecutionsCutBySessionRelease,
   forceStuckSessionRelease,
+  lazySessionReleasePool,
   releaseSessionAndDevice,
 } from "./releaseSessionAndDevice";
 import type { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
@@ -1003,9 +1005,10 @@ export class Daemon {
       registry: () => this.openManagedSlotRegistry(),
       journal: { inFlight: this.managedSlotJournalInFlight },
       work: executionTracker,
-      sessions: managedExecutionSessionsFrom(this.sessionManager, {
-        releaseDevice: (deviceId, sessionId) => this.devicePool.releaseDevice(deviceId, sessionId),
-      }),
+      sessions: managedExecutionSessionsFrom(
+        this.sessionManager,
+        lazySessionReleasePool(() => this.devicePool),
+      ),
       timer: this.timer,
       settler: this.managedSlotJournalOwner(),
       isExecOwnerLive: this.managedSlotOwnerLiveness(),
@@ -1119,9 +1122,10 @@ export class Daemon {
    * the same session-and-device path the drain uses.
    */
   private installManagedSlotAcquisition(): void {
-    const sessions = managedExecutionSessionsFrom(this.sessionManager, {
-      releaseDevice: (deviceId, sessionId) => this.devicePool.releaseDevice(deviceId, sessionId),
-    });
+    const sessions = managedExecutionSessionsFrom(
+      this.sessionManager,
+      lazySessionReleasePool(() => this.devicePool),
+    );
     const acquisition = createDaemonManagedSlotAcquisition({
       registry: () => this.openManagedSlotRegistry(),
       sessions: {
@@ -1560,9 +1564,10 @@ export class Daemon {
     });
     // A released base takes its derived `${base}:${label}` sessions with it (#11091).
     // The pool is created after these callbacks are wired, so resolve it per release.
-    registerDerivedLabelSessionReleaseCascade(this.sessionManager, {
-      releaseDevice: (deviceId, sessionId) => this.devicePool.releaseDevice(deviceId, sessionId),
-    });
+    registerDerivedLabelSessionReleaseCascade(
+      this.sessionManager,
+      lazySessionReleasePool(() => this.devicePool),
+    );
     // A rebind keeps the session live, but its navigation state was collected on
     // the old device and must not follow it to the new one.
     this.sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
@@ -3207,7 +3212,7 @@ export class Daemon {
   private isHeldByAnotherSession(deviceId: string, requesterSessionUuid?: string): boolean {
     const holder =
       this.sessionManager.getSessionForDevice(deviceId) ??
-      this.devicePool.getDevice(deviceId)?.sessionId;
+      holderOf(this.devicePool.getDevice(deviceId));
     if (!holder) {
       return false;
     }
@@ -3232,7 +3237,7 @@ export class Daemon {
     if (this.isHeldByAnotherSession(deviceId, requesterSessionUuid)) {
       return true;
     }
-    if (this.sessionManager.getSessionForDevice(deviceId) ?? pooledDevice.sessionId) {
+    if (this.sessionManager.getSessionForDevice(deviceId) ?? holderOf(pooledDevice)) {
       // The requester's own session holds it; the pool's gates govern others, not the holder.
       return false;
     }
@@ -4432,7 +4437,7 @@ export class Daemon {
     const pooledDeviceAtDisconnect = this.devicePool.getDevice(deviceId);
     const assignmentCountAtDisconnect = pooledDeviceAtDisconnect?.assignmentCount;
     const sessionIdAtDisconnect =
-      pooledDeviceAtDisconnect?.sessionId ?? this.sessionManager.getSessionForDevice(deviceId);
+      holderOf(pooledDeviceAtDisconnect) ?? this.sessionManager.getSessionForDevice(deviceId);
     const sessionAtDisconnect = sessionIdAtDisconnect
       ? this.sessionManager.getSession(sessionIdAtDisconnect)
       : null;
@@ -4859,7 +4864,7 @@ export class Daemon {
       // terminal fence. Pool lookup also covers expired sessions during shutdown.
       const assignedDeviceId =
         expectedSession?.assignedDevice ??
-        this.devicePool.getAllDevices().find((device) => device.sessionId === sessionId)?.id ??
+        this.devicePool.getAllDevices().find((device) => holderOf(device) === sessionId)?.id ??
         null;
       let deviceId: string | null = null;
       let superseded = false;
@@ -4942,7 +4947,7 @@ export class Daemon {
   }
 
   private isSessionDeviceAssigned(deviceId: string | null, sessionId: string): boolean {
-    return deviceId !== null && this.devicePool.getDevice(deviceId)?.sessionId === sessionId;
+    return deviceId !== null && holderOf(this.devicePool.getDevice(deviceId)) === sessionId;
   }
 
   private async cancelAndDrainDeviceExecutions(

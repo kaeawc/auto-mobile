@@ -1,3 +1,4 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -13,7 +14,6 @@ import type { FeatureFlagService } from "../../src/features/featureFlags/Feature
 import { DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE } from "../../src/daemon/types";
 import { ManagedConnectionScopes } from "../../src/daemon/managedSlots/managedConnectionScope";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
@@ -241,7 +241,7 @@ describe("direct frames from a managed connection outside its slots", () => {
         }
       },
     };
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       {

@@ -1,3 +1,5 @@
+import { bindDevice, unbindDevice, holderOf } from "./deviceBinding";
+import { releasePoolDevice } from "./releaseSessionAndDevice";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { throwIfRequestAborted } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -261,7 +263,7 @@ export class ExplicitDeviceBind {
         requesterSessionUuid: sessionId,
       });
     }
-    const heldBefore = this.port.devices.get(deviceId)?.sessionId ?? null;
+    const heldBefore = holderOf(this.port.devices.get(deviceId)) ?? null;
     const boundSessionId = await this.port.withTargetDeviceDiscovery({
       deviceId,
       sessionId,
@@ -322,8 +324,8 @@ export class ExplicitDeviceBind {
           return undefined;
         }
         this.port.assertDeviceCleanupComplete(deviceId);
-        if (device.sessionId) {
-          const existingSession = this.port.sessionManager.getSession(device.sessionId);
+        if (holderOf(device)) {
+          const existingSession = this.port.sessionManager.getSession(holderOf(device)!);
           if (
             existingSession &&
             existingSession.assignedDevice === deviceId &&
@@ -355,8 +357,7 @@ export class ExplicitDeviceBind {
           } else {
             // Looking up an expired owner may itself start its release.
             this.port.assertDeviceCleanupComplete(deviceId);
-            device.sessionId = null;
-            device.status = "idle";
+            unbindDevice(device);
             this.port.notifyDeviceStateChanged(device);
           }
         }
@@ -499,8 +500,7 @@ export class ExplicitDeviceBind {
       platform,
       expectedExistingSessionDeviceId,
     );
-    device.sessionId = sessionId;
-    device.status = "busy";
+    bindDevice(device, sessionId);
     device.lastUsedAt = this.port.nextLastUsedAt();
     device.assignmentCount++;
     device.errorCount = 0;
@@ -822,8 +822,8 @@ export class ExplicitDeviceBind {
       const previousDevice = this.port.devices.get(previousDeviceId);
       const wasAutolocked = previousDevice?.autolockSessionId === sessionId;
       const replacement = this.port.devices.get(deviceId);
-      if (wasAutolocked && replacement?.sessionId === sessionId) {
-        replacement.autolockSessionId = sessionId;
+      if (wasAutolocked && holderOf(replacement) === sessionId) {
+        replacement!.autolockSessionId = sessionId;
       }
       const session = await this.port.sessionManager.rebindSession(sessionId, deviceId, platform, {
         stableDeviceId,
@@ -837,7 +837,7 @@ export class ExplicitDeviceBind {
         );
       }
       await this.cancelOldDeviceWorkForRebind(previousDeviceId, sessionId);
-      await this.port.releaseDevice(previousDeviceId, sessionId);
+      await releasePoolDevice(this.port, previousDeviceId, sessionId);
       return session;
     };
   }

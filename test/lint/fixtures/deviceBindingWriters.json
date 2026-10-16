@@ -1,0 +1,122 @@
+[
+  {
+    "file": "src/daemon/deviceAllocation.ts",
+    "line": 943,
+    "source": "device.sessionId = sessionId;"
+  },
+  {
+    "file": "src/daemon/deviceAllocation.ts",
+    "line": 944,
+    "source": "device.status = \"busy\";"
+  },
+  {
+    "file": "src/daemon/missingDeviceLiveness.ts",
+    "line": 299,
+    "source": "device.status = \"error\";"
+  },
+  {
+    "file": "src/daemon/missingDeviceLiveness.ts",
+    "line": 420,
+    "source": "device.status = \"error\";"
+  },
+  {
+    "file": "src/daemon/missingDeviceLiveness.ts",
+    "line": 574,
+    "source": "device.status = \"idle\";"
+  },
+  {
+    "file": "src/daemon/deviceAutolockManager.ts",
+    "line": 318,
+    "source": "device.sessionId = sessionId;"
+  },
+  {
+    "file": "src/daemon/deviceAutolockManager.ts",
+    "line": 319,
+    "source": "device.status = \"busy\";"
+  },
+  {
+    "file": "src/daemon/explicitDeviceBind.ts",
+    "line": 358,
+    "source": "device.sessionId = null;"
+  },
+  {
+    "file": "src/daemon/explicitDeviceBind.ts",
+    "line": 359,
+    "source": "device.status = \"idle\";"
+  },
+  {
+    "file": "src/daemon/explicitDeviceBind.ts",
+    "line": 502,
+    "source": "device.sessionId = sessionId;"
+  },
+  {
+    "file": "src/daemon/explicitDeviceBind.ts",
+    "line": 503,
+    "source": "device.status = \"busy\";"
+  },
+  {
+    "file": "src/daemon/deviceReplacement.ts",
+    "line": 375,
+    "source": "device.sessionId = null;"
+  },
+  {
+    "file": "src/daemon/deviceReplacement.ts",
+    "line": 376,
+    "source": "device.status = \"idle\";"
+  },
+  {
+    "file": "src/daemon/deviceReplacement.ts",
+    "line": 489,
+    "source": "replacementDevice.sessionId = session.sessionId;"
+  },
+  {
+    "file": "src/daemon/deviceReplacement.ts",
+    "line": 490,
+    "source": "replacementDevice.status = \"busy\";"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 150,
+    "source": "device.sessionId = null;"
+  },
+  {
+    "file": "src/daemon/adbServerResetQuarantine.ts",
+    "line": 151,
+    "source": "device.status = \"idle\";"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 2562,
+    "source": "existing.status = \"idle\";"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4205,
+    "source": "device.sessionId = null;"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4928,
+    "source": "device.sessionId = null;"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 4929,
+    "source": "device.status = \"idle\";"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6173,
+    "source": "device.sessionId = null;"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 6174,
+    "source": "device.status = \"idle\";"
+  },
+  {
+    "file": "src/daemon/devicePool.ts",
+    "line": 8155,
+    "source": "device.status = \"error\";"
+  }
+]

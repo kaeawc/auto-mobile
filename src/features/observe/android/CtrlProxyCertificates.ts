@@ -22,7 +22,8 @@ import type {
   A11yDeviceOwnerStatusResult,
   A11yPermissionResult,
 } from "./types";
-import { generateSecureId, quoteForAdbArg } from "./types";
+import { quoteForAdbArg } from "./types";
+import { createTimestampedId } from "../../../utils/IdGenerator";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 
 /** Directory on device for pushing certificate files */
@@ -635,7 +636,7 @@ export class CtrlProxyCertificates {
   private buildDeviceCertificatePath(sourcePath: string): string {
     const ext = path.extname(sourcePath) || ".crt";
     const base = path.basename(sourcePath, ext);
-    const fileName = `${base}_${this.context.timer.now()}_${generateSecureId()}${ext}`;
+    const fileName = `${createTimestampedId(base, this.context.timer, this.context.idGenerator)}${ext}`;
     return `${DEVICE_CERT_DIR}/${fileName}`;
   }
 }

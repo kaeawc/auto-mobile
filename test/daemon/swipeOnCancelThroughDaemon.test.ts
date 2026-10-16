@@ -1,9 +1,9 @@
+import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_CANCEL_REQUEST_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
@@ -154,7 +154,7 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
     timer = new FakeTimer();
     loopbackCalls = [];
     nextSwipe = [];
-    const server = new UnixSocketServer(
+    const server = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
       { isInitialized: () => false } as DaemonStateAccess,

@@ -1,5 +1,7 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  lazySessionReleasePool,
+  releasePoolDevice,
   releaseSessionAndDevice,
   type SessionReleaseManager,
   type SessionReleasePool,
@@ -47,6 +49,77 @@ class FakeReleasePool implements SessionReleasePool {
     }
   }
 }
+
+describe("releasePoolDevice", () => {
+  test("forwards arguments and returns the pool's promise unchanged", async () => {
+    const promise = Promise.resolve();
+    const calls: Array<[string, string]> = [];
+    const pool: SessionReleasePool = {
+      releaseDevice: (...args) => {
+        calls.push(args);
+        return promise;
+      },
+    };
+    expect(releasePoolDevice(pool, "device", "session")).toBe(promise);
+    expect(calls).toEqual([["device", "session"]]);
+    await promise;
+  });
+
+  test("propagates the pool's rejection unchanged", async () => {
+    const failure = new Error("pool failed");
+    const pool: SessionReleasePool = {
+      releaseDevice: () => Promise.reject(failure),
+    };
+    await expect(releasePoolDevice(pool, "device", "session")).rejects.toBe(failure);
+  });
+});
+
+describe("lazySessionReleasePool", () => {
+  test("resolves late and per call, looks up patched methods, and preserves promise identity", async () => {
+    let pool!: SessionReleasePool;
+    let resolutions = 0;
+    const lazy = lazySessionReleasePool(() => {
+      resolutions++;
+      return pool;
+    });
+    expect(resolutions).toBe(0);
+    const calls: unknown[][] = [];
+    const first = Promise.resolve();
+    const patched = Promise.resolve();
+    const replacement = Promise.resolve();
+    pool = {
+      releaseDevice(...args) {
+        expect(this).toBe(pool);
+        calls.push(["initial", ...args]);
+        return first;
+      },
+    };
+    expect(lazy.releaseDevice("d1", "s1")).toBe(first);
+    expect(resolutions).toBe(1);
+    pool.releaseDevice = function (...args) {
+      expect(this).toBe(pool);
+      calls.push(["patched", ...args]);
+      return patched;
+    };
+    expect(lazy.releaseDevice("d2", "s2")).toBe(patched);
+    expect(resolutions).toBe(2);
+    pool = {
+      releaseDevice(...args) {
+        expect(this).toBe(pool);
+        calls.push(["replacement", ...args]);
+        return replacement;
+      },
+    };
+    expect(lazy.releaseDevice("d3", "s3")).toBe(replacement);
+    expect(resolutions).toBe(3);
+    expect(calls).toEqual([
+      ["initial", "d1", "s1"],
+      ["patched", "d2", "s2"],
+      ["replacement", "d3", "s3"],
+    ]);
+    await Promise.all([first, patched, replacement]);
+  });
+});
 
 describe("releaseSessionAndDevice", () => {
   const warn = spyOn(logger, "warn").mockImplementation(() => {});

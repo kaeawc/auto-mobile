@@ -1,3 +1,4 @@
+import { holderOf } from "./deviceBinding";
 import type { Platform } from "../models";
 import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -58,7 +59,7 @@ export class ForeignClaims {
     maxAgeMs = 0,
   ): Promise<void> {
     const ownership = this.foreignOwnershipFor(platform);
-    if (!ownership || this.port.getDevice(deviceId)?.sessionId) {
+    if (!ownership || holderOf(this.port.getDevice(deviceId))) {
       return;
     }
     const key = `${platform}:${deviceId}`;
@@ -115,7 +116,7 @@ export class ForeignClaims {
    * holds no session on it, so multi-device allocation must not hand it to a plan.
    */
   isDrivenByForeignDaemon(device: PooledDevice): boolean {
-    if (device.sessionId !== null) {
+    if (holderOf(device) !== null) {
       return false;
     }
     const ownership = this.foreignOwnershipFor(device.platform);

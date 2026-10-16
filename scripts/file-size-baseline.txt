@@ -18,7 +18,7 @@
 1213	src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts
 1002	src/daemon/sessionBroker/sqliteStore.ts
 11641	src/daemon/sessionManager.ts
-8803	src/daemon/socketServer.ts
+8668	src/daemon/socketServer.ts
 1808	src/daemon/videoStreamSocketServer.ts
 1147	src/db/deviceSessionRepository.ts
 1089	src/db/failureAnalyticsRepository.ts
@@ -35,9 +35,9 @@
 2253	src/features/action/LaunchApp.ts
 2030	src/features/action/Rotate.ts
 1891	src/features/action/SetUIState.ts
-1953	src/features/action/TapAnyElement.ts
+1947	src/features/action/TapAnyElement.ts
 1424	src/features/action/TapAtCoordinate.ts
-5385	src/features/action/TapOnElement.ts
+5476	src/features/action/TapOnElement.ts
 1040	src/features/action/sendkeys/DefaultSendKeysCommandExecutor.ts
 1420	src/features/action/swipeon/ScrollUntilVisible.ts
 1833	src/features/action/swipeon/SwipeOn.ts
@@ -46,7 +46,7 @@
 1385	src/features/navigation/Explore.ts
 2576	src/features/navigation/NavigationGraphManager.ts
 1568	src/features/observe/DeviceServiceClient.ts
-2511	src/features/observe/ObserveScreen.ts
+2684	src/features/observe/ObserveScreen.ts
 1032	src/features/observe/TakeScreenshot.ts
 1056	src/features/observe/ViewHierarchy.ts
 5122	src/features/observe/android/AndroidCtrlProxyClient.ts
@@ -90,7 +90,7 @@
 1459	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts
 1868	src/utils/android-cmdline-tools/AdbClient.ts
-3336	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts
+3147	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts
 2057	src/utils/fileLock.ts
 1199	src/utils/ios-cmdline-tools/DeviceAppManager.ts
 3185	src/utils/ios-cmdline-tools/SimCtlClient.ts

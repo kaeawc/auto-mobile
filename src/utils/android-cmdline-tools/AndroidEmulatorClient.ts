@@ -73,8 +73,21 @@ import {
   type BootedDeviceScan,
   type BootedDeviceScanOptions,
   type ReadinessDiagnostic,
-  type ReadinessDiagnosticPhase,
 } from "./AndroidDeviceInventoryScanner";
+import {
+  isUnknownEmulatorName,
+  matchesRequestedAvdOrUnknown,
+  nextReadinessNameCandidates,
+  readinessDiagnostic,
+  readinessTarget,
+  readinessTimeoutError,
+  rejectedReadinessDiagnostic,
+  relevantScanDiagnostic,
+  retryUnresolvedReadinessNames,
+  unknownEmulatorName,
+  unmetReadinessPredicate,
+  type TargetReadinessState,
+} from "./emulatorReadinessEvaluation";
 import {
   DefaultEmulatorLauncher,
   type AndroidEmulatorLaunchOutcome,
@@ -116,7 +129,6 @@ const MIN_EMULATOR_POLLING_INTERVAL_MS = 100;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const MAX_POLLING_SLEEP_CHUNK_MS = 500;
 const READINESS_PROBE_TIMEOUT_MS = 10_000;
-const READINESS_NAME_CANDIDATES_PER_ITERATION = 4;
 // A freshly-provisioned AVD's first cold boot can land its serial in ADB
 // `offline` and stay there. This bounds a single re-detect recovery while
 // normal readiness polling continues through the caller's full budget.
@@ -125,11 +137,8 @@ const FRESH_OFFLINE_RECOVERY_COMMAND_TIMEOUT_MS = 5_000;
 // Continue checking at a bounded cadence after recovery so a device that
 // becomes ready before the deadline is observed despite a large configured interval.
 const FRESH_OFFLINE_POST_RECOVERY_POLL_INTERVAL_MS = 5_000;
-const MAX_READINESS_DIAGNOSTIC_CHARS = 512;
 const PRIMARY_USER_UNLOCK_WAIT_MS = 5_000;
 const PRIMARY_USER_UNLOCK_POLL_INTERVAL_MS = 250;
-
-type TargetReadinessState = "absent" | "offline" | "not-ready";
 
 interface OfflineTracker {
   deviceId: string | null;
@@ -586,8 +595,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       avdConfigReader: () => this.avdConfigReader,
       getRunningAvdName: (device, infoTimeoutMs, signal) =>
         this.getRunningAVDName(device, infoTimeoutMs, signal),
-      isUnknownEmulatorName: (name, deviceId) => this.isUnknownEmulatorName(name, deviceId),
-      unknownEmulatorName: (deviceId) => this.unknownEmulatorName(deviceId),
+      isUnknownEmulatorName,
+      unknownEmulatorName,
       throwIfAborted: (signal) => this.throwIfReadinessAborted(signal),
     };
   }
@@ -1752,7 +1761,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       }
     } catch (error) {
       this.throwIfReadinessAborted(signal);
-      diagnostic = this.readinessDiagnostic("avd-name-resolution", error, deviceId);
+      diagnostic = readinessDiagnostic("avd-name-resolution", error, deviceId);
       logger.debug(`Failed to get AVD name for ${deviceId}: ${error}`);
     }
 
@@ -1785,7 +1794,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       logger.debug(`Failed to get AVD name property for ${deviceId}: ${error}`);
       return {
         name: "",
-        diagnostic: this.readinessDiagnostic("avd-name-resolution", error, deviceId),
+        diagnostic: readinessDiagnostic("avd-name-resolution", error, deviceId),
         consoleBusyDuringProbe,
       };
     }
@@ -1990,7 +1999,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       const launchingDeviceId = this.reservations.findReservedLaunchSerial(
         avdName,
         runningEmulators,
-        (name, deviceId) => this.isUnknownEmulatorName(name, deviceId),
+        isUnknownEmulatorName,
       );
       if (launchingDeviceId) {
         logger.info(
@@ -2116,8 +2125,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       // (`deviceTools.confirmPooledAvdIdentity`), so reaching here with two
       // placeholders means no identity was ever established (#6863 review).
       if (
-        this.isUnknownEmulatorName(device.name, device.deviceId) &&
-        this.isUnknownEmulatorName(emulator.name, emulator.deviceId)
+        isUnknownEmulatorName(device.name, device.deviceId) &&
+        isUnknownEmulatorName(emulator.name, emulator.deviceId)
       ) {
         throw new ActionableError(
           `Refusing to kill '${device.deviceId}': the emulator could not name itself, so this ` +
@@ -2231,7 +2240,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   ): boolean {
     return Boolean(
       options.processStop &&
-      this.isUnknownEmulatorName(emulator.name, emulator.deviceId) &&
+      isUnknownEmulatorName(emulator.name, emulator.deviceId) &&
       this.processStopAvdName(device, options),
     );
   }
@@ -2240,7 +2249,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     device: BootedDevice,
     options: EmulatorKillOptions,
   ): string | undefined {
-    return this.isUnknownEmulatorName(device.name, device.deviceId)
+    return isUnknownEmulatorName(device.name, device.deviceId)
       ? options.processStop?.expectedAvdName
       : device.name;
   }
@@ -2534,40 +2543,6 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     }
   }
 
-  private readinessTimeoutError(
-    avdName: string,
-    timeoutMs: number,
-    processExitError: ActionableError | null,
-    correlationFailure?: string,
-    diagnostic?: ReadinessDiagnostic,
-    target?: { deviceId: string; state: TargetReadinessState },
-  ): ActionableError {
-    if (processExitError) {
-      return processExitError;
-    }
-    const details = [
-      correlationFailure ?? `Emulator '${avdName}' failed to become ready within ${timeoutMs}ms`,
-      target ? `target=${target.deviceId}; state=${target.state}` : "",
-      diagnostic
-        ? `Last readiness diagnostic: phase=${diagnostic.phase}; summary=${diagnostic.summary}`
-        : "",
-    ].filter(Boolean);
-    return new ActionableError(details.join("\n"));
-  }
-
-  private readinessDiagnostic(
-    phase: ReadinessDiagnosticPhase,
-    error: unknown,
-    deviceId?: string,
-  ): ReadinessDiagnostic {
-    const redacted = redactAndroidCommandOutput(errorMessage(error)).replace(/\s+/g, " ").trim();
-    const summary =
-      redacted.length <= MAX_READINESS_DIAGNOSTIC_CHARS
-        ? redacted
-        : `${redacted.slice(0, MAX_READINESS_DIAGNOSTIC_CHARS - 16)} [... truncated]`;
-    return { phase, summary, deviceId };
-  }
-
   private throwIfReadinessAborted(signal: AbortSignal | undefined): void {
     if (signal?.aborted) {
       throw signal.reason;
@@ -2587,7 +2562,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       }
       return undefined;
     }
-    return this.readinessDiagnostic("device-discovery", error);
+    return readinessDiagnostic("device-discovery", error);
   }
 
   private markTargetNotReady(tracker: OfflineTracker, targetDeviceId: string | undefined): void {
@@ -2650,183 +2625,12 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     }
   }
 
-  private readinessTarget(
-    deviceId: string | undefined,
-    tracker: OfflineTracker,
-  ): { deviceId: string; state: TargetReadinessState } | undefined {
-    return deviceId && tracker.state ? { deviceId, state: tracker.state } : undefined;
-  }
-
   private readinessTargetDeviceId(
     targetDeviceId: string | undefined,
     childProcess: ChildProcess | null | undefined,
     resolvedTargetDeviceId?: string,
   ): string | undefined {
     return targetDeviceId ?? this.getLaunchTargetDeviceId(childProcess) ?? resolvedTargetDeviceId;
-  }
-
-  private nextReadinessNameCandidates(
-    devices: BootedDevice[],
-    probedSerials: Set<string>,
-    unresolvedSerials: Set<string>,
-  ): BootedDevice[] {
-    const emulatorCandidates = devices.filter((device) => device.deviceId.startsWith("emulator-"));
-    let unprobed = emulatorCandidates.filter((device) => !probedSerials.has(device.deviceId));
-    if (unprobed.length === 0) {
-      probedSerials.clear();
-      unresolvedSerials.clear();
-      unprobed = emulatorCandidates;
-    }
-    // A failed name can be retried while discovery advances, but it may occupy
-    // only one slot so new serials cannot be starved by unresolved names.
-    const retry = emulatorCandidates.find((device) => unresolvedSerials.has(device.deviceId));
-    const selected = unprobed.slice(0, READINESS_NAME_CANDIDATES_PER_ITERATION - (retry ? 1 : 0));
-    if (retry) {
-      selected.push(retry);
-      unresolvedSerials.delete(retry.deviceId);
-    }
-    for (const device of selected) {
-      probedSerials.add(device.deviceId);
-    }
-    return selected;
-  }
-
-  private retryUnresolvedReadinessNames(
-    devices: BootedDevice[],
-    unresolvedSerials: Set<string>,
-  ): void {
-    for (const device of devices) {
-      if (device.name === this.unknownEmulatorName(device.deviceId)) {
-        unresolvedSerials.add(device.deviceId);
-      }
-    }
-  }
-
-  private relevantScanDiagnostic(
-    scan: BootedDeviceScan,
-    targetDeviceId: string | undefined,
-  ): ReadinessDiagnostic | undefined {
-    return scan.diagnostics.findLast(
-      (diagnostic) => !targetDeviceId || diagnostic.deviceId === targetDeviceId,
-    );
-  }
-
-  /**
-   * Returns the first readiness predicate the probed device fails, or undefined when
-   * every required Android readiness signal is satisfied.
-   */
-  private unmetReadinessPredicate(
-    deviceId: string,
-    stateOutput: string,
-    packageManager: ExecResult,
-    sysBootCompleted: string,
-    bootAnimationState: string,
-  ): ReadinessDiagnostic | undefined {
-    if (!stateOutput.includes("device")) {
-      return this.unmetReadinessDiagnostic(
-        "device-state",
-        "adb get-state did not report 'device'",
-        stateOutput,
-        deviceId,
-      );
-    }
-    // Only an explicit package-manager "Failure" blocks readiness. A non-empty stderr
-    // on its own is routinely benign (linker and ART warnings on a healthy device) and
-    // used to keep a fully booted emulator not-ready forever. See #6818.
-    // Checked BEFORE the empty-listing branch: the real failure shape is an empty
-    // stdout plus the reason on stderr, and reporting that as `observed=""` would
-    // throw away the only actionable detail the timeout error carries.
-    if (packageManager.stderr.includes("Failure")) {
-      return this.unmetReadinessDiagnostic(
-        "package-manager",
-        "pm list packages reported a failure",
-        packageManager.stderr.trim(),
-        deviceId,
-      );
-    }
-    if (!packageManager.stdout.includes("package:")) {
-      // With no listing on stdout there is nothing benign for stderr to be noise
-      // about, and the boot-time shape carries the reason there — e.g.
-      // `cmd: Can't find service: package` while the package service is still
-      // coming up. Prefer it over the vacuous `observed=""` (#6818).
-      const stderr = packageManager.stderr.trim();
-      return this.unmetReadinessDiagnostic(
-        "package-manager",
-        "pm list packages returned no 'package:' entries",
-        stderr.length > 0 ? stderr : packageManager.stdout.trim(),
-        deviceId,
-      );
-    }
-    if (sysBootCompleted !== "1") {
-      return this.unmetReadinessDiagnostic(
-        "system-boot-complete",
-        "sys.boot_completed is not 1",
-        sysBootCompleted,
-        deviceId,
-      );
-    }
-    if (bootAnimationState && bootAnimationState !== "stopped") {
-      return this.unmetReadinessDiagnostic(
-        "boot-animation",
-        "init.svc.bootanim has not stopped",
-        bootAnimationState,
-        deviceId,
-      );
-    }
-    return undefined;
-  }
-
-  /**
-   * Records an unmet readiness predicate with the value actually observed, so the
-   * readiness timeout error names the exact check that never passed (#6818).
-   */
-  private unmetReadinessDiagnostic(
-    phase: ReadinessDiagnosticPhase,
-    check: string,
-    observed: string,
-    deviceId: string,
-  ): ReadinessDiagnostic {
-    const diagnostic = this.readinessDiagnostic(
-      phase,
-      `${check}; observed="${observed}"`,
-      deviceId,
-    );
-    logger.debug(`[PARALLEL] ❌ ${deviceId} not ready: ${diagnostic.summary}`);
-    return diagnostic;
-  }
-
-  private rejectedReadinessDiagnostic(
-    checks: Array<[ReadinessDiagnosticPhase, PromiseSettledResult<ExecResult>]>,
-  ): ReadinessDiagnostic | undefined {
-    const rejected = checks.findLast((entry) => entry[1].status === "rejected");
-    if (!rejected || rejected[1].status !== "rejected") {
-      return undefined;
-    }
-    return this.readinessDiagnostic(rejected[0], rejected[1].reason);
-  }
-
-  private unknownEmulatorName(deviceId: string): string {
-    return `Unknown (${deviceId})`;
-  }
-
-  private isUnknownEmulatorName(name: string, deviceId: string): boolean {
-    return name === this.unknownEmulatorName(deviceId);
-  }
-
-  private matchesRequestedAvdOrUnknown(
-    emulator: BootedDevice,
-    avdName: string,
-    targetDeviceId?: string,
-  ): boolean {
-    if (targetDeviceId === emulator.deviceId && !targetDeviceId.startsWith("emulator-")) {
-      return true;
-    }
-
-    return (
-      emulator.name === avdName ||
-      this.isUnknownEmulatorName(emulator.name, emulator.deviceId) ||
-      (targetDeviceId === emulator.deviceId && this.isUnknownEmulatorName(avdName, targetDeviceId))
-    );
   }
 
   private detectDeviceIdFromEmulatorOutput(output: string): string | undefined {
@@ -3030,8 +2834,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       childProcess,
       state.resolvedTargetDeviceId,
     );
-    const target = this.readinessTarget(correlatedTargetDeviceId, offlineTracker);
-    throw this.readinessTimeoutError(
+    const target = readinessTarget(correlatedTargetDeviceId, offlineTracker);
+    throw readinessTimeoutError(
       avdName,
       timeoutMs,
       state.processExitError,
@@ -3051,10 +2855,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       logger.debug(
         `Exact deviceId match for '${correlatedTargetDeviceId}': ${emulator ? `Found ${emulator.deviceId}` : "Not found"}`,
       );
-      if (
-        emulator &&
-        !this.matchesRequestedAvdOrUnknown(emulator, avdName, correlatedTargetDeviceId)
-      ) {
+      if (emulator && !matchesRequestedAvdOrUnknown(emulator, avdName, correlatedTargetDeviceId)) {
         state.correlationFailure =
           `Emulator '${avdName}' failed to become ready within ${timeoutMs}ms: ` +
           `requested AVD '${avdName}' but ${emulator.deviceId} reports '${emulator.name}'. ` +
@@ -3128,7 +2929,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           `sysBootCompleted: ${sysBootCompletedResult.status}, bootAnimation: ${bootAnimationResult.status}`,
       );
       state.lastDiagnostic =
-        this.rejectedReadinessDiagnostic([
+        rejectedReadinessDiagnostic([
           ["device-state", deviceStateResult],
           ["package-manager", packageManagerResult],
           ["system-boot-complete", sysBootCompletedResult],
@@ -3141,7 +2942,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       logger.debug(
         `[PARALLEL] Package manager command completed for ${emulator.deviceId} - output: ${packageManagerResult.value.stdout.length} bytes`,
       );
-      const unmetPredicate = this.unmetReadinessPredicate(
+      const unmetPredicate = unmetReadinessPredicate(
         emulator.deviceId,
         stateOutput,
         packageManagerResult.value,
@@ -3187,11 +2988,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     const { signal, timeoutMs, startTime, probedNameSerials, unresolvedNameSerials } = context;
     const candidateDevices =
       snapshot?.devices && !correlatedTargetDeviceId
-        ? this.nextReadinessNameCandidates(
-            snapshot.devices,
-            probedNameSerials,
-            unresolvedNameSerials,
-          )
+        ? nextReadinessNameCandidates(snapshot.devices, probedNameSerials, unresolvedNameSerials)
         : snapshot?.devices;
     return this.getBootedDevicesWithDiagnostics(
       false,
@@ -3307,8 +3104,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         // For local emulators, check for running devices
         logger.debug(`Checking for running local emulators...`);
         const scan = await this.scanReadinessDevices(context, snapshot, correlatedTargetDeviceId);
-        const scanDiagnostic = this.relevantScanDiagnostic(scan, correlatedTargetDeviceId);
-        this.retryUnresolvedReadinessNames(scan.devices, unresolvedNameSerials);
+        const scanDiagnostic = relevantScanDiagnostic(scan, correlatedTargetDeviceId);
+        retryUnresolvedReadinessNames(scan.devices, unresolvedNameSerials);
         state.lastDiagnostic = scanDiagnostic;
         const runningEmulators = scan.devices;
         logger.debug(`Device scan complete - found ${runningEmulators.length} running emulators`);

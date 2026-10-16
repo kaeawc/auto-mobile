@@ -57,7 +57,7 @@ function harness(
     getTimer: () => timer,
     getDeviceManager: () => manager,
     getDevices: () => devices,
-    getAssignmentMutex: () => mutex,
+    withAssignmentLock: (operation) => mutex.runExclusive(operation),
     getCriteriaMatcher: () => new DeviceCriteriaMatcher(),
     identityEvidenceForBootedDevice: () => ({ unresolved: false }),
     identityEvidenceFields: () => ({}),

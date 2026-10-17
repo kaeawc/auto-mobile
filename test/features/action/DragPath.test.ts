@@ -13,6 +13,7 @@ import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { observation } from "../../helpers/tapAtCoordinate";
@@ -264,6 +265,38 @@ describe("runDragPathStroke", () => {
     expect(frames.map((f) => f.kind)).toEqual(["start"]);
   });
 
+  test("a lost start acknowledgement times out and still sends a cancelling end", async () => {
+    const timer = new FakeTimer();
+    const frames: Frame[] = [];
+    const { client: base } = fakeClient(timer);
+    const client: StrokeClient = {
+      ...base,
+      requestGestureStart: async (_id, x, y) => {
+        frames.push({ kind: "start", at: timer.now(), x, y });
+        await timer.sleep(2000);
+        throw new Error("Gesture start timed out");
+      },
+      requestGestureEnd: async (_id, x, y, cancel) => {
+        frames.push({ kind: "end", at: timer.now(), x, y, cancel });
+        return ok();
+      },
+    };
+    const running = runDragPathStroke(client, plan, { gestureId: "g", timer });
+    const settled = running.then(
+      () => "resolved",
+      (error: Error) => error.message,
+    );
+    await Promise.resolve();
+    expect(frames.map((f) => f.kind)).toEqual(["start"]);
+    timer.advanceTime(2000);
+    expect(await settled).toBe("Gesture start timed out");
+    expect(frames.map((f) => [f.kind, f.cancel])).toEqual([
+      ["start", undefined],
+      ["end", true],
+    ]);
+    expect(frames.at(-1)).toMatchObject({ x: 1, y: 1 });
+  });
+
   test("a refused end is followed by a cancelling end", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -306,6 +339,37 @@ describe("DragPath", () => {
       { x: 80, y: 100 },
     ]);
     expect(frames.map((f) => f.kind)).toEqual(["start", "move", "move", "end"]);
+  });
+
+  test("the default-display route forwards the display fence into the stroke", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const transitions = new FakeDisplayTransitionReader();
+    const { client, frames } = fakeClient(timer);
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(observation(100, 200));
+    // The id is generated right before the stroke, after the fence was captured.
+    const dragPath = new DragPath(android, new FakeAdbExecutor(), {
+      timer,
+      androidClient: client,
+      displayTransitions: transitions,
+      idGenerator: {
+        next: () => {
+          transitions.transition();
+          return "stroke-1";
+        },
+      },
+    });
+    dragPath.window = new FakeWindow();
+    dragPath.observeScreen = observe;
+    const result = await dragPath.execute({
+      points: [
+        { x: 10, y: 10 },
+        { x: 10, y: 100, durationMs: 50 },
+      ],
+    });
+    expect(result.success).toBe(false);
+    expect(frames).toEqual([]);
   });
 
   test("an out-of-bounds point fails before any input", async () => {

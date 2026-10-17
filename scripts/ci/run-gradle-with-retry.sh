@@ -79,6 +79,22 @@ PATTERN
   grep -qiE "${retryable_pattern}|${MISSING_ARTIFACT_PATTERN}" "$log_file"
 }
 
+# A restored dependency cache can hold module metadata whose jars are missing
+# (partial restore, #12706). Gradle then reports ArtifactNotFoundException for
+# artifacts that exist upstream, and --refresh-dependencies alone does not
+# re-download them because the cached metadata still claims they are present.
+PARTIAL_CACHE_PATTERN='ArtifactNotFoundException: Could not find [^ ]+\.(jar|aar|pom|module)'
+
+purge_resolved_module_cache() {
+  local gradle_home="${GRADLE_USER_HOME:-$HOME/.gradle}"
+  local modules_dir="${gradle_home}/caches/modules-2"
+
+  if [[ -d "$modules_dir" ]]; then
+    log "Partial dependency cache detected; purging ${modules_dir}."
+    rm -rf "$modules_dir"
+  fi
+}
+
 has_refresh_dependencies_flag() {
   local arg
 
@@ -150,6 +166,10 @@ while [[ "$attempt" -le "$MAX_ATTEMPTS" ]]; do
   sleep "$delay_seconds"
 
   stop_gradle_daemon "${command[0]}"
+
+  if grep -qE "$PARTIAL_CACHE_PATTERN" "$log_file"; then
+    purge_resolved_module_cache
+  fi
 
   if ! has_refresh_dependencies_flag "${command[@]}"; then
     command+=("--refresh-dependencies")

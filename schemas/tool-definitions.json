@@ -33604,12 +33604,12 @@
           "maximum": 3000
         },
         "fromEdge": {
-          "description": "Start at this screen (or display panel) edge and swipe inward; direction must point inward (left->right, right->left, top->down, bottom->up). Exclusive with container, lookFor, autoTarget=true. With Android gesture navigation a very-near-edge swipe may be taken as system back/home",
+          "description": "Start at this screen (or display panel) edge and swipe inward; direction must point inward (left->right, right->left, top->down, bottom->up). Exclusive with container, lookFor, autoTarget=true. By default the start point is inset from the edge by the system bars/gesture insets (Android left/right: gesture inset plus edgeInset, e.g. x=88 for 78px + edgeInset 10), so the swipe stays in the app; pass includeSystemInsets:true to start at the physical screen edge (edgeInset px in), where a very-near-edge swipe may be taken as system back/home",
           "type": "string",
           "enum": ["left", "right", "top", "bottom"]
         },
         "edgeInset": {
-          "description": "With fromEdge: how far inside the edge the touch starts, px (iOS points); default 4 (iOS swipe-back needs the first ~20 pt)",
+          "description": "With fromEdge: how far inside the edge the touch starts, px (iOS points); default 4 (iOS swipe-back needs the first ~20 pt). Measured from the content edge (after system insets) unless includeSystemInsets:true",
           "type": "integer",
           "minimum": 0,
           "maximum": 50

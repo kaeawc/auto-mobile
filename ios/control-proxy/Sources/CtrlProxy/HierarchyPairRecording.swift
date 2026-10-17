@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 
 /// Records each `(xcuitest, sdk)` input pair the runner hands to `HierarchyMerger` on

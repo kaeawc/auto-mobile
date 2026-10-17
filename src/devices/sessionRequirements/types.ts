@@ -141,6 +141,8 @@ export interface AndroidSessionDeviceCatalog {
   provenance: CatalogProvenance;
   profiles: readonly AndroidCatalogProfile[];
   releases: readonly AndroidCatalogRelease[];
+  /** ABIs the host can run, best first; same-version ties rank these ahead of flavor. */
+  hostAbis?: readonly string[];
 }
 
 export type SessionDeviceCatalog = IosSessionDeviceCatalog | AndroidSessionDeviceCatalog;

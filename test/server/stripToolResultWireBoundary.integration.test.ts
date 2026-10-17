@@ -530,8 +530,8 @@ describe("device lifecycle ordinary-client structured output", () => {
     },
   );
 
-  test("displayConfig still has no schema and is stripped for an ordinary client", async () => {
-    const tool = ToolRegistry.getRegisteredTool("displayConfig")!;
+  test("homeScreen still has no schema and is stripped for an ordinary client", async () => {
+    const tool = ToolRegistry.getRegisteredTool("homeScreen")!;
     expect(tool.outputSchema).toBeUndefined();
     const payload = { message: "Display configuration", success: false };
     const handler = spyOn(tool, "handler").mockResolvedValue({
@@ -539,7 +539,7 @@ describe("device lifecycle ordinary-client structured output", () => {
       structuredContent: payload,
     });
     try {
-      const result = await fixture.client.callTool({ name: "displayConfig", arguments: {} });
+      const result = await fixture.client.callTool({ name: "homeScreen", arguments: {} });
       expect(result.structuredContent).toBeUndefined();
       expect(JSON.parse((result.content[0] as { text: string }).text)).toEqual(payload);
     } finally {

@@ -1,5 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
-import { defaultLockOwnerGenerationProbe } from "../daemon/lockOwnerGeneration";
+import { defaultLockOwnerGenerationProbe } from "../utils/lockOwnerGeneration";
 import { ProcessTableReader } from "../features/bootAdmission/processTableRetry";
 import { nodeProcFs } from "../features/bootAdmission/procProcessTable";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../utils/HostCommandExecutor";

@@ -1,10 +1,13 @@
 import { isStrictlyScoped } from "../utility/ScopedSelection";
+import { readFreshPlatformHierarchy, returnsRawHierarchyUnfiltered } from "./tapHierarchyRead";
 import {
+  assertLongPressWithinHardMax,
+  containerSelectorError,
+  failedTapResult,
   isContainerAvailable,
   resolveSearchUntilDuration,
   throwIfLongPressInterrupted,
 } from "./tapSharedHelpers";
-import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
   withObservationReadScope,
   wasHierarchyReadDuringCall,
@@ -90,12 +93,12 @@ import {
   type PerformanceTracker,
 } from "../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { pollSearchUntil } from "./searchUntilPoller";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { type Timer } from "../../utils/SystemTimer";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../utility/viewHierarchySearch";
-import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
@@ -518,18 +521,18 @@ export class TapAnyElement extends BaseVisualChange {
     this.beforeAndroidTapForTesting = callback;
   }
 
-  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
   private async executeAndroidTap(
     action: TapAnyElementOptions["action"],
     x: number,
     y: number,
     durationMs: number,
     target: CapturedTapTarget,
-    signal?: AbortSignal,
     fenceOptions: DisplayFenceOption & {
+      signal?: AbortSignal;
       onActivationWarnings?: (warnings?: string[]) => void;
     } = {},
   ): Promise<void> {
+    const { signal } = fenceOptions;
     const fence = resolveDisplayFence(fenceOptions);
     const { element, capture } = target;
     this.beforeAndroidTapForTesting?.();
@@ -747,15 +750,14 @@ export class TapAnyElement extends BaseVisualChange {
     return fallback.success;
   }
 
-  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
   private async retryAndroidTapIfNoChange(
     preTapHash: string | null,
     target: CapturedTapTarget,
     action: TapAnyElementOptions["action"],
     durationMs: number,
     screenSize?: ObserveResult["screenSize"],
-    signal?: AbortSignal,
     fenceOptions: DisplayFenceOption & {
+      signal?: AbortSignal;
       selectionOptions?: TapAnyElementOptions;
       refresh?: RefreshViewHierarchy;
       dispatch?: (point: { x: number; y: number }) => Promise<void>;
@@ -763,6 +765,7 @@ export class TapAnyElement extends BaseVisualChange {
     } = {},
   ): Promise<void> {
     const fence = fenceOptions.displayFence;
+    const { signal } = fenceOptions;
     const reportedTarget = target;
     if (action !== "tap" || !preTapHash) {
       return;
@@ -775,7 +778,7 @@ export class TapAnyElement extends BaseVisualChange {
           screenSize,
           signal,
         ),
-      (postTapHierarchy) => this.hashViewHierarchy(postTapHierarchy),
+      (postTapHierarchy) => hierarchyFingerprint(postTapHierarchy),
       preTapHash,
       signal,
     );
@@ -826,7 +829,8 @@ export class TapAnyElement extends BaseVisualChange {
       await fenceOptions.dispatch(retryPoint);
       return;
     }
-    await this.executeAndroidTap(action, retryPoint.x, retryPoint.y, durationMs, target, signal, {
+    await this.executeAndroidTap(action, retryPoint.x, retryPoint.y, durationMs, target, {
+      signal,
       displayFence: fence,
       onActivationWarnings: fenceOptions.onActivationWarnings,
     });
@@ -872,26 +876,11 @@ export class TapAnyElement extends BaseVisualChange {
   }
 
   private createErrorResult(action: string, error: string): TapOnElementResult {
-    return {
-      success: false,
-      action,
-      error,
-      element: {
-        bounds: { left: 0, top: 0, right: 0, bottom: 0 },
-      } as Element,
-    };
+    return failedTapResult(action, error);
   }
 
   private validateOptions(options: TapAnyElementOptions): string | null {
-    if (options.container) {
-      const containerSelectorCount = [options.container.elementId, options.container.text].filter(
-        Boolean,
-      ).length;
-      if (containerSelectorCount !== 1) {
-        return "tapAny container must specify exactly one of elementId or text";
-      }
-    }
-    return null;
+    return containerSelectorError(options.container, "tapAny");
   }
 
   private getSearchUntilDuration(options: TapAnyElementOptions): number {
@@ -986,23 +975,11 @@ export class TapAnyElement extends BaseVisualChange {
     return safe;
   }
 
-  private hashViewHierarchy(viewHierarchy: ViewHierarchyResult | null): string | null {
-    return hierarchyFingerprint(viewHierarchy);
-  }
-
   private prepareViewHierarchyForResponse(
     rawHierarchy: ViewHierarchyResult,
     screenSize?: ObserveResult["screenSize"],
   ): ViewHierarchyResult {
-    if (!serverConfig.isRawElementSearchEnabled()) {
-      return rawHierarchy;
-    }
-    if (
-      rawHierarchy?.hierarchy &&
-      typeof rawHierarchy.hierarchy === "object" &&
-      "error" in rawHierarchy.hierarchy &&
-      rawHierarchy.hierarchy.error
-    ) {
+    if (returnsRawHierarchyUnfiltered(serverConfig.isRawElementSearchEnabled(), rawHierarchy)) {
       return rawHierarchy;
     }
     if (this.device.platform === "android") {
@@ -1095,45 +1072,18 @@ export class TapAnyElement extends BaseVisualChange {
     signal?: AbortSignal,
     forceCapture: boolean = false,
   ): Promise<ViewHierarchyResult | null> {
-    const effectiveTimeoutMs = Math.max(0, timeoutMs);
-    switch (this.device.platform) {
-      case "android": {
-        const rawHierarchy = await refreshAndroidViewHierarchy(
-          this.hierarchyAccessibilityService,
-          effectiveTimeoutMs,
-          signal,
-          { adb: this.adb, timer: this.timer },
-        );
-        return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
-      }
-      case "ios": {
-        // Direct sync bypasses the client TTL while retaining the search deadline.
-        const client = IOSCtrlProxyClient.getInstance(this.device);
-        const synced = forceCapture
-          ? await client.requestHierarchySyncForTapRevalidation(
-              undefined,
-              false,
-              signal,
-              effectiveTimeoutMs,
-            )
-          : await client.requestHierarchySync(undefined, false, signal, effectiveTimeoutMs);
-        if (!synced?.hierarchy) {
-          return null;
-        }
-        const hierarchy = this.viewHierarchy.normalizeIosHierarchy(
-          IOSCtrlProxyClient.getInstance(this.device).convertToViewHierarchyResult(
-            synced.hierarchy,
-          ),
-        );
-        const acquisition = synced[iosHierarchyAcquisition];
-        if (acquisition === "device" || acquisition === "client-cache") {
-          Object.assign(hierarchy, { [iosHierarchyAcquisition]: acquisition });
-        }
-        return this.prepareViewHierarchyForResponse(hierarchy, screenSize);
-      }
-      default:
-        throw unsupportedPlatformError(this.device.platform, "tap any element");
-    }
+    return readFreshPlatformHierarchy(
+      {
+        device: this.device,
+        adb: this.adb,
+        timer: this.timer,
+        androidService: this.hierarchyAccessibilityService,
+        viewHierarchy: this.viewHierarchy,
+        prepareForResponse: (raw, size) => this.prepareViewHierarchyForResponse(raw, size),
+        actionLabel: "tap any element",
+      },
+      { timeoutMs, screenSize, signal, forceCapture },
+    );
   }
 
   private getLongPressDuration(
@@ -1143,11 +1093,7 @@ export class TapAnyElement extends BaseVisualChange {
     if (options.action !== "longPress") {
       return 0;
     }
-    if (options.duration !== undefined && options.duration > LONG_PRESS_HARD_MAX_MS) {
-      throw new ActionableError(
-        `longPress duration too large; maximum is ${LONG_PRESS_HARD_MAX_MS} ms; requested ${options.duration} ms`,
-      );
-    }
+    assertLongPressWithinHardMax(options.duration);
     let durationMs =
       this.device.platform === "ios"
         ? TAP_ANY_LONG_PRESS_DEFAULT_DURATION_MS_IOS
@@ -1186,16 +1132,19 @@ export class TapAnyElement extends BaseVisualChange {
    * `TapOnElement`), falling back to the coordinate path if no label is resolvable or
    * the VoiceOver action itself fails.
    */
-  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
   private async executeIosTap(
     action: string,
     x: number,
     y: number,
     longPressDuration: number,
     element?: Element,
-    signal?: AbortSignal,
-    fenceOptions: DisplayFenceOption & { scoped?: boolean; voiceOverEnabled?: boolean } = {},
+    fenceOptions: DisplayFenceOption & {
+      signal?: AbortSignal;
+      scoped?: boolean;
+      voiceOverEnabled?: boolean;
+    } = {},
   ): Promise<void> {
+    const { signal } = fenceOptions;
     const fence = fenceOptions.displayFence;
     const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
     // Fail-safe tap-bias variant (#6267): an indeterminate probe must route
@@ -1224,7 +1173,8 @@ export class TapAnyElement extends BaseVisualChange {
       return;
     }
 
-    await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration, signal, {
+    await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration, {
+      signal,
       displayFence: fence,
     });
   }
@@ -1242,16 +1192,15 @@ export class TapAnyElement extends BaseVisualChange {
    * it from the short fixed press duration never SHRINKS the window a slow-but-
    * healthy CtrlProxy round trip already had (issue #6306 review, P1).
    */
-  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
   private async executeIosTapWithCoordinates(
     xcTestClient: IOSCtrlProxyClient,
     action: string,
     x: number,
     y: number,
     longPressDuration: number,
-    signal?: AbortSignal,
-    fenceOptions: DisplayFenceOption = {},
+    fenceOptions: DisplayFenceOption & { signal?: AbortSignal } = {},
   ): Promise<void> {
+    const { signal } = fenceOptions;
     const fence = resolveDisplayFence(fenceOptions);
     // Short fixed duration for tap/doubleTap, caller-supplied duration for longPress.
     const tapDuration =
@@ -1492,53 +1441,44 @@ export class TapAnyElement extends BaseVisualChange {
     let requestCount = 0;
     let changeCount = 0;
     let element: Element | null = null;
-    const deadline = startTime + searchDurationMs;
-    while (this.timer.now() < deadline) {
-      throwIfAborted(signal);
-      await this.timer.sleep(TapAnyElement.SEARCH_POLL_INTERVAL_MS);
-      const remainingTimeMs = Math.max(0, deadline - this.timer.now());
-      if (remainingTimeMs <= 0) {
-        break;
-      }
-      const refreshed = await refresh(remainingTimeMs, observeResult.screenSize, signal);
-      requestCount += 1;
-      if (!refreshed) {
-        continue;
-      }
+    const polled = await pollSearchUntil({
+      timer: this.timer,
+      startTime,
+      durationMs: searchDurationMs,
+      intervalMs: TapAnyElement.SEARCH_POLL_INTERVAL_MS,
+      pacing: "sleepFirst",
+      // A hierarchy request can consume the last millisecond of the search window. Do not
+      // select from its result after the deadline: CtrlProxy may have served a stale fallback
+      // when its synchronous refresh timed out, and a late candidate must not turn a bounded
+      // search into an unbounded tap.
+      discardLateResult: true,
+      signal,
+      fetch: (remainingTimeMs) => refresh(remainingTimeMs, observeResult.screenSize, signal),
+      accept: (refreshed) => {
+        const hash = hierarchyFingerprint(refreshed);
+        if (hash && hash !== lastHash) {
+          changeCount += 1;
+          lastHash = hash;
+        }
 
-      // A hierarchy request can consume the last millisecond of the
-      // search window. Do not select from its result after the
-      // deadline: CtrlProxy may have served a stale fallback when its
-      // synchronous refresh timed out, and a late candidate must not
-      // turn a bounded search into an unbounded tap.
-      if (this.timer.now() >= deadline) {
-        break;
-      }
-
-      const hash = this.hashViewHierarchy(refreshed);
-      if (hash && hash !== lastHash) {
-        changeCount += 1;
-        lastHash = hash;
-      }
-
-      selectedCapture = identifyObservedHierarchy(
-        this.device.platform,
-        refreshed,
-        "fresh",
-        this.timer,
-        undefined,
-        { iosMultiPanel: this.iosMultiPanel },
-      );
-      const found = this.findClickableElement(options, selectedCapture.hierarchy, {
-        observationScreenSize: observeResult.screenSize,
-        display: observeResult.viewHierarchy,
-      });
-      element = found.element;
-      containerFoundEver = containerFoundEver || found.containerFound;
-      if (element) {
-        break;
-      }
-    }
+        selectedCapture = identifyObservedHierarchy(
+          this.device.platform,
+          refreshed,
+          "fresh",
+          this.timer,
+          undefined,
+          { iosMultiPanel: this.iosMultiPanel },
+        );
+        const found = this.findClickableElement(options, selectedCapture.hierarchy, {
+          observationScreenSize: observeResult.screenSize,
+          display: observeResult.viewHierarchy,
+        });
+        element = found.element;
+        containerFoundEver = containerFoundEver || found.containerFound;
+        return element !== null;
+      },
+    });
+    requestCount = polled.requestCount;
 
     if (!element) {
       this.throwMissingClickableElement(options, containerFoundEver);
@@ -1611,7 +1551,7 @@ export class TapAnyElement extends BaseVisualChange {
     let startTime = this.timer.now();
     let requestCount = 0;
     let changeCount = 0;
-    const lastHash = this.hashViewHierarchy(viewHierarchy);
+    const lastHash = hierarchyFingerprint(viewHierarchy);
 
     const found = this.findClickableElement(options, selectedCapture.hierarchy, {
       observationScreenSize: observeResult.screenSize,
@@ -1670,7 +1610,7 @@ export class TapAnyElement extends BaseVisualChange {
           selectedCapture,
           searchDurationMs,
           startTime,
-          lastHash: this.hashViewHierarchy(viewHierarchy),
+          lastHash: hierarchyFingerprint(viewHierarchy),
           containerFoundEver: current.containerFound,
         }));
       }
@@ -1783,7 +1723,7 @@ export class TapAnyElement extends BaseVisualChange {
   }): Promise<void> {
     const { element, capture: selectedCapture } = target;
     const longPressDuration = this.getLongPressDuration(options);
-    const tapContext = { displayFence: fence, onActivationWarnings };
+    const tapContext = { signal, displayFence: fence, onActivationWarnings };
 
     logger.info(
       `[TapAnyElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on clickable element: ` +
@@ -1793,7 +1733,7 @@ export class TapAnyElement extends BaseVisualChange {
 
     switch (this.device.platform) {
       case "android": {
-        const preTapHash = this.hashViewHierarchy(selectedCapture.hierarchy);
+        const preTapHash = hierarchyFingerprint(selectedCapture.hierarchy);
         const dispatch = targetDisplay
           ? await androidDisplayTapDispatch(
               this.accessibilityService,
@@ -1826,7 +1766,6 @@ export class TapAnyElement extends BaseVisualChange {
             tapPoint.y,
             longPressDuration,
             target,
-            signal,
             tapContext,
           );
         }
@@ -1836,7 +1775,6 @@ export class TapAnyElement extends BaseVisualChange {
           action,
           longPressDuration,
           observeResult.screenSize,
-          signal,
           { ...tapContext, selectionOptions: options, refresh, dispatch },
         );
         break;
@@ -1844,19 +1782,12 @@ export class TapAnyElement extends BaseVisualChange {
       case "ios":
         targetDisplay?.assertCurrent();
         this.assertSelectedCapture(selectedCapture);
-        await this.executeIosTap(
-          action,
-          tapPoint.x,
-          tapPoint.y,
-          longPressDuration,
-          element,
+        await this.executeIosTap(action, tapPoint.x, tapPoint.y, longPressDuration, element, {
           signal,
-          {
-            displayFence: fence,
-            scoped: target.scoped,
-            voiceOverEnabled: target.talkBackState ?? undefined,
-          },
-        );
+          displayFence: fence,
+          scoped: target.scoped,
+          voiceOverEnabled: target.talkBackState ?? undefined,
+        });
         break;
       default:
         throw unsupportedPlatformError(this.device.platform, "tap any element");

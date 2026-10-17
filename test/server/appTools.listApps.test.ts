@@ -19,8 +19,8 @@ import {
   type AppsQueryOptions,
   type AppsQueryResourceContent,
 } from "../../src/server/appResources";
+import { getStructuredField } from "../../src/utils/toolUtils";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { FakeToolUtils } from "../fakes/FakeToolUtils";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
 import type { BootedDevice } from "../../src/models";
 import { createAppToolsHarness } from "../helpers/appToolsHarness";
@@ -87,7 +87,6 @@ describe("listApps tool", () => {
   });
 
   test("returns structured app data (not prose) for the resolved device", async () => {
-    const fakeToolUtils = new FakeToolUtils();
     let capturedOptions: AppsQueryOptions | undefined;
     const fakeContent = fakeAppsContent({
       totalCount: 1,
@@ -104,7 +103,6 @@ describe("listApps tool", () => {
       ],
     });
     appTools.configure("listApps", {
-      toolResponseFormatter: fakeToolUtils,
       queryInstalledApps: async (options) => {
         capturedOptions = options;
         return fakeContent;
@@ -123,8 +121,7 @@ describe("listApps tool", () => {
       profile: undefined,
     });
 
-    expect(fakeToolUtils.getJSONResponseCount()).toBe(1);
-    const payload = fakeToolUtils.getLastJSONResponse();
+    const payload = result.structuredContent as Record<string, unknown>;
     expect(typeof payload.message).toBe("string");
     expect(payload.devices).toEqual(fakeContent.devices);
     expect(payload.totalCount).toBe(1);
@@ -135,10 +132,8 @@ describe("listApps tool", () => {
   });
 
   test("passes an explicit type filter through to the query", async () => {
-    const fakeToolUtils = new FakeToolUtils();
     let capturedOptions: AppsQueryOptions | undefined;
     appTools.configure("listApps", {
-      toolResponseFormatter: fakeToolUtils,
       queryInstalledApps: async (options) => {
         capturedOptions = options;
         return fakeAppsContent({ query: options });
@@ -183,9 +178,7 @@ describe("listApps tool", () => {
   });
 
   test("the message names the applied filter and what it hid, so a client is not left guessing (#6798)", async () => {
-    const fakeToolUtils = new FakeToolUtils();
     appTools.configure("listApps", {
-      toolResponseFormatter: fakeToolUtils,
       queryInstalledApps: async () =>
         fakeAppsContent({
           query: { deviceId: device.deviceId, type: "launchable" },
@@ -195,9 +188,9 @@ describe("listApps tool", () => {
     });
     const tool = ToolRegistry.getTool("listApps");
 
-    await tool!.deviceAwareHandler!(device, {});
+    const result = await tool!.deviceAwareHandler!(device, {});
 
-    const message = fakeToolUtils.getLastJSONResponse().message as string;
+    const message = getStructuredField(result, "message") as string;
     expect(message).toContain("Found 3 app(s)");
     expect(message).toContain("type=launchable");
     expect(message).toContain("177");
@@ -205,9 +198,7 @@ describe("listApps tool", () => {
   });
 
   test("says nothing about hidden apps when the filter hid nothing (#6798)", async () => {
-    const fakeToolUtils = new FakeToolUtils();
     appTools.configure("listApps", {
-      toolResponseFormatter: fakeToolUtils,
       queryInstalledApps: async () =>
         fakeAppsContent({
           query: { deviceId: device.deviceId, type: "all" },
@@ -217,9 +208,9 @@ describe("listApps tool", () => {
     });
     const tool = ToolRegistry.getTool("listApps");
 
-    await tool!.deviceAwareHandler!(device, {});
+    const result = await tool!.deviceAwareHandler!(device, {});
 
-    const message = fakeToolUtils.getLastJSONResponse().message as string;
+    const message = getStructuredField(result, "message") as string;
     expect(message).toContain("Found 180 app(s)");
     expect(message).not.toContain("hidden");
   });
@@ -509,10 +500,12 @@ describe("app permission tools", () => {
         const message = success
           ? `Read 0 app permission state row(s) for ${result.appId}`
           : result.error;
-        expect(response).toEqual({
+        // The pre-structured wire carried exactly this text and isError flag (#11830).
+        expect({ content: response.content, isError: response.isError }).toEqual({
           content: [{ type: "text", text: JSON.stringify({ message, ...result }) }],
           ...(success ? {} : { isError: true }),
         });
+        expect(response.structuredContent).toEqual({ message, ...result });
       } finally {
         query.mockRestore();
       }

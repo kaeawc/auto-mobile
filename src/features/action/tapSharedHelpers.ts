@@ -1,4 +1,5 @@
-import type { ViewHierarchyResult } from "../../models";
+import type { Element, ViewHierarchyResult } from "../../models";
+import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import { ActionableError } from "../../models/ActionableError";
 import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
@@ -60,4 +61,37 @@ export function isContainerAvailable(
     elementSelector.hasContainer?.(viewHierarchy, container) ??
     defaultContainerSelector.hasContainer(viewHierarchy, container)
   );
+}
+
+/** Error text when `container` does not name exactly one of elementId or text; null when valid. */
+export function containerSelectorError(
+  container: ElementContainerSelector | undefined,
+  tool: string,
+): string | null {
+  if (!container) {
+    return null;
+  }
+  const selectorCount = [container.elementId, container.text].filter(Boolean).length;
+  return selectorCount === 1
+    ? null
+    : `${tool} container must specify exactly one of elementId or text`;
+}
+
+/** Reject a longPress duration beyond the hard ceiling before any device command runs. */
+export function assertLongPressWithinHardMax(durationMs: number | undefined): void {
+  if (durationMs !== undefined && durationMs > LONG_PRESS_HARD_MAX_MS) {
+    throw new ActionableError(
+      `longPress duration too large; maximum is ${LONG_PRESS_HARD_MAX_MS} ms; requested ${durationMs} ms`,
+    );
+  }
+}
+
+/** The failed-result base shared by both tap tools: an empty element at the origin. */
+export function failedTapResult(action: string, error: string) {
+  return {
+    success: false as const,
+    action,
+    error,
+    element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } } as Element,
+  };
 }

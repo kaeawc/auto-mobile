@@ -7,21 +7,9 @@
  */
 import { Timer, defaultTimer } from "./SystemTimer";
 
-/**
- * Represents a single timing entry in the performance data
- */
-export interface TimingEntry {
-  name: string;
-  durationMs: number;
-  children?: TimingData;
-}
+import type { TimingData, TimingEntry } from "../models/TimingData";
 
-/**
- * Timing data structure:
- * - Array = serial operations (ordered execution)
- * - Object = parallel operations (concurrent execution)
- */
-export type TimingData = TimingEntry[] | Record<string, TimingEntry>;
+export type { TimingData, TimingEntry };
 
 /**
  * Block type for tracking serial vs parallel operations

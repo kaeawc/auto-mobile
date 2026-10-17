@@ -8,8 +8,7 @@ import {
   findUnavoidableCoordinationDeadlock,
   formatCoordinationDeadlock,
 } from "./CoordinationScheduleFeasibility";
-
-const COORDINATION_TOOLS = new Set(["barrier", "criticalSection"]);
+import { isCoordinationTool } from "./coordinationTools";
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
@@ -401,7 +400,7 @@ export class PlanValidator {
 
     for (let i = 0; i < plan.steps.length; i++) {
       const step = plan.steps[i];
-      if (!COORDINATION_TOOLS.has(step.tool)) {
+      if (!isCoordinationTool(step.tool)) {
         continue;
       }
       const resolved = this.resolveCoordinationEvent(step, i);
@@ -443,7 +442,7 @@ export class PlanValidator {
         typeof sub === "object" &&
         sub !== null &&
         "tool" in sub &&
-        COORDINATION_TOOLS.has(String(sub.tool)),
+        isCoordinationTool(String(sub.tool)),
     );
   }
 

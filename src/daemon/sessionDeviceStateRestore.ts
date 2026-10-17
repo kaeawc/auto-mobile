@@ -250,11 +250,10 @@ export interface SessionDeviceStateRestoreHost {
   /** The clock every session timestamp is stamped and judged with. */
   sessionNow(): number;
   /**
-   * The TTL elapsed for a still-published `session`: run the shared bounded
-   * network restore. `clearIfOwned` drops the restore slot after a definitive
-   * success. The host keeps the restore target, teardown shield and retry path.
+   * Quarantine the device until `cleanup` settles, capped at `capMs`. Must be called
+   * synchronously after the work is dispatched so a concurrent release observes it.
    */
-  restoreNetworkConditionOnExpiry(session: Session, clearIfOwned: () => void): void;
+  registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>, capMs: number): void;
 }
 
 export interface SessionDeviceStateRestoreOptions {
@@ -1209,7 +1208,7 @@ export class SessionDeviceStateRestore {
     if (!this.host.isPublished(session)) {
       return;
     }
-    this.host.restoreNetworkConditionOnExpiry(session, () =>
+    this.restoreNetworkConditionOnExpiryFor(session, () =>
       this.clearNetworkConditionIfOwned(session, expectedGeneration),
     );
   }
@@ -2090,6 +2089,40 @@ export class SessionDeviceStateRestore {
    * is cleared only after a definitive success, so ownership (and quarantine) is
    * retained until the device is actually clean.
    */
+  /**
+   * TTL elapsed for a still-published `session`: reset the device to `none` via the
+   * SAME bounded restore/retry the session-release path uses, and RETAIN restoration
+   * ownership — keep the restore slot and the device quarantined — until the reset
+   * actually SUCCEEDS (issue #6085 review). A transient emulator-console rejection
+   * therefore does not end quarantine and hand a still-shaped device back to the
+   * pool: it retries, and if every attempt is exhausted the slot is left in place so
+   * a later release still retries. Only on success does `clearIfOwned` clear the
+   * slot, so a subsequent release cannot double-restore.
+   */
+  restoreNetworkConditionOnExpiryFor(session: Session, clearIfOwned: () => void): void {
+    const sessionId = session.sessionId;
+    const target = this.networkConditionRestoreTarget(session);
+    if (!target) {
+      // Slot already cleared by a prior restore: nothing to do, no double-restore.
+      return;
+    }
+    logger.info(
+      `Network condition TTL elapsed for session ${sessionId}; resetting device ${target.deviceId} to none`,
+    );
+    this.host.registerPendingDeviceCleanup(
+      target.deviceId,
+      this.runUnderTeardownShield(async () => [
+        {
+          pending: this.restoreNetworkConditionOnExpiry(session, target, clearIfOwned),
+          abandon: () => this.abandonCappedRestore(target, "network-condition"),
+        },
+      ]).then(async (cleanups) => {
+        await Promise.all(cleanups);
+      }),
+      SESSION_RELEASE_TEARDOWN_CAP_MS,
+    );
+  }
+
   async restoreNetworkConditionOnExpiry(
     session: Session,
     target: NetworkConditionRestoreTarget,

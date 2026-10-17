@@ -1,11 +1,9 @@
+import { makePool } from "../helpers/makePool";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { drainUntil, settleWithFakeTime } from "../helpers/fakeTimerStepping";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { beforeAll, expect, test } from "bun:test";
 import { ActionableError } from "../../src/models/ActionableError";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -258,15 +256,11 @@ async function setupSessionlessUnconfirmedRecovery() {
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new LaggingShutdownManager();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+  });
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   // Android discovery cannot confirm the old emulator stopped.

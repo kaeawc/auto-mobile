@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { bindDevice, markDeviceError, statusOf } from "../../src/daemon/deviceBinding";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
@@ -6,15 +7,12 @@ import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisi
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { poolHoldFor } from "../../src/server/deviceDescription";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { listDevicePayloads } from "../../src/server/deviceTools";
 import { assignBindingDevice } from "./sessionBroker/provisioning/bindingFixtures";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Inventory contract: every surface reports the same status for a device. A device in the pool's
 // `error` state that is also reserved (restart-recovery reservation) is reported `error` by
@@ -37,15 +35,11 @@ describe("pool stats for an errored device that is also reserved", () => {
     healthMarkers = new InMemoryDeviceHealthMarkers(timer);
     const manager = new FakeDeviceManager();
     manager.bootedDevices = [ios(SIM_A)];
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "inventory-error-reserved", {
-        timer,
-        deviceHealthMarkers: healthMarkers,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    pool = makePool(sessions, "inventory-error-reserved", {
+      timer,
+      deviceHealthMarkers: healthMarkers,
+      deviceManager: manager,
+    });
     await pool.initializeWithDevices([ios(SIM_A)]);
   });
 
@@ -119,16 +113,12 @@ describe("every pooled device is in exactly one stats bucket matching its listed
     const manager = new FakeDeviceManager();
     devices = ids.map(ios);
     manager.bootedDevices = devices;
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "stats-buckets", {
-        timer,
-        deviceHealthMarkers: healthMarkers,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
-      }),
-    );
+    pool = makePool(sessions, "stats-buckets", {
+      timer,
+      deviceHealthMarkers: healthMarkers,
+      deviceManager: manager,
+      bindingExclusion: new RegistryBindingExclusion(async () => registry, timer),
+    });
     await pool.initializeWithDevices(devices);
     await pool.bindingStableIds("ios");
     await pool.reserveDevicesForRehydration(

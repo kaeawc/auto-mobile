@@ -1,14 +1,11 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // Repro (adoptOnly gap from #7558): when the pool's tracked emulator child has
@@ -62,15 +59,11 @@ test("adoptOnly recovery does not relaunch an AVD still listed at the same seria
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new RealisticStartManager();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer: timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+  });
   try {
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
@@ -130,15 +123,11 @@ test("adoptOnly recovery relaunches an AVD that really disappeared", async () =>
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new RealisticStartManager();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer: timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+  });
   try {
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);

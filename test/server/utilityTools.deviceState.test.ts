@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
@@ -12,7 +13,6 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { BootedDevice, Platform } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -564,14 +564,10 @@ describe("device state tools", () => {
     async (combined) => {
       const timer = new FakeTimer();
       const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessions, "fake-daemon", {
-          timer,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          deviceManager: new FakeDeviceManager([], []),
-          retryExecutor: new DefaultRetryExecutor(timer),
-        }),
-      );
+      const pool = makePool(sessions, "fake-daemon", {
+        timer,
+        deviceManager: new FakeDeviceManager([], []),
+      });
       DaemonState.getInstance().initialize(sessions, pool);
       const device = createBootedDevice("fake-ios", "ios");
       await sessions.createSession("fake-session", device.deviceId, "ios");
@@ -617,14 +613,10 @@ describe("device state tools", () => {
     // must not register one.
     const fakeTimer = new FakeTimer();
     const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
-    const devicePool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-        timer: fakeTimer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: new FakeDeviceManager([], []),
-        retryExecutor: new DefaultRetryExecutor(fakeTimer),
-      }),
-    );
+    const devicePool = makePool(sessionManager, "test-daemon-session-id", {
+      timer: fakeTimer,
+      deviceManager: new FakeDeviceManager([], []),
+    });
     DaemonState.getInstance().initialize(sessionManager, devicePool);
     await sessionManager.createSession("ios-session", "sim-ios-1", "ios");
 
@@ -696,14 +688,10 @@ describe("device state tools", () => {
       [createBootedDevice("sim-new", "ios", "iPhone 16")],
     );
     PlatformDeviceManagerFactory.setInstance(fakeDeviceManager);
-    const devicePool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-        timer: fakeTimer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: fakeDeviceManager,
-        retryExecutor: new DefaultRetryExecutor(fakeTimer),
-      }),
-    );
+    const devicePool = makePool(sessionManager, "test-daemon-session-id", {
+      timer: fakeTimer,
+      deviceManager: fakeDeviceManager,
+    });
     DaemonState.getInstance().initialize(sessionManager, devicePool);
     const device = createBootedDevice("sim-new", "ios", "iPhone 16");
     await IOSCtrlProxyClient.retireInstance(device.deviceId);
@@ -738,14 +726,10 @@ describe("device state tools", () => {
     const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
     const fakeDeviceManager = new FakeDeviceManager([], [device]);
     PlatformDeviceManagerFactory.setInstance(fakeDeviceManager);
-    const devicePool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-        timer: fakeTimer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: fakeDeviceManager,
-        retryExecutor: new DefaultRetryExecutor(fakeTimer),
-      }),
-    );
+    const devicePool = makePool(sessionManager, "test-daemon-session-id", {
+      timer: fakeTimer,
+      deviceManager: fakeDeviceManager,
+    });
     DaemonState.getInstance().initialize(sessionManager, devicePool);
     AndroidCtrlProxyClient.retireForShutdown(device.deviceId);
     const retired = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
@@ -775,14 +759,7 @@ describe("device state tools", () => {
       return [device];
     };
     PlatformDeviceManagerFactory.setInstance(manager);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     await pool.initializeWithDevices([device]);
     DaemonState.getInstance().initialize(sessionManager, pool);
     const selection = ToolRegistry.getTool("setActiveDevice")!.handler({
@@ -806,14 +783,10 @@ describe("device state tools", () => {
     const fakeTimer = new FakeTimer();
     const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     const device = createBootedDevice("sim-stopped", "ios", "iPhone 16");
-    const devicePool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-        timer: fakeTimer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: new FakeDeviceManager([], [device]),
-        retryExecutor: new DefaultRetryExecutor(fakeTimer),
-      }),
-    );
+    const devicePool = makePool(sessionManager, "test-daemon-session-id", {
+      timer: fakeTimer,
+      deviceManager: new FakeDeviceManager([], [device]),
+    });
     await devicePool.initializeWithDevices([device]);
     const freshDiscovery = new FakeDeviceManager([], []);
     PlatformDeviceManagerFactory.setInstance(freshDiscovery);
@@ -844,14 +817,10 @@ describe("device state tools", () => {
       ],
     );
     PlatformDeviceManagerFactory.setInstance(fakeDeviceManager);
-    const devicePool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-        timer: fakeTimer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: fakeDeviceManager,
-        retryExecutor: new DefaultRetryExecutor(fakeTimer),
-      }),
-    );
+    const devicePool = makePool(sessionManager, "test-daemon-session-id", {
+      timer: fakeTimer,
+      deviceManager: fakeDeviceManager,
+    });
     await devicePool.initializeWithDevices([
       createBootedDevice("sim-a", "ios", "iPhone 15"),
       createBootedDevice("sim-b", "ios", "iPhone 16"),

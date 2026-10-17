@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
@@ -6,12 +7,9 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
 // #11461 (restart ownership). An explicit release is terminal — the UUID ends with it, is never
@@ -56,14 +54,7 @@ describe("explicit release of a restart-recoverable session the daemon has not r
     sessions.stopCleanupTimer();
     const manager = new FakeDeviceManager();
     manager.bootedDevices = [ios(SIM)];
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "explicit-release-unrecovered", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    pool = makePool(sessions, "explicit-release-unrecovered", { timer, deviceManager: manager });
     await pool.initializeWithDevices([ios(SIM)]);
     state = {
       isInitialized: () => true,

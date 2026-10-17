@@ -490,19 +490,11 @@ describe("AccessibilityDetector - Unit Tests", () => {
       fakeFeatureFlags.setFlag("accessibility-auto-detect", true);
 
       // Should return true without calling ADB
-      const enabled = await detector.isAccessibilityEnabled(
-        "device123",
-        fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags,
-      );
+      const enabled = await detector.isAccessibilityEnabled("device123", fakeAdb, fakeFeatureFlags);
       expect(enabled).toBe(true);
       expect(fakeAdb.getCallCount()).toBe(0);
 
-      const service = await detector.detectMethod(
-        "device123",
-        fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags,
-      );
+      const service = await detector.detectMethod("device123", fakeAdb, fakeFeatureFlags);
       expect(service).toBe("talkback");
     });
 
@@ -511,19 +503,11 @@ describe("AccessibilityDetector - Unit Tests", () => {
       fakeFeatureFlags.setFlag("accessibility-auto-detect", false);
 
       // Should return false without calling ADB
-      const enabled = await detector.isAccessibilityEnabled(
-        "device123",
-        fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags,
-      );
+      const enabled = await detector.isAccessibilityEnabled("device123", fakeAdb, fakeFeatureFlags);
       expect(enabled).toBe(false);
       expect(fakeAdb.getCallCount()).toBe(0);
 
-      const service = await detector.detectMethod(
-        "device123",
-        fakeAdb as unknown as AdbClient,
-        fakeFeatureFlags,
-      );
+      const service = await detector.detectMethod("device123", fakeAdb, fakeFeatureFlags);
       expect(service).toBe("unknown");
     });
 
@@ -535,7 +519,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
 
       const enabled1 = await detector.isAccessibilityEnabled(
         "device123",
-        fakeAdb as unknown as AdbClient,
+        fakeAdb,
         fakeFeatureFlags,
       );
       expect(enabled1).toBe(false);
@@ -546,7 +530,7 @@ describe("AccessibilityDetector - Unit Tests", () => {
 
       const enabled2 = await detector.isAccessibilityEnabled(
         "device123",
-        fakeAdb as unknown as AdbClient,
+        fakeAdb,
         fakeFeatureFlags,
       );
       expect(enabled2).toBe(true);

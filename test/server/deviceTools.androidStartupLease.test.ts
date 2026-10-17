@@ -1,5 +1,5 @@
+import { makePool } from "../helpers/makePool";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -11,11 +11,9 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 isolateToolRegistry();
@@ -36,14 +34,7 @@ describe("startDevice Android offline-recovery lease classification", () => {
     timer = new FakeTimer();
     deviceUtils = new FakeDeviceUtils();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     DaemonState.getInstance().initialize(sessionManager, pool);
     setDeviceToolsDependencies({
       deviceManagerFactory: () => deviceUtils,

@@ -85,3 +85,23 @@ describe("definePlainTool", () => {
     expect(await Reflect.apply(registrations[0].handler, undefined, [{ name: "ab" }])).toBe("AB");
   });
 });
+
+describe("late-bound handlers", () => {
+  const tool = defineDeviceTool({
+    name: "lateBound",
+    description: "Late",
+    input: z.object({ n: z.number() }),
+  });
+
+  test("register takes the handler built from dependencies", async () => {
+    const { registrar, registrations } = fakeRegistrar();
+    tool.register(registrar, async (_device, args) => args.n * 2);
+    expect(registrations[0].schema).toBe(tool.schema);
+    expect(await Reflect.apply(registrations[0].handler, undefined, [device, { n: 2 }])).toBe(4);
+  });
+
+  test("register without any handler fails loudly", () => {
+    const { registrar } = fakeRegistrar();
+    expect(() => tool.register(registrar)).toThrow("without a handler");
+  });
+});

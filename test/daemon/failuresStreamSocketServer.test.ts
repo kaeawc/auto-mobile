@@ -6,11 +6,9 @@ import {
   type StreamSocketAuthenticator,
   type StreamAuthorizeInput,
 } from "../../src/daemon/streamSocketAuth";
+import { FakeFailuresStreamRepository } from "../fakes/FakeFailuresStreamRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import {
-  FailuresStreamSocketServer,
-  type FailuresStreamRepository,
-} from "../../src/daemon/failuresStreamSocketServer";
+import { FailuresStreamSocketServer } from "../../src/daemon/failuresStreamSocketServer";
 import type {
   FailuresStreamSocketRequest,
   FailuresStreamSocketResponse,
@@ -21,38 +19,6 @@ import type {
  * assert what normalization produced, and never resolves the real file-backed
  * database (issue #3067).
  */
-class FakeFailuresRepository implements FailuresStreamRepository {
-  lastNotificationsQuery?: Parameters<FailuresStreamRepository["getNotificationsSince"]>[0];
-  lastGroupsQuery?: Parameters<FailuresStreamRepository["getAggregatedGroups"]>[0];
-  lastTimelineQuery?: Parameters<FailuresStreamRepository["getTimelineData"]>[0];
-  acknowledgedIds?: number[];
-
-  async getNotificationsSince(
-    query: Parameters<FailuresStreamRepository["getNotificationsSince"]>[0],
-  ): ReturnType<FailuresStreamRepository["getNotificationsSince"]> {
-    this.lastNotificationsQuery = query;
-    return { notifications: [], lastTimestamp: undefined, lastId: undefined };
-  }
-
-  async getAggregatedGroups(
-    query: Parameters<FailuresStreamRepository["getAggregatedGroups"]>[0],
-  ): ReturnType<FailuresStreamRepository["getAggregatedGroups"]> {
-    this.lastGroupsQuery = query;
-    return { groups: [], totals: { crashes: 0, anrs: 0, toolFailures: 0 } };
-  }
-
-  async getTimelineData(
-    query: Parameters<FailuresStreamRepository["getTimelineData"]>[0],
-  ): ReturnType<FailuresStreamRepository["getTimelineData"]> {
-    this.lastTimelineQuery = query;
-    return { dataPoints: [], previousPeriodTotals: undefined as never };
-  }
-
-  async acknowledgeNotifications(ids: number[]): Promise<void> {
-    this.acknowledgedIds = ids;
-  }
-}
-
 /** Subclass to reach the protected dispatcher without a live socket. */
 class TestableServer extends FailuresStreamSocketServer {
   run(request: FailuresStreamSocketRequest): Promise<FailuresStreamSocketResponse> {
@@ -62,10 +28,10 @@ class TestableServer extends FailuresStreamSocketServer {
 
 function makeServer(authenticator: StreamSocketAuthenticator = { authorize() {} }): {
   server: TestableServer;
-  repo: FakeFailuresRepository;
+  repo: FakeFailuresStreamRepository;
   timer: FakeTimer;
 } {
-  const repo = new FakeFailuresRepository();
+  const repo = new FakeFailuresStreamRepository();
   const timer = new FakeTimer();
   const server = new TestableServer("/tmp/failures-stream-test.sock", timer, repo, {
     authenticator,
@@ -178,7 +144,7 @@ describe("FailuresStreamSocketServer command validation", () => {
 
 describe("failures poll authentication", () => {
   test("rejects missing session with push-stream registration guidance", async () => {
-    const repo = new FakeFailuresRepository();
+    const repo = new FakeFailuresStreamRepository();
     const server = new TestableServer("/fake/failures.sock", new FakeTimer(), repo);
     await expect(server.run({ command: "poll_notifications" })).rejects.toThrow(
       "Register a session with daemon/registerSession",

@@ -7,7 +7,7 @@ test/daemon/devicePool.autolock.test.ts
 test/daemon/devicePool.capturedPredicates.test.ts
 test/daemon/devicePool.heartbeatExpiry.test.ts
 test/daemon/devicePool.ownerDisconnectRelease.test.ts
-test/daemon/devicePool.recoveryShutdown.test.ts
+test/daemon/devicePool.recoveryShutdown.failedReleaseFence.test.ts
 test/daemon/disconnectMonitor-intentionalShutdown.test.ts
 test/daemon/disconnectMonitor-transitionalSimulator.test.ts
 test/daemon/heartbeatAcceptedLog.test.ts

@@ -29,40 +29,56 @@ export type DeviceToolSchema<I extends ObjectSchema> =
     ? ReturnType<typeof addDeviceTargetingToSchema<S, C>>
     : never;
 
+/** The handler of a device tool defined with {@link defineDeviceTool}. */
+export type DeviceToolHandler<I extends ObjectSchema> = (
+  device: BootedDevice,
+  args: z.output<DeviceToolSchema<I>>,
+  progress?: ProgressCallback,
+  signal?: AbortSignal,
+) => Promise<unknown>;
+
 export interface DeviceToolDefinition<I extends ObjectSchema> {
   readonly name: string;
   readonly description: string;
   /** The tool's own arguments. Strictness and device targeting are applied by the helper. */
   readonly input: I;
-  readonly handler: (
-    device: BootedDevice,
-    args: z.output<DeviceToolSchema<I>>,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ) => Promise<unknown>;
+  /**
+   * Omit when the handler is built from dependencies at registration time; pass it to
+   * `register(registry, handler)` instead. The schema is still defined once, at module scope.
+   */
+  readonly handler?: DeviceToolHandler<I>;
   readonly options?: DeviceAwareToolOptions<z.output<DeviceToolSchema<I>>>;
 }
+
+export type PlainToolHandler<I extends ObjectSchema> = (
+  args: z.output<StrictInput<I>>,
+  progress?: ProgressCallback,
+  signal?: AbortSignal,
+) => Promise<unknown>;
 
 export interface PlainToolDefinition<I extends ObjectSchema> {
   readonly name: string;
   readonly description: string;
   readonly input: I;
-  readonly handler: (
-    args: z.output<StrictInput<I>>,
-    progress?: ProgressCallback,
-    signal?: AbortSignal,
-  ) => Promise<unknown>;
+  readonly handler?: PlainToolHandler<I>;
   readonly options?: PlainToolOptions;
 }
 
 /** The registry surface a defined tool registers through; narrowed so tests can fake it. */
 export type ToolRegistrar = Pick<typeof ToolRegistry, "register" | "registerDeviceAware">;
 
-export interface DefinedTool<Schema> {
+export interface DefinedTool<Schema, Handler> {
   readonly name: string;
   /** The final advertised and parsed schema, for callers that assert on the wire contract. */
   readonly schema: Schema;
-  register(registry?: ToolRegistrar): void;
+  register(registry?: ToolRegistrar, handler?: Handler): void;
+}
+
+function requireHandler<H>(name: string, handler: H | undefined): H {
+  if (handler === undefined) {
+    throw new Error(`Tool ${name} was defined without a handler and registered without one`);
+  }
+  return handler;
 }
 
 /**
@@ -71,19 +87,19 @@ export interface DefinedTool<Schema> {
  */
 export function defineDeviceTool<I extends ObjectSchema>(
   definition: DeviceToolDefinition<I>,
-): DefinedTool<DeviceToolSchema<I>> {
+): DefinedTool<DeviceToolSchema<I>, DeviceToolHandler<I>> {
   const strict: z.ZodObject<z.ZodRawShape, z.core.$ZodObjectConfig> = definition.input.strict();
   // oxlint-disable-next-line auto-mobile/no-unknown-cast -- TypeScript cannot resolve the conditional DeviceToolSchema<I> for a generic I; the runtime value is exactly addDeviceTargetingToSchema(strict).
   const schema = addDeviceTargetingToSchema(strict) as unknown as DeviceToolSchema<I>;
   return {
     name: definition.name,
     schema,
-    register: (registry = ToolRegistry) => {
+    register: (registry = ToolRegistry, handler = definition.handler) => {
       registry.registerDeviceAware(
         definition.name,
         definition.description,
         schema,
-        definition.handler,
+        requireHandler(definition.name, handler),
         definition.options,
       );
     },
@@ -93,17 +109,17 @@ export function defineDeviceTool<I extends ObjectSchema>(
 /** Define a plain (no device) tool. The helper applies `.strict()` itself. */
 export function definePlainTool<I extends ObjectSchema>(
   definition: PlainToolDefinition<I>,
-): DefinedTool<StrictInput<I>> {
+): DefinedTool<StrictInput<I>, PlainToolHandler<I>> {
   const schema = definition.input.strict() as StrictInput<I>;
   return {
     name: definition.name,
     schema,
-    register: (registry = ToolRegistry) => {
+    register: (registry = ToolRegistry, handler = definition.handler) => {
       registry.register(
         definition.name,
         definition.description,
         schema,
-        definition.handler,
+        requireHandler(definition.name, handler),
         definition.options,
       );
     },

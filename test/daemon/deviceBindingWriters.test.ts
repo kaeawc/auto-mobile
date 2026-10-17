@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { bindDevice, markDeviceError, statusOf } from "../../src/daemon/deviceBinding";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
@@ -5,14 +6,11 @@ import { MissingDeviceLiveness } from "../../src/daemon/missingDeviceLiveness";
 import type { Session } from "../../src/daemon/sessionManager";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 
 const original: BootedDevice = {
@@ -71,24 +69,20 @@ describe("device binding writers current behavior (#11802)", () => {
     utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", [original, bystander]);
     changes = [];
-    pool = new DevicePool(
-      createDevicePoolDependencies(manager, "binding-characterization", {
-        timer,
-        deviceManager: utils,
-        idGenerator: new FakeIdGenerator(["autolock-owner"]),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        retryExecutor: new DefaultRetryExecutor(timer),
-        recoveryPolicy: { onLoss: false, maxAttempts: 0 },
-        deviceSessionContinuityEnabled: false,
-        missingDeviceLivenessFactory: (port) => {
-          liveness = new MissingDeviceLiveness(port);
-          return liveness;
-        },
-        onDeviceStateChanged: (deviceId, platform) => {
-          changes.push({ deviceId, platform, binding: binding(pool.getDevice(deviceId)!) });
-        },
-      }),
-    );
+    pool = makePool(manager, "binding-characterization", {
+      timer,
+      deviceManager: utils,
+      idGenerator: new FakeIdGenerator(["autolock-owner"]),
+      recoveryPolicy: { onLoss: false, maxAttempts: 0 },
+      deviceSessionContinuityEnabled: false,
+      missingDeviceLivenessFactory: (port) => {
+        liveness = new MissingDeviceLiveness(port);
+        return liveness;
+      },
+      onDeviceStateChanged: (deviceId, platform) => {
+        changes.push({ deviceId, platform, binding: binding(pool.getDevice(deviceId)!) });
+      },
+    });
     await pool.initializeWithDevices([original, bystander]);
   }
 

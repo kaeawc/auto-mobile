@@ -27,6 +27,7 @@ import {
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,
+  requirePooledDevice,
   withProcessPlatform,
 } from "../helpers/devicePoolSuite";
 
@@ -274,10 +275,7 @@ describe("DevicePool", () => {
         });
         await devicePool.addDevice(device);
         readyDeviceIds.length = 0;
-        const captured = devicePool.getDevice(deviceId);
-        if (!captured) {
-          throw new Error("expected pooled device");
-        }
+        const captured = requirePooledDevice(devicePool, deviceId);
         devicePool.markIntentionalShutdown(deviceId);
         const reservation = await devicePool.reserveDeviceForShutdown(deviceId);
         if (!reservation) {
@@ -308,10 +306,7 @@ describe("DevicePool", () => {
       });
       await devicePool.addDevice(device);
       readyDeviceIds.length = 0;
-      const captured = devicePool.getDevice(device.deviceId);
-      if (!captured) {
-        throw new Error("expected pooled device");
-      }
+      const captured = requirePooledDevice(devicePool, device.deviceId);
       expect(await devicePool.retireDeviceForShutdown(captured)).toBe(true);
 
       expect(await devicePool.refreshDevices()).toBe(1);

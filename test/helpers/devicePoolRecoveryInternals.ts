@@ -1,6 +1,22 @@
-import type { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRecordLedger";
-import type { DevicePool } from "../../src/daemon/devicePool";
-import type { DeviceRecoveryCoordinator } from "../../src/daemon/deviceRecoveryCoordinator";
+import type { ChildProcess } from "node:child_process";
+import type { EventEmitter } from "node:events";
+import type { Mutex } from "async-mutex";
+import type {
+  AndroidRecoveryRecord,
+  AndroidRecoveryRecordLedger,
+  AndroidRecoveryReservationKind,
+} from "../../src/daemon/androidRecoveryRecordLedger";
+import type {
+  AdbServerResetRecoveryReservation,
+  DevicePool,
+  PooledDevice,
+  SessionPreservingRecoveryResult,
+} from "../../src/daemon/devicePool";
+import type {
+  DeviceRecoveryCoordinator,
+  SessionPreservingRecovery,
+} from "../../src/daemon/deviceRecoveryCoordinator";
+import type { BootedDevice, DeviceInfo } from "../../src/models";
 import type { EmulatorLossIncidentLedger } from "../../src/daemon/emulatorLossIncidentLedger";
 
 /**
@@ -45,4 +61,58 @@ export function recoveryInternals(pool: DevicePool): DevicePoolRecoveryInternals
     emulatorLossRecoverySettlements: emulatorLossLedger.emulatorLossRecoverySettlements,
     emulatorLossRecoveryResolvers: emulatorLossLedger.emulatorLossRecoveryResolvers,
   };
+}
+
+/**
+ * Private DevicePool members suites reach into. `poolInternals` returns the pool itself, so the
+ * members are real: `spyOn` intercepts them and assigning one replaces it. The view comes from
+ * `Reflect.get` (which returns `any`), so no type assertion is needed or counted.
+ */
+export interface DevicePoolInternals {
+  startedDeviceProcesses: Map<string, ChildProcess>;
+  startedDeviceProcessOutput: Map<string, unknown>;
+  releasedDeviceCaptures: Map<string, { deviceId: string }>;
+  trackStartedDeviceProcess(
+    device: BootedDevice,
+    child: ChildProcess | EventEmitter | null | undefined,
+  ): Promise<void>;
+  evictMissingPooledDevice(
+    device: PooledDevice,
+    reason: string,
+    options?: { attemptDeviceLossRecovery?: boolean; incidentId?: string },
+  ): Promise<void>;
+  assignmentMutex: Pick<Mutex, "runExclusive">;
+  adbServerResetQuarantinedSessions: Set<string>;
+  adbServerResetRecoveryReservations: Map<string, AdbServerResetRecoveryReservation>;
+  recoveryCoordinator: DeviceRecoveryCoordinator;
+  afterAndroidStartupRecoverySnapshot?: () => void;
+  startAndroidRecoveryRecord(
+    sessionId: string,
+    details: Omit<
+      Partial<AndroidRecoveryRecord>,
+      "sessionId" | "generation" | "state" | "reservations"
+    >,
+    reservations: readonly AndroidRecoveryReservationKind[],
+    replace?: boolean,
+  ): AndroidRecoveryRecord;
+  completeEmulatorLossRecovery(
+    incidentId: string | undefined,
+    outcome: "recovered" | "exhausted" | "not-attempted",
+    releasedSessionState?: "awaiting-device",
+  ): Promise<void>;
+  joinSessionPreservingRecovery(
+    recovery: SessionPreservingRecovery,
+    incidentId: string | undefined,
+  ): Promise<SessionPreservingRecoveryResult>;
+  replacePooledDeviceForRuntimeIdentity(
+    pooled: PooledDevice,
+    booted: BootedDevice,
+  ): Promise<boolean>;
+  clearDeviceSessionCache(deviceId: string): Promise<void>;
+  captureReleasedDevice(sessionId: string, deviceId: string): void;
+  runCoordinatedDeviceStart(device: DeviceInfo, deadlineMs: number, op: "start"): Promise<unknown>;
+}
+
+export function poolInternals(pool: DevicePool): DevicePoolInternals {
+  return Reflect.get({ pool }, "pool");
 }

@@ -1,7 +1,7 @@
+import { makePool } from "../helpers/makePool";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
   MAX_DEVICE_READY_TIMEOUT_MS,
@@ -22,11 +22,9 @@ import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/m
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DeviceBootTimeoutError } from "../../src/devices/deviceBootService";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
@@ -527,14 +525,10 @@ describe("platform device preparation tools", () => {
     "%s fences an exact live device session to its MCP owner when autolock is disabled",
     async (toolName, request, device) => {
       sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "daemon-session", {
-          timer: timer,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          deviceManager: deviceUtils,
-          retryExecutor: new DefaultRetryExecutor(timer),
-        }),
-      );
+      const pool = makePool(sessionManager, "daemon-session", {
+        timer,
+        deviceManager: deviceUtils,
+      });
       await pool.initializeWithDevices([device]);
       DaemonState.getInstance().initialize(sessionManager, pool);
       deviceUtils.setBootedDevices(device.platform, [device]);
@@ -641,14 +635,7 @@ describe("platform device preparation tools", () => {
       source: "local",
     };
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(emulator, image);
     DaemonState.getInstance().initialize(sessionManager, pool);
     deviceUtils.setDeviceImages("android", [image]);
@@ -907,14 +894,7 @@ describe("platform device preparation tools", () => {
       deviceId: "emulator-5554",
     };
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(pooled);
     DaemonState.getInstance().initialize(sessionManager, pool);
     deviceUtils.setBootedDevices("android", [
@@ -939,14 +919,7 @@ describe("platform device preparation tools", () => {
       deviceId: "emulator-5562",
     };
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(emulator);
     DaemonState.getInstance().initialize(sessionManager, pool);
     deviceUtils.setBootedDevices("android", [emulator]);
@@ -967,14 +940,7 @@ describe("platform device preparation tools", () => {
       deviceId: "emulator-5562",
     };
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(emulator);
     DaemonState.getInstance().initialize(sessionManager, pool);
     deviceUtils.setBootedDevices("android", [emulator]);
@@ -1022,14 +988,10 @@ describe("platform device preparation tools", () => {
       const persistence = new DeferredSessionPersistence();
       deviceUtils.setDeviceImages(platform, [image]);
       sessionManager = new SessionManager(timer, persistence);
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "daemon-session", {
-          timer: timer,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          deviceManager: deviceUtils,
-          retryExecutor: new DefaultRetryExecutor(timer),
-        }),
-      );
+      const pool = makePool(sessionManager, "daemon-session", {
+        timer,
+        deviceManager: deviceUtils,
+      });
       DaemonState.getInstance().initialize(sessionManager, pool);
       let readinessReleases = 0;
       const reserveReadiness = pool.reserveDeviceForReadiness.bind(pool);
@@ -1132,15 +1094,11 @@ describe("platform device preparation tools", () => {
     };
     deviceUtils.setDeviceImages("android", [image]);
     sessionManager = new SessionManager(timer, persistence);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: repository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: deviceUtils,
+      deviceSessionRepository: repository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     let readinessReleases = 0;
     const reserveReadiness = pool.reserveDeviceForReadiness.bind(pool);
@@ -1214,14 +1172,7 @@ describe("platform device preparation tools", () => {
     };
     deviceUtils.setBootedDevices("android", [emulator]);
     sessionManager = new SessionManager(timer, persistence);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(emulator);
     await pool.bindOrReuseDeviceSession("existing-session", emulator.deviceId, "android");
     DaemonState.getInstance().initialize(sessionManager, pool);
@@ -1260,14 +1211,7 @@ describe("platform device preparation tools", () => {
       deviceId: "emulator-5562",
     };
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     DaemonState.getInstance().initialize(sessionManager, pool);
     deviceUtils.setBootedDevices("android", [emulator]);
 
@@ -1293,14 +1237,7 @@ describe("platform device preparation tools", () => {
       osVersion: "16",
     };
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(emulator, admittedImage);
     DaemonState.getInstance().initialize(sessionManager, pool);
     deviceUtils.setBootedDevices("android", [emulator]);
@@ -1338,14 +1275,7 @@ describe("platform device preparation tools", () => {
       },
     };
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(emulator, admittedImage);
     DaemonState.getInstance().initialize(sessionManager, pool);
     deviceUtils.setBootedDevices("android", [emulator]);
@@ -1362,14 +1292,7 @@ describe("platform device preparation tools", () => {
       deviceId: "emulator-5562",
     };
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(emulator);
     DaemonState.getInstance().initialize(sessionManager, pool);
     deviceUtils.setBootedDevices("android", [emulator]);
@@ -1388,14 +1311,7 @@ describe("platform device preparation tools", () => {
     };
     deviceUtils.setDeviceImages("android", [image]);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     DaemonState.getInstance().initialize(sessionManager, pool);
     setDeviceToolsDependencies({
       notifyDeviceInventoryResourcesChanged: async () => {
@@ -1445,14 +1361,10 @@ describe("platform device preparation tools", () => {
     async (operation, platform, image, target, expectedDeviceId) => {
       deviceUtils.setDeviceImages(platform, [image]);
       sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "daemon-session", {
-          timer: timer,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          deviceManager: deviceUtils,
-          retryExecutor: new DefaultRetryExecutor(timer),
-        }),
-      );
+      const pool = makePool(sessionManager, "daemon-session", {
+        timer,
+        deviceManager: deviceUtils,
+      });
       DaemonState.getInstance().initialize(sessionManager, pool);
 
       let readinessReleases = 0;
@@ -1555,14 +1467,7 @@ describe("platform device preparation tools", () => {
       source: "local",
     };
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(stale, image);
     DaemonState.getInstance().initialize(sessionManager, pool);
     deviceUtils.setDeviceImages("android", [image]);
@@ -1610,14 +1515,7 @@ describe("platform device preparation tools", () => {
       source: "local",
     };
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(target, targetImage);
     await pool.addDevice(unrelated, unrelatedImage);
     DaemonState.getInstance().initialize(sessionManager, pool);
@@ -1675,14 +1573,7 @@ describe("platform device preparation tools", () => {
       source: "local",
     };
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(unrelated, unrelatedImage);
     DaemonState.getInstance().initialize(sessionManager, pool);
     deviceUtils.setBootedDevices("android", [unrelated]);
@@ -1725,14 +1616,7 @@ describe("platform device preparation tools", () => {
       source: "local",
     };
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(stale, image);
     DaemonState.getInstance().initialize(sessionManager, pool);
     const detached = await pool.detachAdbServerResetCohort([pool.getDevice(stale.deviceId)!]);
@@ -1798,14 +1682,7 @@ describe("platform device preparation tools", () => {
     };
     slow.setBootedDevices("android", [emulator]);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: slow,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: slow });
     await pool.initializeWithDevices([emulator]);
     DaemonState.getInstance().initialize(sessionManager, pool);
     const observations: Array<{ source: string }> = [];
@@ -1882,14 +1759,7 @@ describe("platform device preparation tools", () => {
     };
     slow.setBootedDevices("android", [emulator]);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: slow,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: slow });
     await pool.initializeWithDevices([emulator]);
     DaemonState.getInstance().initialize(sessionManager, pool);
     const observations: string[] = [];
@@ -1943,14 +1813,7 @@ describe("platform device preparation tools", () => {
     };
     deviceUtils.setBootedDevices("android", [emulatorA, emulatorB]);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.initializeWithDevices([emulatorA, emulatorB]);
     DaemonState.getInstance().initialize(sessionManager, pool);
     const initialDeviceB = pool.getDevice(emulatorB.deviceId);
@@ -2028,14 +1891,7 @@ describe("platform device preparation tools", () => {
       source: "local",
     };
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceUtils,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: deviceUtils });
     await pool.addDevice(stale, image);
     DaemonState.getInstance().initialize(sessionManager, pool);
     deviceUtils.setDeviceImages("android", [image]);

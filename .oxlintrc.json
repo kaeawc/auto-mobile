@@ -98,6 +98,8 @@
           "warn",
           { "max": 150, "skipBlankLines": true, "skipComments": true }
         ],
+        "max-classes-per-file": ["warn", 1],
+        "auto-mobile/max-class-lines": ["warn", { "max": 1000 }],
         "auto-mobile/catch-convention": "warn",
         "auto-mobile/no-unknown-cast": "error",
         "typescript/no-floating-promises": "warn",

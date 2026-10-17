@@ -14,7 +14,6 @@ import type {
   ObserveScreenExecuteOptions,
   ObserveScreen,
 } from "../../../src/features/observe/interfaces/ObserveScreen";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
@@ -173,7 +172,7 @@ const actions: Record<string, Run> = {
     return action.execute({ text: "Settings", action: "tap", display: key });
   },
   swipeOn: async (key, executor, observe) =>
-    new SwipeOn(device, executor as unknown as AdbClient, {
+    new SwipeOn(device, executor, {
       timer: autoTimer(),
       observeScreen: observe,
       lastRenderedObservation: rendered(key),

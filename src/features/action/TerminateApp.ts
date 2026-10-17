@@ -4,7 +4,7 @@ import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { packageListingContains } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { ActionableError, BootedDevice, ObserveResult, TerminateAppResult } from "../../models";
@@ -132,7 +132,7 @@ export class TerminateApp extends BaseVisualChange {
    */
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     options: TerminateAppOptions = {},
   ) {
     super(device, adb, options.timer ?? defaultTimer);

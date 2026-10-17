@@ -1,5 +1,5 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, BiometricAuthResult, ExecResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -78,7 +78,7 @@ export class BiometricAuth extends BaseVisualChange {
 
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
     private simctl: BiometricSimctl | null = null,
     private readonly iosSdkTriggers: IosSdkTriggerSenderFactory = defaultIosSdkTriggerSenderFactory,

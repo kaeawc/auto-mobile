@@ -3,7 +3,7 @@ import { DispatchedObservationError } from "../../models/DispatchedObservationEr
 import { logger } from "../../utils/logger";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice, ObserveResult, SwipeResult, TapAtOptions } from "../../models";
-import type { SwipeAtOptions } from "../../models/SwipeAtOptions";
+import type { SwipeAtOptions, SwipeAtRecordingContext } from "../../models/SwipeAtOptions";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
@@ -370,7 +370,10 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     return { success: true, x1: from.x, y1: from.y, x2: to.x, y2: to.y, duration };
   }
 
-  async execute(options: SwipeAtOptions, call: ActionCall = {}): Promise<SwipeResult> {
+  async execute(
+    options: SwipeAtOptions,
+    call: ActionCall & { recordingContext?: SwipeAtRecordingContext } = {},
+  ): Promise<SwipeResult> {
     const { progress, signal } = resolveActionCall(call);
     const perf = createGlobalPerformanceTracker();
     perf.serial(TOOL_NAME);
@@ -412,6 +415,9 @@ export class SwipeAtCoordinate extends BaseVisualChange {
             return checked.failure;
           }
           const { resolved } = checked;
+          if (call.recordingContext) {
+            call.recordingContext.screenSize = { ...observation.screenSize };
+          }
 
           throwIfAborted(signal);
           const duration =

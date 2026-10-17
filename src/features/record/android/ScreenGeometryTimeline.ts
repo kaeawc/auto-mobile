@@ -101,6 +101,20 @@ export class ScreenGeometryTimeline implements TimedCoordScaler {
     return this.entryAt(time).scaler;
   }
 
+  /**
+   * The upright display size and rotation in force at `time`, for attaching to a gesture whose
+   * DOWN was at `time` (#12880). `deviceWidth`/`deviceHeight` are rotation-adjusted.
+   */
+  geometryAt(time: number): { deviceWidth: number; deviceHeight: number; orientation: number } {
+    const { rotation, display } = this.entryAt(time);
+    const rotated = rotation % 2 !== 0;
+    return {
+      deviceWidth: rotated ? display.height : display.width,
+      deviceHeight: rotated ? display.width : display.height,
+      orientation: rotation,
+    };
+  }
+
   /** Latest rotation the timeline holds, used to cross-check at stop. */
   get currentRotation(): number {
     return this.entries[this.entries.length - 1].rotation;

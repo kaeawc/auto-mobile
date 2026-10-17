@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 
 /// On-disk shape of one recorded merger input pair.

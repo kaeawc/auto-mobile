@@ -1,3 +1,4 @@
+import { defineDeviceTool } from "./defineTool";
 import { resolveTransportDeadlineMs } from "./formTools";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
@@ -235,36 +236,32 @@ export { setSystemTrayDependencies, resetSystemTrayDependencies, waitForNotifica
 // Schema Definitions
 // ============================================================================
 
-export const shakeSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      duration: z
-        .number()
-        .finite()
-        .int()
-        .min(SHAKE_DURATION_MIN_MS)
-        .max(SHAKE_DURATION_MAX_MS)
-        .optional()
-        .describe(
-          `Shake duration ms (${SHAKE_DURATION_MIN_MS}-${SHAKE_DURATION_MAX_MS}, default 1000)`,
-        ),
-      intensity: z
-        .number()
-        .finite()
-        .min(SHAKE_INTENSITY_MIN)
-        .max(SHAKE_INTENSITY_MAX)
-        .optional()
-        .describe(
-          `Shake intensity on Android (${SHAKE_INTENSITY_MIN}-${SHAKE_INTENSITY_MAX}, default 100); ignored on iOS`,
-        ),
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-      ...responseShapeControlFields,
-    })
-    .strict(),
-);
+const shakeInput = z.object({
+  duration: z
+    .number()
+    .finite()
+    .int()
+    .min(SHAKE_DURATION_MIN_MS)
+    .max(SHAKE_DURATION_MAX_MS)
+    .optional()
+    .describe(
+      `Shake duration ms (${SHAKE_DURATION_MIN_MS}-${SHAKE_DURATION_MAX_MS}, default 1000)`,
+    ),
+  intensity: z
+    .number()
+    .finite()
+    .min(SHAKE_INTENSITY_MIN)
+    .max(SHAKE_INTENSITY_MAX)
+    .optional()
+    .describe(
+      `Shake intensity on Android (${SHAKE_INTENSITY_MIN}-${SHAKE_INTENSITY_MAX}, default 100); ignored on iOS`,
+    ),
+  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+  // not required — a device handle from getAndroid/getApple is sufficient on
+  // its own.
+  platform: platformSchema.optional(),
+  ...responseShapeControlFields,
+});
 
 export const keyboardSchema = addDeviceTargetingToSchema(
   z
@@ -1031,31 +1028,23 @@ export const pinchOnSchema = withJsonSchemaOverride(
   (js) => compactExclusiveSelectorProperties(js, ["container"]),
 );
 
-export const selectAllTextSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      layer: hierarchyLayerSchema.optional(),
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-      ...responseShapeControlFields,
-    })
-    .strict(),
-);
+const selectAllTextInput = z.object({
+  layer: hierarchyLayerSchema.optional(),
+  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+  // not required — a device handle from getAndroid/getApple is sufficient on
+  // its own.
+  platform: platformSchema.optional(),
+  ...responseShapeControlFields,
+});
 
-export const pressButtonSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      button: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]),
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-      ...responseShapeControlFields,
-    })
-    .strict(),
-);
+const pressButtonInput = z.object({
+  button: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]),
+  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+  // not required — a device handle from getAndroid/getApple is sufficient on
+  // its own.
+  platform: platformSchema.optional(),
+  ...responseShapeControlFields,
+});
 
 const systemTrayNotificationSchema = z.object({
   title: z.string().optional().describe("Notification title to match"),
@@ -1344,22 +1333,18 @@ export async function assertSendKeysRunnerCompatible(
   );
 }
 
-export const wakeAndUnlockSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      pin: z
-        .string()
-        .optional()
-        .describe(
-          "Credential to unlock a secure Android device. Optional; logically required to unlock a secure lock unless a pin was already remembered this session. Ignored on iOS.",
-        ),
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-    })
-    .strict(),
-);
+const wakeAndUnlockInput = z.object({
+  pin: z
+    .string()
+    .optional()
+    .describe(
+      "Credential to unlock a secure Android device. Optional; logically required to unlock a secure lock unless a pin was already remembered this session. Ignored on iOS.",
+    ),
+  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+  // not required — a device handle from getAndroid/getApple is sufficient on
+  // its own.
+  platform: platformSchema.optional(),
+});
 
 // openLink gains an optional integrated waitFor (issue #3490 §5): after opening
 // the URL, poll for the predicate — reusing observe's waitFor/settled schema and
@@ -1497,56 +1482,44 @@ export const buildOpenLinkPayload = (
   };
 };
 
-export const recentAppsSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-      ...responseShapeControlFields,
-    })
-    .strict(),
-);
+const recentAppsInput = z.object({
+  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+  // not required — a device handle from getAndroid/getApple is sufficient on
+  // its own.
+  platform: platformSchema.optional(),
+  ...responseShapeControlFields,
+});
 
-export const homeScreenSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-      ...responseShapeControlFields,
-    })
-    .strict(),
-);
+const homeScreenInput = z.object({
+  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+  // not required — a device handle from getAndroid/getApple is sufficient on
+  // its own.
+  platform: platformSchema.optional(),
+  ...responseShapeControlFields,
+});
 
-export const rotateSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      orientation: z.enum(["portrait", "landscape"]),
-      lockOrientation: z
-        .boolean()
-        .optional()
-        .describe(
-          "Android only. In a device session, omission or true holds the orientation until false or session release; an unreadable initial auto-rotate setting is left unchanged by omission. Direct calls restore auto-rotate at the end unless true. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
-        ),
-      display: z
-        .number()
-        .int()
-        .nonnegative()
-        .optional()
-        .describe(
-          "Android logical display ID (default 0). Non-default displays use the per-display window-manager rotation command and do not change or restore global rotation settings; iOS supports only the default display.",
-        ),
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-      ...responseShapeControlFields,
-    })
-    .strict(),
-);
+const rotateInput = z.object({
+  orientation: z.enum(["portrait", "landscape"]),
+  lockOrientation: z
+    .boolean()
+    .optional()
+    .describe(
+      "Android only. In a device session, omission or true holds the orientation until false or session release; an unreadable initial auto-rotate setting is left unchanged by omission. Direct calls restore auto-rotate at the end unless true. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
+    ),
+  display: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe(
+      "Android logical display ID (default 0). Non-default displays use the per-display window-manager rotation command and do not change or restore global rotation settings; iOS supports only the default display.",
+    ),
+  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+  // not required — a device handle from getAndroid/getApple is sufficient on
+  // its own.
+  platform: platformSchema.optional(),
+  ...responseShapeControlFields,
+});
 
 export const setPostureSchema = addDeviceTargetingToSchema(
   z
@@ -2852,6 +2825,76 @@ export function resetWakeAndUnlockFactory(): void {
 /** UI interactions that may cause in-app navigation (the navigation recorder records them). */
 const NAV = { recordsNavigation: true } as const;
 
+export const pressButtonTool = defineDeviceTool({
+  name: "pressButton",
+  description:
+    "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS.",
+  input: pressButtonInput,
+  options: {
+    outputSchema: pressButtonResultSchema,
+    defaultEnabled: true,
+    supportsProgress: true,
+    ...NAV,
+  },
+});
+
+export const pressButtonSchema = pressButtonTool.schema;
+
+export const wakeAndUnlockTool = defineDeviceTool({
+  name: "wakeAndUnlock",
+  description:
+    "Wake a device and unlock its keyguard. Android: swipe lock or secure PIN via `pin`; iOS: wake + swipe-dismiss (pin ignored).",
+  input: wakeAndUnlockInput,
+  options: { outputSchema: wakeAndUnlockResultSchema, defaultEnabled: true },
+});
+
+export const wakeAndUnlockSchema = wakeAndUnlockTool.schema;
+
+export const recentAppsTool = defineDeviceTool({
+  name: "recentApps",
+  description: "Open recent apps",
+  input: recentAppsInput,
+  options: { defaultEnabled: true, supportsProgress: true },
+});
+
+export const recentAppsSchema = recentAppsTool.schema;
+
+const homeScreenTool = defineDeviceTool({
+  name: "homeScreen",
+  description: "Go to home screen",
+  input: homeScreenInput,
+  options: { defaultEnabled: true, supportsProgress: true },
+});
+
+export const homeScreenSchema = homeScreenTool.schema;
+
+export const selectAllTextTool = defineDeviceTool({
+  name: "selectAllText",
+  description: "Select all text in focused input",
+  input: selectAllTextInput,
+  options: { defaultEnabled: false, supportsProgress: true },
+});
+
+export const selectAllTextSchema = selectAllTextTool.schema;
+
+export const shakeTool = defineDeviceTool({
+  name: "shake",
+  description: "Shake device; iOS Simulator only.",
+  input: shakeInput,
+  options: { defaultEnabled: false, supportsProgress: true },
+});
+
+export const shakeSchema = shakeTool.schema;
+
+export const rotateTool = defineDeviceTool({
+  name: "rotate",
+  description: "Rotate device orientation",
+  input: rotateInput,
+  options: { defaultEnabled: false, supportsProgress: true, outputSchema: rotateResultSchema },
+});
+
+export const rotateSchema = rotateTool.schema;
+
 export function registerInteractionTools() {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
@@ -3177,21 +3220,9 @@ export function registerInteractionTools() {
   };
 
   // Register with the tool registry
-  ToolRegistry.registerDeviceAware(
-    "selectAllText",
-    "Select all text in focused input",
-    selectAllTextSchema,
-    selectAllTextHandler,
-    { defaultEnabled: false, supportsProgress: true },
-  );
+  selectAllTextTool.register(ToolRegistry, selectAllTextHandler);
 
-  ToolRegistry.registerDeviceAware(
-    "pressButton",
-    "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS.",
-    pressButtonSchema,
-    pressButtonHandler,
-    { outputSchema: pressButtonResultSchema, defaultEnabled: true, supportsProgress: true, ...NAV },
-  );
+  pressButtonTool.register(ToolRegistry, pressButtonHandler);
 
   ToolRegistry.registerDeviceAware(
     "systemTray",
@@ -3209,13 +3240,7 @@ export function registerInteractionTools() {
     { defaultEnabled: true, supportsProgress: true, outputSchema: sendKeysResultSchema, ...NAV },
   );
 
-  ToolRegistry.registerDeviceAware(
-    "wakeAndUnlock",
-    "Wake a device and unlock its keyguard. Android: swipe lock or secure PIN via `pin`; iOS: wake + swipe-dismiss (pin ignored).",
-    wakeAndUnlockSchema,
-    wakeAndUnlockHandler,
-    { outputSchema: wakeAndUnlockResultSchema, defaultEnabled: true },
-  );
+  wakeAndUnlockTool.register(ToolRegistry, wakeAndUnlockHandler);
 
   ToolRegistry.registerDeviceAware(
     "openLink",
@@ -3289,13 +3314,7 @@ export function registerInteractionTools() {
     ...NAV,
   });
 
-  ToolRegistry.registerDeviceAware(
-    "shake",
-    "Shake device; iOS Simulator only.",
-    shakeSchema,
-    shakeHandler,
-    { defaultEnabled: false, supportsProgress: true },
-  );
+  shakeTool.register(ToolRegistry, shakeHandler);
 
   ToolRegistry.registerDeviceAware(
     "keyboard",
@@ -3311,30 +3330,12 @@ export function registerInteractionTools() {
     },
   );
 
-  ToolRegistry.registerDeviceAware(
-    "recentApps",
-    "Open recent apps",
-    recentAppsSchema,
-    recentAppsHandler,
-    { defaultEnabled: true, supportsProgress: true },
-  );
+  recentAppsTool.register(ToolRegistry, recentAppsHandler);
 
-  ToolRegistry.registerDeviceAware(
-    "homeScreen",
-    "Go to home screen",
-    homeScreenSchema,
-    homeScreenHandler,
-    { defaultEnabled: true, supportsProgress: true },
-  );
+  homeScreenTool.register(ToolRegistry, homeScreenHandler);
 
   // Register the new rotate tool
-  ToolRegistry.registerDeviceAware(
-    "rotate",
-    "Rotate device orientation",
-    rotateSchema,
-    rotateHandler,
-    { defaultEnabled: false, supportsProgress: true, outputSchema: rotateResultSchema },
-  );
+  rotateTool.register(ToolRegistry, rotateHandler);
 
   ToolRegistry.registerDeviceAware(
     "setPosture",

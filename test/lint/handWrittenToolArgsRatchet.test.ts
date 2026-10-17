@@ -8,7 +8,7 @@ import { join } from "node:path";
  * schema instead (#11824). Migrating a tool removes its interface; this cap may only shrink, so a
  * new tool defines its args through the helper rather than adding another interface.
  */
-const MAX_HAND_WRITTEN_ARGS_INTERFACES = 52;
+const MAX_HAND_WRITTEN_ARGS_INTERFACES = 44;
 
 const SERVER_DIR = join(import.meta.dir, "..", "..", "src", "server");
 const ARGS_INTERFACE = /^(export )?interface [A-Za-z]+Args\b/gm;

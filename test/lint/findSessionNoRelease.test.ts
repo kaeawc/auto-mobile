@@ -150,9 +150,9 @@ const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "ToolExecutionContext.ts#storeSetupTiming": 1,
   "deviceLabelMapping.ts#releaseDeviceLabelSessions": 1,
   "deviceToolsStartDevice.ts#callerMayReuse": 1,
-  "index.ts#executeToolCallBody": 1,
-  "index.ts#foreignOwnedExplicitSessionUuid": 1,
   "pipeline/deviceCallDispatch.ts#refuseControlCallBeforeAdmission": 1,
+  "pipeline/ingress/executeToolCall.ts#foreignOwnedExplicitSessionUuid": 1,
+  "pipeline/ingress/routing.ts#admittedSessionDevice": 1,
   "pipeline/planLifecycle.ts#getCleanupDevices": 1,
   "pipeline/planLifecycle.ts#releasePlanBaseSession": 1,
   "planDeviceOwnership.ts#ownsDevice": 1,
@@ -176,8 +176,91 @@ const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
 };
 
 const SERVER_DIR = fileURLToPath(new URL("../../src/server/", import.meta.url));
+const DAEMON_DIR = fileURLToPath(new URL("../../src/daemon/", import.meta.url));
 // Parsing the whole src/server tree can exceed Bun's default hook limit on loaded runners.
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
+
+// `getSession(` calls in src/daemon outside SessionManager and the liveness controller (#12581),
+// keyed by `file#enclosing function`. Counts include non-manager receivers (persistence and
+// broker stores) and are a pre-triage baseline: each call site is an admission, binding, routing
+// or release path where lazy expiry may be observable until a pure reader is proven and moved to
+// findSession (a migrated site drops out, as the appearance sweep did). Counts may only shrink;
+// a new pure reader must call findSession, a new admission site needs an explicit entry here.
+const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
+  "adbServerResetQuarantine.ts#detachAdbServerResetCohort": 1,
+  "adbServerResetQuarantine.ts#getAdbResetRecoverySession": 1,
+  "adbServerResetQuarantine.ts#getAdbServerResetCohortSessionTargets": 1,
+  "adbServerResetQuarantine.ts#settleFailedAdbResetCohortPreparation": 1,
+  "cli/runDaemonCommand.ts#recordLocalDaemonHeartbeat": 1,
+  "cli/runDaemonCommand.ts#requireDaemonSession": 1,
+  "daemon.ts#captureDisconnectCleanup": 1,
+  "daemon.ts#getPersistedSession": 1,
+  "daemon.ts#getSession": 1,
+  "daemon.ts#isCapturedDisconnectTargetCurrent": 1,
+  "daemon.ts#verifyIosDevice": 1,
+  "daemon.ts#warmConfirmedManagedExecution": 1,
+  "daemonRequestHandlers.ts#grantedDeviceOf": 1,
+  "daemonRequestHandlers.ts#handleReleaseSession": 1,
+  "daemonRequestHandlers.ts#releaseSessionOwnerRefusal": 1,
+  "daemonRequestHandlers.ts#releaseUnknownSession": 1,
+  "derivedLabelSessionReleaseCascade.ts#releaseDerived": 1,
+  "deviceAllocation.ts#claimSelectedDeviceForSession": 1,
+  "deviceAutolockManager.ts#adoptResumedAutolockSession": 1,
+  "deviceAutolockManager.ts#attachAutolockSessionToMcpSession": 1,
+  "deviceAutolockManager.ts#getOwnedAutolockSession": 1,
+  "deviceAutolockManager.ts#throwIfFreshStartAlreadyBound": 1,
+  "deviceControlSessionValidity.ts#isDeviceControlRoutingSessionValid": 1,
+  "deviceControlSessionValidity.ts#isDeviceControlTargetOwnerValid": 1,
+  "devicePool.ts#assertDeviceCleanupComplete": 1,
+  "devicePool.ts#assertNotPreparedForOtherRequest": 1,
+  "devicePool.ts#assertSessionReadyForAutomation": 1,
+  "devicePool.ts#bindRecoveredAndroidDeviceSession": 1,
+  "devicePool.ts#consumeAndroidRecoveryCancellation": 1,
+  "devicePool.ts#createSessionAndCommit": 1,
+  "devicePool.ts#detachSessionForAndroidRecovery": 1,
+  "devicePool.ts#deviceHeldByExistingSession": 1,
+  "devicePool.ts#getSession": 3,
+  "devicePool.ts#getSessionPreservingRecoveryTarget": 1,
+  "devicePool.ts#isSessionAssignmentCurrent": 1,
+  "devicePool.ts#isSessionOwnedByOtherConnection": 2,
+  "devicePool.ts#liveOwnershipSession": 1,
+  "devicePool.ts#rebindSameAvdReplacementSession": 1,
+  "devicePool.ts#releaseDisconnectedRecoverySessionWithRetry": 1,
+  "devicePool.ts#resolveOwnedDeviceSessionForMcpSession": 1,
+  "devicePool.ts#restartReleaseReasonForIdentityReplacement": 1,
+  "devicePool.ts#restartReservationOwnerToken": 1,
+  "devicePool.ts#restoreOwnedDeviceSessionsUnderBindClaim": 1,
+  "devicePool.ts#rollbackAssignments": 2,
+  "devicePool.ts#tryPreserveSessionForMissingDevice": 1,
+  "deviceReplacement.ts#restoreSystemUiAnrRecoverySession": 1,
+  "deviceReplacement.ts#rollbackSystemUiAnrRecoveryReplacement": 1,
+  "deviceReplacement.ts#systemUiAnrRecoverySession": 1,
+  "deviceReplacement.ts#validateSystemUiAnrRecoverySession": 1,
+  "deviceReservations.ts#assertReadinessReservationOwner": 1,
+  "emulatorLossIncidentLedger.ts#buildEmulatorLossRecoverySettlement": 1,
+  "emulatorLossIncidentLedger.ts#captureEmulatorLossSession": 1,
+  "emulatorProcessLifecycle.ts#evictStartedDeviceAfterProcessExit": 2,
+  "explicitDeviceBind.ts#assignDeviceToBoundSession": 1,
+  "explicitDeviceBind.ts#claimExplicitlyBoundDevice": 1,
+  "explicitDeviceBind.ts#operation": 1,
+  "explicitDeviceBind.ts#restoreUndeliveredRebind": 2,
+  "httpHeartbeat.ts#handleHttpHeartbeat": 1,
+  "ownerDisconnectRelease.ts#afterAttempt": 1,
+  "ownerDisconnectRelease.ts#fire": 1,
+  "ownerDisconnectRelease.ts#ownerDisconnected": 1,
+  "sessionBroker/broker.ts#commitOwnerExit": 1,
+  "sessionBroker/broker.ts#hasActiveSession": 1,
+  "sessionBroker/broker.ts#ownedSessionRequest": 1,
+  "sessionBroker/provisioning/executionRelease.ts#deviceOf": 1,
+  "sessionBroker/sessionDisposition.ts#sessionDisposition": 1,
+  "sessionClockPersistence.ts#getSession": 1,
+  "sessionForIngress.ts#sessionForIngress": 1,
+  "socketServer.ts#getAssignedDeviceForSession": 1,
+  "socketServer.ts#getDeviceControlSessionIncarnation": 1,
+  "socketServer.ts#grantedDeviceOf": 1,
+  "socketServer.ts#hasActiveDaemonSession": 1,
+  "socketServer.ts#selectInputTargetDevice": 1,
+};
 
 function scanGetSession(source: string): { line: number }[] {
   return scanNamedCalls("fixture.ts", source, "getSession");
@@ -244,5 +327,31 @@ describe("src/server expiring getSession readers", () => {
 
   test("calls stay within the retained expiry reader inventory", () => {
     expect(actual).toEqual(RETAINED_SERVER_EXPIRY_READERS);
+  });
+});
+
+describe("src/daemon expiring getSession readers", () => {
+  let actual: Record<string, number> = {};
+
+  beforeAll(() => {
+    actual = {};
+    for (const file of typeScriptFiles(DAEMON_DIR)) {
+      const relative = relativePosix(DAEMON_DIR, file);
+      if (relative === "sessionManager.ts" || relative === "sessionLivenessLease.ts") {
+        continue;
+      }
+      const text = readFileSync(file, "utf8");
+      if (!text.includes("getSession")) {
+        continue;
+      }
+      for (const owner of scanNamedCallOwners(file, text, "getSession")) {
+        const key = `${relative}#${owner}`;
+        actual[key] = (actual[key] ?? 0) + 1;
+      }
+    }
+  }, TREE_SCAN_HOOK_TIMEOUT_MS);
+
+  test("calls stay within the retained expiry reader inventory", () => {
+    expect(actual).toEqual(RETAINED_DAEMON_EXPIRY_READERS);
   });
 });

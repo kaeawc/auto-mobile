@@ -206,7 +206,11 @@ class Run {
 
   async force(reason = "heartbeat-timeout"): Promise<void> {
     const teardown = Promise.withResolvers<Promise<void>[]>();
-    Reflect.set(this.manager, "drainReleaseTeardown", () => teardown.promise);
+    Reflect.set(
+      Reflect.get(this.manager, "stateRestore") as object,
+      "drainReleaseTeardown",
+      () => teardown.promise,
+    );
     const release = this.manager.releaseSession(UUID, reason);
     await flush();
     if (!this.manager.forceStuckRelease(UUID)) {

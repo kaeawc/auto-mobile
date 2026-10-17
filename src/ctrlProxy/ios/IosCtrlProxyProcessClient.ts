@@ -8,7 +8,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
 import { ActionableError } from "../../models/ActionableError";
 import type { LockOwnerGenerationProbe } from "../../utils/fileLock";
-import { defaultLockOwnerGenerationProbe } from "../../daemon/lockOwnerGeneration";
+import { defaultLockOwnerGenerationProbe } from "../../utils/lockOwnerGeneration";
 
 /** Matches a `kill -0` failure caused by the target being owned by another
  * user/process (EPERM), not by it being gone (ESRCH). The process exists in

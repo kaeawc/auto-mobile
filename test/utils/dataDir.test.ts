@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ActionableError } from "../../src/models/ActionableError";
 import { useScratchRoot } from "../helpers/scratchRoot";
+import { parseProbeJson } from "../helpers/spawnProbe";
 import {
   resolveAutoMobileBaseDir,
   resolveAutoMobileLogsDir,
@@ -62,15 +63,7 @@ console.log(JSON.stringify({ homedir: os.userInfo().homedir,
     });
     exitCode = result.exitCode;
     stderr = result.stderr.toString();
-    const stdout = result.stdout.toString();
-    if (stdout.trim() === "") {
-      // Surface why the child produced nothing instead of a bare JSON EOF error.
-      throw new Error(
-        `coordination probe printed nothing (exit ${result.exitCode}, signal ${result.signalCode ?? "none"}, ` +
-          `exitedDueToTimeout ${result.exitedDueToTimeout ?? false}); stderr:\n${stderr}`,
-      );
-    }
-    child = JSON.parse(stdout);
+    child = parseProbeJson(result);
   });
 
   test("both coordination roots follow the child's os.userInfo().homedir", () => {

@@ -30,7 +30,7 @@
 1359	src/devices/deviceUtils.ts
 1596	src/doctor/checks/ios.ts
 1673	src/features/accessibility/ContrastChecker.ts
-1285	src/features/action/BaseVisualChange.ts
+1286	src/features/action/BaseVisualChange.ts
 1099	src/features/action/InputText.ts
 1528	src/features/action/InstallApp.ts
 2253	src/features/action/LaunchApp.ts
@@ -89,8 +89,8 @@
 1459	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts
 1868	src/utils/android-cmdline-tools/AdbClient.ts
-2415	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts
+2307	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts
 2057	src/utils/fileLock.ts
 1199	src/utils/ios-cmdline-tools/DeviceAppManager.ts
-3185	src/utils/ios-cmdline-tools/SimCtlClient.ts
+3180	src/utils/ios-cmdline-tools/SimCtlClient.ts
 1263	src/utils/logger.ts

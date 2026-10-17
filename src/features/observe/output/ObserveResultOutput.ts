@@ -1011,6 +1011,11 @@ export interface ObserveDiff {
 export interface DiffObserveConfig {
   /** Compact output suppresses captured IME subtrees; full/raw diffs retain them. */
   collapseKeyboard?: boolean;
+  /**
+   * Compact output drops the SystemUI status bar (signal, clock, battery) from the
+   * diff basis: its churn is not a screen change and nothing in it is actionable (#11637).
+   */
+  skipStatusBar?: boolean;
   /** Skeleton-only per-warning layout diff; defaults to the full `{from,to}` envelope. */
   layoutWarningsDiffMode?: "full" | "perEntry";
   /** Skeleton-only projection for added/removed nodes; defaults to raw attributes. */
@@ -1197,13 +1202,24 @@ function isKeyboardNodeForDiff(
   );
 }
 
+/** Roots of the SystemUI status bar subtree (clock, notification icons, signal, battery). */
+const STATUS_BAR_ROOT_IDS: ReadonlySet<string> = new Set([
+  "com.android.systemui:id/status_bar_launch_animation_container",
+  "com.android.systemui:id/status_bar_container",
+  "com.android.systemui:id/status_bar",
+]);
+
 /**
  * Pre-order flatten of an observation's hierarchy into positionally-keyed nodes.
  * Each node's `pathKey` is its ancestor chain of local keys plus its own, so the
  * key is globally unique by position and identical cells in sibling subtrees do
  * not collide.
  */
-function flattenForDiff(obs: ObserveResult, collapseKeyboard = false): FlatObserveNode[] {
+function flattenForDiff(
+  obs: ObserveResult,
+  collapseKeyboard = false,
+  skipStatusBar = false,
+): FlatObserveNode[] {
   const out: FlatObserveNode[] = [];
   const iosKeyboardVisible =
     collapseKeyboard && isIosKeyboardVisible(obs.viewHierarchy, obs.screenSize);
@@ -1218,6 +1234,9 @@ function flattenForDiff(obs: ObserveResult, collapseKeyboard = false): FlatObser
     }
     const rec: Record<string, unknown> = node;
     if (collapseKeyboard && isKeyboardNodeForDiff(node, rec, iosKeyboardVisible)) {
+      return;
+    }
+    if (skipStatusBar && STATUS_BAR_ROOT_IDS.has(String(rec["resource-id"] ?? ""))) {
       return;
     }
     const localKey = nodeKey(rec, siblingIndex);
@@ -1984,8 +2003,8 @@ export function diffObserveResult(
   next: ObserveResult,
   cfg?: DiffObserveConfig,
 ): ObserveDiff {
-  const nextFlatNodes = flattenForDiff(next, cfg?.collapseKeyboard);
-  const baseByKey = groupByKey(flattenForDiff(baseline, cfg?.collapseKeyboard));
+  const nextFlatNodes = flattenForDiff(next, cfg?.collapseKeyboard, cfg?.skipStatusBar);
+  const baseByKey = groupByKey(flattenForDiff(baseline, cfg?.collapseKeyboard, cfg?.skipStatusBar));
   const nextByKey = groupByKey(nextFlatNodes);
   let projected: readonly SearchableEntry[] | undefined;
   let candidates: readonly SearchableEntry[] | undefined;

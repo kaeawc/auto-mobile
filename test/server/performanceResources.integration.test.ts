@@ -51,7 +51,7 @@ describe("performanceData", () => {
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    auditRepo = new PerformanceAuditRepository(new FakeTimer(), db);
+    auditRepo = new PerformanceAuditRepository(db, new FakeTimer());
     toolCallRepo = new ToolCallRepository(db);
   });
 

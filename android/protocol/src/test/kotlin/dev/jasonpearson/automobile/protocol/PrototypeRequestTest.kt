@@ -1,10 +1,12 @@
 package dev.jasonpearson.automobile.protocol
 
+import java.io.File
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -142,6 +144,31 @@ class PrototypeRequestTest {
       assertEquals(
         PrototypeSpecError("root.onTap[0].body", "A GET or HEAD request cannot have a body"),
         failure(request(extra)),
+      )
+    }
+  }
+
+  @Test
+  fun `a bound JSON number is header and query text by JavaScript number rules`() {
+    val file =
+      generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
+        .map { File(it, "test/fixtures/prototype/request-number-text.json") }
+        .first { it.isFile }
+    val vectors = Json.parseToJsonElement(file.readText()).jsonArray
+    assertTrue(vectors.size >= 8)
+    for (vector in vectors) {
+      val json = vector.jsonObject.getValue("json").jsonPrimitive.content
+      val text = vector.jsonObject.getValue("text").jsonPrimitive.content
+      val request =
+        resolved(
+          request(""""headers":{"A":{"value":$json}},"query":{"n":{"value":$json}}"""),
+          "http://localhost:8080/feed",
+        )
+      assertEquals(text, request.headers["A"], "header for $json")
+      assertEquals(
+        "http://localhost:8080/feed?n=" + java.net.URLEncoder.encode(text, Charsets.UTF_8),
+        request.url,
+        "query for $json",
       )
     }
   }

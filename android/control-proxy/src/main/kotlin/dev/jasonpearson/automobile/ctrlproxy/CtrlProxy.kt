@@ -1663,62 +1663,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
 
   private val packageReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null) {
-          return
-        }
+    PackageEventReceiver(
+      serviceScope,
+      object : PackageEventHost {
+        override fun isSystemApp(packageName: String) = resolveSystemApp(packageName)
 
-        val action = intent.action ?: return
-        if (
-          action != Intent.ACTION_PACKAGE_ADDED &&
-            action != Intent.ACTION_PACKAGE_REMOVED &&
-            action != Intent.ACTION_PACKAGE_REPLACED
-        ) {
-          return
-        }
-
-        val packageName = intent.data?.schemeSpecificPart ?: return
-        val uid = intent.getIntExtra(Intent.EXTRA_UID, -1)
-        val userId = packageEventUserId(uid)
-        val isReplacing = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
-        // EXTRA_REMOVED_FOR_ALL_USERS may not be available in all SDK versions, use string
-        // literal
-        val removedForAllUsers =
-          intent.getBooleanExtra("android.intent.extra.REMOVED_FOR_ALL_USERS", false)
-
-        val eventAction =
-          when (action) {
-            Intent.ACTION_PACKAGE_ADDED -> if (isReplacing) "replaced" else "added"
-            Intent.ACTION_PACKAGE_REMOVED -> if (isReplacing) null else "removed"
-            Intent.ACTION_PACKAGE_REPLACED -> "replaced"
-            else -> null
-          } ?: return
-
-        val isSystem =
-          if (eventAction == "removed") {
-            null
-          } else {
-            resolveSystemApp(packageName)
+        override suspend fun onPackageEvent(event: PackageBroadcastEvent) =
+          with(event) {
+            broadcastPackageEvent(action, packageName, userId, uid, isSystem, removedForAllUsers)
           }
-
-        Log.d(
-          TAG,
-          "Package event: $eventAction $packageName (userId=$userId, removedForAllUsers=$removedForAllUsers)",
-        )
-
-        serviceScope.launch {
-          broadcastPackageEvent(
-            eventAction,
-            packageName,
-            userId,
-            uid.takeIf { it >= 0 },
-            isSystem,
-            removedForAllUsers,
-          )
-        }
-      }
-    }
+      },
+    )
 
   private val failureReportHost =
     object : FailureReportHost {
@@ -1764,25 +1719,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val crashReceiver = CrashReceiver(serviceScope, failureReportHost)
 
   private val screenStateReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        refreshPrototypeWindow()
-        when (intent?.action) {
-          Intent.ACTION_SCREEN_ON -> {
-            Log.i(TAG, "Screen turned ON, triggering hierarchy extraction")
-            if (::hierarchyDebouncer.isInitialized) {
-              hierarchyDebouncer.extractNow()
-            }
-          }
-          Intent.ACTION_SCREEN_OFF -> {
-            Log.i(TAG, "Screen turned OFF, triggering hierarchy extraction")
-            if (::hierarchyDebouncer.isInitialized) {
-              hierarchyDebouncer.extractNow()
-            }
+    ScreenStateReceiver(
+      object : ScreenStateHost {
+        override fun refreshPrototypeWindow() = this@CtrlProxy.refreshPrototypeWindow()
+
+        override fun extractHierarchyNow() {
+          if (::hierarchyDebouncer.isInitialized) {
+            hierarchyDebouncer.extractNow()
           }
         }
-      }
-    }
+      },
+    )
 
   private val anrBroadcastHandler =
     SdkAnrBroadcastHandler(
@@ -3962,7 +3909,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     try {
-      val timestamp = System.currentTimeMillis()
+      val timestamp = timeProvider.currentTimeMillis()
       val message =
         webSocketFrameJson("package_event", timestamp = timestamp) {
           put(

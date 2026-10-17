@@ -907,6 +907,7 @@ class BroadcastGuardAdoptionTest {
         "ClipboardController.kt",
         "FocusController.kt",
         "FailureReceivers.kt",
+        "PackageScreenReceivers.kt",
       )
       .map { fileName ->
         fileName to locateSource(fileName).readText()

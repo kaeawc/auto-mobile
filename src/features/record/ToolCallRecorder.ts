@@ -1,6 +1,8 @@
 import { INTERNAL_TOOL_PARAM_NAMES } from "../../daemon/constants";
 import { PlanStep } from "../../models/Plan";
 import { logger } from "../../utils/logger";
+import type { SwipeAtRecordingContext } from "../../models/SwipeAtOptions";
+import { normalizedAxis } from "./normalizedAxis";
 import { isInternalStepParam } from "../../constants/internalStepParams";
 
 /**
@@ -292,6 +294,7 @@ export class ToolCallRecorder {
       logger.warn(`[ToolCallRecorder] ${warning}`);
       this.warnings.push(warning);
     }
+    const recordedParams = this.paramsToStore(toolName, recorded, args);
     if (geometry) {
       const nativeParams = { ...recorded };
       delete nativeParams.image;
@@ -302,9 +305,59 @@ export class ToolCallRecorder {
         geometry,
       });
     } else {
-      this.steps.push({ tool: toolName, params: recorded });
+      this.steps.push({ tool: toolName, params: recordedParams });
     }
     logger.info(`[ToolCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
+  }
+
+  private paramsToStore(
+    toolName: string,
+    recorded: Record<string, unknown>,
+    args: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (toolName !== "swipeAt") {
+      return recorded;
+    }
+    return this.normalizeSwipeAt(
+      recorded,
+      args.__swipeAtRecordingContext as SwipeAtRecordingContext | undefined,
+    );
+  }
+
+  /**
+   * An absolute-coordinate swipeAt replays on the same pixels whatever the screen, so it is stored
+   * as fractions of the screen it was recorded on (#12878). Without that screen the raw pixels stay
+   * and the plan author is warned.
+   */
+  private normalizeSwipeAt(
+    params: Record<string, unknown>,
+    context: SwipeAtRecordingContext | undefined,
+  ): Record<string, unknown> {
+    const { from, to, coordinateSpace } = params as {
+      from?: { x: number; y: number };
+      to?: { x: number; y: number };
+      coordinateSpace?: string;
+    };
+    if (!from || !to || (coordinateSpace ?? "absolute") !== "absolute") {
+      return params;
+    }
+    const screen = context?.screenSize;
+    if (!screen || !(screen.width > 0) || !(screen.height > 0)) {
+      const warning =
+        "swipeAt was recorded without geometry: its absolute pixel endpoints replay on the same pixels on any screen; use coordinateSpace normalized or record again on a single display";
+      logger.warn(`[ToolCallRecorder] ${warning}`);
+      this.warnings.push(warning);
+      return params;
+    }
+    return {
+      ...params,
+      from: {
+        x: normalizedAxis(from.x, screen.width),
+        y: normalizedAxis(from.y, screen.height),
+      },
+      to: { x: normalizedAxis(to.x, screen.width), y: normalizedAxis(to.y, screen.height) },
+      coordinateSpace: "normalized",
+    };
   }
 
   private skipReason(toolName: string, params: Record<string, unknown>): string | undefined {

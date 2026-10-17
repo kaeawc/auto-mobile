@@ -1,3 +1,4 @@
+import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { drainUntil, drainMicrotasks } from "../helpers/fakeTimerStepping";
 
@@ -770,14 +771,7 @@ describe("DevicePool", () => {
         "device-discovery-miss",
       );
       const sharedRecovery = Promise.withResolvers<SessionPreservingRecoveryResult>();
-      const internals = devicePool as unknown as {
-        sessionPreservingRecoveries: Map<
-          string,
-          { promise: Promise<SessionPreservingRecoveryResult>; incidentId?: string }
-        >;
-        emulatorLossRecoveryResolvers: Map<string, () => void>;
-        emulatorLossRecoverySettlements: Map<string, Promise<void>>;
-      };
+      const internals = recoveryInternals(devicePool);
       internals.sessionPreservingRecoveries.set("session-1", {
         promise: sharedRecovery.promise,
         incidentId: primaryIncident,

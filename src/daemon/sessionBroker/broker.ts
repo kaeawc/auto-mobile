@@ -219,7 +219,14 @@ export class SessionBroker {
         ? result
         : {
             ...result,
-            failure: { ...failure, retryable: failure.retryable && !result.cleanupPending },
+            failure: {
+              ...failure,
+              retryable: failure.retryable && !result.cleanupPending,
+              // The stored receipt owns the retry hint, so the first reply matches every replay.
+              ...(result.failure?.retryRequires
+                ? { retryRequires: result.failure.retryRequires }
+                : {}),
+            },
           };
     }
     // Catalog/default resolution can fail before admission. Retain that terminal identity too:
@@ -334,15 +341,28 @@ export class SessionBroker {
     // own liveness policy releases it if the caller never returns. Abandonment is separate and
     // durable, so an aborted caller re-reads the receipt rather than reporting a stale one.
     try {
-      return await this.result(
+      const result = await this.result(
         signal.aborted
           ? ((await this.options.store.getRequest(config.requestId)) ?? request)
           : request,
       );
+      return result.outcome === "ready" ? await this.rereadIfSuperseded(result, config) : result;
     } catch (error) {
       // Only the reply is uncertain (#12771): the committed grant is not a preparation failure.
       throw new CommittedReceiptReadError(config.requestId, error);
     }
+  }
+
+  /**
+   * An abandonment can commit while the ready receipt is being assembled (#12762). Reread the
+   * durable receipt so a ready reply never outlives the grant it describes.
+   */
+  private async rereadIfSuperseded(
+    result: SessionBrokerResult,
+    config: SessionConfig,
+  ): Promise<SessionBrokerResult> {
+    const latest = await this.options.store.getRequest(config.requestId);
+    return latest && latest.state !== "active" ? this.result(latest) : result;
   }
 
   async status(requestId: string): Promise<SessionBrokerResult | undefined> {

@@ -25,6 +25,26 @@
 #   * When you FIX violations the gate stays green and reminds you to `--update`
 #     so the baseline shrinks. It is expected to trend toward zero.
 #
+# Inline suppressions are ratcheted too. An `oxlint-disable*` / `eslint-disable*`
+# directive removes the diagnostic from oxlint's report, so without this a new
+# violation could be hidden instead of failing. scripts/lib/oxlintDisableScan.ts
+# scans the comments of every file oxlint lints (repo-wide via git ls-files, minus
+# the .oxlintrc.json ignorePatterns; it fails closed when none are found) with the
+# TypeScript scanner, and this script merges its rows into the same baseline and
+# the same new_or_increased compare:
+#   <count>  <file>  oxlint-disable(<rule>)            every -next-line directive, per rule
+#   <count>  <file>  oxlint-disable-line(<rule>)       every -line directive, per rule
+#   <count>  <file>  oxlint-disable-block(<rule>)      every unbounded directive a later enable closes
+#   <count>  <file>  oxlint-disable-file(<rule>)       every unbounded directive left open to end of file
+#   <count>  <file>  oxlint-disable-no-reason(<rule>)  those lacking a `-- reason`
+# A new suppression therefore fails like a new violation and needs --allow-grow,
+# and removing one shrinks the baseline via --update. A directive listing several
+# rules counts once per rule; `eslint/<rule>` is normalised to `<rule>`. The
+# no-reason row has no tolerance beyond the baseline: pre-existing reason-less
+# directives are recorded, but a NEW one grows that row and fails even if an
+# equal number of reasoned ones were removed. Write
+# `// oxlint-disable-next-line <rule> -- <why>`.
+#
 # The baseline is keyed per (file, rule) with only a COUNT -- the same granularity
 # as eslint-suppressions.json -- so it does not churn on unrelated line shifts.
 #
@@ -145,9 +165,19 @@ compare_counts() {
   printf '%s\n@@@OXLINT_SEP@@@\n%s' "$1" "$2" | new_or_increased
 }
 
+# Suppression rows. OXLINT_SCAN_ROOT overrides the scanned root (BATS fixtures).
+scan_suppressions() {
+  bun "$ROOT/scripts/lib/oxlintDisableScan.ts" "${OXLINT_SCAN_ROOT:-$ROOT}"
+}
+
 report_json="$(run_oxlint_json)"
-current="$(printf '%s' "$report_json" | extract_counts)"
-current_total="$(printf '%s' "$current" | awk -F'\t' 'NF{s+=$1} END{print s+0}')"
+violations="$(printf '%s' "$report_json" | extract_counts)"
+suppressions="$(scan_suppressions)"
+current="$(printf '%s\n%s\n' "$violations" "$suppressions" | grep -v '^$' | sort || true)"
+violation_total="$(printf '%s' "$violations" | awk -F'\t' 'NF{s+=$1} END{print s+0}')"
+# Directives only; the no-reason rows are a subset and would double count.
+suppression_total="$(printf '%s' "$suppressions" | awk -F'\t' 'NF && $3 !~ /^oxlint-disable-no-reason/ {s+=$1} END{print s+0}')"
+summary="$violation_total gated violation(s), $suppression_total suppression row(s)"
 
 if [[ "$MODE" == "update" ]]; then
   if [[ -f "$BASELINE" && "$ALLOW_GROW" != "true" ]]; then
@@ -157,7 +187,7 @@ if [[ "$MODE" == "update" ]]; then
     prev_counts="$(grep -vE '^#|^$' "$BASELINE" || true)"
     grew="$(compare_counts "$prev_counts" "$current")"
     if [[ -n "$grew" ]]; then
-      echo "refusing to grow the baseline: a (file, rule) count increased or a new pair appeared:" >&2
+      echo "refusing to grow the baseline: a (file, rule) count (violation or oxlint-disable suppression) increased or a new pair appeared:" >&2
       printf '%s\n' "$grew" >&2
       echo "The oxlint ratchet is a one-way ratchet. If this growth is truly" >&2
       echo "intended, re-run with:  bun run lint:prune -- --allow-grow" >&2
@@ -167,9 +197,10 @@ if [[ "$MODE" == "update" ]]; then
   {
     echo "# AutoMobile oxlint ratchet baseline -- see scripts/oxlint-baseline.sh"
     echo "# Gated rules: $RATCHET_CODES"
+    echo "# Also counted: oxlint-disable(<rule>) and oxlint-disable-no-reason(<rule>) rows from the comment scan"
     printf '%s\n' "$current"
   } > "$BASELINE"
-  echo "Updated $BASELINE ($current_total gated violation(s))."
+  echo "Updated $BASELINE ($summary)."
   exit 0
 fi
 
@@ -186,10 +217,10 @@ baseline_counts="$(grep -vE '^#|^$' "$BASELINE" || true)"
 new_violations="$(compare_counts "$baseline_counts" "$current")"
 
 if [[ -n "$new_violations" ]]; then
-  echo "oxlint ratchet: NEW violation(s) of a gated rule -- fix them or (rarely) record with --update:" >&2
+  echo "oxlint ratchet: NEW violation(s) or oxlint-disable suppression(s) -- fix them or (rarely) record with --update --allow-grow:" >&2
   printf '%s\n' "$new_violations" >&2
   exit 1
 fi
 
-echo "oxlint ratchet gate: no new violations ($current_total gated violation(s) in baseline)."
+echo "oxlint ratchet gate: no new violations ($summary in baseline)."
 exit 0

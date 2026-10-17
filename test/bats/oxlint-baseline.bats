@@ -264,3 +264,15 @@ write_src() { # <name> <lines...>
   OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
   [ "$status" -eq 0 ]
 }
+
+# --- source file with a parse error ------------------------------------------
+
+@test "a source file with a parse error is reported by name instead of exiting silently" {
+  # Real oxlint on a real parse-error input: it exits 1 and emits a code-less error diagnostic.
+  mkdir -p "$TEST_DIR/bad"
+  printf 'export const a = ;\n' > "$TEST_DIR/bad/bad.ts"
+  OXLINT_JSON_CMD="cd '$TEST_DIR/bad' && '$REPO_ROOT/node_modules/.bin/oxlint' --format json bad.ts" \
+    run bash "$SCRIPT" --update
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"oxlint parse error in bad.ts:1:18: Unexpected token"* ]]
+}

@@ -72,7 +72,7 @@
 1005	src/features/webrtc/WebRtcPublisher.ts
 2370	src/server/appFileService.ts
 1431	src/server/appResources.ts
-1530	src/server/appTools.ts
+1537	src/server/appTools.ts
 1985	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
 2530	src/server/deviceToolsProvisioning.ts

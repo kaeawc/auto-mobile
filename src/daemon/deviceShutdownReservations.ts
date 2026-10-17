@@ -23,7 +23,7 @@ export interface ShutdownDeviceReservation {
 
 /** All mutable pool state is obtained when used, including after awaits. */
 export interface DeviceShutdownReservationsPoolPort {
-  getDevices(): Map<string, PooledDevice>;
+  getDevices(): ReadonlyMap<string, PooledDevice>;
   withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
   getIntentionalShutdowns(): Map<string, number>;
   assertReadinessReservationOwner(device: PooledDevice, client: AutolockClient | undefined): void;

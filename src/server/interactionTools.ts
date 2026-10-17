@@ -917,7 +917,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
           .enum(["left", "right", "top", "bottom"])
           .optional()
           .describe(
-            "Start at this screen (or display panel) edge and swipe inward; direction must point inward (left->right, right->left, top->down, bottom->up). Exclusive with container, lookFor, autoTarget=true. With Android gesture navigation a very-near-edge swipe may be taken as system back/home",
+            "Start at this screen (or display panel) edge and swipe inward; direction must point inward (left->right, right->left, top->down, bottom->up). Exclusive with container, lookFor, autoTarget=true. By default the start point is inset from the edge by the system bars/gesture insets (Android left/right: gesture inset plus edgeInset, e.g. x=88 for 78px + edgeInset 10), so the swipe stays in the app; pass includeSystemInsets:true to start at the physical screen edge (edgeInset px in), where a very-near-edge swipe may be taken as system back/home",
           ),
         edgeInset: z
           .number()
@@ -926,7 +926,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
           .max(EDGE_INSET_MAX)
           .optional()
           .describe(
-            `With fromEdge: how far inside the edge the touch starts, px (iOS points); default ${EDGE_INSET_DEFAULT} (iOS swipe-back needs the first ~20 pt)`,
+            `With fromEdge: how far inside the edge the touch starts, px (iOS points); default ${EDGE_INSET_DEFAULT} (iOS swipe-back needs the first ~20 pt). Measured from the content edge (after system insets) unless includeSystemInsets:true`,
           ),
         at: z
           .number()

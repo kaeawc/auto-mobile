@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { ActiveDeviceSelection } from "./ActiveDeviceSelection";
 import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
 import { CtrlProxyForwardOwnershipUnreadableError } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 import {
@@ -476,9 +477,7 @@ interface LifecycleStartHold {
 }
 
 export class DeviceReadiness implements DeviceReadiness {
-  private currentDevice: BootedDevice | undefined;
-  private currentPlatform: Platform | undefined;
-  private explicitDevicePin: BootedDevice | undefined;
+  private readonly selection = new ActiveDeviceSelection();
   private static instance: DeviceReadiness;
   private static defaultProvider: DeviceClientProvider | undefined;
   private readonly admissionGate: DeviceAdmissionGate;
@@ -605,14 +604,14 @@ export class DeviceReadiness implements DeviceReadiness {
    * Get the current device ID
    */
   public getCurrentDevice(): BootedDevice | undefined {
-    return this.currentDevice;
+    return this.selection.currentDevice;
   }
 
   /**
    * Get the current platform
    */
   public getCurrentPlatform(): Platform | undefined {
-    return this.currentPlatform;
+    return this.selection.currentPlatform;
   }
 
   /**
@@ -626,8 +625,8 @@ export class DeviceReadiness implements DeviceReadiness {
    * Set the current device ID and platform
    */
   public setCurrentDevice(device: BootedDevice, platform: Platform): void {
-    this.currentDevice = device;
-    this.currentPlatform = platform;
+    this.selection.currentDevice = device;
+    this.selection.currentPlatform = platform;
 
     if (platform === "android") {
       // Update AdbClient with new device ID - need a fresh client for the new device
@@ -636,17 +635,15 @@ export class DeviceReadiness implements DeviceReadiness {
   }
 
   public getExplicitDevicePin(): BootedDevice | undefined {
-    return this.explicitDevicePin;
+    return this.selection.explicitDevicePin;
   }
 
   public setExplicitDevicePin(device: BootedDevice): void {
-    this.explicitDevicePin = device;
+    this.selection.explicitDevicePin = device;
   }
 
   public clearExplicitDevicePin(deviceId: string): void {
-    if (this.explicitDevicePin?.deviceId === deviceId) {
-      this.explicitDevicePin = undefined;
-    }
+    this.selection.clearPinFor(deviceId);
   }
 
   /**
@@ -858,7 +855,7 @@ export class DeviceReadiness implements DeviceReadiness {
 
     // If we have a current device for the requested platform, verify it's still ready
     if (!selectedDevice && this.hasCurrentReadinessDevice(platform, resolvedPlatform)) {
-      const currentDeviceId = this.currentDevice!.deviceId;
+      const currentDeviceId = this.selection.currentDevice!.deviceId;
       selectedDevice = await this.verifyCurrentReadinessDevice(
         platformDevices,
         resolvedPlatform,
@@ -1231,7 +1228,9 @@ export class DeviceReadiness implements DeviceReadiness {
   }
 
   private findPinnedReadinessDevice(platformDevices: BootedDevice[]): BootedDevice | undefined {
-    return platformDevices.find((device) => device.deviceId === this.explicitDevicePin?.deviceId);
+    return platformDevices.find(
+      (device) => device.deviceId === this.selection.explicitDevicePin?.deviceId,
+    );
   }
 
   /** Ownership has been rechecked; now observe boot state while holding the image lease. */
@@ -1332,7 +1331,7 @@ export class DeviceReadiness implements DeviceReadiness {
   }
 
   private reconcileReadinessPin(scan: ConnectedPlatformScan): void {
-    const pinnedDevice = this.explicitDevicePin;
+    const pinnedDevice = this.selection.explicitDevicePin;
     if (
       pinnedDevice &&
       isScanAuthoritativeFor(scan, pinnedDevice) &&
@@ -1404,8 +1403,9 @@ export class DeviceReadiness implements DeviceReadiness {
       }
     }
     // With no matching deviceId, fall back to the platform setActiveDevice selected.
-    const selectedPlatform = this.explicitDevicePin?.platform ?? this.currentPlatform;
-    if (selectedPlatform && (this.explicitDevicePin || this.currentDevice)) {
+    const selectedPlatform =
+      this.selection.explicitDevicePin?.platform ?? this.selection.currentPlatform;
+    if (selectedPlatform && (this.selection.explicitDevicePin || this.selection.currentDevice)) {
       return {
         platformDevices: selectedPlatform === "android" ? androidDevices : iosDevices,
         resolvedPlatform: selectedPlatform,
@@ -1423,12 +1423,12 @@ export class DeviceReadiness implements DeviceReadiness {
   ): boolean {
     if (
       options?.intent === "read" &&
-      !platformDevices.some((device) => device.deviceId === this.currentDevice?.deviceId)
+      !platformDevices.some((device) => device.deviceId === this.selection.currentDevice?.deviceId)
     ) {
       // A cached current device is not an explicit deviceId on this call.
-      if (isScanAuthoritativeFor(scan, this.currentDevice!)) {
-        this.currentDevice = undefined;
-        this.currentPlatform = undefined;
+      if (isScanAuthoritativeFor(scan, this.selection.currentDevice!)) {
+        this.selection.currentDevice = undefined;
+        this.selection.currentPlatform = undefined;
       }
       return true;
     }
@@ -1445,15 +1445,16 @@ export class DeviceReadiness implements DeviceReadiness {
       return undefined;
     }
     logger.info(
-      `[DeviceReadiness] Found current device: ${this.currentDevice!.deviceId}, verifying readiness`,
+      `[DeviceReadiness] Found current device: ${this.selection.currentDevice!.deviceId}, verifying readiness`,
     );
     try {
       // Prefer the current discovery over the cached selection, resolved to
       // its stable AVD name so an Android emulator is keyed by the runtime on
       // the serial rather than by the serial itself.
       const currentDevice = await this.resolveAndroidReadinessIdentity(
-        platformDevices.find((device) => device.deviceId === this.currentDevice?.deviceId) ??
-          this.currentDevice!,
+        platformDevices.find(
+          (device) => device.deviceId === this.selection.currentDevice?.deviceId,
+        ) ?? this.selection.currentDevice!,
         options?.signal,
       );
       // Use resolvedPlatform (always "android" | "ios") instead of platform (which may be "either")
@@ -1478,12 +1479,12 @@ export class DeviceReadiness implements DeviceReadiness {
       if (error instanceof RunnerReadinessError || isDeviceIdentityQuarantinedError(error)) {
         throw error;
       }
-      logger.warn(`Current device ${this.currentDevice} is no longer ready: ${error}`);
+      logger.warn(`Current device ${this.selection.currentDevice} is no longer ready: ${error}`);
       const stillDiscovered = platformDevices.some(
-        (device) => device.deviceId === this.currentDevice?.deviceId,
+        (device) => device.deviceId === this.selection.currentDevice?.deviceId,
       );
-      this.currentDevice = undefined;
-      this.currentPlatform = undefined;
+      this.selection.currentDevice = undefined;
+      this.selection.currentPlatform = undefined;
       if (options?.intent === "read" && stillDiscovered) {
         // Verification failure does not mean a discovered device stopped running.
         throw error;
@@ -2032,8 +2033,9 @@ export class DeviceReadiness implements DeviceReadiness {
 
   private hasCurrentReadinessDevice(platform: SomePlatform, resolvedPlatform: Platform): boolean {
     return !!(
-      this.currentDevice &&
-      (this.currentPlatform === platform || this.currentPlatform === resolvedPlatform)
+      this.selection.currentDevice &&
+      (this.selection.currentPlatform === platform ||
+        this.selection.currentPlatform === resolvedPlatform)
     );
   }
 

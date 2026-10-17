@@ -30,6 +30,33 @@ ObjCPinchPoints ObjCExceptionCatcher_computePinchPoints(
     return points;
 }
 
+NSInteger ObjCExceptionCatcher_pinchSegmentCount(CGFloat rotationDegrees) {
+    CGFloat degrees = fabs(rotationDegrees);
+    if (!isfinite(degrees) || degrees == 0) {
+        return 1;
+    }
+    NSInteger segments = (NSInteger)ceil(degrees / 10.0);
+    return segments < 1 ? 1 : (segments > 36 ? 36 : segments);
+}
+
+ObjCPinchFingers ObjCExceptionCatcher_computePinchFingersAt(
+    CGFloat centerX,
+    CGFloat centerY,
+    CGFloat distanceStart,
+    CGFloat distanceEnd,
+    CGFloat rotationDegrees,
+    CGFloat fraction
+) {
+    CGFloat radius = (distanceStart + (distanceEnd - distanceStart) * fraction) / 2.0;
+    CGFloat radians = rotationDegrees * (CGFloat)M_PI / 180.0 * fraction;
+    CGFloat dx = cos(radians) * radius;
+    CGFloat dy = sin(radians) * radius;
+    ObjCPinchFingers fingers;
+    fingers.finger1 = CGPointMake(centerX - dx, centerY - dy);
+    fingers.finger2 = CGPointMake(centerX + dx, centerY + dy);
+    return fingers;
+}
+
 NSException * _Nullable ObjCExceptionCatcher_tryBlock(void (NS_NOESCAPE ^block)(void)) {
     @try {
         block();
@@ -291,6 +318,9 @@ BOOL ObjCExceptionCatcher_synthesizePinch(
         CGFloat safeDistanceEnd = distanceEnd > 1 ? distanceEnd : 1;
         ObjCPinchPoints points = ObjCExceptionCatcher_computePinchPoints(
             centerX, centerY, safeDistanceStart, safeDistanceEnd, rotationDegrees);
+        // A rotating pinch follows an arc through intermediate waypoints; the straight chord from
+        // start to end would shrink the radius mid-gesture and zoom a pure rotation (#12996).
+        NSInteger segments = ObjCExceptionCatcher_pinchSegmentCount(rotationDegrees);
 
         XCSynthesizedEventRecord *record = [[recordClass alloc]
             initWithName:@"AutoMobile pinch"
@@ -302,6 +332,12 @@ BOOL ObjCExceptionCatcher_synthesizePinch(
             initForTouchAtPoint:points.start1
             offset:0
         ];
+        for (NSInteger index = 1; index < segments; index++) {
+            CGFloat fraction = (CGFloat)index / (CGFloat)segments;
+            ObjCPinchFingers via = ObjCExceptionCatcher_computePinchFingersAt(
+                centerX, centerY, safeDistanceStart, safeDistanceEnd, rotationDegrees, fraction);
+            [firstPath moveToPoint:via.finger1 atOffset:duration * fraction];
+        }
         [firstPath moveToPoint:points.end1 atOffset:duration];
         [firstPath liftUpAtOffset:liftOffset];
         [record addPointerEventPath:firstPath];
@@ -310,6 +346,12 @@ BOOL ObjCExceptionCatcher_synthesizePinch(
             initForTouchAtPoint:points.start2
             offset:0
         ];
+        for (NSInteger index = 1; index < segments; index++) {
+            CGFloat fraction = (CGFloat)index / (CGFloat)segments;
+            ObjCPinchFingers via = ObjCExceptionCatcher_computePinchFingersAt(
+                centerX, centerY, safeDistanceStart, safeDistanceEnd, rotationDegrees, fraction);
+            [secondPath moveToPoint:via.finger2 atOffset:duration * fraction];
+        }
         [secondPath moveToPoint:points.end2 atOffset:duration];
         [secondPath liftUpAtOffset:liftOffset];
         [record addPointerEventPath:secondPath];
@@ -458,7 +500,7 @@ BOOL ObjCExceptionCatcher_synthesizeDisplayTouch(
 }
 
 BOOL ObjCExceptionCatcher_synthesizeDisplayPinch(
-    ObjCPinchPoints points, NSTimeInterval duration,
+    NSArray<NSNumber *> *firstPath, NSArray<NSNumber *> *secondPath, NSTimeInterval duration,
     unsigned long long displayID, NSInteger interfaceOrientation,
     BOOL *_Nullable symbolsUnavailable, NSString *_Nullable *_Nullable errorMessage
 ) {
@@ -487,11 +529,20 @@ BOOL ObjCExceptionCatcher_synthesizeDisplayPinch(
         // Same timing as the main-screen pinch: both fingers move for the duration, then lift.
         NSTimeInterval move = duration > 0 ? duration : 0;
         NSTimeInterval liftOffset = move > 0.05 ? move : 0.05;
-        CGPoint starts[2] = {points.start1, points.start2};
-        CGPoint ends[2] = {points.end1, points.end2};
+        NSArray<NSNumber *> *paths[2] = {firstPath, secondPath};
         for (int index = 0; index < 2; index++) {
-            XCPointerEventPath *path = [[pathClass alloc] initForTouchAtPoint:starts[index] offset:0];
-            [path moveToPoint:ends[index] atOffset:move];
+            NSArray<NSNumber *> *flat = paths[index];
+            NSUInteger count = flat.count / 2;
+            if (count < 2) {
+                failure = @"display-targeted pinch path needs at least a start and an end point";
+                return;
+            }
+            CGPoint first = CGPointMake(flat[0].doubleValue, flat[1].doubleValue);
+            XCPointerEventPath *path = [[pathClass alloc] initForTouchAtPoint:first offset:0];
+            for (NSUInteger point = 1; point < count; point++) {
+                CGPoint next = CGPointMake(flat[point * 2].doubleValue, flat[point * 2 + 1].doubleValue);
+                [path moveToPoint:next atOffset:move * (NSTimeInterval)point / (NSTimeInterval)(count - 1)];
+            }
             [path liftUpAtOffset:liftOffset];
             [record addPointerEventPath:path];
         }

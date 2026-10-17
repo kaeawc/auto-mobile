@@ -233,6 +233,153 @@ class PinchGeometryTest {
       }
   }
 
+  @Test
+  fun `pure rotation keeps a constant radius along the whole path`() {
+    // Regression for issue #12996: a straight chord between the start and end points shrinks the
+    // radius to cos(rotation / 2) of the original mid-gesture, so a rotation-only pinch zoomed.
+    val centerX = 200.0
+    val centerY = 400.0
+    val interior = computePinchPathInterior(centerX, centerY, 100.0, 100.0, 90f)
+    assertEquals(pinchSegmentCount(90f) - 1, interior.size)
+    interior.forEach { p ->
+      assertEquals(50.0, Math.hypot(p.x1 - centerX, p.y1 - centerY), delta.toDouble())
+      assertEquals(50.0, Math.hypot(p.x2 - centerX, p.y2 - centerY), delta.toDouble())
+    }
+  }
+
+  @Test
+  fun `rotating pinch interpolates the radius linearly with the angle`() {
+    val interior = computePinchPathInterior(0.0, 0.0, 200.0, 80.0, -60f)
+    interior.forEachIndexed { index, p ->
+      val fraction = (index + 1).toDouble() / pinchSegmentCount(-60f)
+      assertEquals(
+        (200.0 + (80.0 - 200.0) * fraction) / 2.0,
+        Math.hypot(p.x1.toDouble(), p.y1.toDouble()),
+        delta.toDouble(),
+      )
+    }
+  }
+
+  @Test
+  fun `non rotating pinch stays a single straight segment`() {
+    assertEquals(1, pinchSegmentCount(0f))
+    assertEquals(
+      emptyList<PinchFingerPositions>(),
+      computePinchPathInterior(0.0, 0.0, 80.0, 300.0, 0f),
+    )
+  }
+
+  @Test
+  fun `segment count follows rotation magnitude and is bounded`() {
+    assertEquals(1, pinchSegmentCount(5f))
+    assertEquals(9, pinchSegmentCount(90f))
+    assertEquals(9, pinchSegmentCount(-90f))
+    assertEquals(36, pinchSegmentCount(100000f))
+    assertEquals(1, pinchSegmentCount(Float.NaN))
+  }
+
+  @Test
+  fun `path fractions zero and one equal the endpoint geometry`() {
+    val p = computePinchPoints(540.0, 960.0, 100.0, 300.0, 45f)
+    val start = computePinchFingerPositions(540.0, 960.0, 100.0, 300.0, 45f, 0.0)
+    val end = computePinchFingerPositions(540.0, 960.0, 100.0, 300.0, 45f, 1.0)
+    assertEquals(p.startX1, start.x1, delta)
+    assertEquals(p.startY1, start.y1, delta)
+    assertEquals(p.startX2, start.x2, delta)
+    assertEquals(p.startY2, start.y2, delta)
+    assertEquals(p.endX1, end.x1, delta)
+    assertEquals(p.endY1, end.y1, delta)
+    assertEquals(p.endX2, end.x2, delta)
+    assertEquals(p.endY2, end.y2, delta)
+  }
+
+  /**
+   * SHARED PATH GOLDEN TABLE — the single source of truth is
+   * `test/fixtures/pinch-path-golden-vectors.json`; `test/parity/pinchGoldenVectorParity.test.ts`
+   * verifies this table and the iOS mirror (`testPathGoldenVectorsMatchAndroidParity`) against it.
+   * Each row is (centerX, centerY, distanceStart, distanceEnd, rotationDegrees, fraction) followed
+   * by the expected *unordered* pair of finger positions at that fraction of the gesture.
+   */
+  @Test
+  fun `path golden vectors match iOS parity`() {
+    data class PathVector(
+      val centerX: Double,
+      val centerY: Double,
+      val distanceStart: Double,
+      val distanceEnd: Double,
+      val rotationDegrees: Float,
+      val fraction: Double,
+      val expected: List<Pair<Float, Float>>,
+    )
+    val pathVectors =
+      listOf(
+        PathVector(
+          200.0,
+          400.0,
+          100.0,
+          100.0,
+          90f,
+          0.5,
+          listOf(235.355339f to 435.355339f, 164.644661f to 364.644661f),
+        ),
+        PathVector(
+          200.0,
+          400.0,
+          100.0,
+          100.0,
+          90f,
+          0.25,
+          listOf(246.193977f to 419.134172f, 153.806023f to 380.865828f),
+        ),
+        PathVector(
+          300.0,
+          500.0,
+          200.0,
+          80.0,
+          -60f,
+          0.5,
+          listOf(360.621778f to 465f, 239.378222f to 535f),
+        ),
+        PathVector(0.0, 0.0, 200.0, 200.0, 0f, 0.5, listOf(100f to 0f, -100f to 0f)),
+        PathVector(
+          540.0,
+          960.0,
+          100.0,
+          300.0,
+          45f,
+          1.0,
+          listOf(646.066017f to 1066.066017f, 433.933983f to 853.933983f),
+        ),
+        PathVector(
+          540.0,
+          960.0,
+          100.0,
+          300.0,
+          45f,
+          0.5,
+          listOf(632.387953f to 998.268343f, 447.612047f to 921.731657f),
+        ),
+      )
+
+    for (v in pathVectors) {
+      val p =
+        computePinchFingerPositions(
+          v.centerX,
+          v.centerY,
+          v.distanceStart,
+          v.distanceEnd,
+          v.rotationDegrees,
+          v.fraction,
+        )
+      val actual = sortedPoints(listOf(p.x1 to p.y1, p.x2 to p.y2))
+      val expected = sortedPoints(v.expected)
+      actual.zip(expected).forEach { (a, e) ->
+        assertEquals("x mismatch for $v", e.first, a.first, delta)
+        assertEquals("y mismatch for $v", e.second, a.second, delta)
+      }
+    }
+  }
+
   /** Deterministic order-independent sort so the golden comparison ignores finger labeling. */
   private fun sortedPoints(points: List<Pair<Float, Float>>): List<Pair<Float, Float>> =
     points.sortedWith(compareBy({ it.first }, { it.second }))

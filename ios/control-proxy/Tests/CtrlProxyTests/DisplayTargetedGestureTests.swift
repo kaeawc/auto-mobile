@@ -590,6 +590,33 @@ final class DisplayTargetedGestureTests: XCTestCase {
         XCTAssertEqual(cross(observed).sign, cross((pinch.first, pinch.second)).sign)
     }
 
+    func testPureRotationPinchPathKeepsAConstantRadiusThroughMappedWaypoints() throws {
+        // Regression for #12996: a straight start-to-end chord shrinks the radius mid-gesture, so a
+        // rotation-only pinch zoomed. Every waypoint must stay at distance 50 from the mapped center.
+        let provider = provider()
+        let factory = try DisplayGestureFactory(provider: provider)
+        _ = try factory.deliverPinch(
+            center: point, distanceStart: 100, distanceEnd: 100, rotationDegrees: 90, duration: 0.3
+        )
+        let pinch = try XCTUnwrap(provider.pinches.first)
+        XCTAssertFalse(pinch.first.via.isEmpty)
+        XCTAssertEqual(pinch.first.via.count, pinch.second.via.count)
+        let center = GesturePoint(
+            x: (pinch.first.start.x + pinch.second.start.x) / 2, y: (pinch.first.start.y + pinch.second.start.y) / 2
+        )
+        for finger in [pinch.first, pinch.second] {
+            for waypoint in finger.via + [finger.start, finger.end] {
+                XCTAssertEqual(hypot(waypoint.x - center.x, waypoint.y - center.y), 50, accuracy: 1e-6)
+            }
+        }
+    }
+
+    func testNonRotatingPinchHasNoWaypoints() {
+        let observed = observedPinchPaths(center: point, distanceStart: 120, distanceEnd: 300, rotationDegrees: 0)
+        XCTAssertTrue(observed.first.via.isEmpty)
+        XCTAssertTrue(observed.second.via.isEmpty)
+    }
+
     func testMirroredUnfoldedPinchUsesRotationThreeMapping() throws {
         let provider = provider(geometry: GestureCoordinateGeometry(
             app: unfolded.app, screen: unfolded.screen, observation: unfolded.observation, rotation: 3

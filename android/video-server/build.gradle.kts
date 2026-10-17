@@ -8,10 +8,6 @@ plugins {
   `java-library`
 }
 
-java {
-  toolchain { languageVersion.set(JavaLanguageVersion.of(libs.versions.build.java.target.get())) }
-}
-
 // Android SDK android.jar as compileOnly dependency for Android APIs
 val androidSdkPath: String =
   System.getenv("ANDROID_HOME")

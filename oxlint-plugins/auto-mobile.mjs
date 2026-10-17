@@ -410,13 +410,13 @@ const SELECTOR_FACADE_METHODS = new Set([
   "selectClickableSiblingOfResourceId",
 ]);
 const SELECTOR_FACADE_ALLOWED_FILES =
-  /(?:^|\/)src\/features\/(?:action\/(?:TapOnElement|TapAnyElement)|utility\/ResolverElementSelector)\.ts$/;
+  /(?:^|\/)src\/features\/(?:action\/(?:TapOnElement|TapAnyElement|tapElementFinder)|utility\/ResolverElementSelector)\.ts$/;
 const noDeprecatedSelectorFacadeRule = {
   meta: {
     type: "problem",
     messages: {
       facade:
-        "selectByText/selectByResourceId/selectByTestTag/selectClickable* are deprecated adapters; call ElementSelector.select(capture, query, options) with a named policy from SelectionPolicy. Only TapOnElement and TapAnyElement may still use them (oxlint-plugins/auto-mobile.mjs, issue #11838).",
+        "selectByText/selectByResourceId/selectByTestTag/selectClickable* are deprecated adapters; call ElementSelector.select(capture, query, options) with a named policy from SelectionPolicy. Only TapOnElement, TapAnyElement and tapElementFinder may still use them (oxlint-plugins/auto-mobile.mjs, issue #11838).",
     },
   },
   create(context) {

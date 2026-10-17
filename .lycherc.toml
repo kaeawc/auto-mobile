@@ -71,6 +71,7 @@ exclude_path = [
   "^docs/using/a11y/index\\.html$",
   "^docs/using/talkback/index\\.html$",
   "^docs/using/tool-capabilities/index\\.html$",
+  "^docs/using/ux-exploration/index\\.html$",
   "^docs/using/voiceover/index\\.html$",
   # Generated pages the docs deploy writes into docs/ (gitignored). Their
   # canonical sources -- .github/CONTRIBUTING.md and CHANGELOG.md -- are checked

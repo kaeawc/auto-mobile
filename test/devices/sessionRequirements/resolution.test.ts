@@ -746,6 +746,30 @@ describe("Android system image selection", () => {
     expect(missing.message).toContain("not recognized");
   });
 
+  test("an installed iOS runtime with malformed version metadata stays catalog_metadata_invalid (#12799)", () => {
+    const defaults = iosDefaults();
+    const catalog = iosCatalog({
+      releases: iosCatalog().releases.map((release) => ({
+        ...release,
+        osVersion: undefined,
+        metadataState: "stale" as const,
+      })),
+    });
+    const normalized = normalizeIos(
+      {
+        schemaVersion: 1,
+        platform: "ios",
+        hardware: { kind: "archetype", archetype: "phone" },
+        os: { kind: "exact", version: "27" },
+      },
+      defaults,
+      catalog,
+    );
+    const error = unwrapError(resolveSessionDeviceProfile(normalized, defaults, catalog));
+    expect(error.code).toBe("catalog_metadata_invalid");
+    expect(error.message).not.toContain("Android");
+  });
+
   test("an API level used as os names the release version in the error", () => {
     const error = unwrapError(resolveWith([image("google_apis")], { kind: "major", major: 36 }));
     expect(error.code).toBe("missing_installed_runtime");

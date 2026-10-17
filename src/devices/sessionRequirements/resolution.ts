@@ -249,7 +249,7 @@ function chooseIosRelease(
     osSelectorMatchesVersion(selector, release.osVersion),
   );
   if (satisfying.length === 0) {
-    return noRuntimeResult(selector, releases);
+    return noRuntimeResult(selector, releases, "ios");
   }
   const ordered = stableReleaseSort(
     satisfying,
@@ -345,7 +345,7 @@ function chooseAndroidRelease(
         { field: "os.version" },
       );
     }
-    return androidApiLevelHint(selector, valid) ?? noRuntimeResult(selector, releases);
+    return androidApiLevelHint(selector, valid) ?? noRuntimeResult(selector, releases, "android");
   }
   const ordered = stableReleaseSort(
     satisfying,
@@ -378,19 +378,23 @@ function noRuntimeResult(
     metadataState: "current" | "stale";
     osVersion?: string;
   }[],
+  platform: "android" | "ios",
 ): RequirementResult<never> {
   const unusable = releases.some(
     (release) =>
       release.installed &&
-      release.osVersion !== undefined &&
-      (!parseNumericVersion(release.osVersion).ok ||
+      // Only Android tolerates a missing version (an API level newer than the table, #12788);
+      // a malformed iOS runtime version is invalid metadata.
+      (release.osVersion !== undefined || platform === "ios") &&
+      (release.osVersion === undefined ||
+        !parseNumericVersion(release.osVersion).ok ||
         (release.metadataState !== "current" &&
           osSelectorMatchesVersion(selector, release.osVersion))),
   );
   // An installed image whose Android release is unknown (an API level newer than the
   // table) cannot satisfy any selector, but it must not poison unrelated ones (#12788).
   const unrecognized = releases.filter(
-    (release) => release.installed && release.osVersion === undefined,
+    (release) => platform === "android" && release.installed && release.osVersion === undefined,
   ).length;
   return unusable
     ? failure(

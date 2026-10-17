@@ -162,6 +162,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private setVoiceOverEnabledResult: CtrlProxyActionResult | null = null;
   private multiFingerSwipeResult: CtrlProxySwipeResult | null = null;
   private pressButtonResult: IOSDispatchResult<CtrlProxyPressButtonResult> | null = null;
+  private pressKeyResult: IOSDispatchResult<CtrlProxyPressKeyResult> | null = null;
+  private requestLog: Array<{ type: string } & Record<string, unknown>> = [];
+  private pressHomeResult: IOSDispatchResult<CtrlProxyPressHomeResult> | null = null;
+  private pressBackResult: IOSDispatchResult<CtrlProxyPressBackResult> | null = null;
   private actionResult: CtrlProxyActionResult | null = null;
   private clipboardResult: CtrlProxyClipboardResult | null = null;
   private clipboardResults: CtrlProxyClipboardResult[] = [];
@@ -245,6 +249,21 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   setPressButtonResult(result: IOSDispatchResult<CtrlProxyPressButtonResult> | null): void {
     this.pressButtonResult = result;
+  }
+
+  /** Configure the pressKey result; the dispatch contract is the one documented on `setTapResult`. */
+  setPressKeyResult(result: IOSDispatchResult<CtrlProxyPressKeyResult> | null): void {
+    this.pressKeyResult = result;
+  }
+
+  /** Configure the pressHome result; the dispatch contract is the one documented on `setTapResult`. */
+  setPressHomeResult(result: IOSDispatchResult<CtrlProxyPressHomeResult> | null): void {
+    this.pressHomeResult = result;
+  }
+
+  /** Configure the pressBack result; the dispatch contract is the one documented on `setTapResult`. */
+  setPressBackResult(result: IOSDispatchResult<CtrlProxyPressBackResult> | null): void {
+    this.pressBackResult = result;
   }
 
   /**
@@ -555,7 +574,17 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   /**
    * Clear all call history
    */
+  /**
+   * Gesture and key requests in call order, named and shaped like the runner frames they stand for
+   * (`request_tap_coordinates` with `x`, `y`, `duration`...), so a test can check the cross-operation
+   * order the per-operation histories lose. See `test/contracts/IOSCtrlProxyContract.ts`.
+   */
+  getRequestLog(): ReadonlyArray<{ type: string } & Record<string, unknown>> {
+    return this.requestLog;
+  }
+
   clearHistory(): void {
+    this.requestLog = [];
     this.tapHistory = [];
     this.swipeHistory = [];
     this.dragHistory = [];
@@ -797,6 +826,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.checkFailure("tap");
 
     this.tapHistory.push({ x, y, duration });
+    this.requestLog.push({ type: "request_tap_coordinates", x, y, duration });
 
     return this.settleDispatch<CtrlProxyTapResult>(
       this.tapResult ?? {
@@ -825,6 +855,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.checkFailure("swipe");
 
     this.swipeHistory.push({ x1, y1, x2, y2, duration });
+    this.requestLog.push({ type: "request_swipe", x1, y1, x2, y2, duration });
 
     return this.settleDispatch<CtrlProxySwipeResult>(
       this.swipeResult ?? {
@@ -1052,11 +1083,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     await this.applyDelay("pressKey");
     this.checkFailure("pressKey");
     this.pressKeyHistory.push({ key, modifiers });
-    return {
-      success: true,
-      totalTimeMs: timeoutMs > 0 ? 1 : 0,
-      perfTiming: this.performanceTiming || undefined,
-    };
+    this.requestLog.push({ type: "request_press_key", key, modifiers });
+    return this.settleDispatch<CtrlProxyPressKeyResult>(
+      this.pressKeyResult ?? { success: true, totalTimeMs: timeoutMs > 0 ? 1 : 0 },
+    );
   }
 
   async requestPressHome(
@@ -1066,12 +1096,11 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.pressHomeRequestCount++;
     await this.applyDelay("pressHome");
     this.checkFailure("pressHome");
+    this.requestLog.push({ type: "request_press_home" });
 
-    return {
-      success: true,
-      totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined,
-    };
+    return this.settleDispatch<CtrlProxyPressHomeResult>(
+      this.pressHomeResult ?? { success: true, totalTimeMs: 100 },
+    );
   }
 
   async requestPressBack(
@@ -1081,12 +1110,11 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.pressBackRequestCount++;
     await this.applyDelay("pressBack");
     this.checkFailure("pressBack");
+    this.requestLog.push({ type: "request_press_back" });
 
-    return {
-      success: true,
-      totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined,
-    };
+    return this.settleDispatch<CtrlProxyPressBackResult>(
+      this.pressBackResult ?? { success: true, totalTimeMs: 100 },
+    );
   }
 
   async requestShake(

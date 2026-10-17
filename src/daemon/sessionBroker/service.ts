@@ -24,7 +24,7 @@ import {
   type SqliteBindingRegistry,
 } from "./registry/sqliteBindingRegistry";
 import { computeBindingScopeKey, type BindingProcessIdentity } from "./registry/bindingRegistry";
-import { SessionBroker, type SessionBrokerOptions } from "./broker";
+import { RECEIPT_PRUNE_BATCH, SessionBroker, type SessionBrokerOptions } from "./broker";
 import { ManagedDevicePort } from "./managedDevicePort";
 import { SESSION_BROKER_SCOPE, type SessionBrokerHostConfig } from "./hostConfig";
 import { IosBaselineReset } from "./iosBaselineReset";
@@ -303,7 +303,10 @@ export class SessionBrokerService {
     }
     this.lastPruneAtMs = now;
     try {
-      await this.broker.pruneReceipts();
+      // A full batch means more expired receipts may remain: do not wait out the interval.
+      if ((await this.broker.pruneReceipts()) >= RECEIPT_PRUNE_BATCH) {
+        this.lastPruneAtMs = undefined;
+      }
     } catch (error) {
       // Retention is housekeeping; a busy registry only delays it to the next interval.
       logger.warn(`Session broker receipt retention failed: ${errorMessage(error)}`, error);

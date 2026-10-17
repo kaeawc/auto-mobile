@@ -14,6 +14,8 @@ import {
   type InputTypeTextParams,
 } from "./inputRouteParams";
 import { IDE_DEVICE_MUTATION_METHODS, IDE_ROUTE_PARSERS, STARTUP_PROBE_METHODS } from "./ideRoutes";
+import { ideFeatureRoutes } from "./socketServer/ideRouteModule";
+import { daemonLifecycleRoutes } from "./socketServer/lifecycleRouteModule";
 import {
   DISPATCH_HELD_INPUT_METHODS,
   GESTURE_FRAME_METHODS,
@@ -54,7 +56,7 @@ import {} from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
 import type { RefusedOwnedSessionRestore } from "./devicePool";
 import { GestureOwnershipRegistry } from "./gestureOwnership";
-import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
+import { resolveMcpRequestTimeoutMsOnce, ProgressExtendableDeadline } from "./mcpRequestTimeout";
 import { McpOverloadError, McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -154,7 +156,6 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES, OutboundWriteGuard } from "./outboundWriteGuard";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
-import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinitions";
 import {
   getSessionToolSelectionService,
   type SessionToolSelectionService,
@@ -247,16 +248,6 @@ import {
   sessionExecutionMetadataOf,
   type ActiveExecution,
 } from "../server/executionTracker";
-import {
-  DAEMON_COMPLETE_MAINTENANCE_METHOD,
-  DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
-  DAEMON_REPUBLISH_IDENTITY_METHOD,
-  DAEMON_PREPARE_MAINTENANCE_METHOD,
-  DAEMON_PREPARE_RESTART_METHOD,
-  DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
-  DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
-  DAEMON_RESTART_ADMITTED_METHOD,
-} from "./daemonRestartAdmission";
 import { type DaemonGenerationIdentity } from "./liveAcceptanceCapability";
 import { daemonGenerationMatches } from "./processGeneration";
 import {
@@ -995,6 +986,12 @@ interface InputRouteRun<A extends InputRouteArgs, R extends InputRouteResult> {
 
 type InputTargetAction = InputRouteMethod;
 
+type IdeServerRouteHandler = (
+  request: DaemonRequest,
+  socketSessionId: string | undefined,
+  ideMutation: IdeMutationCall | undefined,
+) => Promise<any | undefined> | any;
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private serverClosePromise: Promise<void> | null = null;
@@ -1634,7 +1631,7 @@ export class UnixSocketServer {
         terminal: false,
         idleDeadline: controlFrame
           ? undefined
-          : new ProgressExtendableDeadline(receivedAtMs, resolveMcpRequestTimeoutMs(request)),
+          : new ProgressExtendableDeadline(receivedAtMs, resolveMcpRequestTimeoutMsOnce(request)),
       };
       pending = tracked;
       this.pendingSocketRequests.add(tracked);
@@ -2172,7 +2169,7 @@ export class UnixSocketServer {
       return this.cancelSocketRequest(session, request);
     }
 
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const totalTimeoutMs = resolveMcpRequestTimeoutMsOnce(request);
     // Mutable: extended by progress notifications for this specific request
     // (see ProgressExtendableDeadline) -- untouched for a request that never
     // emits progress, which keeps its exact original deadline.
@@ -4938,69 +4935,39 @@ export class UnixSocketServer {
   }
 
   /** The `ide/*` and daemon-lifecycle routes this socket serves, by method name (#11813). */
-  private readonly ideRouteHandlers: ReadonlyMap<
+  private readonly ideRouteHandlers: ReadonlyMap<string, IdeServerRouteHandler> = new Map<
     string,
-    (
-      request: DaemonRequest,
-      socketSessionId: string | undefined,
-      ideMutation: IdeMutationCall | undefined,
-    ) => Promise<any | undefined> | any
-  > = new Map([
-    [
-      "ide/listFeatureFlags",
-      (request, socketSessionId, ideMutation) =>
-        this.ideListFeatureFlags(request, socketSessionId, ideMutation),
-    ],
-    [
-      "ide/setFeatureFlag",
-      (request, socketSessionId, ideMutation) =>
-        this.ideSetFeatureFlag(request, socketSessionId, ideMutation),
-    ],
-    [
-      "ide/setSessionToolEnabled",
-      (request, socketSessionId, ideMutation) =>
-        this.ideSetSessionToolEnabled(request, socketSessionId, ideMutation),
-    ],
-    [
-      "ide/ping",
-      (request, socketSessionId, ideMutation) =>
-        this.idePing(request, socketSessionId, ideMutation),
-    ],
-    [
-      DAEMON_REPUBLISH_IDENTITY_METHOD,
-      async (request) => await this.republishDaemonIdentity(request.params),
-    ],
-    [
-      DAEMON_PREPARE_RESTART_METHOD,
-      async (request) => this.restartAdmission.prepareDaemonRestart(request.params),
-    ],
-    [
-      DAEMON_PREPARE_MAINTENANCE_METHOD,
-      async (request) => this.restartAdmission.prepareDaemonMaintenance(request.params),
-    ],
-    [
-      DAEMON_COMPLETE_MAINTENANCE_METHOD,
-      async (request) => this.restartAdmission.completeDaemonMaintenance(request.params),
-    ],
-    [
-      DAEMON_RESTART_ADMITTED_METHOD,
-      async (request) => this.restartAdmission.restartAdmittedDaemon(request.params),
-    ],
-    [
-      DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
-      async (request, socketSessionId) =>
-        this.restartAdmission.restartAcceptanceSession(request.params, socketSessionId),
-    ],
-    [
-      DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
-      async (request, socketSessionId) =>
-        this.restartAdmission.commitAcceptanceRestart(request.params, socketSessionId),
-    ],
-    [
-      DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
-      async (request, socketSessionId) =>
-        this.restartAdmission.releaseAcceptanceRestart(request.params, socketSessionId),
-    ],
+    IdeServerRouteHandler
+  >([
+    ...ideFeatureRoutes({
+      requireFeatureFlagService: () => this.requireFeatureFlagService(),
+      sessionToolSelection: () =>
+        this.sessionToolSelectionService ?? getSessionToolSelectionService(),
+      assertBrokerHostMutation: (socketSessionId, action) =>
+        this.assertBrokerConnectionHostMutation(socketSessionId, action),
+      assertBrokerControl: (socketSessionId, action, target) =>
+        this.assertBrokerConnectionControl(socketSessionId, action, target),
+      emitToolsListChanged: () => ListChangedBroadcaster.emit("tools"),
+      now: () => this.timer.now(),
+    }),
+    ...daemonLifecycleRoutes({
+      republishIdentity: (params) => this.republishDaemonIdentity(params),
+      // Resolved per call: the admission object is built at the end of construction.
+      restart: {
+        prepareDaemonRestart: (params) => this.restartAdmission.prepareDaemonRestart(params),
+        prepareDaemonMaintenance: (params) =>
+          this.restartAdmission.prepareDaemonMaintenance(params),
+        completeDaemonMaintenance: (params) =>
+          this.restartAdmission.completeDaemonMaintenance(params),
+        restartAdmittedDaemon: (params) => this.restartAdmission.restartAdmittedDaemon(params),
+        restartAcceptanceSession: (params, owner) =>
+          this.restartAdmission.restartAcceptanceSession(params, owner),
+        commitAcceptanceRestart: (params, owner) =>
+          this.restartAdmission.commitAcceptanceRestart(params, owner),
+        releaseAcceptanceRestart: (params, owner) =>
+          this.restartAdmission.releaseAcceptanceRestart(params, owner),
+      },
+    }),
     [
       "ide/status",
       (request, socketSessionId, ideMutation) =>
@@ -5039,61 +5006,6 @@ export class UnixSocketServer {
   ): Promise<any | undefined> {
     const handler = this.ideRouteHandlers.get(request.method);
     return handler ? await handler(request, socketSessionId, ideMutation) : undefined;
-  }
-
-  private async ideListFeatureFlags(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    const flags = await this.requireFeatureFlagService().listFlags();
-    return { flags };
-  }
-
-  private async ideSetFeatureFlag(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    const featureFlagService = this.requireFeatureFlagService();
-    const args = IDE_ROUTE_PARSERS["ide/setFeatureFlag"](request.params);
-    this.assertBrokerConnectionHostMutation(socketSessionId, "ide/setFeatureFlag");
-    const updated = await featureFlagService.setFlag(
-      args.key as FeatureFlagKey,
-      args.enabled,
-      args.config,
-    );
-    return updated;
-  }
-
-  private async ideSetSessionToolEnabled(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    const args = IDE_ROUTE_PARSERS["ide/setSessionToolEnabled"](request.params);
-    this.assertBrokerConnectionControl(socketSessionId, "ide/setSessionToolEnabled", {
-      requesterSessionUuid: args.sessionUuid,
-    });
-    await (this.sessionToolSelectionService ?? getSessionToolSelectionService()).setEnabled(
-      args.sessionUuid,
-      args.toolName,
-      args.enabled,
-    );
-    ListChangedBroadcaster.emit("tools");
-    return {
-      sessionUuid: args.sessionUuid,
-      toolName: args.toolName,
-      enabled: args.enabled,
-    };
-  }
-
-  private async idePing(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    return { ok: true, timestamp: this.timer.now() };
   }
 
   private async ideStatus(
@@ -5883,7 +5795,7 @@ export class UnixSocketServer {
   ): { queueEnterMs: number; totalTimeoutMs: number } {
     return {
       queueEnterMs: input?.receivedAtMs ?? this.timer.now(),
-      totalTimeoutMs: resolveMcpRequestTimeoutMs(request),
+      totalTimeoutMs: resolveMcpRequestTimeoutMsOnce(request),
     };
   }
 

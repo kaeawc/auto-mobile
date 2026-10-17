@@ -3,7 +3,11 @@ import type { Element } from "../../src/models/Element";
 import type { ElementSelectionResult } from "../../src/models/ElementSelectionResult";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { ElementSelectionStrategy } from "../../src/models/ElementSelectionStrategy";
-import type { ElementSelector } from "../../src/utils/interfaces/ElementSelector";
+import type {
+  ElementSelectionOptions,
+  ElementSelector,
+} from "../../src/utils/interfaces/ElementSelector";
+import type { ElementQuery } from "../../src/models/ElementQuery";
 import type { TextSelectionIntent } from "../../src/utils/interfaces/TextSelectionIntent";
 
 /**
@@ -63,6 +67,29 @@ export class FakeElementSelector implements ElementSelector {
       totalMatches,
       strategy: strategy ?? "first",
     };
+  }
+
+  /** Records the query like the matching `selectBy*` method would, then returns the next result. */
+  select(
+    viewHierarchy: ViewHierarchyResult,
+    query: ElementQuery,
+    options?: ElementSelectionOptions,
+  ): ElementSelectionResult {
+    void viewHierarchy;
+    this.lastStrategy = options?.strategy;
+    this.lastIndex = options?.index;
+    if (query.text !== undefined) {
+      this.lastText = query.text;
+      this.lastTextSelectionIntent = options?.selectionIntent;
+      this.textCalls.push(query.text);
+    }
+    if (query.elementId !== undefined) {
+      this.lastResourceId = query.elementId;
+    }
+    if (query.testTag !== undefined) {
+      this.lastTestTag = query.testTag;
+    }
+    return this.buildSelectionResult(options?.strategy);
   }
 
   selectByText(

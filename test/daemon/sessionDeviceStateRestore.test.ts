@@ -6,6 +6,7 @@ import {
 } from "../../src/daemon/sessionDeviceStateRestore";
 import type { IosAppNetworkRuleRestorer } from "../../src/daemon/iosAppNetworkLease";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import { DeviceClockRestoreRegistry } from "../../src/features/utility/DeviceClock";
 import type { IosAppNetworkRule } from "../../src/features/networkFilter/IosAppNetworkRuleClient";
 import type { BackoffPolicy } from "../../src/utils/Backoff";
 import { logger } from "../../src/utils/logger";
@@ -68,6 +69,22 @@ class FakeHost implements SessionDeviceStateRestoreHost {
   isPublished(session: Session): boolean {
     return this.publishAll || this.published.has(session);
   }
+  healthEvents: string[] = [];
+  healthIncarnation(): number {
+    return 1;
+  }
+  restoreIncarnationIsCurrent(): boolean {
+    return true;
+  }
+  clearRestoreHealth(target: { deviceId: string }, reason: string): void {
+    this.healthEvents.push(`clear:${target.deviceId}:${reason}`);
+  }
+  markHealth(deviceId: string, _incarnation: number, reason: string): void {
+    this.healthEvents.push(`mark:${deviceId}:${reason}`);
+  }
+  clearHealthMarker(deviceId: string, _incarnation: number, reason: string): void {
+    this.healthEvents.push(`clear:${deviceId}:${reason}`);
+  }
   trackPendingDeviceCleanup(deviceId: string): void {
     this.tracked.push(deviceId);
   }
@@ -95,12 +112,15 @@ function makeRestore(
     restore: async () => {},
   }),
   rotation: SessionDeviceStateRestoreOptions["rotation"] = () => ({ restore: async () => {} }),
+  clock: SessionDeviceStateRestoreOptions["clock"] = () => ({ restore: async () => {} }),
 ): SessionDeviceStateRestore {
   return new SessionDeviceStateRestore(host, {
     screenReader,
     screenReaderBackoff: backoff,
     rotation,
     rotationBackoff: backoff,
+    clock,
+    clockRegistry: new DeviceClockRestoreRegistry(),
     iosAppNetworkRuleRestorer: restorer,
     defaultIosAppNetworkRuleRestorer: () => restorer,
     iosLease: { leaseMs: 30_000, renewIntervalMs: 10_000 },
@@ -428,6 +448,68 @@ describe("rotation family", () => {
       expect(h.restore.abandonedRotations.get("emulator-5556")).toBe(baseline);
       h.restore.rotationRestores.retire("emulator-5556");
       expect(h.restore.abandonedRotations.has("emulator-5556")).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("clock family", () => {
+  async function createClock(clockResult: (call: number) => Promise<void>) {
+    const timer = new FakeTimer();
+    const host = new FakeHost(timer);
+    host.publishAll = true;
+    let calls = 0;
+    const restore = makeRestore(host, undefined, undefined, () => ({
+      restore: () => {
+        calls++;
+        return clockResult(calls);
+      },
+    }));
+    const factory = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
+    factory.stopCleanupTimer();
+    const session = await factory.createSession("s3", "emulator-5558", "android");
+    factory.setClock(session, {
+      initialAutomaticTime: 1,
+      clockChangedByUs: true,
+      rootedByUs: false,
+    });
+    return { timer, host, restore, session, calls: () => calls };
+  }
+
+  test("a successful clock restore runs through the injected registry and clears the slot", async () => {
+    const h = await createClock(async () => {});
+    const { pending } = await h.restore.getPendingClockRestoration(h.session, null);
+    expect(pending).toBeNull();
+    expect(h.calls()).toBe(1);
+    expect(h.session.cacheData.clock).toBeUndefined();
+    expect(h.host.healthEvents).toContain("clear:emulator-5558:clock");
+  });
+
+  // The clock retries without a cap (unlike rotation and screen reader) and marks the device
+  // unhealthy until it restores or the queue retires (#11794, #11795).
+  test("a failing clock restore marks health and keeps retrying until the queue retires", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await createClock(() => Promise.reject(new Error("adb offline")));
+      const { pending } = await h.restore.getPendingClockRestoration(h.session, null);
+      expect(pending).not.toBeNull();
+      expect(h.host.healthEvents).toContain("mark:emulator-5558:clock");
+      for (let i = 0; i < 6; i++) {
+        await flush();
+        h.timer.advanceTime(250);
+      }
+      expect(h.calls()).toBeGreaterThan(4);
+      h.restore.clockRestores.retire("emulator-5558");
+      await pending;
+      const settled = h.calls();
+      await flush();
+      h.timer.advanceTime(10_000);
+      await flush();
+      expect(h.calls()).toBe(settled);
+      expect(h.host.healthEvents).toContain("clear:emulator-5558:clock");
     } finally {
       warn.mockRestore();
     }

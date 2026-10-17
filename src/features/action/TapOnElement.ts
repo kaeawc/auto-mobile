@@ -1,30 +1,26 @@
-import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import {
-  ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
-  describeFocusTarget,
-  distinctFocusFields,
-  findFocusIdentifier,
-  focusFieldSizeMatches,
-  focusScrollDelta,
-  hasStableFocusIdentity,
-  isSameFocusTarget,
-  requireTestTag,
-  type FocusIdentifierKey,
-} from "./tapFocusIdentity";
+  TapTargetUnavailableError,
+  findTapTargetNode,
+  pointInTapBounds,
+  selectionHierarchyFor,
+  type TapFocusFailure,
+} from "./tapTargetSupport";
+import type { HierarchyLayer } from "../../models/HierarchyLayer";
+import { ANDROID_PRE_TAP_BOUNDS_EPSILON_PX, describeFocusTarget } from "./tapFocusIdentity";
+import type { AndroidTapVerification, TapVerificationOptions } from "./tapVerificationOptions";
+import { TapElementFinder } from "./tapElementFinder";
+import { TapPointPlanner } from "./tapPointPlanner";
+import { FocusVerifier } from "./tapFocusVerifier";
 import { pollSearchUntil } from "./searchUntilPoller";
-import { matchedTapElement } from "./tapPointGeometry";
 import { readFreshPlatformHierarchy, returnsRawHierarchyUnfiltered } from "./tapHierarchyRead";
 import {
   assertLongPressWithinHardMax,
   containerSelectorError,
   failedTapResult,
-  isContainerAvailable,
   resolveSearchUntilDuration,
   throwIfLongPressInterrupted,
 } from "./tapSharedHelpers";
-import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
-import type { OwnPrototypeCoverRule } from "../observe/ApplicationWindowCover";
-import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
+import { isStrictlyScoped } from "../utility/ScopedSelection";
 import {
   withObservationReadScope,
   wasHierarchyReadDuringCall,
@@ -41,7 +37,6 @@ import {
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { dispatchAndroidLongPress } from "./androidLongPress";
 import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
-import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
   assertLongPressFitsRequestBudget,
   resolveVoiceOverActivateCtrlProxyTimeoutMs,
@@ -60,7 +55,7 @@ import {
   isFocusEditableElement,
   promoteClickableAncestor,
 } from "../utility/ElementResolver";
-import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
+import { SearchableHierarchy } from "../utility/SearchableNode";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import {
   DefaultHierarchyCapture,
@@ -80,7 +75,6 @@ import {
   BootedDevice,
   Element,
   isFalsy,
-  ElementBounds,
   ElementSelectionResult,
   ObserveResult,
   TapOnElementResult,
@@ -90,17 +84,10 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
-import type { TextSelectionIntent } from "../../utils/interfaces/TextSelectionIntent";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { isElementKeyboardFocused } from "../utility/FocusedInput";
-import {
-  visibleTapBounds,
-  DefaultElementGeometry,
-  screenSizeForOffscreenCheck,
-  isUsableScreenSize,
-  type ScreenSizeForOffscreenCheckOptions,
-} from "../utility/ElementGeometry";
+import { DefaultElementGeometry, isUsableScreenSize } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 
 import { logger } from "../../utils/logger";
@@ -129,22 +116,10 @@ import { type Timer } from "../../utils/SystemTimer";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
-import {
-  intersectBounds as intersectTapBounds,
-  boundsArea,
-  boundsEqual,
-  boundsNearlyEqual,
-  horizontalExtentNearlyEqual,
-} from "../../utils/bounds";
+import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
 import {
-  isOwnPrototypeNode,
-  resolvePrototypeTapUnderSystemBar,
-  type PrototypeBarTapDecision,
-} from "./prototypeTapUnderSystemBars";
-import {
-  assertAppGestureNotUnderPrototype,
   hasOwnPrototype,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
@@ -171,7 +146,7 @@ import {
 import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
-import type { TapBoundsClip, TapStrategy } from "../../utils/interfaces/TapStrategy";
+import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
 import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 import { createTapStrategy } from "./strategies/createTapStrategy";
 import { LongPressMetadataDetector, type LongPressMetadata } from "./LongPressMetadataDetector";
@@ -207,62 +182,10 @@ import {
   POST_TAP_REFRESH_TIMEOUT_MS,
   PRE_RETRY_DELAY_MS,
 } from "./androidGhostTapRetry";
-import { DefaultObserveElementCollector } from "../observe/ObserveElementCollector";
-import {
-  getImeOccluderForElement,
-  getIosImeOccluder,
-  tapPointOutsideIme,
-} from "../observe/output/SkeletonProjection";
 import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { isSdkInjectedNode } from "../observe/android/StableNodeIdentity";
-import { compareSelectionRank } from "../utility/selectionRank";
-import { isIosTapPointCoveredByChrome } from "./swipeon/iosChromeInsets";
-import {
-  createIosVisibleTapContext,
-  iosVisibleTapArea,
-  isIosTapFrameReduced,
-  iosTapOwnershipErrorMessage,
-  resolveIosOwnedTapPoint,
-} from "./iosTapTargetOwnership";
 import { deadlineRequest, resolveTapOnCall, type TapOnCall } from "./ActionCall";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
-
-function pointInTapBounds(point: { x: number; y: number }, bounds: ElementBounds): boolean {
-  return (
-    point.x >= bounds.left &&
-    point.x < bounds.right &&
-    point.y >= bounds.top &&
-    point.y < bounds.bottom
-  );
-}
-
-function hasTapArea(bounds: ElementBounds | undefined): bounds is ElementBounds {
-  return !!bounds && bounds.left < bounds.right && bounds.top < bounds.bottom;
-}
-
-/**
- * Identifiers of a node's ancestors, outermost first (e.g. `["cart_A", "item_42"]`).
- * A container captured twice under one identifier (iOS XCUITest + SDK nodes, #10266)
- * counts once.
- */
-function identifiedAncestorChain(
-  node: SearchableEntry,
-  nodes: readonly SearchableEntry[],
-): string[] {
-  const chain: string[] = [];
-  for (let parent = node.parentIndex; parent !== undefined; parent = nodes[parent].parentIndex) {
-    const properties = nodes[parent].properties;
-    const id = properties["resource-id"] || properties["test-tag"];
-    if (id && chain[0] !== id) {
-      chain.unshift(id);
-    }
-  }
-  return chain;
-}
-
-function sameChain(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((id, index) => id === b[index]);
-}
 
 /** Internal action context; never part of the public tapOn schema. */
 type IosTapOptions = DisplayFenceOption & { signal?: AbortSignal };
@@ -278,71 +201,9 @@ type ResolvedAndroidTapOptions = DisplayFenceOption & {
   ) => void;
 };
 
-/** Internal I/O seam: decisions and timing remain shared with the default tap path. */
-interface AndroidTapVerification {
-  refresh: (timeoutMs: number) => Promise<ViewHierarchyResult | null>;
-  dispatch?: (point: { x: number; y: number }) => Promise<void>;
-}
-
-type TapVerificationOptions = TapOnElementOptions & {
-  verification?: AndroidTapVerification;
-  screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
-};
-
-interface TapPointContext {
-  chromeElements?: readonly Element[];
-  options: TapOnElementOptions;
-  screenSize?: ObserveResult["screenSize"];
-}
-
 /** TalkBack state resolved once for an explicit-display tap, with any unknown-state warnings. */
 type AndroidDisplayTalkBackState = { enabled: boolean; warnings: string[] };
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
-
-const TEXT_SELECTION_INTENT_BY_ACTION: Record<TapOnElementOptions["action"], TextSelectionIntent> =
-  {
-    tap: "tap",
-    doubleTap: "tap",
-    longPress: "tap",
-    focus: "focus-input",
-  };
-
-/** Prefer the exact parsed node when geometry and public IDs collide across windows. */
-function findTapTargetNode(
-  nodes: readonly SearchableEntry[],
-  element: Element,
-): SearchableEntry | undefined {
-  const source = getHierarchyNodeSource(element);
-  return (
-    (source && nodes.find((node) => node.source === source)) ??
-    nodes.find(
-      (node) =>
-        node.element &&
-        node.bounds &&
-        boundsEqual(node.bounds, element.bounds) &&
-        node.nativeId === element["resource-id"] &&
-        node.nodeKey === element["view-id"],
-    )
-  );
-}
-
-/**
- * The tree `element` was selected from, so the IME guard can recover its ancestry by
- * source identity. Unscoped iOS selection reads the registered capture's projected
- * tree; a `layer`-scoped selection projects an unregistered tree that keeps the
- * original capture's nodes (`scopeHierarchyToLayer`), so fall back to the original.
- */
-function selectionHierarchyFor(
-  element: Element,
-  hierarchy: ViewHierarchyResult,
-  platform: "android" | "ios",
-): ViewHierarchyResult {
-  const snapshot = platform === "ios" ? getHierarchySnapshot(hierarchy) : undefined;
-  const source = getHierarchyNodeSource(element);
-  return snapshot && (!source || snapshot.nodes.some((node) => node.source === source))
-    ? snapshot.hierarchy
-    : hierarchy;
-}
 
 /**
  * Dependencies for TapOnElement that can be injected for testing.
@@ -422,7 +283,7 @@ export interface TapPreTapStabilitySeam {
 /** Internal focus evidence; symbol keys never enter JSON tool output. */
 export const tapFocusFailure: unique symbol = Symbol("tapFocusFailure");
 export const tapResolvedLayer: unique symbol = Symbol("tapResolvedLayer");
-export type TapFocusFailure = "not-found" | "no-visible-tap-area" | "navigation-bar";
+export type { TapFocusFailure };
 /** Classify the already resolved node in the captured window scopes, without another read. */
 function resolvedElementLayer(
   hierarchy: ViewHierarchyResult,
@@ -471,20 +332,6 @@ function withResolvedLayer<T extends TapOnFocusResult>(
   return result;
 }
 
-/** With no `layer`, a tap must avoid AutoMobile's own prototype windows as well (#10691). */
-function tapOwnPrototypeCoverRule(layer: TapOnElementOptions["layer"]): OwnPrototypeCoverRule {
-  return layer === undefined ? "touch" : "none";
-}
-
-class TapTargetUnavailableError extends ActionableError {
-  constructor(
-    message: string,
-    readonly reason: TapFocusFailure,
-  ) {
-    super(message);
-  }
-}
-
 function markFocusFailure(
   action: string,
   result: TapOnElementResult,
@@ -523,10 +370,22 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     "checkIdentity" | "record"
   >;
   private readonly lastRenderedObservation?: RenderedObservationReader;
-  private readonly preTapProjections = new WeakMap<
-    ViewHierarchyResult,
-    readonly SearchableEntry[]
-  >();
+  private readonly focusVerifier = new FocusVerifier({
+    device: this.device,
+    findElementInHierarchy: (options, hierarchy) => this.findElementInHierarchy(options, hierarchy),
+    withObservationScreenSize: (options, observation) =>
+      this.withObservationScreenSize(options, observation),
+  });
+  private readonly tapPoints = new TapPointPlanner({
+    device: this.device,
+    geometry: () => this.geometry,
+    strategy: () => this.strategy,
+  });
+  private readonly finder = new TapElementFinder({
+    device: this.device,
+    elementSelector: () => this.elementSelector,
+    tapPoints: this.tapPoints,
+  });
   private geometry: ElementGeometry;
   private elementParser: ElementParser;
   private accessibilityService: AndroidCtrlProxyClient;
@@ -815,83 +674,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private semanticLinkOccurrenceIsInvalid(options: TapOnElementOptions): boolean {
     const occurrence = options.subtext?.occurrence ?? options.index ?? 0;
     return ![Number.isInteger(occurrence), occurrence >= 0].every(Boolean);
-  }
-
-  private resolveTapPoint(element: Element): { x: number; y: number } {
-    return this.geometry.getElementCenter(element);
-  }
-
-  private getImeOccluderForTap(
-    element: Element,
-    hierarchy: ViewHierarchyResult,
-    screenSize?: ObserveResult["screenSize"],
-  ) {
-    const platform = this.device.platform;
-    if (platform !== "android" && platform !== "ios") {
-      return undefined;
-    }
-    const elements = new DefaultObserveElementCollector().collect(
-      selectionHierarchyFor(element, hierarchy, platform),
-      platform,
-    );
-    const ime = elements && getImeOccluderForElement(elements, element);
-    return ime && platform === "ios" ? getIosImeOccluder(ime, screenSize) : ime;
-  }
-
-  /** Judge an Android tap on one of CtrlProxy's own prototype controls against the system bars (#10086). */
-  private prototypeBarTapDecision(
-    hierarchy: ViewHierarchyResult,
-    element: Element,
-    point: { x: number; y: number },
-  ): PrototypeBarTapDecision {
-    if (this.device.platform !== "android") {
-      return { kind: "proceed", point };
-    }
-    const owner = findTapTargetNode(new SearchableHierarchy().project(hierarchy), element)?.source;
-    return resolvePrototypeTapUnderSystemBar({
-      hierarchy,
-      ownedByPrototype: isOwnPrototypeNode(hierarchy, owner),
-      bounds: element.bounds,
-      point,
-    });
-  }
-
-  private resolveImeSafeTapPoint(
-    element: Element,
-    hierarchy: ViewHierarchyResult,
-    { options, screenSize }: TapPointContext,
-    bounds: ElementBounds = element.bounds,
-  ): { x: number; y: number } {
-    const ime = this.getImeOccluderForTap(element, hierarchy, screenSize);
-    if (!ime) {
-      return this.resolveTapPoint(element);
-    }
-    const { left, top, right, bottom } = bounds;
-    const point = tapPointOutsideIme([left, top, right, bottom], ime.bounds);
-    // Check the candidate before dispatch, even if the safe-point helper regresses.
-    // HierarchyHitTest estimates accessible nodes, whose root bounds can extend
-    // above the touch-owning frame; use the captured window rectangle here.
-    const imeBounds = {
-      left: ime.bounds[0],
-      top: ime.bounds[1],
-      right: ime.bounds[2],
-      bottom: ime.bounds[3],
-    };
-    if (point && !pointInTapBounds(point, imeBounds)) {
-      return point;
-    }
-    const elementLabel = element.text ?? element["content-desc"] ?? element["resource-id"];
-    const focusTarget = describeFocusTarget(element, options);
-    const selectorLabel =
-      focusTarget !== "the matched element"
-        ? focusTarget
-        : JSON.stringify(
-            options.elementId ?? options.testTag ?? options.accessibilityLink ?? "element",
-          );
-    const label = JSON.stringify(elementLabel) ?? selectorLabel;
-    throw new KeyboardOcclusionError(
-      `Target ${label} is covered by the soft keyboard; dismiss the keyboard first.`,
-    );
   }
 
   private async activateSemanticLink(
@@ -1357,223 +1139,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     };
   }
 
-  private isElementTapTargetOffScreen(
-    selection: ElementSelectionResult,
-    viewHierarchy: ViewHierarchyResult,
-    screenSize?: ObserveResult["screenSize"],
-    options?: TapOnElementOptions,
-  ): boolean {
-    if (!isUsableScreenSize(screenSize)) {
-      return false;
-    }
-    return !this.visibleTapBounds(selection, viewHierarchy, screenSize, options);
-  }
-
-  private invisibleMatchError(
-    selection: ElementSelectionResult,
-    options: TapOnElementOptions,
-    hierarchy: ViewHierarchyResult,
-    screenSize?: ObserveResult["screenSize"],
-  ): string {
-    const matched = selection.matchedElement ?? selection.element;
-    if (this.isCoveredByNavigationBar(selection, hierarchy, screenSize)) {
-      return `Target ${JSON.stringify(matched?.text ?? options.text ?? options.elementId ?? "target")} is covered by the navigation bar; scroll it into view with swipeOn, then retry tapOn.`;
-    }
-    return (
-      `Matched element ${JSON.stringify(matched?.text ?? options.text ?? options.elementId ?? "target")} ` +
-      `has no visible tap area (bounds ${JSON.stringify(matched?.bounds)}). ` +
-      "Scroll it into view with swipeOn, then retry tapOn."
-    );
-  }
-
-  private visibilityFailureReason(
-    selection: ElementSelectionResult,
-    hierarchy: ViewHierarchyResult,
-    screenSize?: ObserveResult["screenSize"],
-  ): TapFocusFailure {
-    return this.isCoveredByNavigationBar(selection, hierarchy, screenSize)
-      ? "navigation-bar"
-      : "no-visible-tap-area";
-  }
-
-  private invisibleMatchFailure(
-    selection: ElementSelectionResult,
-    options: TapOnElementOptions,
-    hierarchy: ViewHierarchyResult,
-    screenSize?: ObserveResult["screenSize"],
-    fallback?: string,
-  ): TapTargetUnavailableError {
-    const reason = this.visibilityFailureReason(selection, hierarchy, screenSize);
-    return new TapTargetUnavailableError(
-      reason === "navigation-bar" || !fallback
-        ? this.invisibleMatchError(selection, options, hierarchy, screenSize)
-        : fallback,
-      reason,
-    );
-  }
-
-  private navigationTapBounds(
-    bounds: ElementBounds,
-    hierarchy: ViewHierarchyResult,
-    screenSize: ObserveResult["screenSize"] | undefined,
-    elements: readonly Element[],
-  ): TapBoundsClip {
-    return this.strategy.clipNavigationTapBounds(bounds, hierarchy, screenSize, elements);
-  }
-
-  private isCoveredByNavigationBar(
-    selection: ElementSelectionResult,
-    hierarchy: ViewHierarchyResult,
-    screenSize?: ObserveResult["screenSize"],
-  ): boolean {
-    const target = selection.element ?? selection.matchedElement;
-    if (!target) {
-      return false;
-    }
-    const matched = selection.matchedElement ?? target;
-    const overlap = intersectTapBounds(target.bounds, matched.bounds);
-    return (
-      !!overlap &&
-      !!this.navigationTapBounds(overlap, hierarchy, screenSize, [matched, target]).coveredBy
-    );
-  }
-
-  private visibleTapBounds(
-    selection: ElementSelectionResult,
-    hierarchy: ViewHierarchyResult,
-    screenSize?: ObserveResult["screenSize"],
-    options?: TapOnElementOptions,
-    tapTarget?: Element,
-  ): ElementBounds | null {
-    const target = tapTarget ?? selection.element;
-    if (!target?.bounds) {
-      return null;
-    }
-    const matched = matchedTapElement(selection, target, options);
-    const matchedBounds = matched.bounds;
-    const matchForTap = hasTapArea(matchedBounds) ? matched : target;
-    const visible = visibleTapBounds(target.bounds, screenSize, matchForTap.bounds);
-    if (!visible || !isUsableScreenSize(screenSize) || this.device.platform !== "ios") {
-      return visible;
-    }
-    const nodes = new SearchableHierarchy().project(hierarchy);
-    return iosVisibleTapArea({
-      bounds: visible,
-      matched: matchForTap,
-      target,
-      nodes,
-      context: createIosVisibleTapContext(nodes, screenSize, hierarchy),
-    });
-  }
-
-  private resolveVisibleTapPoint(
-    target: Element,
-    hierarchy: ViewHierarchyResult,
-    visibleBounds: ElementBounds,
-    context: TapPointContext,
-  ): { x: number; y: number } | null {
-    const point = this.resolveImeSafeTapPoint(target, hierarchy, context);
-    const { left, top, right, bottom } = visibleBounds;
-    const ime = this.getImeOccluderForTap(target, hierarchy, context.screenSize);
-    if (this.device.platform !== "ios") {
-      const proposed = pointInTapBounds(point, visibleBounds)
-        ? point
-        : ime
-          ? this.resolveImeSafeTapPoint(target, hierarchy, context, visibleBounds)
-          : this.geometry.getElementCenter({ bounds: visibleBounds });
-      const safe = applicationWindowSafeTapPoint(
-        hierarchy,
-        target,
-        visibleBounds,
-        proposed,
-        ime && {
-          left: ime.bounds[0],
-          top: ime.bounds[1],
-          right: ime.bounds[2],
-          bottom: ime.bounds[3],
-        },
-        // Default-layer selectors also resolve app rows kept under AutoMobile's own prototype
-        // (#10691); layer "app" refuses those later with its own prototype-specific error.
-        tapOwnPrototypeCoverRule(context.options.layer),
-      );
-      if (!safe.point) {
-        throw new TapTargetUnavailableError(
-          `Target is covered by ${safe.coveredBy}; dismiss the covering window, then retry tapOn.`,
-          "no-visible-tap-area",
-        );
-      }
-      return safe.point;
-    }
-    const exposedImePoint = ime ? tapPointOutsideIme([left, top, right, bottom], ime.bounds) : null;
-    const exposedCenter = this.geometry.getElementCenter({ bounds: visibleBounds });
-    const chromeElements = context.chromeElements ?? [target];
-    const navClipped = this.navigationTapBounds(
-      target.bounds,
-      hierarchy,
-      context.screenSize,
-      chromeElements,
-    ).bounds;
-    if (!navClipped) {
-      return null;
-    }
-    const nodes = new SearchableHierarchy().project(hierarchy);
-    const targetNode = findTapTargetNode(nodes, target);
-    const candidates = isIosTapFrameReduced(nodes, targetNode, target.bounds, navClipped)
-      ? [exposedImePoint, exposedCenter, point]
-      : [point, exposedImePoint, exposedCenter];
-    const imeBounds = ime && {
-      left: ime.bounds[0],
-      top: ime.bounds[1],
-      right: ime.bounds[2],
-      bottom: ime.bounds[3],
-    };
-    const safe = resolveIosOwnedTapPoint({
-      nodes,
-      target: targetNode,
-      matched: chromeElements.flatMap((element) => {
-        const node = findTapTargetNode(nodes, element);
-        return node ? [node] : [];
-      }),
-      screen: context.screenSize,
-      visibleBounds,
-      candidates,
-      imeBounds,
-      isValid: (candidate): candidate is { x: number; y: number } =>
-        candidate !== null &&
-        Number.isInteger(candidate.x) &&
-        Number.isInteger(candidate.y) &&
-        pointInTapBounds(candidate, visibleBounds) &&
-        pointInTapBounds(candidate, target.bounds) &&
-        (!imeBounds || !pointInTapBounds(candidate, imeBounds)) &&
-        (!isUsableScreenSize(context.screenSize) ||
-          !isIosTapPointCoveredByChrome({
-            point: candidate,
-            hierarchy,
-            screen: context.screenSize,
-            elements: chromeElements,
-          })),
-    });
-    if (safe.coveredBy) {
-      throw new TapTargetUnavailableError(
-        iosTapOwnershipErrorMessage(target, safe.coveredBy, safe.ownerInsideScrollContainer),
-        "no-visible-tap-area",
-      );
-    }
-    return safe.point;
-  }
-
-  private getScreenSizeFromHierarchy(
-    viewHierarchy: ViewHierarchyResult,
-    options: ScreenSizeForOffscreenCheckOptions = {},
-  ): ObserveResult["screenSize"] | undefined {
-    return screenSizeForOffscreenCheck(viewHierarchy, {
-      ...options,
-      platform: this.device.platform,
-      iosMultiPanel:
-        this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1,
-    });
-  }
-
   /**
    * The ONLY sanctioned way to swap an observation's `viewHierarchy` for one
    * captured later in `execute` (issue #6284). Folding "replace hierarchy" and
@@ -1690,36 +1255,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     });
   }
 
-  private selectVariantOrSiblingOrMiss(
-    options: TapVerificationOptions,
-    select: () => ElementSelectionResult,
-  ): ElementSelectionResult {
-    try {
-      return select();
-    } catch (error) {
-      if (!(error instanceof ActionableError)) {
-        throw error;
-      }
-      const expectedMissing =
-        (options.verification !== undefined && error.message === "Sibling row not found") ||
-        (options.textAny !== undefined &&
-          options.selectionStrategy === "unique" &&
-          error.message.startsWith("Target not found"));
-      if (!expectedMissing) {
-        throw error;
-      }
-      // Missing ordered text variants and polling display siblings are expected;
-      // keep all lookups scoped and propagate container errors and ambiguity.
-      logger.debug("[TapOnElement] Text variant or display sibling not found yet", error);
-      return {
-        element: null,
-        totalMatches: 0,
-        indexInMatches: -1,
-        strategy: options.selectionStrategy ?? "first",
-      };
-    }
-  }
-
   private withObservationScreenSize(
     options: TapVerificationOptions,
     observation: Partial<Pick<ObserveResult, "viewHierarchy" | "screenSize">>,
@@ -1740,378 +1275,19 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   ): { selection: ElementSelectionResult; containerFound: boolean } {
     viewHierarchy = scopeHierarchyForSelector(viewHierarchy, options.layer);
     try {
-      return this.selectElementInHierarchy(options, viewHierarchy);
+      return this.finder.selectElementInHierarchy(options, viewHierarchy);
     } catch (error) {
       if (
         options.action !== "focus" ||
         !(error instanceof ActionableError) ||
         error instanceof TapTargetUnavailableError ||
         (!isStrictlyScoped(options) && options.index === undefined) ||
-        !this.isContainerAvailable(viewHierarchy, options.container)
+        !this.finder.isContainerAvailable(viewHierarchy, options.container)
       ) {
         throw error;
       }
-      return this.classifyFocusSelectionFailure(options, viewHierarchy, error);
+      return this.finder.classifyFocusSelectionFailure(options, viewHierarchy, error);
     }
-  }
-
-  private classifyFocusSelectionFailure(
-    options: TapVerificationOptions,
-    viewHierarchy: ViewHierarchyResult,
-    error: ActionableError,
-  ): never {
-    // Strict selection may throw before handleElementNotFound. Inspect the same
-    // hierarchy with first-match selection to distinguish absence from ambiguity
-    // using selection evidence, while preserving the original diagnostic.
-    const inspected = this.selectElementInHierarchy(
-      { ...options, selectionStrategy: "first", index: undefined },
-      viewHierarchy,
-    ).selection;
-    if (inspected.totalMatches === 0 && !inspected.matchedElement) {
-      throw new TapTargetUnavailableError(error.message, "not-found");
-    }
-    const target = inspected.element ?? inspected.matchedElement;
-    if (
-      inspected.totalMatches === 1 &&
-      target &&
-      isFocusEditableElement(target) &&
-      this.isElementTapTargetOffScreen(
-        inspected,
-        viewHierarchy,
-        this.getScreenSizeFromHierarchy(viewHierarchy, options.screenSizeOptions),
-        options,
-      )
-    ) {
-      throw new TapTargetUnavailableError(
-        error.message,
-        this.isCoveredByNavigationBar(
-          inspected,
-          viewHierarchy,
-          this.getScreenSizeFromHierarchy(viewHierarchy, options.screenSizeOptions),
-        )
-          ? "navigation-bar"
-          : "no-visible-tap-area",
-      );
-    }
-    throw error;
-  }
-
-  private selectElementInHierarchy(
-    options: TapVerificationOptions,
-    viewHierarchy: ViewHierarchyResult,
-  ): { selection: ElementSelectionResult; containerFound: boolean } {
-    const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
-    const intentAction =
-      options.action === "longPress"
-        ? "long-press"
-        : options.action === "focus"
-          ? "focus-input"
-          : "tap";
-    const lookupAction = options.subtext
-      ? "inspect"
-      : isStrictlyScoped(options)
-        ? intentAction
-        : options.action === "focus"
-          ? "focus-input"
-          : "inspect";
-    const selectionIntent = this.selectionIntentFor(options);
-
-    const text = options.text;
-    if (text) {
-      if (options.sibling) {
-        return {
-          selection: this.selectVariantOrSiblingOrMiss(options, () =>
-            this.elementSelector.selectClickableSiblingOfText(viewHierarchy, text, {
-              container: options.container,
-              screenSizeOptions: options.screenSizeOptions,
-              fuzzyMatch: true,
-              caseSensitive: false,
-              strategy: options.selectionStrategy,
-              intentAction,
-              selectionIntent,
-              index: options.index,
-            }),
-          ),
-          containerFound,
-        };
-      }
-
-      return {
-        selection: this.elementSelector.selectByText(viewHierarchy, text, {
-          container: options.container,
-          screenSizeOptions: options.screenSizeOptions,
-          partialMatch: true,
-          caseSensitive: false,
-          strategy: options.selectionStrategy,
-          intentAction: lookupAction,
-          allowHintFallback: options.action === "tap" || options.action === "focus",
-          index: options.index,
-          selectionIntent,
-        }),
-        containerFound,
-      };
-    }
-
-    if (options.textAny) {
-      let lastSelection: ElementSelectionResult | null = null;
-      let offScreenSelection: ElementSelectionResult | null = null;
-      const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy, options.screenSizeOptions);
-      for (const text of options.textAny) {
-        const selection = options.sibling
-          ? this.selectVariantOrSiblingOrMiss(options, () =>
-              this.elementSelector.selectClickableSiblingOfText(viewHierarchy, text, {
-                container: options.container,
-                screenSizeOptions: options.screenSizeOptions,
-                fuzzyMatch: true,
-                caseSensitive: false,
-                strategy: options.selectionStrategy,
-                intentAction,
-                selectionIntent,
-                index: options.index,
-              }),
-            )
-          : this.selectVariantOrSiblingOrMiss(options, () =>
-              this.elementSelector.selectByText(viewHierarchy, text, {
-                container: options.container,
-                screenSizeOptions: options.screenSizeOptions,
-                partialMatch: true,
-                caseSensitive: false,
-                strategy: options.selectionStrategy,
-                intentAction: lookupAction,
-                allowHintFallback: options.action === "tap" || options.action === "focus",
-                index: options.index,
-                selectionIntent,
-              }),
-            );
-        lastSelection = selection;
-        if (selection.element) {
-          if (this.isElementTapTargetOffScreen(selection, viewHierarchy, screenSize, options)) {
-            offScreenSelection = selection;
-            continue;
-          }
-          return { selection, containerFound };
-        }
-      }
-
-      if (offScreenSelection) {
-        return {
-          selection: { ...offScreenSelection, element: null },
-          containerFound,
-        };
-      }
-
-      if (lastSelection) {
-        if (options.selectionStrategy === "unique") {
-          throw new TapTargetUnavailableError(
-            `Target not found${options.container ? " within container" : ""}: no textAny variant matched`,
-            "not-found",
-          );
-        }
-        return { selection: lastSelection, containerFound };
-      }
-    }
-
-    const elementId = options.elementId;
-    if (elementId) {
-      if (options.sibling) {
-        return {
-          selection: this.selectVariantOrSiblingOrMiss(options, () =>
-            this.elementSelector.selectClickableSiblingOfResourceId(viewHierarchy, elementId, {
-              container: options.container,
-              screenSizeOptions: options.screenSizeOptions,
-              partialMatch: false,
-              strategy: options.selectionStrategy,
-              intentAction,
-              index: options.index,
-            }),
-          ),
-          containerFound,
-        };
-      }
-
-      return {
-        selection: this.elementSelector.selectByResourceId(viewHierarchy, elementId, {
-          container: options.container,
-          screenSizeOptions: options.screenSizeOptions,
-          partialMatch: false,
-          strategy: options.selectionStrategy,
-          intentAction: lookupAction,
-          index: options.index,
-        }),
-        containerFound,
-      };
-    }
-
-    return {
-      selection: this.elementSelector.selectByTestTag(viewHierarchy, requireTestTag(options), {
-        container: options.container,
-        screenSizeOptions: options.screenSizeOptions,
-        strategy: options.selectionStrategy,
-        intentAction: lookupAction,
-        selectionIntent,
-        index: options.index,
-      }),
-      containerFound,
-    };
-  }
-
-  private selectionIntentFor(options: TapOnElementOptions): TextSelectionIntent {
-    return options.ensureChecked !== undefined && options.index === undefined && !options.elementId
-      ? "toggle"
-      : TEXT_SELECTION_INTENT_BY_ACTION[options.action];
-  }
-
-  private findSoleFocusedFieldByStableIdentity(
-    target: Element,
-    nodes: readonly SearchableEntry[],
-    labelText?: string,
-    preTapHierarchy?: ViewHierarchyResult,
-  ): Element | undefined {
-    const focusedFields = nodes.filter(
-      (node) =>
-        node.element &&
-        isFocusEditableElement(node.properties) &&
-        isElementKeyboardFocused(node.element),
-    );
-    const distinctFocusedFields = distinctFocusFields(focusedFields);
-    if (distinctFocusedFields.length !== 1) {
-      return undefined;
-    }
-    const candidate = distinctFocusedFields[0].element;
-    return candidate &&
-      (this.device.platform === "android" && !candidate.text
-        ? this.hasEmptyTextFocusIdentity(target, candidate, nodes, labelText, preTapHierarchy)
-        : hasStableFocusIdentity(target, candidate, labelText)) &&
-      horizontalExtentNearlyEqual(
-        target.bounds,
-        candidate.bounds,
-        TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
-      )
-      ? candidate
-      : undefined;
-  }
-
-  /** Shared so each captured hierarchy is projected once across the focus-confirmation reads. */
-  private readonly focusProjection = new SearchableHierarchy();
-
-  /** Labels depend only on the (immutable) captured node, so each node is projected once. */
-  private readonly attachedFocusLabels = new WeakMap<object, string | undefined>();
-
-  private attachedFocusLabel(element: Element): string | undefined {
-    const source = getHierarchyNodeSource(element);
-    if (!source) {
-      return undefined;
-    }
-    if (this.attachedFocusLabels.has(source)) {
-      return this.attachedFocusLabels.get(source);
-    }
-    const labels = this.focusProjection
-      .project({ hierarchy: { node: source } })
-      .filter((node) => node.parentIndex === 0 && !isFocusEditableElement(node.properties))
-      .map((node) => node.textSources.text)
-      .filter((text) => typeof text === "string" && text.trim().length > 0);
-    const label = labels.length ? labels.join("\n") : undefined;
-    this.attachedFocusLabels.set(source, label);
-    return label;
-  }
-
-  private focusIdentitySignals(target: Element, candidate: Element, labelText?: string) {
-    if (
-      !isFocusEditableElement(target) ||
-      target.class !== candidate.class ||
-      !focusFieldSizeMatches(target, candidate) ||
-      (["resource-id", "test-tag", "view-id"] as const).some(
-        (key) =>
-          [target[key], candidate[key]].some(
-            (value) => value && !(key === "view-id" && value.startsWith("s2-")),
-          ) && target[key] !== candidate[key],
-      )
-    ) {
-      return { conflict: true, matched: false };
-    }
-    const pairs = [
-      ...(["hint-text", "hint", "placeholder", "content-desc", "test-tag"] as const).map((key) => [
-        target[key],
-        candidate[key],
-      ]),
-      [
-        this.attachedFocusLabel(target) ?? labelText ?? target.text,
-        this.attachedFocusLabel(candidate),
-      ],
-    ].filter((pair) => pair.every((value) => typeof value === "string" && value.trim().length > 0));
-    return {
-      conflict: pairs.some(([before, after]) => before !== after),
-      matched: pairs.some(([before, after]) => before === after),
-    };
-  }
-
-  private hasEmptyTextFocusIdentity(
-    target: Element,
-    candidate: Element,
-    nodes: readonly SearchableEntry[],
-    labelText?: string,
-    preTapHierarchy?: ViewHierarchyResult,
-  ): boolean {
-    // Empty Compose fields can lose labels/s2 IDs on focus. Require matching size and
-    // no label/hint or ordinal conflict, plus a label match, sole empty field at
-    // adjusted bounds, or matching ordinal with a uniform pre/post scroll (including 0).
-    const signals = this.focusIdentitySignals(target, candidate, labelText);
-    if (signals.conflict) {
-      return false;
-    }
-    const fields = distinctFocusFields(
-      nodes.filter((node) => node.element && isFocusEditableElement(node.properties)),
-    );
-    const sameBoundsFields = fields.filter((node) =>
-      boundsNearlyEqual(
-        node.element!.bounds,
-        candidate.bounds,
-        TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
-      ),
-    );
-    if (sameBoundsFields.length !== 1) {
-      return false;
-    }
-    const preNodes = preTapHierarchy
-      ? this.focusProjection.project(resolveViewHierarchyForSearch(preTapHierarchy)!)
-      : [];
-    const preFields = distinctFocusFields(
-      preNodes.filter((node) => node.element && isFocusEditableElement(node.properties)),
-    );
-    const targetFields = preFields.filter(
-      (node) =>
-        node.source === getHierarchyNodeSource(target) ||
-        (node.className === target.class &&
-          boundsNearlyEqual(
-            node.element!.bounds,
-            target.bounds,
-            TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
-          )),
-    );
-    const targetOrdinal = targetFields.length === 1 ? preFields.indexOf(targetFields[0]) : -1;
-    const candidateOrdinal = fields.findIndex((node) => node.element === candidate);
-    if (targetOrdinal >= 0 && targetOrdinal !== candidateOrdinal) {
-      return false;
-    }
-    const delta = focusScrollDelta(preFields, fields);
-    const scrollDelta = delta ?? 0;
-    const adjustedBounds = {
-      ...target.bounds,
-      top: target.bounds.top + scrollDelta,
-      bottom: target.bounds.bottom + scrollDelta,
-    };
-    const atTargetBounds = boundsNearlyEqual(
-      adjustedBounds,
-      candidate.bounds,
-      TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
-    );
-    const emptyFields = fields.filter(
-      (node) => node.className === target.class && !node.element!.text,
-    );
-    return (
-      signals.matched ||
-      (atTargetBounds && (emptyFields.length === 1 || (targetOrdinal >= 0 && delta !== undefined)))
-    );
   }
 
   /**
@@ -2121,6 +1297,54 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * captures for a bounded window before reporting the focus unconfirmed, and return
    * the capture that confirmed it as the result's observation.
    */
+  private verifyFocusedInputTarget(
+    options: TapOnElementOptions,
+    target: Element,
+    observation?: ObserveResult,
+    labelText?: string,
+    selectedIndex?: number,
+    preTapHierarchy?: ViewHierarchyResult,
+  ): boolean {
+    return this.focusVerifier.verify(
+      options,
+      target,
+      observation,
+      labelText,
+      selectedIndex,
+      preTapHierarchy,
+    );
+  }
+
+  private invisibleMatchFailure(...args: Parameters<TapPointPlanner["invisibleMatchFailure"]>) {
+    return this.tapPoints.invisibleMatchFailure(...args);
+  }
+
+  private resolveTapPoint(...args: Parameters<TapPointPlanner["resolveTapPoint"]>) {
+    return this.tapPoints.resolveTapPoint(...args);
+  }
+
+  private resolveContainerElement(
+    ...args: Parameters<TapElementFinder["resolveContainerElement"]>
+  ) {
+    return this.finder.resolveContainerElement(...args);
+  }
+
+  private readonly isElementTapTargetOffScreen: TapPointPlanner["isElementTapTargetOffScreen"] = (
+    ...args
+  ) => this.tapPoints.isElementTapTargetOffScreen(...args);
+
+  private visibleTapBounds(...args: Parameters<TapPointPlanner["visibleTapBounds"]>) {
+    return this.tapPoints.visibleTapBounds(...args);
+  }
+
+  private resolveVisibleTapPoint(...args: Parameters<TapPointPlanner["resolveVisibleTapPoint"]>) {
+    return this.tapPoints.resolveVisibleTapPoint(...args);
+  }
+
+  private readonly getScreenSizeFromHierarchy: TapPointPlanner["getScreenSizeFromHierarchy"] = (
+    ...args
+  ) => this.tapPoints.getScreenSizeFromHierarchy(...args);
+
   private async verifyFocusAfterTap(
     result: TapOnElementResult,
     verify: (observation: ObserveResult | undefined) => boolean,
@@ -2154,270 +1378,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
     }
     return false;
-  }
-
-  private verifyIndexedFocusTarget(
-    options: TapOnElementOptions,
-    target: Element,
-    hierarchy: ViewHierarchyResult,
-    identifier: { key: FocusIdentifierKey; value: string },
-    selectedIndex?: number,
-  ): boolean {
-    const nodes = this.focusProjection.project(hierarchy);
-    const selected = this.findIndexedFocusSelection(
-      options,
-      hierarchy,
-      nodes,
-      identifier,
-      selectedIndex,
-    );
-    const selectedSource = selected && getHierarchyNodeSource(selected);
-    const selectedNode = nodes.find((node) => node.source === selectedSource);
-    return Boolean(
-      selected &&
-      isFocusEditableElement(selected) &&
-      selectedNode &&
-      nodes.some(
-        (node) =>
-          node.element &&
-          isFocusEditableElement(node.properties) &&
-          isElementKeyboardFocused(node.element) &&
-          isSameFocusTarget(selected, node.element, nodes, selectedNode),
-      ) &&
-      selected[identifier.key] === identifier.value &&
-      target.class === selected.class &&
-      horizontalExtentNearlyEqual(
-        target.bounds,
-        selected.bounds,
-        TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX,
-      ),
-    );
-  }
-
-  private findIndexedFocusSelection(
-    options: TapVerificationOptions,
-    hierarchy: ViewHierarchyResult,
-    nodes: readonly SearchableEntry[],
-    identifier: { key: FocusIdentifierKey; value: string },
-    selectedIndex?: number,
-  ): Element | null {
-    // A known focus target may carry a view-id shared by several id-less fields.
-    // Public ID lookup rejects that ambiguous selector, so verify its selected
-    // occurrence within the capture without re-entering the public lookup.
-    const duplicateViewId =
-      identifier.key === "view-id" &&
-      options.elementId === identifier.value &&
-      nodes.filter((node) => node.nodeKey === identifier.value && !node.nativeId).length > 1;
-    const focusRank = (node: SearchableEntry) => ({
-      windowRank: node.windowRank,
-      area: node.bounds ? boundsArea(node.bounds) : Infinity,
-      order: node.index,
-      interactive: true,
-    });
-    if (duplicateViewId) {
-      return (
-        nodes
-          .filter(
-            (node) =>
-              node.nodeKey === identifier.value &&
-              !node.nativeId &&
-              node.element &&
-              isFocusEditableElement(node.properties),
-          )
-          .sort((a, b) => compareSelectionRank(focusRank(a), focusRank(b)))[
-          options.index ?? selectedIndex ?? 0
-        ]?.element ?? null
-      );
-    }
-    return this.findElementInHierarchy(
-      {
-        ...options,
-        index:
-          options.index ?? (options.selectionStrategy === "unique" ? undefined : selectedIndex),
-      },
-      hierarchy,
-    ).selection.element;
-  }
-
-  private isFocusedMatchingNode(
-    target: Element,
-    node: SearchableEntry,
-    nodes: readonly SearchableEntry[],
-  ): boolean {
-    return Boolean(
-      node.element &&
-      isFocusEditableElement(node.properties) &&
-      isElementKeyboardFocused(node.element) &&
-      isSameFocusTarget(target, node.element, nodes),
-    );
-  }
-
-  private isRefoundFocusTarget(
-    options: TapOnElementOptions,
-    target: Element,
-    hierarchy: ViewHierarchyResult,
-  ): boolean {
-    const candidate = this.findElementInHierarchy(options, hierarchy).selection.element;
-    return Boolean(
-      candidate &&
-      isFocusEditableElement(candidate) &&
-      isElementKeyboardFocused(candidate) &&
-      isSameFocusTarget(target, candidate, this.focusProjection.project(hierarchy)),
-    );
-  }
-
-  /**
-   * Whether the post-tap capture shows the target focused. A capture that cannot
-   * re-resolve the selector scope (a container now ambiguous or missing, #10266) leaves
-   * the focus unconfirmed so the caller can re-read; it never fails the tap itself.
-   */
-  private verifyFocusedInputTarget(
-    options: TapOnElementOptions,
-    target: Element,
-    observation?: ObserveResult,
-    labelText?: string,
-    selectedIndex?: number,
-    preTapHierarchy?: ViewHierarchyResult,
-  ): boolean {
-    if (!observation?.viewHierarchy) {
-      return false;
-    }
-    const searchHierarchy =
-      resolveViewHierarchyForSearch(observation.viewHierarchy) ?? observation.viewHierarchy;
-    const nodes = this.focusProjection.project(searchHierarchy);
-    if (this.isFocusedInPreTapScope(target, nodes, labelText, preTapHierarchy)) {
-      return true;
-    }
-    try {
-      return this.matchFocusedInputTarget(
-        options,
-        this.withObservationScreenSize(options, observation),
-        target,
-        observation.viewHierarchy,
-        nodes,
-        { labelText, selectedIndex, preTapHierarchy },
-      );
-    } catch (error) {
-      // The selector is re-resolved against a capture taken while the layout may still be
-      // moving (keyboard avoidance, a lagging SDK snapshot); a scope it cannot resolve
-      // there means "not confirmed yet", which the caller reports or re-reads.
-      logger.debug(
-        `[TapOnElement] focus check could not resolve the target: ${errorMessage(error)}`,
-      );
-      return false;
-    }
-  }
-
-  /**
-   * Confirm focus by the identity the target had before the tap (#10266): the chain of
-   * identified ancestors (e.g. `cart_A > item_42`) that singled the field out pre-tap.
-   * The focused field must sit under the same chain and carry the target's identity.
-   * This survives a layout shift after the tap and duplicate container nodes in the
-   * post-tap capture, neither of which changes which field holds focus.
-   */
-  private isFocusedInPreTapScope(
-    target: Element,
-    nodes: readonly SearchableEntry[],
-    labelText?: string,
-    preTapHierarchy?: ViewHierarchyResult,
-  ): boolean {
-    const targetSource = getHierarchyNodeSource(target);
-    if (!preTapHierarchy || !targetSource) {
-      return false;
-    }
-    const preNodes = this.projectPreTapHierarchy(preTapHierarchy);
-    const preTarget = preNodes.find((node) => node.source === targetSource);
-    const scope = preTarget ? identifiedAncestorChain(preTarget, preNodes) : [];
-    if (scope.length === 0) {
-      return false;
-    }
-    const inScopeWithIdentity = (node: SearchableEntry, all: readonly SearchableEntry[]) =>
-      Boolean(
-        node.element &&
-        isFocusEditableElement(node.properties) &&
-        !this.focusIdentitySignals(target, node.element, labelText).conflict &&
-        sameChain(identifiedAncestorChain(node, all), scope),
-      );
-    // The scope must single the field out before the tap, or it identifies nothing.
-    if (
-      distinctFocusFields(preNodes.filter((node) => inScopeWithIdentity(node, preNodes))).length !==
-      1
-    ) {
-      return false;
-    }
-    // After the tap that field must be the only focused one, and every copy of it (a
-    // capture can serialize one field under several roots) must agree on its identity
-    // and its focus.
-    const inScope = nodes.filter((node) => inScopeWithIdentity(node, nodes));
-    const focused = nodes.filter(
-      (node) =>
-        node.element &&
-        isFocusEditableElement(node.properties) &&
-        isElementKeyboardFocused(node.element),
-    );
-    return (
-      distinctFocusFields(inScope).length === 1 &&
-      inScope.every((node) => isElementKeyboardFocused(node.element!)) &&
-      focused.every((node) => inScope.includes(node))
-    );
-  }
-
-  /** The pre-tap capture is fixed across post-tap re-reads; project it once. */
-  private projectPreTapHierarchy(hierarchy: ViewHierarchyResult): readonly SearchableEntry[] {
-    const cached = this.preTapProjections.get(hierarchy);
-    if (cached) {
-      return cached;
-    }
-    const projected = this.focusProjection.project(
-      resolveViewHierarchyForSearch(hierarchy) ?? hierarchy,
-    );
-    this.preTapProjections.set(hierarchy, projected);
-    return projected;
-  }
-
-  private matchFocusedInputTarget(
-    options: TapOnElementOptions,
-    scopedOptions: TapVerificationOptions,
-    target: Element,
-    viewHierarchy: ViewHierarchyResult,
-    nodes: readonly SearchableEntry[],
-    {
-      labelText,
-      selectedIndex,
-      preTapHierarchy,
-    }: { labelText?: string; selectedIndex?: number; preTapHierarchy?: ViewHierarchyResult },
-  ): boolean {
-    const identifier = findFocusIdentifier(target, nodes);
-    if (identifier?.shared) {
-      return this.verifyIndexedFocusTarget(
-        scopedOptions,
-        target,
-        viewHierarchy,
-        identifier,
-        selectedIndex,
-      );
-    }
-    if (identifier) {
-      return nodes.some(
-        (node) =>
-          node.element &&
-          isFocusEditableElement(node.properties) &&
-          isElementKeyboardFocused(node.element) &&
-          node.element[identifier.key] === identifier.value &&
-          isSameFocusTarget(target, node.element, nodes),
-      );
-    }
-    const focused = nodes.find((node) => this.isFocusedMatchingNode(target, node, nodes));
-    if (focused) {
-      return true;
-    }
-    if (this.findSoleFocusedFieldByStableIdentity(target, nodes, labelText, preTapHierarchy)) {
-      return true;
-    }
-    if (!options.testTag && !(options.elementId && target["resource-id"])) {
-      return false;
-    }
-    return this.isRefoundFocusTarget(scopedOptions, target, viewHierarchy);
   }
 
   private prepareViewHierarchyForResponse(
@@ -3143,51 +2103,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     throw new TapTargetUnavailableError(baseError, "not-found");
   }
 
-  private isContainerAvailable(
-    viewHierarchy: ViewHierarchyResult,
-    container?: ElementContainerSelector,
-  ): boolean {
-    return isContainerAvailable(this.elementSelector, viewHierarchy, container);
-  }
-
-  private resolveContainerElement(
-    viewHierarchy: ViewHierarchyResult,
-    options: TapVerificationOptions,
-  ): Element | undefined {
-    const container = options.container;
-    if (!container) {
-      return undefined;
-    }
-    if (this.elementSelector.resolveContainer) {
-      return this.elementSelector.resolveContainer(
-        viewHierarchy,
-        container,
-        options.selectionStrategy,
-      );
-    }
-    const scopedOptions = {
-      container: container.container,
-      index: container.index,
-      strategy: propagateUniqueStrategy(container, options.selectionStrategy).selectionStrategy,
-    };
-    if (container.elementId) {
-      return this.elementSelector.selectByResourceId(viewHierarchy, container.elementId, {
-        ...scopedOptions,
-        intentAction: "inspect",
-        screenSizeOptions: options.screenSizeOptions,
-      }).element as Element | undefined;
-    }
-    if (container.text) {
-      return this.elementSelector.selectByText(viewHierarchy, container.text, {
-        ...scopedOptions,
-        intentAction: "inspect",
-        screenSizeOptions: options.screenSizeOptions,
-        caseSensitive: false,
-      }).element as Element | undefined;
-    }
-    return undefined;
-  }
-
   private isClickableElement(element: Element): boolean {
     return isTruthyFlag(element.clickable) || hasAccessibilityAction(element.actions, "click");
   }
@@ -3540,7 +2455,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!point) {
       throw new TapTargetUnavailableError(
         "Matched element has no visible tap area on selected display",
-        this.visibilityFailureReason(selection, hierarchy, target.observation.screenSize),
+        this.tapPoints.visibilityFailureReason(selection, hierarchy, target.observation.screenSize),
       );
     }
     const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(hierarchy) : null;
@@ -4000,6 +2915,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     let focusLabelText: string | undefined;
     let ensureCheckedTapTimestamp: number | undefined;
     let completedDisplayGesture = false;
+    let effectiveAction = requestedAction;
 
     try {
       throwIfAborted(signal);
@@ -4189,10 +3105,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               );
             }
 
-            // if not, change action to tap
             action = "tap";
-            options.action = "tap";
+            effectiveAction = "tap";
           }
+          const tapOptions: TapOnElementOptions = { ...options, action }; // dispatch sees the performed action
 
           // Preserve iOS detection at the original activation boundary.
           isAccessibilityServiceEnabled ??= await this.strategy.isAccessibilityServiceEnabled(
@@ -4210,7 +3126,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
           if (this.strategy.shouldRunPreTapStability(options)) {
             const stable = await this.resolveAndroidStableTapTargetAfterRefreshes(
-              requestedAction === "focus" ? { ...options, action: "focus" as const } : options,
+              options,
               observeResult,
               action,
               requireResourceId,
@@ -4269,8 +3185,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           }
           appendDisabledElementWarning(this.device.platform, tapElement, activationWarnings);
           this.logClickableParentSelection(usedParent);
-          const { tapPoint, warning: tapPointWarning } = this.planVisibleTapPoint({
-            options,
+          const { tapPoint, warning: tapPointWarning } = this.tapPoints.planVisibleTapPoint({
+            options: tapOptions,
             requestedAction,
             observeResult,
             viewHierarchy,
@@ -4312,7 +3228,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                   tapElement,
                   signal,
                   {
-                    ...options,
+                    ...tapOptions,
                     displayFence: fence,
                     resolvedHierarchy: viewHierarchy,
                     onResolvedElement: (current, selection, hierarchy) => {
@@ -4361,7 +3277,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               action,
               longPressDuration,
               tapElement,
-              { ...this.withObservationScreenSize(options, observeResult), displayFence: fence },
+              { ...this.withObservationScreenSize(tapOptions, observeResult), displayFence: fence },
               isAccessibilityServiceEnabled,
               observeResult.screenSize,
               signal,
@@ -4411,7 +3327,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       if (options.display !== undefined && result.staleDisplay) {
         // Legacy/iOS display gestures must not finalize optional post-state
         // metadata or confirm focus/checked state from an invalidated capture.
-        return this.unverifiableDisplayPostState(result, { ...options, action: requestedAction });
+        return this.unverifiableDisplayPostState(result, options);
       }
 
       if (result.success && result.observation && result.element) {
@@ -4428,7 +3344,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         await this.captureTerminalObservationScreenshot(result.observation, perf, signal);
         await this.recordDeferredPredictionOutcome(result, result.observation);
         const selectedElements = await this.selectionStateTracker.finalize({
-          action: options.action,
+          action: effectiveAction,
           selectionState: selectionCapture,
           currentObservation: result.observation,
           previousObservation: previousObserveResult,
@@ -4452,7 +3368,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         signal,
       });
 
-      if (options.action === "longPress") {
+      if (effectiveAction === "longPress") {
         const metadata = this.detectLongPressMetadata(previousObserveResult, result.observation);
         return {
           ...result,
@@ -4468,7 +3384,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       logger.warn(`Tap on element failed: ${errorMessage(error)}`, error);
       const failure = this.completedDisplayFailure(error, completedDisplayGesture);
       if (failure instanceof StaleDisplayError || failure instanceof DispatchedObservationError) {
-        return withStaleDisplay(this.createErrorResult(options.action, failure.message), failure);
+        return withStaleDisplay(this.createErrorResult(effectiveAction, failure.message), failure);
       }
 
       // Build debug context if debug mode is enabled
@@ -4481,7 +3397,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       // Return error result with debug info instead of throwing
       return this.readScopeFailureResult(
         requestedAction,
-        options.action,
+        effectiveAction,
         error,
         searchUntilStats,
         debugContext,
@@ -4568,78 +3484,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     };
   }
 
-  /** Pick the tap point inside the visible, unobstructed part of the resolved element. */
-  private planVisibleTapPoint({
-    options,
-    requestedAction,
-    observeResult,
-    viewHierarchy,
-    finalSelection,
-    tapElement,
-  }: {
-    options: TapOnElementOptions;
-    requestedAction: NonNullable<TapOnElementOptions["action"]>;
-    observeResult: ObserveResult;
-    viewHierarchy: ViewHierarchyResult;
-    finalSelection: ElementSelectionResult;
-    tapElement: Element;
-  }): { tapPoint: { x: number; y: number }; warning?: string } {
-    const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy, {
-      observationScreenSize: observeResult.screenSize,
-      display: observeResult.viewHierarchy,
-    });
-    const visibleBounds = this.visibleTapBounds(
-      finalSelection,
-      viewHierarchy,
-      screenSize,
-      requestedAction === "focus" ? { ...options, action: "focus" } : options,
-      tapElement,
-    );
-    if (!visibleBounds) {
-      throw this.invisibleMatchFailure(
-        finalSelection,
-        options,
-        viewHierarchy,
-        screenSize,
-        "Matched element has no visible tap area on this screen. " +
-          "Scroll it into view with swipeOn, then retry tapOn.",
-      );
-    }
-    const visibleTapPoint = this.resolveVisibleTapPoint(tapElement, viewHierarchy, visibleBounds, {
-      options,
-      screenSize,
-      chromeElements: [
-        matchedTapElement(
-          finalSelection,
-          tapElement,
-          requestedAction === "focus" ? { ...options, action: "focus" } : options,
-        ),
-        tapElement,
-      ],
-    });
-    if (!visibleTapPoint) {
-      throw this.invisibleMatchFailure(
-        finalSelection,
-        options,
-        viewHierarchy,
-        screenSize,
-        "Matched element has no unobstructed visible tap area. " +
-          "Dismiss the keyboard or scroll it into view, then retry tapOn.",
-      );
-    }
-    const barDecision = this.prototypeBarTapDecision(viewHierarchy, tapElement, visibleTapPoint);
-    if (barDecision.kind === "refuse") {
-      throw new ActionableError(
-        `Cannot tap (${visibleTapPoint.x}, ${visibleTapPoint.y}): the AutoMobile prototype control is under the ${barDecision.bar} and the touch would not reach it. ` +
-          "Move the control inside the safe area (safeAreaPadding on the node, or an offset in the floating placement), then retry.",
-      );
-    }
-    const tapPoint = barDecision.point;
-    // The selector resolved in the scoped tree; the touch lands on whatever is on top (#9305).
-    assertAppGestureNotUnderPrototype(viewHierarchy, options.layer, tapPoint, "tap");
-    return { tapPoint, ...(barDecision.warning ? { warning: barDecision.warning } : {}) };
-  }
-
   /** Mark a focus-requested tap as failed unless the focused field matches the target (mutates `result`). */
   private async confirmFocusAfterTap({
     result,
@@ -4666,7 +3510,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       result,
       (observation) =>
         this.verifyFocusedInputTarget(
-          { ...options, action: "focus" },
+          options,
           target,
           observation,
           focusLabelText,
@@ -5224,7 +4068,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       hierarchy: resolveViewHierarchyForSearch(options?.resolvedHierarchy),
       reResolve: hasSelector
         ? (hierarchy) => {
-            const selection = this.selectElementInHierarchy(
+            const selection = this.finder.selectElementInHierarchy(
               options,
               scopeHierarchyForSelector(hierarchy, options.layer),
             ).selection;

@@ -1,5 +1,5 @@
 import { logger } from "../utils/logger";
-import { errorMessage } from "../utils/describeUnknownError";
+import { errorMessage } from "./describeUnknownError";
 import type { LockOwnerGenerationProbe } from "../utils/fileLock";
 
 export type ExecutionOwnerIdentityVerdict = ReturnType<LockOwnerGenerationProbe["compare"]>;

@@ -7,8 +7,8 @@ max_concurrency = 10
 # Exclude URL patterns (regex)
 exclude = [
   # Ignore common localhost URLs
-  "^http://localhost",
-  "^http://127\\.0\\.0\\.1",
+  "^https?://localhost",
+  "^https?://127\\.0\\.0\\.1",
   # Ignore RFC 2606 reserved example domains and any subdomain of them. Bare
   # `example.com` is not enough now that include_verbatim checks links inside
   # fenced code samples: docs/webrtc-streaming.md cites `mediamtx.example.com`,

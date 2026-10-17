@@ -1,5 +1,4 @@
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
@@ -8,7 +7,7 @@ import {
   hasActiveSessionExecution,
   subscribeToolCallEndActivity,
 } from "../../src/daemon/toolCallActivity";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { executionTracker } from "../../src/server/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -19,6 +18,7 @@ import {
   createFakeDaemonState,
   createFakeDeviceManager,
 } from "./helpers/inputSocketHarness";
+import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 /**
  * Holder-change matrix, cell "a session acquires the device × an open sessionless stroke" (#11541).
@@ -34,33 +34,6 @@ import {
  * wired as `daemon.ts` wires it (`setDeviceAcquisitionExecutionCanceller`), and the release hook
  * as `socketServer.start()` wires it.
  */
-
-class FakeSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  end(): this {
-    return this.destroy();
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-  send(request: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
-  }
-}
 
 interface Internals {
   acceptingRequests: boolean;

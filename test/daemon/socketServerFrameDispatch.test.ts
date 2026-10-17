@@ -1,5 +1,4 @@
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { expect, spyOn, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
@@ -8,26 +7,7 @@ import { PressButton } from "../../src/features/action/PressButton";
 import type { BootedDevice, PressButtonResult } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
-
-class FakeSocket extends EventEmitter {
-  destroyed = false;
-  readonly responses: DaemonResponse[] = [];
-
-  setTimeout(): this {
-    return this;
-  }
-
-  write(frame: string): boolean {
-    this.responses.push(JSON.parse(frame) as DaemonResponse);
-    // A named pipe may report backpressure. That must not hold the next
-    // device's response behind a running call.
-    return false;
-  }
-
-  send(request: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
-  }
-}
+import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 test("a later pipe data event answers another device while the first call is held", async () => {
   const timer = new FakeTimer();
@@ -40,6 +20,7 @@ test("a later pipe data event answers another device while the first call is hel
   const first = Promise.withResolvers<DaemonResponse>();
   const firstStarted = Promise.withResolvers<void>();
   const socket = new FakeSocket();
+  socket.writeReturnValue = false;
   const request = (id: string, deviceId: string): DaemonRequest => ({
     id,
     type: "mcp_request",
@@ -134,6 +115,7 @@ test.each(["returned failure", "thrown cancellation"])(
       },
     );
     const socket = new FakeSocket();
+    socket.writeReturnValue = false;
     try {
       internals.handleConnection(socket as unknown as Socket);
       socket.send({

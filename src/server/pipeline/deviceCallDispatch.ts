@@ -4,10 +4,7 @@ import { runSessionDisplayPin } from "../sessionDisplayPin";
 import { toActionableError } from "../../models/ActionableError";
 import { DeviceOutsideBoundSessionError } from "../deviceOutsideBoundSessionRefusal";
 import { ZodType } from "zod/v4";
-import {
-  DeviceSessionManager,
-  type ConnectedPlatformScan,
-} from "../../devices/DeviceSessionManager";
+import { DeviceReadiness, type ConnectedPlatformScan } from "../../devices/DeviceReadiness";
 import { ActionableError, BootedDevice, SomePlatform } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -124,6 +121,10 @@ export function deviceAwareHandlerArgs(
   );
   if (name === "tapAt") {
     handlerArgs.__tapAtRecordingContext = handlerArgs.__tapAtPlanContext ?? {};
+  }
+  if (name === "swipeAt") {
+    // Filled by the handler with the screen the endpoints resolved against (#12878).
+    handlerArgs.__swipeAtRecordingContext = {};
   }
   return handlerArgs;
 }
@@ -481,7 +482,7 @@ export function bindingPlatformsFor(
  */
 export async function predictReadinessTarget(
   platform: SomePlatform,
-  deviceSessionManager: DeviceSessionManager,
+  deviceSessionManager: DeviceReadiness,
   getConnectedPlatforms: () => Promise<ConnectedPlatformScan>,
 ): Promise<string | undefined> {
   const { devices } = await getConnectedPlatforms();

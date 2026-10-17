@@ -1,5 +1,6 @@
 import { buildSimctlArgs } from "./simctlArgs";
 import { parseSimctlDeviceList } from "./simctlDeviceList";
+import { parseSimctlRuntimes } from "./simctlRuntimes";
 import { detectImageMimeType } from "../screenshot/imageHeaderDimensions";
 import { errorMessage } from "../describeUnknownError";
 import { trackAmbient } from "../PerfContext";
@@ -2052,8 +2053,7 @@ export class SimCtlClient implements SimCtl {
       signal,
     );
     try {
-      const parsed = JSON.parse(result.stdout) as { runtimes?: AppleDeviceRuntime[] };
-      return (parsed.runtimes ?? []).filter((runtime) => runtime.isAvailable !== false);
+      return parseSimctlRuntimes(result.stdout, "not-unavailable");
     } catch (error) {
       throw new ActionableError(
         "Failed to parse iOS simulator runtimes from 'xcrun simctl list runtimes iOS --json': " +
@@ -2629,7 +2629,7 @@ export class SimCtlClient implements SimCtl {
     // Route through the shared verifier so the SESSION AUTO-START path gets the
     // same post-condition check and bounded retry as startSimulator. This is the
     // default path when an MCP session begins with no booted simulator
-    // (DeviceSessionManager.findOrStartIosDevice -> bootSimulator), so leaving it
+    // (DeviceReadiness.findOrStartIosDevice -> bootSimulator), so leaving it
     // on the old behaviour would have meant #4094 missed the very scenario it is
     // about. The old code ran a bare `simctl boot`, which does not wait for the
     // boot to finish, then slept a fixed 1s and asked whether the device had
@@ -2735,8 +2735,7 @@ export class SimCtlClient implements SimCtl {
   async getRuntimes(timeoutMs?: number, signal?: AbortSignal): Promise<AppleDeviceRuntime[]> {
     const result = await this.executeCommandArgs(["list", "runtimes", "--json"], timeoutMs, signal);
     try {
-      const data = JSON.parse(result.stdout) as { runtimes?: AppleDeviceRuntime[] };
-      return (data.runtimes ?? []).filter((runtime) => runtime.isAvailable);
+      return parseSimctlRuntimes(result.stdout, "available");
     } catch (error) {
       logger.warn(`Failed to parse runtimes from simctl: ${error}`);
       return [];
@@ -2749,11 +2748,7 @@ export class SimCtlClient implements SimCtl {
     signal?: AbortSignal,
   ): Promise<AppleDeviceRuntime[]> {
     const result = await this.executeCommandArgs(["list", "runtimes", "--json"], timeoutMs, signal);
-    const data = JSON.parse(result.stdout) as { runtimes?: unknown };
-    if (!Array.isArray(data?.runtimes)) {
-      throw new Error("simctl runtimes response does not contain a runtimes array");
-    }
-    return data.runtimes as AppleDeviceRuntime[];
+    return parseSimctlRuntimes(result.stdout);
   }
 
   /**

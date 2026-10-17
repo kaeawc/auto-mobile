@@ -11,7 +11,7 @@ import {
 } from "./toolTransportRecovery";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { ActionableError, BootedDevice } from "../models";
 import { serverConfig } from "../utils/ServerConfig";
 
@@ -154,7 +154,7 @@ export class ToolRegistryClass {
   private readonly sessionBindingReleaseNotifier: SessionBindingReleaseHandler = {
     onSessionReleased: (sessionUuid) => this.notifySessionBindingReleased(sessionUuid),
   };
-  private deviceSessionManager: DeviceSessionManager;
+  private deviceSessionManager: DeviceReadiness;
   private cleanupService: AppCleanupService;
   private toolCallRepository: Pick<ToolCallRepository, "recordToolCall">;
   private timer: Timer;
@@ -170,7 +170,7 @@ export class ToolRegistryClass {
   private toolDefinitionSchemaCache: Map<string, CachedToolDefinitionSchemas> = new Map();
 
   constructor(timer: Timer = defaultTimer, loggerInstance: Logger = logger) {
-    this.deviceSessionManager = DeviceSessionManager.getInstance();
+    this.deviceSessionManager = DeviceReadiness.getInstance();
     this.cleanupService = new DefaultAppCleanupService();
     this.toolCallRepository = new ToolCallRepository();
     this.timer = timer;
@@ -207,14 +207,13 @@ export class ToolRegistryClass {
    * `setPipelineOverridesForTesting`.
    */
   setCollaboratorsForTesting(overrides: {
-    deviceSessionManager?: Partial<DeviceSessionManager>;
+    deviceSessionManager?: Partial<DeviceReadiness>;
     toolCallRepository?: Pick<ToolCallRepository, "recordToolCall">;
     timer?: Timer;
     navigationToolCallRecorder?: Partial<NavigationToolCallRecorder>;
   }): void {
     this.deviceSessionManager =
-      (overrides.deviceSessionManager as DeviceSessionManager | undefined) ??
-      this.deviceSessionManager;
+      (overrides.deviceSessionManager as DeviceReadiness | undefined) ?? this.deviceSessionManager;
     this.toolCallRepository = overrides.toolCallRepository ?? this.toolCallRepository;
     this.timer = overrides.timer ?? this.timer;
     this.navigationToolCallRecorder =
@@ -1071,7 +1070,7 @@ export class ToolRegistryClass {
   }
 
   // Get the device session manager
-  getDeviceSessionManager(): DeviceSessionManager {
+  getDeviceSessionManager(): DeviceReadiness {
     return this.deviceSessionManager;
   }
 

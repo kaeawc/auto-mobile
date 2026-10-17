@@ -43,14 +43,12 @@ describe("AndroidCtrlProxyClient network state sync is scoped to its device", ()
   });
 
   function syncedMessages(device: BootedDevice): Array<Record<string, unknown>> {
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      new FakeAdbExecutor(),
-      () => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+      webSocketFactory: () => {
         throw new Error("no socket in this test");
       },
       timer,
-    );
+    });
     const sent: string[] = [];
     const sendSpy = spyOn(client, "sendMessage").mockImplementation((message: string) => {
       sent.push(message);
@@ -114,14 +112,12 @@ describe("AndroidCtrlProxyClient reconnect sends the remaining error simulation 
   });
 
   function reconnectSimulationMessage(): Record<string, unknown> | undefined {
-    const client = AndroidCtrlProxyClient.createForTesting(
-      DEVICE_A,
-      new FakeAdbExecutor(),
-      () => {
+    const client = AndroidCtrlProxyClient.createForTesting(DEVICE_A, new FakeAdbExecutor(), {
+      webSocketFactory: () => {
         throw new Error("no socket in this test");
       },
       timer,
-    );
+    });
     const sent: string[] = [];
     const sendSpy = spyOn(client, "sendMessage").mockImplementation((message: string) => {
       sent.push(message);

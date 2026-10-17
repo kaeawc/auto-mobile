@@ -61,6 +61,7 @@ internal fun PrototypeTextFieldTrailingIcon(
   } else {
     androidx.compose.material3.IconButton(
       onClick = { interact(PrototypeInteraction.Tap(taps)) },
+      enabled = node.enabled,
       modifier =
         androidx.compose.ui.Modifier.semantics {
           contentDescription = action.label

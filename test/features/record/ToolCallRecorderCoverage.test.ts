@@ -117,6 +117,22 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
     expect(() => schema.parse(step.params)).not.toThrow();
   });
 
+  test("a recorded dragPath step carries no snapshot reference (#12811)", () => {
+    const recorder = new ToolCallRecorder();
+    recorder.start();
+    recorder.record("dragPath", {
+      points: [
+        { x: 10, y: 20 },
+        { x: 30, y: 40 },
+      ],
+      snapshotId: "snap-1",
+      deviceId: "emulator-5554",
+    });
+    const [step] = recorder.stop();
+
+    expect(step.params).not.toHaveProperty("snapshotId");
+  });
+
   test("tools other than tapAt keep their params untouched", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();

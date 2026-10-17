@@ -197,7 +197,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     },
 
     // --- Consult no pooled identity -----------------------------------------
-    "src/devices/DeviceSessionManager.ts": {
+    "src/devices/DeviceReadiness.ts": {
       calls: 4,
       reason:
         "Tracks adb-level connection state; owns no pooled identity and runs below the pool. The " +

@@ -51,15 +51,14 @@ describe("Android CtrlProxy crash/ANR wire persistence", () => {
     client = AndroidCtrlProxyClient.createForTesting(
       { deviceId: "crash-wire-device", platform: "android", name: "Crash Wire Device" },
       new FakeAdbExecutor(),
-      () => {
-        throw new Error("WebSocket connection is not needed for wire dispatch tests");
+      {
+        webSocketFactory: () => {
+          throw new Error("WebSocket connection is not needed for wire dispatch tests");
+        },
+        timer,
+        crashEventSink: new FailureEventRepository(timer, db),
+        sdkEventIngestor: ingestor,
       },
-      timer,
-      undefined,
-      undefined,
-      new FailureEventRepository(timer, db),
-      undefined,
-      ingestor,
     );
   });
 

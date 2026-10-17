@@ -92,10 +92,13 @@ RATCHET_CODES="eslint(complexity) eslint(max-depth) eslint(max-params) eslint(ma
 # BATS tests to inject a canned report. It is `eval`ed, so treat it as TRUSTED
 # input only (never wire it from an untrusted source).
 run_oxlint_json() {
+  # oxlint exits non-zero whenever it reports an error-level diagnostic (including
+  # a parse error). That must not abort here under `set -e` with no message:
+  # extract_counts names the failing file, or reports unparseable output.
   if [[ -n "${OXLINT_JSON_CMD:-}" ]]; then
-    eval "$OXLINT_JSON_CMD"
+    eval "$OXLINT_JSON_CMD" || true
   else
-    bunx oxlint --type-aware --format json 2>/dev/null
+    bunx oxlint --type-aware --format json 2>/dev/null || true
   fi
 }
 
@@ -112,6 +115,16 @@ extract_counts() {
       try { report = JSON.parse(raw); }
       catch { process.stderr.write("oxlint did not emit parseable JSON\n"); process.exit(3); }
       const counts = new Map();
+      // A file oxlint could not parse yields an error diagnostic with no rule code.
+      const parseErrors = (report.diagnostics || []).filter(d => !d.code);
+      if (parseErrors.length) {
+        for (const d of parseErrors) {
+          const at = d.labels && d.labels[0] && d.labels[0].span;
+          const loc = at ? ":" + at.line + ":" + at.column : "";
+          process.stderr.write("oxlint parse error in " + String(d.filename).replace(/\\/g, "/") + loc + ": " + d.message + "\n");
+        }
+        process.exit(3);
+      }
       for (const d of (report.diagnostics || [])) {
         if (!codes.has(d.code)) { continue; }
         // Normalize path separators so the committed baseline (forward slashes)

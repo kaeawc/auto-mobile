@@ -1,9 +1,9 @@
 import { AmbiguousDeviceTargetError } from "../ambiguousDeviceTargetRefusal";
 import {
-  DeviceSessionManager,
+  DeviceReadiness,
   type ConnectedPlatformScan,
   isScanAuthoritativeFor,
-} from "../../devices/DeviceSessionManager";
+} from "../../devices/DeviceReadiness";
 import { ActionableError, BootedDevice, SomePlatform } from "../../models";
 import { serverConfig } from "../../utils/ServerConfig";
 import {
@@ -60,7 +60,7 @@ export interface ExecutionTargetInput {
   name: string;
   args: any;
   options: DeviceAwareToolOptions;
-  deviceSessionManager: DeviceSessionManager;
+  deviceSessionManager: DeviceReadiness;
   signal?: AbortSignal;
   /** The registry's clock; rate-limits the first-sighting transport probe (#11618). */
   timer?: Timer;
@@ -484,7 +484,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       };
       if (sessionUuid && DaemonState.getInstance().isInitialized() && providedDeviceId) {
         // Daemon session path: device already resolved via createToolExecutionContext.
-        // Construct BootedDevice directly to avoid mutating global DeviceSessionManager state.
+        // Construct BootedDevice directly to avoid mutating global DeviceReadiness state.
         const resolvedPlatform =
           platform === "android" || platform === "ios" ? platform : "android";
         const pooledDevice = DaemonState.getInstance().getDevicePool().getDevice(providedDeviceId);
@@ -500,7 +500,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         );
         logger.info(`[ToolRegistry] ${name}: Using session-resolved device ${device.deviceId}`);
       } else {
-        // Legacy single-agent path or no session: use DeviceSessionManager (may set global state).
+        // Legacy single-agent path or no session: use DeviceReadiness (may set global state).
         // Readiness acts on the device it selects (CtrlProxy setup, the current-device pin,
         // settings), so a call without a deviceId is checked against the device it would land
         // on first: a refused call leaves the holder's device untouched (#10828).
@@ -682,7 +682,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     platform: SomePlatform;
     sessionUuid: string | undefined;
     providedDeviceId: string | undefined;
-    deviceSessionManager: DeviceSessionManager;
+    deviceSessionManager: DeviceReadiness;
     signal: AbortSignal | undefined;
     getConnectedPlatforms: () => Promise<ConnectedPlatformScan>;
     readOnly: boolean;
@@ -734,7 +734,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   }
 
   private getValidExplicitPin(
-    deviceSessionManager: DeviceSessionManager,
+    deviceSessionManager: DeviceReadiness,
     scan: ConnectedPlatformScan,
   ): BootedDevice | undefined {
     const explicitPin = deviceSessionManager.getExplicitDevicePin();
@@ -805,7 +805,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     platform: SomePlatform;
     sessionUuid: string | undefined;
     providedDeviceId: string | undefined;
-    deviceSessionManager: DeviceSessionManager;
+    deviceSessionManager: DeviceReadiness;
     signal: AbortSignal | undefined;
     getConnectedPlatforms: () => Promise<ConnectedPlatformScan>;
     autolockEnabled: boolean;

@@ -50,12 +50,10 @@ describe("a storage write whose call was cancelled before it was sent", () => {
       new FakeAdbClientFactory(),
     ).clearAvailabilityCache();
     let created: CapturingWebSocket | undefined;
-    client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      adb,
-      (url) => (created = new CapturingWebSocket(url, "none", 0, timer)),
+    client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+      webSocketFactory: (url) => (created = new CapturingWebSocket(url, "none", 0, timer)),
       timer,
-    );
+    });
     await client.ensureConnected();
     socket = created!;
     if (socket.readyState !== WebSocketState.OPEN) {

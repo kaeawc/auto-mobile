@@ -103,6 +103,7 @@ const COORDINATE_ACTIONS = new Set([
   "swipeOn",
   "dragAndDrop",
   "pinchOn",
+  "multiTouch",
 ]);
 
 export type RenderedDisplayRevisionReader = (deviceId: string) => number | undefined;

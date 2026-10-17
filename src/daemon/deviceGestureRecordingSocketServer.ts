@@ -1,7 +1,7 @@
 import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+import { DeviceReadiness } from "../devices/DeviceReadiness";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { ActionableError, type BootedDevice, type Platform } from "../models";
 import {
@@ -51,7 +51,7 @@ export interface DeviceGestureRecordingDeviceResolution {
 
 /** What device resolution needs of the device session manager; narrowed so a test can supply one. */
 export type DeviceGestureRecordingDeviceSessions = Pick<
-  DeviceSessionManager,
+  DeviceReadiness,
   "ensureDeviceReady" | "getPlatformDeviceManager" | "getCurrentDevice"
 >;
 
@@ -62,7 +62,7 @@ export type DeviceGestureRecordingDeviceSessions = Pick<
  * FUNNEL 1. This resolver runs its OWN fresh discovery, so it can be the first
  * path to see the `Unknown (<serial>)` placeholder or a different AVD on a
  * reused serial. It used to discover through
- * `DeviceSessionManager.detectConnectedPlatforms` and never fold the
+ * `DeviceReadiness.detectConnectedPlatforms` and never fold the
  * observation in, so the admission gate in `handleRequest` re-read pool state
  * from BEFORE this discovery — the same shape the video-stream and WebRTC
  * resolvers were given in #6888 (#6923).
@@ -147,8 +147,7 @@ const defaultBindingGate: DeviceGestureRecordingBindingGate = async (input) => {
  * with the manager injectable so a test can drive real readiness (and its device writes) on fakes.
  */
 export function createDeviceGestureRecordingDeviceResolution(
-  deviceSessions: () => DeviceGestureRecordingDeviceSessions = () =>
-    DeviceSessionManager.getInstance(),
+  deviceSessions: () => DeviceGestureRecordingDeviceSessions = () => DeviceReadiness.getInstance(),
 ): DeviceGestureRecordingDeviceResolution {
   return {
     selectDevice: (deviceId, platform) => {

@@ -15,7 +15,6 @@ import { SwipeOn } from "../../../src/features/action/swipeon/SwipeOn";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import { prepareTargetDisplayAction } from "../../../src/features/action/TargetDisplayAction";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -415,22 +414,17 @@ async function caughtAction(
       return action.execute({ action: "tap" });
     }
     case "swipeOn": {
-      const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, h.deps);
+      const action = new SwipeOn(h.targetDevice, h.adb, h.deps);
       action.observeScreen = h.observe;
       return action.execute({ direction: "up", autoTarget: false });
     }
     case "dragAndDrop": {
-      const action = new DragAndDrop(
-        h.targetDevice,
-        h.adb as unknown as AdbClient,
-        h.timer,
-        h.deps,
-      );
+      const action = new DragAndDrop(h.targetDevice, h.adb, h.timer, h.deps);
       action.observeScreen = h.observe;
       return action.execute({ source: { text: "Source" }, target: { text: "Target" } });
     }
     case "pinchOn": {
-      const action = new PinchOn(h.targetDevice, h.adb as unknown as AdbClient, {
+      const action = new PinchOn(h.targetDevice, h.adb, {
         ...h.deps,
         capture: new FakeHierarchyCapture(async () => h.screen.viewHierarchy!),
       });
@@ -498,12 +492,12 @@ async function caughtExplicitAction(
       return action.execute({ action: "tap", text: "Target", display: "inner" });
     }
     case "swipeOn": {
-      const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, deps);
+      const action = new SwipeOn(h.targetDevice, h.adb, deps);
       action.observeScreen = h.observe;
       return action.execute({ direction: "up", display: "inner" });
     }
     case "dragAndDrop": {
-      const action = new DragAndDrop(h.targetDevice, h.adb as unknown as AdbClient, h.timer, deps);
+      const action = new DragAndDrop(h.targetDevice, h.adb, h.timer, deps);
       action.observeScreen = h.observe;
       return action.execute({
         source: { text: "Source" },
@@ -512,7 +506,7 @@ async function caughtExplicitAction(
       });
     }
     case "pinchOn": {
-      const action = new PinchOn(h.targetDevice, h.adb as unknown as AdbClient, deps);
+      const action = new PinchOn(h.targetDevice, h.adb, deps);
       action.observeScreen = h.observe;
       return action.execute({ direction: "in", display: "inner" });
     }
@@ -675,7 +669,7 @@ describe("selector tools retry once after a fold", () => {
       case "dragAndDrop":
         return caughtAction(name, h);
       case "swipeOn": {
-        const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, {
+        const action = new SwipeOn(h.targetDevice, h.adb, {
           ...h.deps,
           executeGesture: new FakeGestureExecutor(),
           accessibilityDetector: new FakeAccessibilityDetector(),
@@ -716,7 +710,7 @@ describe("selector tools retry once after a fold", () => {
   test("a screen swipe without a selector keeps refusing", async () => {
     const { h, fresh } = staleCallerHarness("android");
     h.observe.setObserveResult(fresh);
-    const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, h.deps);
+    const action = new SwipeOn(h.targetDevice, h.adb, h.deps);
     action.observeScreen = h.observe;
     const result = await action.execute({ direction: "up", autoTarget: false });
     assertResult(result, 7, 8);
@@ -776,7 +770,7 @@ describe("swipeOn lookFor and auto-target retry once after a fold", () => {
       ),
     );
     const gesture = new FakeGestureExecutor();
-    const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, {
+    const action = new SwipeOn(h.targetDevice, h.adb, {
       ...h.deps,
       observeScreen: h.observe,
       executeGesture: gesture,

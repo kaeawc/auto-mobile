@@ -186,7 +186,6 @@
 1	test/fakes/FakeAndroidInventoryLoad.ts
 2	test/fakes/FakeTimer.ts
 1	test/fakes/SafeDaemonManager.ts
-6	test/features/accessibility/AccessibilityDetector.test.ts
 1	test/features/accessibility/ContrastChecker.test.ts
 1	test/features/accessibility/WcagAudit.test.ts
 2	test/features/action/BaseVisualChange.cachedFreshness.test.ts
@@ -221,7 +220,7 @@
 2	test/features/action/SelectAllText.test.ts
 4	test/features/action/SendKeys.test.ts
 13	test/features/action/SetUIState.test.ts
-13	test/features/action/StaleDisplay.test.ts
+4	test/features/action/StaleDisplay.test.ts
 3	test/features/action/StructuralGestureSequences.test.ts
 6	test/features/action/TapOnElement.accessibilityLink.test.ts
 1	test/features/action/TapOnElement.documentsUiTap.test.ts
@@ -239,9 +238,6 @@
 1	test/features/action/TapOnElement.voiceover.test.ts
 1	test/features/action/TapStrategy.test.ts
 20	test/features/action/TargetDisplayAction.test.ts
-2	test/features/action/TargetDisplayDisconnectedPanel.test.ts
-1	test/features/action/TargetDisplayPreDispatchCapture.test.ts
-1	test/features/action/TerminateApp.awaitTerminated.test.ts
 3	test/features/action/TerminateApp.test.ts
 1	test/features/action/UninstallApp.test.ts
 1	test/features/action/androidCoordinateTapPolicy.test.ts
@@ -278,7 +274,7 @@
 1	test/features/iosSimFleet/iosBootCapacityGate.test.ts
 1	test/features/navigation/DefaultPathOptimizer.test.ts
 1	test/features/navigation/DefaultScreenTransitionWaiter.test.ts
-16	test/features/navigation/DefaultUIStateSetup.test.ts
+15	test/features/navigation/DefaultUIStateSetup.test.ts
 12	test/features/navigation/Explore.test.ts
 19	test/features/navigation/ExploreBlockerDetection.test.ts
 1	test/features/navigation/NavigateTo.test.ts

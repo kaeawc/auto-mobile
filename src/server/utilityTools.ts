@@ -11,6 +11,11 @@ import {
   runSessionLocationMutation,
 } from "./sessionLocation";
 import { z } from "zod/v4";
+import {
+  changeLocalizationResultSchema,
+  displayConfigResultSchema,
+  setActiveDeviceResultSchema,
+} from "./utilityToolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError } from "../models/ActionableError";
 import { isIosSimulatorDevice } from "../features/action/IosSimulatorPermissions";
@@ -40,11 +45,7 @@ import {
   type DisplayConfigResult,
   type SetDisplayConfigInput,
 } from "../features/utility/DisplayConfig";
-import {
-  createJSONToolResponse,
-  createStructuredToolResponse,
-  withIsErrorOnFailure,
-} from "../utils/toolUtils";
+import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { BootedDevice, Platform } from "../models";
@@ -839,7 +840,7 @@ const changeLocalizationHandler = async (device: BootedDevice, args: ChangeLocal
   }
 
   return withIsErrorOnFailure(
-    createJSONToolResponse({
+    createStructuredToolResponse({
       success,
       changes,
       intentBroadcast,
@@ -861,6 +862,7 @@ const displayConfigToolOptions = {
   defaultEnabled: false,
   deviceReadOnly: isDisplayConfigRead,
   deviceReadOnlyArgs: [{ absentArguments: ["reset", "fontScale", "density", "theme"] }],
+  outputSchema: displayConfigResultSchema,
 };
 
 /** The device settings a displayConfig call may change (#11145). */
@@ -883,7 +885,7 @@ const displayConfigHandler = async (device: BootedDevice, args: DisplayConfigArg
   const result = displayConfigArgsAreSet(args)
     ? await displayConfig.setConfig(displayConfigSetInput(args))
     : await displayConfig.getConfig();
-  const response = createJSONToolResponse({
+  const response = createStructuredToolResponse({
     message: displayConfigMessage(result),
     ...result,
   });
@@ -1077,7 +1079,7 @@ export function registerUtilityTools(
     "Set active device using existing session binding or legacy global selection. With a daemon session, display pins a display key or role (inner/cover/rear/external); null clears, omission preserves. Explicit display arguments (including active) bypass the pin; otherwise pin beats focus/posture. On single-display devices, active resolves to the sole key; on multi-display devices active cannot be pinned. all cannot be pinned. Missing or inactive pinned panels fail without dispatch; clear with display: null. Pins clear on release/rebind and are unsupported in direct mode. Returns a text JSON result with message, deviceId, optional sessionUuid, and displayPin (string or null) when display was passed or a pin is present/cleared; never-pinned calls omit displayPin.",
     setActiveDeviceSchema,
     setActiveDeviceHandler,
-    { defaultEnabled: true },
+    { defaultEnabled: true, outputSchema: setActiveDeviceResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1085,7 +1087,7 @@ export function registerUtilityTools(
     "Change locale, time zone, text direction, time format, and calendar system",
     changeLocalizationSchema,
     changeLocalizationHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: changeLocalizationResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(

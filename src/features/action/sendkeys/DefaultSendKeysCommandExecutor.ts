@@ -18,18 +18,22 @@ import type { AndroidModeTyper } from "./AndroidModeTyper";
 import { A11yTyper } from "./A11yTyper";
 import { EventOnlyTyper } from "./EventOnlyTyper";
 import { PasswordRouting } from "./PasswordRouting";
+import { createSendKeysTextClient } from "./CtrlProxyTextClient";
 import {
-  isSemanticKey,
+  getAutoImeFallback,
+  graphemeCodePoints,
+  hasFocusedPasswordField,
+  inputKeyOutcomeFields,
   markPartialAfterMutation,
   markPartialAfterPriorMutation,
   preExistingFieldText,
-  validateImeKeyEventsText,
-} from "./SendKeysSupport";
+  redactPasswordTypeResult,
+} from "./ExecutorHelpers";
+import { isSemanticKey, validateImeKeyEventsText } from "./SendKeysSupport";
 import { isSendKeysBudgetExhausted } from "./SendKeysRequestBudget";
 import { IosTyper } from "./IosTyper";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { clearIosFieldWithVerification } from "../iosClearVerification";
-import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "../textTransportTimeout";
 import type { HierarchyLayer } from "../../../models/HierarchyLayer";
 import type { InsertTextState } from "../../observe/android/ctrlProxyProtocol";
 import type { BootedDevice, ObserveResult } from "../../../models";
@@ -39,21 +43,11 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { scopeObserveResultToLayer } from "../../observe/hierarchyLayer";
-import { AndroidCtrlProxyClient } from "../../observe/android";
 import { imeCommitUnitFields } from "../../observe/android/CtrlProxyText";
-import { IOSCtrlProxyClient } from "../../observe/ios";
 import { getFocusedTextLength } from "../ClearText";
 import { InputKey } from "../InputKey";
-import {
-  imeFailureFields,
-  IME_PASSWORD_COMMIT_UNAVAILABLE_ERROR,
-  LEGACY_IME_PASSWORD_REFUSAL,
-  redactPasswordImeFailure,
-} from "../imeFailureDiagnostics";
-import { withImeActionApproximationWarning } from "../imeActionApproximationWarning";
+import { imeFailureFields } from "../imeFailureDiagnostics";
 import type { KeyboardProfileId } from "../keyboardProfiles";
-import { FieldTypeDetector } from "../FieldTypeDetector";
-import { DefaultElementParser } from "../../utility/ElementParser";
 import { AUTO_MOBILE_IME_ID, type ImeSubtypeSnapshot } from "../AndroidImeCatalog";
 import type { KeyEventPlan } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
 import type {
@@ -72,91 +66,6 @@ import type {
   SendKeysTypingMode,
   TextActionResult,
 } from "../SendKeys";
-
-function hasFocusedPasswordField(hierarchy: NonNullable<ObserveResult["viewHierarchy"]>): boolean {
-  const parser = new DefaultElementParser();
-  const detector = new FieldTypeDetector();
-  for (const root of parser.extractRootNodes(hierarchy)) {
-    let password = false;
-    parser.traverseNode(root, (node) => {
-      const element = parser.extractNodeProperties(node);
-      if (
-        (element.focused === true || element.focused === "true") &&
-        detector.isPasswordField(element)
-      ) {
-        password = true;
-      }
-    });
-    if (password) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function graphemeCodePoints(graphemes: string[]): string {
-  return graphemes
-    .map((grapheme) =>
-      Array.from(
-        grapheme,
-        (char) => `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`,
-      ).join(" "),
-    )
-    .join(", ");
-}
-
-/** An older CtrlProxy refused the IME commit because the focused field is a password field. */
-function isLegacyImePasswordRefusal(result: TextActionResult): boolean {
-  return (
-    result.error === LEGACY_IME_PASSWORD_REFUSAL ||
-    result.imeFailure?.cause === LEGACY_IME_PASSWORD_REFUSAL
-  );
-}
-
-/**
- * A password field's typed text never reaches a diagnostic. An older CtrlProxy's password refusal
- * names the APK update: explicit IME mode never switches delivery on its own.
- */
-function redactPasswordTypeResult(
-  result: TextActionResult,
-  text: string,
-  passwordField: boolean,
-): void {
-  const legacyRefusal = isLegacyImePasswordRefusal(result);
-  if (passwordField || legacyRefusal) {
-    Object.assign(result, redactPasswordImeFailure(result, text));
-  }
-  if (legacyRefusal) {
-    result.error = IME_PASSWORD_COMMIT_UNAVAILABLE_ERROR;
-  }
-}
-
-function getAutoImeFallback(
-  operation: SendKeysOperation,
-  requestedMode: SendKeysTypingMode,
-  keyboardProfile: KeyboardProfileId | undefined,
-  resolvedMode: AndroidSendKeysTypingMode,
-  passwordField?: boolean,
-): AndroidSendKeysTypingMode | undefined {
-  // A password field typed through the IME has no safe fallback: eventAll would need the
-  // up-front deliverability check, and a mid-run switch could leave part of it typed.
-  if (requestedMode !== "auto" || keyboardProfile || resolvedMode !== "ime" || passwordField) {
-    return undefined;
-  }
-  return operation === "insert" ? "eventAll" : "a11y";
-}
-
-/** The optional outcome fields of an InputKey press, copied onto a sendKeys key result. */
-function inputKeyOutcomeFields(
-  result: Awaited<ReturnType<SendKeysInputKey["press"]>>,
-): Pick<SendKeysCommandResult, "verified" | "warning" | "error" | "errorCode"> {
-  return {
-    ...(result.verified === undefined ? {} : { verified: result.verified }),
-    ...(result.warning === undefined ? {} : { warning: result.warning }),
-    ...(result.error ? { error: result.error } : {}),
-    ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
-  };
-}
 
 export interface SendKeysPlatformDependencies {
   timer?: Timer;
@@ -399,6 +308,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       withTextWarnings: (result, warnings) => this.withTextWarnings(result, warnings),
       markPartialAfterMutation: (result) => markPartialAfterMutation(result),
     });
+  }
+
+  private createTextClient(adbFactory: AdbClientFactory): SendKeysTextClient {
+    return createSendKeysTextClient(this.device, adbFactory);
   }
 
   private createKeyEventSupport(): KeyEventSupport {
@@ -997,110 +910,5 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   private executeKeyEventPlan(plan: KeyEventPlan, signal?: AbortSignal): Promise<void> {
     return this.keyEventSupport.executeKeyEventPlan(plan, signal);
-  }
-
-  private createTextClient(adbFactory: AdbClientFactory): SendKeysTextClient {
-    if (this.device.platform === "android") {
-      const client = AndroidCtrlProxyClient.getInstance(this.device, adbFactory);
-      return {
-        readInsertTextState: async () => {
-          const result = await client.requestInsertTextState();
-          return result.success ? result.state : undefined;
-        },
-        replace: async (text) => client.requestSetText(text),
-        insert: async (text, options) =>
-          client.requestInsertText(
-            text,
-            options?.timeoutMs,
-            undefined,
-            {
-              ...options,
-              acceptsCaretNotPlaced: true,
-            },
-            {
-              abortSignal: options?.abortSignal,
-              onDispatch: options?.onDispatch,
-              deadlineMs: options?.deadlineMs,
-            },
-          ),
-        clear: async () => client.requestClearText(),
-        ime: async (action, signal, onDispatch) =>
-          withImeActionApproximationWarning(
-            await client.requestImeAction(action, 5000, undefined, signal, onDispatch),
-          ),
-        supportsImeCommit: async () =>
-          (await client.supportsCommand("request_commit_text")) &&
-          (await client.supportsCommand("request_cancel_ime_commit")),
-        supportsImeKeyEvents: async () => client.supportsCommand("ime_key_events_v1"),
-        supportsImeClearField: async () => client.supportsCommand("ime_clear_field_v1"),
-        supportsImePasswordCommit: async () => client.supportsCommand("ime_password_commit_v1"),
-        supportsImeInsertedText: async () => client.supportsCommand("ime_inserted_text_v1"),
-        supportsImeTrace: async () => client.supportsCommand("ime_commit_trace_v1"),
-        supportsKeyboardProfiles: async () =>
-          client.supportsCommand("request_set_keyboard_profile"),
-        setKeyboardProfile: async (id) => client.setKeyboardProfile(id),
-        commitViaIme: async (text, priorImeId, signal, delivery, trace) => {
-          const result = await client.commitViaIme(
-            text,
-            priorImeId ?? undefined,
-            undefined,
-            undefined,
-            signal,
-            delivery,
-            trace,
-          );
-          return {
-            success: result.success,
-            ...(result.error ? { error: result.error } : {}),
-            ...(result.partialApplication ? { partialApplication: true } : {}),
-            ...(result.sessionUnsafe ? { sessionUnsafe: true } : {}),
-            ...(result.transportFailure ? { imeFailureStage: "transport" as const } : {}),
-            ...imeCommitUnitFields(result),
-            ...(result.insertedText !== undefined ? { insertedText: result.insertedText } : {}),
-            ...(result.editorConsumed === true ? { editorConsumed: true } : {}),
-            ...(result.trace !== undefined ? { imeTrace: result.trace } : {}),
-          };
-        },
-      };
-    }
-
-    const client = IOSCtrlProxyClient.getInstance(this.device);
-    return {
-      replace: async (text) => {
-        const clearResult = await client.requestClearText();
-        return clearResult.success ? client.requestAppendText(text) : clearResult;
-      },
-      insert: async (text, options) =>
-        client.requestAppendText(
-          text,
-          options?.timeoutMs ?? resolveTextCtrlProxyTimeoutMs(text),
-          undefined,
-          undefined,
-          {
-            abortSignal: options?.abortSignal,
-            ...(options?.deadlineMs === undefined ? {} : { deadlineMs: options.deadlineMs }),
-          },
-        ),
-      clear: async (signal) => {
-        const deadlineMs = getTextRequestDeadlineMs();
-        return client.requestClearText(undefined, 5000, undefined, {
-          abortSignal: signal,
-          ...(deadlineMs === undefined ? {} : { deadlineMs }),
-        });
-      },
-      ime: async (action, signal, onDispatch) =>
-        client.requestImeAction(action, 5000, undefined, signal, onDispatch),
-      supportsImeCommit: async () => false,
-      supportsImeKeyEvents: async () => false,
-      supportsImeClearField: async () => false,
-      supportsImePasswordCommit: async () => false,
-      supportsImeInsertedText: async () => false,
-      supportsKeyboardProfiles: async () => false,
-      setKeyboardProfile: async () => ({
-        success: false,
-        error: "Keyboard profiles are Android-only",
-      }),
-      commitViaIme: async () => ({ success: false, error: "IME commit is Android-only" }),
-    };
   }
 }

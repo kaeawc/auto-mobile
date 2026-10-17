@@ -140,6 +140,10 @@ describe("MultiTouchGesture dispatch (#12535)", () => {
     const result = await gesture.execute({ action: "tap", x: 500, y: 1000, fingers: 4 });
     expect(result.success).toBe(false);
     expect(result.error).toContain("multi_finger_gesture_v1");
+    expect(result.error).toContain("does not advertise multi-finger gestures");
+    expect(result.error).toContain("Two-finger gestures (fingers: 2) still work");
+    expect(result.error).toContain("AUTOMOBILE_CTRL_PROXY_APK_PATH");
+    expect(result.error).toContain("upgrade AutoMobile");
     expect(result.error).toContain("Nothing was dispatched");
     expect(result.outcomeIndeterminate).toBeUndefined();
   });

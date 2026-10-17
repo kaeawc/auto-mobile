@@ -1,7 +1,11 @@
 import { createDevicePoolDependencies } from "./devicePoolDependencies";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
-import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
+import {
+  DevicePool,
+  type DevicePoolDependencies,
+  type PooledDevice,
+} from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -768,4 +772,29 @@ export function androidDeviceImage(
   extra: Partial<DeviceInfo> = {},
 ): DeviceInfo {
   return { name, platform: "android", isRunning: false, deviceId, ...extra };
+}
+
+/**
+ * Turn on reboot-on-death recovery for the current test and return the function that puts the
+ * environment back. Call the restore function in a `finally`.
+ */
+export function enableRebootOnDeath(): () => void {
+  const original = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+  process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+  return () => {
+    if (original === undefined) {
+      delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
+    } else {
+      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = original;
+    }
+  };
+}
+
+/** The pooled device for `deviceId`, failing the test clearly when it is not in the pool. */
+export function requirePooledDevice(pool: DevicePool, deviceId: string): PooledDevice {
+  const pooled = pool.getDevice(deviceId);
+  if (!pooled) {
+    throw new Error("expected pooled device");
+  }
+  return pooled;
 }

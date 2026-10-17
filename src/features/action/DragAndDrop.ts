@@ -39,7 +39,7 @@ import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../observe/shared/SharedGestureDelegate";
 import { LONG_PRESS_TIMEOUT_HEADROOM_MS } from "./gestureTransportTimeout";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
@@ -144,7 +144,7 @@ export class DragAndDrop extends BaseVisualChange {
 
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
     deps: DragAndDropDeps = {},
   ) {

@@ -31,17 +31,24 @@ interface RuleContext {
   filename: string;
   physicalFilename: string;
   id: string;
+  sourceCode: { text: string };
   report: (diagnostic: ReportedDiagnostic) => void;
 }
 
 type AstNode = { type: string } & Record<string, unknown>;
 
-export function runRule(rule: PluginRule, code: string, filename = "fixture.ts"): string[] {
+export function runRule(
+  rule: PluginRule,
+  code: string,
+  filename = "fixture.ts",
+  options: readonly unknown[] = [],
+): string[] {
   const { program } = parseSync(filename, code);
   const messages: string[] = [];
 
   const context: RuleContext = {
-    options: [],
+    options,
+    sourceCode: { text: code },
     filename,
     physicalFilename: filename,
     id: "auto-mobile/test",

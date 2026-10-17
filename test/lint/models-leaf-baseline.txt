@@ -15,5 +15,3 @@ src/models/PackageSigningInspection.ts	src/utils/android-cmdline-tools/apkSignin
 src/models/ScreenshotResult.ts	src/features/observe/ScreenshotMetadata
 src/models/TapOnElementResult.ts	src/features/talkback/TalkBackTapStrategy
 src/models/ViewHierarchyResult.ts	src/features/prototype/prototypeHidden
-src/models/executionOwnerIdentity.ts	src/utils/fileLock
-src/models/executionOwnerIdentity.ts	src/utils/logger

@@ -12,7 +12,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { LockOwnerGenerationProbe } from "../../utils/fileLock";
-import { defaultLockOwnerGenerationProbe } from "../../daemon/lockOwnerGeneration";
+import { defaultLockOwnerGenerationProbe } from "../../utils/lockOwnerGeneration";
 
 const IPROXY_GRACEFUL_STOP_TIMEOUT_MS = 1000;
 export interface IosTunnelStart {

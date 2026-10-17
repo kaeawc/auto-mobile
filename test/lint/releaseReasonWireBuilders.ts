@@ -46,7 +46,7 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
     "Serializes a client version/build handshake mismatch reason, not a session release reason.",
   ],
   [
-    "src/server/index.ts#executeToolCallBody",
+    "src/server/pipeline/ingress/shapeResult.ts#shapeCallFailure",
     "Passes the release reason into sessionOwnershipLostPayload, which builds the wire envelope.",
   ],
   [

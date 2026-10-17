@@ -35,22 +35,22 @@ class PrototypeHostChromeScreenshotTest {
   /** Fullscreen: the translucent dismiss bar above the spec, light. */
   @Test
   fun dismissBarLight() =
-    chromeTest("host_chrome_dismiss_bar_light", dark = false, fullscreen = true, pending = true)
+    chromeTest("host_chrome_dismiss_bar_light", dark = false, fullscreen = true)
 
   /** Fullscreen: the translucent dismiss bar above the spec, dark. */
   @Test
   fun dismissBarDark() =
-    chromeTest("host_chrome_dismiss_bar_dark", dark = true, fullscreen = true, pending = true)
+    chromeTest("host_chrome_dismiss_bar_dark", dark = true, fullscreen = true)
 
   /** Floating and persistent: the Close control over the spec, light. */
   @Test
   fun closeControlLight() =
-    chromeTest("host_chrome_close_control_light", dark = false, fullscreen = false, pending = true)
+    chromeTest("host_chrome_close_control_light", dark = false, fullscreen = false)
 
   /** Floating and persistent: the Close control over the spec, dark. */
   @Test
   fun closeControlDark() =
-    chromeTest("host_chrome_close_control_dark", dark = true, fullscreen = false, pending = true)
+    chromeTest("host_chrome_close_control_dark", dark = true, fullscreen = false)
 
   @Test
   fun chromelessLight() = chromelessTest("host_chrome_none_light", dark = false, revealed = false)
@@ -68,7 +68,7 @@ class PrototypeHostChromeScreenshotTest {
 
   /** Chromeless baselines are pending until recorded on Linux, like the ones above. */
   private fun chromelessTest(name: String, dark: Boolean, revealed: Boolean) =
-    prototypeScreenshotTest(name, pending = true) {
+    prototypeScreenshotTest(name) {
       renderPrototypeChrome(
         name,
         dark,

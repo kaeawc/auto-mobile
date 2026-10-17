@@ -38,7 +38,10 @@
 #   <count>  <file>  oxlint-disable-file(<rule>)       every unbounded directive left open to end of file
 #   <count>  <file>  oxlint-disable-no-reason(<rule>)  those lacking a `-- reason`
 # A new suppression therefore fails like a new violation and needs --allow-grow,
-# and removing one shrinks the baseline via --update. A directive listing several
+# and removing one shrinks the baseline via --update. Narrowing a baselined
+# -file directive by adding the enable that closes it moves its count from the
+# -file row to the -block row; the compare treats that as a shrink (no
+# --allow-grow), while the reverse (dropping a closer) is still growth. A directive listing several
 # rules counts once per rule; `eslint/<rule>` is normalised to `<rule>`. The
 # no-reason row has no tolerance beyond the baseline: pre-existing reason-less
 # directives are recorded, but a NEW one grows that row and fails even if an
@@ -165,7 +168,17 @@ new_or_increased() {
       const cur = parse(curText);
       const news = [];
       for (const [key, n] of cur) {
-        const allowed = base.get(key) || 0;
+        let allowed = base.get(key) || 0;
+        // Narrowing: closing a baselined file-wide disable with a later enable
+        // turns its -file row into a -block row for the same file+rule. That is a
+        // shrink, so a -block increase is covered by the -file decrease. The -file
+        // count itself is still compared strictly, so block -> file (dropping a
+        // closer) stays a new row.
+        const sep = key.indexOf("\toxlint-disable-block(");
+        if (sep >= 0) {
+          const fileKey = key.replace("\toxlint-disable-block(", "\toxlint-disable-file(");
+          allowed += Math.max(0, (base.get(fileKey) || 0) - (cur.get(fileKey) || 0));
+        }
         if (n > allowed) { news.push((n - allowed) + " new in " + key.replace("\t", "  ")); }
       }
       process.stdout.write(news.join("\n"));

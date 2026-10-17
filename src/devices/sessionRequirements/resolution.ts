@@ -293,12 +293,20 @@ function insufficientAndroidExactPrecision(
 }
 
 /**
- * Same-version tie-break: the plain `google_apis` flavor first (it boots
+ * Same-version tie-break: a host-runnable ABI first (an ARM image is unusable
+ * on an x86_64 host whatever its flavor), then the plain `google_apis` flavor first (it boots
  * adb-authorized quickly; Play Store images can stay unauthorized for minutes),
  * then the system image package name for a deterministic order.
  */
-function androidTieBreakIdentity(release: AndroidCatalogRelease): string {
-  return `${release.flavor === "google_apis" ? "0" : "1"}|${release.systemImagePackage}`;
+function androidTieBreakIdentity(
+  hostAbis: readonly string[],
+): (release: AndroidCatalogRelease) => string {
+  return (release) => {
+    const index = hostAbis.indexOf(release.abi);
+    const abiRank = index === -1 ? hostAbis.length : index;
+    const flavorRank = release.flavor === "google_apis" ? "0" : "1";
+    return `${String(abiRank).padStart(3, "0")}|${flavorRank}|${release.systemImagePackage}`;
+  };
 }
 
 /** `os` takes the Android release (16), not the API level (36); say so when it is clearly confused. */
@@ -332,6 +340,7 @@ function chooseAndroidRelease(
   selector: EffectiveOsSelector,
   preferredVersion: string,
   releases: readonly AndroidCatalogRelease[],
+  hostAbis: readonly string[] = [],
 ): RequirementResult<ResolvedAndroidOs> {
   const valid = validAndroidReleases(releases);
   const satisfying = valid.filter((release) =>
@@ -350,7 +359,7 @@ function chooseAndroidRelease(
   const ordered = stableReleaseSort(
     satisfying,
     (release) => release.osVersion,
-    androidTieBreakIdentity,
+    androidTieBreakIdentity(hostAbis),
   );
   if (selector.kind === "exact") {
     return success({ release: ordered[0], by: "exact" });
@@ -545,6 +554,7 @@ function resolveAndroid(
     requirement.effective.os,
     defaults.os.preferredVersion,
     catalog.releases,
+    catalog.hostAbis,
   );
   if (!os.ok) {
     return os;

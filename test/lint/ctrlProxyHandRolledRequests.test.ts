@@ -12,7 +12,9 @@ const EXEMPT = new Set([
 // Counts sum register and WebSocket send call expressions, not request pairs.
 const ALLOWANCES: Readonly<Record<string, number>> = {
   // Screenshots retain capture bindings, stream suppression and post-dispatch abort bookkeeping.
-  "src/features/observe/android/AndroidCtrlProxyClient.ts": 4,
+  "src/features/observe/android/AndroidCtrlProxyClient.ts": 2,
+  // Observation-stream screenshot: stream suppression, capture binding and rate-limit stamp.
+  "src/features/observe/android/AndroidScreenshotCapture.ts": 2,
   // Hierarchy streaming path: subscription, cancellation and one-shot dispatch.
   "src/features/observe/android/CtrlProxyHierarchy.ts": 3,
   // Hierarchy streaming path: deadline recompute, abort, preparation and cache shaping.

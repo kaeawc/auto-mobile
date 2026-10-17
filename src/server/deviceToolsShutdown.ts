@@ -1,4 +1,5 @@
 import { isEmulatorStopDispatchedError } from "../utils/android-cmdline-tools/EmulatorProcessStop";
+import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { ActionableError, type BootedDevice, type SomePlatform } from "../models";
 import type { DeviceShutdownOptions, PlatformDeviceManager } from "../devices/deviceUtils";
@@ -12,7 +13,6 @@ import type {
 } from "../daemon/devicePool";
 import type { Session } from "../daemon/sessionManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
-import { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -160,7 +160,7 @@ async function stopIosCtrlProxyBeforeShutdown(
       // Fence the observer before stopping its runner. Otherwise the runner's
       // intentional socket close can schedule auto-reconnect and restart the
       // simulator after killDevice has confirmed shutdown.
-      await IOSCtrlProxyClient.retireInstance(context.device.deviceId);
+      await ctrlProxyClientLifecycle.retireForShutdown("ios", context.device.deviceId);
       await xcTestManager.stop();
     })();
     await runWithinShutdownDeadline(
@@ -244,11 +244,7 @@ async function resumeCtrlProxyAfterFailedKill(device: BootedDevice): Promise<voi
   ) {
     return;
   }
-  if (device.platform === "ios") {
-    IOSCtrlProxyClient.resumeAfterDeviceStart(device.deviceId);
-  } else if (device.platform === "android") {
-    AndroidCtrlProxyClient.resumeAfterDeviceStart(device.deviceId);
-  }
+  ctrlProxyClientLifecycle.resumeAfterDeviceStart(device.platform, device.deviceId);
 }
 
 async function resumeCtrlProxyAfterUnconfirmedFailure(

@@ -1,4 +1,4 @@
-import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
+import { poolInternals, recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { drainUntil, drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { beforeAll, expect, spyOn, test } from "bun:test";
@@ -303,27 +303,8 @@ interface DevicePoolProcessExitInternals {
   trackStartedDeviceProcess(device: BootedDevice, child: ChildProcess): Promise<void>;
 }
 
-interface DevicePoolPrivateRecoveryMembers {
-  adbServerResetQuarantinedSessions: Set<string>;
-  adbServerResetRecoveryReservations: Map<
-    string,
-    { sessionId?: string; recoveryGeneration?: number; resolve(): void }
-  >;
-  recoveryCoordinator: { recoveringAndroidImageSettlements: Map<string, unknown> };
-  startAndroidRecoveryRecord(
-    sessionId: string,
-    details: { deviceId: string; avdName?: string },
-    reservations: readonly string[],
-    replace?: boolean,
-  ): { generation: number };
-  completeEmulatorLossRecovery(
-    incidentId: string | undefined,
-    outcome: "recovered" | "exhausted" | "not-attempted",
-  ): Promise<void>;
-}
-
 function assertNoRecoveryReservationsRemain(pool: DevicePool, sessionId: string): void {
-  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
+  const internals = poolInternals(pool);
   const recoveryState = recoveryInternals(pool);
   expect(pool.isSessionRecoveryInFlight(sessionId)).toBe(false);
   expect(recoveryState.sessionPreservingRecoveries.has(sessionId)).toBe(false);
@@ -2380,9 +2361,7 @@ test("active emulator loss adopts a new serial after its tracked process exits",
         throw new Error("An exited process must not be killed");
       },
     } as unknown as ChildProcess;
-    (
-      pool as unknown as { startedDeviceProcesses: Map<string, ChildProcess> }
-    ).startedDeviceProcesses.set(original.deviceId, exitedProcess);
+    poolInternals(pool).startedDeviceProcesses.set(original.deviceId, exitedProcess);
     const returned = { ...original, deviceId: "emulator-5556" };
     manager.bootedDevices = [returned];
     await expect(
@@ -2674,7 +2653,7 @@ test("ADB-reset recovery releases after its retry also has unconfirmed shutdown"
 
 test("ADB-reset terminal release failure retains its recovery fence", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
+  const internals = poolInternals(pool);
   const recoveryState = recoveryInternals(pool);
   const originalReleaseSession = sessions.releaseSession.bind(sessions);
   sessions.releaseSession = async () => {
@@ -2715,7 +2694,7 @@ test("ADB-reset terminal release failure retains its recovery fence", async () =
 
 test("ADB-reset recovery clears its failed-release fence after a later release", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
+  const internals = poolInternals(pool);
   const recoveryState = recoveryInternals(pool);
   const originalReleaseSession = sessions.releaseSession.bind(sessions);
   sessions.releaseSession = async () => {
@@ -2859,7 +2838,7 @@ test("a deferred session recovery incident remains pending until its retry recov
 
 test("release during shutdown confirmation finalizes session recovery instead of deferring it", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
+  const internals = poolInternals(pool);
   const completeRecovery = internals.completeEmulatorLossRecovery;
   let finalizations = 0;
   internals.completeEmulatorLossRecovery = async (...args) => {
@@ -2965,7 +2944,7 @@ test("release with an unavailable incident repository still finalizes the releas
 test("a stale due-recovery snapshot does not finalize a record another sweep is recovering", async () => {
   const manager = new PerAvdBlockingReadyManager();
   const { timer, sessions, pool, captured } = await setup(manager);
-  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
+  const internals = poolInternals(pool);
   const recoveryState = recoveryInternals(pool);
   const second: BootedDevice = {
     name: "Pixel_8_API_35_2",
@@ -3035,7 +3014,7 @@ test("a stale due-recovery snapshot does not finalize a record another sweep is 
 
 test("an old ADB-reset cohort sweep cannot clear a newer recovery record", async () => {
   const { sessions, pool, captured } = await setup();
-  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
+  const internals = poolInternals(pool);
   const recoveryState = recoveryInternals(pool);
   try {
     const oldRecord = internals.startAndroidRecoveryRecord(
@@ -3080,7 +3059,7 @@ test("an old ADB-reset cohort sweep cannot clear a newer recovery record", async
 
 test("terminal recovery release failure retains the recovery fence until a later release", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
+  const internals = poolInternals(pool);
   const recoveryState = recoveryInternals(pool);
   const incidentId = await pool.recordEmulatorLossIncident(
     original.deviceId,
@@ -3480,10 +3459,7 @@ test("startup lease does not cool down when matching recovery clears before sett
     await manager.readinessStarted.promise;
 
     let releaseLease: (() => Promise<void>) | undefined;
-    const internals = pool as unknown as {
-      afterAndroidStartupRecoverySnapshot?: () => void;
-      recoveryCoordinator: { clearRecoveringAndroidImage(avdName: string): void };
-    };
+    const internals = poolInternals(pool);
     internals.afterAndroidStartupRecoverySnapshot = () => {
       manager.releaseReadiness.resolve();
       internals.recoveryCoordinator.clearRecoveringAndroidImage(original.name);
@@ -3578,28 +3554,13 @@ test("startup lease beats a shorter timeout when matching recovery settles", asy
   }
 });
 
-interface FailedReleaseRecord {
-  generation: number;
-  failedReleaseAttempts?: number;
-  deferredUntil?: number;
-  reservations: Set<string>;
-}
-interface FailedReleaseInternals {
-  startAndroidRecoveryRecord(
-    sessionId: string,
-    details: { deviceId: string },
-    reservations: readonly string[],
-  ): FailedReleaseRecord;
-  markAndroidRecoveryReleaseFailure(record: FailedReleaseRecord): void;
-}
-
 async function setupFailedReleaseFence() {
   const context = await setup();
   context.sessions.stopCleanupTimer();
   context.sessions.setActiveSessionExecutionChecker((id) =>
     context.pool.isSessionRecoveryInFlight(id),
   );
-  const internals = context.pool as unknown as FailedReleaseInternals;
+  const internals = poolInternals(context.pool);
   const record = internals.startAndroidRecoveryRecord("session", { deviceId: original.deviceId }, [
     "loss",
     "quarantine",

@@ -1,8 +1,8 @@
-@testable import AutoMobileSDK
+@testable import AutoMobileSdkWire
 import Foundation
 import XCTest
 
-/// Both packages read the SAME host fixture, not copies in separate resource bundles.
+/// The SDK binds and the runner dials this one implementation; the host fixture pins its values.
 final class SdkSimulatorPortTests: XCTestCase {
     private struct Fixture: Decodable {
         let udid: String

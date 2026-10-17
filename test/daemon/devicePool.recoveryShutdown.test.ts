@@ -1,3 +1,4 @@
+import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { drainUntil, drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { beforeAll, expect, spyOn, test } from "bun:test";
@@ -303,19 +304,13 @@ interface DevicePoolProcessExitInternals {
   emulatorLossRecoverySettlements: Map<string, Promise<void>>;
 }
 
-interface DevicePoolRecoveryInternals {
+interface DevicePoolPrivateRecoveryMembers {
   adbServerResetQuarantinedSessions: Set<string>;
   adbServerResetRecoveryReservations: Map<
     string,
     { sessionId?: string; recoveryGeneration?: number; resolve(): void }
   >;
-  recoveringAndroidImages: Map<string, DeviceInfo>;
   recoveryCoordinator: { recoveringAndroidImageSettlements: Map<string, unknown> };
-  recoveringAndroidDeviceIds: Set<string>;
-  recoveringSessionLosses: Map<string, { generation: number }>;
-  failedTerminalRecoveryReleases: Set<string>;
-  sessionPreservingRecoveries: Map<string, unknown>;
-  androidRecoveryHandoffOwners: Map<string, unknown>;
   startAndroidRecoveryRecord(
     sessionId: string,
     details: { deviceId: string; avdName?: string },
@@ -329,19 +324,20 @@ interface DevicePoolRecoveryInternals {
 }
 
 function assertNoRecoveryReservationsRemain(pool: DevicePool, sessionId: string): void {
-  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
+  const recoveryState = recoveryInternals(pool);
   expect(pool.isSessionRecoveryInFlight(sessionId)).toBe(false);
-  expect(internals.sessionPreservingRecoveries.has(sessionId)).toBe(false);
-  expect(internals.recoveringSessionLosses.has(sessionId)).toBe(false);
+  expect(recoveryState.sessionPreservingRecoveries.has(sessionId)).toBe(false);
+  expect(recoveryState.recoveringSessionLosses.has(sessionId)).toBe(false);
   expect(internals.adbServerResetQuarantinedSessions.has(sessionId)).toBe(false);
-  expect(internals.failedTerminalRecoveryReleases.has(sessionId)).toBe(false);
-  expect(internals.recoveringAndroidImages.has(original.name)).toBe(false);
+  expect(recoveryState.failedTerminalRecoveryReleases.has(sessionId)).toBe(false);
+  expect(recoveryState.recoveringAndroidImages.has(original.name)).toBe(false);
   expect(internals.recoveryCoordinator.recoveringAndroidImageSettlements.has(original.name)).toBe(
     false,
   );
   expect(internals.adbServerResetRecoveryReservations.has(original.name)).toBe(false);
-  expect(internals.recoveringAndroidDeviceIds.has(original.deviceId)).toBe(false);
-  expect(internals.androidRecoveryHandoffOwners.has(original.deviceId)).toBe(false);
+  expect(recoveryState.recoveringAndroidDeviceIds.has(original.deviceId)).toBe(false);
+  expect(recoveryState.androidRecoveryHandoffOwners.has(original.deviceId)).toBe(false);
 }
 
 async function flush(): Promise<void> {
@@ -2666,12 +2662,8 @@ test("ADB-reset recovery releases after its retry also has unconfirmed shutdown"
 
     expect(sessions.getSession("session")).toBeNull();
     expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
-    expect(
-      (pool as unknown as DevicePoolRecoveryInternals).recoveringSessionLosses.has("session"),
-    ).toBe(false);
-    expect(
-      (pool as unknown as DevicePoolRecoveryInternals).recoveringAndroidImages.has(original.name),
-    ).toBe(false);
+    expect(recoveryInternals(pool).recoveringSessionLosses.has("session")).toBe(false);
+    expect(recoveryInternals(pool).recoveringAndroidImages.has(original.name)).toBe(false);
     expect((await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome).toMatch(
       /^(recovered|exhausted)$/,
     );
@@ -2683,7 +2675,8 @@ test("ADB-reset recovery releases after its retry also has unconfirmed shutdown"
 
 test("ADB-reset terminal release failure retains its recovery fence", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
+  const recoveryState = recoveryInternals(pool);
   const originalReleaseSession = sessions.releaseSession.bind(sessions);
   sessions.releaseSession = async () => {
     throw new Error("ADB-reset release persistence failed");
@@ -2713,8 +2706,8 @@ test("ADB-reset terminal release failure retains its recovery fence", async () =
     await expect(terminalRecovery).rejects.toThrow("ADB-reset release persistence failed");
 
     expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(true);
-    expect(internals.recoveringSessionLosses.has("session")).toBe(true);
-    expect(internals.recoveringAndroidImages.has(original.name)).toBe(true);
+    expect(recoveryState.recoveringSessionLosses.has("session")).toBe(true);
+    expect(recoveryState.recoveringAndroidImages.has(original.name)).toBe(true);
   } finally {
     sessions.releaseSession = originalReleaseSession;
     sessions.stopCleanupTimer();
@@ -2723,7 +2716,8 @@ test("ADB-reset terminal release failure retains its recovery fence", async () =
 
 test("ADB-reset recovery clears its failed-release fence after a later release", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
+  const recoveryState = recoveryInternals(pool);
   const originalReleaseSession = sessions.releaseSession.bind(sessions);
   sessions.releaseSession = async () => {
     throw new Error("ADB-reset release persistence failed");
@@ -2752,7 +2746,7 @@ test("ADB-reset recovery clears its failed-release fence after a later release",
     timer.advanceTime(1_000);
     await expect(failedRecovery).rejects.toThrow("ADB-reset release persistence failed");
     expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(true);
-    expect(internals.recoveringSessionLosses.has("session")).toBe(true);
+    expect(recoveryState.recoveringSessionLosses.has("session")).toBe(true);
 
     // The retained fence is not a due deferred retry: the sweep must wait for
     // a later durable release rather than re-running the failed recovery.
@@ -2760,16 +2754,16 @@ test("ADB-reset recovery clears its failed-release fence after a later release",
     timer.advanceTime(30_000);
     await pool.retryDueDeferredSessionRecoveries();
     await flush();
-    expect(internals.failedTerminalRecoveryReleases.has("session")).toBe(true);
-    expect(internals.recoveringSessionLosses.has("session")).toBe(true);
+    expect(recoveryState.failedTerminalRecoveryReleases.has("session")).toBe(true);
+    expect(recoveryState.recoveringSessionLosses.has("session")).toBe(true);
     expect(manager.startedDevices).toHaveLength(0);
 
     await originalReleaseSession("session", "explicit-release");
     await flush();
 
     expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(false);
-    expect(internals.recoveringSessionLosses.has("session")).toBe(false);
-    expect(internals.failedTerminalRecoveryReleases.has("session")).toBe(false);
+    expect(recoveryState.recoveringSessionLosses.has("session")).toBe(false);
+    expect(recoveryState.failedTerminalRecoveryReleases.has("session")).toBe(false);
 
     const abort = new AbortController();
     let reservationReleased = false;
@@ -2866,7 +2860,7 @@ test("a deferred session recovery incident remains pending until its retry recov
 
 test("release during shutdown confirmation finalizes session recovery instead of deferring it", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
   const completeRecovery = internals.completeEmulatorLossRecovery;
   let finalizations = 0;
   internals.completeEmulatorLossRecovery = async (...args) => {
@@ -2941,7 +2935,6 @@ test("release with an unavailable incident repository still finalizes the releas
     },
     store,
   );
-  const internals = pool as unknown as DevicePoolRecoveryInternals;
   const incidentId = await pool.recordEmulatorLossIncident(
     original.deviceId,
     "device-discovery-miss",
@@ -2963,7 +2956,7 @@ test("release with an unavailable incident repository still finalizes the releas
     cancellation.resolve(0);
 
     expect(await recovery).toBe("released");
-    expect(internals.failedTerminalRecoveryReleases.has("session")).toBe(false);
+    expect(recoveryInternals(pool).failedTerminalRecoveryReleases.has("session")).toBe(false);
     assertNoRecoveryReservationsRemain(pool, "session");
   } finally {
     sessions.stopCleanupTimer();
@@ -2973,7 +2966,8 @@ test("release with an unavailable incident repository still finalizes the releas
 test("a stale due-recovery snapshot does not finalize a record another sweep is recovering", async () => {
   const manager = new PerAvdBlockingReadyManager();
   const { timer, sessions, pool, captured } = await setup(manager);
-  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
+  const recoveryState = recoveryInternals(pool);
   const second: BootedDevice = {
     name: "Pixel_8_API_35_2",
     platform: "android",
@@ -3019,19 +3013,19 @@ test("a stale due-recovery snapshot does not finalize a record another sweep is 
     await sweepA;
 
     // Sweep B still owns session-2's reboot: sweep A must leave its record alone.
-    expect(internals.sessionPreservingRecoveries.has("session-2")).toBe(true);
-    expect(internals.recoveringSessionLosses.has("session-2")).toBe(true);
+    expect(recoveryState.sessionPreservingRecoveries.has("session-2")).toBe(true);
+    expect(recoveryState.recoveringSessionLosses.has("session-2")).toBe(true);
     expect(internals.adbServerResetQuarantinedSessions.has("session-2")).toBe(true);
-    expect(internals.recoveringAndroidImages.has(second.name)).toBe(true);
+    expect(recoveryState.recoveringAndroidImages.has(second.name)).toBe(true);
     expect(sessions.getSession("session")?.assignedDevice).toBe(`${original.name}-replacement`);
 
     manager.releaseReadinessFor(second.name);
     await sweepB;
     expect(manager.startedDevices).toHaveLength(2);
-    expect(internals.sessionPreservingRecoveries.has("session-2")).toBe(false);
-    expect(internals.recoveringSessionLosses.has("session-2")).toBe(false);
+    expect(recoveryState.sessionPreservingRecoveries.has("session-2")).toBe(false);
+    expect(recoveryState.recoveringSessionLosses.has("session-2")).toBe(false);
     expect(internals.adbServerResetQuarantinedSessions.has("session-2")).toBe(false);
-    expect(internals.recoveringAndroidImages.has(second.name)).toBe(false);
+    expect(recoveryState.recoveringAndroidImages.has(second.name)).toBe(false);
     expect(internals.recoveryCoordinator.recoveringAndroidImageSettlements.has(second.name)).toBe(
       false,
     );
@@ -3042,7 +3036,8 @@ test("a stale due-recovery snapshot does not finalize a record another sweep is 
 
 test("an old ADB-reset cohort sweep cannot clear a newer recovery record", async () => {
   const { sessions, pool, captured } = await setup();
-  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
+  const recoveryState = recoveryInternals(pool);
   try {
     const oldRecord = internals.startAndroidRecoveryRecord(
       "session",
@@ -3073,7 +3068,9 @@ test("an old ADB-reset cohort sweep cannot clear a newer recovery record", async
 
     await pool.releaseAdbServerResetCohortReservations([captured]);
 
-    expect(internals.recoveringSessionLosses.get("session")?.generation).toBe(newRecord.generation);
+    expect(recoveryState.recoveringSessionLosses.get("session")?.generation).toBe(
+      newRecord.generation,
+    );
     expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(true);
     expect(internals.adbServerResetRecoveryReservations.has(original.name)).toBe(true);
     expect(resolved).toBe(false);
@@ -3084,7 +3081,8 @@ test("an old ADB-reset cohort sweep cannot clear a newer recovery record", async
 
 test("terminal recovery release failure retains the recovery fence until a later release", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const internals = pool as unknown as DevicePoolPrivateRecoveryMembers;
+  const recoveryState = recoveryInternals(pool);
   const incidentId = await pool.recordEmulatorLossIncident(
     original.deviceId,
     "device-discovery-miss",
@@ -3124,8 +3122,8 @@ test("terminal recovery release failure retains the recovery fence until a later
     await expect(terminalRecovery).rejects.toThrow("release persistence failed");
 
     expect(internals.adbServerResetQuarantinedSessions.has("session")).toBe(true);
-    expect(internals.recoveringSessionLosses.has("session")).toBe(true);
-    expect(internals.recoveringAndroidImages.has(original.name)).toBe(true);
+    expect(recoveryState.recoveringSessionLosses.has("session")).toBe(true);
+    expect(recoveryState.recoveringAndroidImages.has(original.name)).toBe(true);
     expect((await pool.waitForEmulatorLossIncident(incidentId, 0))?.recovery.outcome).toBe(
       "exhausted",
     );
@@ -3151,7 +3149,7 @@ test("terminal recovery release failure retains the recovery fence until a later
 
 test("a retained failure fence is not re-swept as a due deferred recovery", async () => {
   const { timer, sessions, manager, pool, captured } = await setup();
-  const internals = pool as unknown as DevicePoolRecoveryInternals;
+  const recoveryState = recoveryInternals(pool);
   const originalReleaseSession = sessions.releaseSession.bind(sessions);
   sessions.releaseSession = async () => {
     throw new Error("release persistence failed");
@@ -3180,7 +3178,7 @@ test("a retained failure fence is not re-swept as a due deferred recovery", asyn
     await flush();
     timer.advanceTime(1_000);
     await expect(terminalRecovery).rejects.toThrow("release persistence failed");
-    expect(internals.failedTerminalRecoveryReleases.has("session")).toBe(true);
+    expect(recoveryState.failedTerminalRecoveryReleases.has("session")).toBe(true);
     expect(manager.startedDevices).toHaveLength(0);
 
     // Shutdown is now confirmable, so a relaunch would actually start a device.
@@ -3191,8 +3189,8 @@ test("a retained failure fence is not re-swept as a due deferred recovery", asyn
       await flush();
     }
     expect(manager.startedDevices).toHaveLength(0);
-    expect(internals.failedTerminalRecoveryReleases.has("session")).toBe(true);
-    expect(internals.recoveringSessionLosses.has("session")).toBe(true);
+    expect(recoveryState.failedTerminalRecoveryReleases.has("session")).toBe(true);
+    expect(recoveryState.recoveringSessionLosses.has("session")).toBe(true);
     expect(sessions.getSession("session")?.assignedDevice).toBe(original.deviceId);
     expect(
       await pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, undefined, captured),
@@ -3407,9 +3405,7 @@ test("releasing a deferred ADB-reset session clears its retained AVD startup res
     await flush();
     timer.advanceTime(30_000);
     expect(await recovery).toBe(false);
-    expect(
-      (pool as unknown as DevicePoolRecoveryInternals).recoveringAndroidImages.has(original.name),
-    ).toBe(true);
+    expect(recoveryInternals(pool).recoveringAndroidImages.has(original.name)).toBe(true);
 
     await sessions.releaseSession("session", "explicit-release");
     const releaseLease = await pool.reserveAndroidStartupLease(original.name, true);
@@ -3528,9 +3524,7 @@ test("unnamed startup lease ignores a different AVD's deferred recovery", async 
     await flush();
     timer.advanceTime(30_000);
     expect(await recovery).toBe("deferred");
-    expect(
-      (pool as unknown as DevicePoolRecoveryInternals).recoveringAndroidImages.has(original.name),
-    ).toBe(true);
+    expect(recoveryInternals(pool).recoveringAndroidImages.has(original.name)).toBe(true);
 
     const releaseLease = await pool.reserveAndroidStartupLease(undefined, false);
     await releaseLease();
@@ -3612,9 +3606,7 @@ async function setupFailedReleaseFence() {
     "quarantine",
     "failed-release",
   ]);
-  (context.pool as unknown as DevicePoolRecoveryInternals).failedTerminalRecoveryReleases.add(
-    "session",
-  );
+  recoveryInternals(context.pool).failedTerminalRecoveryReleases.add("session");
   const releases: string[] = [];
   const monitor = new SessionHeartbeatMonitor(
     context.sessions,
@@ -3678,18 +3670,14 @@ test("a live heartbeat leaves a due failed-release fence untouched", async () =>
   await monitor.tick();
   expect(releases).toEqual([]);
   expect(record).toEqual(before);
-  expect(
-    (pool as unknown as DevicePoolRecoveryInternals).recoveringSessionLosses.get("session"),
-  ).toBe(record);
-  expect(
-    (pool as unknown as DevicePoolRecoveryInternals).failedTerminalRecoveryReleases.has("session"),
-  ).toBe(true);
+  expect(recoveryInternals(pool).recoveringSessionLosses.get("session")).toBe(record);
+  expect(recoveryInternals(pool).failedTerminalRecoveryReleases.has("session")).toBe(true);
 });
 
 test("an in-flight promise blocks reaping a failed-release fence with or without a deadline", async () => {
   const { pool, timer, monitor, releases, record } = await setupFailedReleaseFence();
   const recovery = Promise.withResolvers<void>();
-  (pool as unknown as DevicePoolRecoveryInternals).sessionPreservingRecoveries.set("session", {
+  recoveryInternals(pool).sessionPreservingRecoveries.set("session", {
     promise: recovery.promise,
   });
   timer.advanceTime(20_001);
@@ -3771,9 +3759,7 @@ test("failed-release expiry preserves a declined commit fence", async () => {
   expect(release).toEqual({ superseded: true });
   expect(record.reservations.has("failed-release")).toBe(true);
   expect(record.failedReleaseAttempts).toBeUndefined();
-  expect(
-    (pool as unknown as DevicePoolRecoveryInternals).recoveringSessionLosses.get("session"),
-  ).toBe(record);
+  expect(recoveryInternals(pool).recoveringSessionLosses.get("session")).toBe(record);
   expect(pool.isSessionRecoveryInFlight("session")).toBe(false);
 });
 

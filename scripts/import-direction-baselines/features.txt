@@ -28,6 +28,8 @@ src/features/observe/android/AndroidAppEventRecorder.ts -> src/server/failuresRe
 src/features/observe/android/AndroidCtrlProxyClient.ts -> src/server/NetworkState
 src/features/observe/android/AndroidCtrlProxyClient.ts -> src/server/failuresResources
 src/features/observe/android/AndroidCtrlProxyClient.ts -> src/server/networkMockRules
+src/features/observe/android/AndroidDeviceStateSync.ts -> src/server/NetworkState
+src/features/observe/android/AndroidDeviceStateSync.ts -> src/server/networkMockRules
 src/features/observe/android/AndroidSdkEventIngestor.ts -> src/server/failuresResources
 src/features/observe/android/ctrlProxyProtocol.ts -> src/server/networkMockRules
 src/features/observe/android/networkMockRulesPush.ts -> src/server/networkMockRules

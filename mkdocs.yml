@@ -5,6 +5,7 @@
 site_name: AutoMobile
 repo_name: AutoMobile
 repo_url: https://github.com/kaeawc/auto-mobile
+site_url: https://kaeawc.github.io/auto-mobile/
 site_description: "Mobile interaction automation"
 site_author: Jason Pearson
 remote_branch: gh-pages

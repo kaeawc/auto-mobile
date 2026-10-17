@@ -35,10 +35,15 @@
 #   <count>  <file>  oxlint-disable(<rule>)            every -next-line directive, per rule
 #   <count>  <file>  oxlint-disable-line(<rule>)       every -line directive, per rule
 #   <count>  <file>  oxlint-disable-block(<rule>)      every unbounded directive a later enable closes
+#   <count>  <file>  oxlint-disable-partial(*)         a bare unbounded disable only named enables partly re-enable
 #   <count>  <file>  oxlint-disable-file(<rule>)       every unbounded directive left open to end of file
 #   <count>  <file>  oxlint-disable-no-reason(<rule>)  those lacking a `-- reason`
 # A new suppression therefore fails like a new violation and needs --allow-grow,
-# and removing one shrinks the baseline via --update. A directive listing several
+# and removing one shrinks the baseline via --update. Narrowing a baselined
+# unbounded directive (-file to -partial to -block, e.g. adding the enable that
+# closes it) moves its count to a narrower row of the same file+rule; the
+# compare treats that as a shrink (no --allow-grow), while the reverse (dropping
+# a closer) is still growth. A directive listing several
 # rules counts once per rule; `eslint/<rule>` is normalised to `<rule>`. The
 # no-reason row has no tolerance beyond the baseline: pre-existing reason-less
 # directives are recorded, but a NEW one grows that row and fails even if an
@@ -164,9 +169,35 @@ new_or_increased() {
       const base = parse(baseText);
       const cur = parse(curText);
       const news = [];
+      // Unbounded disables narrow in one direction: -file (open to EOF), then
+      // -partial (a bare disable some named enables re-enable), then -block
+      // (closed). A count that leaves a wider row may land on a narrower row of
+      // the same file+rule without counting as growth; the reverse (dropping a
+      // closer) is a new row. Each freed count is spent once, widest first.
+      const SCOPES = ["file", "partial", "block"];
+      const scopeOf = (key) => /\toxlint-disable-(file|partial|block)\((.*)\)$/.exec(key);
+      const grouped = new Set();
       for (const [key, n] of cur) {
+        const m = scopeOf(key);
+        if (m) {
+          grouped.add(key.slice(0, m.index) + "\t" + m[2]);
+          continue;
+        }
         const allowed = base.get(key) || 0;
         if (n > allowed) { news.push((n - allowed) + " new in " + key.replace("\t", "  ")); }
+      }
+      for (const group of grouped) {
+        const tab = group.lastIndexOf("\t");
+        const file = group.slice(0, tab);
+        const rule = group.slice(tab + 1);
+        let freed = 0;
+        for (const scope of SCOPES) {
+          const key = file + "\toxlint-disable-" + scope + "(" + rule + ")";
+          const allowed = (base.get(key) || 0) + freed;
+          const n = cur.get(key) || 0;
+          if (n > allowed) { news.push((n - allowed) + " new in " + key.replace("\t", "  ")); }
+          freed = Math.max(0, allowed - n);
+        }
       }
       process.stdout.write(news.join("\n"));
     });

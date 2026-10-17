@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 
 /// Resolves an inline semantic link to the on-screen point the runner taps to

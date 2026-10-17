@@ -37,8 +37,12 @@ let package = Package(
             path: "ios/highlight-core/Sources/AutoMobileHighlightCore"
         ),
         .target(
+            name: "AutoMobileSdkWire",
+            path: "ios/sdk-wire/Sources/AutoMobileSdkWire"
+        ),
+        .target(
             name: "AutoMobileSDK",
-            dependencies: ["AutoMobileHighlightCore"],
+            dependencies: ["AutoMobileHighlightCore", "AutoMobileSdkWire"],
             path: "ios/auto-mobile-sdk/Sources/AutoMobileSDK",
             resources: [.process("PrivacyInfo.xcprivacy")]
         ),

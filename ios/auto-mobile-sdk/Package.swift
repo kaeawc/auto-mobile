@@ -15,13 +15,17 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../highlight-core"),
+        .package(path: "../sdk-wire"),
         .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.4.3"),
     ],
     // Swift 6 language mode: complete strict-concurrency checking, warning-free (#5839).
     targets: [
         .target(
             name: "AutoMobileSDK",
-            dependencies: [.product(name: "AutoMobileHighlightCore", package: "highlight-core")],
+            dependencies: [
+                .product(name: "AutoMobileHighlightCore", package: "highlight-core"),
+                .product(name: "AutoMobileSdkWire", package: "sdk-wire"),
+            ],
             path: "Sources/AutoMobileSDK",
             resources: [.process("PrivacyInfo.xcprivacy")],
             swiftSettings: [.swiftLanguageMode(.v6)]

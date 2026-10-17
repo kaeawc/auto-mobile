@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import XCTest
 
 @testable import CtrlProxy

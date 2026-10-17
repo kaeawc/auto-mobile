@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 
 public enum SdkHierarchyExtractor {

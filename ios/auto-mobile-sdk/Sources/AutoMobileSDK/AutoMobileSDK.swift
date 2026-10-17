@@ -1,3 +1,6 @@
+// The wire models this SDK serves (SdkViewHierarchy, SdkBounds...) live in the shared wire package;
+// re-exporting keeps them source-compatible for SDK consumers.
+@_exported import AutoMobileSdkWire
 import Foundation
 #if canImport(UIKit)
     import UIKit

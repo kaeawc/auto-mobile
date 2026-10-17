@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 
 public protocol SdkHierarchyCaching: Sendable {

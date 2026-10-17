@@ -62,9 +62,10 @@ const REQUIRED_SCOPES_BY_JOB_ID: Record<string, readonly string[]> = {
   "ios-playground-tests": [
     "ios/Playground/",
     ["ios/", "highlight-core/"].join(""),
+    "ios/sdk-wire/",
     "ios/auto-mobile-sdk/",
   ],
-  "ios-xctest-runner-simulator-tests": ["ios/control-proxy/"],
+  "ios-xctest-runner-simulator-tests": ["ios/control-proxy/", "ios/sdk-wire/"],
 };
 
 function isDerivedDataCacheStep(step: WorkflowStep): boolean {

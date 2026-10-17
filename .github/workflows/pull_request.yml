@@ -2629,7 +2629,7 @@ jobs:
       - name: "Resolve Swift package dependencies"
         shell: bash
         run: |
-          for package in ios/screen-capture ios/network-filter ios/highlight-core ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
+          for package in ios/screen-capture ios/network-filter ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
             (cd "${package}" && swift package resolve)
           done
 
@@ -2783,7 +2783,7 @@ jobs:
       - name: "Resolve Xcode project Swift package dependencies"
         shell: bash
         run: |
-          for package in ios/highlight-core ios/auto-mobile-sdk ios/control-proxy; do
+          for package in ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy; do
             (cd "${package}" && swift package resolve)
           done
 
@@ -2890,7 +2890,7 @@ jobs:
           path: |
             ${{ runner.temp }}/automobile-derived-data-Playground/Build
             ${{ runner.temp }}/automobile-derived-data-Playground/ModuleCache.noindex
-          key: ${{ runner.os }}-${{ runner.environment }}-derived-playground-tests-${{ matrix.config.xcode }}-${{ hashFiles('ios/Playground/**/*.swift', 'ios/Playground/**/*.m', 'ios/Playground/**/*.mm', 'ios/Playground/**/*.h', 'ios/Playground/**/*.c', 'ios/Playground/**/*.cpp', 'ios/Playground/**/*.xcconfig', 'ios/Playground/**/*.plist', 'ios/Playground/**/*.entitlements', 'ios/Playground/**/*.storyboard', 'ios/Playground/**/*.xib', 'ios/Playground/**/*.xcassets/**', 'ios/Playground/**/*.strings', 'ios/Playground/**/*.ttf', 'ios/Playground/**/*.otf', 'ios/Playground/**/*.xcprivacy', 'ios/Playground/**/*.pbxproj', 'ios/Playground/**/*.xcscheme', 'ios/Playground/**/project.yml', 'ios/Playground/**/Package.swift', 'ios/Playground/**/Package.resolved', 'ios/highlight-core/**/*.swift', 'ios/highlight-core/**/*.m', 'ios/highlight-core/**/*.mm', 'ios/highlight-core/**/*.h', 'ios/highlight-core/**/*.c', 'ios/highlight-core/**/*.cpp', 'ios/highlight-core/**/*.xcconfig', 'ios/highlight-core/**/*.plist', 'ios/highlight-core/**/*.entitlements', 'ios/highlight-core/**/*.storyboard', 'ios/highlight-core/**/*.xib', 'ios/highlight-core/**/*.xcassets/**', 'ios/highlight-core/**/*.strings', 'ios/highlight-core/**/*.ttf', 'ios/highlight-core/**/*.otf', 'ios/highlight-core/**/*.xcprivacy', 'ios/highlight-core/**/*.pbxproj', 'ios/highlight-core/**/*.xcscheme', 'ios/highlight-core/**/project.yml', 'ios/highlight-core/**/Package.swift', 'ios/highlight-core/**/Package.resolved', 'ios/auto-mobile-sdk/**/*.swift', 'ios/auto-mobile-sdk/**/*.m', 'ios/auto-mobile-sdk/**/*.mm', 'ios/auto-mobile-sdk/**/*.h', 'ios/auto-mobile-sdk/**/*.c', 'ios/auto-mobile-sdk/**/*.cpp', 'ios/auto-mobile-sdk/**/*.xcconfig', 'ios/auto-mobile-sdk/**/*.plist', 'ios/auto-mobile-sdk/**/*.entitlements', 'ios/auto-mobile-sdk/**/*.storyboard', 'ios/auto-mobile-sdk/**/*.xib', 'ios/auto-mobile-sdk/**/*.xcassets/**', 'ios/auto-mobile-sdk/**/*.strings', 'ios/auto-mobile-sdk/**/*.ttf', 'ios/auto-mobile-sdk/**/*.otf', 'ios/auto-mobile-sdk/**/*.xcprivacy', 'ios/auto-mobile-sdk/**/*.pbxproj', 'ios/auto-mobile-sdk/**/*.xcscheme', 'ios/auto-mobile-sdk/**/project.yml', 'ios/auto-mobile-sdk/**/Package.swift', 'ios/auto-mobile-sdk/**/Package.resolved') }}
+          key: ${{ runner.os }}-${{ runner.environment }}-derived-playground-tests-${{ matrix.config.xcode }}-${{ hashFiles('ios/Playground/**/*.swift', 'ios/Playground/**/*.m', 'ios/Playground/**/*.mm', 'ios/Playground/**/*.h', 'ios/Playground/**/*.c', 'ios/Playground/**/*.cpp', 'ios/Playground/**/*.xcconfig', 'ios/Playground/**/*.plist', 'ios/Playground/**/*.entitlements', 'ios/Playground/**/*.storyboard', 'ios/Playground/**/*.xib', 'ios/Playground/**/*.xcassets/**', 'ios/Playground/**/*.strings', 'ios/Playground/**/*.ttf', 'ios/Playground/**/*.otf', 'ios/Playground/**/*.xcprivacy', 'ios/Playground/**/*.pbxproj', 'ios/Playground/**/*.xcscheme', 'ios/Playground/**/project.yml', 'ios/Playground/**/Package.swift', 'ios/Playground/**/Package.resolved', 'ios/highlight-core/**/*.swift', 'ios/sdk-wire/**/*.swift', 'ios/highlight-core/**/*.m', 'ios/sdk-wire/**/*.m', 'ios/highlight-core/**/*.mm', 'ios/sdk-wire/**/*.mm', 'ios/highlight-core/**/*.h', 'ios/sdk-wire/**/*.h', 'ios/highlight-core/**/*.c', 'ios/sdk-wire/**/*.c', 'ios/highlight-core/**/*.cpp', 'ios/sdk-wire/**/*.cpp', 'ios/highlight-core/**/*.xcconfig', 'ios/sdk-wire/**/*.xcconfig', 'ios/highlight-core/**/*.plist', 'ios/sdk-wire/**/*.plist', 'ios/highlight-core/**/*.entitlements', 'ios/sdk-wire/**/*.entitlements', 'ios/highlight-core/**/*.storyboard', 'ios/sdk-wire/**/*.storyboard', 'ios/highlight-core/**/*.xib', 'ios/sdk-wire/**/*.xib', 'ios/highlight-core/**/*.xcassets/**', 'ios/sdk-wire/**/*.xcassets/**', 'ios/highlight-core/**/*.strings', 'ios/sdk-wire/**/*.strings', 'ios/highlight-core/**/*.ttf', 'ios/sdk-wire/**/*.ttf', 'ios/highlight-core/**/*.otf', 'ios/sdk-wire/**/*.otf', 'ios/highlight-core/**/*.xcprivacy', 'ios/sdk-wire/**/*.xcprivacy', 'ios/highlight-core/**/*.pbxproj', 'ios/sdk-wire/**/*.pbxproj', 'ios/highlight-core/**/*.xcscheme', 'ios/sdk-wire/**/*.xcscheme', 'ios/highlight-core/**/project.yml', 'ios/sdk-wire/**/project.yml', 'ios/highlight-core/**/Package.swift', 'ios/sdk-wire/**/Package.swift', 'ios/highlight-core/**/Package.resolved', 'ios/sdk-wire/**/Package.resolved', 'ios/auto-mobile-sdk/**/*.swift', 'ios/auto-mobile-sdk/**/*.m', 'ios/auto-mobile-sdk/**/*.mm', 'ios/auto-mobile-sdk/**/*.h', 'ios/auto-mobile-sdk/**/*.c', 'ios/auto-mobile-sdk/**/*.cpp', 'ios/auto-mobile-sdk/**/*.xcconfig', 'ios/auto-mobile-sdk/**/*.plist', 'ios/auto-mobile-sdk/**/*.entitlements', 'ios/auto-mobile-sdk/**/*.storyboard', 'ios/auto-mobile-sdk/**/*.xib', 'ios/auto-mobile-sdk/**/*.xcassets/**', 'ios/auto-mobile-sdk/**/*.strings', 'ios/auto-mobile-sdk/**/*.ttf', 'ios/auto-mobile-sdk/**/*.otf', 'ios/auto-mobile-sdk/**/*.xcprivacy', 'ios/auto-mobile-sdk/**/*.pbxproj', 'ios/auto-mobile-sdk/**/*.xcscheme', 'ios/auto-mobile-sdk/**/project.yml', 'ios/auto-mobile-sdk/**/Package.swift', 'ios/auto-mobile-sdk/**/Package.resolved') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.environment }}-derived-playground-tests-${{ matrix.config.xcode }}-
 
@@ -2901,6 +2901,7 @@ jobs:
         shell: bash
         run: |
           (cd ios/highlight-core && swift package resolve)
+          (cd ios/sdk-wire && swift package resolve)
           (cd ios/auto-mobile-sdk && swift package resolve)
 
       - name: "Run Playground Tests"

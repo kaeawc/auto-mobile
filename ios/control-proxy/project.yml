@@ -5,6 +5,12 @@ options:
     iOS: "17.0"
   xcodeVersion: "15.0"
 
+# The runner compiles Sources/CtrlProxy directly, so it takes the shared wire models as a local package
+# (the same one the SwiftPM CtrlProxy target and the SDK depend on).
+packages:
+  AutoMobileSdkWire:
+    path: ../sdk-wire
+
 configFiles:
   Debug: Configurations/Debug.xcconfig
   Release: Configurations/Release.xcconfig
@@ -76,6 +82,7 @@ targets:
       # "Library not loaded: @rpath/ObjCExceptionCatcher.framework".
       - target: ObjCExceptionCatcher
         embed: true
+      - package: AutoMobileSdkWire
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.uitests

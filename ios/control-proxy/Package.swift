@@ -15,6 +15,9 @@ let package = Package(
             targets: ["CtrlProxy"]
         ),
     ],
+    dependencies: [
+        .package(path: "../sdk-wire"),
+    ],
     targets: [
         .target(
             name: "ObjCExceptionCatcher",
@@ -26,7 +29,10 @@ let package = Package(
 
         .target(
             name: "CtrlProxy",
-            dependencies: ["ObjCExceptionCatcher"],
+            dependencies: [
+                "ObjCExceptionCatcher",
+                .product(name: "AutoMobileSdkWire", package: "sdk-wire"),
+            ],
             path: "Sources/CtrlProxy",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
@@ -41,7 +47,11 @@ let package = Package(
         // fixture `ios-ctrlproxy-request-snapshots.json`.
         .testTarget(
             name: "CtrlProxyTests",
-            dependencies: ["CtrlProxy", "CtrlProxyTestSupport"],
+            dependencies: [
+                "CtrlProxy",
+                "CtrlProxyTestSupport",
+                .product(name: "AutoMobileSdkWire", package: "sdk-wire"),
+            ],
             path: "Tests/CtrlProxyTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

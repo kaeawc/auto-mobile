@@ -263,46 +263,38 @@ const shakeInput = z.object({
   ...responseShapeControlFields,
 });
 
-export const keyboardSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      action: z
-        .enum([
-          "open",
-          "close",
-          "detect",
-          "setProfile",
-          "listProfiles",
-          "listImes",
-          "setIme",
-          "tapImeKey",
-        ])
-        .describe(
-          "Keyboard action; listProfiles returns AutoMobile behavior models and listImes returns installed Android input methods",
-        ),
-      profile: z
-        .enum(KEYBOARD_PROFILE_IDS)
-        .optional()
-        .describe("AutoMobile keyboard behavior profile; required for setProfile"),
-      imeId: z.string().optional().describe("Installed Android IME component; required for setIme"),
-      key: z
-        .string()
-        .optional()
-        .describe("Exact visible key text or accessibility label; required for tapImeKey"),
-      // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
-      // not required — a device handle from getAndroid/getApple is sufficient on
-      // its own.
-      platform: platformSchema.optional(),
-    })
-    .strict(),
-);
+const keyboardInput = z.object({
+  action: z
+    .enum([
+      "open",
+      "close",
+      "detect",
+      "setProfile",
+      "listProfiles",
+      "listImes",
+      "setIme",
+      "tapImeKey",
+    ])
+    .describe(
+      "Keyboard action; listProfiles returns AutoMobile behavior models and listImes returns installed Android input methods",
+    ),
+  profile: z
+    .enum(KEYBOARD_PROFILE_IDS)
+    .optional()
+    .describe("AutoMobile keyboard behavior profile; required for setProfile"),
+  imeId: z.string().optional().describe("Installed Android IME component; required for setIme"),
+  key: z
+    .string()
+    .optional()
+    .describe("Exact visible key text or accessibility label; required for tapImeKey"),
+  // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
+  // not required — a device handle from getAndroid/getApple is sufficient on
+  // its own.
+  platform: platformSchema.optional(),
+});
 
 /** Keyboard actions that change no UI (#10965): reads, allowed without holding the device. */
-const KEYBOARD_READ_ACTIONS: ReadonlySet<KeyboardArgs["action"]> = new Set([
-  "detect",
-  "listImes",
-  "listProfiles",
-]);
+const KEYBOARD_READ_ACTIONS: ReadonlySet<string> = new Set(["detect", "listImes", "listProfiles"]);
 
 export async function setKeyboardProfileForTool(
   device: BootedDevice,
@@ -2895,6 +2887,22 @@ export const rotateTool = defineDeviceTool({
 
 export const rotateSchema = rotateTool.schema;
 
+export const keyboardTool = defineDeviceTool({
+  name: "keyboard",
+  description:
+    "Open, close, detect, list/select installed Android IMEs, or switch the AutoMobile typing profile",
+  input: keyboardInput,
+  options: {
+    defaultEnabled: true,
+    outputSchema: keyboardResultSchema,
+    // detect, listImes and listProfiles change no UI: reads (#10965). The rest are control.
+    deviceReadOnly: (args) => KEYBOARD_READ_ACTIONS.has(args.action),
+    deviceReadOnlyArgs: [{ argument: "action", values: [...KEYBOARD_READ_ACTIONS] }],
+  },
+});
+
+export const keyboardSchema = keyboardTool.schema;
+
 export function registerInteractionTools() {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
@@ -3316,19 +3324,7 @@ export function registerInteractionTools() {
 
   shakeTool.register(ToolRegistry, shakeHandler);
 
-  ToolRegistry.registerDeviceAware(
-    "keyboard",
-    "Open, close, detect, list/select installed Android IMEs, or switch the AutoMobile typing profile",
-    keyboardSchema,
-    keyboardHandler,
-    {
-      defaultEnabled: true,
-      outputSchema: keyboardResultSchema,
-      // detect, listImes and listProfiles change no UI: reads (#10965). The rest are control.
-      deviceReadOnly: (args: KeyboardArgs) => KEYBOARD_READ_ACTIONS.has(args.action),
-      deviceReadOnlyArgs: [{ argument: "action", values: [...KEYBOARD_READ_ACTIONS] }],
-    },
-  );
+  keyboardTool.register(ToolRegistry, keyboardHandler);
 
   recentAppsTool.register(ToolRegistry, recentAppsHandler);
 

@@ -5408,7 +5408,7 @@ main() {
     echo ""
     if [[ "${DRY_RUN}" != "true" ]]; then
         if [[ "${CHANGES_MADE}" == "true" ]]; then
-            log_info "Setup complete. Get started: https://kaeawc.github.io/auto-mobile/using/ux-exploration/"
+            log_info "Setup complete. Get started: https://kaeawc.github.io/auto-mobile/using/agent-examples/"
         else
             log_info "No changes necessary"
         fi

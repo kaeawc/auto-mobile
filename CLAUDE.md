@@ -208,7 +208,7 @@ fully burned down and are `error` in `.oxlintrc.json`. Inline suppressions of AN
 TypeScript-scanner comment scan (`scripts/lib/oxlintDisableScan.ts`) of every
 file oxlint lints (repo-wide via `git ls-files`, TypeScript extensions only,
 minus the `.oxlintrc.json` `ignorePatterns`) adds
-`oxlint-disable(<rule>)` rows (`oxlint-disable-line(<rule>)` for the `-line` form; `oxlint-disable-block(<rule>)` for an unbounded disable a later enable closes and `oxlint-disable-partial(*)` for a bare disable only named enables partly re-enable, `oxlint-disable-file(<rule>)` for one left open, so widening a suppression or dropping its closer is a new row; and `oxlint-disable-no-reason(<rule>)` for
+`oxlint-disable(<rule>)` rows (`oxlint-disable-line(<rule>)` for the `-line` form; `oxlint-disable-block(<rule>)` for an unbounded disable a later enable closes, `oxlint-disable-partial(*)` for a bare disable only named enables partly re-enable, and `oxlint-disable-file(<rule>)` for one left open, so widening a suppression or dropping its closer is a new row (narrowing a baselined one, `-file` to `-partial` to `-block`, is a permitted shrink); and `oxlint-disable-no-reason(<rule>)` for
 directives lacking a `-- reason`) to the same baseline, so a new
 `oxlint-disable*`/`eslint-disable*` comment fails like a new violation and needs
 `--allow-grow` even when it carries a `-- reason`; a new directive without a

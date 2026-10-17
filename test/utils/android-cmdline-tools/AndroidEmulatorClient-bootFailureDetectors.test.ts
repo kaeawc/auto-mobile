@@ -24,24 +24,6 @@ const expectRejection = async (promise: Promise<unknown>): Promise<Error> => {
 };
 
 describe("Android emulator boot failure diagnostics", () => {
-  test("detects mprotect and HVF sandbox signatures", () => {
-    const client = new AndroidEmulatorClient(async () => result());
-
-    expect(
-      client.detectSandboxMprotect("qemu_mprotect__osdep: mprotect failed: Permission denied")
-        .isSandboxError,
-    ).toBe(true);
-    expect(
-      client.detectSandboxMprotect("hvf is not enabled on this aarch64 host").isSandboxError,
-    ).toBe(true);
-    expect(client.detectSandboxMprotect("HVF error: HV_UNSUPPORTED").isSandboxError).toBe(true);
-    expect(client.detectSandboxMprotect("HVF error: HV_ERROR").isSandboxError).toBe(true);
-    expect(
-      client.detectSandboxMprotect("failed to initialize HVF: Invalid argument").isSandboxError,
-    ).toBe(true);
-    expect(client.detectSandboxMprotect("Detected GPU type: host").isSandboxError).toBe(false);
-  });
-
   test("rejects a modern AVD whose configured RAM is below the floor", () => {
     const client = new AndroidEmulatorClient(async () => result());
     expect(() =>

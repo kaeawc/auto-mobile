@@ -25,8 +25,9 @@ function isRetryable(error: unknown): boolean {
   );
 }
 
-async function withBusyRetry<T>(operation: () => Promise<T>): Promise<T> {
-  const deadline = defaultTimer.now() + RETRY_DEADLINE_MS;
+// One absolute deadline shared by open and admit keeps the child's total retry time inside the
+// parent's 15 s SIGKILL window instead of granting each call its own fresh 10 s.
+async function withBusyRetry<T>(operation: () => Promise<T>, deadline: number): Promise<T> {
   for (;;) {
     try {
       return await operation();
@@ -39,21 +40,24 @@ async function withBusyRetry<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-const registry = await withBusyRetry(() => openSqliteBindingRegistry({ dbPath }));
+const retryDeadline = defaultTimer.now() + RETRY_DEADLINE_MS;
+const registry = await withBusyRetry(() => openSqliteBindingRegistry({ dbPath }), retryDeadline);
 try {
   process.send?.({ phase: "ready" });
   await begin.promise;
   const store = registry.sessionBrokerStore(scopeKey);
-  const result = await withBusyRetry(() =>
-    store.admit({
-      requestId,
-      fingerprint: `same-parameters:${requestId}`,
-      parameters: { device: "phone" },
-      owner: { daemonId: `child-${process.pid}`, pid: process.pid },
-      limits: { totalDeviceCap: 1, sessionCap: 1 },
-      resolveCreation: () => ({ platform: "ios", model: "phone", runtime: "27" }),
-      matches: () => false,
-    }),
+  const result = await withBusyRetry(
+    () =>
+      store.admit({
+        requestId,
+        fingerprint: `same-parameters:${requestId}`,
+        parameters: { device: "phone" },
+        owner: { daemonId: `child-${process.pid}`, pid: process.pid },
+        limits: { totalDeviceCap: 1, sessionCap: 1 },
+        resolveCreation: () => ({ platform: "ios", model: "phone", runtime: "27" }),
+        matches: () => false,
+      }),
+    retryDeadline,
   );
   process.send?.({ phase: "result", kind: result.kind, resourceId: result.request.resourceId });
 } finally {

@@ -4,9 +4,6 @@ import android.content.Context
 import android.os.UserManager
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
-import dev.jasonpearson.automobile.protocol.PrototypeRequestError
-import dev.jasonpearson.automobile.protocol.PrototypeRequestErrorCode
-import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
 import java.io.File
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -77,14 +74,13 @@ internal object SavedPrototypeActivityDependencies {
   /** Outlives any one activity: the last storage flush of a stopped activity runs here. */
   @Volatile var flushScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
   @Volatile var clock: () -> Long = System::currentTimeMillis
-
-  /**
-   * The transports behind a saved prototype's `request` actions. `via: "device"` calls from the
-   * device itself; `via: "host"` needs the live CtrlProxy socket, which a standalone activity does
-   * not reach, so it fails as a typed `network` error that says what to do instead.
-   */
-  @Volatile var httpClients: () -> PrototypeHttpClients = { defaultHttpClients() }
   @Volatile var eventSink: PrototypeEventSink = PrototypeEventSink { SavedPrototypeEvents.send(it) }
+
+  /** The transports behind a saved prototype's `request` actions (#12970). */
+  @Volatile var httpClients: () -> PrototypeHttpClients = ::defaultHttpClients
+
+  private fun defaultHttpClients(): PrototypeHttpClients =
+    PrototypeHttpClients.forSavedPrototype(RetrofitPrototypeHttpClient(OkHttpClient()))
 
   fun reset() {
     storageStore = { PrototypeStorageStores.inDirectory(prototypeStorageRoot(it.filesDir)) }
@@ -93,26 +89,7 @@ internal object SavedPrototypeActivityDependencies {
     ioDispatcher = Dispatchers.IO
     flushScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     clock = System::currentTimeMillis
-    httpClients = { defaultHttpClients() }
     eventSink = PrototypeEventSink { SavedPrototypeEvents.send(it) }
+    httpClients = ::defaultHttpClients
   }
 }
-
-internal const val SAVED_PROTOTYPE_HOST_UNAVAILABLE =
-  "The host request proxy is not available for a saved prototype; use via \"device\"."
-
-private val sharedOkHttp by lazy { OkHttpClient() }
-
-private fun defaultHttpClients() =
-  PrototypeHttpClients(
-    host =
-      PrototypeHttpClient {
-        PrototypeRequestResponse.Failed(
-          PrototypeRequestError(
-            PrototypeRequestErrorCode.NETWORK,
-            SAVED_PROTOTYPE_HOST_UNAVAILABLE,
-          ),
-        )
-      },
-    device = RetrofitPrototypeHttpClient(sharedOkHttp),
-  )

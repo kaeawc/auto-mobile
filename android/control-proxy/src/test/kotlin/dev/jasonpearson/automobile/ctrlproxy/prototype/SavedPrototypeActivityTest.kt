@@ -18,19 +18,23 @@ import dev.jasonpearson.automobile.protocol.PrototypeDismissAction
 import dev.jasonpearson.automobile.protocol.PrototypeEmitAction
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeEventKind
+import dev.jasonpearson.automobile.protocol.PrototypeRequestAction
+import dev.jasonpearson.automobile.protocol.PrototypeRequestError
+import dev.jasonpearson.automobile.protocol.PrototypeRequestErrorCode
 import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
-import dev.jasonpearson.automobile.protocol.PrototypeRequests
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
 import dev.jasonpearson.automobile.protocol.PrototypeStorageBlock
 import dev.jasonpearson.automobile.protocol.PrototypeStoredValues
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -260,6 +264,42 @@ class SavedPrototypeActivityTest {
   }
 
   @Test
+  fun `request via device uses the injected transport with no host connection`() = runBlocking {
+    val seen = CompletableDeferred<PrototypeHttpRequest>()
+    val device = PrototypeHttpClient { request ->
+      seen.complete(request)
+      PrototypeRequestResponse.Failed(
+        PrototypeRequestError(PrototypeRequestErrorCode.NETWORK, "fake device transport"),
+      )
+    }
+    SavedPrototypeActivityDependencies.httpClients = {
+      PrototypeHttpClients.forSavedPrototype(device)
+    }
+    store.stored["panel"] =
+      savedPrototypeFixture(
+        actions =
+          listOf(PrototypeRequestAction(url = "http://localhost:8080/feed", via = "device")),
+      )
+    launch()
+    click(activity = controllers.single().get(), tag = "saved-node")
+    val request = withTimeout(5_000) { seen.await() }
+    assertEquals("http://localhost:8080/feed", request.url)
+    assertEquals("panel", request.prototypeId)
+  }
+
+  @Test
+  fun `request via host fails with an explicit saved prototype error`() = runBlocking {
+    val response =
+      PrototypeHttpClients.forSavedPrototype { error("device not used") }
+        .forVia(PrototypeHttpClients.VIA_HOST)
+        .execute(PrototypeHttpRequest("r", "panel", "GET", "http://h/", emptyMap(), null, 1_000))
+    val error = (response as PrototypeRequestResponse.Failed).error
+    assertEquals(PrototypeRequestErrorCode.INVALID_REQUEST, error.code)
+    assertEquals(PrototypeHttpClients.SAVED_HOST_UNAVAILABLE_MESSAGE, error.message)
+    assertTrue(error.message.contains("saved prototypes"))
+  }
+
+  @Test
   fun `connected delivery consumes events and refused delivery falls back`() {
     val delivered = mutableListOf<PrototypeEvent>()
     SavedPrototypeEvents.delivery = SavedPrototypeEventDelivery {
@@ -439,35 +479,6 @@ class SavedPrototypeActivityTest {
     val button = store.stored.getValue("panel").spec.root as PrototypeButtonNode
     activity.interact(PrototypeInteraction.Tap(checkNotNull(button.onTap)))
     shadowOf(Looper.getMainLooper()).idle()
-  }
-
-  private fun requestEvents() =
-    SavedPrototypeEvents.buffer.drain().filter { it.name == PrototypeRequests.EVENT_NAME }
-
-  @Test
-  fun `a device request from a saved prototype reaches the device client`() {
-    val device = RecordingHttp()
-    val host = RecordingHttp()
-    SavedPrototypeActivityDependencies.httpClients = { PrototypeHttpClients(host, device) }
-    savedRequestPrototype("device")
-
-    tapSaved(launch())
-
-    assertEquals(1, device.requests.size)
-    assertEquals(0, host.requests.size)
-    val event = requestEvents().single().payload!!.jsonObject
-    assertEquals("success", event.getValue("outcome").jsonPrimitive.content)
-  }
-
-  @Test
-  fun `a host request from a saved prototype fails with a typed network error`() {
-    savedRequestPrototype("host")
-
-    tapSaved(launch())
-
-    val error = requestEvents().single().payload!!.jsonObject.getValue("error").jsonObject
-    assertEquals("network", error.getValue("code").jsonPrimitive.content)
-    assertEquals(SAVED_PROTOTYPE_HOST_UNAVAILABLE, error.getValue("message").jsonPrimitive.content)
   }
 
   @Test

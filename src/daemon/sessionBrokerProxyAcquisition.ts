@@ -182,12 +182,26 @@ async function statusUntilSettled(
   );
 }
 
+/**
+ * Returns whether cleanup is still pending. With a deadline, the wait is bounded by it so a
+ * release that never settles cannot hold the acquisition open; the release itself keeps running
+ * and the caller reports cleanupPending (#12985).
+ */
 async function releaseUnheldSession(
   sessionUuid: string,
   ports: SessionBrokerProxyAcquisitionPorts,
+  deadlineMs?: number,
 ): Promise<boolean> {
   try {
-    const released = await ports.releaseSession(sessionUuid);
+    const release = ports.releaseSession(sessionUuid);
+    const released =
+      deadlineMs === undefined
+        ? await release
+        : await raceWithDeadline(release, {
+            timer: ports.timer,
+            timeoutMs: Math.max(1, deadlineMs - ports.timer.now()),
+            label: `session broker release of unheld session ${sessionUuid}`,
+          });
     return !isReleaseResult(released, sessionUuid) || released.outcome !== "released";
   } catch (releaseError) {
     logger.warn(
@@ -248,12 +262,13 @@ async function abandonHeldReadyResult(
   late: Promise<void> | undefined,
   ports: SessionBrokerProxyAcquisitionPorts,
   end: AcquisitionEnd,
+  deadlineMs: number,
 ): Promise<SessionBrokerResult> {
   const sessionUuid = result.sessionUuid!;
   if (late) {
     releaseAfterLateHold(late, sessionUuid, ports);
   }
-  const cleanupPending = await releaseUnheldSession(sessionUuid, ports);
+  const cleanupPending = await releaseUnheldSession(sessionUuid, ports, deadlineMs);
   return failedResult(
     { requestId: result.requestId },
     end === "cancelled"
@@ -275,6 +290,7 @@ async function failedHoldResult(
   result: SessionBrokerResult,
   ports: SessionBrokerProxyAcquisitionPorts,
   error: unknown,
+  deadlineMs: number,
 ): Promise<SessionBrokerResult> {
   const sessionUuid = result.sessionUuid!;
   logger.warn(
@@ -288,7 +304,7 @@ async function failedHoldResult(
       `The prepared session could not be held: ${errorMessage(error)}`,
       true,
     ),
-    await releaseUnheldSession(sessionUuid, ports),
+    await releaseUnheldSession(sessionUuid, ports, deadlineMs),
   );
 }
 
@@ -309,7 +325,7 @@ async function holdReadyResult(
   const endedBeforeHold = acquisitionEnded(ports, deadlineMs, signal);
   if (endedBeforeHold) {
     // Never start ownership for a grant whose acquisition already ended; release it instead.
-    return abandonHeldReadyResult(result, undefined, ports, endedBeforeHold);
+    return abandonHeldReadyResult(result, undefined, ports, endedBeforeHold, deadlineMs);
   }
   const holdTimeoutMs = deadlineMs - ports.timer.now();
   const hold = ports.holdSession(result.requestId, sessionUuid);
@@ -328,18 +344,18 @@ async function holdReadyResult(
         ? "timeout"
         : undefined;
     if (!ended) {
-      return failedHoldResult(result, ports, error);
+      return failedHoldResult(result, ports, error, deadlineMs);
     }
     logger.warn(
       `[SessionBroker] Holding session ${sessionUuid} did not finish before acquisition ended: ${errorMessage(error)}`,
       error,
     );
-    return abandonHeldReadyResult(result, hold, ports, ended);
+    return abandonHeldReadyResult(result, hold, ports, ended, deadlineMs);
   }
   // Fence publication after the awaited hold: cancellation may land in the same turn it resolves.
   const endedDuringHold = acquisitionEnded(ports, deadlineMs, signal);
   return endedDuringHold
-    ? abandonHeldReadyResult(result, undefined, ports, endedDuringHold)
+    ? abandonHeldReadyResult(result, undefined, ports, endedDuringHold, deadlineMs)
     : result;
 }
 

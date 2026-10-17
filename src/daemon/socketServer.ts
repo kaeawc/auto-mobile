@@ -14,6 +14,7 @@ import {
   type InputTypeTextParams,
 } from "./inputRouteParams";
 import { IDE_DEVICE_MUTATION_METHODS, IDE_ROUTE_PARSERS, STARTUP_PROBE_METHODS } from "./ideRoutes";
+import { ideFeatureRoutes } from "./socketServer/ideRouteModule";
 import {
   DISPATCH_HELD_INPUT_METHODS,
   GESTURE_FRAME_METHODS,
@@ -154,7 +155,6 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES, OutboundWriteGuard } from "./outboundWriteGuard";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
-import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinitions";
 import {
   getSessionToolSelectionService,
   type SessionToolSelectionService,
@@ -994,6 +994,12 @@ interface InputRouteRun<A extends InputRouteArgs, R extends InputRouteResult> {
 }
 
 type InputTargetAction = InputRouteMethod;
+
+type IdeServerRouteHandler = (
+  request: DaemonRequest,
+  socketSessionId: string | undefined,
+  ideMutation: IdeMutationCall | undefined,
+) => Promise<any | undefined> | any;
 
 export class UnixSocketServer {
   private server: NetServer | null = null;
@@ -4938,34 +4944,21 @@ export class UnixSocketServer {
   }
 
   /** The `ide/*` and daemon-lifecycle routes this socket serves, by method name (#11813). */
-  private readonly ideRouteHandlers: ReadonlyMap<
+  private readonly ideRouteHandlers: ReadonlyMap<string, IdeServerRouteHandler> = new Map<
     string,
-    (
-      request: DaemonRequest,
-      socketSessionId: string | undefined,
-      ideMutation: IdeMutationCall | undefined,
-    ) => Promise<any | undefined> | any
-  > = new Map([
-    [
-      "ide/listFeatureFlags",
-      (request, socketSessionId, ideMutation) =>
-        this.ideListFeatureFlags(request, socketSessionId, ideMutation),
-    ],
-    [
-      "ide/setFeatureFlag",
-      (request, socketSessionId, ideMutation) =>
-        this.ideSetFeatureFlag(request, socketSessionId, ideMutation),
-    ],
-    [
-      "ide/setSessionToolEnabled",
-      (request, socketSessionId, ideMutation) =>
-        this.ideSetSessionToolEnabled(request, socketSessionId, ideMutation),
-    ],
-    [
-      "ide/ping",
-      (request, socketSessionId, ideMutation) =>
-        this.idePing(request, socketSessionId, ideMutation),
-    ],
+    IdeServerRouteHandler
+  >([
+    ...ideFeatureRoutes({
+      requireFeatureFlagService: () => this.requireFeatureFlagService(),
+      sessionToolSelection: () =>
+        this.sessionToolSelectionService ?? getSessionToolSelectionService(),
+      assertBrokerHostMutation: (socketSessionId, action) =>
+        this.assertBrokerConnectionHostMutation(socketSessionId, action),
+      assertBrokerControl: (socketSessionId, action, target) =>
+        this.assertBrokerConnectionControl(socketSessionId, action, target),
+      emitToolsListChanged: () => ListChangedBroadcaster.emit("tools"),
+      now: () => this.timer.now(),
+    }),
     [
       DAEMON_REPUBLISH_IDENTITY_METHOD,
       async (request) => await this.republishDaemonIdentity(request.params),
@@ -5039,61 +5032,6 @@ export class UnixSocketServer {
   ): Promise<any | undefined> {
     const handler = this.ideRouteHandlers.get(request.method);
     return handler ? await handler(request, socketSessionId, ideMutation) : undefined;
-  }
-
-  private async ideListFeatureFlags(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    const flags = await this.requireFeatureFlagService().listFlags();
-    return { flags };
-  }
-
-  private async ideSetFeatureFlag(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    const featureFlagService = this.requireFeatureFlagService();
-    const args = IDE_ROUTE_PARSERS["ide/setFeatureFlag"](request.params);
-    this.assertBrokerConnectionHostMutation(socketSessionId, "ide/setFeatureFlag");
-    const updated = await featureFlagService.setFlag(
-      args.key as FeatureFlagKey,
-      args.enabled,
-      args.config,
-    );
-    return updated;
-  }
-
-  private async ideSetSessionToolEnabled(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    const args = IDE_ROUTE_PARSERS["ide/setSessionToolEnabled"](request.params);
-    this.assertBrokerConnectionControl(socketSessionId, "ide/setSessionToolEnabled", {
-      requesterSessionUuid: args.sessionUuid,
-    });
-    await (this.sessionToolSelectionService ?? getSessionToolSelectionService()).setEnabled(
-      args.sessionUuid,
-      args.toolName,
-      args.enabled,
-    );
-    ListChangedBroadcaster.emit("tools");
-    return {
-      sessionUuid: args.sessionUuid,
-      toolName: args.toolName,
-      enabled: args.enabled,
-    };
-  }
-
-  private async idePing(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    return { ok: true, timestamp: this.timer.now() };
   }
 
   private async ideStatus(

@@ -87,6 +87,26 @@ class LaunchCancellationRethrowTest {
   }
 
   @Test
+  fun `settings controller action bodies remain covered after extraction`() {
+    val source = locateSource("SettingsController.kt").readText()
+    val result = LaunchCancellationScanner.scan(source)
+
+    assertEquals(6, result.launchBlocks)
+    val withoutRethrow = source.replace("throw e", "Unit")
+    assertEquals(3, LaunchCancellationScanner.scan(withoutRethrow).violations.size)
+  }
+
+  @Test
+  fun `package controller action bodies remain covered after extraction`() {
+    val source = locateSource("PackageController.kt").readText()
+    val result = LaunchCancellationScanner.scan(source)
+
+    assertEquals(6, result.launchBlocks)
+    val withoutRethrow = source.replace("throw e", "Unit")
+    assertTrue(LaunchCancellationScanner.scan(withoutRethrow).violations.isNotEmpty())
+  }
+
+  @Test
   fun `scanner actually matches the control-proxy coroutine bodies`() {
     // Guards against a scanner that silently matches nothing (a broken regex would make the
     // "no violations" assertion vacuously pass). CtrlProxy + WebSocketServer launch many
@@ -894,6 +914,8 @@ class LaunchCancellationRethrowTest {
       listOf(
         ScannedSource("CtrlProxy.kt", exemptSuspendFns = emptyList()),
         ScannedSource("CaCertificateController.kt", exemptSuspendFns = emptyList()),
+        ScannedSource("SettingsController.kt", exemptSuspendFns = emptyList()),
+        ScannedSource("PackageController.kt", exemptSuspendFns = emptyList()),
         ScannedSource("WebSocketServer.kt", exemptSuspendFns = emptyList()),
       )
   }

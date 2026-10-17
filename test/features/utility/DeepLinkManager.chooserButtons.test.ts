@@ -146,8 +146,27 @@ describe("DeepLinkManager.findButtonByText over a captured ResolverActivity", ()
 
   test("still honours a per-instance override of the findButtonByText seam", () => {
     const patched = new DeepLinkManager(device, new FakeAdbExecutor());
-    const sentinel = { sentinel: true };
-    Object.defineProperty(patched, "findButtonByText", { value: () => sentinel });
-    expect(patched["findChooserButton"](rootNodes as never, ["Always"])).toBe(sentinel);
+    const node = allNodes().find(
+      (candidate) => propsOf(candidate)["resource-id"] === "android:id/button_always",
+    );
+    Object.defineProperty(patched, "findButtonByText", { value: () => node });
+    const element = patched["findChooserButton"](rootNodes as never, ["Never"]);
+    expect(element?.["resource-id"]).toBe("android:id/button_always");
+    expect(element?.bounds).toEqual(parser.parseNodeBounds(node as never)?.bounds);
+  });
+
+  test.each([
+    ["always", "android:id/button_always"],
+    ["just_once", "android:id/button_once"],
+  ] as const)("taps the centre of the %s button, not NaN", async (preference, resourceId) => {
+    const adb = new FakeAdbExecutor();
+    const tapper = new DeepLinkManager(device, adb);
+    const result = await tapper.handleIntentChooser(capture.viewHierarchy, preference);
+    expect(result).toMatchObject({ success: true, detected: true, action: preference });
+    const node = allNodes().find((candidate) => propsOf(candidate)["resource-id"] === resourceId);
+    const bounds = parser.parseNodeBounds(node as never)?.bounds;
+    expect(bounds).toBeDefined();
+    const center = tapper["geometry"].getElementCenter({ bounds } as never);
+    expect(adb.getExecutedCommands()).toContain(`shell input tap ${center.x} ${center.y}`);
   });
 });

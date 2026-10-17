@@ -43,6 +43,23 @@ describe("edgeSwipeCoordinates (#12537)", () => {
     });
   });
 
+  test("a narrow panel keeps both endpoints inside its bounds (#12808)", () => {
+    const narrow = { left: 100, top: 0, right: 200, bottom: 100 };
+    const left = edgeSwipeCoordinates({ edge: "left", bounds: narrow, inset: 50 });
+    expect(left.x1).toBe(150);
+    expect(left.x2).toBeLessThanOrEqual(199);
+    const right = edgeSwipeCoordinates({ edge: "right", bounds: narrow, inset: 50 });
+    expect(right.x1).toBe(149);
+    expect(right.x2).toBeGreaterThanOrEqual(100);
+    const tiny = edgeSwipeCoordinates({
+      edge: "right",
+      bounds: { ...narrow, right: 120 },
+      inset: 50,
+    });
+    expect(tiny.x1).toBeGreaterThanOrEqual(100);
+    expect(tiny.x2).toBeGreaterThanOrEqual(100);
+  });
+
   test("a panel's own edges are used, not the physical screen's", () => {
     expect(edgeSwipeCoordinates({ edge: "left", bounds: panel, at: 0 })).toEqual({
       x1: 100 + EDGE_INSET_DEFAULT,

@@ -6,7 +6,7 @@
 1183	src/daemon/cli/runDaemonCommand.ts
 1540	src/daemon/client.ts
 5392	src/daemon/daemon.ts
-6025	src/daemon/daemonMcpProxy.ts
+6045	src/daemon/daemonMcpProxy.ts
 1730	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8441	src/daemon/devicePool.ts
@@ -55,7 +55,7 @@
 1121	src/features/observe/android/ctrlProxyWireManifest.ts
 1342	src/features/observe/ios/CtrlProxyHierarchy.ts
 4586	src/features/observe/ios/IOSCtrlProxyClient.ts
-2118	src/features/observe/output/ObserveResultOutput.ts
+2136	src/features/observe/output/ObserveResultOutput.ts
 1693	src/features/observe/output/SkeletonProjection.ts
 1429	src/features/performance/PerformanceMonitor.ts
 1223	src/features/preferences/AppPreferences.ts
@@ -78,7 +78,7 @@
 1269	src/server/deviceToolsShutdown.ts
 1266	src/server/deviceToolsStartDevice.ts
 1170	src/server/executionTracker.ts
-1645	src/server/finalizeToolResponse.ts
+1646	src/server/finalizeToolResponse.ts
 3133	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts
 2852	src/server/prototypeTools.ts

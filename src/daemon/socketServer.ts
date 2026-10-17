@@ -15,6 +15,7 @@ import {
 } from "./inputRouteParams";
 import { IDE_DEVICE_MUTATION_METHODS, IDE_ROUTE_PARSERS, STARTUP_PROBE_METHODS } from "./ideRoutes";
 import { ideFeatureRoutes } from "./socketServer/ideRouteModule";
+import { daemonLifecycleRoutes } from "./socketServer/lifecycleRouteModule";
 import {
   DISPATCH_HELD_INPUT_METHODS,
   GESTURE_FRAME_METHODS,
@@ -247,16 +248,6 @@ import {
   sessionExecutionMetadataOf,
   type ActiveExecution,
 } from "../server/executionTracker";
-import {
-  DAEMON_COMPLETE_MAINTENANCE_METHOD,
-  DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
-  DAEMON_REPUBLISH_IDENTITY_METHOD,
-  DAEMON_PREPARE_MAINTENANCE_METHOD,
-  DAEMON_PREPARE_RESTART_METHOD,
-  DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
-  DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
-  DAEMON_RESTART_ADMITTED_METHOD,
-} from "./daemonRestartAdmission";
 import { type DaemonGenerationIdentity } from "./liveAcceptanceCapability";
 import { daemonGenerationMatches } from "./processGeneration";
 import {
@@ -4959,41 +4950,24 @@ export class UnixSocketServer {
       emitToolsListChanged: () => ListChangedBroadcaster.emit("tools"),
       now: () => this.timer.now(),
     }),
-    [
-      DAEMON_REPUBLISH_IDENTITY_METHOD,
-      async (request) => await this.republishDaemonIdentity(request.params),
-    ],
-    [
-      DAEMON_PREPARE_RESTART_METHOD,
-      async (request) => this.restartAdmission.prepareDaemonRestart(request.params),
-    ],
-    [
-      DAEMON_PREPARE_MAINTENANCE_METHOD,
-      async (request) => this.restartAdmission.prepareDaemonMaintenance(request.params),
-    ],
-    [
-      DAEMON_COMPLETE_MAINTENANCE_METHOD,
-      async (request) => this.restartAdmission.completeDaemonMaintenance(request.params),
-    ],
-    [
-      DAEMON_RESTART_ADMITTED_METHOD,
-      async (request) => this.restartAdmission.restartAdmittedDaemon(request.params),
-    ],
-    [
-      DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
-      async (request, socketSessionId) =>
-        this.restartAdmission.restartAcceptanceSession(request.params, socketSessionId),
-    ],
-    [
-      DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
-      async (request, socketSessionId) =>
-        this.restartAdmission.commitAcceptanceRestart(request.params, socketSessionId),
-    ],
-    [
-      DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
-      async (request, socketSessionId) =>
-        this.restartAdmission.releaseAcceptanceRestart(request.params, socketSessionId),
-    ],
+    ...daemonLifecycleRoutes({
+      republishIdentity: (params) => this.republishDaemonIdentity(params),
+      // Resolved per call: the admission object is built at the end of construction.
+      restart: {
+        prepareDaemonRestart: (params) => this.restartAdmission.prepareDaemonRestart(params),
+        prepareDaemonMaintenance: (params) =>
+          this.restartAdmission.prepareDaemonMaintenance(params),
+        completeDaemonMaintenance: (params) =>
+          this.restartAdmission.completeDaemonMaintenance(params),
+        restartAdmittedDaemon: (params) => this.restartAdmission.restartAdmittedDaemon(params),
+        restartAcceptanceSession: (params, owner) =>
+          this.restartAdmission.restartAcceptanceSession(params, owner),
+        commitAcceptanceRestart: (params, owner) =>
+          this.restartAdmission.commitAcceptanceRestart(params, owner),
+        releaseAcceptanceRestart: (params, owner) =>
+          this.restartAdmission.releaseAcceptanceRestart(params, owner),
+      },
+    }),
     [
       "ide/status",
       (request, socketSessionId, ideMutation) =>

@@ -28,6 +28,14 @@ interface SwipeAtGestureOptions {
   display?: string;
 }
 
+/**
+ * Internal, never advertised: filled by `swipeAt` with the screen its absolute endpoints were
+ * resolved against, so a successful-call recording can store them as fractions of that screen.
+ */
+export interface SwipeAtRecordingContext {
+  screenSize?: { width: number; height: number };
+}
+
 export type SwipeAtOptions = SwipeAtGestureOptions &
   (
     | {

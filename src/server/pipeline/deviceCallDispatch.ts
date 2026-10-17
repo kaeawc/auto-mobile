@@ -125,6 +125,10 @@ export function deviceAwareHandlerArgs(
   if (name === "tapAt") {
     handlerArgs.__tapAtRecordingContext = handlerArgs.__tapAtPlanContext ?? {};
   }
+  if (name === "swipeAt") {
+    // Filled by the handler with the screen the endpoints resolved against (#12878).
+    handlerArgs.__swipeAtRecordingContext = {};
+  }
   return handlerArgs;
 }
 

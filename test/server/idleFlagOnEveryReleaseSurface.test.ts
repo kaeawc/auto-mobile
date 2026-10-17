@@ -203,7 +203,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "typed socket admission refusal",
-    builders: ["src/daemon/socketServer.ts#sessionAdmissionRefusalFields"],
+    builders: ["src/daemon/socketServer/errorFrames.ts#sessionAdmissionRefusalFields"],
     reasonKey: "reason",
     holder: (reason) =>
       mcpRequestFailureDetails(new TerminalSessionError(SESSION, snapshot(reason)), undefined)

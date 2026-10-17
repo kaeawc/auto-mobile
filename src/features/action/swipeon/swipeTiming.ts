@@ -102,7 +102,7 @@ function validateBoomerangDuration(
 }
 
 /** durationMs replaces the speed preset for the forward stroke; reject ambiguity before dispatch. */
-function validateDurationMs(
+export function validateDurationMs(
   options: Pick<SwipeOnOptions, "lookFor" | "durationMs" | "speed">,
 ): string | null {
   const { durationMs } = options;

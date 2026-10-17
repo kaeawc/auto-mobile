@@ -13,7 +13,11 @@ import {
 } from "./tapFocusIdentity";
 import { pollSearchUntil } from "./searchUntilPoller";
 import { matchedTapElement } from "./tapPointGeometry";
+import { readFreshPlatformHierarchy, returnsRawHierarchyUnfiltered } from "./tapHierarchyRead";
 import {
+  assertLongPressWithinHardMax,
+  containerSelectorError,
+  failedTapResult,
   isContainerAvailable,
   resolveSearchUntilDuration,
   throwIfLongPressInterrupted,
@@ -21,7 +25,6 @@ import {
 import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
 import type { OwnPrototypeCoverRule } from "../observe/ApplicationWindowCover";
 import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
-import { iosHierarchyAcquisition } from "../observe/ios/types";
 import {
   withObservationReadScope,
   wasHierarchyReadDuringCall,
@@ -37,7 +40,6 @@ import {
 } from "../talkback/resourceIdActionError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { dispatchAndroidLongPress } from "./androidLongPress";
-import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
 import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import {
@@ -127,7 +129,6 @@ import { type Timer } from "../../utils/SystemTimer";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
-import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import {
   intersectBounds as intersectTapBounds,
   boundsArea,
@@ -708,18 +709,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * @returns TapOnTextResult with error state
    */
   private createErrorResult(action: string, error: string, cause?: unknown): TapOnFocusResult {
-    return markFocusFailure(
-      action,
-      {
-        success: false,
-        action: action,
-        error,
-        element: {
-          bounds: { left: 0, top: 0, right: 0, bottom: 0 },
-        } as Element,
-      },
-      cause,
-    );
+    return markFocusFailure(action, failedTapResult(action, error), cause);
   }
 
   private validateOptions(options: TapOnElementOptions): string | null {
@@ -744,13 +734,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return "tapOn textAny selector must be non-empty";
     }
 
-    if (options.container) {
-      const containerSelectorCount = [options.container.elementId, options.container.text].filter(
-        Boolean,
-      ).length;
-      if (containerSelectorCount !== 1) {
-        return "tapOn container must specify exactly one of elementId or text";
-      }
+    const containerError = containerSelectorError(options.container, "tapOn");
+    if (containerError) {
+      return containerError;
     }
 
     return this.validateSemanticLinkOptions(options);
@@ -2438,16 +2424,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     rawHierarchy: ViewHierarchyResult,
     screenSize?: ObserveResult["screenSize"],
   ): ViewHierarchyResult {
-    if (!serverConfig.isRawElementSearchEnabled()) {
-      return rawHierarchy;
-    }
-
-    if (
-      rawHierarchy?.hierarchy &&
-      typeof rawHierarchy.hierarchy === "object" &&
-      "error" in rawHierarchy.hierarchy &&
-      rawHierarchy.hierarchy.error
-    ) {
+    if (returnsRawHierarchyUnfiltered(serverConfig.isRawElementSearchEnabled(), rawHierarchy)) {
       return rawHierarchy;
     }
 
@@ -2574,47 +2551,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (effectiveTimeoutMs === 0) {
       return null;
     }
-    switch (this.device.platform) {
-      case "android": {
-        const rawHierarchy = await refreshAndroidViewHierarchy(
-          this.accessibilityService,
-          effectiveTimeoutMs,
-          signal,
-          { adb: this.adb, timer: this.timer },
-        );
-
-        return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
-      }
-      case "ios": {
-        // Match the observe projection exactly. Going through CtrlProxy's
-        // alternate conversion here lets a selector observed from one tree be
-        // resolved against a differently-pruned tree on refresh.
-        const client = IOSCtrlProxyClient.getInstance(this.device);
-        const synced = forceCapture
-          ? await client.requestHierarchySyncForTapRevalidation(
-              undefined,
-              false,
-              signal,
-              effectiveTimeoutMs,
-            )
-          : await client.requestHierarchySync(undefined, false, signal, effectiveTimeoutMs);
-        if (!synced?.hierarchy) {
-          return null;
-        }
-        const rawHierarchy = this.viewHierarchy.normalizeIosHierarchy(
-          IOSCtrlProxyClient.getInstance(this.device).convertToViewHierarchyResult(
-            synced.hierarchy,
-          ),
-        );
-        const acquisition = synced[iosHierarchyAcquisition];
-        if (acquisition === "device" || acquisition === "client-cache") {
-          Object.assign(rawHierarchy, { [iosHierarchyAcquisition]: acquisition });
-        }
-        return this.prepareViewHierarchyForResponse(rawHierarchy, screenSize);
-      }
-      default:
-        throw unsupportedPlatformError(this.device.platform, "tap on elements");
-    }
+    return readFreshPlatformHierarchy(
+      {
+        device: this.device,
+        adb: this.adb,
+        timer: this.timer,
+        androidService: this.accessibilityService,
+        viewHierarchy: this.viewHierarchy,
+        prepareForResponse: (raw, size) => this.prepareViewHierarchyForResponse(raw, size),
+        actionLabel: "tap on elements",
+      },
+      { timeoutMs: effectiveTimeoutMs, screenSize, signal, forceCapture },
+    );
   }
 
   /**
@@ -5595,11 +5543,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private getLongPressDuration(options: TapOnElementOptions): number {
-    if (options.duration !== undefined && options.duration > LONG_PRESS_HARD_MAX_MS) {
-      throw new ActionableError(
-        `longPress duration too large; maximum is ${LONG_PRESS_HARD_MAX_MS} ms; requested ${options.duration} ms`,
-      );
-    }
+    assertLongPressWithinHardMax(options.duration);
     if (typeof options.duration === "number" && options.duration > 0) {
       return options.duration;
     }

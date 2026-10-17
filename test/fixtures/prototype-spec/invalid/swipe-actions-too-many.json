@@ -1,0 +1,60 @@
+{
+  "spec": {
+    "id": "swipe",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "listItem",
+          "headline": "Order",
+          "swipeActions": {
+            "start": [
+              {
+                "label": "A",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "a"
+                  }
+                ]
+              },
+              {
+                "label": "B",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "b"
+                  }
+                ]
+              },
+              {
+                "label": "C",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "c"
+                  }
+                ]
+              },
+              {
+                "label": "D",
+                "onTap": [
+                  {
+                    "type": "emit",
+                    "name": "d"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].swipeActions.start"
+}

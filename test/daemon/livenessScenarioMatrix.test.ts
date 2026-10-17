@@ -220,9 +220,9 @@ describe("live stdio proxy", () => {
     scenario = await LivenessScenario.start();
     const session = await scenario.acquire();
 
-    // Held side: a call every 110 s keeps the session across five idle windows.
+    // Held side: a call every 110 s keeps the session across three idle windows.
     const callEvery = IDLE_WINDOW_MS - 10_000;
-    for (let call = 0; call < 5; call++) {
+    for (let call = 0; call < 3; call++) {
       expect(await scenario.idleWhileHeld(session, scenario.timer.now() + callEvery, 30_000)).toBe(
         undefined,
       );

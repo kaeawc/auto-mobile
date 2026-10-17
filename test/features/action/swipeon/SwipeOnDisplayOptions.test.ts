@@ -510,3 +510,31 @@ test("fromEdge on a display rejects a wrong-way direction before dispatch", asyn
   expect(result.error).toContain("fromEdge");
   expect(h.legs()).toEqual([]);
 });
+
+test("fromEdge on a display validates the resolved finger direction (#12992)", async () => {
+  const h = optionsHarness();
+  // scrollTowardsDirection "left" content movement is a "right" finger swipe,
+  // which is inward from the left edge.
+  const result = await h.action.execute({
+    display: "external",
+    fromEdge: "left",
+    direction: "left",
+    gestureType: "scrollTowardsDirection",
+  });
+  expect(result.success).toBe(true);
+  expect(h.legs()).toHaveLength(1);
+  expect(h.legs()[0].x2).toBeGreaterThan(h.legs()[0].x1);
+});
+
+test("fromEdge on a display still rejects a genuinely wrong-way direction (#12992)", async () => {
+  const h = optionsHarness();
+  const result = await h.action.execute({
+    display: "external",
+    fromEdge: "left",
+    direction: "left",
+    gestureType: "swipeFingerTowardsDirection",
+  });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain('finger direction must be "right"');
+  expect(h.legs()).toHaveLength(0);
+});

@@ -20,6 +20,7 @@
 test/contracts/deviceSessionPersistence.integration.test.ts | safe | fake versus real DeviceSessionRepository over createTestDatabase in-memory L8
 test/contracts/deviceSnapshotStore.integration.test.ts | safe | fake versus real store over a private mkdtemp directory removed afterwards L9
 test/contracts/navigationGraph.integration.test.ts | safe | fake versus real NavigationGraphManager over createTestDatabase in-memory with stubbed telemetry L7
+test/contracts/observeCacheStore.integration.test.ts | safe | fake versus real FileSystemObserveCacheStore over a private mkdtemp directory removed afterwards L11
 test/contracts/repositoryContracts.integration.test.ts | safe | fake versus real repositories over createTestDatabase in-memory L9
 test/contracts/runAll.integration.test.ts | unsafe | DefaultHostCommandExecutor L53 runs process.execPath; DefaultFileDownloader L45 is real
 test/ctrlProxy/ios/IOSHostPortAvailabilityChecker.integration.test.ts | safe | loopback 127.0.0.1 ephemeral port server L22

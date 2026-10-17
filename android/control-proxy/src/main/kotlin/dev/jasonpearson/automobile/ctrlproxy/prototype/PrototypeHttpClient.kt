@@ -37,6 +37,29 @@ class PrototypeHttpClients(val host: PrototypeHttpClient, val device: PrototypeH
     const val VIA_HOST = "host"
     const val VIA_DEVICE = "device"
 
+    /** Why a saved prototype cannot send `via: "host"`: it runs without a host connection. */
+    const val SAVED_HOST_UNAVAILABLE_MESSAGE =
+      "Requests via \"host\" are not available in saved prototypes, which run without a host " +
+        "connection. Use via \"device\" instead."
+
+    /**
+     * The transports of a saved prototype (#12970): `device` sends on the device with no host, as
+     * in a shown prototype, while `host` fails with an explicit, actionable error rather than a
+     * misleading `network` one.
+     */
+    fun forSavedPrototype(device: PrototypeHttpClient): PrototypeHttpClients =
+      PrototypeHttpClients(
+        host = { _ ->
+          PrototypeRequestResponse.Failed(
+            PrototypeRequestError(
+              PrototypeRequestErrorCode.INVALID_REQUEST,
+              SAVED_HOST_UNAVAILABLE_MESSAGE,
+            ),
+          )
+        },
+        device = device,
+      )
+
     /** No transport is wired: every request fails as `network`. */
     val Unavailable: PrototypeHttpClients = PrototypeHttpClient { _ ->
       PrototypeRequestResponse.Failed(

@@ -1720,162 +1720,48 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
     }
 
-  private val handledExceptionReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != AutoMobileFailures.ACTION_HANDLED_EXCEPTION) {
-          return
+  private val failureReportHost =
+    object : FailureReportHost {
+      override suspend fun onHandledException(report: HandledExceptionReport) =
+        with(report) {
+          broadcastHandledExceptionEvent(
+            timestamp = timestamp,
+            exceptionClass = exceptionClass,
+            exceptionMessage = exceptionMessage,
+            stackTrace = stackTrace,
+            customMessage = customMessage,
+            currentScreen = currentScreen,
+            packageName = packageName,
+            appVersion = appVersion,
+            deviceModel = deviceModel,
+            deviceManufacturer = deviceManufacturer,
+            osVersion = osVersion,
+            sdkInt = sdkInt,
+          )
         }
 
-        try {
-          // Try type-safe deserialization first (new protocol)
-          val eventJson = intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)
-          if (eventJson != null) {
-            val event = SdkEventSerializer.handledExceptionEventFromJson(eventJson)
-            if (event != null) {
-              Log.d(
-                TAG,
-                "Received handled exception (protocol): ${event.exceptionClass} from ${event.applicationId}",
-              )
-
-              serviceScope.launch {
-                broadcastHandledExceptionEvent(
-                  timestamp = event.timestamp,
-                  exceptionClass = event.exceptionClass,
-                  exceptionMessage = event.exceptionMessage,
-                  stackTrace = event.stackTrace,
-                  customMessage = event.customMessage,
-                  currentScreen = event.currentScreen,
-                  packageName = event.applicationId ?: "unknown",
-                  appVersion = event.appVersion,
-                  deviceModel = event.deviceInfo?.model ?: "unknown",
-                  deviceManufacturer = event.deviceInfo?.manufacturer ?: "unknown",
-                  osVersion = event.deviceInfo?.osVersion ?: "unknown",
-                  sdkInt = event.deviceInfo?.sdkInt ?: 0,
-                )
-              }
-              return
-            }
-          }
-
-          // Fallback to legacy extras for backward compatibility
-          val timestamp = intent.getLongExtra(AutoMobileFailures.EXTRA_TIMESTAMP, 0L)
-          val exceptionClass =
-            intent.getStringExtra(AutoMobileFailures.EXTRA_EXCEPTION_CLASS) ?: return
-          val exceptionMessage = intent.getStringExtra(AutoMobileFailures.EXTRA_EXCEPTION_MESSAGE)
-          val stackTrace = intent.getStringExtra(AutoMobileFailures.EXTRA_STACK_TRACE) ?: return
-          val customMessage = intent.getStringExtra(AutoMobileFailures.EXTRA_CUSTOM_MESSAGE)
-          val currentScreen = intent.getStringExtra(AutoMobileFailures.EXTRA_CURRENT_SCREEN)
-          val packageName = intent.getStringExtra(AutoMobileFailures.EXTRA_PACKAGE_NAME) ?: return
-          val appVersion = intent.getStringExtra(AutoMobileFailures.EXTRA_APP_VERSION)
-          val deviceModel =
-            intent.getStringExtra(AutoMobileFailures.EXTRA_DEVICE_MODEL) ?: "unknown"
-          val deviceManufacturer =
-            intent.getStringExtra(AutoMobileFailures.EXTRA_DEVICE_MANUFACTURER) ?: "unknown"
-          val osVersion = intent.getStringExtra(AutoMobileFailures.EXTRA_OS_VERSION) ?: "unknown"
-          val sdkInt = intent.getIntExtra(AutoMobileFailures.EXTRA_SDK_INT, 0)
-
-          Log.d(TAG, "Received handled exception (legacy): $exceptionClass from $packageName")
-
-          serviceScope.launch {
-            broadcastHandledExceptionEvent(
-              timestamp = timestamp,
-              exceptionClass = exceptionClass,
-              exceptionMessage = exceptionMessage,
-              stackTrace = stackTrace,
-              customMessage = customMessage,
-              currentScreen = currentScreen,
-              packageName = packageName,
-              appVersion = appVersion,
-              deviceModel = deviceModel,
-              deviceManufacturer = deviceManufacturer,
-              osVersion = osVersion,
-              sdkInt = sdkInt,
-            )
-          }
-        } catch (e: Exception) {
-          Log.e(TAG, "Error handling handled exception broadcast", e)
+      override suspend fun onCrash(report: CrashReport) =
+        with(report) {
+          broadcastCrashEvent(
+            timestamp = timestamp,
+            exceptionClass = exceptionClass,
+            exceptionMessage = exceptionMessage,
+            stackTrace = stackTrace,
+            threadName = threadName,
+            currentScreen = currentScreen,
+            packageName = packageName,
+            appVersion = appVersion,
+            deviceModel = deviceModel,
+            deviceManufacturer = deviceManufacturer,
+            osVersion = osVersion,
+            sdkInt = sdkInt,
+          )
         }
-      }
     }
 
-  private val crashReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != AutoMobileCrashes.ACTION_CRASH) {
-          return
-        }
+  private val handledExceptionReceiver = HandledExceptionReceiver(serviceScope, failureReportHost)
 
-        try {
-          // Try type-safe deserialization first (new protocol)
-          val eventJson = intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)
-          if (eventJson != null) {
-            val event = SdkEventSerializer.crashEventFromJson(eventJson)
-            if (event != null) {
-              Log.d(
-                TAG,
-                "Received crash (protocol): ${event.exceptionClass} from ${event.applicationId}",
-              )
-
-              serviceScope.launch {
-                broadcastCrashEvent(
-                  timestamp = event.timestamp,
-                  exceptionClass = event.exceptionClass,
-                  exceptionMessage = event.exceptionMessage,
-                  stackTrace = event.stackTrace,
-                  threadName = event.threadName,
-                  currentScreen = event.currentScreen,
-                  packageName = event.applicationId ?: "unknown",
-                  appVersion = event.appVersion,
-                  deviceModel = event.deviceInfo?.model ?: "unknown",
-                  deviceManufacturer = event.deviceInfo?.manufacturer ?: "unknown",
-                  osVersion = event.deviceInfo?.osVersion ?: "unknown",
-                  sdkInt = event.deviceInfo?.sdkInt ?: 0,
-                )
-              }
-              return
-            }
-          }
-
-          // Fallback to legacy extras for backward compatibility
-          val timestamp = intent.getLongExtra(AutoMobileCrashes.EXTRA_TIMESTAMP, 0L)
-          val exceptionClass =
-            intent.getStringExtra(AutoMobileCrashes.EXTRA_EXCEPTION_CLASS) ?: return
-          val exceptionMessage = intent.getStringExtra(AutoMobileCrashes.EXTRA_EXCEPTION_MESSAGE)
-          val stackTrace = intent.getStringExtra(AutoMobileCrashes.EXTRA_STACK_TRACE) ?: return
-          val threadName = intent.getStringExtra(AutoMobileCrashes.EXTRA_THREAD_NAME) ?: "unknown"
-          val currentScreen = intent.getStringExtra(AutoMobileCrashes.EXTRA_CURRENT_SCREEN)
-          val packageName = intent.getStringExtra(AutoMobileCrashes.EXTRA_PACKAGE_NAME) ?: return
-          val appVersion = intent.getStringExtra(AutoMobileCrashes.EXTRA_APP_VERSION)
-          val deviceModel = intent.getStringExtra(AutoMobileCrashes.EXTRA_DEVICE_MODEL) ?: "unknown"
-          val deviceManufacturer =
-            intent.getStringExtra(AutoMobileCrashes.EXTRA_DEVICE_MANUFACTURER) ?: "unknown"
-          val osVersion = intent.getStringExtra(AutoMobileCrashes.EXTRA_OS_VERSION) ?: "unknown"
-          val sdkInt = intent.getIntExtra(AutoMobileCrashes.EXTRA_SDK_INT, 0)
-
-          Log.d(TAG, "Received crash (legacy): $exceptionClass from $packageName")
-
-          serviceScope.launch {
-            broadcastCrashEvent(
-              timestamp = timestamp,
-              exceptionClass = exceptionClass,
-              exceptionMessage = exceptionMessage,
-              stackTrace = stackTrace,
-              threadName = threadName,
-              currentScreen = currentScreen,
-              packageName = packageName,
-              appVersion = appVersion,
-              deviceModel = deviceModel,
-              deviceManufacturer = deviceManufacturer,
-              osVersion = osVersion,
-              sdkInt = sdkInt,
-            )
-          }
-        } catch (e: Exception) {
-          Log.e(TAG, "Error handling crash broadcast", e)
-        }
-      }
-    }
+  private val crashReceiver = CrashReceiver(serviceScope, failureReportHost)
 
   private val screenStateReceiver =
     object : BroadcastReceiver() {
@@ -7182,7 +7068,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // Fall back to now because the legacy intent timestamp extra defaults to 0.
       val response =
         handledExceptionEventResponse(
-          timestamp = crashEventTimestamp(timestamp, System.currentTimeMillis()),
+          timestamp = crashEventTimestamp(timestamp, timeProvider.currentTimeMillis()),
           exceptionClass = exceptionClass,
           exceptionMessage = exceptionMessage,
           stackTrace = stackTrace,
@@ -7233,7 +7119,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // Fall back to now because the legacy intent timestamp extra defaults to 0.
       val response =
         crashEventResponse(
-          timestamp = crashEventTimestamp(timestamp, System.currentTimeMillis()),
+          timestamp = crashEventTimestamp(timestamp, timeProvider.currentTimeMillis()),
           exceptionClass = exceptionClass,
           exceptionMessage = exceptionMessage,
           stackTrace = stackTrace,

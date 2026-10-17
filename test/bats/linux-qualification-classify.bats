@@ -287,9 +287,35 @@ prepare_cell_stubs() {
 #!/usr/bin/env bash
 echo 'test emulator version'
 STUB
+  # The cell backgrounds its emulator wrapper, which reads the clock concurrently with the
+  # main loop; an unlocked read-modify-write can tear the tick file ("1\n2").
+  # The lock records its owner's pid so a holder killed mid-update (the TERM fixtures below)
+  # is reclaimed, and acquisition is bounded so a stuck lock fails instead of hanging.
+  # Reclaim runs under its own short mutex and re-reads the owner there: two waiters that
+  # both saw the same dead owner cannot have the second delete a lock a new holder just took.
   cat > "$bin/clock" <<'STUB'
 #!/usr/bin/env bash
-n=$(cat "$TICKS"); echo "$((n+1))" > "$TICKS"; echo "$n"
+lock="$TICKS.lock" reclaim="$TICKS.reclaim"
+for _ in $(seq 1 1000); do
+  if mkdir "$lock" 2>/dev/null; then
+    trap 'rm -rf "$lock"' EXIT
+    trap 'rm -rf "$lock"; exit 143' TERM INT
+    echo "$$" > "$lock/pid"
+    n=$(cat "$TICKS"); echo "$((n+1))" > "$TICKS"
+    echo "$n"
+    exit 0
+  fi
+  owner=$(cat "$lock/pid" 2>/dev/null)
+  if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null && mkdir "$reclaim" 2>/dev/null; then
+    trap 'rmdir "$reclaim"; exit 143' TERM INT
+    if [ "$(cat "$lock/pid" 2>/dev/null)" = "$owner" ]; then rm -rf "$lock"; fi
+    rmdir "$reclaim"
+    trap - TERM INT
+  fi
+  sleep 0.01
+done
+echo "clock: could not acquire $lock" >&2
+exit 1
 STUB
   cat > "$bin/avdmanager" <<'STUB'
 #!/usr/bin/env bash

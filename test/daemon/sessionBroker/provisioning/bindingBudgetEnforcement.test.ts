@@ -241,6 +241,7 @@ describe("binding total-resource enforcement on SQLite", () => {
               deleting: 0,
               orphaned: 0,
             },
+            charged: [],
             retained: [],
             evictionFailures: [],
           };
@@ -295,6 +296,7 @@ describe("binding total-resource enforcement on SQLite", () => {
       failure: {
         code: "binding_budget_exhausted",
         budget: { usage: { orphaned: 1, preparing: 1 } },
+        message: expect.stringContaining("ambroker-other (android, orphaned"),
       },
     });
     expect(provisioner.calls).toEqual([]);

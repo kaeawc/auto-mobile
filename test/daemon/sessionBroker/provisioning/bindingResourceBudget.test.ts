@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import {
   computeBindingResourceUsage,
+  describeBudgetExhaustion,
+  MAX_CHARGED_EVIDENCE,
   RegistryBindingResourceBudget,
   type BindingResourceRegistry,
 } from "../../../../src/daemon/sessionBroker/provisioning/resourceBudget";
@@ -391,8 +393,62 @@ describe("binding total-resource budget", () => {
       { platform: "android", stableDeviceId: "idle-a", kind: "assigned_idle" },
       { platform: "ios", stableDeviceId: "idle-b", kind: "assigned_idle" },
       { platform: "android", stableDeviceId: "amslot-new", kind: "preparing" },
-      { platform: "android", stableDeviceId: "ambroker-orphan", kind: "orphaned" },
+      {
+        platform: "android",
+        stableDeviceId: "ambroker-orphan",
+        kind: "orphaned",
+        name: "ambroker-orphan",
+        orphanState: "power_unknown",
+      },
     ]);
+  });
+
+  test("exhaustion distinguishes running from power-unknown orphans", async () => {
+    inventory.devices.push(
+      { platform: "android", name: "ambroker-run", deviceId: "run-id", isRunning: true },
+      {
+        platform: "android",
+        name: "ambroker-unk",
+        deviceId: "unk-id",
+        isRunning: false,
+        isRunningStateKnown: false,
+      },
+    );
+    const mine = await creation("amslot-new");
+    const result = await budget(1).admitCreation({ journalEntryId: mine.id });
+    expect(result.kind === "exhausted" && result.charged.map((c) => c.orphanState)).toEqual([
+      undefined,
+      "running",
+      "power_unknown",
+    ]);
+    if (result.kind !== "exhausted") {
+      throw new Error("expected exhausted");
+    }
+    const message = describeBudgetExhaustion(result);
+    expect(message).toContain("limit 1");
+    expect(message).toContain("ambroker-run (android, orphaned: running)");
+    expect(message).toContain("ambroker-unk (android, orphaned: power state unknown)");
+    expect(message).toContain("amslot-new (android, committed: being prepared)");
+  });
+
+  test("evidence and message list at most MAX_CHARGED_EVIDENCE devices and count the rest", async () => {
+    for (let i = 0; i < MAX_CHARGED_EVIDENCE + 3; i += 1) {
+      inventory.devices.push({
+        platform: "android",
+        name: `ambroker-o${String(i).padStart(2, "0")}`,
+        deviceId: `o${i}`,
+        isRunning: true,
+      });
+    }
+    const mine = await creation("amslot-new");
+    const result = await budget(1).admitCreation({ journalEntryId: mine.id });
+    if (result.kind !== "exhausted") {
+      throw new Error("expected exhausted");
+    }
+    expect(result.charged).toHaveLength(MAX_CHARGED_EVIDENCE);
+    expect(result.chargedOmitted).toBe(4);
+    expect(result.usage.total).toBe(MAX_CHARGED_EVIDENCE + 4);
+    expect(describeBudgetExhaustion(result)).toEndWith("; and 4 more.");
   });
 
   test.each(["journal", "snapshot"] as const)(

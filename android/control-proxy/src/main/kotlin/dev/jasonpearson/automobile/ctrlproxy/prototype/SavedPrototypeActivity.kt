@@ -148,6 +148,7 @@ class SavedPrototypeActivity : ComponentActivity() {
           true
         },
         storage = opened.session,
+        httpClients = SavedPrototypeActivityDependencies.httpClients(),
       )
   }
 

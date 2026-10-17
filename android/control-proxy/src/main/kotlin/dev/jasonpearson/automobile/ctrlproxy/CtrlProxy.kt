@@ -5428,14 +5428,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // finger axis *during* the pinch (start horizontal, end rotated); see issue #2911.
       val points = computePinchPoints(centerX, centerY, distanceStart, distanceEnd, rotationDegrees)
 
+      // A rotating pinch follows an arc (angle and radius interpolated) instead of the straight
+      // chord, which would shrink the radius mid-gesture and zoom a pure rotation (issue #12996).
+      val interior =
+        computePinchPathInterior(centerX, centerY, distanceStart, distanceEnd, rotationDegrees)
       val path1 =
         Path().apply {
           moveTo(points.startX1, points.startY1)
+          interior.forEach { lineTo(it.x1, it.y1) }
           lineTo(points.endX1, points.endY1)
         }
       val path2 =
         Path().apply {
           moveTo(points.startX2, points.startY2)
+          interior.forEach { lineTo(it.x2, it.y2) }
           lineTo(points.endX2, points.endY2)
         }
 

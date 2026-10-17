@@ -17,11 +17,16 @@ import { readFileSync } from "fs";
 import {
   assertNoStringLiterals,
   diffGoldenTables,
+  diffPathGoldenTables,
   KOTLIN_TEST_PATH,
+  loadCanonicalPathVectors,
   loadCanonicalVectors,
   parseKotlinGoldenTable,
+  parseKotlinPathGoldenTable,
   parseSwiftGoldenTable,
+  parseSwiftPathGoldenTable,
   referencePinchEndpoints,
+  referencePinchFingersAt,
   SWIFT_TEST_PATH,
   type GoldenVector,
 } from "./pinchGoldenVectors";
@@ -171,5 +176,49 @@ describe("pinch golden vector parity (issue #2997)", function () {
       expected: [...row.expected].reverse() as GoldenVector["expected"],
     }));
     expect(diffGoldenTables(reordered, canonical)).toEqual([]);
+  });
+});
+
+describe("pinch path golden vector parity (issue #12996)", function () {
+  const canonical = loadCanonicalPathVectors();
+  const swift = parseSwiftPathGoldenTable();
+  const kotlin = parseKotlinPathGoldenTable();
+
+  test("both platform path tables match the canonical source", function () {
+    expect(canonical.length).toBeGreaterThanOrEqual(5);
+    expect(diffPathGoldenTables(swift, canonical)).toEqual([]);
+    expect(diffPathGoldenTables(kotlin, canonical)).toEqual([]);
+  });
+
+  test("every canonical row is derivable from the arc interpolation", function () {
+    for (const row of canonical) {
+      const computed = referencePinchFingersAt(row);
+      expect(diffPathGoldenTables([{ ...row, expected: computed }], [row])).toEqual([]);
+    }
+  });
+
+  test("a pure rotation keeps the finger radius constant at every fraction", function () {
+    // The #12996 invariant: with distanceStart == distanceEnd the fingers never leave the circle,
+    // unlike the straight chord whose midpoint sits at cos(rotation / 2) of the radius.
+    for (const rotationDegrees of [30, 90, 180, -120, 360]) {
+      for (let step = 0; step <= 20; step++) {
+        const [a, b] = referencePinchFingersAt({
+          centerX: 200,
+          centerY: 400,
+          distanceStart: 100,
+          distanceEnd: 100,
+          rotationDegrees,
+          fraction: step / 20,
+        });
+        expect(Math.hypot(a[0] - 200, a[1] - 400)).toBeCloseTo(50, 9);
+        expect(Math.hypot(b[0] - 200, b[1] - 400)).toBeCloseTo(50, 9);
+      }
+    }
+  });
+
+  test("a tampered path row is detected", function () {
+    const tampered = swift.map((row) => ({ ...row, expected: [...row.expected] }));
+    tampered[0] = { ...tampered[0], fraction: tampered[0].fraction + 0.1 };
+    expect(diffPathGoldenTables(tampered, canonical).length).toBeGreaterThan(0);
   });
 });

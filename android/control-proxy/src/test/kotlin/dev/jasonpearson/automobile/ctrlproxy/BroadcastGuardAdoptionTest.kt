@@ -166,6 +166,7 @@ class BroadcastGuardAdoptionTest {
       listOf(
         "broadcastCaCertResult",
         "broadcastSettingsGetResult",
+        "broadcastInstalledPackagesResult",
         "broadcastDeviceOwnerStatusResult",
         "broadcastSetTextResult",
         "broadcastPinchResult",
@@ -896,9 +897,15 @@ class BroadcastGuardAdoptionTest {
   // ---------------------------------------------------------------------------
 
   private fun readGuardedSources(): List<Pair<String, String>> =
-    listOf("CtrlProxy.kt", "CaCertificateController.kt", "SettingsController.kt").map { fileName ->
-      fileName to locateSource(fileName).readText()
-    }
+    listOf(
+        "CtrlProxy.kt",
+        "CaCertificateController.kt",
+        "SettingsController.kt",
+        "PackageController.kt",
+      )
+      .map { fileName ->
+        fileName to locateSource(fileName).readText()
+      }
 
   private fun readCtrlProxySource(): String = locateSource("CtrlProxy.kt").readText()
 

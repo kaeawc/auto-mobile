@@ -40,6 +40,7 @@ describe("auto-mobile/no-deprecated-selector-facade", () => {
       "src/features/utility/ResolverElementSelector.ts",
       "src/features/action/TapOnElement.ts",
       "src/features/action/TapAnyElement.ts",
+      "src/features/action/tapElementFinder.ts",
     ]) {
       expect(lint(call, file)).toBe(false);
     }

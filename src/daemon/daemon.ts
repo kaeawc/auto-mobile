@@ -6,8 +6,7 @@ import type { SessionReleaseReason } from "./releaseReasons";
 import { type BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
-import { isSessionReleasing } from "./sessionReleaseState";
-import { isTokenOwnedOrClaimPending, lookupReleasedSessionReason } from "./daemonRequestHandlers";
+import { handleHttpHeartbeat, parseHttpHeartbeatBody } from "./httpHeartbeat";
 import {
   cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
   cancelExecutionsCutBySessionRelease,
@@ -132,12 +131,7 @@ import {
   ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
-import {
-  DaemonOptions,
-  PidFileData,
-  releasedSessionNotFoundFields,
-  type AuxiliaryDaemonSocketName,
-} from "./types";
+import { DaemonOptions, PidFileData, type AuxiliaryDaemonSocketName } from "./types";
 import { DeviceForwardLeaseIdleReleaser } from "./deviceForwardLeaseIdleReleaser";
 import {
   getAcceptedAuxSocketConnectionCount,
@@ -2071,66 +2065,20 @@ export class Daemon {
       return;
     }
 
-    let payload: { sessionId?: string; livenessOwnerToken?: unknown } | null = null;
-    try {
-      payload = JSON.parse(bodyResult.body);
-    } catch (error) {
-      // Invalid client JSON is expected; the 400 response fully describes the failure.
-      logger.debug(`Invalid heartbeat JSON: ${error}`);
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Invalid JSON" }));
+    const body = parseHttpHeartbeatBody(bodyResult.body);
+    if (!body.ok) {
+      res.writeHead(body.response.status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(body.response.body));
       return;
     }
-
-    const sessionId = payload?.sessionId;
-    if (!sessionId) {
-      res.writeHead(400, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Missing sessionId" }));
-      return;
-    }
-
-    const readOwnerToken = (value: unknown): string | undefined =>
-      typeof value === "string" && value.trim() ? value : undefined;
-    const ownerToken = readOwnerToken(payload?.livenessOwnerToken);
-    const creditLiveHeartbeat = (session: Session): void => {
-      // Match the socket's non-claiming rule; a different owner remains a 200 liveness no-op.
-      const ownsLiveness = ownerToken
-        ? this.sessionManager.hasLivenessOwnership(sessionId, ownerToken) ||
-          this.sessionManager.claimUnownedLivenessOwnership(sessionId, ownerToken)
-        : !isTokenOwnedOrClaimPending(session);
-      if (ownsLiveness) {
-        this.sessionManager.recordHeartbeat(sessionId);
-      }
-    };
-    const session =
-      this.sessionManager.getSession(sessionId) ??
-      this.sessionManager.getReleasingSession(sessionId);
-    // Match the socket route: an unknown, released, or releasing session id is a
-    // 404 unless it names a live observer session, so a client learns its session
-    // is gone instead of heartbeating a dead id forever.
-    if (!session || isSessionReleasing(this.sessionManager, sessionId, session)) {
-      if (ownerToken) {
-        this.sessionManager.creditOwnerHeartbeatDuringRelease(sessionId, ownerToken);
-      }
-      if (this.observerSessionRegistry.heartbeat(sessionId)) {
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ status: "ok" }));
-        return;
-      }
-      const releaseReason = await lookupReleasedSessionReason(this.sessionManager, sessionId);
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          error: `Session not found: ${sessionId}`,
-          ...releasedSessionNotFoundFields(releaseReason),
-        }),
-      );
-      return;
-    }
-    creditLiveHeartbeat(session);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: "ok" }));
-    return;
+    const result = await handleHttpHeartbeat(
+      this.sessionManager,
+      this.observerSessionRegistry,
+      body.sessionId,
+      body.livenessOwnerToken,
+    );
+    res.writeHead(result.status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(result.body));
   }
 
   private createHttpSessionContext(req: IncomingMessage): {

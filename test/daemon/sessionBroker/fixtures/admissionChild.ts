@@ -14,7 +14,8 @@ process.on("message", (message) => {
 
 // The registry fails fast on a busy lock (one 250 ms busy_timeout) and leaves the retry to the
 // caller, which yields the event loop first. A slow Windows fsync can hold a peer's write lock past
-// one wait, so retry within the parent's 15 s deadline. A busy transaction rolled back; retrying
+// one wait, so retry. Open and admit share one window that starts before open, matching the
+// parent's 15 s kill deadline, which starts before spawn. A busy transaction rolled back; retrying
 // replays the same request id.
 const RETRY_DEADLINE_MS = 10_000;
 const RETRY_DELAY_MS = 25;
@@ -25,8 +26,7 @@ function isRetryable(error: unknown): boolean {
   );
 }
 
-async function withBusyRetry<T>(operation: () => Promise<T>): Promise<T> {
-  const deadline = defaultTimer.now() + RETRY_DEADLINE_MS;
+async function withBusyRetry<T>(operation: () => Promise<T>, deadline: number): Promise<T> {
   for (;;) {
     try {
       return await operation();
@@ -39,21 +39,24 @@ async function withBusyRetry<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-const registry = await withBusyRetry(() => openSqliteBindingRegistry({ dbPath }));
+const deadline = defaultTimer.now() + RETRY_DEADLINE_MS;
+const registry = await withBusyRetry(() => openSqliteBindingRegistry({ dbPath }), deadline);
 try {
   process.send?.({ phase: "ready" });
   await begin.promise;
   const store = registry.sessionBrokerStore(scopeKey);
-  const result = await withBusyRetry(() =>
-    store.admit({
-      requestId,
-      fingerprint: `same-parameters:${requestId}`,
-      parameters: { device: "phone" },
-      owner: { daemonId: `child-${process.pid}`, pid: process.pid },
-      limits: { totalDeviceCap: 1, sessionCap: 1 },
-      resolveCreation: () => ({ platform: "ios", model: "phone", runtime: "27" }),
-      matches: () => false,
-    }),
+  const result = await withBusyRetry(
+    () =>
+      store.admit({
+        requestId,
+        fingerprint: `same-parameters:${requestId}`,
+        parameters: { device: "phone" },
+        owner: { daemonId: `child-${process.pid}`, pid: process.pid },
+        limits: { totalDeviceCap: 1, sessionCap: 1 },
+        resolveCreation: () => ({ platform: "ios", model: "phone", runtime: "27" }),
+        matches: () => false,
+      }),
+    deadline,
   );
   process.send?.({ phase: "result", kind: result.kind, resourceId: result.request.resourceId });
 } finally {

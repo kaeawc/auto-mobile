@@ -41,7 +41,7 @@ import type {
   FailureCapture,
   TimelineDataPoint,
   PeriodTotals,
-} from "../server/failuresResources";
+} from "../models/failureAnalytics";
 
 const RETENTION_MAX_ROWS = 10_000;
 const retentionState = createRowCapRetentionState();

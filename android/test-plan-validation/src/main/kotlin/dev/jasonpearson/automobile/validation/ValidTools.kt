@@ -73,6 +73,7 @@ object ValidTools {
         "shake",
         "sqlQuery",
         "putAppFile",
+        "swipeAt",
         "swipeOn",
         "systemTray",
         "tapOn",

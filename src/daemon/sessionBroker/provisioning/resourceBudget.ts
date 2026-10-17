@@ -36,7 +36,7 @@ export interface BindingResourceUsage {
   preparing: number;
   /** Bound old devices named by an open replace in intent or deleting phase. */
   deleting: number;
-  /** Daemon-named inventory devices without a registry commitment. */
+  /** Running (or power-unknown) daemon-named inventory devices without a registry commitment. */
   orphaned: number;
 }
 
@@ -226,10 +226,18 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
   return charges;
 }
 
+/**
+ * A known powered-off image with no registry commitment holds no live resource and is never
+ * deleted by the budget, so it must not block creation (#13017). Unknown power state still counts.
+ */
+function isPoweredOffLeftover(device: DeviceInfo): boolean {
+  return device.isRunning === false && device.isRunningStateKnown !== false;
+}
+
 function chargeOrphans(input: LedgerInput, charges: ResourceCharge[], seen: Set<string>): void {
   for (const device of input.inventory ?? []) {
     const stableId = deviceStableId(device);
-    if (!stableId || !isProductBrokerDevice(device.name)) {
+    if (!stableId || !isProductBrokerDevice(device.name) || isPoweredOffLeftover(device)) {
       continue;
     }
     const key = resourceKey(device.platform, stableId);

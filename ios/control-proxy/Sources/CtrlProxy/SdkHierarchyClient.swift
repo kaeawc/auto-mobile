@@ -50,22 +50,22 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
 
     /// Fetch the latest cached hierarchy from the SDK (fast, no main-thread work in the target app).
     public func fetchHierarchy() async -> SdkViewHierarchy? {
-        await optionalHierarchy(path: "/hierarchy")
+        await optionalHierarchy(path: SdkRoute.cachedHierarchy.path)
     }
 
     /// Request a fresh hierarchy walk from the SDK (slower, involves main-thread work in the target app).
     public func fetchFreshHierarchy() async -> SdkViewHierarchy? {
-        await optionalHierarchy(path: "/hierarchy/fresh")
+        await optionalHierarchy(path: SdkRoute.freshHierarchy.path)
     }
 
     /// Callers of the typed result log failures with their own continuation context.
     public func fetchFreshHierarchyResult() async -> SdkHierarchyFetchResult {
-        await fetchDecoded(path: "/hierarchy/fresh")
+        await fetchDecoded(path: SdkRoute.freshHierarchy.path)
     }
 
     /// Fetch lightweight SDK server metadata without walking or serializing the view tree.
     public func fetchServerInfo() async -> SdkHierarchyServerInfo? {
-        guard let data = await getData(path: "/health", transport: healthTransport) else { return nil }
+        guard let data = await getData(path: SdkRoute.health.path, transport: healthTransport) else { return nil }
         return try? JSONDecoder().decode(SdkHierarchyServerInfo.self, from: data)
     }
 
@@ -79,7 +79,7 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         guard let body = try? JSONEncoder().encode(SetMockRulesBody(rules: rules)) else {
             return false
         }
-        return await postExpectingOK(path: "/network/mock", body: body)
+        return await postExpectingOK(path: SdkRoute.networkMock.path, body: body)
     }
 
     /// Replace network mock rules and read back which ones the SDK's regex engine rejected. An SDK that
@@ -88,7 +88,7 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         guard let body = try? JSONEncoder().encode(SetMockRulesBody(rules: rules)) else {
             return SdkMockRulesOutcome(ok: false)
         }
-        guard let responseBody = await postReturningBody(path: "/network/mock", body: body) else {
+        guard let responseBody = await postReturningBody(path: SdkRoute.networkMock.path, body: body) else {
             return SdkMockRulesOutcome(ok: false)
         }
         guard let reply = try? JSONDecoder().decode(SetMockRulesReply.self, from: responseBody),
@@ -107,14 +107,14 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         guard let body = try? JSONEncoder().encode(SetNetworkFaultRulesBody(rules: rules)) else {
             return false
         }
-        return await postExpectingOK(path: "/network/fault-rules", body: body)
+        return await postExpectingOK(path: SdkRoute.networkFaultRules.path, body: body)
     }
 
     public func setNetworkErrorSimulation(_ config: NetworkErrorSimulationDTO) async -> Bool {
         guard let body = try? JSONEncoder().encode(config) else {
             return false
         }
-        return await postExpectingOK(path: "/network/error-simulation", body: body)
+        return await postExpectingOK(path: SdkRoute.networkErrorSimulation.path, body: body)
     }
 
     /// Draw a highlight in the target app through the SDK's in-app server.
@@ -122,13 +122,13 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         guard let body = try? JSONEncoder().encode(AddHighlightBody(id: id, shape: shape)) else {
             return .unavailable
         }
-        return await postHighlight(path: "/highlight", body: body)
+        return await postHighlight(path: SdkRoute.highlight.path, body: body)
     }
 
     public func performMagicTap() async -> Bool? {
         do {
             let (data, response) = try await SdkEndpointResolver.requestData(
-                for: jsonPost(path: "/accessibility/magic-tap", body: Data("{}".utf8)),
+                for: jsonPost(path: SdkRoute.magicTap.path, body: Data("{}".utf8)),
                 transport: transport, resolver: endpointResolver
             )
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
@@ -148,7 +148,7 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     public func sendTrigger(_ body: Data) async -> SdkTriggerReply? {
         do {
             let (data, response) = try await SdkEndpointResolver.requestData(
-                for: jsonPost(path: "/trigger", body: body), transport: transport, resolver: endpointResolver
+                for: jsonPost(path: SdkRoute.trigger.path, body: body), transport: transport, resolver: endpointResolver
             )
             guard let http = response as? HTTPURLResponse else { return nil }
             let payload = try? JSONDecoder().decode(SdkTriggerReplyPayload.self, from: data)

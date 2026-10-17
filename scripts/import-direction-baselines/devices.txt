@@ -8,6 +8,7 @@ src/devices/DeviceSessionManager.ts -> src/features/observe/Window
 src/devices/DeviceSessionManager.ts -> src/features/observe/android
 src/devices/DeviceSessionManager.ts -> src/features/observe/android/AndroidCtrlProxyClient
 src/devices/DeviceSessionManager.ts -> src/features/observe/android/foreignCtrlProxyForwardEvidence
+src/devices/DeviceSessionManager.ts -> src/features/observe/ctrlProxyClientLifecycle
 src/devices/DeviceSessionManager.ts -> src/features/observe/interfaces/ObserveScreenCache
 src/devices/DeviceSessionManager.ts -> src/features/observe/interfaces/Window
 src/devices/DeviceSessionManager.ts -> src/features/observe/ios

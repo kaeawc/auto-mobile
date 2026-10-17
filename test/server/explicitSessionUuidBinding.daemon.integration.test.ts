@@ -1,4 +1,4 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { makePool } from "../helpers/makePool";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
@@ -30,12 +30,10 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import type { BootedDevice } from "../../src/models";
 
 /**
@@ -91,15 +89,11 @@ beforeEach(async () => {
   utils.setBootedDevices("android", devices);
   utils.setBootedDevices("ios", []);
   PlatformDeviceManagerFactory.setInstance(utils);
-  pool = new DevicePool(
-    createDevicePoolDependencies(manager, "daemon", {
-      timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: utils,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      deviceSessionRepository: repository,
-    }),
-  );
+  pool = makePool(manager, "daemon", {
+    timer,
+    deviceManager: utils,
+    deviceSessionRepository: repository,
+  });
   await pool.initializeWithDevices(devices);
   DaemonState.getInstance().initialize(manager, pool);
   ToolRegistry.clearTools();

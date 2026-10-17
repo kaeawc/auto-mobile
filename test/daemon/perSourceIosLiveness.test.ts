@@ -1,4 +1,4 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { makePool } from "../helpers/makePool";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -7,10 +7,8 @@ import { evaluateDeviceDisconnects } from "../../src/daemon/disconnectMonitor";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { BootedDevice, Platform } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { IdleDeviceReaper } from "../../src/daemon/idleDeviceReaper";
 import { DevicectlDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
@@ -218,14 +216,10 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     deviceManager = new FakeDeviceManager();
-    devicePool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: deviceManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    devicePool = makePool(sessionManager, "test-daemon-session-id", {
+      timer,
+      deviceManager: deviceManager,
+    });
   });
 
   afterEach(() => {

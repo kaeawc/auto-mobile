@@ -287,6 +287,8 @@ function indexSource(
     imports: new Map(),
     registrations: [],
   };
+  const lateBound = new Map<string, string>();
+  const lateRegistrations: Array<{ variable: string; handler: ts.Node }> = [];
   function visit(node: ts.Node): void {
     if (ts.isFunctionDeclaration(node) && node.name) {
       index.bindings.set(node.name.text, node);
@@ -353,9 +355,60 @@ function indexSource(
         index.registrations.push({ name: name.text, handler });
       }
     }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      ["defineDeviceTool", "definePlainTool"].includes(node.expression.text) &&
+      node.arguments[0] &&
+      ts.isObjectLiteralExpression(node.arguments[0])
+    ) {
+      // defineDeviceTool({ name, handler, options: { outputSchema } }) (#11824)
+      const definition = node.arguments[0];
+      const property = (key: string) =>
+        definition.properties.find(
+          (candidate): candidate is ts.PropertyAssignment =>
+            ts.isPropertyAssignment(candidate) && candidate.name.getText(ast) === key,
+        );
+      const name = property("name")?.initializer;
+      const handler = property("handler")?.initializer;
+      const options = property("options")?.initializer;
+      const hasOutputSchema =
+        options &&
+        ts.isObjectLiteralExpression(options) &&
+        options.properties.some(
+          (candidate) =>
+            ts.isPropertyAssignment(candidate) && candidate.name.getText(ast) === "outputSchema",
+        );
+      if (name && ts.isStringLiteral(name) && hasOutputSchema) {
+        if (handler) {
+          index.registrations.push({ name: name.text, handler });
+        } else if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
+          // Late-bound handler: paired below with `<variable>.register(registry, handler)`.
+          lateBound.set(node.parent.name.text, name.text);
+        }
+      }
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      ts.isIdentifier(node.expression.expression) &&
+      node.expression.name.text === "register" &&
+      node.arguments[1]
+    ) {
+      lateRegistrations.push({
+        variable: node.expression.expression.text,
+        handler: node.arguments[1],
+      });
+    }
     ts.forEachChild(node, visit);
   }
   visit(ast);
+  for (const { variable, handler } of lateRegistrations) {
+    const name = lateBound.get(variable);
+    if (name) {
+      index.registrations.push({ name, handler });
+    }
+  }
   return index;
 }
 function auditHandler(

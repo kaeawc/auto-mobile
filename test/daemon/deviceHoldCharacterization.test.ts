@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
@@ -9,13 +10,10 @@ import type { BootedDevice } from "../../src/models";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { AndroidTransportAliases } from "../../src/utils/androidSerial";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 interface Answers {
   availability: ReturnType<DevicePool["genericAvailability"]>;
@@ -84,19 +82,15 @@ describe("device hold current-behavior characterization (#11803)", () => {
     // Observe the actual predicate installed by wireSessionDeviceHealth, not a copy of it.
     const wiring = spyOn(sessions, "setDeviceHealthMarkers");
     try {
-      pool = new DevicePool(
-        createDevicePoolDependencies(sessions, "hold-characterization", {
-          timer,
-          deviceManager: manager,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          deviceHealthMarkers: markers,
-          bindingExclusion: bindings,
-          foreignDeviceOwnership: ownership,
-          lifecycleCoordinator: lifecycle,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          deviceSessionContinuityEnabled: true,
-        }),
-      );
+      pool = makePool(sessions, "hold-characterization", {
+        timer,
+        deviceManager: manager,
+        deviceHealthMarkers: markers,
+        bindingExclusion: bindings,
+        foreignDeviceOwnership: ownership,
+        lifecycleCoordinator: lifecycle,
+        deviceSessionContinuityEnabled: true,
+      });
       expect(wiring).toHaveBeenCalledTimes(1);
       canRecover = wiring.mock.calls[0]![2];
     } finally {

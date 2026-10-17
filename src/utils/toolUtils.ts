@@ -286,3 +286,13 @@ export const awaitWhileRequestIsLive = async <T>(
     );
   });
 };
+
+/**
+ * Locate the ObserveResult inside a tool's structured payload (#11830): `observe` returns the
+ * ObserveResult as its top-level payload, every action tool nests the same snapshot under
+ * `.observation`. The one place that encodes that difference.
+ */
+export const observationOfPayload = (
+  toolName: string,
+  payload: Record<string, unknown>,
+): unknown => (toolName === "observe" ? payload : payload.observation);

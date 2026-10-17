@@ -916,6 +916,9 @@ class LaunchCancellationRethrowTest {
         ScannedSource("CaCertificateController.kt", exemptSuspendFns = emptyList()),
         ScannedSource("SettingsController.kt", exemptSuspendFns = emptyList()),
         ScannedSource("PackageController.kt", exemptSuspendFns = emptyList()),
+        ScannedSource("StorageController.kt", exemptSuspendFns = emptyList()),
+        ScannedSource("ClipboardController.kt", exemptSuspendFns = emptyList()),
+        ScannedSource("FocusController.kt", exemptSuspendFns = emptyList()),
         ScannedSource("WebSocketServer.kt", exemptSuspendFns = emptyList()),
       )
   }

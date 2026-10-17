@@ -1,16 +1,14 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { commitAcquisition, type AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
 import { holderOf } from "../../src/daemon/deviceBinding";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // A setActiveDevice rebind (receipt, refusePreparedForOtherRequest) keeps the OLD device pool-bound
 // to the session until its deferred cleanup settles. Losing OLD in that window must drop only OLD:
@@ -53,14 +51,7 @@ describe("losing the old device during a deferred rebind cleanup", () => {
     });
     devices = new FakeDeviceManager();
     devices.bootedDevices = booted;
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "rebind-eviction-daemon", {
-        timer,
-        deviceManager: devices,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    pool = makePool(sessions, "rebind-eviction-daemon", { timer, deviceManager: devices });
     await pool.initializeWithDevices(booted);
     await pool.bindOrReuseDeviceSession("s1", OLD, "android");
     sessions.updateSessionCache("s1", {

@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
@@ -12,13 +13,10 @@ import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevic
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { ExecutionTracker } from "../../src/server/executionTracker";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 
 // #10663: the owner-disconnect release was one-shot. The daemon vetoes it while the session has
@@ -72,39 +70,35 @@ describe("owner-disconnect release re-arm (#10663)", () => {
     });
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = [DEVICE];
-    devicePool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-        timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        ownerDisconnect: {
-          // Mirrors the daemon's port: defer while a call is in flight, else fenced release.
-          release: async (session, reason) => {
-            const deferral = veto.keeps(session);
-            if (deferral) {
-              return deferral;
-            }
-            await releaseSessionAndDevice(
-              sessionManager,
-              devicePool,
-              session.assignedDevice,
-              session.sessionId,
-              reason,
-              {
-                release: () =>
-                  sessionManager.releaseSessionIfOwned(
-                    session.sessionId,
-                    session,
-                    session.assignedDevice,
-                    reason,
-                  ),
-              },
-            );
-          },
+    devicePool = makePool(sessionManager, "test-daemon-session-id", {
+      timer,
+      deviceManager,
+      ownerDisconnect: {
+        // Mirrors the daemon's port: defer while a call is in flight, else fenced release.
+        release: async (session, reason) => {
+          const deferral = veto.keeps(session);
+          if (deferral) {
+            return deferral;
+          }
+          await releaseSessionAndDevice(
+            sessionManager,
+            devicePool,
+            session.assignedDevice,
+            session.sessionId,
+            reason,
+            {
+              release: () =>
+                sessionManager.releaseSessionIfOwned(
+                  session.sessionId,
+                  session,
+                  session.assignedDevice,
+                  reason,
+                ),
+            },
+          );
         },
-      }),
-    );
+      },
+    });
     // As in the daemon: an execution's end re-arms the releases it deferred.
     unsubscribeExecutionEnded = tracker.onSessionExecutionEnded((sessionUuids) =>
       devicePool.sessionExecutionsEnded(sessionUuids),

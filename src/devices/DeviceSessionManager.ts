@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
 import { CtrlProxyForwardOwnershipUnreadableError } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 import {
   describeDevices,
@@ -1101,11 +1102,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       options.signal,
     );
     await this.withLifecycleStart(lifecycleIdentityForDevice(device), options, async (signal) => {
-      if (platform === "android") {
-        AndroidCtrlProxyClient.resumeAfterDeviceStart(device.deviceId);
-      } else {
-        IOSCtrlProxyClient.resumeAfterDeviceStart(device.deviceId);
-      }
+      ctrlProxyClientLifecycle.resumeAfterDeviceStart(platform, device.deviceId);
       await this.verifyDevice(device.deviceId, platform, { ...options, signal }, device);
     });
     return device;

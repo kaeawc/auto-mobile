@@ -667,6 +667,10 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
       "appears only in cache-key glob-pattern string literals used to validate .github/workflows/*.yml content, not read from disk",
     ],
     [
+      "ios/sdk-wire",
+      "appears only in cache-key glob-pattern string literals used to validate .github/workflows/*.yml content, not read from disk",
+    ],
+    [
       "ios/Playground/Sources/ContentView.swift",
       "appears only in cache-key glob-pattern string literals used to validate .github/workflows/*.yml content, not read from disk",
     ],

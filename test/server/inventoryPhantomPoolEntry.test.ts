@@ -1,10 +1,10 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -18,12 +18,9 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Inventory contract: every surface reports the same devices and the same counts. The
 // booted-devices resource deliberately counts "from the live booted list so phantom (shut-down)
@@ -57,14 +54,7 @@ describe("a pooled device that discovery no longer lists", () => {
     manager.setBootedDevices("ios", []);
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessions = sessionManager;
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "hunt-phantom", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    const pool = makePool(sessionManager, "hunt-phantom", { timer, deviceManager: manager });
     await pool.initializeWithDevices([android]);
     // The emulator is shut down; adb now succeeds and lists nothing.
     manager.setBootedDevices("android", []);
@@ -112,14 +102,7 @@ describe("a pooled device that discovery no longer lists", () => {
     manager.setBootedDevices("ios", []);
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessions = sessionManager;
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "phantom-stats", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    const pool = makePool(sessionManager, "phantom-stats", { timer, deviceManager: manager });
     await pool.initializeWithDevices(devices);
     return { pool, manager };
   }

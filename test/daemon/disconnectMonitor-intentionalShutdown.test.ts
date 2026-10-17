@@ -1,20 +1,17 @@
+import { makePool } from "../helpers/makePool";
 import { expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { MISSING_DEVICE_MISS_THRESHOLD } from "../../src/daemon/missingDeviceLiveness";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { SingleFlightInterval } from "../../src/daemon/SingleFlightInterval";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { ExecutionTracker, executionTracker } from "../../src/server/executionTracker";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 interface DisconnectMonitorSurface {
   deviceDisconnectMonitor: SingleFlightInterval;
@@ -62,29 +59,25 @@ async function monitorHarness(platform: "android" | "ios", initiatingSessionId: 
   const tracker = new ExecutionTracker(timer, ids);
   const quarantineSessionCancel = spyOn(tracker, "cancelDeviceSessionExecutions");
   const quarantineDeviceCancel = spyOn(tracker, "cancelDeviceExecutions");
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer,
-      idGenerator: ids,
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      cancelDeviceSessionExecutions: Object.assign(
-        (sessionId: string, reason: string, options?: { excludeExecutionId?: string }) =>
-          tracker.cancelDeviceSessionExecutions(sessionId, reason, options),
-        {
-          cancelDeviceExecutions: (
-            deviceId: string,
-            reason: string,
-            options?: { excludeExecutionId?: string },
-          ) => tracker.cancelDeviceExecutions(deviceId, reason, options),
-        },
-      ),
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      emulatorLossIncidentStore: incidents,
-      recoveryPolicy: { onLoss: false, maxAttempts: 0 },
-      deviceSessionContinuityEnabled: false,
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    idGenerator: ids,
+    deviceManager: manager,
+    cancelDeviceSessionExecutions: Object.assign(
+      (sessionId: string, reason: string, options?: { excludeExecutionId?: string }) =>
+        tracker.cancelDeviceSessionExecutions(sessionId, reason, options),
+      {
+        cancelDeviceExecutions: (
+          deviceId: string,
+          reason: string,
+          options?: { excludeExecutionId?: string },
+        ) => tracker.cancelDeviceExecutions(deviceId, reason, options),
+      },
+    ),
+    emulatorLossIncidentStore: incidents,
+    recoveryPolicy: { onLoss: false, maxAttempts: 0 },
+    deviceSessionContinuityEnabled: false,
+  });
   const booted: BootedDevice = {
     deviceId: platform === "android" ? "emulator-5554" : "sim-1",
     name: "Monitor device",

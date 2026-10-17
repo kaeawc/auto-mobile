@@ -1,11 +1,10 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
-import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models/index";
 import { logger } from "../utils/logger";
 import { abortErrorFromSignal, createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
 import { isDeviceLostError } from "./deviceLossOutcome";
 
 // Barrier tool schema. A barrier is a pure synchronization point: every
@@ -14,40 +13,28 @@ import { isDeviceLostError } from "./deviceLossOutcome";
 // serialized section and no steps — each device's own track continues in
 // parallel after the barrier lifts.
 //
-// Wrapped in addDeviceTargetingToSchema (like criticalSectionSchema) so the
+// Defined with defineDeviceTool (device targeting + `.strict()`, like criticalSectionSchema) so the
 // `device` label / `sessionUuid` / `platform` PlanExecutor injects survive
 // `schema.parse`. Without them every track's barrier would route to the base
 // session's device and fail as a duplicate arrival (#6117).
-const barrierSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      lock: z
-        .string()
-        .describe("Shared barrier name; all devices using the same name synchronize together"),
-      deviceCount: z
-        .number()
-        .int()
-        .positive()
-        .describe("Number of devices that must arrive before the barrier lifts"),
-      timeout: z
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe("Barrier timeout ms (default 30000)"),
-      // Internal: the plan's base session UUID, injected by PlanExecutor
-      // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
-      // plans that reuse the same lock name get isolated barriers instead of
-      // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
-      __lockNamespace: z
-        .string()
-        .optional()
-        .describe("Internal plan-scoped lock namespace (injected)"),
-    })
-    .strict(),
-);
+const barrierInput = z.object({
+  lock: z
+    .string()
+    .describe("Shared barrier name; all devices using the same name synchronize together"),
+  deviceCount: z
+    .number()
+    .int()
+    .positive()
+    .describe("Number of devices that must arrive before the barrier lifts"),
+  timeout: z.number().int().positive().optional().describe("Barrier timeout ms (default 30000)"),
+  // Internal: the plan's base session UUID, injected by PlanExecutor
+  // (buildEnhancedStepParams). Scopes the shared coordinator so two independent
+  // plans that reuse the same lock name get isolated barriers instead of
+  // colliding. Not authored by users; stripped from recordings via INTERNAL_PARAMS.
+  __lockNamespace: z.string().optional().describe("Internal plan-scoped lock namespace (injected)"),
+});
 
-type BarrierParams = z.infer<typeof barrierSchema>;
+type BarrierParams = z.output<DeviceToolSchema<typeof barrierInput>>;
 
 /**
  * Barrier tool handler. Blocks the calling device at a named synchronization
@@ -102,20 +89,28 @@ const barrierHandler = async (
   });
 };
 
+// Plan-only: a multi-device coordination primitive that only makes sense as
+// a plan step (a single direct call would just block). Hidden from tools/list
+// discovery, still runnable in plans via getToolForPlan.
+const barrierTool = defineDeviceTool({
+  name: "barrier",
+  description:
+    "Synchronize multiple devices at a barrier, then let all proceed concurrently (no serialized section).",
+  input: barrierInput,
+  handler: barrierHandler,
+  options: {
+    defaultEnabled: false,
+    planOnly: true,
+    planExecutable: true,
+    acceptsPlanLockNamespace: true,
+  },
+});
+
 /**
  * Register the barrier tool.
  */
 export function registerBarrierTools(): void {
-  ToolRegistry.registerDeviceAware(
-    "barrier",
-    "Synchronize multiple devices at a barrier, then let all proceed concurrently (no serialized section).",
-    barrierSchema,
-    barrierHandler,
-    // Plan-only: a multi-device coordination primitive that only makes sense as
-    // a plan step (a single direct call would just block). Hidden from tools/list
-    // discovery, still runnable in plans via getToolForPlan.
-    { defaultEnabled: false, planOnly: true, planExecutable: true, acceptsPlanLockNamespace: true },
-  );
+  barrierTool.register();
 
   logger.info("Barrier tools registered");
 }

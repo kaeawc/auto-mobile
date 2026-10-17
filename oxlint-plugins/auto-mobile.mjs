@@ -1665,6 +1665,48 @@ function isEnvCoercionCallee(callee) {
   );
 }
 
+const DEFAULT_MAX_CLASS_LINES = 1000;
+
+// Non-blank lines in a class body cannot be gamed by reformatting; oxlint has no built-in class
+// length rule (#11784). Ratcheted like max-lines-per-function: WARN plus a count baseline.
+const maxClassLinesRule = {
+  meta: {
+    type: "suggestion",
+    messages: {
+      classTooLong:
+        "Class has too many lines. Split it into collaborators; the file-size and class-size ratchets only allow shrinking.",
+    },
+    schema: [
+      {
+        type: "object",
+        properties: { max: { type: "integer", minimum: 1 } },
+        additionalProperties: false,
+      },
+    ],
+  },
+  create(context) {
+    const max = context.options?.[0]?.max ?? DEFAULT_MAX_CLASS_LINES;
+    const text = context.sourceCode?.text ?? context.getSourceCode?.().text ?? "";
+    const check = (node) => {
+      const start = node.range?.[0] ?? node.start;
+      const end = node.range?.[1] ?? node.end;
+      if (typeof start !== "number" || typeof end !== "number") {
+        return;
+      }
+      let lines = 0;
+      for (const line of text.slice(start, end).split("\n")) {
+        if (/\S/.test(line)) {
+          lines++;
+        }
+      }
+      if (lines > max) {
+        context.report({ node, messageId: "classTooLong" });
+      }
+    };
+    return { ClassDeclaration: check, ClassExpression: check };
+  },
+};
+
 const noRawEnvNumberParseRule = {
   meta: {
     type: "problem",
@@ -1797,6 +1839,7 @@ const plugin = {
     "no-structured-content-read": noStructuredContentReadRule,
     "naming-convention": namingConventionRule,
     "no-raw-env-number-parse": noRawEnvNumberParseRule,
+    "max-class-lines": maxClassLinesRule,
   },
 };
 

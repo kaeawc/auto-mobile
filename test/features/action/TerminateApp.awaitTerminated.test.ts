@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { TerminateApp } from "../../../src/features/action/TerminateApp";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { logger } from "../../../src/utils/logger";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -109,7 +108,7 @@ describe("TerminateApp Android termination verification", () => {
     adb = new TerminatingAdb(timer);
     observedAt = undefined;
     invalidator = new FakeDeviceWindowCacheInvalidator(() => adb.events.push("invalidate"));
-    app = new TerminateApp(device, adb as unknown as AdbClient, {
+    app = new TerminateApp(device, adb, {
       timer,
       cacheInvalidator: invalidator,
     });

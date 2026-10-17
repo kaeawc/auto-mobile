@@ -353,6 +353,37 @@ function indexSource(
         index.registrations.push({ name: name.text, handler });
       }
     }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      ["defineDeviceTool", "definePlainTool"].includes(node.expression.text) &&
+      node.arguments[0] &&
+      ts.isObjectLiteralExpression(node.arguments[0])
+    ) {
+      // defineDeviceTool({ name, handler, options: { outputSchema } }) (#11824)
+      const definition = node.arguments[0];
+      const property = (key: string) =>
+        definition.properties.find(
+          (candidate): candidate is ts.PropertyAssignment =>
+            ts.isPropertyAssignment(candidate) && candidate.name.getText(ast) === key,
+        );
+      const name = property("name")?.initializer;
+      const handler = property("handler")?.initializer;
+      const options = property("options")?.initializer;
+      if (
+        name &&
+        ts.isStringLiteral(name) &&
+        handler &&
+        options &&
+        ts.isObjectLiteralExpression(options) &&
+        options.properties.some(
+          (candidate) =>
+            ts.isPropertyAssignment(candidate) && candidate.name.getText(ast) === "outputSchema",
+        )
+      ) {
+        index.registrations.push({ name: name.text, handler });
+      }
+    }
     ts.forEachChild(node, visit);
   }
   visit(ast);

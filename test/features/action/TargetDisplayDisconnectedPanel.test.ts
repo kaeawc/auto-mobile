@@ -9,7 +9,6 @@ import { DisplaySelectionError } from "../../../src/features/observe/DisplaySele
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { SwipeOn } from "../../../src/features/action/swipeon/SwipeOn";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import * as targetDisplayAction from "../../../src/features/action/TargetDisplayAction";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import type { CoordinateTapClient } from "../../../src/features/action/coordinateTapDispatch";
@@ -311,7 +310,7 @@ const disconnectedActions: Array<[string, DisconnectedCall]> = [
   [
     "swipeOn",
     (h) => {
-      const action = new SwipeOn(h.targetDevice, h.adb as unknown as AdbClient, {
+      const action = new SwipeOn(h.targetDevice, h.adb, {
         timer: new FakeTimer(),
         lastRenderedObservation: h.previous,
         displayTransitions: h.transitions,
@@ -323,12 +322,10 @@ const disconnectedActions: Array<[string, DisconnectedCall]> = [
   [
     "dragAndDrop",
     (h) => {
-      const action = new DragAndDrop(
-        h.targetDevice,
-        h.adb as unknown as AdbClient,
-        new FakeTimer(),
-        { lastRenderedObservation: h.previous, displayTransitions: h.transitions },
-      );
+      const action = new DragAndDrop(h.targetDevice, h.adb, new FakeTimer(), {
+        lastRenderedObservation: h.previous,
+        displayTransitions: h.transitions,
+      });
       action.observeScreen = h.observe;
       return action.execute({
         source: { text: "Source" },

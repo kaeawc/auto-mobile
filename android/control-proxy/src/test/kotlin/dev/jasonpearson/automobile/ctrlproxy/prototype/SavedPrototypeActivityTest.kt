@@ -16,8 +16,16 @@ import dev.jasonpearson.automobile.protocol.PrototypeDismissAction
 import dev.jasonpearson.automobile.protocol.PrototypeEmitAction
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeEventKind
+import dev.jasonpearson.automobile.protocol.PrototypeScalar
+import dev.jasonpearson.automobile.protocol.PrototypeStorageBlock
+import dev.jasonpearson.automobile.protocol.PrototypeStoredValues
+import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
@@ -333,5 +341,58 @@ class SavedPrototypeActivityTest {
     activity.onBackPressedDispatcher.onBackPressed()
     assertTrue(activity.isFinishing)
     assertEquals(0, SavedPrototypeEvents.buffer.size)
+  }
+
+  /** Passes io work straight through until [hold], then queues it for the test to release. */
+  private class GatedDispatcher : CoroutineDispatcher() {
+    var hold = false
+    val queue = ArrayDeque<Runnable>()
+
+    override fun dispatch(context: CoroutineContext, block: Runnable) {
+      if (hold) queue.addLast(block) else block.run()
+    }
+  }
+
+  @Test
+  fun `a stop followed straight by a destroy still saves the stored values`() = runBlocking {
+    val gate = GatedDispatcher()
+    val storage = FakePrototypeStorageStore()
+    SavedPrototypeActivityDependencies.ioDispatcher = gate
+    SavedPrototypeActivityDependencies.storageStore = { storage }
+    SavedPrototypeActivityDependencies.flushScope = CoroutineScope(Dispatchers.Unconfined)
+    val fixture = savedPrototypeFixture(actions = listOf(PrototypeToggleAction("dark")))
+    store.stored["panel"] =
+      SavedPrototypeLoadResult.Loaded(
+        fixture.id,
+        fixture.label,
+        fixture.slug,
+        fixture.savedAt,
+        fixture.spec.copy(
+          state = mapOf("dark" to PrototypeScalar.BooleanValue(false)),
+          storage = PrototypeStorageBlock(1, listOf("state:dark")),
+        ),
+        fixture.specJson,
+        emptyMap(),
+      )
+    val controller =
+      Robolectric.buildActivity(
+          SavedPrototypeActivity::class.java,
+          SavedPrototypeLaunch.intent(context, "panel"),
+        )
+        .setup()
+    compose.waitForIdle()
+    val button = store.stored.getValue("panel").spec.root as PrototypeButtonNode
+    controller.get().interact(PrototypeInteraction.Tap(checkNotNull(button.onTap)))
+
+    gate.hold = true
+    controller.pause().stop()
+    controller.destroy()
+    gate.hold = false
+    while (gate.queue.isNotEmpty()) gate.queue.removeFirst().run()
+
+    assertEquals(
+      PrototypeStoredValues(1, mapOf("state:dark" to JsonPrimitive(true))),
+      storage.stored("panel"),
+    )
   }
 }

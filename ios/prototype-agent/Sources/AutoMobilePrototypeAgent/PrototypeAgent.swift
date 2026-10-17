@@ -128,7 +128,13 @@ final class PrototypeAgent: NSObject {
         }
         server.onClientCountChanged = { [weak agent] count in agent?.clientCountChanged(count) }
         agent.server = server
+        agent.installRequestDriver()
         server.start()
+    }
+
+    /// Writes any pending stored prototype values; the viewer calls it as the app terminates.
+    static func flushStorage() {
+        instance?.model.flushStorage()
     }
 
     static func retractViewerEndpoint() {
@@ -139,7 +145,7 @@ final class PrototypeAgent: NSObject {
     private var outbox: PrototypeEventOutbox<[String: Any]>
 
     init(mode: PrototypeLifecycleMode = .session) {
-        model = PrototypeModel(mode: mode)
+        model = PrototypeModel(mode: mode, storage: PrototypeStorageCoordinator.fileBacked())
         outbox = PrototypeEventOutbox(mode: mode)
         super.init()
     }
@@ -223,8 +229,50 @@ final class PrototypeAgent: NSObject {
         model.onSessionChange?(model.session)
         observeKeyboard()
         observeAssistiveEscape()
+        observeStorageFlush()
         server.start()
         self.server = server
+        installRequestDriver()
+    }
+
+    /// Wires the `request` action (#12529): `via: "host"` calls go out as `prototype_request` frames
+    /// to the most recently authenticated host (one connection only) and come back as
+    /// `prototype_response`; `via: "device"` calls run on a dedicated URLSession client.
+    private func installRequestDriver() {
+        let driver = PrototypeRequestDriver(
+            clock: SystemPrototypeClock(),
+            device: PrototypeURLSessionClient()
+        ) { [weak self] frame in
+            guard let self, connectedClients > 0, let server else { return false }
+            server.sendToHost(frame, requestId: frame["requestId"] as? String ?? "")
+            return true
+        }
+        driver.onHostCancel = { [weak self] frame in
+            self?.server?.cancelHostRequest(frame, requestId: frame["requestId"] as? String ?? "")
+        }
+        driver.onHostSettled = { [weak self] requestId in self?.server?.hostRequestFinished(requestId) }
+        server?.onHostRequestsLost = { [weak driver] ids in driver?.hostRequestsLost(ids) }
+        driver.onComplete = { [weak model] requestId, response in
+            model?.completeRequest(requestId, response)
+        }
+        model.requestDriver = driver
+    }
+
+    /// Stored prototype values are debounced; the app going to the background or ending flushes them.
+    private func observeStorageFlush() {
+        for name in [UIApplication.didEnterBackgroundNotification, UIApplication.willTerminateNotification] {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(flushStorageNotification(_:)),
+                name: name,
+                object: nil
+            )
+        }
+    }
+
+    @objc
+    private func flushStorageNotification(_: Notification) {
+        model.flushStorage()
     }
 
     /// Selector delivery matches keyboard notifications and stays on the UIKit main actor.
@@ -424,6 +472,11 @@ final class PrototypeAgent: NSObject {
             body.merge(extra) { _, new in new }
             reply(body)
         }
+        // The host's answer to a `prototype_request` frame is not a request: nothing replies to it.
+        if type == PrototypeRequestWire.responseType {
+            model.requestDriver?.receiveHostResponse(message)
+            return
+        }
         if let rejection = PrototypeTestHooks.rejection(requestType: type, enabled: testHooksEnabled) {
             return result(false, rejection)
         }
@@ -490,6 +543,17 @@ final class PrototypeAgent: NSObject {
                 }
                 model.dismiss(reason: .agent)
                 result(true)
+            case PrototypeAgentProtocol.clearStorageRequest:
+                // Wipes the stored values of an id (#12526); the shown prototype is left as it is.
+                guard let id = message["id"] as? String, !id.isEmpty else {
+                    return result(false, "clear_prototype_storage needs an id")
+                }
+                do {
+                    let cleared = try model.clearStorage(id: id)
+                    result(true, extra: ["cleared": cleared])
+                } catch {
+                    result(false, "Could not clear stored values for \(id): \(error)")
+                }
             case "put_prototype_asset":
                 guard let id = message["id"] as? String,
                       let base64 = message["dataBase64"] as? String,
@@ -545,7 +609,11 @@ final class PrototypeAgent: NSObject {
     /// is dismissed (`reason: disconnect`) and its assets dropped, as on Android.
     private func clientCountChanged(_ count: Int) {
         connectedClients = count
-        if count < 1 { model.hostDisconnected() }
+        if count < 1 {
+            model.hostDisconnected()
+            // Calls still waiting on the host (a persistent prototype outlives it) cannot be answered.
+            model.requestDriver?.hostDisconnected()
+        }
         for pending in outbox.clientCountChanged(count) {
             server?.broadcast(pending)
         }

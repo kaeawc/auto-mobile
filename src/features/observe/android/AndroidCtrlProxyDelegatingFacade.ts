@@ -31,6 +31,7 @@ import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
 import { type FocusActionOutcome } from "./CtrlProxyFocus";
 import { type PrototypeAssetRequestOptions } from "./CtrlProxyPrototypes";
 import type { PrototypeSpec } from "../../prototype/prototypeSpec";
+import type { PrototypeRequestHost } from "../../prototype/prototypeRequestHandler";
 import type { PrototypeAssetUpload } from "../../prototype/prototypeAssets";
 import type {
   PrototypeAppearanceOverride,
@@ -592,6 +593,13 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   ): Promise<PrototypeResult> {
     return this.prototypes.requestDeleteSavedPrototype(id, timeoutMs, perf);
   }
+  requestClearPrototypeStorage(
+    id: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.prototypes.requestClearPrototypeStorage(id, timeoutMs, perf);
+  }
 
   requestInspectPrototypes(
     timeoutMs?: number,
@@ -613,6 +621,9 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   }
   onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void {
     return this.prototypes.onPrototypeEvent(listener);
+  }
+  attachPrototypeRequestHost(host: PrototypeRequestHost | undefined): void {
+    this.prototypes.attachRequestHost(host);
   }
 
   async requestAddHighlight(

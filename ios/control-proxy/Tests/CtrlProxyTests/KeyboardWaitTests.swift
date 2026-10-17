@@ -568,7 +568,7 @@ final class KeyboardWaitTests: XCTestCase {
             ("tapAndAwaitKeyboardFocus", "KeyboardWait.focus("),
             ("waitForKeyboardVisibility", "KeyboardWait.visibility("),
             ("waitForKeyboardClose<C: Clock>", "KeyboardWait.close("),
-            ("performPressKey", "KeyboardWait.destructivePostCondition("),
+            ("confirmDestructiveKeyOutcome", "KeyboardWait.destructivePostCondition("),
         ] {
             let source = try XCTUnwrap(sources.first { $0.contains("func \(name)(") })
             let start = try XCTUnwrap(source.range(of: "func \(name)("))
@@ -580,7 +580,7 @@ final class KeyboardWaitTests: XCTestCase {
             XCTAssertFalse(function.contains("RunLoop.current.run"))
             XCTAssertFalse(function.contains("Date()"))
             XCTAssertFalse(function.contains("systemUptime"))
-            if name == "performPressKey" {
+            if name == "confirmDestructiveKeyOutcome" {
                 XCTAssertTrue(function.contains("catchingObjCException({ focusedElement.exists })"))
             }
         }

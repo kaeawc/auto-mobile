@@ -786,13 +786,29 @@ textField `trailingIcon`, `imeAction` and `onSubmit` require `prototype_text_fie
 textField `leadingIcon` requires `prototype_text_field_leading_icon_v1`, with the same refusal.
 `scroll.refresh` (`{stateKey, onRefresh}`, pull-to-refresh on a vertical scroll) requires
 `prototype_refresh_v1`, with the same refusal.
-Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve
-once per show on the device; `status` remembers shown data beside state, `inspect` reports and
-adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).
+`setData`, `appendData` and `removeData` actions (a tap changing `/data`, with a `change` event per
+write and `baseRevision` required for later `/data` patches) require `prototype_data_actions_v1`,
+with the same refusal; see [data actions](design-docs/plat/android/prototype-ux.md#data-actions-12519).
+A root-level `storage` block (`{version, keys: ["state:darkMode", "data:/cart"]}`) makes the device keep
+those values per prototype id across shows, requires `prototype_storage_v1` with the same refusal,
+and is reported by `inspect` as `storage` per prototype. Stored values replace the spec's on the next
+show of the same id unless `version` changed; `clearStorage {id}` wipes them and `deleteSaved` also
+clears them; see [storage](design-docs/plat/android/prototype-ux.md#storage-12522).
+`request` actions (an HTTP call to any http(s) URL from a tap, written into `/data` with a
+`statusKey` lifecycle, `onSuccess` / `onError` lists and a `prototype_request` emit event) require
+`prototype_network_v1`, and `prototype_network_device_v1` as well for `via: "device"`, with the same
+refusal; see [the request action](design-docs/plat/android/prototype-ux.md#request-action-12523).
+Data is nested content the agent supplies and state is user-owned scalars. Rendering bindings
+(`{data:/pointer}` text, `{data: pointer}` conditions, `repeat` rows) resolve against the current data
+whenever it changes, starting with the show; action bindings (`request` url, headers, query and body,
+`setData` values, emit context) are read at the moment the action runs, after the earlier actions in
+the list have committed. The device may write data (`setData`, `appendData`, `removeData`, a request
+`into`), so patches to `/data` follow the `baseRevision` rule above. `status` remembers shown data
+beside state, `inspect` reports and adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).
 
 The `prototype` tool (Android and iOS simulators) is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is
-`show`, `patch`, `dismiss`, `status`, `inspect`, `awaitEvent`, `save`, `listSaved`, or `deleteSaved`. `show` requires a full `spec` (id,
+`show`, `patch`, `dismiss`, `status`, `inspect`, `awaitEvent`, `save`, `listSaved`, `deleteSaved`, or `clearStorage`. `show` requires a full `spec` (id,
 window, optional data and state, root) and always renders the whole spec. Instead of an inline
 `spec`, `show` accepts `specPath`, the absolute path of a local JSON file with the same spec
 (exactly one of the two): the daemon reads it, refuses a file over the spec byte limit (1 MiB)

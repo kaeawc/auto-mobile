@@ -1,9 +1,15 @@
 import type { PrototypeHiddenReason } from "./prototypeHidden";
 import { PrototypeShownSpecs } from "./PrototypeShownSpecs";
 import type { PrototypeData } from "./prototypeSpec";
+import { applyPrototypeDataWrite } from "./prototypeDataWrite";
+import { prototypeDataWriteOf } from "./prototypeDataWriteEvent";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
-import type { PrototypeEvent, PrototypeResult } from "../observe/android/ctrlProxyProtocol";
+import type {
+  PrototypeEvent,
+  PrototypeResult,
+  PrototypeStorageReport,
+} from "../observe/android/ctrlProxyProtocol";
 import {
   prototypeAppearanceAfterChange,
   shownAppearance,
@@ -43,6 +49,12 @@ export interface PrototypeLastResult {
    * whenever the device lacks `prototype_appearance_v1`.
    */
   appearance?: ShownPrototypeAppearance;
+  /**
+   * What the device last reported it has stored for this prototype (#12522), from an `inspect`.
+   * Absent when the device does not report it (no prototype_storage_v1, or no `storage` block), and
+   * after a show or a clearStorage, which leave the stored values for the next inspect to report.
+   */
+  storage?: PrototypeStorageReport;
   success: boolean;
   error?: string;
   totalTimeMs?: number;
@@ -63,6 +75,7 @@ export interface AdoptedPrototype {
   suspended?: boolean;
   hiddenReason?: PrototypeHiddenReason;
   appearance?: ShownPrototypeAppearance;
+  storage?: PrototypeStorageReport;
   pages: PrototypeEvent["pages"];
   stacks?: PrototypeEvent["stacks"];
   state: PrototypeEvent["state"];
@@ -111,6 +124,8 @@ export interface PrototypeStatusStore {
   ): PrototypeLastResult;
   readonly shownSpecs: PrototypeShownSpecs;
   recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void;
+  /** The device wiped this prototype's stored values (#12522): drop the reported `storage`. */
+  forgetStorage(deviceId: string, id: string): void;
 }
 /** What a show placed besides its display: the spec's data (#11673) and the chrome drawn (#12064). */
 export interface PrototypeRecordDetails {
@@ -249,6 +264,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...(prototype.suspended === true ? { suspended: true as const } : {}),
       ...(prototype.hiddenReason ? { hiddenReason: prototype.hiddenReason } : {}),
       ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
+      ...(prototype.storage ? { storage: structuredClone(prototype.storage) } : {}),
       success: true,
       timestamp: this.clock.now(),
     };
@@ -270,6 +286,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
 
   /** Accepted pushes may precede the successful show acknowledgement. */
   recordEvent(scope: PrototypeScope, event: PrototypeEvent): void {
+    this.applyDeviceDataWrite(scope.deviceId, event);
     const dispatches = this.showDispatches.get(scope.deviceId);
     if (
       dispatches?.has(event.id) &&
@@ -355,6 +372,42 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
 
   readonly shownSpecs = new PrototypeShownSpecs();
 
+  /**
+   * A `change` event reporting a device `/data` write (#12519) updates the host's spec copy and
+   * the data status reports. A write that cannot be applied exactly removes the reported data
+   * rather than leaving content the device no longer shows.
+   */
+  private applyDeviceDataWrite(deviceId: string, event: PrototypeEvent): void {
+    const write = prototypeDataWriteOf(event);
+    if (!write) {
+      return;
+    }
+    this.shownSpecs.recordDeviceDataWrite(deviceId, event.id, write);
+    for (const stored of this.scopes.values()) {
+      const entry = stored.deviceId === deviceId ? stored.shown.get(event.id) : undefined;
+      if (!entry) {
+        continue;
+      }
+      const applied =
+        write.op === "remove"
+          ? applyPrototypeDataWrite(entry.data, { op: "remove", path: write.path })
+          : write.value === undefined
+            ? undefined
+            : applyPrototypeDataWrite(entry.data, {
+                op: write.op,
+                path: write.path,
+                value: write.value,
+              });
+      const written = { ...entry };
+      if (applied?.success) {
+        written.data = applied.data;
+      } else {
+        delete written.data;
+      }
+      stored.shown.set(event.id, written);
+    }
+  }
+
   recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void {
     for (const stored of this.scopes.values()) {
       const entry = stored.deviceId === deviceId ? stored.shown.get(id) : undefined;
@@ -366,6 +419,21 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
           patched.data = structuredClone(data);
         }
         stored.shown.set(id, patched);
+      }
+    }
+  }
+
+  forgetStorage(deviceId: string, id: string): void {
+    for (const stored of this.scopes.values()) {
+      if (stored.deviceId !== deviceId) {
+        continue;
+      }
+      const entry = stored.shown.get(id);
+      if (entry?.storage) {
+        stored.shown.set(id, { ...entry, storage: undefined });
+      }
+      if (stored.lastResult?.id === id && stored.lastResult.storage) {
+        stored.lastResult = { ...stored.lastResult, storage: undefined };
       }
     }
   }

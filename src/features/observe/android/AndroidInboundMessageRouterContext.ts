@@ -102,7 +102,10 @@ interface InboundNavigationContext {
 interface InboundDelegateContext {
   readonly certificates: Pick<CtrlProxyCertificates, "handleCaCertRemovalResult">;
   readonly focus: Pick<CtrlProxyFocus, "convertAccessibilityNodeToElement">;
-  readonly prototypes: Pick<CtrlProxyPrototypes, "handlePrototypeEvent">;
+  readonly prototypes: Pick<
+    CtrlProxyPrototypes,
+    "handlePrototypeEvent" | "handlePrototypeRequest" | "handlePrototypeRequestCancel"
+  >;
   readonly storage: { notifyStorageChangeListeners(event: StorageChangedEvent): void };
 }
 

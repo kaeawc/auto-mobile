@@ -3,13 +3,24 @@ import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol
 import { z } from "zod";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { record, BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
+import { record } from "./prototypeTemplate";
+import { prototypeStorageSchema } from "./prototypeStorageSchema";
+import {
+  keySchema,
+  stateKeySchema,
+  pointerSchema,
+  prototypeDataActionValueSchema,
+  type PrototypeDataActionValue,
+} from "./prototypeActionValues";
+import { requestActionSchema, bindPrototypeRequestFollowUps } from "./prototypeRequestSchema";
+export { prototypeDataActionValueSchema, type PrototypeDataActionValue };
 export const {
   MAX_PROTOTYPE_SPEC_BYTES,
   MAX_PROTOTYPE_TEXT_SPANS,
   MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
   MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES,
   MAX_PROTOTYPE_DATA_BYTES,
+  MAX_PROTOTYPE_DATA_WRITE_BYTES,
   MAX_PROTOTYPE_DATA_DEPTH,
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
   MAX_PROTOTYPE_DATA_POINTER_LENGTH,
@@ -18,32 +29,12 @@ export const {
   MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH,
   MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL,
 } = contract.limits;
-export type PrototypeJson =
-  | null
-  | string
-  | number
-  | boolean
-  | PrototypeJson[]
-  | { [key: string]: PrototypeJson };
-// zod v3 calls a lazy schema's getter on every parse, so each getter builds its schema once and
-// returns that same instance afterwards instead of rebuilding it for every nested value.
-let jsonValueUnion: z.ZodType<PrototypeJson> | undefined;
-const jsonValueSchema: z.ZodType<PrototypeJson> = z.lazy(
-  () =>
-    (jsonValueUnion ??= z.union([
-      z.null(),
-      z.string(),
-      z.number().finite(),
-      z.boolean(),
-      z.array(jsonValueSchema),
-      z.record(jsonValueSchema),
-    ])),
-);
-// Preserve arbitrary JSON keys: Zod record decoding deliberately drops __proto__.
-const prototypeJsonSchema = z.custom<PrototypeJson>(
-  (value) => jsonValueSchema.safeParse(value).success,
-);
-export const prototypeJsonObjectSchema = z.record(prototypeJsonSchema).and(z.unknown());
+import {
+  prototypeJsonSchema,
+  prototypeJsonObjectSchema,
+  type PrototypeJson,
+} from "./prototypeJson";
+export { prototypeJsonSchema, prototypeJsonObjectSchema, type PrototypeJson };
 // Icon names are the closed list of Material icons the Android renderer bundles
 // (androidx material-icons-extended); the shared contract is the single source.
 const iconNames: ReadonlySet<string> = new Set(contract.definitions.iconName.values);
@@ -51,7 +42,6 @@ const iconNameSchema = z.string().refine((name) => iconNames.has(name), {
   message: "Unknown prototype icon name",
 });
 const iconVariantSchema = z.enum(["filled", "outlined", "rounded", "sharp", "twoTone"]);
-const keySchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
 const offsetSchema = z
   .object({
     x: z.number().finite().min(-10000).max(10000),
@@ -91,8 +81,6 @@ const selectorSchema = z
     container: containerSchema.optional(),
   })
   .strict();
-// State-key fields also take repeat placeholders such as `liked_{item.id}` (#11051).
-const stateKeySchema = z.string().regex(BOUND_STATE_KEY_PATTERN);
 const scalarSchema = z.union([z.string(), z.number().finite(), z.boolean()]);
 export type PrototypeDataValue =
   | string
@@ -101,11 +89,6 @@ export type PrototypeDataValue =
   | PrototypeDataValue[]
   | { [key: string]: PrototypeDataValue };
 export type PrototypeData = Record<string, PrototypeDataValue>;
-const pointerSchema = z
-  .string()
-  .min(1)
-  .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH)
-  .regex(/^(?:\/(?:[^~\/]|~[01])*)+$/);
 
 export type PrototypeCondition =
   | { valid: string | string[] }
@@ -413,14 +396,16 @@ export const placementSchema = z.discriminatedUnion("type", [
     .strict(),
 ]);
 export const prototypeEmitContextBindingSchema = z.union([
-  z.object({ state: stateKeySchema }).strict(),
-  z.object({ item: keySchema }).strict(),
-  z.object({ index: z.literal(true) }).strict(),
+  ...prototypeDataActionValueSchema.options,
   z.object({ page: z.string().min(1) }).strict(),
-  z.object({ data: pointerSchema }).strict(),
-  z.object({ value: prototypeJsonSchema }).strict(),
 ]);
 export type PrototypeEmitContextBinding = z.infer<typeof prototypeEmitContextBindingSchema>;
+// A data action path is `/data` plus a pointer; a repeat binds a whole `{index}` segment.
+const dataActionPathSchema = z
+  .string()
+  .min(1)
+  .max(MAX_PROTOTYPE_DATA_POINTER_LENGTH + 5);
+const dataActionFields = { path: dataActionPathSchema, value: prototypeDataActionValueSchema };
 // Retain arbitrary context names (Zod 3 record output alone drops __proto__).
 export const prototypeEmitContextSchema = z
   .record(z.string().min(1), prototypeEmitContextBindingSchema)
@@ -471,6 +456,10 @@ export const actionSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
+  z.object({ type: z.enum(["setData"]), ...dataActionFields }).strict(),
+  z.object({ type: z.enum(["appendData"]), ...dataActionFields }).strict(),
+  z.object({ type: z.enum(["removeData"]), path: dataActionPathSchema }).strict(),
+  requestActionSchema,
   z
     .object({ type: z.enum(["push"]), stack: z.string().min(1), screen: z.string().min(1) })
     .strict(),
@@ -480,6 +469,7 @@ export const actionSchema = z.discriminatedUnion("type", [
     .object({ type: z.enum(["replace"]), stack: z.string().min(1), screen: z.string().min(1) })
     .strict(),
 ]);
+bindPrototypeRequestFollowUps(() => actionSchema);
 const gestureNodeShape = {
   onLongPress: z.array(actionSchema).min(1).max(32).optional(),
   onDoubleTap: z.array(actionSchema).min(1).max(32).optional(),
@@ -1212,6 +1202,7 @@ const specSchema = z
       )
       .optional(),
     motion: z.enum(["none", "standard"]).optional(),
+    storage: prototypeStorageSchema.optional(),
     root: z.lazy(() => prototypeNodeSchema),
   })
   .strict();
@@ -1270,6 +1261,10 @@ export const PROTOTYPE_ACTION_TYPES = [
   "increment",
   "decrement",
   "dismiss",
+  "setData",
+  "appendData",
+  "removeData",
+  "request",
 ] as const;
 export const PROTOTYPE_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;
 

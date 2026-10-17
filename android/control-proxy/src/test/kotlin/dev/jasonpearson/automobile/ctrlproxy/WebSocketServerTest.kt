@@ -31,6 +31,7 @@ import kotlinx.serialization.json.Json
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -616,6 +617,76 @@ class WebSocketServerTest {
       closeReason = reason
     }
   }
+
+  @Test
+  fun `a prototype request goes to the latest connected host and to no one else`() =
+    runTest(testScope.testScheduler) {
+      val older = RecordingTransport()
+      val latest = RecordingTransport()
+      server.registerClient(1, older)
+      server.registerClient(2, latest)
+      val frame = """{"type":"prototype_request","requestId":"r-1"}"""
+
+      assertNotNull(server.sendToHost(frame))
+      runCurrent()
+
+      assertEquals(listOf(frame), latest.messages)
+      assertTrue(older.messages.isEmpty())
+    }
+
+  @Test
+  fun `a host whose queue is full is disconnected and not reported as the request's owner`() =
+    runTest(testScope.testScheduler) {
+      val stalled = StalledTransport()
+      server.registerClient(1, stalled)
+      server.broadcast("""{"type":"must_deliver","index":-1}""")
+      runCurrent() // The stalled sender is blocked on its first frame.
+      repeat(WebSocketServer.OUTGOING_HARD_CEILING) {
+        server.broadcast("""{"type":"must_deliver","index":$it}""")
+      }
+
+      assertNull(server.sendToHost("""{"type":"prototype_request","requestId":"r-1"}"""))
+      runCurrent()
+
+      assertEquals(0, server.getConnectionCount())
+    }
+
+  @Test
+  fun `with no connected host a prototype request is not sent`() {
+    assertNull(server.sendToHost("""{"type":"prototype_request","requestId":"r-1"}"""))
+  }
+
+  @Test
+  fun `a host prototype response is routed to its handler and never decoded as a request`() =
+    runTest(testScope.testScheduler) {
+      val responses = mutableListOf<String>()
+      val handled = mutableListOf<WebSocketRequest>()
+      val routed =
+        WebSocketServer(
+          port = 0,
+          scope = testScope,
+          messageHandler =
+            object : WebSocketMessageHandler {
+              override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
+                handled += request
+                return null
+              }
+            },
+          onPrototypeResponse = { responses += it },
+        )
+      val transport = RecordingTransport()
+      val client = routed.registerClient(1, transport)
+      val frame =
+        """{"type":"prototype_response","requestId":"r-1","ok":true,"status":200,"headers":{},"body":null,"durationMs":3}"""
+
+      routed.handleClientMessage(frame, client)
+      runCurrent()
+
+      assertEquals(listOf(frame), responses)
+      assertTrue(handled.isEmpty())
+      // No error frame came back for an unknown request type.
+      assertTrue(transport.messages.isEmpty())
+    }
 
   private class RecordingTransport : WebSocketServer.ClientTransport {
     val messages = mutableListOf<String>()

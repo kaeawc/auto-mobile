@@ -306,6 +306,158 @@ devices are refused before upload, display or patch dispatch. The \`prototype_ev
 
 `;
 
+export const GUIDE_DATA_ACTIONS = `### Data actions
+
+A tap can change \`/data\` on the device without the agent answering it. Three actions write a
+member of \`data\`; each \`path\` is \`/data\` plus a non-empty data pointer (the same syntax and
+\`MAX_PROTOTYPE_DATA_POINTER_LENGTH\` as \`{data: pointer}\`), so the whole document cannot be
+written:
+
+- \`{type: "setData", path, value}\` creates or replaces an object member, or replaces an existing
+  array element. A missing parent is an error.
+- \`{type: "appendData", path, value}\` appends to the existing array at \`path\`.
+- \`{type: "removeData", path}\` removes an existing member or element; later elements shift down.
+
+\`value\` uses the emit.context binding forms except \`page\`: \`{value: json}\` is the literal,
+\`{state: key}\` reads state, \`{data: pointer}\` reads data, and \`{item: field}\` and
+\`{index: true}\` read the repeat row (repeat only). A written value must be data: strings, booleans,
+finite numbers, arrays and objects, without null. Inside a repeat, a whole \`{index}\` segment of
+\`path\`, as in \`/data/cart/{index}\`, is bound to the current row; \`{index}\` anywhere else, or
+\`{alias.field}\`, is rejected.
+
+The host validates pointer syntax and \`{index}\` use, rejects a literal value data cannot hold, and
+rejects an \`appendData\` whose target resolves in the spec's own \`data\` to something other than an
+array. A target that only exists after earlier writes is checked by the device. A write that would
+leave \`data\` over \`MAX_PROTOTYPE_DATA_WRITE_BYTES\` (or over a depth or array limit), or whose
+target is missing or not an array, changes nothing.
+Actions run in order, so a later action sees an earlier write.
+
+Each write is a \`change\` event with \`name\` the written \`/data/...\` path and \`payload\`
+\`{op: "set"|"append"|"remove", value?, revision}\`; \`awaitEvent\` with \`kind: "change"\` returns it.
+\`revision\` is the device revision after the write, the same counter as a patch result's. The host
+applies each write to its own copy of the spec and to \`status\` data, so both stay current. The
+agent's \`/data\` patches and a device's writes never silently lose each other: once the device
+has written a prototype's data, a patch with \`/data\` ops needs \`baseRevision\` (the latest
+\`revision\` the agent has seen) and is refused with \`conflict: {revision, state, data}\` when a write
+newer than that revision touched an overlapping path (\`data\` lists those paths). A \`show\` makes its
+own \`data\` authoritative again and clears the history.
+
+Data actions require \`prototype_data_actions_v1\`. A show or patch result that contains one is
+refused on a device without it, before anything is shown or sent.
+
+`;
+
+export const GUIDE_STORAGE = `### Storage
+
+A show resets \`state\` and \`data\` to the spec's values, so what the user typed or a data action
+changed is lost on the next show, and saved prototypes keep the spec but no user data. A root-level
+\`storage\` block keeps chosen values on the device, for example
+\`"storage": {"version": 1, "keys": ["state:darkMode", "data:/cart"]}\`.
+
+\`version\` is an integer from 1; \`keys\` holds 1 to \`MAX_PROTOTYPE_STORAGE_KEYS\` unique entries.
+\`state:<key>\` names a key declared in \`state\`. \`data:<pointer>\` is an RFC 6901 pointer to a member of
+\`data\` (the pointer is relative to \`data\`: \`data:/cart\` is \`/data/cart\`, the path a data action
+uses; the whole document is refused). Listing a pointer and its ancestor or descendant is rejected,
+and the values the spec itself holds for the listed keys must fit \`MAX_PROTOTYPE_STORAGE_BYTES\`
+(counted as the UTF-8 bytes of each storage key plus its compact JSON value).
+
+The device saves each listed key, keyed by the spec \`id\`, after every write: a user edit, a device
+data action or a request response. A write that would take the stored total over
+\`MAX_PROTOTYPE_STORAGE_BYTES\` still applies on screen but is not stored (\`skippedKeys\` in inspect).
+Stored values survive a dismiss, a process restart and a saved prototype's relaunch.
+
+Precedence on the next show of the same \`id\` (the adopted decision of #12522):
+
+- Stored values replace the spec's values for the listed keys. The spec's \`state\` is otherwise still
+  authoritative.
+- A different \`storage.version\` than the values were stored under discards all of them: the spec's
+  values stand. Bump \`version\` when you change what a key means.
+- A stored key the spec no longer lists is dropped, and a show without a \`storage\` block drops every
+  stored value of that id.
+- A stored value that no longer fits the spec is dropped and the spec's value stands: a \`state\` value
+  whose type (string, number, boolean) differs from the spec's, a state key the spec no longer
+  declares, a \`data\` value of another JSON kind than the spec's value at that pointer, or one that
+  cannot be written there (missing parent, a data limit).
+- Restoring happens before the first draw and emits no \`change\` event. After a show, read the real
+  values with inspect: the show result and the host's cached copy carry the spec's values.
+- A host \`patch\` against a stored key wins: it applies under the usual \`baseRevision\` conflict rules
+  and the device then stores the new value.
+
+\`inspect\` reports \`storage: {version, keys: [{key, bytes}], totalBytes, skippedKeys?}\` per prototype
+for the keys that currently hold a stored value, or omits it when the device does not report it.
+\`{action: "clearStorage", id}\` wipes the stored values of an id (the next show starts from the spec;
+the result has \`cleared\`, the number of keys removed). \`deleteSaved\` also clears that id's storage.
+\`storage\`, \`clearStorage\` and the report need \`prototype_storage_v1\`: a spec with \`storage\` is refused
+before anything is shown, and \`clearStorage\` before anything is sent, on a device without it.
+
+
+`;
+
+export const GUIDE_REQUEST = `### Requests
+
+\`{type: "request", url, method?, headers?, query?, body?, into?, statusKey?, via?, timeoutMs?, onSuccess?, onError?}\`
+calls an HTTP endpoint from a tap and writes the answer into \`/data\`, so a prototype can load and
+post real content without the agent answering each tap. It requires \`prototype_network_v1\`
+(\`prototype_network_device_v1\` as well for \`via: "device"\`); a show or patch result containing
+one is refused on a device without them.
+
+- \`url\` is any absolute \`http\` or \`https\` URL (at most 2048 characters). There is no host
+  allowlist: localhost, loopback and private addresses are allowed. It takes the text placeholders of
+  any text field (\`{key}\` state, \`{data:/pointer}\`, repeat \`{item.field}\` / \`{index}\`). Without a
+  placeholder it must parse as an http(s) URL; with one, it must start with a literal \`http://\` or
+  \`https://\`. (\`{state:key}\` is not a placeholder: write \`{key}\`.)
+- \`method\` is GET (default), POST, PUT, PATCH, DELETE or HEAD. A GET or HEAD cannot have a \`body\`.
+- \`headers\` and \`query\` (up to 16 entries each) map a name to a literal string or to a value
+  binding: \`{state: key}\`, \`{data: pointer}\`, \`{value: scalar}\`, \`{item: field}\` / \`{index: true}\`
+  (repeat only). A bound value must be a string, number or boolean. \`query\` entries are set on the URL
+  in order (a key already in the URL is replaced). Literal header and query strings take the same
+  text placeholders as \`url\`.
+- \`body\` is a value binding, so a literal body is \`{value: json}\`; \`{state: key}\` sends the state
+  value and \`{data: pointer}\` the data subtree. A non-string body is sent as JSON with
+  \`Content-Type: application/json\` unless a header sets one; a string body is sent as is.
+- \`into\` is a \`/data/<pointer>\` path with the data-action rules (a whole \`{index}\` segment inside a
+  repeat); it must name an object member, not an array element, and its parent must exist. Without
+  \`into\` nothing is written to data.
+- \`statusKey\` names a declared **string** state key. The device sets it to \`"loading"\` when the
+  request starts and to \`"success"\` or \`"error"\` when it ends, so \`visibleWhen\` can show a spinner
+  (\`{key: "feedStatus", equals: "loading"}\`) or an error. Do not bind it to a control with fixed options.
+- \`via\` is \`"host"\` (default: the host runs the call and the device sends only the resolved request
+  frame) or \`"device"\` (the device makes the call itself, which on Android reaches localhost through
+  \`adb reverse\`, see below).
+- \`timeoutMs\` is optional, 1 to \`MAX_PROTOTYPE_REQUEST_TIMEOUT_MS\`; the default is
+  \`DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS\`.
+- \`onSuccess\` and \`onError\` are action lists (1 to 32) run after the request ends, for example
+  \`setState\`, \`push\` or another \`request\`. Requests nest up to \`MAX_PROTOTYPE_ACTION_DEPTH\` levels.
+
+**Response.** A 2xx response is parsed: JSON is written to \`into\` exactly as \`setData\` would write it,
+anything else as a string, an empty body (and a HEAD) as \`""\`. The response must be data (no null,
+within the data limits) or the request fails with \`invalid_response\`. Metadata goes to \`<into>__meta\`,
+a sibling whose key is the last segment of \`into\` plus \`__meta\` (\`/data/feed\` writes
+\`/data/feed__meta\`): \`{status?, headers?, durationMs, error?: {code, message}}\`. \`status\` and
+\`headers\` (names lower-cased) are present once a response arrived; \`error\` is present for every
+failure. A non-2xx status leaves \`into\` untouched, writes the metadata with
+\`error: {code: "http_error", message: "HTTP 404"}\` and counts as an error. If the metadata would not fit
+the data write limit, \`headers\` is dropped. Other \`error.code\` values: \`timeout\`, \`too_large\`,
+\`connection_refused\`, \`cancelled\`, \`invalid_url\`, \`invalid_request\`, \`network\`, \`too_many_in_flight\`,
+\`invalid_response\`.
+
+**Order.** On completion the device writes \`into\`, then \`<into>__meta\`, then \`statusKey\`, then sends the
+request event, then runs \`onSuccess\` or \`onError\`. Each \`/data\` write is a \`change\` event as for data
+actions. The request event is an \`emit\` with \`name\` \`prototype_request\` (reserved: an authored
+\`emit\` cannot use it) and \`payload\`
+\`{requestId, method, url, via, into?, outcome: "success"|"error", status?, durationMs, error?: {code, message}}\`,
+where \`url\` is the resolved URL cut to 2048 characters. Await it with
+\`awaitEvent {kind: "emit", eventName: "prototype_request"}\`.
+
+**Limits.** A response body over \`MAX_PROTOTYPE_RESPONSE_BYTES\` fails with \`too_large\` (the value never
+exceeds \`MAX_PROTOTYPE_DATA_WRITE_BYTES\`, so an accepted response fits one \`/data\` write). At most
+\`MAX_PROTOTYPE_REQUESTS_IN_FLIGHT\` requests run per device; another fails with \`too_many_in_flight\`.
+A request to an \`into\` that already has one in flight cancels the first: the latest request wins. The
+cancelled one writes nothing, does not touch \`statusKey\`, runs no follow-up and reports a
+\`cancelled\` event. Dismissing the prototype cancels all its requests.
+
+`;
+
 export const GUIDE_DATA = `## Data
 
 \`data\` is agent-owned, read-only content: nested objects, arrays, strings, finite numbers and
@@ -373,7 +525,7 @@ The host validates data and repeat paths; the device resolves bindings once per 
 repeat expansion. All data uses require \`prototype_data_model_v1\`; an older device is refused
 before uploads or show, with an update/relaunch hint. \`status\` reports the last successful show's
 data next to state; \`inspect\` reports and adopts device data. Absent data is omitted; dismiss
-clears it. Events never carry data.
+clears it. Events carry data only as the value of a device data write (see Data actions).
 `;
 
 export const GUIDE_COMPONENTS = `## Reuse: components
@@ -637,8 +789,10 @@ must keep that id. Replacement nodes cannot contain \`use\` nodes or element
 anchors. Inline the component, use a bounds anchor, or use \`show\`.
 
 The agent writes data; the user writes state. Data-only patches and patches
-containing only data ops and \`replaceNode\` ignore \`baseRevision\`. Any state op,
-including \`test\`, requires \`baseRevision\`. A device supporting the capability
+containing only data ops and \`replaceNode\` ignore \`baseRevision\`, until the device has
+written the prototype's data with a data action (\`prototype_data_actions_v1\`): from then on a
+\`/data\` op also needs \`baseRevision\` and conflicts with newer overlapping device writes (see
+Data actions). Any state op, including \`test\`, requires \`baseRevision\`. A device supporting the capability
 must refuse the whole patch with \`conflict\` if the user changed a touched state
 key since that revision, returning the current revision and those keys' values.
 
@@ -719,4 +873,18 @@ button, iconButton, fab, chip and listItem; false disables the control and skips
 whole action list atomically, shows errors on every listed field, and sends
 \`{kind:"validation_failed", keys:[…]}\` naming only the failing keys. \`change\` events carry
 \`validity: {key:boolean}\` for checked keys. Both event kinds retain the usual event envelope.
+`;
+
+export const GUIDE_DEVICE_LOOPBACK = `## Requests to localhost from the device
+
+On Android, \`localhost\`, \`127.0.0.1\` and \`[::1]\` in a \`request\` action with \`via: "device"\` mean the
+device itself. When you \`show\` such a prototype, the host runs \`adb reverse tcp:<port> tcp:<port>\` for
+each literal port (a URL without a port reverses 80, or 443 for https), removes only the reverses it
+created when the prototype is dismissed or the device disconnects, and leaves a reverse that already
+existed alone. A failed reverse never fails the show; \`inspect\` reports it as \`reverseFailures\`.
+
+A port that is a binding (\`http://localhost:{port}/feed\`) cannot be reversed, because it is only
+known when the request runs. \`inspect\` lists such URLs as \`unreversiblePorts\`. Use \`via: "host"\` for
+those requests. A saved prototype launched with no host connected gets no reverse either.
+iOS simulators share the Mac's network, so nothing is reversed there.
 `;

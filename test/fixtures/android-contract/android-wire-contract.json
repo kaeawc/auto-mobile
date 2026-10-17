@@ -47,6 +47,23 @@
       ]
     },
     {
+      "serialName": "clear_prototype_storage",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
       "serialName": "delete_saved_prototype",
       "fields": [
         {
@@ -3489,6 +3506,12 @@
           "type": "object:dev.jasonpearson.automobile.protocol.SavedPrototypePinInfo",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "cleared",
+          "type": "int",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -4388,6 +4411,20 @@
     "PrototypeRepeat": [],
     "PrototypeScalar": [],
     "PrototypeValidityKeys": [],
+    "appendData": [
+      {
+        "name": "path",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "value",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "badge": [
       {
         "name": "id",
@@ -6650,6 +6687,12 @@
         "type": "json",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "storage",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStorageBlock",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeSpecTheme": [
@@ -7015,6 +7058,66 @@
         "name": "stacks",
         "type": "map",
         "nullable": false,
+        "hasDefault": true
+      },
+      {
+        "name": "storage",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeStorageReport",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeStorageBlock": [
+      {
+        "name": "version",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "keys",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeStorageKeyBytes": [
+      {
+        "name": "key",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "bytes",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypeStorageReport": [
+      {
+        "name": "version",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "keys",
+        "type": "list",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "totalBytes",
+        "type": "int",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "skippedKeys",
+        "type": "list",
+        "nullable": true,
         "hasDefault": true
       }
     ],
@@ -8890,6 +8993,14 @@
         "hasDefault": true
       }
     ],
+    "removeData": [
+      {
+        "name": "path",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      }
+    ],
     "replace": [
       {
         "name": "stack",
@@ -8902,6 +9013,74 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
+      }
+    ],
+    "request": [
+      {
+        "name": "url",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "method",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "headers",
+        "type": "map",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "query",
+        "type": "map",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "body",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "into",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "statusKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "via",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "timeoutMs",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onSuccess",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "onError",
+        "type": "list",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "row": [
@@ -9368,6 +9547,20 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      }
+    ],
+    "setData": [
+      {
+        "name": "path",
+        "type": "string",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "value",
+        "type": "json",
+        "nullable": false,
+        "hasDefault": false
       }
     ],
     "setPage": [

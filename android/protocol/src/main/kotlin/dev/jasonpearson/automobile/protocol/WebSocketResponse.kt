@@ -776,6 +776,8 @@ data class PrototypeResult(
   /** Only a successful show reply: why the existing prototype is hidden. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val hiddenReason: PrototypeHiddenReason? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val pin: SavedPrototypePinInfo? = null,
+  /** Only the reply to `clear_prototype_storage`: how many stored keys were removed. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val cleared: Int? = null,
 ) : WebSocketResponse()
 
 @OptIn(ExperimentalSerializationApi::class)
@@ -916,6 +918,10 @@ data class PrototypeStatusEntry(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val data: JsonObject? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER)
   val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
+  /**
+   * What the device stores for this prototype (`prototype_storage_v1`); absent without `storage`.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val storage: PrototypeStorageReport? = null,
 )
 
 /** Input validation vocabulary understood by this protocol version. */

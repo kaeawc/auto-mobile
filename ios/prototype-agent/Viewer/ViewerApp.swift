@@ -15,7 +15,7 @@ struct PrototypeViewerApp: App {
         let layoutDirectory = (documents ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents"))
             .appendingPathComponent(PrototypeViewerLayoutLoader.documentsDirectoryName)
         let locations = Bundle.main.path(forResource: "prototype", ofType: "json").map { [$0] } ?? []
-        let model = PrototypeModel(mode: .standalone)
+        let model = PrototypeModel(mode: .standalone, storage: PrototypeStorageCoordinator.fileBacked())
         model.setDeviceDark(UITraitCollection.current.userInterfaceStyle == .dark)
         let fallback = PrototypeViewerSpecLoader(reader: PrototypeViewerFileReader(), locations: locations)
         let launch: PrototypeViewerLaunch
@@ -140,10 +140,20 @@ private final class ViewerTerminationObserver: NSObject {
         NotificationCenter.default.addObserver(
             self, selector: #selector(terminate(_:)), name: UIApplication.willTerminateNotification, object: nil
         )
+        // iOS can kill a suspended app without willTerminate, so stored values flush on backgrounding too.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(background(_:)), name: UIApplication.didEnterBackgroundNotification, object: nil
+        )
+    }
+
+    @objc
+    private func background(_: Notification) {
+        PrototypeAgent.flushStorage()
     }
 
     @objc
     private func terminate(_: Notification) {
+        PrototypeAgent.flushStorage()
         PrototypeAgent.retractViewerEndpoint()
     }
 }

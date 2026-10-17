@@ -13,6 +13,9 @@ import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -100,6 +103,9 @@ fun interface PrototypeResultSink {
     hiddenReason: PrototypeHiddenReason? = null,
   ) = sendShown(requestId, missingAssets, appearance, hiddenReason)
 
+  /** The reply to `clear_prototype_storage`. Sinks that predate it answer a bare success. */
+  suspend fun sendCleared(requestId: String?, cleared: Int) = send(requestId, true, null)
+
   /** The reply to `inspect_prototypes`. Sinks that predate it answer a bare success. */
   suspend fun sendPrototypeStatus(
     requestId: String?,
@@ -157,6 +163,15 @@ class PrototypeController(
   private val settle: suspend (Long) -> Unit = { delay(it) },
   /** The supplied host handles the first surface; additional surfaces need independent hosts. */
   private val hostFactory: () -> PrototypeHost = { host },
+  /**
+   * Keeps the values a spec's `storage` block lists across shows (#12522, `prototype_storage_v1`).
+   * Null leaves `storage` inert, and the device must not advertise the capability.
+   */
+  private val storage: PrototypeStoragePersistence? = null,
+  /** The transports behind `request` actions (#12528). */
+  private val httpClients: PrototypeHttpClients = PrototypeHttpClients.Unavailable,
+  /** Where requests wait for their response; they are cancelled when their prototype ends. */
+  private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
   val isShowing: Boolean
     get() = surfaces.values.any { it.host.isShowing }
@@ -226,6 +241,9 @@ class PrototypeController(
   }
 
   private val mutex = Mutex()
+
+  /** One cap on requests in flight for every surface this controller shows. */
+  private val requestLimiter = PrototypeRequestLimiter()
 
   private class Surface(
     val runtime: PrototypeRuntime,
@@ -417,6 +435,19 @@ class PrototypeController(
     return validated
   }
 
+  /** Whether a spec with stored values applied still passes the same validation as a shown one. */
+  private fun restoredSpecFits(restored: PrototypeSpec): Boolean =
+    try {
+      validate(restored)
+      true
+    } catch (error: IllegalArgumentException) {
+      Log.w("PrototypeController", "Restored prototype values rejected: ${error.message}")
+      false
+    } catch (error: IllegalStateException) {
+      Log.w("PrototypeController", "Restored prototype values rejected: ${error.message}")
+      false
+    }
+
   /** Snapshot decision, like windowMetadata: no controller mutex is acquired. */
   fun hiddenReason(displayId: Int, ownWindowCaptured: Boolean?): PrototypeHiddenReason? =
     surfaces.values
@@ -473,7 +504,15 @@ class PrototypeController(
     displayId: Int = Display.DEFAULT_DISPLAY,
     appearance: PrototypeAppearanceOverride? = null,
   ): Surface {
-    val validated = validate(spec)
+    val authored = validate(spec)
+    // A same-id show reads the document the shown prototype is about to have written.
+    surfaces[spec.id]?.runtime?.flushStorage()
+    // A flush the disk refused leaves values the old session still owes; they carry over.
+    val unsaved = surfaces[spec.id]?.runtime?.storage?.unsavedValues()
+    val opened =
+      storage?.prepare(authored, unsaved, ::restoredSpecFits)
+        ?: PrototypeStorageOpen(authored, null)
+    val validated = opened.spec
     val request =
       render(validated)
         .copy(
@@ -511,6 +550,12 @@ class PrototypeController(
         nextRevision = { nextRevision(validated.id) },
         previousStacks =
           if (preservePages) previous?.runtime?.current?.stacks.orEmpty() else emptyMap(),
+        storage = opened.session,
+        httpClients = httpClients,
+        requestScope = requestScope,
+        // A response lands between interactions, never in the middle of one.
+        exclusively = { block -> settleRequest(runtime, block) },
+        requestLimiter = requestLimiter,
       )
     val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
@@ -547,8 +592,15 @@ class PrototypeController(
       scope.restore(scopeBefore)
       throw error
     }
+    // The accepted window is the first point the stored document may change.
+    opened.commit()
+    // Its unsaved values live on in the new session; it must not write them again behind it.
+    if (previous != null) previous.runtime.storage?.invalidate()
     // Render acceptance precedes replacing records. Refused renders keep all old timers/runtime.
     val retiring = if (replaceOthers) surfaces.values.filter { it !== reused } else emptyList()
+    reused?.runtime?.flushStorage()
+    // A same-id show without a reset keeps its requests in flight; a reset or another id cancels.
+    if (preservePages && reused === previous) reused?.runtime?.handOverRequests(runtime)
     reused?.runtime?.close()
     idle.cancel()
     val retainedRequest =
@@ -589,6 +641,7 @@ class PrototypeController(
 
   /** Replacement closes silently, just as the former single runtime did. */
   private suspend fun retire(surface: Surface, notifyDismissed: Boolean = false) {
+    surface.runtime.flushStorage()
     surface.runtime.close()
     surface.idle.cancel()
     surface.foreground.release()
@@ -737,18 +790,39 @@ class PrototypeController(
           )
             armIdle(runtime)
           runtime.handle(interaction)
-          if (surfaceOf(runtime) != null && runtime.current.active) {
-            val model = runtime.renderModel()
-            PrototypeTrace.asyncSection(PrototypeTrace.SYNC_APPEARANCE) {
-              syncAppearance(runtime, model)
-              syncTextFieldFocus(runtime, model)
-            }
-          }
+          syncAfterChange(runtime)
         } catch (error: CancellationException) {
           throw error
         } catch (error: Exception) {
           Log.w("PrototypeController", "Prototype interaction failed", error)
         }
+      }
+    }
+
+  /** Re-resolves the appearance and the focused field after the runtime changed the spec. */
+  private suspend fun syncAfterChange(runtime: PrototypeRuntime) {
+    if (surfaceOf(runtime) == null || !runtime.current.active) return
+    val model = runtime.renderModel()
+    PrototypeTrace.asyncSection(PrototypeTrace.SYNC_APPEARANCE) {
+      syncAppearance(runtime, model)
+      syncTextFieldFocus(runtime, model)
+    }
+  }
+
+  /**
+   * A request's response, applied under the same lock as a tap and followed by the same appearance
+   * and focus sync, because its writes and follow-up actions change the spec like one.
+   */
+  private suspend fun settleRequest(runtime: PrototypeRuntime, apply: suspend () -> Unit) =
+    mutex.withLock {
+      if (destroyed || !runtime.current.active || surfaceOf(runtime) == null) return@withLock
+      try {
+        apply()
+        syncAfterChange(runtime)
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Exception) {
+        Log.w("PrototypeController", "Prototype request completion failed", error)
       }
     }
 
@@ -855,6 +929,31 @@ class PrototypeController(
     }
   }
 
+  /**
+   * Answers `clear_prototype_storage`: wipes the values stored for [id], from the shown prototype's
+   * session when there is one (which also forgets its pending write) and from disk otherwise. The
+   * prototype on screen is unchanged; the next show of the id starts from the spec's values.
+   */
+  suspend fun clearStorage(requestId: String?, id: String) = mutex.withLock {
+    try {
+      check(!destroyed) { "Prototype host destroyed" }
+      val cleared = clearStoredValues(id)
+      sink.sendCleared(requestId, cleared)
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("PrototypeController", "Prototype storage clear failed", error)
+      sink.send(requestId, false, error.message ?: "Prototype storage clear failed")
+    }
+  }
+
+  /** The stored keys removed for [id]; callers hold no controller state of their own. */
+  suspend fun clearStoredValues(id: String): Int {
+    val persistence = storage ?: return 0
+    val live = surfaces[id]?.runtime?.storage
+    return live?.clear() ?: persistence.clear(id)
+  }
+
   private suspend fun statusOf(surface: Surface): PrototypeStatusEntry {
     val runtime = surface.runtime
     val id = runtime.current.spec.id
@@ -869,6 +968,7 @@ class PrototypeController(
       suspended = surface.foreground.suspended,
       hiddenReason = shownHiddenReason(surface),
       appearance = surface.theme.value.appearance,
+      storage = runtime.storage?.report(),
     )
   }
 

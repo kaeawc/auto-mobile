@@ -32,9 +32,12 @@ final class PrototypeModel {
 
     private func publish(_ next: PrototypeSession, replacingSpec: Bool = false) {
         onSessionChange?(next)
-        // Only show and dismissal change structure; state transitions must not invalidate readers
-        // of an unchanged (non-Equatable) spec merely by copying the session back.
-        if replacingSpec || session.isShown != next.isShown { spec = next.spec }
+        // Only show, dismissal and a device data write (#12519, which rebuilds the drawn tree)
+        // change structure; state transitions must not invalidate readers of an unchanged
+        // (non-Equatable) spec merely by copying the session back.
+        if replacingSpec || session.isShown != next.isShown || session.dataRevision != next.dataRevision {
+            spec = next.spec
+        }
         session = next
         if let selected = expandedSelect {
             let root = next.spec?.root
@@ -53,6 +56,19 @@ final class PrototypeModel {
         if stacks != next.stacks { stacks = next.stacks }
         if appearance != next.appearance { appearance = next.appearance }
         if deviceDark != next.deviceDark { deviceDark = next.deviceDark }
+        // After the model holds the new session: a changed stored key schedules the debounced write,
+        // and a dismissal flushes it.
+        storage?.sessionChanged(next)
+    }
+
+    /// Writes any pending stored values now, for the app leaving the foreground or ending.
+    func flushStorage() {
+        storage?.flush()
+    }
+
+    /// `clear_prototype_storage`: the number of stored keys removed for `id`.
+    func clearStorage(id: String) throws -> Int {
+        try storage?.clear(id: id) ?? 0
     }
 
     var safeInsets = UIEdgeInsets.zero
@@ -91,6 +107,8 @@ final class PrototypeModel {
     @ObservationIgnored var hitRects = PrototypeHitRects()
 
     @ObservationIgnored var onEvent: (([String: Any]) -> Void)?
+    /// Runs the `request` actions the session starts and cancels (#12529).
+    @ObservationIgnored var requestDriver: PrototypeRequestDriver?
     @ObservationIgnored var onVisibilityChange: ((Bool) -> Void)?
     /// Resigns keyboard focus inside the prototype window.
     @ObservationIgnored var onEndEditing: (() -> Void)?
@@ -122,11 +140,20 @@ final class PrototypeModel {
 
     @ObservationIgnored private let clock: PrototypeClock
 
+    /// Stored values (#12526): restored by `show`, written back after changes and on dismissal. Nil
+    /// keeps nothing, which is what tests and a sandbox without Application Support get.
+    @ObservationIgnored private let storage: PrototypeStorageCoordinator?
+
     let mode: PrototypeLifecycleMode
 
-    init(clock: PrototypeClock = SystemPrototypeClock(), mode: PrototypeLifecycleMode = .session) {
+    init(
+        clock: PrototypeClock = SystemPrototypeClock(),
+        mode: PrototypeLifecycleMode = .session,
+        storage: PrototypeStorageCoordinator? = nil
+    ) {
         self.clock = clock
         self.mode = mode
+        self.storage = storage
     }
 
     /// Local override of the five-minute idle TTL; no wire field carries it. Applies from the next
@@ -176,8 +203,17 @@ final class PrototypeModel {
         // Keep the touchable rects: SwiftUI re-reports a frame only when it changes, so clearing
         // them on a same-geometry re-show would leave the prototype passing every touch through.
         var next = session
-        next.show(spec, reset: reset, appearance: appearance, specBytes: specBytes)
+        // Stored values replace the spec's for the keys it lists before the first draw, and emit
+        // nothing (#12526); the session only receives the result.
+        let prepared = storage?.prepare(spec)
+        next.show(
+            prepared?.spec ?? spec, reset: reset, appearance: appearance, specBytes: specBytes,
+            restoredState: prepared?.state
+        )
+        // A show that replaces another prototype cancels that one's requests.
+        let requestCommands = next.takeRequestCommands()
         publish(next, replacingSpec: true)
+        requestDriver?.perform(requestCommands)
         expandedSelect = nil
         showRevision += 1
         syncSnackbarTimeouts()
@@ -335,6 +371,7 @@ final class PrototypeModel {
         // `transition` adds the `appearance_changed` a state or page change caused.
         var next = session
         let events = next.transition(transition)
+        let requestCommands = next.takeRequestCommands()
         publish(next)
         // A rejected edit (#11562) or no-op transition leaves the stored values unchanged;
         // redraw value-holding controls so they show those values instead of the refused input.
@@ -353,6 +390,13 @@ final class PrototypeModel {
             hitRects.removeAll()
             onVisibilityChange?(false)
         }
+        requestDriver?.perform(requestCommands)
+    }
+
+    /// A request's answer. Not user activity: it neither restarts the idle TTL nor needs the
+    /// prototype to still be the one that asked (the session drops answers it no longer awaits).
+    func completeRequest(_ requestId: String, _ response: PrototypeRequestResponse) {
+        apply(activity: false) { $0.completeRequest(requestId, response) }
     }
 
     func status() -> [String: Any] {
@@ -368,6 +412,10 @@ final class PrototypeModel {
         if !fontFaces.isEmpty { status["fonts"] = fontFaces.keys.sorted() }
         if !assetProblems.isEmpty { status["assetProblems"] = assetProblems.map(\.wireObject) }
         if let data = session.data { status["data"] = JSONValue.object(data).foundationObject }
+        if let id = spec?.id, let storage {
+            storage.flush()
+            if let report = storage.report(id: id) { status["storage"] = report.wireObject }
+        }
         // Only a shown prototype has a resolved mode.
         if let appearance = session.appearance { status["appearance"] = appearance.wireObject }
         return status

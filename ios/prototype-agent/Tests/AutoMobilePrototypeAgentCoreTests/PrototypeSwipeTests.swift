@@ -144,6 +144,46 @@ final class PrototypeSwipeTests: XCTestCase {
         XCTAssertTrue(events.contains { $0.name == "del" })
     }
 
+    private func swipeTarget(_ session: PrototypeSession, row: Int, button: Int) -> PrototypeTapTarget? {
+        guard let item = session.spec?.root.children?[row], let tag = item.testTag else { return nil }
+        return item.tapTarget(identifier: "\(tag).swipe.\(button)", state: session.state)
+    }
+
+    func testASwipeButtonRunsDataAndRequestActionsInsideARepeat() throws {
+        let json = #"""
+        {"id":"p","window":{"placement":{"type":"fullscreen"}},"state":{"status":"idle"},
+         "data":{"items":[{"id":"a"},{"id":"b"}]},
+         "root":{"type":"column","repeat":{"items":{"path":"/items"},"as":"o"},"children":[
+           {"type":"listItem","headline":"{o.id}","testTag":"row{index}","swipeActions":{"end":[
+             {"label":"Remove","onTap":[{"type":"removeData","path":"/data/items/{index}"}]},
+             {"label":"Sync","onTap":[{"type":"request","url":"http://h.test/{o.id}","into":"/data/last",
+               "statusKey":"status"}]}]}}]}}
+        """#
+        var session = PrototypeSession()
+        try session.show(JSONDecoder().decode(PrototypeSpec.self, from: Data(json.utf8)))
+        // The request inside the swipe action is validated at show and runs its start command.
+        let sync = try XCTUnwrap(swipeTarget(session, row: 1, button: 1))
+        XCTAssertNotNil(session.activate(sync))
+        guard case let .start(job)? = session.takeRequestCommands().first else { return XCTFail("no request") }
+        XCTAssertEqual(job.url, "http://h.test/b")
+        XCTAssertEqual(session.state["status"], .string("loading"))
+        // A data action in a swipe button changes /data and rebuilds the drawn rows.
+        let remove = try XCTUnwrap(swipeTarget(session, row: 0, button: 0))
+        XCTAssertNotNil(session.activate(remove))
+        XCTAssertEqual(session.data?["items"], .array([.object(["id": .string("b")])]))
+    }
+
+    func testASwipeButtonWithAnInvalidRequestFailsTheShowAtItsPath() throws {
+        let json = #"""
+        {"id":"p","window":{"placement":{"type":"fullscreen"}},
+         "root":{"type":"listItem","headline":"x","swipeActions":{"end":[
+           {"label":"Go","onTap":[{"type":"request","url":"ftp://h/x"}]}]}}}
+        """#
+        XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: Data(json.utf8))) { error in
+            XCTAssertTrue("\(error)".contains("root.swipeActions.end[0].onTap[0]"), "\(error)")
+        }
+    }
+
     func testSharedValidFixturesDecode() throws {
         for name in ["swipe-actions-list-item", "swipe-actions-row", "swipe-actions-vertical-pager"] {
             let spec = try JSONDecoder().decode(

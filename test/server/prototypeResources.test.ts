@@ -173,7 +173,7 @@ test("the Data guide describes bindings, ownership, reporting, capability and er
     "prototype_data_model_v1",
     "once per show",
     "inspect",
-    "Events never carry data",
+    "Events carry data only",
   ]) {
     expect(section).toContain(text);
   }

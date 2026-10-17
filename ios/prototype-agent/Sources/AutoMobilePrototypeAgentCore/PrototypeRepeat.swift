@@ -426,6 +426,11 @@ private struct Instance {
                     return .object(binding)
                 })
             }
+        case .string("setData")?, .string("appendData")?, .string("removeData")?:
+            if case let .string(path)? = fields["path"] { fields["path"] = .string(bindDataPath(path)) }
+            if case let .object(binding)? = fields["value"] { fields["value"] = bindDataValue(binding) }
+        case .string("request")?:
+            bindRequest(&fields)
         default:
             break
         }
@@ -433,6 +438,46 @@ private struct Instance {
             fields["requireValid"] = .array(keys.map { .string(interpolate($0.stringValue ?? "")) })
         }
         return .object(fields)
+    }
+
+    /// A `request` (#12529): `url`, `statusKey` and literal header and query strings take the row's
+    /// text placeholders, `into` binds like a data path, binding objects bind like a data value,
+    /// and the follow-up lists bind recursively.
+    private func bindRequest(_ fields: inout [String: JSONValue]) {
+        bindString("url", in: &fields)
+        bindString("statusKey", in: &fields)
+        if case let .string(path)? = fields["into"] { fields["into"] = .string(bindDataPath(path)) }
+        for entries in ["headers", "query"] {
+            guard case let .object(values)? = fields[entries] else { continue }
+            fields[entries] = .object(values.mapValues { value in
+                switch value {
+                case let .string(text): .string(interpolate(text))
+                case let .object(binding): bindDataValue(binding)
+                default: value
+                }
+            })
+        }
+        if case let .object(binding)? = fields["body"] { fields["body"] = bindDataValue(binding) }
+        for list in ["onSuccess", "onError"] {
+            if case let .array(actions)? = fields[list] { fields[list] = .array(actions.map(bindAction)) }
+        }
+    }
+
+    /// Only a whole `{index}` segment binds (#12519), so item content cannot inject pointer syntax.
+    private func bindDataPath(_ path: String) -> String {
+        path.split(separator: "/", omittingEmptySubsequences: false)
+            .map { $0 == "{index}" ? String(index) : String($0) }
+            .joined(separator: "/")
+    }
+
+    /// A data action's value binding, bound like an `emit.context` entry: `item` and `index` become
+    /// literals of this row, and a `state` key interpolates.
+    private func bindDataValue(_ binding: [String: JSONValue]) -> JSONValue {
+        if let field = binding["item"]?.stringValue { return .object(["value": item[field] ?? .null]) }
+        if binding["index"] == .bool(true) { return .object(["value": .number(Double(index))]) }
+        var bound = binding
+        bindString("state", in: &bound)
+        return .object(bound)
     }
 
     private func bindCondition(_ condition: JSONValue) -> JSONValue {

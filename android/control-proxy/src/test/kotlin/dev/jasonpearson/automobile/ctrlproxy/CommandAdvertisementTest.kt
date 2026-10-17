@@ -22,6 +22,7 @@ class CommandAdvertisementTest {
   private val knownFlags =
     setOf(
       "prototype_saved_v1",
+      "prototype_storage_v1",
       "node_selector_actions",
       "ime_key_events_v1",
       "ime_clear_field_v1",
@@ -41,6 +42,9 @@ class CommandAdvertisementTest {
       "prototype_flow_grid_v1",
       "prototype_pager_options_v1",
       "prototype_data_model_v1",
+      "prototype_data_actions_v1",
+      "prototype_network_v1",
+      "prototype_network_device_v1",
       "prototype_text_field_options_v1",
       "prototype_gestures_v1",
       "prototype_swipe_actions_v1",
@@ -92,6 +96,9 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("prototype_flow_grid_v1"))
       assertTrue(commands.contains("prototype_pager_options_v1"))
       assertTrue(commands.contains("prototype_data_model_v1"))
+      assertTrue(commands.contains("prototype_data_actions_v1"))
+      assertTrue(commands.contains("prototype_network_v1"))
+      assertTrue(commands.contains("prototype_network_device_v1"))
       assertTrue(commands.contains("prototype_text_field_options_v1"))
       assertTrue(commands.contains("prototype_gestures_v1"))
       assertTrue(commands.contains("prototype_swipe_actions_v1"))

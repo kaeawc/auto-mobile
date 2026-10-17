@@ -109,6 +109,16 @@ object PrototypeRepeatTemplate {
     item: Map<String, JsonElement>,
     index: Int,
   ): Map<String, EmitContextBinding> = context.mapValues { (_, binding) ->
+    bindBinding(binding, alias, item, index)
+  }
+
+  /** One emit-context style binding bound to a repeat row; also the value of a data action. */
+  fun bindBinding(
+    binding: EmitContextBinding,
+    alias: String,
+    item: Map<String, JsonElement>,
+    index: Int,
+  ): EmitContextBinding =
     when {
       "item" in binding ->
         JsonObject(
@@ -125,7 +135,33 @@ object PrototypeRepeatTemplate {
         )
       else -> binding
     }
-  }
+
+  /** A data action path with each whole `{index}` segment bound to the row. */
+  fun bindDataPath(path: String, index: Int): String =
+    path.split('/').joinToString("/") { if (it == INDEX_SEGMENT) index.toString() else it }
+
+  /** True when the path holds a `{index}` placeholder anywhere in it. */
+  fun dataPathHasIndex(path: String): Boolean =
+    segments(path, NO_ALIAS).any { it is PrototypeRepeatSegment.Index }
+
+  /**
+   * The message for a data path whose placeholders break the grammar inside a repeat aliased
+   * [alias], or null. Only a whole `{index}` segment binds; `{alias.field}` would let item content
+   * inject pointer syntax.
+   */
+  fun dataPathPlaceholderMessage(path: String, alias: String): String? =
+    when {
+      segments(path, alias).any { it is PrototypeRepeatSegment.Field } ->
+        "Only a whole {index} segment may be a placeholder in a data path"
+      path.split('/').any { INDEX_SEGMENT in it && it != INDEX_SEGMENT } ->
+        "{index} must be a whole data path segment"
+      else -> null
+    }
+
+  private const val INDEX_SEGMENT = "{index}"
+
+  // NUL cannot occur in a repeat alias, so only `{index}` is recognised as a placeholder.
+  private const val NO_ALIAS = "\u0000"
 
   /** Integral numbers render without a decimal point or exponent at any magnitude. */
   fun rendered(value: JsonPrimitive): String {
@@ -159,6 +195,25 @@ internal enum class PrototypeBindableKind {
   EMIT_NAME,
   EMIT_BINDING,
   KEY,
+
+  /** A data action's `/data/...` path: renders to text, and only a whole `{index}` binds. */
+  DATA_PATH,
+
+  /**
+   * A `request`'s `into`: the [DATA_PATH] grammar, kept apart as in TypeScript's `requestInto` so
+   * data-action gating does not claim it.
+   */
+  REQUEST_INTO,
+
+  /**
+   * A `request` `url` or literal header/query string. It binds like [TEXT] (repeat placeholders,
+   * limits) but `{data:/pointer}` and `{key}` are read when the request runs, so the render-time
+   * data resolver leaves it alone.
+   */
+  REQUEST_TEXT;
+
+  /** The kinds holding a `/data/...` path with `{index}` segments. */
+  fun isDataPath(): Boolean = this == DATA_PATH || this == REQUEST_INTO
 }
 
 /**
@@ -168,6 +223,11 @@ internal enum class PrototypeBindableKind {
  */
 internal object PrototypeBindableFields {
   private val contextNamePattern = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
+
+  /** A member path as the TypeScript validator spells it: `.name`, or `["name"]` if not a name. */
+  fun memberPath(path: String, name: String): String =
+    if (contextNamePattern.matches(name)) "$path.$name"
+    else "$path[" + JsonPrimitive(name).toString() + "]"
 
   fun <T : Any> first(
     node: JsonObject,
@@ -240,22 +300,76 @@ internal object PrototypeBindableFields {
         "toggle",
         "increment",
         "decrement" -> field(action, "key", path, PrototypeBindableKind.KEY)
+        "setData",
+        "appendData" ->
+          field(action, "path", path, PrototypeBindableKind.DATA_PATH)
+            ?: binding(action["value"], "$path.value")
+        "removeData" -> field(action, "path", path, PrototypeBindableKind.DATA_PATH)
+        "request" -> request(action, path)
         else -> null
       }
+
+    /** Mirrors `mapRequestAction`: url, headers, query, body, into, statusKey, then follow-ups. */
+    fun request(action: JsonObject, path: String): T? {
+      field(action, "url", path, PrototypeBindableKind.REQUEST_TEXT)?.let {
+        return it
+      }
+      for (name in listOf("headers", "query")) {
+        entries(action, name, path)?.let {
+          return it
+        }
+      }
+      binding(action["body"], "$path.body")?.let {
+        return it
+      }
+      field(action, "into", path, PrototypeBindableKind.REQUEST_INTO)?.let {
+        return it
+      }
+      field(action, "statusKey", path, PrototypeBindableKind.KEY)?.let {
+        return it
+      }
+      for (name in listOf("onSuccess", "onError")) {
+        for ((entry, entryPath) in objects(action, name, path)) {
+          action(entry, entryPath)?.let {
+            return it
+          }
+        }
+      }
+      return null
+    }
+
+    /** A header or query entry: a literal string is text, an object is a value binding. */
+    fun entries(action: JsonObject, name: String, path: String): T? {
+      val entries = action[name] as? JsonObject ?: return null
+      for ((key, value) in entries) {
+        val at = memberPath("$path.$name", key)
+        if (value is JsonObject)
+          binding(value, at)?.let {
+            return it
+          }
+        else
+          visit(value, at, PrototypeBindableKind.REQUEST_TEXT)?.let {
+            return it
+          }
+      }
+      return null
+    }
+
+    /** An emit-binding value: the binding itself, then the state key it names. */
+    fun binding(value: JsonElement?, at: String): T? {
+      value ?: return null
+      visit(value, at, PrototypeBindableKind.EMIT_BINDING)?.let {
+        return it
+      }
+      return (value as? JsonObject)?.let { field(it, "state", at, PrototypeBindableKind.KEY) }
+    }
 
     fun emitContext(action: JsonObject, path: String): T? {
       val context = action["context"] as? JsonObject ?: return null
       for ((name, value) in context) {
-        val at =
-          if (contextNamePattern.matches(name)) "$path.context.$name"
-          else "$path.context[" + JsonPrimitive(name).toString() + "]"
-        visit(value, at, PrototypeBindableKind.EMIT_BINDING)?.let {
+        val at = memberPath("$path.context", name)
+        binding(value, at)?.let {
           return it
-        }
-        (value as? JsonObject)?.let { binding ->
-          field(binding, "state", at, PrototypeBindableKind.KEY)?.let {
-            return it
-          }
         }
       }
       return null
@@ -573,7 +687,7 @@ internal object PrototypeRepeatValidator {
     }
     var dataRecognized = false
     val resolved =
-      if (kind == PrototypeBindableKind.TEXT)
+      if (kind == PrototypeBindableKind.TEXT || kind == PrototypeBindableKind.REQUEST_TEXT)
         state.data.text(text) {
           dataRecognized = true
           chargeText(state, it)
@@ -599,8 +713,23 @@ internal object PrototypeRepeatValidator {
     state: RepeatState,
   ): PrototypeSpecError? =
     PrototypeBindableFields.first(node, path) { value, fieldPath, kind ->
-      fieldError(value, fieldPath, kind, scope, state)
+      dataPathPlaceholderError(kind, value, fieldPath, scope)
+        ?: fieldError(value, fieldPath, kind, scope, state)
     }
+
+  /** A data action path binds only a whole `{index}` segment; `{alias.field}` is refused. */
+  private fun dataPathPlaceholderError(
+    kind: PrototypeBindableKind,
+    value: JsonElement?,
+    path: String,
+    scope: Scope,
+  ): PrototypeSpecError? {
+    val text = value.string()
+    if (!kind.isDataPath() || text == null) return null
+    return PrototypeRepeatTemplate.dataPathPlaceholderMessage(text, scope.alias)?.let {
+      fail(path, it)
+    }
+  }
 
   /** Outside every template a state key is literal, so a placeholder there is an invalid key. */
   private fun checkLiteralKeys(
@@ -618,13 +747,15 @@ internal object PrototypeRepeatValidator {
       )
         fail(fieldPath, "Emit item/index binding outside a repeat template")
       else if (
-        kind == PrototypeBindableKind.TEXT &&
+        (kind == PrototypeBindableKind.TEXT || kind == PrototypeBindableKind.REQUEST_TEXT) &&
           text != null &&
           state.data.text(text) { chargeText(state, it) } == null
       )
         dataTextError(fieldPath, state)
       else if (kind == PrototypeBindableKind.KEY && text != null && !stateKeyPattern.matches(text))
         fail(fieldPath, "State key placeholder outside a repeat template")
+      else if (kind.isDataPath() && text != null && PrototypeRepeatTemplate.dataPathHasIndex(text))
+        fail(fieldPath, "{index} outside a repeat template")
       else null
     }
 
@@ -779,7 +910,8 @@ internal object PrototypeRepeatValidator {
     return scopes
   }
 
-  private val checkedKeyFields = listOf("key", "stateKey", "activeKey", "hourKey", "minuteKey")
+  private val checkedKeyFields =
+    listOf("key", "stateKey", "statusKey", "activeKey", "hourKey", "minuteKey")
 
   /** The state-key values the validator type-checks: node keys and an action's `key`. */
   private fun checkedKeys(value: JsonObject): List<String> {
@@ -819,7 +951,11 @@ internal object PrototypeRepeatValidator {
       replacements[path]
         ?: when (element) {
           is JsonObject ->
-            JsonObject(element.mapValues { (key, child) -> replace(child, "$path.$key") })
+            JsonObject(
+              element.mapValues { (key, child) ->
+                replace(child, PrototypeBindableFields.memberPath(path, key))
+              },
+            )
           is JsonArray -> JsonArray(element.mapIndexed { i, child -> replace(child, "$path[$i]") })
           else -> element
         }

@@ -17,6 +17,12 @@ final class PrototypeAgentConfigurationTests: XCTestCase {
         )
     }
 
+    func testDataActionsCapability() {
+        XCTAssertEqual(PrototypeAgentProtocol.dataActionsCapability, "prototype_data_actions_v1")
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.dataActionsCapability))
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.dataModelCapability))
+    }
+
     func testChecksCapability() {
         XCTAssertEqual(PrototypeAgentProtocol.checksCapability, "prototype_checks_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.checksCapability))

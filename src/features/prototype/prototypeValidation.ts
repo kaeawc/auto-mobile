@@ -10,6 +10,9 @@ import {
   type KeyInstance,
 } from "./prototypeRepeat";
 import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
+import { prototypeDataActionsError } from "./prototypeDataActions";
+import { prototypeStorageError } from "./prototypeStorage";
+import { prototypeRequestsError, prototypeRequestStatusKeyError } from "./prototypeRequest";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 
@@ -51,8 +54,8 @@ interface Context {
   nodes: Located[];
   actions: Located[];
   images: number;
-  selectorDepth: number;
-  conditionDepth: number;
+  /** Current nesting per bounded reference (see `nestedReferences`). */
+  nesting: Record<string, number>;
 }
 const definitions: Record<string, Rule> = contract.definitions;
 const fail = (path: string, message: string): PrototypeValidationError => ({
@@ -86,15 +89,24 @@ function refRule(rule: Rule): Rule {
   return definitions[rule.name ?? ""] ?? rule;
 }
 
-/** References whose nesting is bounded by their own contract limit. */
-const nestedReferences: Record<string, typeof visitReference | undefined> = Object.assign(
-  Object.create(null) as Record<string, typeof visitReference | undefined>,
-  { container: visitContainer, condition: visitCondition },
+/** References whose nesting is bounded by their own contract limit. A request nests actions. */
+const nestedReferences = Object.assign(
+  Object.create(null) as Record<string, { limit: number; message: string } | undefined>,
+  {
+    container: {
+      limit: contract.limits.MAX_PROTOTYPE_SELECTOR_DEPTH,
+      message: "Selector depth limit exceeded",
+    },
+    condition: {
+      limit: contract.limits.MAX_PROTOTYPE_CONDITION_DEPTH,
+      message: "Condition depth limit exceeded",
+    },
+    action: {
+      limit: contract.limits.MAX_PROTOTYPE_ACTION_DEPTH,
+      message: "Action nesting limit exceeded",
+    },
+  },
 );
-
-function nestedReference(rule: Rule): typeof visitReference | undefined {
-  return nestedReferences[rule.name ?? ""];
-}
 
 function visitReference(
   value: unknown,
@@ -103,9 +115,9 @@ function visitReference(
   context: Context,
   depth: number,
 ): PrototypeValidationError | undefined {
-  const nested = nestedReference(rule);
+  const nested = nestedReferences[String(rule.name)];
   if (nested) {
-    return nested(value, rule, path, context, depth);
+    return visitNested(value, rule, path, context, depth, nested);
   }
   const itemImages = rule.name === "item" ? imageSlotUses(object(value)?.image) : 0;
   if (itemImages > 0) {
@@ -136,34 +148,20 @@ function visitReference(
   }
   return walk(value, refRule(rule), path, context, depth + 1);
 }
-function visitContainer(
+function visitNested(
   value: unknown,
   rule: Rule,
   path: string,
   context: Context,
   depth: number,
+  nested: { limit: number; message: string },
 ): PrototypeValidationError | undefined {
-  context.selectorDepth++;
-  if (context.selectorDepth > contract.limits.MAX_PROTOTYPE_SELECTOR_DEPTH) {
-    return fail(path, "Selector depth limit exceeded");
+  const name = rule.name ?? "";
+  if (++context.nesting[name] > nested.limit) {
+    return fail(path, nested.message);
   }
   const error = walk(value, refRule(rule), path, context, depth);
-  context.selectorDepth--;
-  return error;
-}
-function visitCondition(
-  value: unknown,
-  rule: Rule,
-  path: string,
-  context: Context,
-  depth: number,
-): PrototypeValidationError | undefined {
-  context.conditionDepth++;
-  if (context.conditionDepth > contract.limits.MAX_PROTOTYPE_CONDITION_DEPTH) {
-    return fail(path, "Condition depth limit exceeded");
-  }
-  const error = walk(value, refRule(rule), path, context, depth);
-  context.conditionDepth--;
+  context.nesting[name]--;
   return error;
 }
 function visitTagged(
@@ -480,15 +478,16 @@ function jsonCost(value: unknown, depth = 0): number {
   );
 }
 /** Data uses the emit payload cost after its own stricter depth-first walk. */
-export function prototypeDataError(value: unknown): PrototypeValidationError | undefined {
+export function prototypeDataError(
+  value: unknown,
+  maxBytes: number = contract.limits.MAX_PROTOTYPE_DATA_BYTES,
+): PrototypeValidationError | undefined {
   if (!object(value)) {
     return fail("data", "Expected object");
   }
   return (
     walkDataValue(value, "data", 1) ??
-    (jsonCost(value) > contract.limits.MAX_PROTOTYPE_DATA_BYTES
-      ? fail("data", "Data byte limit exceeded")
-      : undefined)
+    (jsonCost(value) > maxBytes ? fail("data", "Data byte limit exceeded") : undefined)
   );
 }
 
@@ -1109,7 +1108,9 @@ function stateActionErrors(
       return forItem(fail(`${path}.key`, rule.message), item);
     }
     const written =
-      value.type === "setState" ? setStateBindingErrors(action, checked, state) : undefined;
+      value.type === "setState"
+        ? setStateBindingErrors(action, checked, state)
+        : prototypeRequestStatusKeyError(value, path, state);
     if (written) {
       return forItem(written, item);
     }
@@ -1187,24 +1188,49 @@ function gridSpanErrors(context: Context): PrototypeValidationError | undefined 
   return undefined;
 }
 
+/** Tree-shape checks that run after the schema walk, in the order the host reports them. */
+function layoutErrors(
+  value: unknown,
+  context: Context,
+  repeats: PrototypeRepeatData,
+): PrototypeValidationError | undefined {
+  return (
+    gridSpanErrors(context) ??
+    swipeActionsErrors(context) ??
+    repeatErrors(value, repeats) ??
+    prototypeStorageError(value)
+  );
+}
+
+/** Action, container and state checks, after the layout checks pass. */
+function behaviourErrors(
+  value: unknown,
+  context: Context,
+  data: Record<string, unknown>,
+  repeats: PrototypeRepeatData,
+): PrototypeValidationError | undefined {
+  return (
+    prototypeDataActionsError(context.actions, data.data, prototypeDataError) ??
+    prototypeRequestsError(context.actions) ??
+    pagerErrors(context) ??
+    stackErrors(context) ??
+    stateTypeErrors(value, context, data, repeats)
+  );
+}
+
 function validateValue(value: unknown): PrototypeValidationResult {
   const context: Context = {
     nodes: [],
     actions: [],
     images: 0,
-    selectorDepth: 0,
-    conditionDepth: 0,
+    nesting: { container: 0, condition: 0, action: 0 },
   };
   const data = object(value) ?? {};
   const repeats = new PrototypeRepeatData(data.data);
   const error =
     walk(value, definitions.spec, "", context, 0) ??
-    gridSpanErrors(context) ??
-    swipeActionsErrors(context) ??
-    repeatErrors(value, repeats) ??
-    pagerErrors(context) ??
-    stackErrors(context) ??
-    stateTypeErrors(value, context, data, repeats);
+    layoutErrors(value, context, repeats) ??
+    behaviourErrors(value, context, data, repeats);
   if (error) {
     return { success: false, error };
   }

@@ -37,14 +37,15 @@ blanket focusability proposal).
 
 ## Envelope and limits
 
-| Property | Type / meaning                                                     |
-| -------- | ------------------------------------------------------------------ |
-| `id`     | Required nonempty prototype identifier string.                     |
-| `window` | Required window configuration below.                               |
-| `data`   | Optional agent-owned read-only nested JSON object; see Data model. |
-| `state`  | Optional flat object of string, finite number, or boolean values.  |
-| `motion` | Optional `none` or `standard` (default). See Motion below.         |
-| `root`   | Required single node.                                              |
+| Property  | Type / meaning                                                                                                         |
+| --------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `id`      | Required nonempty prototype identifier string.                                                                         |
+| `window`  | Required window configuration below.                                                                                   |
+| `data`    | Optional agent-owned read-only nested JSON object; see Data model.                                                     |
+| `state`   | Optional flat object of string, finite number, or boolean values.                                                      |
+| `motion`  | Optional `none` or `standard` (default). See Motion below.                                                             |
+| `storage` | Optional `{version, keys}` naming state keys and `/data` pointers the device keeps across shows. See Storage (#12522). |
+| `root`    | Required single node.                                                                                                  |
 
 All numeric values are finite. State keys (including action/binding/condition
 keys) match `[A-Za-z_][A-Za-z0-9_]{0,63}`. No nested state, arrays, or nulls.
@@ -170,9 +171,6 @@ before uploads or show, with an update/relaunch hint. `status` reports the last 
 data next to state; `inspect` reports and adopts device data. Absent data is omitted; dismiss
 clears it. Events never carry data.
 
-````
-
-
 `repeat.items` accepts a strict `{ "path": pointer }` alongside the unchanged literal list.
 The path must statically resolve to an array of objects within the literal repeat's item maximum.
 Empty arrays produce zero instances. Each item is projected to scalar members whose names match
@@ -228,24 +226,24 @@ state, omitting it when absent.
 Data is walked depth-first, with sorted object keys and array index order. At each container,
 depth precedes array length, then children; the byte check runs last.
 
-| Path | Message |
-| --- | --- |
-| `data` | `Expected object` when the root is not a plain object |
-| Offending data container | `Data depth limit exceeded` or `Data array limit exceeded` |
-| Offending value, e.g. `data.orders[0].title` or `data["a b"]` | `Invalid data value` |
-| `data` after the walk | `Data byte limit exceeded` |
-| Pointer field | `Invalid pointer value` |
-| `<node>.repeat.items` | `Invalid union value` for neither array nor object |
-| `<node>.repeat.items.path` (in this order) | `Repeat path does not resolve to an array`; `Repeat path resolves to more than 128 items`; `Repeat path item <i> is not an object`; `Repeat path cell limit exceeded` |
-| Bindable field | `Substituted text total limit exceeded` (reduce bindable fields, replacement lengths or repeat items; `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL`) |
-| Authored bindable field, e.g. `root.children[0].text` or `root.children[0].onTap[0].name` | `Substituted text length limit exceeded` (after unknown repeat fields, before bound key/empty emit checks) |
-| Referencing template string | `Unknown repeat field "x"` (non-scalar members count as absent) |
-| `<node>.repeat.items.path` | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix |
-| `<node>.repeat.key` | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair |
-| Condition `.key` | `Exactly one of key, data, all, any, not is required` |
-| Condition comparison field | `Requires key or data`; `Exactly one of equals, notEquals, gt, lt is required` |
-| Condition `.equals` / `.notEquals` in bindable visiting order | `Repeat placeholder in a data condition operand is not supported` |
-| `<node>.repeat` | Existing expanded node/image limit errors |
+| Path                                                                                      | Message                                                                                                                                                               |
+| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `data`                                                                                    | `Expected object` when the root is not a plain object                                                                                                                 |
+| Offending data container                                                                  | `Data depth limit exceeded` or `Data array limit exceeded`                                                                                                            |
+| Offending value, e.g. `data.orders[0].title` or `data["a b"]`                             | `Invalid data value`                                                                                                                                                  |
+| `data` after the walk                                                                     | `Data byte limit exceeded`                                                                                                                                            |
+| Pointer field                                                                             | `Invalid pointer value`                                                                                                                                               |
+| `<node>.repeat.items`                                                                     | `Invalid union value` for neither array nor object                                                                                                                    |
+| `<node>.repeat.items.path` (in this order)                                                | `Repeat path does not resolve to an array`; `Repeat path resolves to more than 128 items`; `Repeat path item <i> is not an object`; `Repeat path cell limit exceeded` |
+| Bindable field                                                                            | `Substituted text total limit exceeded` (reduce bindable fields, replacement lengths or repeat items; `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL`)                         |
+| Authored bindable field, e.g. `root.children[0].text` or `root.children[0].onTap[0].name` | `Substituted text length limit exceeded` (after unknown repeat fields, before bound key/empty emit checks)                                                            |
+| Referencing template string                                                               | `Unknown repeat field "x"` (non-scalar members count as absent)                                                                                                       |
+| `<node>.repeat.items.path`                                                                | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix                                                |
+| `<node>.repeat.key`                                                                       | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair                                                             |
+| Condition `.key`                                                                          | `Exactly one of key, data, all, any, not is required`                                                                                                                 |
+| Condition comparison field                                                                | `Requires key or data`; `Exactly one of equals, notEquals, gt, lt is required`                                                                                        |
+| Condition `.equals` / `.notEquals` in bindable visiting order                             | `Repeat placeholder in a data condition operand is not supported`                                                                                                     |
+| `<node>.repeat`                                                                           | Existing expanded node/image limit errors                                                                                                                             |
 
 All data-model uses require `prototype_data_model_v1`: top-level data, path items, repeat.key,
 data conditions or recognised text placeholders. The host refuses before any asset upload or
@@ -469,40 +467,40 @@ layout room.
 
 ## Nodes
 
-| `type`            | Node-specific properties                                                                                                                                                                                                                    |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `box`             | Required `children` array, possibly empty; children stack. Optional `repeat` (see List templates below).                                                                                                                                    |
-| `row`             | Required `children` array, possibly empty; horizontal layout. Optional `repeat` (see List templates below).                                                                                                                                 |
-| `column`          | Required `children` array, possibly empty; vertical layout. Optional `repeat` (see List templates below).                                                                                                                                   |
-| `text`            | Required `text` string, possibly empty.                                                                                                                                                                                                     |
-| `image`           | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                                                                                   |
-| `icon`            | Required built-in `name` below; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                                                                                                                   |
-| `spacer`          | No node-specific properties; size comes from style.                                                                                                                                                                                         |
-| `textField`       | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty; `label`, `variant`, `supportingText`, `keyboardType`, `secure`, `multiline`, `minLines`, `maxLines`, `maxLength` (see Text field options).                                                                                                                                 |
-| `switch`          | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
-| `checkbox`        | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
-| `button`          | Required nonempty `label`; optional `variant`: `filled` (default), `tonal`, `elevated`, `outlined`, `text`; optional leading `icon` (built-in name). Taps run `onTap`.                                                                      |
-| `radioGroup`      | Required `stateKey` naming an initialized string state value; required `options`, 2 to 16 `{value, label}` entries with nonempty, unique `value`s.                                                                                          |
-| `listItem`        | Required nonempty `headline`; optional nonempty `supporting`, optional `leadingIcon` (built-in name), optional `trailing`: `{type: switch\|checkbox, stateKey}` bound to an initialized boolean, or `{type: icon, name}`. Taps run `onTap`. |
-| `slider`          | Required `stateKey` naming an initialized number within `min`..`max`; required finite `min` < `max`; optional `step`, optional nonempty `label`.                                                                                            |
-| `chip`            | Required nonempty `label`; optional `variant`: `assist`, `filter`, `input`, `suggestion`; optional `stateKey` naming a boolean (a filter chip only).                                                                                        |
-| `card`            | Required `children` array; optional `variant`: `filled` (default), `elevated`, `outlined`.                                                                                                                                                  |
-| `iconButton`      | Required built-in `icon`; optional `variant`: `standard` (default), `filled`, `tonal`, `outlined`. Taps run `onTap`.                                                                                                                        |
-| `fab`             | Required built-in `icon`; optional nonempty `label` (an extended FAB); optional `size`: `small`, `regular` (default), `large`, only without a `label`. Taps run `onTap`.                                                                    |
-| `segmentedButton` | Required `stateKey` naming an initialized string state value; required `options`, 2 to 5 `{value, label}` entries with nonempty, unique `value`s. Single select.                                                                            |
-| `topAppBar`       | Required nonempty `title`; optional `variant`: `small` (default), `centerAligned`, `medium`, `large`; optional `navigationIcon` and 1 to 3 `actions`, each `{icon, label, onTap?}`.                                                         |
-| `divider`         | Optional `orientation`: `horizontal` (default), `vertical`.                                                                                                                                                                                 |
-| `badge`           | Optional nonempty `text` (a count or short label); without it a small dot.                                                                                                                                                                  |
-| `progress`        | Optional `variant`: `linear` (default), `circular`; optional `stateKey` naming an initialized number within 0..`max` (determinate); optional `max` > 0, default 1, only with `stateKey`. Unbound is indeterminate.                          |
-| `dialog`          | Required `openWhen` and `confirm`; optional nonempty `title` and `text`, optional `icon`, optional `dismiss`, optional single `child`. Buttons are `{label, onTap?}`.                                                                       |
-| `snackbar`        | Required `openWhen` and nonempty `text`; optional `action` button `{label, onTap?}` and `durationMs` (1 to 600000, self-closing).                                                                                                           |
-| `timePicker`      | Required distinct `hourKey` and `minuteKey` naming initialized integers 0..23 and 0..59; optional `is24Hour` boolean, default the device setting.                                                                                           |
-| `datePicker`      | Required `stateKey` naming an initialized `YYYY-MM-DD` string, a real date in years 1900..2100.                                                                                                                                             |
-| `scroll`          | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                                                                                                                        |
-| `pager`           | Required `id` and nonempty `children` array. Each child is one page; defaults to horizontal, full-size paging. Optional `axis`, `pageSpacing`, `peek`, `pageSize` (see Pager options below).                                                                                                                                       |
-| `tabBar`          | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                                                                                                                          |
-| `bottomNav`       | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                                                                                                                   |
-| `bottomSheet`     | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                                                                                                                       |
+| `type`            | Node-specific properties                                                                                                                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `box`             | Required `children` array, possibly empty; children stack. Optional `repeat` (see List templates below).                                                                                                                                               |
+| `row`             | Required `children` array, possibly empty; horizontal layout. Optional `repeat` (see List templates below).                                                                                                                                            |
+| `column`          | Required `children` array, possibly empty; vertical layout. Optional `repeat` (see List templates below).                                                                                                                                              |
+| `text`            | Required `text` string, possibly empty.                                                                                                                                                                                                                |
+| `image`           | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                                                                                              |
+| `icon`            | Required built-in `name` below; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                                                                                                                              |
+| `spacer`          | No node-specific properties; size comes from style.                                                                                                                                                                                                    |
+| `textField`       | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty; `label`, `variant`, `supportingText`, `keyboardType`, `secure`, `multiline`, `minLines`, `maxLines`, `maxLength` (see Text field options). |
+| `switch`          | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                              |
+| `checkbox`        | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                              |
+| `button`          | Required nonempty `label`; optional `variant`: `filled` (default), `tonal`, `elevated`, `outlined`, `text`; optional leading `icon` (built-in name). Taps run `onTap`.                                                                                 |
+| `radioGroup`      | Required `stateKey` naming an initialized string state value; required `options`, 2 to 16 `{value, label}` entries with nonempty, unique `value`s.                                                                                                     |
+| `listItem`        | Required nonempty `headline`; optional nonempty `supporting`, optional `leadingIcon` (built-in name), optional `trailing`: `{type: switch\|checkbox, stateKey}` bound to an initialized boolean, or `{type: icon, name}`. Taps run `onTap`.            |
+| `slider`          | Required `stateKey` naming an initialized number within `min`..`max`; required finite `min` < `max`; optional `step`, optional nonempty `label`.                                                                                                       |
+| `chip`            | Required nonempty `label`; optional `variant`: `assist`, `filter`, `input`, `suggestion`; optional `stateKey` naming a boolean (a filter chip only).                                                                                                   |
+| `card`            | Required `children` array; optional `variant`: `filled` (default), `elevated`, `outlined`.                                                                                                                                                             |
+| `iconButton`      | Required built-in `icon`; optional `variant`: `standard` (default), `filled`, `tonal`, `outlined`. Taps run `onTap`.                                                                                                                                   |
+| `fab`             | Required built-in `icon`; optional nonempty `label` (an extended FAB); optional `size`: `small`, `regular` (default), `large`, only without a `label`. Taps run `onTap`.                                                                               |
+| `segmentedButton` | Required `stateKey` naming an initialized string state value; required `options`, 2 to 5 `{value, label}` entries with nonempty, unique `value`s. Single select.                                                                                       |
+| `topAppBar`       | Required nonempty `title`; optional `variant`: `small` (default), `centerAligned`, `medium`, `large`; optional `navigationIcon` and 1 to 3 `actions`, each `{icon, label, onTap?}`.                                                                    |
+| `divider`         | Optional `orientation`: `horizontal` (default), `vertical`.                                                                                                                                                                                            |
+| `badge`           | Optional nonempty `text` (a count or short label); without it a small dot.                                                                                                                                                                             |
+| `progress`        | Optional `variant`: `linear` (default), `circular`; optional `stateKey` naming an initialized number within 0..`max` (determinate); optional `max` > 0, default 1, only with `stateKey`. Unbound is indeterminate.                                     |
+| `dialog`          | Required `openWhen` and `confirm`; optional nonempty `title` and `text`, optional `icon`, optional `dismiss`, optional single `child`. Buttons are `{label, onTap?}`.                                                                                  |
+| `snackbar`        | Required `openWhen` and nonempty `text`; optional `action` button `{label, onTap?}` and `durationMs` (1 to 600000, self-closing).                                                                                                                      |
+| `timePicker`      | Required distinct `hourKey` and `minuteKey` naming initialized integers 0..23 and 0..59; optional `is24Hour` boolean, default the device setting.                                                                                                      |
+| `datePicker`      | Required `stateKey` naming an initialized `YYYY-MM-DD` string, a real date in years 1900..2100.                                                                                                                                                        |
+| `scroll`          | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                                                                                                                                   |
+| `pager`           | Required `id` and nonempty `children` array. Each child is one page; defaults to horizontal, full-size paging. Optional `axis`, `pageSpacing`, `peek`, `pageSize` (see Pager options below).                                                           |
+| `tabBar`          | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                                                                                                                                     |
+| `bottomNav`       | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                                                                                                                              |
+| `bottomSheet`     | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                                                                                                                                  |
 
 Each nav item is `{label, icon?, image?}`. Label is nonempty; icon uses the same
 closed list as icon nodes; image is an opaque asset ID. Both icon and image may
@@ -762,7 +760,6 @@ uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage`
 navigation pager bindings keep their meaning. Stable keys and neighbour retention
 stay unchanged. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed. Indicator and carousel remain deferred. On iOS dp means points.
 
-
 ## Icons and images
 
 Built-in Material names are the 2,075 icons of `material-icons-extended`, written
@@ -781,7 +778,6 @@ shape, so image nodes use `{type: "image", asset: "opaque-id"}` and nav items
 use `image: "opaque-id"`. Asset existence is not validated here. A missing asset
 renders a visible placeholder and reports a result under #9301; image bytes,
 MIME types, URLs, cache paths, and screenshot handles are not spec properties.
-
 
 ### Asset transport (#9301, first slice)
 
@@ -896,15 +892,15 @@ scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
 ## Actions and state
 
-| Action `type` | Properties                                                                                                                                                 |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `emit`        | Required nonempty `name`; optional `context` of named bindings (see Emit context below); optional arbitrary JSON `payload` up to the 4 KiB conservative compact JSON budget (null and nested JSON allowed).               |
-| `setPage`     | Required existing `pager` ID; required `page`: `next`, `prev`, or nonnegative integer index up to 2147483647. Renderer clamps to available pages.          |
-| `setState`    | Required state `key` and scalar `value`; creates or replaces a key.                                                                                        |
-| `toggle`      | Required `key` that the spec's `state` declares as a boolean; flips it.                                                                                    |
-| `increment`   | Required `key` that `state` declares as a finite number; adds optional finite `by` (default 1, negative values decrement). Non-finite results are ignored. |
-| `decrement`   | Same as `increment` but subtracts `by` (default 1); `decrement` with a negative `by` adds. Non-finite results are ignored.                                 |
-| `dismiss`     | No additional properties.                                                                                                                                  |
+| Action `type` | Properties                                                                                                                                                                                                  |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `emit`        | Required nonempty `name`; optional `context` of named bindings (see Emit context below); optional arbitrary JSON `payload` up to the 4 KiB conservative compact JSON budget (null and nested JSON allowed). |
+| `setPage`     | Required existing `pager` ID; required `page`: `next`, `prev`, or nonnegative integer index up to 2147483647. Renderer clamps to available pages.                                                           |
+| `setState`    | Required state `key` and scalar `value`; creates or replaces a key.                                                                                                                                         |
+| `toggle`      | Required `key` that the spec's `state` declares as a boolean; flips it.                                                                                                                                     |
+| `increment`   | Required `key` that `state` declares as a finite number; adds optional finite `by` (default 1, negative values decrement). Non-finite results are ignored.                                                  |
+| `decrement`   | Same as `increment` but subtracts `by` (default 1); `decrement` with a negative `by` adds. Non-finite results are ignored.                                                                                  |
+| `dismiss`     | No additional properties.                                                                                                                                                                                   |
 
 ### Emit context
 
@@ -937,11 +933,385 @@ devices are refused before upload, display or patch dispatch. The `prototype_eve
 `contextTruncated: true` only when truncated; otherwise the field is omitted, never false.
 `awaitEvent` and host status preserve these fields.
 
-
 No scripts, callbacks, expressions, or implicit navigation. `setState` must
 preserve any text-field, selection, or sheet binding's scalar type at runtime;
 renderer enforcement is part of #9300. Event sequence and transmission are
 #9298/#9303. Dismissal does not remove the host's safety responsibilities.
+
+### Data actions (#12519)
+
+`setData {path, value}`, `appendData {path, value}` and `removeData {path}` let a tap change `/data`
+on the device, so "add to cart" or "delete row" needs no agent round trip. They require
+`prototype_data_actions_v1` (which a device advertises only with `prototype_data_model_v1`); the
+host refuses a show, or a patch whose resulting spec contains one, on a device without it, through
+the same gate registry as every other capability (`PROTOTYPE_SPEC_CAPABILITY_GATES`, checked on
+the complete result of `show`, `patch` and `replaceNode`).
+
+- `path` is `/data` plus a non-empty RFC 6901 pointer, validated by the same
+  `isPrototypeDataPointer` guard as `{data: pointer}` and patch ops (`MAX_PROTOTYPE_DATA_POINTER_LENGTH`);
+  `/data` alone is refused. Inside a `repeat`, a whole `{index}` segment (`/data/cart/{index}`) binds
+  to the current row; `{index}` elsewhere, outside a repeat, or `{alias.field}`, is a validation error.
+- `value` takes the `emit.context` binding forms except `page`: `{value: json}` (the literal form),
+  `{state: key}`, `{data: pointer}` and, in a repeat, `{item: field}` and `{index: true}`. A written
+  value is data: no null.
+- Semantics are one pure function, `applyPrototypeDataWrite` (`src/features/prototype/prototypeDataWrite.ts`),
+  shared by the host mirror and meant for the device runtimes, `request` responses (#12523) and
+  storage restores (#12522). `set` creates or replaces an object member or replaces an existing array
+  element; `append` pushes onto an existing array; `remove` deletes an existing member or element and
+  shifts later elements down. Errors are typed (`invalid_path`, `invalid_value`, `not_found`,
+  `not_array`, `limit_exceeded`) and change nothing. The data after a write must satisfy the data
+  depth and array limits and `MAX_PROTOTYPE_DATA_WRITE_BYTES`.
+- The validator checks pointer syntax and `{index}` placement, rejects a literal value data cannot
+  hold, and, when the target has no `{index}` and resolves in the spec's own `data`, rejects an
+  `appendData` whose target is not an array. A target created only by an earlier write is the device's
+  to check.
+
+Each device write is reported on a `change` event, using existing wire fields so no event field is
+added: `name` is the written `/data/...` path (for an append, the array) and `payload` is
+`{op: "set"|"append"|"remove", value?, revision}`. `validity` may accompany it; a `change` whose name
+is a data path must carry a valid payload or the host drops it. `awaitEvent` returns it like any
+other event.
+
+The Android runtime (`PrototypeRuntime.writeData`, over the shared `PrototypeDataWriter` that mirrors
+`applyPrototypeDataWrite`) applies a write to an immutable copy of `/data`, so Compose re-renders
+`repeat` and `{data: ...}` bindings from the new spec. A refused write (a typed error, an unresolvable
+value binding, or rows the renderer cannot take) changes and emits nothing, is logged, and the rest of
+the action list still runs. Each accepted write takes its own revision, so a state write later in the
+same list takes a later one. The event carries the value only while the payload fits
+`MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`; otherwise it is left out and the host stops tracking the spec. With
+no host connected, a device-persistent prototype's write events wait in `PrototypeOfflineEventBuffer`
+like every other event.
+
+**Revisions and host patches.** The device has one revision counter per prototype. A data write bumps
+it and reports the new value as `payload.revision`; a patch result's `revision` is the same counter.
+The agent's `/data` patch and a device write must not silently lose each other, so:
+
+1. The host applies every reported write to its tracked copy of the spec and to `status` data with
+   `applyPrototypeDataWrite`, keeping the copy exact. If it cannot (the value did not travel, the copy
+   disagrees, or a show is in flight so the order is unknown) it stops tracking the spec and removes
+   the reported data; the next patch requires a show first.
+2. It also logs `{path, revision}` of each write (the last 64 per prototype, remembering the newest
+   revision it forgot). A show of that id clears the log.
+3. Until the device has written a prototype's data, `/data` patches behave as before. After that, a
+   patch with a `/data` op requires `baseRevision`, and the host refuses it before sending, with the
+   existing `conflict` shape plus the touched paths (`conflict: {revision, state: {}, data: [paths]}`),
+   when a write newer than `baseRevision` touched a path that overlaps an op path (equal, ancestor or
+   descendant), or when `baseRevision` is older than the forgotten writes. A device receiving a
+   `/data` patch applies the same rule against its own history. `replaceNode` and `/state` ops are
+   unaffected.
+
+The smallest sound rule is therefore: a device write bumps the device revision and is reported in the
+change event; a stale `baseRevision` gets the existing conflict. Host-side bookkeeping lives in
+`PrototypeShownSpecs` (`recordDeviceDataWrite`, `dataPatchGuard`), called from
+`InMemoryPrototypeStatusStore.recordEvent` and `performPrototypePatch`.
+
+### Storage (#12522)
+
+A show resets `state` and `data` to the spec's values, saved prototypes keep the spec and assets but
+no user data, and the offline event buffer is lost if the process dies. A root-level `storage` block
+names the values the device keeps for the prototype:
+
+```jsonc
+"storage": { "version": 1, "keys": ["state:darkMode", "data:/cart"] }
+```
+
+The capability is `prototype_storage_v1` (`PROTOTYPE_STORAGE_CAPABILITY`). A show, or a patch whose
+resulting spec contains `storage`, is refused on a device without it through the same gate registry
+as every other capability (`PROTOTYPE_SPEC_CAPABILITY_GATES`, field `storage`).
+
+**Shape and validation.** The block is strict: `version` is an integer from 1, `keys` holds 1 to
+`MAX_PROTOTYPE_STORAGE_KEYS` (64) unique strings. The contract (`schemas/prototype-spec-contract.json`,
+definition `storage`) checks the shape; `prototypeStorageError` (`src/features/prototype/prototypeStorage.ts`)
+checks the rest, with the path of the first problem:
+
+- `state:<key>`: the key matches the state-key pattern and is declared in the spec's `state`.
+- `data:<pointer>`: an RFC 6901 pointer to a member of `data`, validated with `prototypeDataPathPointer`
+  (which wraps `isPrototypeDataPointer`) on `/data` + pointer, so `data:/cart` is the path `/data/cart`
+  that data actions and patch ops use. The whole document (`data:` alone), a pointer without a leading
+  `/`, or an over-long pointer is refused. Two data pointers where one is the other's ancestor or equal
+  (`/cart` and `/cart/items`) are refused, so each stored value has one owner.
+- Duplicate keys are refused.
+- The values the spec itself holds for the listed keys, counted per entry as the UTF-8 bytes of the
+  storage key plus the compact JSON of the value, must fit `MAX_PROTOTYPE_STORAGE_BYTES` (262144).
+
+| Constant                      | Value  | Counting rule                                                                             |
+| ----------------------------- | ------ | ----------------------------------------------------------------------------------------- |
+| `MAX_PROTOTYPE_STORAGE_BYTES` | 262144 | Stored bytes per prototype id: sum over stored entries of key bytes + compact JSON bytes. |
+| `MAX_PROTOTYPE_STORAGE_KEYS`  | 64     | Entries in `storage.keys`.                                                                |
+
+**What is stored.** After every write the device saves the listed keys under the spec `id`: a user
+write (a tap, a text edit), a device data action (`setData`, `appendData`, `removeData`) or a `request`
+response (#12523) that writes state or data. A write that would take the stored total over
+`MAX_PROTOTYPE_STORAGE_BYTES` still applies on screen, is not stored (the previous stored value of
+that key stays) and the key is listed in `skippedKeys` of the inspect report. Stored values are part
+of the device's per-id state: they survive a dismiss, a process restart and a saved prototype's relaunch.
+
+**Precedence (ADOPTED DECISION).** #12522 was labelled needs-decision; its proposal is adopted as
+the decision, and the rules below are the contract. They are implemented once as the pure function
+`restorePrototypeStorage` (`src/features/prototype/prototypeStorageRestore.ts`), the reference the
+device runtimes follow, as `applyPrototypeDataWrite` is for data actions.
+
+1. On the next show of the same `id`, stored values replace the spec's values for the keys the spec
+   lists. This applies to a same-id replacement, to a show after a dismiss and to a saved prototype's
+   launch. The rest of the spec's `state` stays authoritative (see Re-showing). `reset: true` only
+   restarts pager pages and display; it does not clear storage (use `clearStorage` first).
+2. If `storage.version` differs from the version the values were stored under, every stored value
+   of that id is discarded and the spec's values stand. Authors bump `version` when a key's meaning or
+   shape changes.
+3. A stored key that `storage.keys` no longer lists is dropped, and a show with no `storage` block
+   drops every stored value of that id (as if `keys` were empty).
+4. A stored value that no longer fits the spec is dropped and the spec's value stands: a `state`
+   value whose type (string, finite number, boolean) differs from the spec's value, a `state` key the
+   spec no longer declares, a `data` value of a different JSON kind than the spec's own value at that
+   pointer (object, array, string, number, boolean), or a value `applyPrototypeDataWrite` refuses as
+   a `set` (a missing parent, a data limit). Dropped entries are deleted from storage.
+5. Restoring happens before the first draw and sends no `change` event; the show result and the
+   host's cached state and data still describe the spec's values. Call `inspect` to read the live
+   values.
+6. **Host `patch` against a stored key.** The patch wins. It applies under the existing
+   `baseRevision` conflict rules (a stored restore is not a device write and does not bump the
+   revision or enter the write log), and the device then stores the new value like any other write.
+
+**Host tool support.**
+
+- `inspect` reports what the device stores. The device reports, per prototype in its
+  `inspect_prototypes` reply (and flat in the iOS agent's status), a `storage` object:
+  `{version, keys: [{key, bytes}], totalBytes, skippedKeys?}` (`PrototypeStorageReport`). `keys` lists only
+  keys that currently hold a stored value, in storage-key form (`state:darkMode`, `data:/cart`).
+  The host passes it through as `storage` on the prototype entry, and reports it absent when the
+  device sends none (no `prototype_storage_v1`, or no `storage` block) or sends a malformed one.
+  `status` shows the last inspected value and drops it after a successful `clearStorage`.
+- `{action: "clearStorage", id}` wipes the stored values of `id`. The host sends
+  `{type: "clear_prototype_storage", requestId, id}` (Android CtrlProxy; the iOS agent receives the
+  same request type) and the device answers one `prototype_result` with `success` and `cleared`, the
+  number of keys removed (0 for an id with nothing stored). The prototype on screen is not changed;
+  the next show of the id starts from the spec's values. It is refused before anything is sent, with
+  a message naming `prototype_storage_v1`, when the device does not advertise it.
+- `deleteSaved` also clears the id's storage. This is device-side behavior and part of the contract:
+  deleting a saved prototype removes its spec, assets, shortcut and stored values, so a later save of
+  the same id starts clean. `delete_saved_prototype` needs no new flag. On iOS the saved prototype is
+  its own app, so deleting the app removes its storage with it.
+
+**Native lanes need.** The Kotlin and Swift runtimes must: add `storage` to the spec model
+(the contract and its validator already accept it), the two limits to their constants (`MAX_PROTOTYPE_STORAGE_BYTES`,
+`MAX_PROTOTYPE_STORAGE_KEYS`), advertise `prototype_storage_v1`, persist and restore per the rules
+above, report `storage` in the inspect entry, handle `clear_prototype_storage` (a `ClearPrototypeStorage`
+serializer with `requestId` and `id`; replies carry `cleared`), and clear storage on `delete_saved_prototype`.
+
+**Android CtrlProxy (#12525).** CtrlProxy advertises `prototype_storage_v1` and implements the rules
+above in `PrototypeStorageRestorer` (`android/protocol`, the pure twin of `restorePrototypeStorage`),
+`PrototypeStoragePersistence` / `PrototypeStorageSession` and a `PrototypeStorageStore`
+(`android/control-proxy/.../prototype`).
+
+- **Store.** `PrototypeStorageDirectoryStore` keeps one document per id at
+  `filesDir/prototype-storage/<slug>-<hash16>.json` (the slug prefix is the one saved prototypes use,
+  followed by 16 hex characters of the id's SHA-256): `{"id", "version", "values": {"state:dark": true,
+  "data:/cart": {...}}}`. A save writes `<name>.tmp`, syncs and renames it over the target, so a reader
+  sees the old or the new document. An unparsable document, a wrong shape or another id's document is
+  `Corrupt`: the show uses the spec's values, logs a warning and deletes it.
+- **Show.** The restore runs before the runtime is built, so the first draw already shows the stored
+  values; the runtime starts at the spec's revision and no `change` event is sent. Dropped entries
+  (version, unlisted, no longer fits) are deleted at once. The restored spec must still pass the same
+  validation as a shown one (a stored text that breaks a field's `maxLength` would not), otherwise
+  every stored value is dropped. A same-id show first flushes the shown prototype's pending write, so
+  it restores what the user last did.
+- **Write-back.** After each interaction and each patch, the session compares the listed keys with
+  what it last saw and stores those that changed: a state write, a device data action or a host
+  patch. Only changed keys are stored, so an untouched key keeps following the spec's value. The first
+  change of a burst arms one write `PROTOTYPE_STORAGE_DEBOUNCE_MILLIS` (500 ms) later and changes
+  inside the window ride along; dismissal (any reason, including teardown), replacement and the saved
+  activity's `onStop` flush at once. A write that fails is logged and retried at the next flush.
+  `request` responses (#12523) are covered when they land, because they write through the same state
+  and data paths.
+- **Limit.** Per id the stored entries (key bytes plus compact JSON) are summed against
+  `MAX_PROTOTYPE_STORAGE_BYTES`. A write that would pass it applies live, is not stored, keeps the
+  key's previous stored value and lists the key in `skippedKeys` until a later write fits.
+- **Removed pointers.** A listed `data:` pointer that a data action removes loses its stored value
+  (JSON `null` is not stored), so the spec's value returns on the next show.
+- **Surfaces.** The overlay (`PrototypeController`), `persistence: "device"` prototypes (same
+  controller) and `SavedPrototypeActivity` (its own persistence over the same store) all use it.
+  A service prototype and the saved activity of the same id share one file; the last write wins.
+- **Host actions.** `clear_prototype_storage` is answered by one `prototype_result` with `cleared`.
+  It clears the shown session (and its pending write) or, for an id nobody shows, the document. The
+  prototype on screen keeps its live values. `delete_saved_prototype` clears the id's storage after
+  deleting the saved copy. Each `inspect_prototypes` entry carries `storage` when its spec declares
+  `storage`: `keys` holds only the keys that currently hold a stored value.
+- **Reinstall (not done; follow-up).** Stored values live in `filesDir`, so they survive a dismiss,
+  a process restart and a saved prototype's launch but not an uninstall, a data clear or the
+  reinstall fallback. The #12268 host mirror (`savedPrototypeMirror.ts`) records a saved prototype
+  from what the host sent at `save`; the stored values exist only on the device, so mirroring them
+  needs a device-to-host export of a prototype's storage (a new wire message and a
+  `restoreSavedPrototypes` step that re-seeds it). That host work is not built here.
+
+### Request action (#12523)
+
+```json
+{
+  "type": "request",
+  "method": "GET",
+  "url": "http://localhost:8080/feed",
+  "headers": { "Accept": "application/json" },
+  "query": { "q": { "state": "search" } },
+  "into": "/data/feed",
+  "statusKey": "feedStatus",
+  "via": "host",
+  "onSuccess": [{ "type": "setState", "key": "loaded", "value": true }],
+  "onError": []
+}
+```
+
+A `request` calls an HTTP endpoint from a tap, writes the answer into `/data` and reports its
+progress in a state key, so a prototype can load and post real content with no agent round trip.
+It requires `prototype_network_v1`, and `prototype_network_device_v1` as well when `via` is
+`"device"`; both are entries in `PROTOTYPE_SPEC_CAPABILITY_GATES` (the second gate's fields are only
+the via-device requests), so show, patch and `replaceNode` refuse a spec containing one on a device
+without them. A device advertising `prototype_network_v1` also writes `/data` for `into`, with the
+`applyPrototypeDataWrite` semantics, without `prototype_data_actions_v1`.
+
+| Field                  | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`                  | Required, at most 2048 characters. Any absolute `http` or `https` URL, with **no host allowlist** (localhost, loopback and private addresses included). Takes the text placeholders of any text field: `{key}` (state), `{data:/pointer}`, `{item.field}`, `{index}`. Without a placeholder it must parse as an http(s) URL; with one, only the literal `http://` or `https://` prefix is checked, because the rest is known when the request runs. The issue's `{state:key}` spelling does not exist in the placeholder grammar; use `{key}`.                                                                                                                                                                                                                                                                                                        |
+| `method`               | `GET` (default), `POST`, `PUT`, `PATCH`, `DELETE` or `HEAD`, the same `PROTOTYPE_REQUEST_METHODS` the host executor accepts. `body` is refused with `GET` and `HEAD`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `headers`, `query`     | Up to 16 entries each: a literal string (text placeholders apply) or a value binding `{state}`, `{data}`, `{value}`, and `{item}` / `{index: true}` in a repeat. A bound value must be a string, number or boolean. Header names must be HTTP tokens. Query entries are set on the URL in sorted key order (UTF-16 code units, like JS `sort()`), on every runtime, so the resolved URL does not depend on authoring order. With no authored `query` the URL's raw query is kept verbatim. Each authored key replaces the value at its first existing piece in place and removes later duplicates; new keys are appended in sorted order. Only those pieces are re-encoded (form encoding: space is `+`, `~` is `%7E`); untouched pieces keep their exact spelling (`?flag`, `%20`). E.g. `?a=1&b=x%20y&a=3&c` with `{a:"2"}` gives `?a=2&b=x%20y&c`. |
+| `body`                 | A value binding, so a literal is `{value: json}`. Non-string values are sent as JSON with `Content-Type: application/json` unless a header sets one.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `into`                 | `/data/<pointer>` with the data-action rules (whole `{index}` segment in a repeat). It must name an object member, not an array element, and its parent must exist. Optional: without it nothing is written to data.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `statusKey`            | A declared **string** state key (a numeric or boolean key is refused). Set to `"loading"`, then `"success"` or `"error"`, so `visibleWhen` can show a spinner or an error. Inside a repeat it may hold placeholders like any state key.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `via`                  | `"host"` (default) or `"device"`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `timeoutMs`            | Optional integer, 1 to `MAX_PROTOTYPE_REQUEST_TIMEOUT_MS`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `onSuccess`, `onError` | Optional action lists (1 to 32). Recursive: a request may carry requests.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+
+**Limits** live in the contract's `limits` and `src/features/prototype/prototypeRequestLimits.ts`
+reads them from there (the contract is the single source for the host executor, the validator and
+the native runtimes):
+
+| Limit                                  | Value                                                                                                                                                                                                          |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS` | 10000                                                                                                                                                                                                          |
+| `MAX_PROTOTYPE_REQUEST_TIMEOUT_MS`     | 30000 (a larger `timeoutMs` is a validation error; the host clamps)                                                                                                                                            |
+| `MAX_PROTOTYPE_RESPONSE_BYTES`         | 262144, never above `MAX_PROTOTYPE_DATA_WRITE_BYTES`, so an accepted response is one `/data` write                                                                                                             |
+| `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT`     | 4 per device                                                                                                                                                                                                   |
+| `MAX_PROTOTYPE_ACTION_DEPTH`           | 4: a top-level action is level 1 and each `onSuccess` / `onError` adds one. The contract walk counts it like selector and condition depth; Zod does not, and treats follow-up entries as actions of any depth. |
+
+**Response handling** is the pure function `applyPrototypeRequestOutcome`
+(`prototypeRequestOutcome.ts`), the reference the device runtimes copy:
+
+1. A 2xx response is written to `into` as `set` does: parsed JSON as it is, any non-JSON body as a
+   string, an empty body (and a HEAD) as `""`. If the value is not data (it holds null, or breaks a
+   depth, array or byte limit) the request is an error with `error.code` `invalid_response` and `into`
+   is left alone.
+2. A non-2xx status leaves `into` untouched and is an error with `error.code` `http_error`
+   (`message` `HTTP <status>`). The status decides this before the body is consumed: a non-2xx body
+   is never read or capped (it is reported as `null`), so an oversized error page is `http_error`,
+   not `too_large`; the size cap applies to 2xx bodies only. A transport failure is an error with the executor's code (`timeout`,
+   `too_large`, `connection_refused`, `cancelled`, `invalid_url`, `invalid_request`, `network`,
+   `too_many_in_flight`).
+3. With `into`, the metadata is then written to **`<into>__meta`**: the same pointer with `__meta`
+   appended to its last segment (`/data/feed` reports at `/data/feed__meta`; `prototypeRequestMetaPath`).
+   Its value is `{status?: number, headers?: {name: value}, durationMs: number, error?: {code, message}}`.
+   `status` and `headers` (lower-cased names) exist once a response arrived; `error` exists for every
+   failure. If it does not fit the data write limit, `headers` is dropped. The completion is atomic: if
+   the body fits `/data` but no form of `__meta` fits beside it, `into` is left unchanged and the request
+   is an error with `error.code` `invalid_response` (message `response and metadata exceed the data
+   limit`); its minimal metadata (duration and error) is still written if it fits, the status key
+   becomes `error` and `onError` runs.
+4. `statusKey` becomes `"success"` or `"error"`, the request event is sent, then `onSuccess` or
+   `onError` runs.
+
+**Event.** A finished request is an `emit` event with `name` `prototype_request` (reserved; an
+authored `emit` with that name is a validation error) and a payload decoded by
+`prototypeRequestEventOf` (`prototypeRequestEvent.ts`), so no wire field is added and
+`ctrlProxyWireManifest.ts` is unchanged:
+
+```json
+{
+  "requestId": "r-1",
+  "method": "GET",
+  "url": "http://localhost:8080/feed?q=cats",
+  "via": "host",
+  "into": "/data/feed",
+  "outcome": "success",
+  "status": 200,
+  "durationMs": 31
+}
+```
+
+`outcome` is `"success"` or `"error"`; `error: {code, message}` is present exactly for `"error"`;
+`status` is absent when no response arrived; `url` is the resolved URL cut to 2048 characters and
+`message` is cut to 512. A malformed payload under that name drops the event, as for data writes.
+`awaitEvent {kind: "emit", eventName: "prototype_request"}` returns it. The `/data` writes of
+step 1 and 3 are `change` events as for data actions, sent before it.
+
+**Concurrency (device runtime).** A request whose `into` already has one in flight cancels the
+first: the latest wins. The cancelled request writes nothing to `into`, `<into>__meta` or `statusKey`,
+runs no follow-up and reports a `cancelled` event. A `via: "host"` call sends
+`{"type":"prototype_request_cancel","requestId":"<id>"}` to the host (also on dismiss, reset or
+abandonment): the host aborts that request's fetch, frees its in-flight slot and sends no reply, and the
+device ignores a `prototype_response` that crosses it. The frame is not in the Kotlin-mirrored wire
+manifest, like `prototype_request`. Beyond `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT` a new request fails with
+`too_many_in_flight`. Dismissing the prototype cancels its requests. `via: "device"` loopback URLs
+are reversed as described in [Loopback requests from the device](#loopback-requests-from-the-device-12530).
+
+**Android runtime (#12528).** CtrlProxy advertises both capabilities and runs the action in
+`PrototypeRuntime`; the Kotlin twins of the TypeScript rules live in the `protocol` module
+(`PrototypeRequest.kt`: the resolver, `PrototypeRequestOutcome` and the event payload) and are
+tested against the same fixture, `request-actions.json`.
+
+- `statusKey` becomes `loading` in the tap's own interaction. The request then waits off the
+  interaction on the controller's scope, and its completion runs under the controller's lock, so a
+  response never lands in the middle of a tap. The completion order is the contract's: `into`,
+  `<into>__meta`, `statusKey`, the `prototype_request` event, then `onSuccess` / `onError`. A request
+  that cannot start (an unresolvable binding, or the in-flight cap) finishes at once as an error
+  without a `loading` step.
+- Both transports implement `PrototypeHttpClient`, so the runtime does not know which one ran.
+  `via: "host"` sends a `prototype_request` frame to the latest connected host over the CtrlProxy
+  socket and waits for the `prototype_response` with the same `requestId` (a host that never
+  answers times out five seconds after the request's own timeout; no host connected fails at once
+  with `network` and a message naming `via: "host"`). `via: "device"` is one Retrofit service
+  (`PrototypeHttpService`) over an injected `OkHttpClient` with raw `RequestBody` / `ResponseBody`
+  and no converter; the response is read with the `MAX_PROTOTYPE_RESPONSE_BYTES` cap, and the
+  contract timeout is the whole-call timeout. The two frames are plain serializable classes
+  (`PrototypeNetworkFrames.kt`), kept out of the `WebSocketRequest` / `WebSocketResponse` hierarchies
+  because the host reads them outside its Kotlin-mirrored wire manifest.
+- A request to any absolute http or https URL is allowed: CtrlProxy declares
+  `android.permission.INTERNET` and a `network_security_config` with `cleartextTrafficPermitted="true"`
+  on the `base-config`. There is no host allowlist; CtrlProxy is sideloaded over adb and never
+  distributed.
+- Saved prototypes (`SavedPrototypeActivity`) are not wired to a transport yet: a `request` in one
+  finishes as a `network` error.
+
+Worked example: a feed that shows a spinner, the result and an error (state
+`{"feedStatus": "idle", "search": "cats"}`, data `{"title": "Feed"}`):
+
+```json
+[
+  {
+    "type": "text",
+    "text": "Loading",
+    "visibleWhen": { "key": "feedStatus", "equals": "loading" }
+  },
+  {
+    "type": "text",
+    "text": "{data:/feed__meta/error/message}",
+    "visibleWhen": { "key": "feedStatus", "equals": "error" }
+  },
+  {
+    "type": "button",
+    "label": "Load",
+    "onTap": [
+      {
+        "type": "request",
+        "url": "http://localhost:8080/feed",
+        "query": { "q": { "state": "search" } },
+        "into": "/data/feed",
+        "statusKey": "feedStatus"
+      }
+    ]
+  }
+]
+```
+
+The shared native-parity fixture `test/fixtures/prototype-spec/valid/request-actions.json` covers
+both `via` values, `onSuccess` / `onError`, nesting, `statusKey` and `visibleWhen` on the status.
 
 ### Conditions
 
@@ -1031,7 +1401,7 @@ list is a `column` with `repeat` whose single child is the row template).
     }
   ]
 }
-````
+```
 
 - `items` is a literal array of 1 to 32 objects declared in the spec. Each object
   maps state-style field names to scalar values (string, finite number, boolean);
@@ -1177,8 +1547,10 @@ must keep that id. Replacement nodes cannot contain `use` nodes or element
 anchors. Inline the component, use a bounds anchor, or use `show`.
 
 The agent writes data; the user writes state. Data-only patches and patches
-containing only data ops and `replaceNode` ignore `baseRevision`. Any state op,
-including `test`, requires `baseRevision`. A device supporting the capability
+containing only data ops and `replaceNode` ignore `baseRevision`, until the device has written the
+prototype's data with a data action (see [Data actions](#data-actions-12519)): from then on a
+`/data` op also needs `baseRevision` and conflicts with newer overlapping device writes. Any state
+op, including `test`, requires `baseRevision`. A device supporting the capability
 must refuse the whole patch with `conflict` if the user changed a touched state
 key since that revision, returning the current revision and those keys' values.
 
@@ -1211,7 +1583,8 @@ the device replaces it in place: it keeps the display the prototype is on (the
 request's `displayId` is ignored), and each pager keeps its settled page,
 matched by pager id and clamped to the new page count. The new spec's `state`
 is authoritative; values the user changed by tapping or typing are not carried
-over unless the spec includes them. The window content is rebuilt from the new
+over unless the spec includes them, except the keys its `storage` block lists, whose
+stored values replace the spec's (see [Storage](#storage-12522)). The window content is rebuilt from the new
 runtime, so a text field shows the spec's value and edits still in flight from
 the previous showing are dropped. Event sequences continue per id, as for any
 re-show. `reset: true`, a different id, or nothing on screen is a fresh show:
@@ -1229,6 +1602,29 @@ whose `pager` holds every design with a visible label per page (see the
 full-screen pager example below). The user chooses in chat; nothing waits on the
 device for a choice. `pager`, `setPage` and `{page}`/`{pageCount}` interpolation
 remain spec primitives for that.
+
+### Loopback requests from the device (#12530)
+
+On an Android emulator or device, `localhost` in a `request` action with `via: "device"` is the
+device itself, not the host. When the host shows a prototype it scans every such request, at any
+depth (including nested `onSuccess`/`onError` lists), for URLs on `localhost`, `127.0.0.1` or `[::1]`
+and runs `adb -s <serial> reverse tcp:<port> tcp:<port>` for each port. `via: "host"` requests are
+ignored.
+
+- Implicit ports are reversed: `http://localhost/` reverses 80 and `https://localhost/` reverses 443,
+  so the same URL reaches the same host server under both `via` values.
+- Ownership: a reverse is recorded as the host's own only when it created it. One already listed by
+  `adb reverse --list` is left alone and never removed. Ports are reference-counted across the
+  prototypes shown on one device and removed when the last holder is dismissed, the session ends, or
+  the device is unbound or removed.
+- Best-effort: a failed reverse is logged and reported as `reverseFailures`; it never fails the show.
+- A port that is a binding (`http://localhost:{port}/feed`) or an unparseable URL cannot be
+  reversed, because it is unknown until the request runs. `inspect` reports these as
+  `unreversiblePorts`, and the authoring guide says to use `via: "host"` for them.
+- A saved prototype launched with no host connected has no host to run `adb reverse`, so its
+  `via: "device"` requests to localhost fail until a host shows or re-shows it. Use a reachable
+  address (or `via: "host"` while a host is attached) for prototypes meant to run unattended.
+- iOS simulators share the Mac's network, so nothing is reversed there.
 
 ## Anchors
 

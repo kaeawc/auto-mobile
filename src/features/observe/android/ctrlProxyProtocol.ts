@@ -37,6 +37,16 @@ import type {
  */
 
 import type { PrototypeSpec, PrototypeJson, PrototypeData } from "../../prototype/prototypeSpec";
+import {
+  clearPrototypeStorageMessage,
+  type ClearPrototypeStorageMessage,
+  type PrototypeStorageReport,
+} from "../../prototype/prototypeStorageWire";
+export {
+  PROTOTYPE_STORAGE_CAPABILITY,
+  type ClearPrototypeStorageMessage,
+  type PrototypeStorageReport,
+} from "../../prototype/prototypeStorageWire";
 import type { HighlightShape } from "../../../models/VisualHighlight";
 import type { ImeAction } from "../../../models/ImeAction";
 import type { NetworkMockRuleSync } from "../../../server/networkMockRules";
@@ -641,6 +651,8 @@ export interface PrototypeResult {
   droppedEvents?: number;
   /** Only a successful `show_prototype` reply from a device advertising prototype_appearance_v1. */
   appearance?: PrototypeAppearance;
+  /** Only the reply to `clear_prototype_storage`: how many stored keys were removed. */
+  cleared?: number;
 }
 
 /** One prototype the device reported to `inspect_prototypes`. `id` is the prototype id (its spec id). */
@@ -660,6 +672,8 @@ export interface PrototypeStatusEntry {
   hiddenReason?: PrototypeHiddenReason;
   /** The mode it is drawn in right now; only from a device advertising prototype_appearance_v1. */
   appearance?: PrototypeAppearance;
+  /** What the device stores for this prototype's `storage` block (prototype_storage_v1, #12522). */
+  storage?: PrototypeStorageReport;
 }
 
 /**
@@ -1028,6 +1042,7 @@ export type CtrlProxyRequest =
   | PinSavedPrototypeMessage
   | ListSavedPrototypesMessage
   | DeleteSavedPrototypeMessage
+  | ClearPrototypeStorageMessage
   | PutPrototypeAssetMessage
   | RemovePrototypeAssetMessage
   | AddHighlightMessage
@@ -1105,10 +1120,7 @@ export const PROTOTYPE_WINDOW_OPTIONS_CAPABILITY = "prototype_window_options_v1"
  */
 export const PROTOTYPE_WINDOW_CHROME_CAPABILITY = "prototype_window_chrome_v1";
 
-/**
- * Advertised by a CtrlProxy that buffers a device-persistent prototype's events while no host is
- * connected, replays them on the next connection, and answers `inspect_prototypes`.
- */
+/** Buffers a device-persistent prototype's events while no host is connected; answers inspect. */
 export const PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY = "prototype_persistence_replay_v1";
 
 /**
@@ -1118,7 +1130,6 @@ export const PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY = "prototype_persistence_re
  */
 export const PROTOTYPE_SHOW_IN_PLACE_CAPABILITY = "prototype_show_in_place_v1";
 
-// ORCHESTRATOR-CHOSEN: to be folded into the PROTOTYPE_SPEC_CAPABILITY_GATES registry (briefs/prototype-capability-gate-registry)
 export const PROTOTYPE_MULTI_SURFACE_CAPABILITY = "prototype_multi_surface_v1";
 
 /**
@@ -1138,6 +1149,11 @@ export const PROTOTYPE_MENUS_CAPABILITY = "prototype_menus_v1";
 export const PROTOTYPE_EMIT_CONTEXT_CAPABILITY = "prototype_emit_context_v1";
 export const PROTOTYPE_CHECKS_CAPABILITY = "prototype_checks_v1";
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
+/** setData/appendData/removeData on `/data`, each write reported as a `change` event. */
+export const PROTOTYPE_DATA_ACTIONS_CAPABILITY = "prototype_data_actions_v1";
+/** The `request` action (#12523); see prototypeRequest.ts. A `via: "device"` one also needs the second. */
+export const PROTOTYPE_NETWORK_CAPABILITY = "prototype_network_v1";
+export const PROTOTYPE_NETWORK_DEVICE_CAPABILITY = "prototype_network_device_v1";
 /** Editable in-tree search field with active results and submit/trailing actions. */
 export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
 
@@ -1396,6 +1412,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   pin_saved_prototype: true,
   list_saved_prototypes: true,
   delete_saved_prototype: true,
+  clear_prototype_storage: true,
   put_prototype_asset: true,
   remove_prototype_asset: true,
   list_preference_files: true,
@@ -1720,6 +1737,7 @@ export const ctrlProxyRequests = {
   deleteSavedPrototype(args: { requestId: string; id: string }): DeleteSavedPrototypeMessage {
     return { type: "delete_saved_prototype", requestId: args.requestId, id: args.id };
   },
+  clearPrototypeStorage: clearPrototypeStorageMessage,
   patchPrototype(args: { requestId: string } & PrototypePatchRequest): PatchPrototypeMessage {
     return {
       type: "patch_prototype",

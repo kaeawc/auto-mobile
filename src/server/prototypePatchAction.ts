@@ -2,6 +2,7 @@ import { ActionableError, toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 import {
   applyPrototypePatch,
+  prototypePatchDataPaths,
   prototypePatchTouchesState,
   type PrototypePatchOp,
 } from "../features/prototype/prototypePatch";
@@ -47,6 +48,8 @@ export interface PrototypePatchDependencies {
   supportsPatch: () => Promise<boolean>;
   /** Checks spec-level capabilities on the complete validated patch result. */
   specRefusal?: (spec: unknown) => Promise<string | undefined>;
+  /** Settles what `specRefusal` staged: true once the patch landed (or may have), else false. */
+  settleSpec?: (landed: boolean) => Promise<void>;
   platform: "android" | "ios";
   queue: PrototypePatchQueue;
   /** Retires the device's cached observation after an applied patch. */
@@ -126,16 +129,36 @@ async function queuedPatch(
       `Prototype ${args.id} was not patched: this host is not tracking its spec on this device (it was not shown by this host, or a dismiss, a failed show or an overlapping show ended the tracking). Show it, then patch.`,
     );
   }
-  const applied = patchSpec(read.spec, args.ops);
+  const applied = plannedPatch(deps, deviceId, args, read.spec);
   if (!("spec" in applied)) {
     return applied;
   }
-  const refused = await deps.specRefusal?.(applied.spec);
-  if (refused !== undefined) {
-    return failure(refused);
+  let landed = false;
+  try {
+    const refused = await deps.specRefusal?.(applied.spec);
+    if (refused !== undefined) {
+      return failure(refused);
+    }
+    signal?.throwIfAborted();
+    const result = await sendPatch(deps, args);
+    landed = result.success || result.delivery === "indeterminate";
+    return await finishPatch(deps, deviceId, args, { read, applied, result });
+  } finally {
+    await deps.settleSpec?.(landed);
   }
-  signal?.throwIfAborted();
-  const result = await sendPatch(deps, args);
+}
+
+async function finishPatch(
+  deps: PrototypePatchDependencies,
+  deviceId: string,
+  args: PrototypePatchArgs,
+  sent: {
+    read: { version: number };
+    applied: Extract<ReturnType<typeof patchSpec>, { spec: unknown }>;
+    result: PrototypePatchReply;
+  },
+): Promise<PrototypePatchOutput> {
+  const { read, applied, result } = sent;
   if (result.delivery === "indeterminate") {
     deps.store.shownSpecs.abandon(deviceId);
     return failure(
@@ -157,6 +180,43 @@ async function queuedPatch(
   }
   deps.retire(result);
   return successfulPatchOutput(fields.revision, committed, args.id);
+}
+
+/** The patched spec, unless the patch is invalid or would overwrite device `/data` writes. */
+function plannedPatch(
+  deps: PrototypePatchDependencies,
+  deviceId: string,
+  args: PrototypePatchArgs,
+  spec: ShownSpecJson,
+): ReturnType<typeof patchSpec> {
+  const applied = patchSpec(spec, args.ops);
+  return "spec" in applied ? (dataWriteGuard(deps, deviceId, args) ?? applied) : applied;
+}
+
+/** A patch must not overwrite device `/data` writes it was not built on (see dataPatchGuard). */
+function dataWriteGuard(
+  deps: PrototypePatchDependencies,
+  deviceId: string,
+  args: PrototypePatchArgs,
+): PrototypePatchOutput | undefined {
+  const guard = deps.store.shownSpecs.dataPatchGuard(
+    deviceId,
+    args.id,
+    prototypePatchDataPaths(args.ops),
+    args.baseRevision,
+  );
+  if (guard.kind === "baseRevisionRequired") {
+    return failure(
+      "Invalid patch at baseRevision: required for /data ops once the device has written this prototype's data (setData, appendData, removeData); use the revision from the latest change event or patch result",
+    );
+  }
+  return guard.kind === "conflict"
+    ? {
+        success: false,
+        error: `The patch was refused: the device wrote ${guard.paths.join(", ")} after revision ${args.baseRevision}. Re-read the prototype's data and patch again from revision ${guard.revision}.`,
+        conflict: { revision: guard.revision, state: {}, data: guard.paths },
+      }
+    : undefined;
 }
 
 function successfulPatchOutput(

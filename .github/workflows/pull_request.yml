@@ -1036,7 +1036,8 @@ jobs:
   # PR that touches no shell input finishes in seconds with "nothing to validate",
   # so the stable context name below always reports.
   shell-changed-gate:
-    timeout-minutes: 15
+    # The dependency helper alone may use its full 15-minute retry budget.
+    timeout-minutes: 25
     name: "Shell Changed Files"
     runs-on: ${{ vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && 'namespace-profile-auto-mobile' || 'ubuntu-latest' }}
     steps:
@@ -1047,20 +1048,18 @@ jobs:
           # Full history so `origin/<base>...HEAD` has a merge-base.
           fetch-depth: 0
 
+      # prepush-shell.sh selects the same fast-validate checks Fast Validation
+      # runs (xml needs xmlstarlet, lychee-offline needs lychee), so install
+      # their tools with the same helper: pinned bats-core, xmlstarlet with a
+      # fallback mirror, and lychee, each bounded and retried.
       - name: "Install BATS"
         shell: bash
         background: true
         id: install-bats
+        # The helper budgets its retried operations for up to 870 s.
+        timeout-minutes: 15
         run: |
-          if command -v bats &>/dev/null; then
-            echo "bats already installed: $(bats --version)"
-          else
-            # Same pinned bats-core as the full BATS job.
-            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
-            # Tags are mutable; the install runs under sudo, so check the commit.
-            test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
-            sudo /tmp/bats-core/install.sh /usr/local
-          fi
+          scripts/ci/install-fast-validation-deps.sh
           if ! command -v shellcheck &>/dev/null; then
             echo "shellcheck missing on the runner" >&2
             exit 1

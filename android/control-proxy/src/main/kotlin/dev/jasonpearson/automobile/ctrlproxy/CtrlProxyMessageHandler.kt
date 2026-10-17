@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscription
 import dev.jasonpearson.automobile.protocol.AddHighlight
 import dev.jasonpearson.automobile.protocol.ClearPreferences
+import dev.jasonpearson.automobile.protocol.ClearPrototypeStorage
 import dev.jasonpearson.automobile.protocol.DeleteSavedPrototype
 import dev.jasonpearson.automobile.protocol.DiscoverKeystore
 import dev.jasonpearson.automobile.protocol.DismissPrototype
@@ -430,6 +431,7 @@ class CtrlProxyMessageHandler(
       is PinSavedPrototype -> actions.pinSavedPrototype(request.requestId, request.id, request.icon)
       is ListSavedPrototypes -> actions.listSavedPrototypes(request.requestId)
       is DeleteSavedPrototype -> actions.deleteSavedPrototype(request.requestId, request.id)
+      is ClearPrototypeStorage -> actions.clearPrototypeStorage(request.requestId, request.id)
       is PatchPrototype ->
         actions.patchPrototype(request.requestId, request.id, request.baseRevision, request.ops)
       is PutPrototypeAsset ->

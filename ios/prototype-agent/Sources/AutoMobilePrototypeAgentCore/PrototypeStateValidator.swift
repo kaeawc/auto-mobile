@@ -21,6 +21,8 @@ enum PrototypeStateValidator {
         var nodes: [PrototypeNode] = []
         var actions: [PrototypeAction] = []
         collect(root, nodes: &nodes, actions: &actions)
+        // A request's onSuccess / onError lists run state actions too.
+        actions = actions.flatMap(\.flattened)
         for node in nodes {
             if let message = bindingError(node, state) { return message }
         }

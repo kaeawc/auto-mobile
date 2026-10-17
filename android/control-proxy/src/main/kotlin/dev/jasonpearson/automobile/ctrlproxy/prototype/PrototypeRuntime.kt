@@ -2,10 +2,17 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.*
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
@@ -122,6 +129,29 @@ class PrototypeRuntime(
   initialRevision: Long = 0L,
   private val nextRevision: (() -> Long)? = null,
   previousStacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
+  /** Where a refused data write is explained; a seam so JVM tests need no `android.util.Log`. */
+  private val warn: (String) -> Unit = { Log.w("PrototypeRuntime", it) },
+  /**
+   * Keeps the spec's `storage` keys across shows (#12522). The [spec] passed in already carries the
+   * restored values, so restoring is neither a write nor an event.
+   */
+  internal val storage: PrototypeStorageSession? = null,
+  /** The transports behind `request` actions (#12528); a seam so JVM tests use a fake. */
+  private val httpClients: PrototypeHttpClients = PrototypeHttpClients.Unavailable,
+  /**
+   * Where `request` actions wait for their response. The runtime cancels its own requests on
+   * dismissal and never this scope; tests pass a test scope to control time.
+   */
+  private val requestScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+  /**
+   * Runs a request's completion alongside the interactions: the controller passes its own lock so a
+   * response never lands in the middle of a tap. The default runs it directly.
+   */
+  private val exclusively: suspend (suspend () -> Unit) -> Unit = { it() },
+  /** A request id is unique on the device and stable between the request and its response. */
+  private val newRequestId: () -> String = { UUID.randomUUID().toString() },
+  /** The device-wide cap on requests in flight; the controller shares one across its surfaces. */
+  private val requestLimiter: PrototypeRequestLimiter = PrototypeRequestLimiter(),
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
@@ -268,6 +298,7 @@ class PrototypeRuntime(
         stateRevisions = before.stateRevisions + changed.associateWith { revision },
       )
     // The commit is authoritative even if an ancillary event sink fails. Cancellation propagates.
+    storage?.record(current.spec)
     try {
       emitStateChange(changed.filter { it in current.state })
     } catch (error: CancellationException) {
@@ -282,6 +313,7 @@ class PrototypeRuntime(
 
   fun close() {
     mutableSnapshot.value = current.copy(active = false)
+    cancelRequests()
   }
 
   suspend fun handle(interaction: PrototypeInteraction) {
@@ -290,7 +322,14 @@ class PrototypeRuntime(
       handleInteraction(interaction)
     } finally {
       interactionRevision = null
+      // Every device write ends an interaction here, so one diff covers state, data and checks.
+      if (current.active) storage?.record(current.spec)
     }
+  }
+
+  /** Writes any stored value not yet on disk: the dismissal and replacement path. */
+  suspend fun flushStorage() {
+    storage?.flush()
   }
 
   private var interactionRevision: Long? = null
@@ -303,9 +342,11 @@ class PrototypeRuntime(
       }
     if (changed.isEmpty()) return
     val revision = interactionRevision ?: allocateRevision().also { interactionRevision = it }
+    // Only state differs from the spec the write was planned against. Taking the planned spec whole
+    // would roll back a data write made earlier in the same action list.
     mutableSnapshot.value =
       current.copy(
-        spec = spec,
+        spec = current.spec.copy(state = spec.state),
         revision = revision,
         stateRevisions = current.stateRevisions + changed.associateWith { revision },
       )
@@ -420,6 +461,7 @@ class PrototypeRuntime(
     writes: Map<Int, Pair<String, PrototypeSpec>>,
   ) {
     val baseline = current.state
+    val plannedData = current.spec.data
     val touched = LinkedHashSet<String>()
     for ((index, action) in actions.withIndex()) {
       if (!current.active) break
@@ -455,9 +497,19 @@ class PrototypeRuntime(
             if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
           }
         PrototypeDismissAction -> dismiss()
+        is PrototypeSetDataAction,
+        is PrototypeAppendDataAction,
+        is PrototypeRemoveDataAction -> writeData(action)
+        is PrototypeRequestAction -> startRequest(action, touched)
         else ->
-          writes[index]?.let { (key, spec) ->
-            writeInteractionSpec(spec)
+          writes[index]?.let { (key, planned) ->
+            // A data write earlier in this list may have added rows that bind this key, so a
+            // value planned against the old data is checked again against the data as it is now.
+            if (current.spec.data === plannedData) writeInteractionSpec(planned)
+            else
+              writeInteractionSpec(
+                validated(current.spec, mapOf(key to planned.state.orEmpty().getValue(key))),
+              )
             touched += key
           }
       }
@@ -642,6 +694,8 @@ class PrototypeRuntime(
   /** Teardown is terminal even if the platform removal or event delivery fails. */
   internal suspend fun finishDismissal(reason: PrototypeDismissReason) {
     if (!current.active) return
+    storage?.record(current.spec)
+    storage?.flush()
     close()
     emit(
       kind = PrototypeEventKind.DISMISSED,
@@ -665,22 +719,417 @@ class PrototypeRuntime(
     )
   }
 
+  /** Bindings read the committed values at the action, after the writes before it in the list. */
+  private fun bindingInputs() =
+    object : EmitContextInputs {
+      override fun state(key: String): JsonElement? =
+        current.state[key]?.let(EmitContextResolver::scalar)
+
+      override fun page(id: String): Int? = current.pages[id]
+
+      override fun data(pointer: String): JsonElement? =
+        PrototypeDataPointer.resolve(current.spec.data, pointer)
+    }
+
+  /**
+   * A `setData`, `appendData` or `removeData` action (#12519). The write is the shared
+   * [PrototypeDataWriter] semantics, applied to an immutable copy of the data so Compose sees a new
+   * spec; a refused write (typed error, or a result the renderer cannot take) changes and emits
+   * nothing and the rest of the list still runs. An accepted write bumps the revision and reports
+   * itself as a `change` event named by the written path.
+   */
+  private suspend fun writeData(action: PrototypeAction) {
+    val write = dataWrite(action) ?: return
+    applyDataWrite(write)?.let { refusedDataWrite(write, it.message) }
+  }
+
+  /**
+   * One accepted or refused `/data` write; shared by the data actions and a request's response.
+   * Null once the write took effect (and reported itself), else why it was refused.
+   */
+  private suspend fun applyDataWrite(write: PrototypeDataWrite): PrototypeDataWriteError? {
+    val before = current
+    val spec =
+      when (val staged = stageDataWrite(before, before.spec, write)) {
+        is StagedWrite.Accepted -> staged.spec
+        is StagedWrite.Refused -> return staged.error
+      }
+    val revision = allocateRevision()
+    // The next state write of this interaction allocates a later revision, so it never regresses.
+    interactionRevision = null
+    stateWriteValidator = null
+    mutableSnapshot.value = before.copy(spec = spec, revision = revision)
+    emit(
+      kind = PrototypeEventKind.CHANGE,
+      name = write.path,
+      payload = dataWritePayload(write, revision),
+    )
+    return null
+  }
+
+  private sealed interface StagedWrite {
+    class Accepted(val spec: PrototypeSpec) : StagedWrite
+
+    class Refused(val error: PrototypeDataWriteError) : StagedWrite
+  }
+
+  /** [write] applied to [from] and checked against the renderer's limits; nothing is changed. */
+  private fun stageDataWrite(
+    before: PrototypeRuntimeSnapshot,
+    from: PrototypeSpec,
+    write: PrototypeDataWrite,
+  ): StagedWrite {
+    val data =
+      when (val result = PrototypeDataWriter.apply(from.data, write)) {
+        is PrototypeDataWriteResult.Success -> result.data
+        is PrototypeDataWriteResult.Failure -> return StagedWrite.Refused(result.error)
+      }
+    val spec = from.copy(data = data)
+    // Rows added by the write must still fit the renderer's limits; a disposable mapper keeps a
+    // rejected write from touching the runtime's own caches, as for a patch.
+    return try {
+      PrototypeRenderMapper()
+        .map(spec, before.pages, stacks = before.stacks, shownErrors = before.shownErrors)
+      StagedWrite.Accepted(spec)
+    } catch (error: IllegalArgumentException) {
+      StagedWrite.Refused(
+        PrototypeDataWriteError(
+          PrototypeDataWriteErrorCode.LIMIT_EXCEEDED,
+          error.message ?: "Data write exceeds a prototype limit",
+        ),
+      )
+    }
+  }
+
+  /** The first refusal of [writes] applied in order from now, or null; nothing is applied. */
+  private fun trialDataWrites(writes: List<PrototypeDataWrite>): PrototypeDataWriteError? {
+    val before = current
+    var spec = before.spec
+    for (write in writes) {
+      when (val staged = stageDataWrite(before, spec, write)) {
+        is StagedWrite.Accepted -> spec = staged.spec
+        is StagedWrite.Refused -> return staged.error
+      }
+    }
+    return null
+  }
+
+  private fun refusedDataWrite(write: PrototypeDataWrite, message: String) {
+    warn("Refused ${write.op}Data at ${write.path}: $message")
+  }
+
+  /** Binds the action's value; null when the value cannot be resolved (the write is refused). */
+  private fun dataWrite(action: PrototypeAction): PrototypeDataWrite? {
+    fun value(binding: EmitContextBinding, path: String): JsonElement? =
+      when (val resolved = PrototypeDataWriter.resolveValue(binding, bindingInputs())) {
+        is PrototypeDataValue.Resolved -> resolved.value
+        is PrototypeDataValue.Failure -> {
+          warn("Refused data write at $path: ${resolved.error.message}")
+          null
+        }
+      }
+    return when (action) {
+      is PrototypeSetDataAction ->
+        value(action.value, action.path)?.let { PrototypeDataWrite.Set(action.path, it) }
+      is PrototypeAppendDataAction ->
+        value(action.value, action.path)?.let { PrototypeDataWrite.Append(action.path, it) }
+      is PrototypeRemoveDataAction -> PrototypeDataWrite.Remove(action.path)
+      else -> null
+    }
+  }
+
+  /**
+   * `{op, value?, revision}`. The value is left out when the payload would not fit an event, so the
+   * host, which cannot mirror a write it was not shown, stops tracking the spec.
+   */
+  private fun dataWritePayload(write: PrototypeDataWrite, revision: Long): JsonObject {
+    fun payload(value: JsonElement?) = buildJsonObject {
+      put("op", write.op)
+      if (value != null) put("value", value)
+      put("revision", revision)
+    }
+    val value =
+      when (write) {
+        is PrototypeDataWrite.Set -> write.value
+        is PrototypeDataWrite.Append -> write.value
+        is PrototypeDataWrite.Remove -> null
+      }
+    val full = payload(value)
+    return if (
+      full.toString().toByteArray(Charsets.UTF_8).size <=
+        PrototypeSpecValidator.MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES
+    )
+      full
+    else payload(null)
+  }
+
+  // ---- request action (#12528) ----
+
+  /** A started request, kept until its response settles or it is superseded or cancelled. */
+  private class RequestInFlight(
+    val requestId: String,
+    val method: String,
+    val url: String,
+    val via: String,
+    val into: String?,
+    val statusKey: String?,
+    val startedAt: Long,
+    val onSuccess: List<PrototypeAction>?,
+    val onError: List<PrototypeAction>?,
+  ) {
+    lateinit var job: Job
+
+    /** The runtime that applies the response; a same-id replacement hands it to the new one. */
+    @Volatile lateinit var owner: PrototypeRuntime
+  }
+
+  private val inFlight = LinkedHashMap<String, RequestInFlight>()
+
+  /** Dismissal ends every request without a trace: the runtime is closed, so nothing is sent. */
+  private fun cancelRequests() {
+    val jobs = synchronized(inFlight) { inFlight.values.map { it.job }.also { inFlight.clear() } }
+    jobs.forEach {
+      it.cancel()
+      requestLimiter.release()
+    }
+  }
+
+  /**
+   * Hands the requests still in flight to [replacement], the runtime that replaces this one for the
+   * same id without a reset: their responses then apply to the new spec through the normal outcome
+   * path. Call before [close], which would cancel them.
+   */
+  internal fun handOverRequests(replacement: PrototypeRuntime) {
+    val moved = synchronized(inFlight) { inFlight.values.toList().also { inFlight.clear() } }
+    moved.forEach { request ->
+      requestLimiter.release()
+      replacement.adoptRequest(request)
+    }
+  }
+
+  private fun adoptRequest(request: RequestInFlight) {
+    request.owner = this
+    requestLimiter.acquire()
+    synchronized(inFlight) { inFlight[request.requestId] = request }
+  }
+
+  /** `{data:/pointer}` and `{key}` placeholders read the committed data and state at the action. */
+  private fun requestText(text: String): String =
+    interpolatePrototypeText(
+      PrototypeRequests.bindDataText(text, current.spec.data),
+      current.state,
+    )
+
+  private fun requestEntries(entries: Map<String, JsonElement>?): Map<String, JsonElement>? =
+    entries?.mapValues { (_, entry) ->
+      if (entry is JsonPrimitive && entry.isString) JsonPrimitive(requestText(entry.content))
+      else entry
+    }
+
+  /**
+   * A `request` action: resolves its bindings against the committed state and data, moves
+   * `statusKey` to `loading`, then waits for the response off the interaction. The latest request
+   * for the same `into` wins (the older one reports `cancelled`), at most
+   * [PrototypeSpecValidator.MAX_PROTOTYPE_REQUESTS_IN_FLIGHT] run at once, and a request that
+   * cannot start finishes at once as an error. The response is applied by [finishRequest].
+   */
+  private suspend fun startRequest(action: PrototypeRequestAction, touched: MutableSet<String>) {
+    val bound =
+      action.copy(
+        url = requestText(action.url),
+        headers = requestEntries(action.headers),
+        query = requestEntries(action.query),
+      )
+    val info = { url: String ->
+      RequestInFlight(
+        newRequestId(),
+        action.method ?: PrototypeRequests.DEFAULT_METHOD,
+        url,
+        action.via ?: PrototypeHttpClients.VIA_HOST,
+        action.into,
+        action.statusKey,
+        clock(),
+        action.onSuccess,
+        action.onError,
+      )
+    }
+    // The newest request wins even when it fails to resolve: the older one must not land later.
+    supersedeRequests(action.into)
+    val resolved =
+      when (val result = PrototypeRequestResolver.resolve(bound, bound.url, bindingInputs())) {
+        is PrototypeResolvedRequestResult.Failure ->
+          return finishRequest(
+            info(bound.url),
+            PrototypeRequestResponse.Failed(result.error),
+          )
+        is PrototypeResolvedRequestResult.Success -> result.request
+      }
+    val started = info(resolved.url)
+    started.owner = this
+    if (!requestLimiter.tryAcquire()) {
+      val error =
+        PrototypeRequestError(
+          PrototypeRequestErrorCode.TOO_MANY_IN_FLIGHT,
+          "At most ${PrototypeSpecValidator.MAX_PROTOTYPE_REQUESTS_IN_FLIGHT} requests can be in flight.",
+        )
+      return finishRequest(started, PrototypeRequestResponse.Failed(error))
+    }
+    action.statusKey?.let { key ->
+      if (writeStatus(key, PrototypeRequests.STATUS_LOADING)) touched += key
+    }
+    val request =
+      PrototypeHttpRequest(
+        requestId = started.requestId,
+        prototypeId = current.spec.id,
+        method = started.method,
+        url = resolved.url,
+        headers = resolved.headers,
+        body = resolved.body,
+        timeoutMs = action.timeoutMs ?: PrototypeSpecValidator.DEFAULT_PROTOTYPE_REQUEST_TIMEOUT_MS,
+      )
+    val client = httpClients.forVia(started.via)
+    // Lazy, so the job is registered before it can settle even on an eager dispatcher.
+    started.job =
+      requestScope.launch(start = CoroutineStart.LAZY) {
+        val response =
+          try {
+            client.execute(request)
+          } catch (error: CancellationException) {
+            throw error
+          } catch (error: Exception) {
+            warn("Request ${started.requestId} failed: ${error.message}")
+            PrototypeRequestResponse.Failed(
+              PrototypeRequestError(
+                PrototypeRequestErrorCode.NETWORK,
+                error.message ?: error.javaClass.simpleName,
+              ),
+            )
+          }
+        // A same-id replacement can adopt the request while this waits for the lock: re-read the
+        // owner inside it and, if it changed, settle again on the new one.
+        do {
+          val owner = started.owner
+          owner.exclusively { if (started.owner === owner) owner.settleRequest(started, response) }
+        } while (started.owner !== owner)
+      }
+    synchronized(inFlight) { inFlight[started.requestId] = started }
+    started.job.start()
+  }
+
+  /** A newer request to the same `into` ends the older one: it writes nothing and says so. */
+  private suspend fun supersedeRequests(into: String?) {
+    if (into == null) return
+    val older =
+      synchronized(inFlight) {
+        inFlight.values
+          .filter { it.into == into }
+          .also { it.forEach { old -> inFlight.remove(old.requestId) } }
+      }
+    for (request in older) {
+      request.job.cancel()
+      requestLimiter.release()
+      val error =
+        PrototypeRequestError(
+          PrototypeRequestErrorCode.CANCELLED,
+          "Superseded by a newer request to $into",
+        )
+      sendRequestEvent(request, null, clock() - request.startedAt, error)
+    }
+  }
+
+  /** Only a request still registered settles; a superseded or dismissed one is dropped. */
+  private suspend fun settleRequest(request: RequestInFlight, response: PrototypeRequestResponse) {
+    val registered =
+      synchronized(inFlight) {
+        (inFlight[request.requestId] === request).also {
+          if (it) inFlight.remove(request.requestId)
+        }
+      }
+    if (registered) requestLimiter.release()
+    if (!registered || !current.active) return
+    try {
+      finishRequest(request, response)
+    } finally {
+      interactionRevision = null
+      // A response writes outside handle(), so a stored key it changed is recorded here (#12522).
+      if (current.active) storage?.record(current.spec)
+    }
+  }
+
+  /**
+   * The completion order of the contract: `into`, then `<into>__meta`, then `statusKey`, then the
+   * `prototype_request` event, then `onSuccess` or `onError`.
+   */
+  private suspend fun finishRequest(request: RequestInFlight, response: PrototypeRequestResponse) {
+    val result =
+      PrototypeRequestOutcome.complete(request.into, response, ::trialDataWrites) { write ->
+        applyDataWrite(write)?.also {
+          warn("Refused request write at ${write.path}: ${it.message}")
+        }
+      }
+    if (!current.active) return
+    request.statusKey?.let { key ->
+      val status =
+        if (result.succeeded) PrototypeRequests.STATUS_SUCCESS else PrototypeRequests.STATUS_ERROR
+      if (writeStatus(key, status)) emitStateChange(listOf(key))
+    }
+    sendRequestEvent(
+      request,
+      result.meta.status,
+      result.meta.durationMs,
+      result.meta.error,
+    )
+    val followUps = (if (result.succeeded) request.onSuccess else request.onError).orEmpty()
+    if (followUps.isEmpty() || !current.active || !requireValid(followUps)) return
+    val writes =
+      try {
+        plannedWrites(followUps, current.spec)
+      } catch (error: IllegalArgumentException) {
+        warn("Refused the follow-up of request ${request.requestId}: ${error.message}")
+        return
+      }
+    run(followUps, writes)
+  }
+
+  private suspend fun sendRequestEvent(
+    request: RequestInFlight,
+    status: Int?,
+    durationMs: Long,
+    error: PrototypeRequestError?,
+  ) {
+    emit(
+      kind = PrototypeEventKind.EMIT,
+      name = PrototypeRequests.EVENT_NAME,
+      payload =
+        PrototypeRequestEvent.payload(
+          request.requestId,
+          request.method,
+          request.url,
+          request.via,
+          request.into,
+          status,
+          durationMs,
+          error,
+        ),
+    )
+  }
+
+  /** True when the state key changed; a rejected write leaves state alone and says why. */
+  private fun writeStatus(key: String, status: String): Boolean {
+    val value = PrototypeScalar.Text(status)
+    if (current.state[key] == value) return false
+    return try {
+      writeInteractionSpec(validated(current.spec, mapOf(key to value)))
+      true
+    } catch (error: IllegalArgumentException) {
+      warn("Refused statusKey $key = $status: ${error.message}")
+      false
+    }
+  }
+
   private suspend fun emitAction(action: PrototypeEmitAction) {
     val resolved =
-      action.context?.let { bindings ->
-        EmitContextResolver.resolve(
-          bindings,
-          object : EmitContextInputs {
-            override fun state(key: String): JsonElement? =
-              current.state[key]?.let(EmitContextResolver::scalar)
-
-            override fun page(id: String): Int? = current.pages[id]
-
-            override fun data(pointer: String): JsonElement? =
-              PrototypeDataPointer.resolve(current.spec.data, pointer)
-          },
-        )
-      }
+      action.context?.let { bindings -> EmitContextResolver.resolve(bindings, bindingInputs()) }
     emit(
       kind = PrototypeEventKind.EMIT,
       name = action.name,
@@ -829,4 +1278,28 @@ fun settlePrototypeSheet(
   val desired = current - drag
   if (dismissOnSwipe && desired < heights.min() / 2) return null
   return heights.minBy { kotlin.math.abs(it - desired) }
+}
+
+/**
+ * Counts the requests in flight against `MAX_PROTOTYPE_REQUESTS_IN_FLIGHT`. One instance is shared
+ * by every runtime of a controller, so the cap holds for the device and not per window.
+ */
+class PrototypeRequestLimiter(
+  private val max: Int = PrototypeSpecValidator.MAX_PROTOTYPE_REQUESTS_IN_FLIGHT,
+) {
+  private var count = 0
+
+  /** True and counted when there is room. */
+  @Synchronized fun tryAcquire(): Boolean = (count < max).also { if (it) count++ }
+
+  /** Counts a request that already exists, as when a replacement adopts it. */
+  @Synchronized
+  fun acquire() {
+    count++
+  }
+
+  @Synchronized
+  fun release() {
+    if (count > 0) count--
+  }
 }

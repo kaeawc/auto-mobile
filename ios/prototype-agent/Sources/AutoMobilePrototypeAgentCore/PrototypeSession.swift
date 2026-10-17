@@ -81,6 +81,12 @@ struct PrototypeSession {
     /// dismissal or another prototype never rewinds it, because hosts discard lower-or-equal
     /// sequences as duplicates.
     private var sequences: [String: Int] = [:]
+    /// Device data writes per prototype id (#12519), monotonic like `sequences` and for the same
+    /// reason: a host's `baseRevision` from before a re-show must not look newer than a write after it.
+    private var revisions: [String: Int] = [:]
+    /// `request` actions in flight (#12529) and the commands for the driver that runs them; see
+    /// `takeRequestCommands`.
+    private(set) var requests = PrototypeRequestLedger()
     /// The shown prototype's `appearance` from its show request.
     /// The shown spec's size outside its `state`, for the spec byte cap (#11562); see
     /// `PrototypeStateValidator.stateBytes`.
@@ -99,6 +105,12 @@ struct PrototypeSession {
         spec != nil
     }
 
+    /// The shown prototype's data revision: 0 until a device data action writes it, then one more
+    /// per write. Reported as `revision` in a data write's `change` event.
+    var dataRevision: Int {
+        spec.flatMap { revisions[$0.id] } ?? 0
+    }
+
     /// The last event sequence issued for the shown prototype's id (0 before its first event), which
     /// `get_prototype_status` reports so a host inspecting the agent can resume past it.
     var lastSequence: Int {
@@ -108,37 +120,56 @@ struct PrototypeSession {
     /// A show of the prototype already on screen replaces it in place: its spec state is
     /// authoritative and each pager that survives keeps its page, matched by id and clamped to the
     /// new page count. Stack paths drop unknown screens and fall back to start when empty.
-    /// Any other show, or one with `reset`, starts fresh: the spec's own state, every pager on
-    /// its first page and every stack at start. Event sequences are per id and never rewound either way.
+    /// Any other show, or one with `reset`, starts fresh: the spec's own state (or `restoredState`, the
+    /// spec's with its stored values over it), every pager on its first page and every stack at start.
+    /// Event sequences are per id and never rewound either way.
     /// `appearance` is the request's own: a show that carries none follows the device again.
     mutating func show(
         _ spec: PrototypeSpec,
         reset: Bool = false,
         appearance: PrototypeAppearanceOverride = .device,
-        specBytes: Int? = nil
+        specBytes: Int? = nil,
+        restoredState: [String: JSONValue]? = nil
     ) {
         appearanceOverride = appearance
         // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
         // state it carried is what the cap adds every later state to; without it only state counts.
         nonStateBytes = max(0, (specBytes ?? 0) - PrototypeStateValidator.stateBytes(spec.state ?? [:]))
-        let previousStacks = !reset && self.spec?.id == spec.id ? stacks : [:]
+        let keepNavigation = !reset && self.spec?.id == spec.id
+        // A same-id replace keeps its requests running; any other show ends the old prototype's.
+        if !keepNavigation { requests.cancelAll() }
+        rebuildNavigation(
+            for: spec.root,
+            keepingPages: keepNavigation ? pages : [:],
+            keepingStacks: keepNavigation ? stacks : [:]
+        )
+        shownErrors = []
+        // Stored values (#12526) arrive already applied by `PrototypeStorageCoordinator.prepare`, before
+        // the first draw; restoring is not a change, so no event is emitted and no revision moves.
+        state = restoredState ?? spec.state ?? [:]
+        self.spec = spec
+        // The show result reports this mode, so the show itself is not a change.
+        reportedDark = self.appearance?.dark
+    }
+
+    /// Stack and pager bookkeeping for `root`: surviving stack paths drop unknown screens and fall
+    /// back to start when empty; each surviving pager keeps its page, clamped to its page count.
+    private mutating func rebuildNavigation(
+        for root: PrototypeNode,
+        keepingPages previous: [String: Int],
+        keepingStacks previousStacks: [String: PrototypeStackSnapshot]
+    ) {
         stackNodes = [:]
-        spec.root.collectStacks(into: &stackNodes)
+        root.collectStacks(into: &stackNodes)
         stacks = stackNodes.mapValues { node in
             let path = (node.id.flatMap { previousStacks[$0]?.path } ?? [])
                 .filter { node.screens?[$0] != nil }.prefix(PrototypeLimits.maxStackDepth)
             return PrototypeStackSnapshot(path: path.isEmpty ? [node.start ?? ""] : Array(path))
         }
-        let previous = !reset && self.spec?.id == spec.id ? pages : [:]
-        pageCounts = spec.root.pagerCounts()
+        pageCounts = root.pagerCounts()
         pages = pageCounts.reduce(into: [:]) { result, entry in
             result[entry.key] = min(max(previous[entry.key] ?? 0, 0), max(entry.value - 1, 0))
         }
-        shownErrors = []
-        state = spec.state ?? [:]
-        self.spec = spec
-        // The show result reports this mode, so the show itself is not a change.
-        reportedDark = self.appearance?.dark
     }
 
     func holds(_ condition: Condition) -> Bool {
@@ -285,10 +316,19 @@ struct PrototypeSession {
                 events += runStack(action)
             case "setPage":
                 events += runSetPage(action)
+            case "setData", "appendData", "removeData":
+                events += runDataWrite(action)
+            case "request":
+                events += runRequest(action)
             case "dismiss":
                 events += dismiss(reason: .user)
             default:
                 if let write = writes[index] {
+                    // The plan was validated against the data before this list ran; an earlier data
+                    // action may have added a control (a repeat row) that refuses this value now.
+                    var next = state
+                    next[write.key] = write.value
+                    guard accepts(next) else { continue }
                     state[write.key] = write.value
                     if !touched.contains(write.key) { touched.append(write.key) }
                 }
@@ -296,6 +336,58 @@ struct PrototypeSession {
         }
         guard isShown else { return events }
         return events + emitStateChange(touched.filter { baseline[$0] != state[$0] })
+    }
+
+    /// A `setData`, `appendData` or `removeData` action (#12519). The write is applied to the shown
+    /// spec's data with `PrototypeDataWrite`, the drawn tree is rebuilt from the changed data so
+    /// bindings and repeat rows refresh, the data revision is bumped, and one `change` event named
+    /// for the written `/data/...` path reports `{op, value?, revision}`. A refused write (any
+    /// `PrototypeDataWriteCode`, or a tree the changed data cannot rebuild within the show's limits)
+    /// changes and emits nothing, and the rest of the action list still runs.
+    private mutating func runDataWrite(_ action: PrototypeAction) -> [PrototypeEvent] {
+        guard let spec, let op = PrototypeDataWrite.Op(actionType: action.type), let path = action.path else {
+            return []
+        }
+        let inputs = EmitContextInputs(state: state, pages: pages, dataModel: spec.data)
+        var value: JSONValue?
+        if op != .remove {
+            guard case let .success(resolved) = PrototypeDataWrite.resolveValue(action.value, inputs: inputs) else {
+                return []
+            }
+            value = resolved
+        }
+        return (try? commitDataWrite(op, path: path, value: value).get()) ?? []
+    }
+
+    /// Applies one data write to the shown spec: the data change, the rebuilt drawn tree, the
+    /// bumped revision and the `change` event. A refused write changes nothing.
+    private mutating func commitDataWrite(
+        _ op: PrototypeDataWrite.Op, path: String, value: JSONValue?
+    )
+        -> Result<[PrototypeEvent], PrototypeDataWriteFailure>
+    {
+        guard let spec else { return .failure(.init(code: .notFound, message: "No prototype is shown")) }
+        let data: [String: JSONValue]
+        switch PrototypeDataWrite.apply(spec.data, op: op, path: path, value: value) {
+        case let .success(written): data = written
+        case let .failure(failure): return .failure(failure)
+        }
+        guard let rebuilt = try? spec.replacingData(data) else {
+            return .failure(.init(
+                code: .limitExceeded, message: "\(path): the changed data breaks a limit the show enforces"
+            ))
+        }
+        self.spec = rebuilt
+        rebuildNavigation(for: rebuilt.root, keepingPages: pages, keepingStacks: stacks)
+        let revision = dataRevision + 1
+        revisions[rebuilt.id] = revision
+        var payload: [String: JSONValue] = ["op": .string(op.rawValue), "revision": .number(Double(revision))]
+        // The value is left out when the event would not fit the emit payload limit, so the host,
+        // which cannot mirror a write it was not shown, stops tracking the spec (as on Android).
+        if let value, PrototypeEmitContext.fits(.object(payload.merging(["value": value]) { $1 })) {
+            payload["value"] = value
+        }
+        return .success(emit(kind: "change", name: path, payload: .object(payload)))
     }
 
     /// A `setPage` action: `next`/`prev` step from the current page, a number jumps to it.
@@ -467,6 +559,7 @@ struct PrototypeSession {
     mutating func dismiss(reason: PrototypeDismissReason) -> [PrototypeEvent] {
         guard isShown else { return [] }
         let events = emit(kind: "dismissed", name: nil, payload: .object(["reason": .string(reason.rawValue)]))
+        requests.cancelAll()
         spec = nil
         return events
     }
@@ -597,6 +690,187 @@ enum PrototypeTestHooks {
     static func rejection(requestType: String, enabled: Bool) -> String? {
         guard gatedRequestTypes.contains(requestType), !enabled else { return nil }
         return "\(requestType) is a test hook; launch the app with \(environmentKey)=1 to enable it"
+    }
+}
+
+// MARK: Requests (#12529)
+
+extension PrototypeSession {
+    /// The commands for the request driver since the last call. A transition calls this on its new
+    /// value before it is stored, so the driver sees exactly what that transition started or ended.
+    mutating func takeRequestCommands() -> [PrototypeRequestCommand] {
+        requests.takeCommands()
+    }
+
+    /// A `request` action. Bindings resolve against the committed state and data; a request that
+    /// cannot be built or is refused completes at once as an error. Otherwise the status key moves
+    /// to `loading` and a start command is issued; the response arrives later through
+    /// `completeRequest`. Starting a request to an `into` that already has one in flight cancels
+    /// the older (the latest wins).
+    private mutating func runRequest(_ action: PrototypeAction) -> [PrototypeEvent] {
+        guard let spec else { return [] }
+        let inputs = EmitContextInputs(state: state, pages: pages, dataModel: spec.data)
+        var events: [PrototypeEvent] = []
+        let into = action.into
+        if let into, let older = requests.inFlight(into: into) {
+            events += cancelRequest(older, message: "Superseded by a newer request to \(into)")
+        }
+        let urlText = PrototypeRequestResolver.urlText(action, inputs: inputs)
+        let resolved = PrototypeRequestResolver.resolve(action, urlText: urlText, inputs: inputs)
+        // A request that failed to resolve still reports the method and URL text it tried.
+        let request = (try? resolved.get()) ?? PrototypeResolvedRequest(
+            method: action.method.flatMap(PrototypeRequestMethod.init(rawValue:)) ?? .get,
+            url: urlText, headers: [:], body: nil
+        )
+        let job = PrototypeRequestJob(
+            requestId: requests.nextId(),
+            prototypeId: spec.id,
+            via: action.via.flatMap(PrototypeRequestVia.init(rawValue:)) ?? .host,
+            method: request.method,
+            url: request.url,
+            headers: request.headers,
+            body: request.body,
+            timeoutMs: action.timeoutMs.flatMap { Int(exactly: $0) }
+        )
+        let inFlight = PrototypeInFlightRequest(
+            job: job,
+            into: into,
+            statusKey: action.statusKey,
+            onSuccess: action.onSuccess ?? [],
+            onError: action.onError ?? []
+        )
+        if case let .failure(error) = resolved {
+            return events + finishRequest(inFlight, .failed(error, durationMs: 0))
+        }
+        if requests.inFlight.count >= PrototypeLimits.maxRequestsInFlight {
+            let error = PrototypeRequestError(
+                .tooManyInFlight,
+                "At most \(PrototypeLimits.maxRequestsInFlight) requests may be in flight at once."
+            )
+            return events + finishRequest(inFlight, .failed(error, durationMs: 0))
+        }
+        requests.start(inFlight)
+        return events + writeRequestStatus(inFlight.statusKey, "loading")
+    }
+
+    /// A response (or failure) for a request this session started. A request that was cancelled,
+    /// belongs to a prototype that is gone, or never existed changes and emits nothing.
+    mutating func completeRequest(_ requestId: String, _ response: PrototypeRequestResponse) -> [PrototypeEvent] {
+        guard isShown, let inFlight = requests.finish(requestId), inFlight.job.prototypeId == spec?.id else {
+            return []
+        }
+        return finishRequest(inFlight, response)
+    }
+
+    /// The `applyPrototypeRequestOutcome` order: the body at `into`, the metadata at
+    /// `<into>__meta`, the status key, the request event, then the follow-up list.
+    private mutating func finishRequest(
+        _ inFlight: PrototypeInFlightRequest, _ response: PrototypeRequestResponse
+    )
+        -> [PrototypeEvent]
+    {
+        var meta = PrototypeRequestMeta(response)
+        var events: [PrototypeEvent] = []
+        var minimalMeta = false
+        let saved = self
+        var wroteBody = false
+        if case let .received(_, _, body, _) = response, meta.error == nil, let into = inFlight.into {
+            let stored = PrototypeRequestOutcome.storedBody(body, method: inFlight.job.method)
+            if leavesNoRoomForMeta(stored, into: into, meta: meta) {
+                // The completion is atomic: a body that fits without room for any `__meta` is not
+                // written, and the request is an error whose minimal metadata is written if it fits.
+                meta.error = PrototypeRequestError(.invalidResponse, PrototypeRequestOutcome.noRoomForMeta)
+                minimalMeta = true
+            } else {
+                switch commitDataWrite(.set, path: into, value: stored) {
+                case let .success(written):
+                    events += written
+                    wroteBody = true
+                case let .failure(failure): meta.error = PrototypeRequestError(.invalidResponse, failure.message)
+                }
+            }
+        }
+        if let into = inFlight.into {
+            if let written = writeRequestMeta(meta, beside: into, minimal: minimalMeta) {
+                events += written
+            } else if wroteBody {
+                // The pure preflight passed but the drawn tree refused every form of `__meta` (a bound
+                // field, such as substituted text, outgrew its limit): roll the body back too.
+                self = saved
+                events = []
+                meta.error = PrototypeRequestError(.invalidResponse, PrototypeRequestOutcome.noRoomForMeta)
+                events += writeRequestMeta(meta, beside: into, minimal: true) ?? []
+            }
+        }
+        let failed = meta.error != nil
+        events += writeRequestStatus(inFlight.statusKey, failed ? "error" : "success")
+        events += emit(
+            kind: "emit",
+            name: PrototypeRequestEvent.name,
+            payload: PrototypeRequestEvent.payload(job: inFlight.job, into: inFlight.into, meta: meta)
+        )
+        return events + run(failed ? inFlight.onError : inFlight.onSuccess)
+    }
+
+    /// The `__meta` values to try, in order: whole, without `headers`, and (only when `minimal`)
+    /// reduced to the duration and error.
+    private func metaForms(_ meta: PrototypeRequestMeta, minimal: Bool) -> [JSONValue] {
+        var forms = [meta.json(includingHeaders: true)]
+        if meta.headers != nil { forms.append(meta.json(includingHeaders: false)) }
+        if minimal, let error = meta.error {
+            forms.append(PrototypeRequestMeta(.failed(error, durationMs: meta.durationMs)).json())
+        }
+        return forms
+    }
+
+    /// Whether the body would fit at `into` but no form of `<into>__meta` would fit beside it.
+    private func leavesNoRoomForMeta(_ stored: JSONValue, into: String, meta: PrototypeRequestMeta) -> Bool {
+        guard case let .success(withBody) = PrototypeDataWrite.apply(spec?.data, op: .set, path: into, value: stored)
+        else { return false }
+        return !metaForms(meta, minimal: false).contains { form in
+            if case .success = PrototypeDataWrite.apply(withBody, op: .set, path: into + "__meta", value: form) {
+                return true
+            }
+            return false
+        }
+    }
+
+    /// `<into>__meta` in the first form that fits the data write limit.
+    private mutating func writeRequestMeta(
+        _ meta: PrototypeRequestMeta, beside into: String, minimal: Bool
+    )
+        -> [PrototypeEvent]?
+    {
+        for form in metaForms(meta, minimal: minimal) {
+            if case let .success(events) = commitDataWrite(.set, path: into + "__meta", value: form) {
+                return events
+            }
+        }
+        return nil
+    }
+
+    /// Moves the status key to `loading`, `success` or `error`. Nothing is written for an
+    /// undeclared or non-string key, or a value some control bound to the key would refuse.
+    private mutating func writeRequestStatus(_ key: String?, _ status: String) -> [PrototypeEvent] {
+        guard let key, state[key]?.stringValue != nil, state[key] != .string(status) else { return [] }
+        var next = state
+        next[key] = .string(status)
+        guard accepts(next) else { return [] }
+        state[key] = .string(status)
+        return emitStateChange([key])
+    }
+
+    /// Ends a request that a newer one replaces: nothing is written, the status key keeps its
+    /// value and no follow-up runs, but the request event reports `cancelled`. There is no clock in
+    /// the session, so its `durationMs` is 0.
+    private mutating func cancelRequest(_ older: PrototypeInFlightRequest, message: String) -> [PrototypeEvent] {
+        requests.cancel(older.job.requestId)
+        let meta = PrototypeRequestMeta(.failed(PrototypeRequestError(.cancelled, message), durationMs: 0))
+        return emit(
+            kind: "emit",
+            name: PrototypeRequestEvent.name,
+            payload: PrototypeRequestEvent.payload(job: older.job, into: older.into, meta: meta)
+        )
     }
 }
 

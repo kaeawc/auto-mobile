@@ -1,0 +1,256 @@
+import { describe, expect, test } from "bun:test";
+import { decodePrototypeEvent } from "../../../src/features/observe/android/CtrlProxyPrototypes";
+import { PrototypeShownSpecs } from "../../../src/features/prototype/PrototypeShownSpecs";
+import { InMemoryPrototypeStatusStore } from "../../../src/features/prototype/PrototypeStatusStore";
+import { prototypeDataWriteOf } from "../../../src/features/prototype/prototypeDataWriteEvent";
+import { prototypePatchDataPaths } from "../../../src/features/prototype/prototypePatch";
+import {
+  createPrototypePatchQueue,
+  performPrototypePatch,
+} from "../../../src/server/prototypePatchAction";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { event } from "../../helpers/prototypeTestEvent";
+
+// Data pointers, not file paths: named once so the POSIX path-literal lint reads them as data.
+const CART = "/data/cart";
+const FIRST_ROW = "/data/cart/0";
+const DATA_ROOT = "/data";
+const spec = {
+  id: "shop",
+  window: { placement: { type: "fullscreen" } },
+  root: { type: "text", id: "label", text: "Hello" },
+  data: { cart: [{ sku: "a" }], note: "hi" },
+};
+function dataWrite(
+  sequence: number,
+  name: string,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...event(sequence, "shop", "change", name), payload };
+}
+const written = (name: string, revision: number, op = "set", value: unknown = 1) =>
+  op === "remove" ? { op, revision } : { op, value, revision };
+
+function tracked() {
+  const shown = new PrototypeShownSpecs();
+  shown.endShow("d", shown.beginShow("d"), { id: "shop", spec });
+  return shown;
+}
+const dataOf = (shown: PrototypeShownSpecs) => {
+  const read = shown.read("d", "shop");
+  return read.kind === "known" ? read.spec.data : undefined;
+};
+
+describe("data write change events", () => {
+  test("decode with a pointer name and a payload, without validity", () => {
+    const wire = dataWrite(1, "/data/cart", written("/data/cart", 4, "append", { sku: "b" }));
+    const decoded = decodePrototypeEvent(wire, "test");
+    expect(decoded).toEqual(wire);
+    expect(prototypeDataWriteOf(decoded!)).toEqual({
+      path: "/data/cart",
+      op: "append",
+      value: { sku: "b" },
+      revision: 4,
+    });
+  });
+  test("a remove carries no value", () => {
+    const wire = dataWrite(1, "/data/cart/0", written("/data/cart/0", 5, "remove"));
+    expect(prototypeDataWriteOf(decodePrototypeEvent(wire, "test")!)).toEqual({
+      path: "/data/cart/0",
+      op: "remove",
+      revision: 5,
+    });
+  });
+  test.each([
+    { op: "set", value: 1 },
+    { op: "swap", value: 1, revision: 1 },
+    { op: "set", value: 1, revision: -1 },
+    { op: "remove", value: 1, revision: 1 },
+    "set",
+  ])("a data-path change with payload %j is dropped", (payload) => {
+    const wire = { ...event(1, "shop", "change", "/data/a"), payload };
+    expect(decodePrototypeEvent(wire, "test")).toBeUndefined();
+  });
+  test("a validity change is not a data write", () => {
+    const wire = { ...event(1, "shop", "change", "email"), validity: { email: true } };
+    expect(prototypeDataWriteOf(decodePrototypeEvent(wire, "test")!)).toBeUndefined();
+  });
+});
+
+describe("the host mirror follows device data writes", () => {
+  test("each write is applied with the shared helper and logged", () => {
+    const shown = tracked();
+    const outcome = shown.recordDeviceDataWrite("d", "shop", {
+      path: "/data/cart",
+      op: "append",
+      value: { sku: "b" },
+      revision: 3,
+    });
+    expect(outcome).toMatchObject({ kind: "mirrored" });
+    expect(dataOf(shown)).toEqual({ cart: [{ sku: "a" }, { sku: "b" }], note: "hi" });
+    shown.recordDeviceDataWrite("d", "shop", { path: "/data/cart/0", op: "remove", revision: 4 });
+    expect(dataOf(shown)).toEqual({ cart: [{ sku: "b" }], note: "hi" });
+  });
+  test("a write the mirror cannot apply makes the host stop tracking the spec", () => {
+    for (const write of [
+      { path: "/data/cart", op: "append" as const, revision: 3 },
+      { path: "/data/missing/x", op: "set" as const, value: 1, revision: 3 },
+    ]) {
+      const shown = tracked();
+      expect(shown.recordDeviceDataWrite("d", "shop", write)).toEqual({ kind: "dropped" });
+      expect(shown.read("d", "shop")).toEqual({ kind: "unknown" });
+    }
+  });
+  test("a write during a show cannot be ordered against it", () => {
+    const shown = tracked();
+    shown.beginShow("d", "shop");
+    const outcome = shown.recordDeviceDataWrite("d", "shop", {
+      path: "/data/note",
+      op: "set",
+      value: "x",
+      revision: 3,
+    });
+    expect(outcome).toEqual({ kind: "dropped" });
+  });
+  test("an untracked prototype or device is left alone", () => {
+    const write = { path: "/data/note", op: "set" as const, value: "x", revision: 1 };
+    expect(new PrototypeShownSpecs().recordDeviceDataWrite("d", "shop", write)).toEqual({
+      kind: "untracked",
+    });
+    expect(tracked().recordDeviceDataWrite("d", "other", write)).toEqual({ kind: "untracked" });
+  });
+});
+
+describe("the baseRevision rule for /data patches", () => {
+  const writes = (shown: PrototypeShownSpecs, ...entries: [string, number][]) => {
+    for (const [path, revision] of entries) {
+      shown.recordDeviceDataWrite("d", "shop", { path, op: "set", value: "v", revision });
+    }
+  };
+  const guard = (shown: PrototypeShownSpecs, paths: string[], base?: number) =>
+    shown.dataPatchGuard("d", "shop", paths, base);
+
+  test("nothing is required before the device has written data", () => {
+    expect(guard(tracked(), ["/data/note"])).toEqual({ kind: "ok" });
+  });
+  test("after a write, /data ops need a baseRevision; other ops do not", () => {
+    const shown = tracked();
+    writes(shown, ["/data/note", 3]);
+    expect(guard(shown, ["/data/other"])).toEqual({ kind: "baseRevisionRequired" });
+    expect(guard(shown, [])).toEqual({ kind: "ok" });
+  });
+  test("a newer overlapping write conflicts; older or disjoint ones do not", () => {
+    const shown = tracked();
+    writes(shown, ["/data/cart/0", 3], ["/data/note", 5]);
+    expect(guard(shown, [CART], 2)).toEqual({
+      kind: "conflict",
+      revision: 5,
+      paths: [FIRST_ROW],
+    });
+    expect(guard(shown, ["/data/cart/0/sku"], 2)).toMatchObject({ kind: "conflict" });
+    expect(guard(shown, [DATA_ROOT], 4)).toMatchObject({ kind: "conflict", paths: ["/data/note"] });
+    expect(guard(shown, ["/data/cart"], 3)).toEqual({ kind: "ok" });
+    expect(guard(shown, ["/data/other"], 0)).toEqual({ kind: "ok" });
+  });
+  test("a base older than the remembered writes conflicts on every path", () => {
+    const shown = tracked();
+    for (let revision = 1; revision <= 70; revision++) {
+      writes(shown, [`/data/k${revision}`, revision]);
+    }
+    expect(guard(shown, ["/data/free"], 3)).toMatchObject({
+      kind: "conflict",
+      revision: 70,
+      paths: ["/data/free"],
+    });
+    expect(guard(shown, ["/data/free"], 6)).toEqual({ kind: "ok" });
+  });
+  test("a show makes its data authoritative again", () => {
+    const shown = tracked();
+    writes(shown, ["/data/note", 3]);
+    shown.endShow("d", shown.beginShow("d"), { id: "shop", spec });
+    expect(guard(shown, ["/data/note"])).toEqual({ kind: "ok" });
+  });
+});
+
+describe("patch action", () => {
+  const timer = new FakeTimer();
+  function setup() {
+    const store = new InMemoryPrototypeStatusStore(timer);
+    store.shownSpecs.endShow("d", store.shownSpecs.beginShow("d"), { id: "shop", spec });
+    const sent: unknown[] = [];
+    const deps = {
+      store,
+      transport: {
+        patch: async (request: unknown) => {
+          sent.push(request);
+          return { success: true, delivery: "answered" as const, revision: 9 };
+        },
+      },
+      supportsPatch: async () => true,
+      platform: "android" as const,
+      queue: createPrototypePatchQueue(),
+      retire: () => {},
+    };
+    return { store, sent, deps };
+  }
+  const patch = (deps: ReturnType<typeof setup>["deps"], ops: unknown, baseRevision?: number) =>
+    performPrototypePatch(deps, "d", { id: "shop", ops, baseRevision });
+  const replaceNote = [{ op: "replace", path: "/data/note", value: "patched" }];
+
+  test("without device writes a /data patch needs no baseRevision", async () => {
+    const { deps, sent } = setup();
+    expect(await patch(deps, replaceNote)).toMatchObject({ success: true, revision: 9 });
+    expect(sent).toHaveLength(1);
+  });
+  test("after a device write the host refuses an unbased or stale /data patch locally", async () => {
+    const { deps, sent, store } = setup();
+    store.recordEvent(
+      { deviceId: "d" },
+      decodePrototypeEvent(
+        dataWrite(1, "/data/note", written("/data/note", 4, "set", "device")),
+        "test",
+      )!,
+    );
+    const unbased = await patch(deps, replaceNote);
+    expect(unbased.success).toBe(false);
+    expect(unbased.error).toContain("baseRevision");
+    const stale = await patch(deps, replaceNote, 3);
+    expect(stale).toMatchObject({
+      success: false,
+      conflict: { revision: 4, state: {}, data: ["/data/note"] },
+    });
+    expect(stale.error).toContain("/data/note");
+    expect(sent).toEqual([]);
+    expect(await patch(deps, replaceNote, 4)).toMatchObject({ success: true });
+    expect(sent).toHaveLength(1);
+  });
+  test("a patch on a disjoint path built before the write still applies on the mirror", async () => {
+    const { deps, store } = setup();
+    store.recordEvent(
+      { deviceId: "d" },
+      decodePrototypeEvent(
+        dataWrite(1, "/data/cart", written("/data/cart", 4, "append", { sku: "b" })),
+        "test",
+      )!,
+    );
+    const ops = [{ op: "replace", path: "/data/note", value: "patched" }];
+    expect(await patch(deps, ops, 2)).toMatchObject({ success: true });
+    const read = store.shownSpecs.read("d", "shop");
+    expect(read.kind === "known" && read.spec.data).toEqual({
+      cart: [{ sku: "a" }, { sku: "b" }],
+      note: "patched",
+    });
+  });
+  test("data paths are read from the ops", () => {
+    expect(
+      prototypePatchDataPaths([
+        { op: "add", path: "/data/a", value: 1 },
+        { op: "replace", path: "/state/b", value: 1 },
+        { op: "replaceNode", id: "x", node: {} },
+        { op: "remove", path: DATA_ROOT },
+        "junk",
+      ]),
+    ).toEqual(["/data/a", DATA_ROOT]);
+    expect(prototypePatchDataPaths(undefined)).toEqual([]);
+  });
+});

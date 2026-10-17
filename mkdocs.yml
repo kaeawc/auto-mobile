@@ -109,6 +109,7 @@ not_in_nav: |
   /release/ios-simulator-continuity.md
   /design-docs/plat/ios/xctestrunner/ci-integration.md
   /decisions/ios-user-files-provider.md
+  /decisions/prototype-request-retrofit.md
 
 nav:
   - "Overview": index.md

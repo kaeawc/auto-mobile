@@ -65,6 +65,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecod
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
 import dev.jasonpearson.automobile.ctrlproxy.prototype.DefaultPrototypeHost
+import dev.jasonpearson.automobile.ctrlproxy.prototype.HostPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PinnedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetDirectory
@@ -76,13 +77,18 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeFontCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeForegroundTracker
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeForegroundWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHiddenCapture
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHostLink
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHttpClients
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeInset
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStorageStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowOnScreen
+import dev.jasonpearson.automobile.ctrlproxy.prototype.RetrofitPrototypeHttpClient
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
@@ -90,6 +96,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.imeLiftPx
 import dev.jasonpearson.automobile.ctrlproxy.prototype.isPrototypeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundFromWindows
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.AnrData
@@ -197,6 +204,7 @@ import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
+import okhttp3.OkHttpClient
 
 /**
  * Prefer the first resource-id match kept by the extractor's offscreen rule, falling back to the
@@ -1124,6 +1132,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
   private lateinit var prototypeController: PrototypeController
+
+  /** `via: "host"` prototype requests: sent over the socket to the latest connected host. */
+  private val hostPrototypeHttp =
+    HostPrototypeHttpClient(
+      PrototypeHostLink { frame ->
+        if (::webSocketServer.isInitialized) webSocketServer.sendToHost(frame) else null
+      },
+      cancelLink = { target, frame ->
+        // A connection that has since closed is skipped by sendToClient.
+        if (::webSocketServer.isInitialized && target is WebSocketServer.ConnectedClient) {
+          webSocketServer.sendToClient(target, frame)
+        }
+      },
+    )
   private val prototypeRefreshCoalescer =
     PrototypeRefreshCoalescer(
       launch = { action -> serviceScope.launch { action() } },
@@ -1267,6 +1289,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
 
+      override suspend fun sendCleared(requestId: String?, cleared: Int) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "prototype_result") {
+            webSocketServer.broadcastWithPerf { _ -> prototypeClearedFrame(requestId, cleared) }
+          }
+        }
+      }
+
       override suspend fun sendPrototypeStatus(
         requestId: String?,
         prototypes: List<PrototypeStatusEntry>,
@@ -1307,6 +1337,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val prototypeFonts by lazy {
     PrototypeFontCache(prototypeAssets, ComposePrototypeFontLoader())
   }
+  // Values a spec's storage block keeps across shows (#12522); writes are coalesced on the service
+  // scope and hit the disk on IO.
+  private val prototypeStorage by lazy {
+    PrototypeStoragePersistence(
+      PrototypeStorageStores.inDirectory(prototypeStorageRoot(filesDir)),
+      CoroutinePrototypeScheduler(serviceScope),
+    )
+  }
   private val savedPrototypeController by lazy {
     SavedPrototypeController(
       SavedPrototypeStores.inDirectory(File(filesDir, "saved-prototypes")),
@@ -1314,6 +1352,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       AndroidSavedPrototypeShortcuts(this),
       prototypeResultSink,
       pinner = PinnedPrototypeShortcuts(AndroidPinnedShortcutPlatform(this)),
+      // Deleting a saved prototype also removes the values its storage block kept.
+      clearStorage = { id ->
+        if (::prototypeController.isInitialized) prototypeController.clearStoredValues(id)
+        else prototypeStorage.clear(id)
+      },
     )
   }
   private val prototypeAssetController by lazy {
@@ -1859,6 +1902,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   }
                 }
               },
+            storage = prototypeStorage,
             windowOnScreen =
               PrototypeWindowOnScreen { displayId ->
                 try {
@@ -1900,6 +1944,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             foreground = prototypeForeground,
             deviceAppearance = AndroidPrototypeDeviceAppearance(this),
             hostFactory = createPrototypeHost,
+            httpClients =
+              PrototypeHttpClients(
+                host = hostPrototypeHttp,
+                device = RetrofitPrototypeHttpClient(OkHttpClient()),
+              ),
+            requestScope = serviceScope,
           )
         // Service start: drop anything a previous process left in the cache directory.
         prototypeAssets.purgeLeftovers()
@@ -2123,10 +2173,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             onClientDisconnected = { client ->
               queuedHandler.disconnect(client)
               gestureStreamRouter.cancelOwnedBy(client)
+              // Its in-flight host requests have no socket to answer on, even if another remains.
+              hostPrototypeHttp.onHostLost(client)
             },
             onClientCountChanged = { count, session ->
+              if (count == 0) hostPrototypeHttp.onHostLost()
               serviceScope.launch { prototypes.onClientCountChanged(count, session) }
             },
+            onPrototypeResponse = hostPrototypeHttp::onResponse,
             onClientConnected = { serviceScope.launch { prototypes.onClientConnected() } },
             onPermanentStartFailure = { disableSelf() },
           )
@@ -3191,6 +3245,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) {
     launchRequestScope(requestId) { savedPrototypeController.delete(requestId, id) }
+  }
+
+  override suspend fun clearPrototypeStorage(requestId: String?, id: String) {
+    launchRequestScope(requestId) { prototypeController.clearStorage(requestId, id) }
   }
 
   override suspend fun patchPrototype(

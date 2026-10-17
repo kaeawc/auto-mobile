@@ -8,7 +8,6 @@ import android.annotation.TargetApi
 import android.app.Activity
 import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
-import android.content.BroadcastReceiver
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
@@ -1615,31 +1614,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private var logEventBuffer: BoundedLogBuffer? = null
 
   private val commandReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null) {
-          Log.w(TAG, "no intent")
-          return
-        }
+    CommandReceiver(
+      serviceScope,
+      object : CommandHost {
+        override suspend fun handleCommand(intent: Intent) = this@CtrlProxy.handleCommand(intent)
 
-        Log.d(TAG, "Received broadcast: ${intent.action}")
-
-        serviceScope.launch {
-          try {
-            handleCommand(intent)
-          } catch (e: CancellationException) {
-            // Cooperative cancellation (service scope shutting down) must never become an error
-            // result — let it propagate so the coroutine unwinds cleanly. Mirrors the inner
-            // ACTION_EXTRACT_HIERARCHY rethrow (PR #3126), which would otherwise be re-swallowed
-            // here (issue #3130).
-            throw e
-          } catch (e: Exception) {
-            Log.e(TAG, "Error handling command: ${intent.action}", e)
-            sendResult(success = false, error = e.message)
-          }
-        }
-      }
-    }
+        override fun sendFailure(error: String?) = sendResult(success = false, error = error)
+      },
+    )
 
   private val navigationEventReceiver =
     NavigationEventReceiver(
@@ -3452,11 +3434,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       sendOrderedBroadcast(
         intent,
         null,
-        object : BroadcastReceiver() {
-          override fun onReceive(context: Context?, intent: Intent?) {
-            replyNetworkMockRules(networkMockRulesResult(requestId, resultData))
-          }
-        },
+        NetworkMockRulesReplyReceiver(requestId, ::replyNetworkMockRules),
         null,
         Activity.RESULT_OK,
         null,

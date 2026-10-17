@@ -105,7 +105,7 @@ test.each(causeTable)(
     });
     const deviceId = "emulator-5554";
     const internals = {
-      clockRestores: manager["clockRestores"],
+      clockRestores: manager["stateRestore"].clockRestores,
       rotationRestores: manager["stateRestore"].rotationRestores,
       screenReaderRestores: manager["stateRestore"].screenReaderRestores,
       abandonedRotations: manager["stateRestore"].abandonedRotations as Map<string, object>,

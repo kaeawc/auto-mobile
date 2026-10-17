@@ -10,7 +10,7 @@ import { ActionableError } from "../models/ActionableError";
 import {
   compareExecutionOwnerIdentity,
   type ExecutionOwnerIdentityVerdict,
-} from "../models/executionOwnerIdentity";
+} from "../utils/executionOwnerIdentity";
 
 export const SESSION_CONFIG_FLAG = "--session-config";
 export const SESSION_CONFIG_ENV = ENV_SPECS.SESSION_CONFIG.name;

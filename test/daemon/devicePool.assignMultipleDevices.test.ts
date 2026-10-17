@@ -1,3 +1,4 @@
+import { EmulatorProcessLifecycle } from "../../src/daemon/emulatorProcessLifecycle";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { drainUntil, drainMicrotasks } from "../helpers/fakeTimerStepping";
@@ -36,6 +37,7 @@ import {
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,
+  enableRebootOnDeath,
 } from "../helpers/devicePoolSuite";
 
 useSessionIdleWindowForSuite();
@@ -492,8 +494,7 @@ describe("DevicePool", () => {
     });
 
     test("reboots a disconnected pool-started Android emulator from its source AVD when enabled", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       try {
         const images: DeviceInfo[] = [
           androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
@@ -543,11 +544,7 @@ describe("DevicePool", () => {
           },
         ]);
       } finally {
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
@@ -643,23 +640,21 @@ describe("DevicePool", () => {
         fakeTimer,
         new CountingIdGenerator("incident"),
       );
+      let processLifecycle: EmulatorProcessLifecycle | undefined;
       devicePool = makePool({
         deviceManager: manager,
         recoveryPolicy: { onLoss: true, maxAttempts: 1 },
         emulatorLossIncidentStore: incidents,
+        emulatorProcessLifecycleFactory: (port) => {
+          processLifecycle = new EmulatorProcessLifecycle(port);
+          return processLifecycle;
+        },
       });
 
       await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
       manager.bootedDevices = [];
       const incidentResolutionStarted = Promise.withResolvers<void>();
       const releaseIncidentResolution = Promise.withResolvers<void>();
-      const internals = devicePool as unknown as {
-        evictStartedDeviceAfterProcessExit(
-          deviceId: string,
-          code: number | null,
-          signal: NodeJS.Signals | null,
-        ): Promise<void>;
-      };
       const livenessInternals = (
         devicePool as unknown as {
           missingDeviceLiveness: {
@@ -673,7 +668,11 @@ describe("DevicePool", () => {
         return args[2] as string | undefined;
       };
 
-      const eviction = internals.evictStartedDeviceAfterProcessExit("emulator-5554", 1, null);
+      const eviction = processLifecycle!.evictStartedDeviceAfterProcessExit(
+        "emulator-5554",
+        1,
+        null,
+      );
       await incidentResolutionStarted.promise;
 
       expect(devicePool.isSessionRecoveryInFlight("session-1")).toBe(true);
@@ -865,8 +864,7 @@ describe("DevicePool", () => {
     });
 
     test("does not recover an emulator intentionally shut down by the client", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       try {
         const images: DeviceInfo[] = [
           androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
@@ -887,17 +885,12 @@ describe("DevicePool", () => {
         expect(manager.startedDevices).toHaveLength(1);
         expect(devicePool.getDevice("emulator-5554")).toBeNull();
       } finally {
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
     test("recovers an emulator after a failed intentional shutdown is cleared", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       try {
         const images: DeviceInfo[] = [
           androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
@@ -918,17 +911,12 @@ describe("DevicePool", () => {
 
         expect(manager.startedDevices).toHaveLength(2);
       } finally {
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
     test("ignores an old emulator process exit after same-serial recovery", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       try {
         const images: DeviceInfo[] = [
           androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
@@ -949,17 +937,12 @@ describe("DevicePool", () => {
         expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("session-2");
         expect(sessionManager.getSession("session-2")).not.toBeNull();
       } finally {
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
     test("retries when a recovery process exited before tracking was attached", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       try {
         const images: DeviceInfo[] = [
           androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
@@ -984,17 +967,12 @@ describe("DevicePool", () => {
         expect(manager.childProcesses).toHaveLength(3);
         expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
       } finally {
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
     test("adopts the listed AVD when the initial cold boot launcher exited before tracking", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       try {
         const images: DeviceInfo[] = [
           androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
@@ -1008,17 +986,12 @@ describe("DevicePool", () => {
         expect(manager.childProcesses).toHaveLength(1);
         expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("session-1");
       } finally {
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
     test("retries when a recovery process was killed by a signal before tracking", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       try {
         const images: DeviceInfo[] = [
           androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" }),
@@ -1043,17 +1016,12 @@ describe("DevicePool", () => {
         expect(manager.childProcesses).toHaveLength(3);
         expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
       } finally {
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
     test("does not launch an AVD while recovery already owns its boot", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       const manager = new DeferredRecoveryDeviceManager();
       manager.deviceImages = [
         androidDeviceImage("pixel_8_api_35", "emulator-5554", {
@@ -1122,11 +1090,7 @@ describe("DevicePool", () => {
             { description: "owned AVD recovery settlement" },
           );
         } finally {
-          if (originalRebootOnDeath === undefined) {
-            delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-          } else {
-            process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-          }
+          restoreRebootOnDeath();
         }
       }
     });
@@ -1220,8 +1184,7 @@ describe("DevicePool", () => {
     );
 
     test("does not defer incompatible criteria allocation for an unrelated recovering AVD", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       const manager = new DeferredRecoveryDeviceManager();
       manager.deviceImages = [
         androidDeviceImage("pixel_8_api_35", "emulator-5554", {
@@ -1252,17 +1215,12 @@ describe("DevicePool", () => {
         await drainUntil(() => devicePool.getRecoveringAndroidTargets().names.size === 0, {
           description: "owned recovery settlement",
         });
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
 
     test("does not count one pending recovery as capacity for multiple devices", async () => {
-      const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-      process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
+      const restoreRebootOnDeath = enableRebootOnDeath();
       const manager = new DeferredRecoveryDeviceManager();
       manager.deviceImages = [androidDeviceImage("Pixel 8", "emulator-5554", { source: "local" })];
       devicePool = makePool({ deviceManager: manager });
@@ -1280,11 +1238,7 @@ describe("DevicePool", () => {
         await drainUntil(() => devicePool.getRecoveringAndroidTargets().names.size === 0, {
           description: "owned recovery settlement",
         });
-        if (originalRebootOnDeath === undefined) {
-          delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
-        } else {
-          process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = originalRebootOnDeath;
-        }
+        restoreRebootOnDeath();
       }
     });
   });

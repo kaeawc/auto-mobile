@@ -37,7 +37,7 @@ import {
   SwipeResult,
   ViewHierarchyResult,
 } from "../../../models";
-import { AdbClient } from "../../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ScrollableElementsQuery } from "../../../utils/interfaces/ElementTraitQueries";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
 import { DefaultScrollableElementsQuery } from "../../utility/InteractiveElementQueries";
@@ -268,7 +268,7 @@ export class SwipeOn extends BaseVisualChange {
 
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     dependencies: SwipeOnDependencies = {},
   ) {
     super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
@@ -336,7 +336,7 @@ export class SwipeOn extends BaseVisualChange {
 
   private initializeGestureDependencies(
     device: BootedDevice,
-    adb: AdbClient | null,
+    adb: AdbExecutor | null,
     dependencies: SwipeOnDependencies,
   ) {
     this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);

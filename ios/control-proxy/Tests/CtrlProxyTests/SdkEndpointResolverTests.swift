@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 @testable import CtrlProxy
 import Foundation
 import os

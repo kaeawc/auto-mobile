@@ -1,8 +1,8 @@
-import type { TimingData } from "../utils/PerformanceTracker";
+import type { TimingData } from "./TimingData";
 import type { ContainerFailure } from "./ActionableError";
 import { BaseActionResult } from "./BaseActionResult";
 import { Element } from "./Element";
-import { ToolDebugInfo } from "../utils/DebugContextBuilder";
+import { ToolDebugInfo } from "./ToolDebugInfo";
 
 /**
  * Result of a swipeOn operation

@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { EventEmitter } from "events";
 import type { ChildProcess } from "child_process";
@@ -26,12 +27,9 @@ import {
 import { RunnerReadinessService } from "../../src/ctrlProxy/RunnerReadinessService";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { executeCommandOptionsOf } from "../fakes/executeCommandOptionsOf";
@@ -81,34 +79,30 @@ describe("device acquisition wait deadlines", () => {
     deviceUtils = new FakeDeviceUtils();
     lifecycleReleases = 0;
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer,
-        deviceManager: deviceUtils,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        retryExecutor: new DefaultRetryExecutor(timer),
-        adbServerResetQuarantineFactory: (port) => {
-          startupLeases = port.getAndroidStartupLeases();
-          return new AdbServerResetQuarantine(port);
-        },
-        deviceShutdownReservationsFactory: (port) => {
-          mutex = {
-            acquire: async () => {
-              const acquired = Promise.withResolvers<void>();
-              const released = Promise.withResolvers<void>();
-              void port.withAssignmentLock(async () => {
-                acquired.resolve();
-                await released.promise;
-              });
-              await acquired.promise;
-              return () => released.resolve();
-            },
-          };
-          reservations = new DeviceShutdownReservations(port);
-          return reservations;
-        },
-      }),
-    );
+    pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: deviceUtils,
+      adbServerResetQuarantineFactory: (port) => {
+        startupLeases = port.getAndroidStartupLeases();
+        return new AdbServerResetQuarantine(port);
+      },
+      deviceShutdownReservationsFactory: (port) => {
+        mutex = {
+          acquire: async () => {
+            const acquired = Promise.withResolvers<void>();
+            const released = Promise.withResolvers<void>();
+            void port.withAssignmentLock(async () => {
+              acquired.resolve();
+              await released.promise;
+            });
+            await acquired.promise;
+            return () => released.resolve();
+          },
+        };
+        reservations = new DeviceShutdownReservations(port);
+        return reservations;
+      },
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     setDeviceToolsDependencies({
       timer,

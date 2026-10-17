@@ -8,7 +8,7 @@ const CHILD_PROCESS_MODULES = new Set(["child_process", "node:child_process"]);
 
 // One-way ratchet: this allowlist may shrink; additions require deliberate review.
 const ALLOWED_IMPORTERS = new Set([
-  "src/daemon/DaemonLauncher.ts",
+  "src/utils/daemonProcessCommand.ts",
   "src/daemon/devicePool.ts",
   "src/daemon/processTable.ts",
   "src/utils/GitMetadataClient.ts",

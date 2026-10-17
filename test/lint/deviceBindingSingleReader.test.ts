@@ -51,8 +51,10 @@ const DIRECT_READ_ALLOWLIST: Readonly<Record<string, number>> = {
   "src/daemon/deviceReservations.ts": 1,
   // existingSession is a Session, not its assigned PooledDevice.
   "src/daemon/explicitDeviceBind.ts": 1,
-  // Session objects and keep-awake restore targets.
-  "src/daemon/sessionManager.ts": 28,
+  // Session objects.
+  "src/daemon/sessionManager.ts": 13,
+  // Keep-awake, biometric and network restore targets moved from SessionManager; no additional reads.
+  "src/daemon/sessionDeviceStateRestore.ts": 15,
   // Finalization callback record moved from SessionManager; no additional reads.
   "src/daemon/sessionSlots.ts": 1,
   // MCP failure options and live-acceptance Session candidates.

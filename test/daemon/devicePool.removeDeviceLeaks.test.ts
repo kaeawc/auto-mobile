@@ -1,3 +1,4 @@
+import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
@@ -11,15 +12,6 @@ import type { DeviceInfo } from "../../src/models";
 
 // Regressions for #11123 (items 1-3): tracked-process, release-capture and start-timer leaks.
 const androidDevice = { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" };
-
-interface PoolInternals {
-  startedDeviceProcesses: Map<string, ChildProcess>;
-  startedDeviceProcessOutput: Map<string, unknown>;
-  releasedDeviceCaptures: Map<string, { deviceId: string }>;
-  trackStartedDeviceProcess(device: unknown, child: unknown): Promise<void>;
-  captureReleasedDevice(sessionId: string, deviceId: string): void;
-  runCoordinatedDeviceStart(device: DeviceInfo, deadlineMs: number, op: "start"): Promise<unknown>;
-}
 
 describe("DevicePool removeDevice / start leaks (#11123)", () => {
   let timer: FakeTimer;
@@ -41,7 +33,7 @@ describe("DevicePool removeDevice / start leaks (#11123)", () => {
     await pool.initializeWithDevices([androidDevice]);
     return pool;
   };
-  const internals = (pool: DevicePool): PoolInternals => pool as unknown as PoolInternals;
+  const internals = poolInternals;
   const aliveChild = (): ChildProcess => new EventEmitter() as unknown as ChildProcess;
 
   let pool: DevicePool;
@@ -69,9 +61,7 @@ describe("DevicePool removeDevice / start leaks (#11123)", () => {
     await internals(pool).trackStartedDeviceProcess(androidDevice, child);
     const device = pool.getDevice("emulator-5554")!;
 
-    await (
-      pool as unknown as { evictMissingPooledDevice(d: unknown, reason: string): Promise<void> }
-    ).evictMissingPooledDevice(device, "missing device during liveness check");
+    await internals(pool).evictMissingPooledDevice(device, "missing device during liveness check");
 
     expect(pool.getDevice("emulator-5554")).toBeNull();
     expect(internals(pool).startedDeviceProcesses.get("emulator-5554")).toBe(child);

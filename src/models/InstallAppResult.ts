@@ -1,5 +1,5 @@
 import { BaseActionResult } from "./BaseActionResult";
-import type { TimingData } from "../utils/PerformanceTracker";
+import type { TimingData } from "./TimingData";
 
 /**
  * Result of an install app operation

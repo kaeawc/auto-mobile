@@ -1,3 +1,13 @@
+import type { z } from "zod/v4";
+import type {
+  keyboardTool,
+  selectAllTextTool,
+  pressButtonTool,
+  wakeAndUnlockTool,
+  shakeTool,
+  recentAppsTool,
+  rotateTool,
+} from "./interactionTools";
 import type { SwipeEdge, SwipeOnOptions } from "../models/SwipeOnOptions";
 import type { ElementContainerSelector } from "../models/PinchOnOptions";
 import type { TapAtOptions } from "../models/TapAtOptions";
@@ -25,15 +35,9 @@ import type {
 // `TapOnArgs.platform` (below) is left as-is: tapOn's schema has been
 // optional since #5870, predating this pass, and fixing that pre-existing
 // mismatch is out of scope here.
-export interface SelectAllTextArgs {
-  layer?: HierarchyLayer;
-  platform?: Platform;
-}
+export type SelectAllTextArgs = z.output<typeof selectAllTextTool.schema>;
 
-export interface PressButtonArgs {
-  button: "home" | "back" | "menu" | "power" | "volume_up" | "volume_down" | "recent";
-  platform?: Platform;
-}
+export type PressButtonArgs = z.output<typeof pressButtonTool.schema>;
 
 export interface SendKeysArgs extends SendKeysFocusOptions {
   display?: string;
@@ -44,10 +48,7 @@ export interface SendKeysArgs extends SendKeysFocusOptions {
   project?: "full" | "skeleton";
 }
 
-export interface WakeAndUnlockArgs {
-  pin?: string;
-  platform?: Platform;
-}
+export type WakeAndUnlockArgs = z.output<typeof wakeAndUnlockTool.schema>;
 
 export interface OpenLinkArgs {
   url: string;
@@ -158,45 +159,13 @@ export interface PinchOnArgs {
   platform?: Platform;
 }
 
-export interface ShakeArgs {
-  duration?: number;
-  intensity?: number;
-  platform?: Platform;
-}
+export type ShakeArgs = z.output<typeof shakeTool.schema>;
 
-export interface KeyboardArgs {
-  action:
-    | "open"
-    | "close"
-    | "detect"
-    | "setProfile"
-    | "listProfiles"
-    | "listImes"
-    | "setIme"
-    | "tapImeKey";
-  profile?: import("../features/action/keyboardProfiles").KeyboardProfileId;
-  imeId?: string;
-  key?: string;
-  platform?: Platform;
-}
+export type KeyboardArgs = z.output<typeof keyboardTool.schema>;
 
-export interface RecentAppsArgs {
-  platform?: Platform;
-}
+export type RecentAppsArgs = z.output<typeof recentAppsTool.schema>;
 
-export interface RotateArgs {
-  sessionUuid?: string; // Existing device-targeting input supplied by the tool registry.
-  orientation: "portrait" | "landscape";
-  /**
-   * Android only. Session omission or `true` holds until `false` or release
-   * (omission leaves unreadable initial auto-rotate unchanged). Direct omission
-   * restores at call end; `true` persists. `false` enables automatic rotation even
-   * if originally locked, restores the session's original user_rotation, and clears ownership.
-   */
-  lockOrientation?: boolean;
-  display?: number;
-  platform?: Platform;
-}
+export type RotateArgs = z.output<typeof rotateTool.schema>;
 
 export interface ClipboardArgs {
   action: "copy" | "paste" | "clear" | "get";

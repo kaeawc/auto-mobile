@@ -5,6 +5,7 @@ import {
   type MultiTouchDispatchRequest,
 } from "../../../src/features/action/MultiTouchGesture";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -38,6 +39,35 @@ function create(
   gesture.observeScreen = observeScreen;
   return { gesture, requests, iosInvalidations: () => iosInvalidations };
 }
+
+describe("MultiTouchGesture display fence (#12995)", () => {
+  test("a display transition after the caller render refuses instead of dispatching", async () => {
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(observation(1000, 2000));
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const transitions = new FakeDisplayTransitionReader();
+    const rendered = transitions.fullRevision;
+    transitions.transition(1);
+    let dispatches = 0;
+    const client = async () => {
+      dispatches++;
+      return { success: true };
+    };
+    const gesture = new MultiTouchGesture(android, new FakeAdbExecutor(), {
+      timer,
+      clients: { android: client, ios: client },
+      displayTransitions: transitions,
+      renderedDisplayRevision: () => rendered,
+    });
+    gesture.window = new FakeWindow();
+    gesture.observeScreen = observeScreen;
+    const result = await gesture.execute({ action: "tap", x: 500, y: 1000 });
+    expect(result.success).toBe(false);
+    expect(result.staleDisplay).toBeDefined();
+    expect(dispatches).toBe(0);
+  });
+});
 
 describe("MultiTouchGesture dispatch (#12535)", () => {
   test.each([android, ios])(

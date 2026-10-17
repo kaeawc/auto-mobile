@@ -176,6 +176,7 @@ const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
 };
 
 const SERVER_DIR = fileURLToPath(new URL("../../src/server/", import.meta.url));
+const FEATURES_DIR = fileURLToPath(new URL("../../src/features/", import.meta.url));
 const DAEMON_DIR = fileURLToPath(new URL("../../src/daemon/", import.meta.url));
 // Parsing the whole src/server tree can exceed Bun's default hook limit on loaded runners.
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
@@ -260,6 +261,12 @@ const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "socketServer.ts#grantedDeviceOf": 1,
   "socketServer.ts#hasActiveDaemonSession": 1,
   "socketServer.ts#selectInputTargetDevice": 1,
+};
+
+// src/features: the one remaining reader consumes the session object and, when it is expired,
+// relies on the lazy release to take the "no session" branch (#12581).
+const RETAINED_FEATURES_EXPIRY_READERS: Readonly<Record<string, number>> = {
+  "deviceLifecycle/deviceLifecycleCore.ts#createSystemUiAnrRebooter": 1,
 };
 
 function scanGetSession(source: string): { line: number }[] {
@@ -353,5 +360,27 @@ describe("src/daemon expiring getSession readers", () => {
 
   test("calls stay within the retained expiry reader inventory", () => {
     expect(actual).toEqual(RETAINED_DAEMON_EXPIRY_READERS);
+  });
+});
+
+describe("src/features expiring getSession readers", () => {
+  let actual: Record<string, number> = {};
+
+  beforeAll(() => {
+    actual = {};
+    for (const file of typeScriptFiles(FEATURES_DIR)) {
+      const text = readFileSync(file, "utf8");
+      if (!text.includes("getSession")) {
+        continue;
+      }
+      for (const owner of scanNamedCallOwners(file, text, "getSession")) {
+        const key = `${relativePosix(FEATURES_DIR, file)}#${owner}`;
+        actual[key] = (actual[key] ?? 0) + 1;
+      }
+    }
+  }, TREE_SCAN_HOOK_TIMEOUT_MS);
+
+  test("calls stay within the retained expiry reader inventory", () => {
+    expect(actual).toEqual(RETAINED_FEATURES_EXPIRY_READERS);
   });
 });

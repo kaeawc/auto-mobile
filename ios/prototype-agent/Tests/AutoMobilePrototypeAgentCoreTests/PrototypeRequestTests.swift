@@ -463,7 +463,8 @@ final class PrototypeRequestTests: XCTestCase {
             let json = try XCTUnwrap(vector["json"])
             let text = try XCTUnwrap(vector["text"])
             let tap = """
-            [{"type":"request","url":"http://h.test/p","headers":{"X-N":{"value":\(json)}},"query":{"n":{"value":\(json)}}}]
+            [{"type":"request","url":"http://h.test/p",
+              "headers":{"X-N":{"value":\(json)}},"query":{"n":{"value":\(json)}}}]
             """
             var (session, actions) = try shown(onTap: tap)
             _ = session.run(actions)

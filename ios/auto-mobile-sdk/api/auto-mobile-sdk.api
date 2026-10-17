@@ -560,46 +560,6 @@ public final class NWConnectionNetworkCaptureAdapter: Sendable
   public func didCancel(requestId: String)
 
 // Network/NetworkMockRuleStore.swift
-public enum NetworkFaultTransport: String, Codable, Equatable, Sendable
-  case urlSession
-  case webSocket
-  case nwConnection
-  case webView
-public enum NetworkFaultAction: String, Codable, Equatable, Sendable
-  case response
-  case status
-  case error
-  case latency
-  case bandwidth
-  case dropBytes
-  case closeConnection
-  case rejectFrame
-public struct NetworkFaultRuleDTO: Codable, Equatable, Sendable
-  public let faultId: String
-  public let transport: NetworkFaultTransport?
-  public let host: String?
-  public let port: Int?
-  public let scheme: String?
-  public let path: String?
-  public let method: String?
-  public let headers: [String: String]?
-  public let origin: String?
-  public let connectionId: String?
-  public let sessionId: String?
-  public let action: NetworkFaultAction
-  public let statusCode: Int?
-  public let responseHeaders: [String: String]?
-  public let responseBody: String?
-  public let contentType: String?
-  public let errorType: String?
-  public let delayMs: Int?
-  public let bandwidthBytesPerSecond: Int?
-  public let dropBytes: Int?
-  public let limit: Int?
-  public let expiresAtEpochMs: Int64?
-  public let scope: String?
-  public let dryRun: Bool
-  public init( faultId: String, transport: NetworkFaultTransport?, host: String?, port: Int?, scheme: String?, path: String?, method: String?, headers: [String: String]?, origin: String?, connectionId: String?, sessionId: String?, action: NetworkFaultAction, statusCode: Int?, responseHeaders: [String: String]?, responseBody: String?, contentType: String?, errorType: String?, delayMs: Int?, bandwidthBytesPerSecond: Int?, dropBytes: Int?, limit: Int?, expiresAtEpochMs: Int64?, scope: String?, dryRun: Bool )
 public final class NetworkMockRuleStore: Sendable
 public struct FaultDecision: Equatable, Sendable
   public let faultId: String

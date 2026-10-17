@@ -288,24 +288,6 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     }
 }
 
-private struct SetMockRulesBody: Encodable {
-    let rules: [NetworkMockRuleDTO]
-}
-
-/// The SDK's reply to `POST /network/mock`; `rejected` is absent from an SDK that predates issue #10101.
-private struct SetMockRulesReply: Decodable {
-    struct Rejected: Decodable {
-        let mockId: String
-        let reason: String
-    }
-
-    let rejected: [Rejected]?
-}
-
-private struct SetNetworkFaultRulesBody: Encodable {
-    let rules: [NetworkFaultRuleDTO]
-}
-
 private struct AddHighlightBody: Encodable {
     let id: String
     let shape: HighlightShape

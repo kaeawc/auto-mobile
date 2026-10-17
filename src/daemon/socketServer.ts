@@ -14,6 +14,7 @@ import {
   type InputTypeTextParams,
 } from "./inputRouteParams";
 import { IDE_DEVICE_MUTATION_METHODS, IDE_ROUTE_PARSERS, STARTUP_PROBE_METHODS } from "./ideRoutes";
+import { ideFeatureRoutes } from "./socketServer/ideRouteModule";
 import {
   DISPATCH_HELD_INPUT_METHODS,
   GESTURE_FRAME_METHODS,
@@ -154,7 +155,6 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES, OutboundWriteGuard } from "./outboundWriteGuard";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
-import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinitions";
 import {
   getSessionToolSelectionService,
   type SessionToolSelectionService,
@@ -256,19 +256,15 @@ import {
   DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
   DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
   DAEMON_RESTART_ADMITTED_METHOD,
-  type AcceptanceSessionRestartScope,
-  type DaemonAcceptanceRestartCommit,
-  type DaemonAcceptanceRestartRelease,
-  type DaemonAcceptanceSessionRestart,
-  type DaemonAdmittedRestart,
-  type DaemonMaintenancePreparation,
-  type DaemonRestartPreparation,
 } from "./daemonRestartAdmission";
-import {
-  daemonLiveAcceptanceScopedCapabilityMatches,
-  type DaemonGenerationIdentity,
-} from "./liveAcceptanceCapability";
+import { type DaemonGenerationIdentity } from "./liveAcceptanceCapability";
 import { daemonGenerationMatches } from "./processGeneration";
+import {
+  DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS,
+  DAEMON_MAINTENANCE_ADMISSION_TTL_MS,
+  RestartAdmission,
+} from "./socketServer/restartAdmission";
+export { DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS, DAEMON_MAINTENANCE_ADMISSION_TTL_MS };
 import {
   processGenerationRecordFields,
   recordedProcessGenerationToken,
@@ -278,6 +274,19 @@ import {
   mcpRequestFailureDetails,
   requestFailureCause,
 } from "./socketServer/errorFrames";
+import {
+  clearPooledIdleTimer,
+  closePooledClient,
+  discardTimedOutReconnect,
+  getPooledClient,
+  resetPooledClient,
+  resetPooledClientIfCurrent,
+  runWithActivePooledClient,
+  schedulePooledIdleClose,
+  type LoopbackClientPool,
+  type McpClientFactory,
+} from "./socketServer/loopbackMcpClientPool";
+import { runKeyedSerial, type McpForwardChainWait } from "./socketServer/keyedSerialQueue";
 import { CONTROL_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
 import {
   SessionReleasedDuringCallError,
@@ -368,27 +377,12 @@ function snapshotDaemonOptions(options: DaemonOptions | undefined): DaemonOption
   return structuredClone(options ?? {});
 }
 
-const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
-const MCP_SESSION_TERMINATION_TIMEOUT_MS = 2_000;
 const DEVICE_ACQUISITION_TOOL_NAMES = new Set([
   "getAndroid",
   "getApple",
   "startDevice",
   "provisionDevice",
 ]);
-/**
- * Maintenance spans separate control RPCs (and, for restart-admitted, separate
- * client processes), so it cannot be tied to one socket. Bound the global
- * execution fence instead: the default live-acceptance platform budget is just
- * under nine minutes, leaving a one-minute margin for valid fault/repair work.
- */
-export const DAEMON_MAINTENANCE_ADMISSION_TTL_MS = 10 * 60 * 1000;
-/**
- * Acceptance crash admission only spans generation revalidation and SIGKILL.
- * Keep enough margin for a loaded process-table scan while bounding an
- * abandoned process-global tool fence.
- */
-export const DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS = 15_000;
 /** Keep shutdown bounded if a request handler ignores its disconnected peer. */
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 /** Keep shutdown bounded if a client cannot flush a release notification. */
@@ -615,11 +609,7 @@ interface PendingSocketRequest {
  * by name (a name-based patch silently no-ops if the internal creator is renamed,
  * leaving forwarding dead but the suite green).
  */
-export type McpClientFactory = (
-  boundSessionUuid?: string,
-  toolSelectionProfileUuid?: string,
-  releasedSessionUuid?: string,
-) => Promise<Client>;
+export type { McpClientFactory };
 
 /**
  * The narrow append-text surface `input/typeText mode:"append"` needs.
@@ -667,18 +657,6 @@ interface BoundMcpClient {
   sessionUuid?: string;
   toolSelectionProfileUuid?: string;
   requiresLiveDaemonSession: boolean;
-}
-
-/**
- * Bounds how long a forward may park on another forward's execution-key chain. Without it a
- * waiter is only timed out after it acquires the key, so a stuck holder parks it (and its
- * socket's admission queue) forever (issue #6388).
- */
-interface McpForwardChainWait {
-  /** Milliseconds this waiter may still spend waiting, read at each acquisition. */
-  remainingMs: () => number;
-  /** Error to reject with once that budget is spent. */
-  timeoutError: (executionKey: string) => Error;
 }
 
 /** One keyed attempt either ran the forward or found its route moved to another key. */
@@ -1017,6 +995,12 @@ interface InputRouteRun<A extends InputRouteArgs, R extends InputRouteResult> {
 
 type InputTargetAction = InputRouteMethod;
 
+type IdeServerRouteHandler = (
+  request: DaemonRequest,
+  socketSessionId: string | undefined,
+  ideMutation: IdeMutationCall | undefined,
+) => Promise<any | undefined> | any;
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private serverClosePromise: Promise<void> | null = null;
@@ -1104,16 +1088,7 @@ export class UnixSocketServer {
   private readonly onRestartAccepted?: () => void;
   private readonly liveAcceptanceStartupSecret: string | undefined;
   private readonly acceptanceDiscoveryCapability: string | undefined;
-  private maintenanceAdmissionToken: string | undefined;
-  private maintenanceAdmissionExpiresAt: number | undefined;
-  private maintenanceAdmissionExpiryTimer: NodeJS.Timeout | undefined;
-  private maintenanceAdmissionAbortController: AbortController | undefined;
-  private maintenanceRestartConsumed = false;
-  private acceptanceRestartAdmissionToken: string | undefined;
-  private acceptanceRestartAdmissionOwnerSessionId: string | undefined;
-  private acceptanceRestartAdmissionCommitted = false;
-  private acceptanceRestartAdmissionExpiresAt: number | undefined;
-  private acceptanceRestartAdmissionExpiryTimer: NodeJS.Timeout | undefined;
+  private restartAdmission!: RestartAdmission;
   private readonly sessionToolSelectionService?: Pick<
     SessionToolSelectionService,
     "isEnabled" | "setEnabled"
@@ -1251,6 +1226,15 @@ export class UnixSocketServer {
     this.onRestartAccepted = handshakeConfig.onRestartAccepted;
     this.liveAcceptanceStartupSecret = handshakeConfig.liveAcceptanceStartupSecret;
     this.acceptanceDiscoveryCapability = handshakeConfig.acceptanceDiscoveryCapability;
+    this.restartAdmission = new RestartAdmission({
+      timer: this.timer,
+      idGenerator: this.idGenerator,
+      generationMatches: (params) => this.daemonGenerationMatches(params),
+      currentIdentity: () => this.currentGenerationIdentity(),
+      getAllSessions: () => this.daemonState.getSessionManager().getAllSessions?.(),
+      onRestartAccepted: this.onRestartAccepted,
+      liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
+    });
     logger.info(`UnixSocketServer initialized with endpoint: "${mcpEndpoint}"`);
     if (!mcpEndpoint) {
       logger.error("ERROR: mcpEndpoint is empty or undefined!");
@@ -1792,7 +1776,7 @@ export class UnixSocketServer {
       return;
     }
     this.abortMcpRequests(sessionId);
-    this.releaseAcceptanceRestartAdmissionForOwner(sessionId);
+    this.restartAdmission.releaseAcceptanceRestartAdmissionForOwner(sessionId);
     this.sessions.delete(sessionId);
     this.clientSockets.delete(sessionId);
     this.notificationSubscribers.delete(sessionId);
@@ -2744,90 +2728,23 @@ export class UnixSocketServer {
     idleCloseKey?: string,
     chainWait?: McpForwardChainWait,
   ): Promise<T> {
-    if (idleCloseKey) {
-      const idleCloseKeys = this.mcpForwardIdleCloseKeys.get(executionKey) ?? new Set<string>();
-      idleCloseKeys.add(idleCloseKey);
-      this.mcpForwardIdleCloseKeys.set(executionKey, idleCloseKeys);
-    }
-    const heldTail = this.mcpForwardTails.get(executionKey);
-    const previous = heldTail ?? Promise.resolve();
-    // Only a contended acquisition needs a bound; an idle key is taken immediately.
-    const acquired =
-      heldTail && chainWait
-        ? this.waitForMcpForwardChain(executionKey, heldTail, chainWait)
-        : previous;
-    const run = acquired.then(() => {
-      if (idleCloseKey) {
-        this.clearMcpClientIdleTimer(idleCloseKey);
-      }
-      return fn();
-    });
-    // The tail also waits for `previous`: a waiter that gave up must not let the next
-    // waiter run concurrently with the forward still holding this key.
-    const tail = Promise.all([
-      previous,
-      run.then(
-        () => undefined,
-        () => undefined,
-      ),
-    ]).then(() => undefined);
-    this.mcpForwardTails.set(executionKey, tail);
-    void tail.finally(() => {
-      if (this.mcpForwardTails.get(executionKey) === tail) {
-        this.mcpForwardTails.delete(executionKey);
-        const idleCloseKeys = this.mcpForwardIdleCloseKeys.get(executionKey);
-        this.mcpForwardIdleCloseKeys.delete(executionKey);
-        for (const key of idleCloseKeys ?? []) {
-          this.scheduleMcpClientIdleClose(key);
-        }
-      }
-    });
-    return run;
-  }
-
-  private async waitForMcpForwardChain(
-    executionKey: string,
-    heldTail: Promise<void>,
-    chainWait: McpForwardChainWait,
-  ): Promise<void> {
-    try {
-      await raceWithDeadline(heldTail, {
+    return runKeyedSerial(
+      {
+        tails: this.mcpForwardTails,
+        idleCloseKeys: this.mcpForwardIdleCloseKeys,
         timer: this.timer,
-        timeoutMs: Math.max(0, chainWait.remainingMs()),
-        label: `MCP forward wait for ${executionKey}`,
-      });
-    } catch (error) {
-      // Tails never reject, so only the wait bound lands here (issue #6388).
-      logger.warn(
-        `[McpForward] chain wait expired executionKey=${executionKey}: ${errorMessage(error)}`,
-      );
-      throw chainWait.timeoutError(executionKey);
-    }
+        onAcquired: (key) => this.clearMcpClientIdleTimer(key),
+        onDrained: (key) => this.scheduleMcpClientIdleClose(key),
+      },
+      executionKey,
+      fn,
+      idleCloseKey,
+      chainWait,
+    );
   }
 
   private async runWithActiveMcpClient<T>(clientKey: string, fn: () => Promise<T>): Promise<T> {
-    this.clearMcpClientIdleTimer(clientKey);
-    this.activeMcpClientForwardCounts.set(
-      clientKey,
-      (this.activeMcpClientForwardCounts.get(clientKey) ?? 0) + 1,
-    );
-    try {
-      return await fn();
-    } finally {
-      const remainingForClient = (this.activeMcpClientForwardCounts.get(clientKey) ?? 1) - 1;
-      if (remainingForClient === 0) {
-        this.activeMcpClientForwardCounts.delete(clientKey);
-        // Re-arm the idle close around the whole active-client wrapper. A forward
-        // can throw before its own cleanup runs (e.g. the pre-forward queue
-        // timeout deadline throws before the forward-body finally), and this
-        // wrapper cleared the client's idle timer on entry. Without this re-arm
-        // the inactive transport would stay cached until another request or
-        // daemon shutdown (issue #4610).
-        this.scheduleMcpClientIdleClose(clientKey);
-      } else {
-        this.activeMcpClientForwardCounts.set(clientKey, remainingForClient);
-      }
-    }
+    return await runWithActivePooledClient(this.loopbackPool(), clientKey, fn);
   }
 
   /**
@@ -4863,58 +4780,21 @@ export class UnixSocketServer {
     return `method=${request.method}`;
   }
 
-  /**
-   * Handle socket requests that don't require the MCP client.
-   * Returns undefined if the request should be forwarded to MCP.
-   */
-  private prepareDaemonRestart(params: Record<string, unknown>): DaemonRestartPreparation {
-    if (!this.daemonGenerationMatches(params)) {
-      return {
-        accepted: false,
-        reason: "generation_changed",
-      };
-    }
-    const admission = executionTracker.prepareForDaemonRestart();
-    if (admission !== "accepted") {
-      return {
-        accepted: false,
-        reason: admission,
-      };
-    }
-    if (!this.onRestartAccepted) {
-      executionTracker.clearDaemonRestartPreparation();
-      return {
-        accepted: false,
-        reason: "shutdown_unavailable",
-      };
-    }
-    try {
-      this.onRestartAccepted();
-      return { accepted: true };
-    } catch (error) {
-      logger.warn("Failed to initiate an admitted daemon restart", error);
-      executionTracker.clearDaemonRestartPreparation();
-      return {
-        accepted: false,
-        reason: "shutdown_unavailable",
-      };
-    }
+  private daemonGenerationMatches(params: Record<string, unknown>): boolean {
+    return daemonGenerationMatches(this.currentGenerationIdentity(), params);
   }
 
-  private daemonGenerationMatches(params: Record<string, unknown>): boolean {
-    return daemonGenerationMatches(
-      {
-        pid: process.pid,
-        startedAt: this.identityStartedAt,
-        ...(this.processGenerationToken === undefined
-          ? {}
-          : { processGenerationToken: this.processGenerationToken }),
-        version: this.daemonIdentity.version,
-        buildId: this.daemonIdentity.build.buildId,
-        entryScript: this.daemonIdentity.build.entryScript,
-      },
-      params,
-    );
+  private currentGenerationIdentity(): DaemonGenerationIdentity {
+    return {
+      pid: process.pid,
+      startedAt: this.identityStartedAt,
+      ...(this.processGenerationToken === undefined
+        ? {}
+        : { processGenerationToken: this.processGenerationToken }),
+      version: this.daemonIdentity.version,
+      buildId: this.daemonIdentity.build.buildId,
+      entryScript: this.daemonIdentity.build.entryScript,
+    };
   }
 
   /** Local admin RPC, generation-bound; publication never reserves tool admission. */
@@ -4950,329 +4830,6 @@ export class UnixSocketServer {
       logger.warn("Failed to republish daemon identity", error);
       return { accepted: false, reason: "republish_failed" };
     }
-  }
-
-  private prepareDaemonMaintenance(params: Record<string, unknown>): DaemonMaintenancePreparation {
-    if (!this.daemonGenerationMatches(params)) {
-      return { accepted: false, reason: "generation_changed" };
-    }
-    this.expireDaemonMaintenanceAdmission();
-    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
-    if (!sessions) {
-      return { accepted: false, reason: "sessions_unavailable" };
-    }
-    const activeSessions = sessions.length;
-    const admission = executionTracker.prepareForDaemonMaintenance(activeSessions);
-    if (admission !== "accepted") {
-      return { accepted: false, reason: admission };
-    }
-    const maintenanceToken = this.idGenerator.next();
-    this.maintenanceAdmissionToken = maintenanceToken;
-    this.maintenanceAdmissionExpiresAt = this.timer.now() + DAEMON_MAINTENANCE_ADMISSION_TTL_MS;
-    this.maintenanceAdmissionExpiryTimer = this.timer.setTimeout(
-      () => this.releaseDaemonMaintenanceAdmission(maintenanceToken),
-      DAEMON_MAINTENANCE_ADMISSION_TTL_MS,
-    );
-    this.maintenanceAdmissionAbortController = new AbortController();
-    this.maintenanceRestartConsumed = false;
-    return { accepted: true, maintenanceToken };
-  }
-
-  private completeDaemonMaintenance(params: Record<string, unknown>): {
-    completed: boolean;
-  } {
-    if (
-      !this.daemonGenerationMatches(params) ||
-      !this.daemonMaintenanceAdmissionMatches(params.maintenanceToken)
-    ) {
-      return { completed: false };
-    }
-    this.releaseDaemonMaintenanceAdmission(params.maintenanceToken);
-    return { completed: true };
-  }
-
-  private daemonMaintenanceAdmissionMatches(token: unknown): token is string {
-    this.expireDaemonMaintenanceAdmission();
-    return (
-      typeof token === "string" &&
-      this.maintenanceAdmissionToken !== undefined &&
-      token === this.maintenanceAdmissionToken
-    );
-  }
-
-  private expireDaemonMaintenanceAdmission(): void {
-    if (
-      this.maintenanceAdmissionToken !== undefined &&
-      this.maintenanceAdmissionExpiresAt !== undefined &&
-      this.maintenanceAdmissionExpiresAt <= this.timer.now()
-    ) {
-      this.releaseDaemonMaintenanceAdmission(this.maintenanceAdmissionToken);
-    }
-  }
-
-  private releaseDaemonMaintenanceAdmission(token: unknown): void {
-    if (
-      typeof token !== "string" ||
-      this.maintenanceAdmissionToken === undefined ||
-      token !== this.maintenanceAdmissionToken
-    ) {
-      return;
-    }
-    if (this.maintenanceAdmissionExpiryTimer !== undefined) {
-      this.timer.clearTimeout(this.maintenanceAdmissionExpiryTimer);
-    }
-    this.maintenanceAdmissionAbortController?.abort(
-      new Error("Daemon maintenance admission expired or was released"),
-    );
-    executionTracker.clearDaemonMaintenancePreparation();
-    this.maintenanceAdmissionToken = undefined;
-    this.maintenanceAdmissionExpiresAt = undefined;
-    this.maintenanceAdmissionExpiryTimer = undefined;
-    this.maintenanceAdmissionAbortController = undefined;
-    this.maintenanceRestartConsumed = false;
-  }
-
-  private restartAdmittedDaemon(params: Record<string, unknown>): DaemonAdmittedRestart {
-    if (!this.daemonGenerationMatches(params)) {
-      return { accepted: false, reason: "generation_changed" };
-    }
-    if (!this.daemonMaintenanceAdmissionMatches(params.maintenanceToken)) {
-      return { accepted: false, reason: "maintenance_token_invalid" };
-    }
-    if (this.maintenanceRestartConsumed) {
-      return { accepted: false, reason: "maintenance_token_consumed" };
-    }
-    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
-    if (!sessions) {
-      return { accepted: false, reason: "sessions_unavailable" };
-    }
-    if (sessions.length > 0) {
-      return { accepted: false, reason: "active_sessions" };
-    }
-    const admission = executionTracker.prepareForAdmittedDaemonRestart();
-    if (admission !== "accepted") {
-      return { accepted: false, reason: admission };
-    }
-    if (!this.onRestartAccepted) {
-      executionTracker.clearDaemonRestartPreparation();
-      return { accepted: false, reason: "shutdown_unavailable" };
-    }
-    this.maintenanceRestartConsumed = true;
-    try {
-      this.onRestartAccepted();
-      return { accepted: true };
-    } catch (error) {
-      logger.warn("Failed to initiate a maintenance-admitted daemon restart", error);
-      executionTracker.clearDaemonRestartPreparation();
-      return { accepted: false, reason: "shutdown_unavailable" };
-    }
-  }
-
-  /**
-   * Acceptance-only crash admission for one persisted session. Unlike host
-   * maintenance, this intentionally permits exactly the signed session to
-   * survive in storage so the successor must prove stable-identity recovery.
-   * It never touches a device; the manager kills only this verified daemon
-   * generation after this RPC returns.
-   */
-  // eslint-disable-next-line complexity -- each refusal is a distinct security fence for this one-shot control RPC.
-  private restartAcceptanceSession(
-    params: Record<string, unknown>,
-    ownerSessionId: string | undefined,
-  ): DaemonAcceptanceSessionRestart {
-    if (!this.daemonGenerationMatches(params)) {
-      return { accepted: false, reason: "generation_changed" };
-    }
-    if (ownerSessionId === undefined) {
-      return { accepted: false, reason: "restart_pending" };
-    }
-    this.expireAcceptanceRestartAdmission();
-    const scope = this.acceptanceSessionRestartScope(params.scope);
-    if (!scope) {
-      return { accepted: false, reason: "scope_invalid" };
-    }
-    if (scope.expiresAt <= this.timer.now()) {
-      return { accepted: false, reason: "scope_expired" };
-    }
-    const identity: DaemonGenerationIdentity = {
-      pid: process.pid,
-      startedAt: this.identityStartedAt,
-      ...(this.processGenerationToken === undefined
-        ? {}
-        : { processGenerationToken: this.processGenerationToken }),
-      version: this.daemonIdentity.version,
-      buildId: this.daemonIdentity.build.buildId,
-      entryScript: this.daemonIdentity.build.entryScript,
-    };
-    if (
-      !daemonLiveAcceptanceScopedCapabilityMatches(
-        this.liveAcceptanceStartupSecret,
-        identity,
-        scope,
-        params.acceptanceCapability,
-      )
-    ) {
-      return { accepted: false, reason: "acceptance_capability_invalid" };
-    }
-    const sessions = this.daemonState.getSessionManager().getAllSessions?.();
-    if (!sessions) {
-      return { accepted: false, reason: "session_not_found" };
-    }
-    const session = sessions.find((candidate) => candidate.sessionId === scope.sessionUuid);
-    if (!session) {
-      return { accepted: false, reason: "session_not_found" };
-    }
-    if (
-      session.platform !== scope.platform ||
-      session.stableDeviceId !== scope.stableDeviceId ||
-      sessions.length !== 1
-    ) {
-      return {
-        accepted: false,
-        reason:
-          sessions.length !== 1 &&
-          sessions.some((candidate) => candidate.sessionId !== scope.sessionUuid)
-            ? "unrelated_sessions"
-            : "session_identity_mismatch",
-      };
-    }
-    const admission = executionTracker.prepareForDaemonRestart();
-    if (admission !== "accepted") {
-      return {
-        accepted: false,
-        reason: admission === "active_operations" ? "active_operations" : "restart_pending",
-      };
-    }
-    const restartToken = this.idGenerator.next();
-    const admissionTtlMs = Math.min(
-      DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS,
-      scope.expiresAt - this.timer.now(),
-    );
-    this.acceptanceRestartAdmissionToken = restartToken;
-    this.acceptanceRestartAdmissionOwnerSessionId = ownerSessionId;
-    this.acceptanceRestartAdmissionCommitted = false;
-    this.acceptanceRestartAdmissionExpiresAt = this.timer.now() + admissionTtlMs;
-    this.acceptanceRestartAdmissionExpiryTimer = this.timer.setTimeout(
-      () => this.releaseAcceptanceRestartAdmission(restartToken),
-      admissionTtlMs,
-    );
-    // Graceful shutdown would terminally release the persisted session. The
-    // manager commits the token before SIGKILL. Disconnect rolls back only an
-    // uncommitted fence; after commit the lease keeps new work fenced through
-    // the signal even if the control socket drops.
-    return { accepted: true, restartToken };
-  }
-
-  private releaseAcceptanceRestart(
-    params: Record<string, unknown>,
-    ownerSessionId: string | undefined,
-  ): DaemonAcceptanceRestartRelease {
-    if (
-      !this.daemonGenerationMatches(params) ||
-      !this.acceptanceRestartAdmissionMatches(params.restartToken, ownerSessionId)
-    ) {
-      return { released: false };
-    }
-    this.releaseAcceptanceRestartAdmission(params.restartToken);
-    return { released: true };
-  }
-
-  private commitAcceptanceRestart(
-    params: Record<string, unknown>,
-    ownerSessionId: string | undefined,
-  ): DaemonAcceptanceRestartCommit {
-    if (
-      !this.daemonGenerationMatches(params) ||
-      !this.acceptanceRestartAdmissionMatches(params.restartToken, ownerSessionId)
-    ) {
-      return { committed: false };
-    }
-    this.acceptanceRestartAdmissionCommitted = true;
-    return { committed: true };
-  }
-
-  private acceptanceRestartAdmissionMatches(
-    token: unknown,
-    ownerSessionId: string | undefined,
-  ): token is string {
-    this.expireAcceptanceRestartAdmission();
-    return (
-      typeof token === "string" &&
-      ownerSessionId !== undefined &&
-      token === this.acceptanceRestartAdmissionToken &&
-      ownerSessionId === this.acceptanceRestartAdmissionOwnerSessionId
-    );
-  }
-
-  private expireAcceptanceRestartAdmission(): void {
-    if (
-      this.acceptanceRestartAdmissionToken !== undefined &&
-      this.acceptanceRestartAdmissionExpiresAt !== undefined &&
-      this.acceptanceRestartAdmissionExpiresAt <= this.timer.now()
-    ) {
-      this.releaseAcceptanceRestartAdmission(this.acceptanceRestartAdmissionToken);
-    }
-  }
-
-  private releaseAcceptanceRestartAdmissionForOwner(ownerSessionId: string): void {
-    if (
-      this.acceptanceRestartAdmissionCommitted ||
-      ownerSessionId !== this.acceptanceRestartAdmissionOwnerSessionId
-    ) {
-      return;
-    }
-    this.releaseAcceptanceRestartAdmission(this.acceptanceRestartAdmissionToken);
-  }
-
-  private releaseAcceptanceRestartAdmission(token: unknown): void {
-    if (typeof token !== "string" || token !== this.acceptanceRestartAdmissionToken) {
-      return;
-    }
-    if (this.acceptanceRestartAdmissionExpiryTimer !== undefined) {
-      this.timer.clearTimeout(this.acceptanceRestartAdmissionExpiryTimer);
-    }
-    executionTracker.clearDaemonRestartPreparation();
-    this.acceptanceRestartAdmissionToken = undefined;
-    this.acceptanceRestartAdmissionOwnerSessionId = undefined;
-    this.acceptanceRestartAdmissionCommitted = false;
-    this.acceptanceRestartAdmissionExpiresAt = undefined;
-    this.acceptanceRestartAdmissionExpiryTimer = undefined;
-  }
-
-  // eslint-disable-next-line complexity -- validate every untrusted scope field before HMAC authorization.
-  private acceptanceSessionRestartScope(value: unknown): AcceptanceSessionRestartScope | undefined {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      return undefined;
-    }
-    const scope = value as Partial<AcceptanceSessionRestartScope>;
-    const controls = scope.controls;
-    if (
-      typeof scope.sessionUuid !== "string" ||
-      scope.sessionUuid.length === 0 ||
-      (scope.platform !== "android" && scope.platform !== "ios") ||
-      typeof scope.stableDeviceId !== "string" ||
-      scope.stableDeviceId.length === 0 ||
-      typeof scope.expiresAt !== "number" ||
-      !Number.isFinite(scope.expiresAt) ||
-      !controls ||
-      typeof controls !== "object" ||
-      typeof controls.androidSiblingAvdName !== "string" ||
-      typeof controls.androidDuplicateSerial !== "string" ||
-      typeof controls.iosSameNameSiblingUdid !== "string"
-    ) {
-      return undefined;
-    }
-    return {
-      sessionUuid: scope.sessionUuid,
-      platform: scope.platform,
-      stableDeviceId: scope.stableDeviceId,
-      controls: {
-        androidSiblingAvdName: controls.androidSiblingAvdName,
-        androidDuplicateSerial: controls.androidDuplicateSerial,
-        iosSameNameSiblingUdid: controls.iosSameNameSiblingUdid,
-      },
-      expiresAt: scope.expiresAt,
-    };
   }
 
   private requireFeatureFlagService(): FeatureFlagService {
@@ -5387,62 +4944,55 @@ export class UnixSocketServer {
   }
 
   /** The `ide/*` and daemon-lifecycle routes this socket serves, by method name (#11813). */
-  private readonly ideRouteHandlers: ReadonlyMap<
+  private readonly ideRouteHandlers: ReadonlyMap<string, IdeServerRouteHandler> = new Map<
     string,
-    (
-      request: DaemonRequest,
-      socketSessionId: string | undefined,
-      ideMutation: IdeMutationCall | undefined,
-    ) => Promise<any | undefined> | any
-  > = new Map([
-    [
-      "ide/listFeatureFlags",
-      (request, socketSessionId, ideMutation) =>
-        this.ideListFeatureFlags(request, socketSessionId, ideMutation),
-    ],
-    [
-      "ide/setFeatureFlag",
-      (request, socketSessionId, ideMutation) =>
-        this.ideSetFeatureFlag(request, socketSessionId, ideMutation),
-    ],
-    [
-      "ide/setSessionToolEnabled",
-      (request, socketSessionId, ideMutation) =>
-        this.ideSetSessionToolEnabled(request, socketSessionId, ideMutation),
-    ],
-    [
-      "ide/ping",
-      (request, socketSessionId, ideMutation) =>
-        this.idePing(request, socketSessionId, ideMutation),
-    ],
+    IdeServerRouteHandler
+  >([
+    ...ideFeatureRoutes({
+      requireFeatureFlagService: () => this.requireFeatureFlagService(),
+      sessionToolSelection: () =>
+        this.sessionToolSelectionService ?? getSessionToolSelectionService(),
+      assertBrokerHostMutation: (socketSessionId, action) =>
+        this.assertBrokerConnectionHostMutation(socketSessionId, action),
+      assertBrokerControl: (socketSessionId, action, target) =>
+        this.assertBrokerConnectionControl(socketSessionId, action, target),
+      emitToolsListChanged: () => ListChangedBroadcaster.emit("tools"),
+      now: () => this.timer.now(),
+    }),
     [
       DAEMON_REPUBLISH_IDENTITY_METHOD,
       async (request) => await this.republishDaemonIdentity(request.params),
     ],
-    [DAEMON_PREPARE_RESTART_METHOD, async (request) => this.prepareDaemonRestart(request.params)],
+    [
+      DAEMON_PREPARE_RESTART_METHOD,
+      async (request) => this.restartAdmission.prepareDaemonRestart(request.params),
+    ],
     [
       DAEMON_PREPARE_MAINTENANCE_METHOD,
-      async (request) => this.prepareDaemonMaintenance(request.params),
+      async (request) => this.restartAdmission.prepareDaemonMaintenance(request.params),
     ],
     [
       DAEMON_COMPLETE_MAINTENANCE_METHOD,
-      async (request) => this.completeDaemonMaintenance(request.params),
+      async (request) => this.restartAdmission.completeDaemonMaintenance(request.params),
     ],
-    [DAEMON_RESTART_ADMITTED_METHOD, async (request) => this.restartAdmittedDaemon(request.params)],
+    [
+      DAEMON_RESTART_ADMITTED_METHOD,
+      async (request) => this.restartAdmission.restartAdmittedDaemon(request.params),
+    ],
     [
       DAEMON_RESTART_ACCEPTANCE_SESSION_METHOD,
       async (request, socketSessionId) =>
-        this.restartAcceptanceSession(request.params, socketSessionId),
+        this.restartAdmission.restartAcceptanceSession(request.params, socketSessionId),
     ],
     [
       DAEMON_COMMIT_ACCEPTANCE_RESTART_METHOD,
       async (request, socketSessionId) =>
-        this.commitAcceptanceRestart(request.params, socketSessionId),
+        this.restartAdmission.commitAcceptanceRestart(request.params, socketSessionId),
     ],
     [
       DAEMON_RELEASE_ACCEPTANCE_RESTART_METHOD,
       async (request, socketSessionId) =>
-        this.releaseAcceptanceRestart(request.params, socketSessionId),
+        this.restartAdmission.releaseAcceptanceRestart(request.params, socketSessionId),
     ],
     [
       "ide/status",
@@ -5482,61 +5032,6 @@ export class UnixSocketServer {
   ): Promise<any | undefined> {
     const handler = this.ideRouteHandlers.get(request.method);
     return handler ? await handler(request, socketSessionId, ideMutation) : undefined;
-  }
-
-  private async ideListFeatureFlags(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    const flags = await this.requireFeatureFlagService().listFlags();
-    return { flags };
-  }
-
-  private async ideSetFeatureFlag(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    const featureFlagService = this.requireFeatureFlagService();
-    const args = IDE_ROUTE_PARSERS["ide/setFeatureFlag"](request.params);
-    this.assertBrokerConnectionHostMutation(socketSessionId, "ide/setFeatureFlag");
-    const updated = await featureFlagService.setFlag(
-      args.key as FeatureFlagKey,
-      args.enabled,
-      args.config,
-    );
-    return updated;
-  }
-
-  private async ideSetSessionToolEnabled(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    const args = IDE_ROUTE_PARSERS["ide/setSessionToolEnabled"](request.params);
-    this.assertBrokerConnectionControl(socketSessionId, "ide/setSessionToolEnabled", {
-      requesterSessionUuid: args.sessionUuid,
-    });
-    await (this.sessionToolSelectionService ?? getSessionToolSelectionService()).setEnabled(
-      args.sessionUuid,
-      args.toolName,
-      args.enabled,
-    );
-    ListChangedBroadcaster.emit("tools");
-    return {
-      sessionUuid: args.sessionUuid,
-      toolName: args.toolName,
-      enabled: args.enabled,
-    };
-  }
-
-  private async idePing(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    return { ok: true, timestamp: this.timer.now() };
   }
 
   private async ideStatus(
@@ -8585,82 +8080,21 @@ export class UnixSocketServer {
     toolSelectionProfileUuid?: string,
     releasedSessionUuid?: string,
   ): Promise<Client> {
-    this.clearMcpClientIdleTimer(key);
-
-    const existingClient = this.mcpClients.get(key);
-    if (existingClient) {
-      return existingClient;
-    }
-
-    const existingPromise = this.mcpClientPromises.get(key);
-    if (existingPromise) {
-      return existingPromise;
-    }
-
-    const generation = this.lifecycleGeneration;
-    const clientPromise = this.mcpClientFactory(
+    return await getPooledClient(
+      this.loopbackPool(),
+      key,
       boundSessionUuid,
       toolSelectionProfileUuid,
       releasedSessionUuid,
-    )
-      .then(async (client) => {
-        if (
-          this.closing ||
-          generation !== this.lifecycleGeneration ||
-          this.mcpClientPromises.get(key) !== clientPromise
-        ) {
-          await this.closeMcpClient(key, client);
-          throw new Error("MCP client creation was superseded");
-        }
-        this.mcpClients.set(key, client);
-        this.mcpClientPromises.delete(key);
-        return client;
-      })
-      .catch((error) => {
-        if (this.mcpClientPromises.get(key) === clientPromise) {
-          this.mcpClientPromises.delete(key);
-        }
-        throw error;
-      });
-
-    this.mcpClientPromises.set(key, clientPromise);
-    return clientPromise;
+    );
   }
 
   private async resetMcpClient(key: string, closeMode: "wait" | "detach" = "wait"): Promise<void> {
-    this.clearMcpClientIdleTimer(key);
-    const existingClient = this.mcpClients.get(key);
-    this.mcpClients.delete(key);
-    this.mcpClientPromises.delete(key);
-    if (!existingClient) {
-      return;
-    }
-    const close = Promise.resolve()
-      .then(() => this.closeMcpClient(key, existingClient))
-      .catch((error) => {
-        logger.warn(`Error closing MCP client for key ${key}:`, error);
-      });
-    if (closeMode === "wait") {
-      await close;
-    }
+    await resetPooledClient(this.loopbackPool(), key, closeMode);
   }
 
   private async closeMcpClient(key: string, client: Client): Promise<void> {
-    const transport = client.transport;
-    if (transport instanceof StreamableHTTPClientTransport && transport.sessionId) {
-      try {
-        await raceWithDeadline(transport.terminateSession(), {
-          timer: this.timer,
-          timeoutMs: MCP_SESSION_TERMINATION_TIMEOUT_MS,
-          label: "MCP session termination",
-          timeoutError: () => new Error("MCP session termination timed out"),
-        });
-      } catch (error) {
-        // A failed DELETE is best-effort; closing the local client still releases its resources.
-        logger.debug(`Could not terminate MCP session for key ${key}: ${error}`);
-      }
-    }
-    await client.close();
+    await closePooledClient(this.timer, key, client);
   }
 
   private async resetMcpClientIfCurrent(
@@ -8668,51 +8102,44 @@ export class UnixSocketServer {
     expectedClient: Client,
     closeMode: "wait" | "detach" = "wait",
   ): Promise<boolean> {
-    if (this.mcpClients.get(key) !== expectedClient) {
-      return false;
-    }
-    await this.resetMcpClient(key, closeMode);
-    return true;
+    return await resetPooledClientIfCurrent(this.loopbackPool(), key, expectedClient, closeMode);
   }
 
-  // Clean up after a reconnect that blew its deadline without clobbering an
-  // unrelated request. Two teardown paths, each fenced to what this wait owns:
-  //   1. If our creation is still the pending one, drop it so a hung factory does
-  //      not leak; a resolved or superseded creation has already cleared itself.
-  //   2. When our own creation does resolve, close that specific client only while
-  //      it remains the cached one — never a replacement another request installed
-  //      under the same key (issue #5499). Fire-and-forget: the connection may
-  //      never settle, so the request must not block on it.
   private discardTimedOutMcpReconnect(
     key: string,
     connection: Promise<Client>,
     pendingCreation: Promise<Client> | undefined,
   ): void {
-    if (pendingCreation && this.mcpClientPromises.get(key) === pendingCreation) {
-      this.mcpClientPromises.delete(key);
-    }
-    void connection
-      .then((client) => this.resetMcpClientIfCurrent(key, client, "detach"))
-      .catch(() => {
-        // Creation was superseded or failed; nothing of ours remains to discard.
-      });
+    discardTimedOutReconnect(this.loopbackPool(), key, connection, pendingCreation);
   }
 
   private scheduleMcpClientIdleClose(key: string): void {
-    this.clearMcpClientIdleTimer(key);
-    const timer = this.timer.setTimeout(() => {
-      void this.closeIdleMcpClient(key);
-    }, MCP_CLIENT_IDLE_CLOSE_MS);
-    this.mcpClientIdleTimers.set(key, timer);
+    schedulePooledIdleClose(this.loopbackPool(), key);
   }
 
   private clearMcpClientIdleTimer(key: string): void {
-    const timer = this.mcpClientIdleTimers.get(key);
-    if (!timer) {
-      return;
-    }
-    this.timer.clearTimeout(timer);
-    this.mcpClientIdleTimers.delete(key);
+    clearPooledIdleTimer(this.loopbackPool(), key);
+  }
+
+  /** The loopback client cache's state and hooks; cross-calls re-enter through this server. */
+  private loopbackPool(): LoopbackClientPool {
+    return {
+      clients: this.mcpClients,
+      promises: this.mcpClientPromises,
+      idleTimers: this.mcpClientIdleTimers,
+      activeForwardCounts: this.activeMcpClientForwardCounts,
+      timer: this.timer,
+      factory: () => this.mcpClientFactory,
+      generation: () => this.lifecycleGeneration,
+      isSuperseded: (generation) => this.closing || generation !== this.lifecycleGeneration,
+      closeClient: (key, client) => this.closeMcpClient(key, client),
+      clearIdleTimer: (key) => this.clearMcpClientIdleTimer(key),
+      scheduleIdleClose: (key) => this.scheduleMcpClientIdleClose(key),
+      resetClient: (key, closeMode) => this.resetMcpClient(key, closeMode),
+      resetClientIfCurrent: (key, client, closeMode) =>
+        this.resetMcpClientIfCurrent(key, client, closeMode),
+      onIdle: (key) => this.closeIdleMcpClient(key),
+    };
   }
 
   private async closeIdleMcpClient(key: string): Promise<void> {
@@ -8929,8 +8356,7 @@ export class UnixSocketServer {
     this.closing = true;
     this.acceptingRequests = false;
     this.lifecycleGeneration += 1;
-    this.releaseDaemonMaintenanceAdmission(this.maintenanceAdmissionToken);
-    this.releaseAcceptanceRestartAdmission(this.acceptanceRestartAdmissionToken);
+    this.restartAdmission.releaseAll();
 
     // Stop receiving list-changed events (mirrors the subscribe in start()).
     this.listChangedUnsubscribe?.();

@@ -19,6 +19,16 @@ const LINT_READ_FILES = {
   "scripts/file-size-baseline.txt": "file-size-baseline.sh",
   "scripts/utils-import-direction-baseline.txt":
     "check-utils-import-direction.ts via check-boundaries.sh",
+  "scripts/import-direction-baselines/models.txt":
+    "check-tier-import-direction.ts via check-boundaries.sh",
+  "scripts/import-direction-baselines/db.txt":
+    "check-tier-import-direction.ts via check-boundaries.sh",
+  "scripts/import-direction-baselines/devices.txt":
+    "check-tier-import-direction.ts via check-boundaries.sh",
+  "scripts/import-direction-baselines/ctrlProxy.txt":
+    "check-tier-import-direction.ts via check-boundaries.sh",
+  "scripts/import-direction-baselines/features.txt":
+    "check-tier-import-direction.ts via check-boundaries.sh",
   "test/features/element-resolution/observeContractGaps.json":
     "check-element-resolution-ratchet.sh",
   "test/features/element-resolution/observeContractGapSignatures.json":

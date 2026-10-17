@@ -19,10 +19,10 @@ import org.junit.Test
  *    reintroducing an inner `try { … } catch (e: Exception) { Log.e(…) }` swallow — the guard only
  *    fires on a throw that *escapes* the block, so a stray inner swallow silently defeats it.
  *
- * This test source-scans [CtrlProxy] and [CaCertificateController] and fails CI on either
- * regression. The scanning logic is factored into [BroadcastGuardScanner] (a pure function over
- * source text) so the enforcement contract itself is unit-tested against synthetic good/bad
- * snippets — the real-file assertions then prove the live source complies.
+ * This test source-scans [CtrlProxy], [CaCertificateController] and [SettingsController] and fails
+ * CI on either regression. The scanning logic is factored into [BroadcastGuardScanner] (a pure
+ * function over source text) so the enforcement contract itself is unit-tested against synthetic
+ * good/bad snippets — the real-file assertions then prove the live source complies.
  *
  * Scope: [ResultBroadcaster.guard] adoption is enforced fully (missing guard + reintroduced
  * swallow). [AsyncActionRunner] coverage is the swallow-regression check only. For raw
@@ -165,6 +165,7 @@ class BroadcastGuardAdoptionTest {
     for (known in
       listOf(
         "broadcastCaCertResult",
+        "broadcastSettingsGetResult",
         "broadcastDeviceOwnerStatusResult",
         "broadcastSetTextResult",
         "broadcastPinchResult",
@@ -895,7 +896,7 @@ class BroadcastGuardAdoptionTest {
   // ---------------------------------------------------------------------------
 
   private fun readGuardedSources(): List<Pair<String, String>> =
-    listOf("CtrlProxy.kt", "CaCertificateController.kt").map { fileName ->
+    listOf("CtrlProxy.kt", "CaCertificateController.kt", "SettingsController.kt").map { fileName ->
       fileName to locateSource(fileName).readText()
     }
 

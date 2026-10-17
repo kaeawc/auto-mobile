@@ -14,6 +14,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { setActiveDeviceResultSchema } from "../../src/server/utilityToolOutputSchemas";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
 
 /**
@@ -231,6 +232,9 @@ describe("setActiveDevice never rebinds a session across platforms (#11167)", ()
       throw new Error("Expected selection text");
     }
     expect(JSON.parse(content.text)).toMatchObject({ sessionUuid: owned });
+    // The text and structured payloads are the same object (#11830).
+    expect(content.text).toBe(JSON.stringify(result.structuredContent));
+    expect(setActiveDeviceResultSchema.safeParse(result.structuredContent).success).toBe(true);
     expect(manager.getSession(owned)!.platform).toBe("android");
   });
 });

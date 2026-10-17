@@ -27,7 +27,7 @@ import {
 import { discoverySourceFor, type DiscoverySource } from "../utils/discoverySource";
 import { isIosUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
 import {
   registerDirectSessionDevice,
   resolveDirectSessionDevice,
@@ -543,7 +543,7 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
           ...(args.sessionUuid ? { sessionUuid: args.sessionUuid } : {}),
           ...currentDisplayPinResult({ sessionUuid: args.sessionUuid, reportClearedPin }),
         };
-        return createJSONToolResponse(payload);
+        return createStructuredToolResponse(payload);
       };
       if (!sessionScoped || !sessionUuid) {
         // A legacy selection binds no session, so there is nothing a cancellation leaves behind.

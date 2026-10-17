@@ -86,7 +86,7 @@
 2875	src/server/prototypeTools.ts
 1884	src/server/toolOutputSchemas.ts
 1301	src/server/toolRegistry.ts
-1048	src/server/utilityTools.ts
+1050	src/server/utilityTools.ts
 2185	src/server/videoRecordingManager.ts
 1459	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts

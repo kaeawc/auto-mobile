@@ -72,7 +72,7 @@
 1	src/utils/android-cmdline-tools/AdbClient.ts	eslint(max-params)
 1	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	eslint(max-params)
 1	src/utils/android-cmdline-tools/EmulatorReadinessPoller.ts	eslint(complexity)
-1	src/utils/describeUnknownError.ts	auto-mobile(catch-convention)
+1	src/models/describeUnknownError.ts	auto-mobile(catch-convention)
 1	src/utils/envBootstrap.ts	auto-mobile(catch-convention)
 1	src/utils/ios-cmdline-tools/SimCtlClient.ts	eslint(max-params)
 1	src/utils/logPruner.ts	auto-mobile(catch-convention)

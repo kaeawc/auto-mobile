@@ -19,7 +19,7 @@
 1002	src/daemon/sessionBroker/sqliteStore.ts
 1181	src/daemon/sessionDeviceStateRestore.ts
 11453	src/daemon/sessionManager.ts
-8116	src/daemon/socketServer.ts
+8090	src/daemon/socketServer.ts
 1808	src/daemon/videoStreamSocketServer.ts
 1147	src/db/deviceSessionRepository.ts
 1089	src/db/failureAnalyticsRepository.ts

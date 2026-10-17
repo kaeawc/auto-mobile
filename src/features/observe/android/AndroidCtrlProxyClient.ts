@@ -67,8 +67,6 @@ import {
   ImeAction,
   ViewHierarchyResult,
   ScreenScaleMetadata,
-  CurrentFocusResult,
-  TraversalOrderResult,
   HighlightOperationResult,
   HighlightShape,
   toActionableError,
@@ -105,6 +103,7 @@ import {
   type AndroidServiceManagerFactory,
 } from "./AndroidServiceRecovery";
 import { AndroidHierarchyUpdateHandler } from "./AndroidHierarchyUpdateHandler";
+import { AndroidCtrlProxyDelegatingFacade } from "./AndroidCtrlProxyDelegatingFacade";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import {
   WEBSOCKET_NOT_CONNECTED_MESSAGE,
@@ -183,15 +182,8 @@ import {
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
 } from "./ctrlProxyProtocol";
-import type {
-  PreferenceFile,
-  KeyValueEntry,
-  KeyValueType,
-  StorageSubscription,
-  StorageChangedEvent,
-} from "../../storage/storageTypes";
+import type { StorageSubscription } from "../../storage/storageTypes";
 import {
-  DeviceServiceClient,
   ObserverPendingRequestTimeoutError,
   WebSocketFactory,
   defaultWebSocketFactory,
@@ -222,7 +214,7 @@ import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
 import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
-import { CtrlProxyFocus, type FocusActionOutcome } from "./CtrlProxyFocus";
+import { CtrlProxyFocus } from "./CtrlProxyFocus";
 import { CtrlProxyPrototypes, type PrototypeAssetRequestOptions } from "./CtrlProxyPrototypes";
 import type { PrototypeSpec } from "../../prototype/prototypeSpec";
 import type { PrototypeAssetUpload } from "../../prototype/prototypeAssets";
@@ -698,7 +690,10 @@ const defaultAndroidServiceManagerFactory: AndroidServiceManagerFactory = (devic
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
 const CTRL_PROXY_CLIENT_PURPOSE = "to drive the device through CtrlProxy";
 
-export class AndroidCtrlProxyClient extends DeviceServiceClient implements AndroidCtrlProxy {
+export class AndroidCtrlProxyClient
+  extends AndroidCtrlProxyDelegatingFacade
+  implements AndroidCtrlProxy
+{
   protected override get clientLogTag(): string {
     return "AndroidCtrlProxyClient";
   }
@@ -1866,7 +1861,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Delegate Getters (lazy initialization)
   // ===========================================================================
 
-  private get gestures(): CtrlProxyGestures {
+  protected get gestures(): CtrlProxyGestures {
     return this.lazyDelegate(
       () => this._gestures,
       (value) => {
@@ -1876,7 +1871,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
   }
 
-  private get text(): CtrlProxyText {
+  protected get text(): CtrlProxyText {
     return this.lazyDelegate(
       () => this._text,
       (value) => {
@@ -1897,7 +1892,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
   }
 
-  private get storage(): CtrlProxyStorage {
+  protected get storage(): CtrlProxyStorage {
     return this.lazyDelegate(
       () => this._storage,
       (value) => {
@@ -1907,7 +1902,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
   }
 
-  private get certificates(): CtrlProxyCertificates {
+  protected get certificates(): CtrlProxyCertificates {
     return this.lazyDelegate(
       () => this._certificates,
       (value) => {
@@ -1921,7 +1916,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
   }
 
-  private get focus(): CtrlProxyFocus {
+  protected get focus(): CtrlProxyFocus {
     return this.lazyDelegate(
       () => this._focus,
       (value) => {
@@ -1931,7 +1926,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
   }
 
-  private get prototypes(): CtrlProxyPrototypes {
+  protected get prototypes(): CtrlProxyPrototypes {
     return this.lazyDelegate(
       () => this._prototypes,
       (value) => {
@@ -1941,7 +1936,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
   }
 
-  private get highlights(): CtrlProxyHighlights {
+  protected get highlights(): CtrlProxyHighlights {
     return this.lazyDelegate(
       () => this._highlights,
       (value) => {
@@ -2416,430 +2411,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return this.hierarchy.invalidateCache();
   }
 
-  // ===========================================================================
-  // Delegated Public Methods - Gestures
-  // ===========================================================================
-
-  // These are thin pass-throughs. They deliberately DO NOT restate the delegate's
-  // default parameter values: omitted args forward as `undefined`, so the delegate
-  // (the single source of truth) applies its own defaults. This makes the two-copies
-  // drift class from issue #3505 unrepresentable.
-  async requestSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
-    return this.gestures.requestSwipe(
-      x1,
-      y1,
-      x2,
-      y2,
-      duration,
-      timeoutMs,
-      perf,
-      frameContext,
-      onDispatch,
-      signal,
-      displayId,
-      beforeSend,
-    );
-  }
-
-  async requestTapCoordinates(
-    x: number,
-    y: number,
-    // Deliberate Android-specific override: taps default to a 10ms press, not the
-    // delegate's cross-platform 0ms default. This is the one intentional divergence,
-    // not restated drift — see issue #3505.
-    duration: number = 10,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    frameContext?: string,
-    onDispatch?: () => void,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yTapCoordinatesResult> {
-    return this.gestures.requestTapCoordinates(
-      x,
-      y,
-      duration,
-      timeoutMs,
-      perf,
-      frameContext,
-      signal,
-      onDispatch,
-      displayId,
-      beforeSend,
-    );
-  }
-
-  /** Double tap (TalkBack activation, tapOn/tapAny/tapAt) with device-side double-tap timing. */
-  async requestDoubleTapCoordinates(
-    x: number,
-    y: number,
-    onDispatch?: () => void,
-    options?: {
-      frameContext?: string;
-      displayId?: number;
-      signal?: AbortSignal;
-      beforeSend?: () => void;
-    },
-  ): Promise<A11yTapCoordinatesResult> {
-    return this.gestures.requestDoubleTapCoordinates(x, y, onDispatch, options);
-  }
-
-  async requestTwoFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration?: number,
-    offset?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
-    return this.gestures.requestTwoFingerSwipe(
-      x1,
-      y1,
-      x2,
-      y2,
-      duration,
-      offset,
-      timeoutMs,
-      perf,
-      displayId,
-      beforeSend,
-    );
-  }
-
-  async requestMultiFingerSwipe(
-    request: Parameters<CtrlProxyGestures["requestMultiFingerSwipe"]>[0],
-  ): Promise<A11ySwipeResult> {
-    return this.gestures.requestMultiFingerSwipe(request);
-  }
-
-  async requestDrag(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    timeoutMs: number,
-    frameContext?: string,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-    onDispatch?: () => void,
-  ): Promise<A11yDragResult> {
-    return this.gestures.requestDrag(
-      x1,
-      y1,
-      x2,
-      y2,
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs,
-      timeoutMs,
-      frameContext,
-      signal,
-      displayId,
-      beforeSend,
-      onDispatch,
-    );
-  }
-
-  async requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yPinchResult> {
-    return this.gestures.requestPinch(
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-      timeoutMs,
-      perf,
-      signal,
-      displayId,
-      beforeSend,
-    );
-  }
-
-  // Streaming gesture input (Android-only): one live drag = start + moves + end sharing a gestureId,
-  // chained into a single continued AccessibilityService gesture by the runner.
-  // oxlint-disable-next-line max-params -- Append the dispatch fence to the existing positional Android API.
-  async requestGestureStart(
-    gestureId: string,
-    x: number,
-    y: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
-    return this.gestures.requestGestureStart(
-      gestureId,
-      x,
-      y,
-      timeoutMs,
-      perf,
-      displayId,
-      beforeSend,
-    );
-  }
-
-  async requestGestureMove(
-    gestureId: string,
-    x: number,
-    y: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11ySwipeResult> {
-    return this.gestures.requestGestureMove(gestureId, x, y, timeoutMs, perf);
-  }
-
-  async requestGestureEnd(
-    gestureId: string,
-    x: number,
-    y: number,
-    cancel?: boolean,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11ySwipeResult> {
-    return this.gestures.requestGestureEnd(gestureId, x, y, cancel, timeoutMs, perf);
-  }
-
-  // ===========================================================================
-  // Delegated Public Methods - Text
-  // ===========================================================================
-
-  async requestSetText(text: string, options?: SetTextOptions): Promise<A11ySetTextResult> {
-    return this.text.requestSetText(text, options);
-  }
-
   async requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }> {
     // Older APKs do not know this optional command; absence retains legacy suffix settling.
     if (!(await this.supportsCommand("request_insert_text_state"))) {
       return { success: true };
     }
     return this.text.requestInsertTextState();
-  }
-
-  async requestInsertText(
-    text: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    options?: {
-      expectedSuffix?: string;
-      acceptsCaretNotPlaced?: boolean;
-      precedingState?: InsertTextState;
-    },
-    transport: Pick<SetTextOptions, "abortSignal" | "onDispatch" | "deadlineMs"> = {},
-  ): Promise<A11ySetTextResult> {
-    return this.text.requestInsertText(text, timeoutMs, perf, options, transport);
-  }
-
-  async commitViaIme(
-    text: string,
-    priorImeId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    ...[delivery, trace]: [delivery?: "commit" | "keyEvents" | "clearField", trace?: boolean]
-  ): Promise<ImeCommitActionResult> {
-    return this.text.commitViaIme(text, priorImeId, timeoutMs, perf, signal, delivery, trace);
-  }
-
-  async setKeyboardProfile(
-    profileId: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<{
-    success: boolean;
-    activeProfileId?: string;
-    previousProfileId?: string;
-    error?: string;
-  }> {
-    return this.text.setKeyboardProfile(profileId, timeoutMs, perf);
-  }
-
-  async listKeyboardProfiles(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<KeyboardProfileCatalog> {
-    return this.text.listKeyboardProfiles(timeoutMs, perf);
-  }
-
-  async requestClearText(
-    resourceId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11ySetTextResult> {
-    return this.text.requestClearText(resourceId, timeoutMs, perf);
-  }
-
-  async requestImeAction(
-    action: ImeAction,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<A11yImeActionResult> {
-    return this.text.requestImeAction(action, timeoutMs, perf, abortSignal, onDispatch);
-  }
-
-  async requestSelectAll(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11ySelectAllResult> {
-    return this.text.requestSelectAll(timeoutMs, perf);
-  }
-
-  // ===========================================================================
-  // Delegated Public Methods - Certificates & Permissions
-  // ===========================================================================
-
-  async requestInstallCaCertificate(
-    certificate: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yCaCertResult> {
-    return this.certificates.requestInstallCaCertificate(certificate, timeoutMs, perf);
-  }
-
-  async requestInstallCaCertificateFromFile(
-    certificatePath: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yCaCertResult> {
-    return this.certificates.requestInstallCaCertificateFromFile(certificatePath, timeoutMs, perf);
-  }
-
-  async requestRemoveCaCertificate(
-    alias: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yCaCertResult> {
-    return this.certificates.requestRemoveCaCertificate(alias, timeoutMs, perf);
-  }
-
-  async requestDeviceOwnerStatus(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yDeviceOwnerStatusResult> {
-    return this.certificates.requestDeviceOwnerStatus(timeoutMs, perf);
-  }
-
-  async requestPermission(
-    permission: string,
-    requestPermission?: boolean,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<A11yPermissionResult> {
-    return this.certificates.requestPermission(permission, requestPermission, timeoutMs, perf);
-  }
-
-  // ===========================================================================
-  // Delegated Public Methods - Storage
-  // ===========================================================================
-
-  async listPreferenceFiles(packageName: string, timeoutMs?: number): Promise<PreferenceFile[]> {
-    return this.storage.listPreferenceFiles(packageName, timeoutMs);
-  }
-
-  async getPreferenceEntries(
-    packageName: string,
-    fileName: string,
-    timeoutMs?: number,
-  ): Promise<KeyValueEntry[]> {
-    return this.storage.getPreferenceEntries(packageName, fileName, timeoutMs);
-  }
-
-  async discoverKeystore(packageName: string) {
-    return this.storage.discoverKeystore(packageName);
-  }
-
-  async getSdkCapabilities(packageName: string, userId?: number) {
-    return this.storage.getSdkCapabilities(packageName, userId);
-  }
-
-  async listDataStores(
-    packageName: string,
-    adapterName: string,
-    timeoutMs?: number,
-  ): Promise<PreferenceFile[]> {
-    return this.storage.listDataStores(packageName, adapterName, timeoutMs);
-  }
-
-  async getDataStore(
-    packageName: string,
-    adapterName: string,
-    storeName: string,
-    timeoutMs?: number,
-  ): Promise<KeyValueEntry[]> {
-    return this.storage.getDataStore(packageName, adapterName, storeName, timeoutMs);
-  }
-
-  async getPreference(
-    packageName: string,
-    fileName: string,
-    key: string,
-    timeoutMs?: number,
-  ): Promise<KeyValueEntry | null> {
-    return this.storage.getPreference(packageName, fileName, key, timeoutMs);
-  }
-
-  async setPreference(
-    packageName: string,
-    fileName: string,
-    key: string,
-    value: string | null,
-    type: KeyValueType,
-    timeoutMsOrOptions?: number | import("../../storage/storageTypes").StorageWriteOptions,
-  ): Promise<void> {
-    return this.storage.setPreference(packageName, fileName, key, value, type, timeoutMsOrOptions);
-  }
-
-  async removePreference(
-    packageName: string,
-    fileName: string,
-    key: string,
-    timeoutMsOrOptions?: number | import("../../storage/storageTypes").StorageWriteOptions,
-  ): Promise<void> {
-    return this.storage.removePreference(packageName, fileName, key, timeoutMsOrOptions);
-  }
-
-  async clearPreferenceStore(
-    packageName: string,
-    fileName: string,
-    timeoutMsOrOptions?: number | import("../../storage/storageTypes").StorageWriteOptions,
-  ): Promise<void> {
-    return this.storage.clearPreferenceStore(packageName, fileName, timeoutMsOrOptions);
   }
 
   async subscribeStorage(
@@ -2868,144 +2445,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.debug(`pidof ${packageName} found no process: ${error}`);
       return false;
     }
-  }
-
-  async unsubscribeStorage(subscriptionId: string, timeoutMs?: number): Promise<void> {
-    return this.storage.unsubscribeStorage(subscriptionId, timeoutMs);
-  }
-
-  addStorageChangeListener(callback: (event: StorageChangedEvent) => void): () => void {
-    return this.storage.addStorageChangeListener(callback);
-  }
-
-  // ===========================================================================
-  // Delegated Public Methods - Focus
-  // ===========================================================================
-
-  async clearAccessibilityFocus(
-    resourceId: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<FocusActionOutcome> {
-    return this.focus.clearAccessibilityFocus(resourceId, timeoutMs, perf);
-  }
-
-  async setAccessibilityFocus(
-    resourceId: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<FocusActionOutcome> {
-    return this.focus.setAccessibilityFocus(resourceId, timeoutMs, perf);
-  }
-
-  async requestCurrentFocus(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<CurrentFocusResult> {
-    return this.focus.requestCurrentFocus(timeoutMs, perf);
-  }
-
-  async requestTraversalOrder(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<TraversalOrderResult> {
-    return this.focus.requestTraversalOrder(timeoutMs, perf);
-  }
-
-  // ===========================================================================
-  // Delegated Public Methods - Highlights
-  // ===========================================================================
-
-  requestShowPrototype(
-    spec: PrototypeSpec,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    displayId?: number,
-    reset?: boolean,
-    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
-  ): Promise<PrototypeResult> {
-    return this.prototypes.requestShowPrototype(
-      spec,
-      timeoutMs,
-      perf,
-      displayId,
-      reset,
-      appearance,
-    );
-  }
-  requestDismissPrototype(
-    target: PrototypeDismiss,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult> {
-    return this.prototypes.requestDismissPrototype(target, timeoutMs, perf);
-  }
-  requestPatchPrototype(
-    patch: PrototypePatchRequest,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypePatchReply> {
-    return this.prototypes.requestPatchPrototype(patch, timeoutMs, perf);
-  }
-
-  requestSavePrototype(
-    save: { spec: PrototypeSpec; label: string; icon?: string },
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult> {
-    return this.prototypes.requestSavePrototype(save, timeoutMs, perf);
-  }
-  requestPinSavedPrototype(
-    id: string,
-    icon?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult> {
-    return this.prototypes.requestPinSavedPrototype(id, icon, timeoutMs, perf);
-  }
-  requestListSavedPrototypes(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult> {
-    return this.prototypes.requestListSavedPrototypes(timeoutMs, perf);
-  }
-  requestDeleteSavedPrototype(
-    id: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult> {
-    return this.prototypes.requestDeleteSavedPrototype(id, timeoutMs, perf);
-  }
-
-  requestInspectPrototypes(
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<PrototypeResult> {
-    return this.prototypes.requestInspectPrototypes(timeoutMs, perf);
-  }
-  requestPutPrototypeAsset(
-    asset: PrototypeAssetUpload,
-    options?: PrototypeAssetRequestOptions,
-  ): Promise<PrototypeAssetResult> {
-    return this.prototypes.requestPutPrototypeAsset(asset, options);
-  }
-  requestRemovePrototypeAsset(
-    id: string,
-    options?: PrototypeAssetRequestOptions,
-  ): Promise<PrototypeAssetResult> {
-    return this.prototypes.requestRemovePrototypeAsset(id, options);
-  }
-  onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void {
-    return this.prototypes.onPrototypeEvent(listener);
-  }
-
-  async requestAddHighlight(
-    id: string,
-    shape: HighlightShape,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<HighlightOperationResult> {
-    return this.highlights.requestAddHighlight(id, shape, timeoutMs, perf);
   }
 
   // ===========================================================================

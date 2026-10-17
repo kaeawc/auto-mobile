@@ -199,7 +199,8 @@ Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (its
 exit code is authoritative; CI disables fixes so even auto-fixable violations
 exit non-zero). The ratchet only gates the rules set to `warn` because they carry
 pre-existing violations: `complexity`, `max-depth`, `max-params`,
-`max-lines-per-function`, `auto-mobile/catch-convention`, and the two type-aware
+`max-lines-per-function`, `max-classes-per-file`, `auto-mobile/max-class-lines`
+(1000 non-blank lines), `auto-mobile/catch-convention`, and the two type-aware
 promise rules (`typescript/no-floating-promises`, `typescript/no-misused-promises`,
 currently at a zero baseline but kept here because the fast stage is not type-aware).
 `auto-mobile/no-unknown-cast` and `auto-mobile/no-caught-error-interpolation` are

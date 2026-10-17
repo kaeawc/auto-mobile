@@ -63,7 +63,7 @@ fi
 # max-lines-per-function). Kept in lock-step with the "warn"
 # rules in .oxlintrc.json. The two typescript(no-*-promises) codes have a zero
 # baseline; they stay here because only this stage runs `--type-aware`.
-RATCHET_CODES="eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) auto-mobile(catch-convention) typescript(no-floating-promises) typescript(no-misused-promises)"
+RATCHET_CODES="eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) eslint(max-classes-per-file) auto-mobile(max-class-lines) auto-mobile(catch-convention) typescript(no-floating-promises) typescript(no-misused-promises)"
 
 # Emit the JSON report. OXLINT_JSON_CMD overrides the invocation -- used by the
 # BATS tests to inject a canned report. It is `eval`ed, so treat it as TRUSTED

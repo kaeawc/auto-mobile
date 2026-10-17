@@ -34,4 +34,29 @@ describe("device pool ports", () => {
     }
     expect(offenders).toEqual([]);
   });
+  test("read-only collaborator state getters return ReadonlyMap/ReadonlySet", () => {
+    // These collaborators only read these collections, so the port must not hand out a mutable view.
+    const readOnly: Record<string, string[]> = {
+      "adbServerResetQuarantine.ts": [
+        "getStartedDeviceProcesses",
+        "getRecoveringAndroidImages",
+        "getRecoveringAndroidDeviceIds",
+        "getRecoveringSessionLosses",
+        "getFailedTerminalRecoveryReleases",
+      ],
+      "deviceShutdownReservations.ts": ["getIntentionalShutdowns"],
+    };
+    const offenders: string[] = [];
+    for (const [file, names] of Object.entries(readOnly)) {
+      const source = readFileSync(path.join(DAEMON_DIR, file), "utf8");
+      for (const match of source.matchAll(ANY_PORT_INTERFACE)) {
+        for (const name of names) {
+          if (new RegExp(`\\b${name}\\(\\): (Map|Set)<`).test(match[1] ?? "")) {
+            offenders.push(`${file}:${name}`);
+          }
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
 });

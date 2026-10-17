@@ -25,7 +25,7 @@
 1089	src/db/failureAnalyticsRepository.ts
 1451	src/db/navigationRepository.ts
 1403	src/db/navigationRetention.ts
-2617	src/devices/DeviceSessionManager.ts
+2611	src/devices/DeviceReadiness.ts
 1953	src/devices/deviceBootService.ts
 1359	src/devices/deviceUtils.ts
 1596	src/doctor/checks/ios.ts
@@ -83,7 +83,7 @@
 1331	src/server/planExecutionOrchestrator.ts
 2852	src/server/prototypeTools.ts
 1884	src/server/toolOutputSchemas.ts
-1100	src/server/toolRegistry.ts
+1099	src/server/toolRegistry.ts
 1045	src/server/utilityTools.ts
 2185	src/server/videoRecordingManager.ts
 1459	src/server/videoRecordingTools.ts

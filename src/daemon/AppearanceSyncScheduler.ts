@@ -1,6 +1,6 @@
 import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../models";
 import { DaemonState } from "./daemonState";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import { logger } from "../utils/logger";
 import { getAppearanceConfig, resolveAppearanceMode } from "../server/appearanceManager";
@@ -338,7 +338,7 @@ export class AppearanceSyncScheduler {
       }
     }
 
-    const current = DeviceSessionManager.getInstance().getCurrentDevice();
+    const current = DeviceReadiness.getInstance().getCurrentDevice();
     // Only return if it's an Android device
     return current && current.platform === "android" ? [current] : [];
   }

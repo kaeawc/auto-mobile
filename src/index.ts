@@ -156,7 +156,7 @@ async function main() {
   const webrtcStreamSocketServer = await import("./daemon/webrtcStreamSocketServer");
   const appearanceSyncScheduler = await import("./daemon/AppearanceSyncScheduler");
   const { isAppearanceSyncEnabled } = await import("./daemon/PassiveWorkPolicy");
-  const { DeviceSessionManager } = await import("./devices/DeviceSessionManager");
+  const { DeviceReadiness } = await import("./devices/DeviceReadiness");
   const { FeatureFlagService } = await import("./features/featureFlags/FeatureFlagService");
   const { serverConfig } = await import("./utils/ServerConfig");
   const { AndroidCtrlProxyManager } = await import("./ctrlProxy/CtrlProxyManager");
@@ -746,7 +746,7 @@ async function main() {
         await startWebRtcStreamSocketServer();
         startAppearanceSyncScheduler({
           getTargets: () => {
-            const current = DeviceSessionManager.getInstance().getCurrentDevice();
+            const current = DeviceReadiness.getInstance().getCurrentDevice();
             return current?.platform === "android" ? [current] : [];
           },
           isEnabled: () => isAppearanceSyncEnabled(process.env.AUTOMOBILE_APPEARANCE_SYNC),

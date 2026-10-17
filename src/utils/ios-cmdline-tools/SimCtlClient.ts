@@ -2629,7 +2629,7 @@ export class SimCtlClient implements SimCtl {
     // Route through the shared verifier so the SESSION AUTO-START path gets the
     // same post-condition check and bounded retry as startSimulator. This is the
     // default path when an MCP session begins with no booted simulator
-    // (DeviceSessionManager.findOrStartIosDevice -> bootSimulator), so leaving it
+    // (DeviceReadiness.findOrStartIosDevice -> bootSimulator), so leaving it
     // on the old behaviour would have meant #4094 missed the very scenario it is
     // about. The old code ran a bare `simctl boot`, which does not wait for the
     // boot to finish, then slept a fixed 1s and asked whether the device had

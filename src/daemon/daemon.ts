@@ -312,7 +312,7 @@ import {
   type TerminalReleaseJournal,
 } from "./terminalReleaseJournal";
 import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
 import { initializeIosCtrlProxyAtStartup, selectIosStartupWarmupDevices } from "./iosStartupInit";
 import { selectObservationStreamDevices } from "./observationInitialFrame";
@@ -1293,7 +1293,7 @@ export class Daemon {
         defaultMockLocationClearRegistry.retireDevice(deviceId);
         NetworkState.getInstance().retireDevice(deviceId);
         defaultDisplayInventoryProvider.invalidate(deviceId);
-        DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
+        DeviceReadiness.getInstance().clearExplicitDevicePin(deviceId);
         this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
         // Full removal: prune AFTER epoch retirement, which also invalidates frames.
         this.deviceDataStreamServer?.removeDeviceFrames(deviceId);
@@ -4913,7 +4913,7 @@ export class Daemon {
     }
 
     logger.info(`[Daemon] Initializing CtrlProxy iOS for ${iosDevices.length} iOS device(s)...`);
-    const deviceSessionManager = DeviceSessionManager.getInstance();
+    const deviceSessionManager = DeviceReadiness.getInstance();
 
     await initializeIosCtrlProxyAtStartup(
       iosDevices.map((device) => device.id),
@@ -4959,7 +4959,7 @@ export class Daemon {
           this.sessionManager.getSessionForDevice(id) === sessionUuid &&
           this.managedExecutionReowner?.ownershipState(sessionUuid) === undefined
         ) {
-          await DeviceSessionManager.getInstance().verifyIosDevice(id, options);
+          await DeviceReadiness.getInstance().verifyIosDevice(id, options);
         }
       },
     });

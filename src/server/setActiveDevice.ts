@@ -11,7 +11,7 @@ import type { BootedDevice, Platform, SomePlatform } from "../models";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { DisplayPinNeedsSessionError } from "../models/PinnedDisplayError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { DeviceSessionManager, type DeviceReadyOptions } from "../devices/DeviceSessionManager";
+import { DeviceReadiness, type DeviceReadyOptions } from "../devices/DeviceReadiness";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
@@ -79,7 +79,7 @@ interface SetActiveDeviceDependencies {
     invalidateDeviceList?: () => void;
   };
   resumeCtrlProxy: ResumeCtrlProxy;
-  /** Defaults to the process-wide DeviceSessionManager. */
+  /** Defaults to the process-wide DeviceReadiness. */
   legacyDeviceSelection?: () => LegacyDeviceSelection;
 }
 
@@ -496,7 +496,7 @@ function currentDisplayPinResult(input: { sessionUuid?: string; reportClearedPin
 /** Existing device selection with a session-only, side-effect-free display selection slot. */
 export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDependencies) {
   const legacyDeviceSelection =
-    dependencies.legacyDeviceSelection ?? (() => DeviceSessionManager.getInstance());
+    dependencies.legacyDeviceSelection ?? (() => DeviceReadiness.getInstance());
   return async (args: HandlerArgs, _progress?: unknown, signal?: AbortSignal) => {
     const mcpSessionId = args.__mcpSessionId;
     const transportAttempt = transitionalTransportAttempt(args, dependencies, signal);

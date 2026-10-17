@@ -1,0 +1,3 @@
+emulator: INFO: Android emulator version 36.1.9.0 (build_id 13823996) (CL:N/A)
+PANIC: Avd's CPU Architecture 'x86_64' is not supported by the QEMU2 emulator on aarch64 host.
+Read the following page to learn how to use the emulator

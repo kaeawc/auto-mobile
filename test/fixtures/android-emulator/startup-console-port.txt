@@ -1,0 +1,4 @@
+INFO    | Started GRPC server at 127.0.0.1:8554, security: Local
+INFO    | Advertising in: /home/user/.local/share/Emulator/avd/running/pid_4242.ini
+emulator: Android emulator console on port 5556
+emulator: Android emulator adb port 5557

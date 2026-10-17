@@ -42,9 +42,9 @@ async function fixture() {
   const manager = new FakeDeviceManager([], [original]);
   Object.assign(pool, { deviceManager: manager });
   const restores: string[] = [];
-  Object.assign(sessions, {
-    getBarrier: () => new FakeDbWriteBarrier(),
-    keepScreenAwakeRestorerFactory: (device: BootedDevice) => ({
+  Object.assign(sessions, { getBarrier: () => new FakeDbWriteBarrier() });
+  Object.assign(sessions["stateRestore"], {
+    keepScreenAwakeRestorer: (device: BootedDevice) => ({
       restore: async () => {
         restores.push(device.deviceId);
         return { status: "restored" as const };

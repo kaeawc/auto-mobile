@@ -547,6 +547,42 @@ describe("CtrlProxyManager", function () {
       ).toHaveLength(2);
     });
 
+    describe("ACCESS_LOCAL_NETWORK grant after install (#13018)", () => {
+      const grantCommand = `shell pm grant ${AndroidCtrlProxyManager.PACKAGE} android.permission.ACCESS_LOCAL_NETWORK`;
+
+      async function installOnApi(
+        sdk: string,
+        grantResponse?: { stdout: string; stderr: string },
+      ): Promise<FakeAdbExecutor> {
+        const adb = new FakeAdbExecutor();
+        adb.setCommandResponse('install "/tmp/ctrlproxy.apk"', { stdout: "Success", stderr: "" });
+        adb.setCommandResponse("shell getprop ro.build.version.sdk", { stdout: sdk, stderr: "" });
+        if (grantResponse) {
+          adb.setCommandResponse(grantCommand, grantResponse);
+        }
+        await createManager(new FakeTimer(), adb).install("/tmp/ctrlproxy.apk");
+        return adb;
+      }
+
+      test("grants the permission on API 37", async () => {
+        const adb = await installOnApi("37\n");
+        expect(adb.getCommandCalls().filter((c) => c.command === grantCommand)).toHaveLength(1);
+      });
+
+      test("does not grant below API 37", async () => {
+        const adb = await installOnApi("36\n");
+        expect(adb.wasCommandExecuted("pm grant")).toBe(false);
+      });
+
+      test("tolerates an unknown-permission refusal", async () => {
+        const adb = await installOnApi("37", {
+          stdout: "",
+          stderr: "Exception occurred while executing 'grant': Unknown permission",
+        });
+        expect(adb.wasCommandExecuted(grantCommand)).toBe(true);
+      });
+    });
+
     test("keeps a positive installation result cached", async () => {
       const timer = new FakeTimer();
       const adb = new FakeAdbExecutor();

@@ -1,18 +1,15 @@
+import { makePool } from "../helpers/makePool";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DEVICE_OWNED_BY_OTHER_DAEMON_CODE } from "../../src/daemon/deviceAcquisitionRefusals";
-import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession } from "../../src/db/types";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // #11076: daemon A crashed holding emulator-5554 for session S; daemon B took the lapsed claim.
 // When A restarts and S resumes, A must not rehydrate S onto the device B now drives.
@@ -115,15 +112,11 @@ describe("restart recovery onto a device another daemon holds (#11076)", () => {
     const devices = new FakeDeviceManager();
     const device = { deviceId: DEVICE_ID, name: AVD, platform: "android" as const };
     devices.bootedDevices = [device];
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "daemon-a-after-restart", {
-        timer,
-        deviceManager: devices,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        foreignDeviceOwnership: ownership,
-      }),
-    );
+    const pool = makePool(sessions, "daemon-a-after-restart", {
+      timer,
+      deviceManager: devices,
+      foreignDeviceOwnership: ownership,
+    });
     await pool.initializeWithDevices([device]);
     return { sessions, pool, persisted, releaseReasons };
   };

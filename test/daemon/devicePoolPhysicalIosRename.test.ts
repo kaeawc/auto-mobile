@@ -1,13 +1,11 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import type { BootedDevice, ExecResult, Platform } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DevicectlDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 
 /**
@@ -71,14 +69,10 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     fakeTimer = new FakeTimer();
     sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     fakeDeviceManager = new FakeDeviceManager();
-    devicePool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-        timer: fakeTimer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: fakeDeviceManager,
-        retryExecutor: new DefaultRetryExecutor(fakeTimer),
-      }),
-    );
+    devicePool = makePool(sessionManager, "test-daemon-session-id", {
+      timer: fakeTimer,
+      deviceManager: fakeDeviceManager,
+    });
   });
 
   afterEach(() => {

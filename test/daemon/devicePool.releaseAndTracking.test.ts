@@ -20,6 +20,7 @@ import {
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,
+  requirePooledDevice,
 } from "../helpers/devicePoolSuite";
 
 useSessionIdleWindowForSuite();
@@ -1035,10 +1036,7 @@ describe("DevicePool", () => {
       const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([stamped(device, 1)], "test:initial");
-      const pooled = devicePool.getDevice("emulator-5554");
-      if (!pooled) {
-        throw new Error("expected pooled device");
-      }
+      const pooled = requirePooledDevice(devicePool, "emulator-5554");
 
       type DevicePoolInternals = {
         assignmentMutex: {
@@ -1101,10 +1099,7 @@ describe("DevicePool", () => {
       const replacement = stamped(poolDevice("emulator-5554", "Pixel_7_API_34"), 2);
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([stamped(device, 1)], "test:initial");
-      const pooled = devicePool.getDevice("emulator-5554");
-      if (!pooled) {
-        throw new Error("expected pooled device");
-      }
+      const pooled = requirePooledDevice(devicePool, "emulator-5554");
 
       type DevicePoolInternals = {
         addDevice(device: BootedDevice): Promise<void>;
@@ -1173,10 +1168,7 @@ describe("DevicePool", () => {
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
       await devicePool.bindOrReuseDeviceSession("owner-session", device.deviceId, "android");
-      const pooled = devicePool.getDevice(device.deviceId);
-      if (!pooled) {
-        throw new Error("expected pooled device");
-      }
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
 
       type DevicePoolInternals = {
         evictMissingPooledDevice(
@@ -1248,10 +1240,7 @@ describe("DevicePool", () => {
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
       await devicePool.bindOrReuseDeviceSession("owner-session", device.deviceId, "android");
-      const pooled = devicePool.getDevice(device.deviceId);
-      if (!pooled) {
-        throw new Error("expected pooled device");
-      }
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
 
       try {
         fakeDeviceManager.bootedDevices = [replacement];
@@ -1328,10 +1317,7 @@ describe("DevicePool", () => {
       const newerReplacement = stamped(poolDevice("emulator-5554", "Pixel_6_API_33"), 3);
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
-      const pooled = devicePool.getDevice(device.deviceId);
-      if (!pooled) {
-        throw new Error("expected pooled device");
-      }
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
 
       type DevicePoolInternals = {
         replacePooledDeviceForRuntimeIdentity(
@@ -1382,10 +1368,7 @@ describe("DevicePool", () => {
         devicePool = makePool();
         await initializeLiveDevices([device]);
         await devicePool.reconcileDiscoveryObservation([device], "test:initial");
-        const pooled = devicePool.getDevice(device.deviceId);
-        if (!pooled) {
-          throw new Error("expected pooled device");
-        }
+        const pooled = requirePooledDevice(devicePool, device.deviceId);
         const internals = devicePool as unknown as DevicePoolInternals;
         const cacheCleanupStarted = Promise.withResolvers<void>();
         const finishCacheCleanup = Promise.withResolvers<void>();
@@ -1436,10 +1419,7 @@ describe("DevicePool", () => {
       const resolvedReplacement = stamped(poolDevice("emulator-5554", "Pixel_6_API_33"), 3);
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
-      const pooled = devicePool.getDevice(device.deviceId);
-      if (!pooled) {
-        throw new Error("expected pooled device");
-      }
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
 
       type DevicePoolInternals = {
         replacePooledDeviceForRuntimeIdentity(
@@ -1497,10 +1477,7 @@ describe("DevicePool", () => {
       const resolvedReplacement = stamped(poolDevice("emulator-5554", "Pixel_6_API_33"), 5);
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
-      const pooled = devicePool.getDevice(device.deviceId);
-      if (!pooled) {
-        throw new Error("expected pooled device");
-      }
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
 
       type DevicePoolInternals = {
         replacePooledDeviceForRuntimeIdentity(
@@ -1552,10 +1529,7 @@ describe("DevicePool", () => {
       const unresolvedReplacement = stamped(unresolved("emulator-5554"), 4);
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
-      const pooled = devicePool.getDevice(device.deviceId);
-      if (!pooled) {
-        throw new Error("expected pooled device");
-      }
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
 
       type DevicePoolInternals = {
         replacePooledDeviceForRuntimeIdentity(
@@ -1602,10 +1576,7 @@ describe("DevicePool", () => {
       const unresolvedReplacement = stamped(unresolved("emulator-5554"), 2);
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
-      const pooled = devicePool.getDevice(device.deviceId);
-      if (!pooled) {
-        throw new Error("expected pooled device");
-      }
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
 
       type DevicePoolInternals = {
         replacePooledDeviceForRuntimeIdentity(
@@ -1630,10 +1601,7 @@ describe("DevicePool", () => {
       const delayedStraggler = stamped(poolDevice("emulator-5554", "Pixel_5_API_32"), 3);
       await initializeLiveDevices([device]);
       await devicePool.reconcileDiscoveryObservation([device], "test:initial");
-      const pooled = devicePool.getDevice(device.deviceId);
-      if (!pooled) {
-        throw new Error("expected pooled device");
-      }
+      const pooled = requirePooledDevice(devicePool, device.deviceId);
 
       type DevicePoolInternals = {
         replacePooledDeviceForRuntimeIdentity(

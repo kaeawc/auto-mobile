@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { commitAcquisition, type AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -8,11 +9,9 @@ import {
   type SessionCacheData,
 } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
@@ -108,15 +107,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
   ): Promise<DevicePool> => {
     const devices = new FakeDeviceManager();
     devices.bootedDevices = booted;
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "hunt-daemon", {
-        timer,
-        deviceManager: devices,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        ...overrides,
-      }),
-    );
+    const pool = makePool(sessions, "hunt-daemon", { timer, deviceManager: devices, ...overrides });
     await pool.initializeWithDevices(booted);
     return pool;
   };

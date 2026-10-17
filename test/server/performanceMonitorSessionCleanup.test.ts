@@ -1,59 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { SessionManager } from "../../src/daemon/sessionManager";
 import { PerformanceMonitor } from "../../src/features/performance/PerformanceMonitor";
 import { registerPerformanceMonitorSessionCleanup } from "../../src/server/performanceMonitorSessionCleanup";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-
-type CleanupManager = Parameters<typeof registerPerformanceMonitorSessionCleanup>[0];
-type ReleaseCallback = Parameters<SessionManager["onSessionRelease"]>[0];
-type UnboundCallback = Parameters<SessionManager["onSessionDeviceUnbound"]>[0];
-
-class FakeSessionManager implements CleanupManager {
-  releaseCallbacks: ReleaseCallback[] = [];
-  unboundCallbacks: UnboundCallback[] = [];
-
-  onSessionRelease(callback: ReleaseCallback): void {
-    this.releaseCallbacks.push(callback);
-  }
-
-  onSessionDeviceUnbound(callback: UnboundCallback): void {
-    this.unboundCallbacks.push(callback);
-  }
-
-  release(sessionId: string, deviceId: string, deviceIdentityReplaced = false): void {
-    for (const callback of this.releaseCallbacks) {
-      callback(
-        sessionId,
-        deviceId,
-        "explicit-release",
-        {
-          sessionId,
-          deviceId,
-          releaseReason: "explicit-release",
-          releasedAtMs: 0,
-          terminal: true,
-          heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
-        },
-        { deviceIdentityReplaced },
-      );
-    }
-  }
-
-  unbind(sessionId: string, deviceId: string): void {
-    for (const callback of this.unboundCallbacks) {
-      callback(sessionId, deviceId);
-    }
-  }
-}
 
 describe("registerPerformanceMonitorSessionCleanup", () => {
   const deviceId = "emulator-5554";
   let timer: FakeTimer;
   let adb: FakeAdbClient;
   let monitor: PerformanceMonitor;
-  let manager: FakeSessionManager;
+  let manager: FakeSessionCleanupManager;
 
   const gfxinfoPolls = () => adb.getCommandCount("dumpsys gfxinfo");
 
@@ -66,7 +24,7 @@ describe("registerPerformanceMonitorSessionCleanup", () => {
     }));
     monitor.start();
     monitor.startMonitoring(deviceId, "com.example.app");
-    manager = new FakeSessionManager();
+    manager = new FakeSessionCleanupManager();
     registerPerformanceMonitorSessionCleanup(manager, { monitor: () => monitor });
   });
 
@@ -94,7 +52,7 @@ describe("registerPerformanceMonitorSessionCleanup", () => {
   });
 
   test("identity replacement stops host polling without another adb command", async () => {
-    manager.release("session-1", deviceId, true);
+    manager.release("session-1", deviceId, false, true);
     await timer.advanceTimeAsync(PerformanceMonitor.TICK_INTERVAL_MS * 10);
     expect(gfxinfoPolls()).toBe(0);
     expect(adb.getCommandCount("shell")).toBe(0);

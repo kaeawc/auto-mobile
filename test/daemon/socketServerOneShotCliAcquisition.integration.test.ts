@@ -5,6 +5,7 @@
  * refused to the CLI. Drives the real {@link UnixSocketServer}, real {@link DevicePool} and the
  * registered `getAndroid` handler; only the loopback MCP hop is replaced by a direct dispatch.
  */
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
@@ -35,14 +36,11 @@ import {
 } from "../../src/server/deviceTools";
 import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const DEVICE_ID = "emulator-5554";
@@ -80,18 +78,14 @@ async function createHarness(): Promise<Harness> {
     [],
     [{ deviceId: DEVICE_ID, name: AVD_NAME, platform: "android" }],
   );
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "one-shot-cli-daemon", {
-      timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: devices,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      deviceSessionRepository: repository,
-      recoveryPolicy: { onLoss: false, maxAttempts: 2 },
-      idGenerator: new FakeIdGenerator(),
-      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
-    }),
-  );
+  const pool = makePool(manager, "one-shot-cli-daemon", {
+    timer,
+    deviceManager: devices,
+    deviceSessionRepository: repository,
+    recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+    idGenerator: new FakeIdGenerator(),
+    lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+  });
   await pool.initializeWithDevices(devices.bootedDevices);
 
   const matcher = new FakeDeviceMatcher();

@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import {
@@ -11,12 +12,9 @@ import { ActionableError } from "../../src/models/ActionableError";
 import type { Database } from "../../src/db/types";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // A call naming a UUID may issue it again for the recoverable handoffs and for `plan-auto-release`
 // (#11418): the list, startup rehydration and the claim's category are separate, and the claim,
@@ -196,14 +194,7 @@ describe("session persistence: by-name re-issue of released rows (#11418)", () =
       manager.attachLiveDaemonSessionIds(() => new Set(["daemon-new"]));
       const deviceManager = new FakeDeviceManager();
       deviceManager.bootedDevices = devices;
-      pool = new DevicePool(
-        createDevicePoolDependencies(manager, "plan-reissue", {
-          timer,
-          deviceManager,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-        }),
-      );
+      pool = makePool(manager, "plan-reissue", { timer, deviceManager });
       await pool.initializeWithDevices(devices);
     }
 

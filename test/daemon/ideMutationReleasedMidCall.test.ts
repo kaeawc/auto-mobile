@@ -1,5 +1,4 @@
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -10,7 +9,6 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { hasActiveSessionExecution } from "../../src/daemon/toolCallActivity";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -19,6 +17,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { androidDevice, createFakeDaemonState } from "./helpers/inputSocketHarness";
+import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 /**
  * "A session is never released under an in-flight CONTROL call" (#11486). A mutating `ide/*` frame
@@ -30,33 +29,6 @@ import { androidDevice, createFakeDaemonState } from "./helpers/inputSocketHarne
  * Real SessionManager, heartbeat handler, execution tracker and socket server; the veto is wired
  * exactly as daemon.ts wires it. Only the device client is a fake.
  */
-
-class FakeSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  end(): this {
-    return this.destroy();
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-  send(request: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
-  }
-}
 
 interface Internals {
   acceptingRequests: boolean;

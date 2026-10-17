@@ -149,7 +149,7 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     expect(await sendSessionlessGesture("Start")).toMatchObject({ success: true });
     expect(strokes).toEqual(["start"]);
 
-    await sessionManager.createSession(NEW_OWNER, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(NEW_OWNER, DEVICE, "android", { timeoutMs: IDLE_MS });
     await settle();
 
     // The acquisition was announced and the device has its new holder.
@@ -163,7 +163,7 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
 
   test("the lifted stroke is cancelled once: a refused frame and the socket close lift nothing more", async () => {
     expect(await sendSessionlessGesture("Start")).toMatchObject({ success: true });
-    await sessionManager.createSession(NEW_OWNER, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(NEW_OWNER, DEVICE, "android", { timeoutMs: IDLE_MS });
     await settle();
 
     expect(await sendSessionlessGesture("Move")).toMatchObject({
@@ -184,7 +184,7 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     expect(strokes).toEqual(["start"]);
 
     // The new owner's own stroke is not sessionless work: a later acquisition signal leaves it.
-    await sessionManager.createSession(NEW_OWNER, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(NEW_OWNER, DEVICE, "android", { timeoutMs: IDLE_MS });
     await settle();
     socket.send({
       id: "owner-start",
@@ -221,7 +221,7 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     expect(strokes).toEqual(["start"]);
 
     // The acquisition finds no recorded stroke: the pointer is down, the ack is not in yet.
-    await sessionManager.createSession(NEW_OWNER, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(NEW_OWNER, DEVICE, "android", { timeoutMs: IDLE_MS });
     await settle();
     expect(strokes).toEqual(["start"]);
 
@@ -249,7 +249,7 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
       params: { platform: "android", deviceId: DEVICE, x: 1, y: 2, gestureId: "drag-1" },
     });
     await settle();
-    await sessionManager.createSession(NEW_OWNER, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(NEW_OWNER, DEVICE, "android", { timeoutMs: IDLE_MS });
     await settle();
 
     startAck.resolve({ success: false });

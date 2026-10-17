@@ -4,7 +4,7 @@ import { ScreenSize } from "./ScreenSize";
 import { SystemInsets } from "./SystemInsets";
 import { ActiveWindowInfo } from "./ActiveWindowInfo";
 import { ViewHierarchyResult, type HierarchyUnavailableReason } from "./ViewHierarchyResult";
-import { TimingData } from "../utils/PerformanceTracker";
+import type { TimingData } from "./TimingData";
 import { GfxMetrics } from "./GfxMetrics";
 import { PerfSnapshot } from "./PerfSnapshot";
 import { BackStackInfo } from "./BackStack";

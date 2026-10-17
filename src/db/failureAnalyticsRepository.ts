@@ -9,8 +9,10 @@ import type {
   NewFailureNotification,
 } from "./types";
 import { logger } from "../utils/logger";
+import { decodeStackTrace, decodeToolCallInfo } from "./failureAggregateJson";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import { nowIso } from "./nowIso";
 import {
   formatTimelineBucketLabel,
   timelineBucketMs,
@@ -39,7 +41,7 @@ import type {
   FailureCapture,
   TimelineDataPoint,
   PeriodTotals,
-} from "../server/failuresResources";
+} from "../models/failureAnalytics";
 
 const RETENTION_MAX_ROWS = 10_000;
 const retentionState = createRowCapRetentionState();
@@ -242,7 +244,7 @@ export class FailureAnalyticsRepository {
         // (lost increments). A single INSERT ... ON CONFLICT DO UPDATE makes the
         // count bump atomic. The candidate id is used only on the first-seen path.
         const candidateGroupId = this.idGenerator.next();
-        const nowIso = new Date().toISOString();
+        const stampedAt = nowIso(this.timer);
 
         const upserted = await trx
           .insertInto("failure_groups")
@@ -259,13 +261,13 @@ export class FailureAnalyticsRepository {
             unique_sessions: 1,
             stack_trace_json: input.stackTrace ? JSON.stringify(input.stackTrace) : null,
             tool_call_info_json: input.toolCallInfo ? JSON.stringify(input.toolCallInfo) : null,
-            updated_at: nowIso,
+            updated_at: stampedAt,
           })
           .onConflict((oc) =>
             oc.column("signature").doUpdateSet((eb) => ({
               last_occurrence: now,
               total_count: eb("failure_groups.total_count", "+", 1),
-              updated_at: nowIso,
+              updated_at: stampedAt,
             })),
           )
           .returning("id")
@@ -313,21 +315,16 @@ export class FailureAnalyticsRepository {
             .where("id", "=", groupId)
             .executeTakeFirst();
 
-          let mergedToolCallInfo = input.toolCallInfo;
-          if (current?.tool_call_info_json) {
-            const existing = JSON.parse(current.tool_call_info_json) as AggregatedToolCallInfo;
-            mergedToolCallInfo = this.mergeToolCallInfo(
-              existing,
-              input.toolCallInfo,
-              input.occurrence,
-            );
-          }
+          const existing = decodeToolCallInfo(current?.tool_call_info_json);
+          const mergedToolCallInfo = existing
+            ? this.mergeToolCallInfo(existing, input.toolCallInfo, input.occurrence)
+            : input.toolCallInfo;
 
           await trx
             .updateTable("failure_groups")
             .set({
               tool_call_info_json: mergedToolCallInfo ? JSON.stringify(mergedToolCallInfo) : null,
-              updated_at: new Date().toISOString(),
+              updated_at: nowIso(this.timer),
             })
             .where("id", "=", groupId)
             .execute();
@@ -453,12 +450,8 @@ export class FailureAnalyticsRepository {
         versionBreakdown: versionBreakdowns.get(group.id) ?? [],
         screenBreakdown,
         failureScreens: this.computeFailureScreens(screenBreakdown),
-        stackTraceElements: group.stack_trace_json
-          ? (JSON.parse(group.stack_trace_json) as StackTraceElement[])
-          : [],
-        toolCallInfo: group.tool_call_info_json
-          ? (JSON.parse(group.tool_call_info_json) as AggregatedToolCallInfo)
-          : null,
+        stackTraceElements: decodeStackTrace(group.stack_trace_json),
+        toolCallInfo: decodeToolCallInfo(group.tool_call_info_json),
         affectedTests: affectedTestsByGroup.get(group.id) ?? {},
         recentCaptures: recentCapturesByGroup.get(group.id) ?? [],
         sampleOccurrences: sampleOccurrencesByGroup.get(group.id) ?? [],

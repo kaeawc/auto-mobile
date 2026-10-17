@@ -218,7 +218,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
       hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
     );
     unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
-    await sessionManager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     await heartbeat(true);
 
     PlatformDeviceManagerFactory.setInstance({
@@ -622,7 +622,9 @@ describe("a holder's control frame refused before it reaches the device", () => 
           async (frame) => {
             const deviceId = platform === "android" ? DEVICE : "idle-ios";
             if (platform === "ios") {
-              await sessionManager.createSession("ios-holder", deviceId, "ios", IDLE_MS);
+              await sessionManager.createSession("ios-holder", deviceId, "ios", {
+                timeoutMs: IDLE_MS,
+              });
             }
             const sessionId = platform === "android" ? SESSION : "ios-holder";
             const clock = () => {
@@ -725,7 +727,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
         const deviceId = platform === "android" ? DEVICE : "idle-ios";
         const sessionId = platform === "android" ? SESSION : "ios-holder";
         if (platform === "ios") {
-          await sessionManager.createSession(sessionId, deviceId, "ios", IDLE_MS);
+          await sessionManager.createSession(sessionId, deviceId, "ios", { timeoutMs: IDLE_MS });
         }
         const mark = spyOn(executionTracker, "markSessionAdmitted");
         try {

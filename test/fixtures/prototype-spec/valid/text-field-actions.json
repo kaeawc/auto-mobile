@@ -43,7 +43,8 @@
           "icon": "search",
           "label": "Search"
         },
-        "imeAction": "next"
+        "imeAction": "next",
+        "leadingIcon": "search"
       }
     ]
   }

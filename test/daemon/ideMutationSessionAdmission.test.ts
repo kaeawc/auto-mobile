@@ -101,7 +101,7 @@ describe("mutating ide/* frames against a session that may not take a control ca
     writes = [];
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    await sessionManager.createSession(SESSION, DEVICE, "android", 60_000);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     await heartbeat(true);
 
     PlatformDeviceManagerFactory.setInstance({

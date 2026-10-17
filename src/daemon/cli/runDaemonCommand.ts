@@ -26,7 +26,7 @@ import {
 } from "../buildIdentity";
 import type { DaemonClientFactory } from "../client";
 import type { DaemonStateLike } from "../daemonState";
-import type { DaemonManager } from "../manager";
+import type { DaemonManager, DaemonManagerOptions } from "../manager";
 import type { DaemonOptions, DaemonStatus } from "../types";
 import {
   DAEMON_LIVENESS_OWNER_IS_PROXY_CODE,
@@ -1199,14 +1199,14 @@ export async function runDaemonCommand(
   command: string,
   rawArgs: string[],
   options: RunDaemonCommandOptions,
-  DaemonManager: new (
-    clientFactory?: DaemonClientFactory,
-    stateProvider?: () => DaemonStateLike,
-  ) => DaemonManager,
+  DaemonManager: new (options?: DaemonManagerOptions) => DaemonManager,
 ): Promise<void> {
   const allowSharedNamespace = readBooleanFlag(rawArgs, [ALLOW_SHARED_NAMESPACE_FLAG]) === true;
   const args = rawArgs.filter((arg) => splitFlagToken(arg).flag !== ALLOW_SHARED_NAMESPACE_FLAG);
-  const manager = new DaemonManager(options.clientFactory, options.stateProvider);
+  const manager = new DaemonManager({
+    clientFactory: options.clientFactory,
+    stateProvider: options.stateProvider,
+  });
 
   const handlers: Partial<Record<string, () => Promise<void> | void>> = {
     start: () => runDaemonLifecycleCommand(command, args, options, manager),

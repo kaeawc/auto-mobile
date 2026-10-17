@@ -113,7 +113,7 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
       hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
     );
     unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
-    await sessionManager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
 
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
@@ -226,7 +226,7 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
     expect(internals.strokeAdmissionStillHolds(admission)).toBe(false);
 
     // Same id, same device, a new incarnation: the admitted holder is still gone.
-    await sessionManager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     expect(sessionManager.getSessionForDevice(DEVICE)).toBe(SESSION);
     expect(sessionManager.getSession(SESSION)).not.toBe(admitted);
     expect(internals.strokeAdmissionStillHolds(admission)).toBe(false);
@@ -248,7 +248,7 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
       { sessionId: SESSION, deviceId: DEVICE },
     );
     await settle();
-    await sessionManager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     expect(sessionManager.getSessionForDevice(DEVICE)).toBe(SESSION);
 
     await ackStart();

@@ -42,16 +42,13 @@ describe("rehydrated session idle origin", () => {
 
   const makePool = (): SessionDeviceAssigner => ({
     async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
-      const session = await sessions.createSession(
-        sessionId,
-        target?.deviceId ?? SIM,
-        "ios",
-        target?.liveness?.sessionTimeoutMs,
-        target?.liveness?.heartbeatTimeoutMs,
-        target?.stableDeviceId,
-        target?.liveness,
-        target?.initialOwnership,
-      );
+      const session = await sessions.createSession(sessionId, target?.deviceId ?? SIM, "ios", {
+        timeoutMs: target?.liveness?.sessionTimeoutMs,
+        heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+        stableDeviceId: target?.stableDeviceId,
+        recoveredLiveness: target?.liveness,
+        initialOwnership: target?.initialOwnership,
+      });
       return session.assignedDevice;
     },
   });

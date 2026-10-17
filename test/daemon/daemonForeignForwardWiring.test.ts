@@ -60,7 +60,7 @@ test("only the production daemon entry supplies Android forward evidence", async
     expect(reads).toEqual([]);
     expect(factory).not.toHaveBeenCalled();
 
-    daemon = new Daemon({}, undefined, timer);
+    daemon = new Daemon({}, { timer });
     await (daemon.getDevicePool() as unknown as PoolOwnership).foreignDeviceOwnership.refresh([
       "wiring-android",
     ]);

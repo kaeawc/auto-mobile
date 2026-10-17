@@ -391,12 +391,14 @@ describe("Daemon stream wiring", () => {
         );
         const daemon = new Daemon(
           {},
-          new FakeInstalledAppsRepository(),
-          timer,
-          new FakeDeviceSessionRepository(),
-          new CountingIdGenerator("epoch"),
-          new FakeDatabaseInitializer(),
-          new FakeStartupFailureTracker(),
+          {
+            installedAppsRepository: new FakeInstalledAppsRepository(),
+            timer,
+            deviceSessionRepository: new FakeDeviceSessionRepository(),
+            idGenerator: new CountingIdGenerator("epoch"),
+            databaseInitializer: new FakeDatabaseInitializer(),
+            startupFailureTracker: new FakeStartupFailureTracker(),
+          },
         );
         const internals = daemon as unknown as DaemonStreamInternals;
         const stream = new StaticScreenStreamServer("/fake/unused.sock", timer, {
@@ -569,12 +571,14 @@ describe("Daemon stream wiring", () => {
   test("forwards a successor uuid only when the registry replaces a live epoch", () => {
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      new FakeTimer(),
-      new FakeDeviceSessionRepository(),
-      new CountingIdGenerator("device-session"),
-      new FakeDatabaseInitializer(),
-      new FakeStartupFailureTracker(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: new FakeTimer(),
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+        idGenerator: new CountingIdGenerator("device-session"),
+        databaseInitializer: new FakeDatabaseInitializer(),
+        startupFailureTracker: new FakeStartupFailureTracker(),
+      },
     );
     const internals = daemon as unknown as DaemonStreamInternals;
     const stream = new FakeDeviceDataStreamServer();
@@ -620,12 +624,14 @@ describe("Daemon stream wiring", () => {
     const info = spyOn(logger, "info").mockImplementation(() => {});
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      new FakeTimer(),
-      new FakeDeviceSessionRepository(),
-      new CountingIdGenerator("device-session"),
-      new FakeDatabaseInitializer(),
-      new FakeStartupFailureTracker(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: new FakeTimer(),
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+        idGenerator: new CountingIdGenerator("device-session"),
+        databaseInitializer: new FakeDatabaseInitializer(),
+        startupFailureTracker: new FakeStartupFailureTracker(),
+      },
     );
     const internals = daemon as unknown as DaemonStreamInternals;
     const stream = new FakeDeviceDataStreamServer();
@@ -712,12 +718,14 @@ describe("Daemon stream wiring", () => {
 
         const daemon = new Daemon(
           {},
-          new FakeInstalledAppsRepository(),
-          new FakeTimer(),
-          new FakeDeviceSessionRepository(),
-          new CountingIdGenerator("device-session"),
-          new FakeDatabaseInitializer(),
-          new FakeStartupFailureTracker(),
+          {
+            installedAppsRepository: new FakeInstalledAppsRepository(),
+            timer: new FakeTimer(),
+            deviceSessionRepository: new FakeDeviceSessionRepository(),
+            idGenerator: new CountingIdGenerator("device-session"),
+            databaseInitializer: new FakeDatabaseInitializer(),
+            startupFailureTracker: new FakeStartupFailureTracker(),
+          },
         );
         const internals = daemon as unknown as DaemonStreamInternals;
         const stream = new FakeDeviceDataStreamServer();
@@ -804,12 +812,14 @@ describe("Daemon stream wiring", () => {
         }
         const daemon = new Daemon(
           {},
-          new FakeInstalledAppsRepository(),
-          new FakeTimer(),
-          new FakeDeviceSessionRepository(),
-          new CountingIdGenerator("device-session"),
-          new FakeDatabaseInitializer(),
-          new FakeStartupFailureTracker(),
+          {
+            installedAppsRepository: new FakeInstalledAppsRepository(),
+            timer: new FakeTimer(),
+            deviceSessionRepository: new FakeDeviceSessionRepository(),
+            idGenerator: new CountingIdGenerator("device-session"),
+            databaseInitializer: new FakeDatabaseInitializer(),
+            startupFailureTracker: new FakeStartupFailureTracker(),
+          },
         );
         const internals = daemon as unknown as DaemonStreamInternals;
         const stream = new FakeDeviceDataStreamServer();
@@ -868,10 +878,11 @@ describe("Daemon stream wiring", () => {
     const db = await createTestDatabase();
     const daemon = new Daemon(
       {},
-      undefined,
-      timer,
-      new DeviceSessionRepository(db),
-      new CountingIdGenerator("device-session"),
+      {
+        timer,
+        deviceSessionRepository: new DeviceSessionRepository(db),
+        idGenerator: new CountingIdGenerator("device-session"),
+      },
     );
     const internals = daemon as unknown as DaemonStreamInternals;
     const originalStream = new FakeDeviceDataStreamServer();
@@ -931,10 +942,11 @@ describe("Daemon stream wiring", () => {
     const db = await createTestDatabase();
     const daemon = new Daemon(
       {},
-      undefined,
-      timer,
-      new DeviceSessionRepository(db),
-      new CountingIdGenerator("device-session"),
+      {
+        timer,
+        deviceSessionRepository: new DeviceSessionRepository(db),
+        idGenerator: new CountingIdGenerator("device-session"),
+      },
     );
     const internals = daemon as unknown as DaemonStreamInternals;
     const stream = new FakeDeviceDataStreamServer();
@@ -986,10 +998,11 @@ describe("Daemon stream wiring", () => {
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionNavigation);
     const daemon = new Daemon(
       {},
-      undefined,
-      timer,
-      new DeviceSessionRepository(db),
-      new CountingIdGenerator("daemon"),
+      {
+        timer,
+        deviceSessionRepository: new DeviceSessionRepository(db),
+        idGenerator: new CountingIdGenerator("daemon"),
+      },
     );
     const internals = daemon as unknown as DaemonStreamInternals;
     const stream = new FakeDeviceDataStreamServer();
@@ -1028,10 +1041,11 @@ describe("Daemon stream wiring", () => {
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionNavigation);
     const daemon = new Daemon(
       {},
-      undefined,
-      timer,
-      new DeviceSessionRepository(db),
-      new CountingIdGenerator("daemon"),
+      {
+        timer,
+        deviceSessionRepository: new DeviceSessionRepository(db),
+        idGenerator: new CountingIdGenerator("daemon"),
+      },
     );
     const internals = daemon as unknown as DaemonStreamInternals;
     const stream = new FakeDeviceDataStreamServer();
@@ -1079,10 +1093,11 @@ describe("Daemon stream wiring", () => {
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionNavigation);
     const daemon = new Daemon(
       {},
-      undefined,
-      timer,
-      new DeviceSessionRepository(db),
-      new CountingIdGenerator("daemon"),
+      {
+        timer,
+        deviceSessionRepository: new DeviceSessionRepository(db),
+        idGenerator: new CountingIdGenerator("daemon"),
+      },
     );
     const internals = daemon as unknown as DaemonStreamInternals;
     const stream = new FakeDeviceDataStreamServer();
@@ -1123,10 +1138,11 @@ describe("Daemon stream wiring", () => {
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, initialNavigation);
     const daemon = new Daemon(
       {},
-      undefined,
-      timer,
-      new DeviceSessionRepository(db),
-      new CountingIdGenerator("daemon"),
+      {
+        timer,
+        deviceSessionRepository: new DeviceSessionRepository(db),
+        idGenerator: new CountingIdGenerator("daemon"),
+      },
     );
     const internals = daemon as unknown as DaemonStreamInternals;
     const stream = new FakeDeviceDataStreamServer();
@@ -1170,10 +1186,11 @@ describe("Daemon stream wiring", () => {
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionNavigation);
     const daemon = new Daemon(
       {},
-      undefined,
-      timer,
-      new DeviceSessionRepository(db),
-      new CountingIdGenerator("daemon"),
+      {
+        timer,
+        deviceSessionRepository: new DeviceSessionRepository(db),
+        idGenerator: new CountingIdGenerator("daemon"),
+      },
     );
     const internals = daemon as unknown as DaemonStreamInternals;
     const stream = new FakeDeviceDataStreamServer();
@@ -1216,10 +1233,11 @@ describe("Daemon stream wiring", () => {
     NavigationGraphManager.releaseSession(sessionId);
     const daemon = new Daemon(
       {},
-      undefined,
-      timer,
-      new DeviceSessionRepository(db),
-      new CountingIdGenerator("daemon"),
+      {
+        timer,
+        deviceSessionRepository: new DeviceSessionRepository(db),
+        idGenerator: new CountingIdGenerator("daemon"),
+      },
     );
     const internals = daemon as unknown as DaemonStreamInternals;
     const attachedManagers: NavigationGraphManager[] = [];
@@ -1253,10 +1271,11 @@ describe("Daemon stream wiring", () => {
       const db = await createTestDatabase();
       const daemon = new Daemon(
         {},
-        undefined,
-        new FakeTimer(),
-        new DeviceSessionRepository(db),
-        new CountingIdGenerator("device-session"),
+        {
+          timer: new FakeTimer(),
+          deviceSessionRepository: new DeviceSessionRepository(db),
+          idGenerator: new CountingIdGenerator("device-session"),
+        },
       );
       const internals = daemon as unknown as DaemonStreamInternals;
       internals.devicePool.getAllDevices = () => pooled;

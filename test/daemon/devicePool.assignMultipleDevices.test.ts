@@ -1,3 +1,4 @@
+import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { drainUntil, drainMicrotasks } from "../helpers/fakeTimerStepping";
 
@@ -149,24 +150,12 @@ describe("DevicePool", () => {
       const createSession = sessionManager.createSession.bind(sessionManager);
       const releaseSession = sessionManager.releaseSession.bind(sessionManager);
       let sessionCreates = 0;
-      sessionManager.createSession = async (
-        sessionId,
-        deviceId,
-        platform,
-        timeoutMs,
-        heartbeatTimeoutMs,
-      ) => {
-        const session = await createSession(
-          sessionId,
-          deviceId,
-          platform,
-          timeoutMs,
-          heartbeatTimeoutMs,
-        );
+      sessionManager.createSession = async (sessionId, deviceId, platform, options) => {
+        const session = await createSession(sessionId, deviceId, platform, options);
         sessionCreates++;
         if (sessionCreates === 1) {
           await releaseSession(sessionId, "allocation-rollback");
-          await createSession(sessionId, deviceId, platform, timeoutMs, heartbeatTimeoutMs);
+          await createSession(sessionId, deviceId, platform, options);
           fakeDeviceManager.failedPlatforms.add("ios");
         }
         return session;
@@ -782,14 +771,7 @@ describe("DevicePool", () => {
         "device-discovery-miss",
       );
       const sharedRecovery = Promise.withResolvers<SessionPreservingRecoveryResult>();
-      const internals = devicePool as unknown as {
-        sessionPreservingRecoveries: Map<
-          string,
-          { promise: Promise<SessionPreservingRecoveryResult>; incidentId?: string }
-        >;
-        emulatorLossRecoveryResolvers: Map<string, () => void>;
-        emulatorLossRecoverySettlements: Map<string, Promise<void>>;
-      };
+      const internals = recoveryInternals(devicePool);
       internals.sessionPreservingRecoveries.set("session-1", {
         promise: sharedRecovery.promise,
         incidentId: primaryIncident,

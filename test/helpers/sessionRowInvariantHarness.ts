@@ -385,29 +385,22 @@ export async function runSessionRowInterleaving(
   };
   const poolOf = (owner: SessionManager): SessionDeviceAssigner => ({
     async assignDeviceToSession(id, _platform, target): Promise<string> {
-      const session = await owner.createSession(
-        id,
-        target?.deviceId ?? DEVICES[0],
-        "android",
-        target?.liveness?.sessionTimeoutMs ?? IDLE_WINDOW_MS,
-        target?.liveness?.heartbeatTimeoutMs,
-        target?.stableDeviceId ?? STABLE_DEVICE_ID,
-        target?.liveness,
-        target?.initialOwnership,
-      );
+      const session = await owner.createSession(id, target?.deviceId ?? DEVICES[0], "android", {
+        timeoutMs: target?.liveness?.sessionTimeoutMs ?? IDLE_WINDOW_MS,
+        heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+        stableDeviceId: target?.stableDeviceId ?? STABLE_DEVICE_ID,
+        recoveredLiveness: target?.liveness,
+        initialOwnership: target?.initialOwnership,
+      });
       return session.assignedDevice;
     },
   });
 
   // Created over a database that answers: the interleaving starts from a live, persisted session.
-  const created = manager.createSession(
-    sessionId,
-    DEVICES[0],
-    "android",
-    IDLE_WINDOW_MS,
-    undefined,
-    extended ? STABLE_DEVICE_ID : undefined,
-  );
+  const created = manager.createSession(sessionId, DEVICES[0], "android", {
+    timeoutMs: IDLE_WINDOW_MS,
+    stableDeviceId: extended ? STABLE_DEVICE_ID : undefined,
+  });
   for (let step = 0; step < 4; step++) {
     await settleMicrotasks(50);
     await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);

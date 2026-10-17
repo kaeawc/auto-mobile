@@ -105,7 +105,7 @@ describe("a direct frame naming a held handset by its other transport id", () =>
     expect(pool.getAllDevices().map((device) => device.id)).toEqual(pooledRows.length ? [usb] : []);
     if (hold) {
       expect(await pool.assignDeviceToSession(HOLDER, "android")).toBe(usb);
-      await sessionManager.createSession(HOLDER, usb, "android", 60_000);
+      await sessionManager.createSession(HOLDER, usb, "android", { timeoutMs: 60_000 });
       expect(sessionManager.getSessionForDevice(usb)).toBe(HOLDER);
     }
 
@@ -429,7 +429,7 @@ describe("a direct frame naming a held handset by its other transport id", () =>
 
   test("a loopback adb port cannot alias a held different emulator", async () => {
     await start([], false);
-    await sessionManager.createSession(HOLDER, "emulator-5556", "android", 60_000);
+    await sessionManager.createSession(HOLDER, "emulator-5556", "android", { timeoutMs: 60_000 });
     adb.setCommandError("getprop ro.serialno", new Error("unreadable"));
     const target = "localhost:5555";
     manager.setBootedDevices("android", [booted(target)]);

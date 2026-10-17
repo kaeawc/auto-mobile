@@ -69,13 +69,10 @@ test("rollback keeps the device bound when a replacement session binds it during
   const releaseSpy = spyOn(manager, "releaseSession").mockImplementation(
     async (...args: Parameters<SessionManager["releaseSession"]>) => {
       const released = await originalRelease(...args);
-      replacement = await manager.createSession(
-        SESSION_ID,
-        DEVICE.deviceId,
-        "android",
-        1_000,
-        1_000,
-      );
+      replacement = await manager.createSession(SESSION_ID, DEVICE.deviceId, "android", {
+        timeoutMs: 1_000,
+        heartbeatTimeoutMs: 1_000,
+      });
       return released;
     },
   );
@@ -106,13 +103,10 @@ test("rollback still frees the device when the replacement session is bound to a
   const releaseSpy = spyOn(manager, "releaseSession").mockImplementation(
     async (...args: Parameters<SessionManager["releaseSession"]>) => {
       const released = await originalRelease(...args);
-      replacement = await manager.createSession(
-        SESSION_ID,
-        OTHER_DEVICE_ID,
-        "android",
-        1_000,
-        1_000,
-      );
+      replacement = await manager.createSession(SESSION_ID, OTHER_DEVICE_ID, "android", {
+        timeoutMs: 1_000,
+        heartbeatTimeoutMs: 1_000,
+      });
       return released;
     },
   );

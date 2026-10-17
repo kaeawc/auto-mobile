@@ -2,7 +2,6 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { EventEmitter } from "events";
 import type { ChildProcess } from "child_process";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { Mutex } from "async-mutex";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { AdbServerResetQuarantine } from "../../src/daemon/adbServerResetQuarantine";
@@ -69,7 +68,8 @@ describe("device acquisition wait deadlines", () => {
   let deviceUtils: FakeDeviceUtils;
   let sessionManager: SessionManager;
   let pool: DevicePool;
-  let mutex: Mutex;
+  /** Hold the pool's assignment lock through its port verb until the returned release runs. */
+  let mutex: { acquire(): Promise<() => void> };
   let reservations: DeviceShutdownReservations;
   let lifecycleReleases: number;
   let startupLeases: Map<symbol, AndroidStartupLeaseRequest>;
@@ -92,7 +92,18 @@ describe("device acquisition wait deadlines", () => {
           return new AdbServerResetQuarantine(port);
         },
         deviceShutdownReservationsFactory: (port) => {
-          mutex = port.getAssignmentMutex();
+          mutex = {
+            acquire: async () => {
+              const acquired = Promise.withResolvers<void>();
+              const released = Promise.withResolvers<void>();
+              void port.withAssignmentLock(async () => {
+                acquired.resolve();
+                await released.promise;
+              });
+              await acquired.promise;
+              return () => released.resolve();
+            },
+          };
           reservations = new DeviceShutdownReservations(port);
           return reservations;
         },

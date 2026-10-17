@@ -16,21 +16,18 @@ import {
   type LegacyLifecycleView,
 } from "./sessionSlots";
 import { SessionSlotShadowProbe, type SlotShadowProbeMode } from "./sessionSlotShadowProbe";
+import { PlanLabelRegistry } from "./planLabelRegistry";
+import { SessionLivenessController } from "./sessionLivenessLease";
 import {
   RecorderTeardownRetries,
   RECORDER_TEARDOWN_RECHECK_MS,
   recoverRecorderTeardowns,
 } from "./recorderTeardownRecovery";
 import {
-  DeviceStateRestoreQueue,
-  type AbandonedRestoreSpec,
-  type BoundedRetrySpec,
-  type PendingRestore,
-  type RestoreAttemptOutcome,
-  type RestoreKindSpec,
-  type RestoreQueuePolicy,
-  type RestoreRun,
-} from "./deviceStateRestoreQueue";
+  SessionDeviceStateRestore,
+  type IosAppNetworkRuleSessionState,
+} from "./sessionDeviceStateRestore";
+import {} from "./deviceStateRestoreQueue";
 import {
   DeviceCleanupQuarantine,
   type AbandonablePendingDeviceCleanup,
@@ -50,7 +47,6 @@ import type { TimingData } from "../utils/PerformanceTracker";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
 import { type RotationRestoreState } from "../features/action/Rotate";
-import { RotationSettingManagedError } from "../models/RotationSettingManagedError";
 import {
   SCREEN_READER_RESTORE_TIMEOUT_MS,
   type ScreenReaderRestoreState,
@@ -63,19 +59,13 @@ import {
   type IosAppNetworkRule,
   type IosAppNetworkRuleCommandContext,
 } from "../features/networkFilter/IosAppNetworkRuleClient";
-import { IosAppNetworkLeases, type IosAppNetworkRuleRestorer } from "./iosAppNetworkLease";
-import {
-  defaultDeviceClockRestoreRegistry,
-  type DeviceClockRestoreState,
-} from "../features/utility/DeviceClock";
+import { type IosAppNetworkRuleRestorer } from "./iosAppNetworkLease";
+
+export type { IosAppNetworkRuleSessionState } from "./sessionDeviceStateRestore";
+import { type DeviceClockRestoreState } from "../features/utility/DeviceClock";
 import type { ObserverSessionStore } from "./observerSessionRegistry";
 import { resolveOwnershipSessionUuid } from "../features/toolSelection/selectionSessionResolver";
-import {
-  decideLivenessClaim,
-  mayAdoptUnownedLiveness,
-  refusedClaimHoldSource,
-  type LivenessOwnerView,
-} from "./livenessClaimDecision";
+import { refusedClaimHoldSource, type LivenessOwnerView } from "./livenessClaimDecision";
 import {
   getAbortSignal,
   runOutsideRequestContext,
@@ -112,16 +102,17 @@ import {
 import type { DeviceSession } from "../db/types";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { ActionableError, toActionableError } from "../models/ActionableError";
+import { RELEASE_PERSIST_TIMEOUT_REASON, SessionReleasePersistTimeoutError } from "./releaseErrors";
+import { UNATTACHED, assertCollaboratorsAttached } from "./daemonAttachedCollaborators";
+export * from "./releaseErrors";
 import {
   MANAGED_EXECUTION_LIVENESS_POLICY,
   clampManagedExecutionIdleTimeoutMs,
   holdsOwnerHeartbeatLease,
-  resolveManagedExecutionIdleTimeoutMs,
 } from "./sessionBroker/provisioning/executionLiveness";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
 import {
-  MAX_NETWORK_CONDITION_TTL_SECONDS,
   type BiometricEnrollment,
   type NetworkConditionProfile,
 } from "../features/utility/DeviceState";
@@ -130,10 +121,8 @@ import {
   getCliSessionIdleTimeoutMs as resolveCliSessionIdleTimeoutMs,
   MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
-  sanitizeCliSessionIdleTimeoutMs as sanitizeRequestedCliIdleTimeoutMs,
 } from "./constants";
 import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
-import { Mutex } from "async-mutex";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 import { errorMessage } from "../utils/describeUnknownError";
 import { effectiveLastToolActivity, sessionIdleDeadline } from "./sessionClocks";
@@ -187,6 +176,7 @@ import {
   isReissuableByNameReleaseReason,
   isTerminalReleaseReason,
   outranksReleaseReason,
+  resolveReleaseReason,
   IDLE_WINDOW_RELEASE_REASON,
   releasedRowStatus,
   shouldJudgeOwnerLeaseForRelease,
@@ -233,39 +223,11 @@ export interface BiometricEnrollmentSessionState {
 
 /** What a pending restore must write, resolved before any await (see below). */
 /** One restore a release started; `abandon` records it when the teardown cap expires first. */
-interface ReleaseTeardownStage {
+export interface ReleaseTeardownStage {
   /** In-flight setup can still drive the serial even when restoration is skipped. */
   setup?: boolean;
   pending: Promise<void> | null;
   abandon?: () => void;
-}
-
-/** Preserve typed restore evidence through the existing bounded retry path. */
-class KeepAwakeRestoreError extends Error {
-  constructor(
-    message: string,
-    readonly report: KeepAwakeRestoreReport,
-  ) {
-    super(message);
-    this.name = "KeepAwakeRestoreError";
-  }
-}
-
-/** Keep-awake restore resolved before any await, like the biometric target below. */
-interface KeepScreenAwakeRestoreTarget {
-  restoreGeneration?: number;
-  incarnation?: number;
-  sessionId: string;
-  deviceId: string;
-  state: KeepScreenAwakeState;
-}
-
-interface BiometricRestoreTarget {
-  restoreGeneration?: number;
-  incarnation?: number;
-  sessionId: string;
-  deviceId: string;
-  enrollment: BiometricEnrollment;
 }
 
 /** Narrow seam for restoring iOS Simulator biometric enrollment on release. */
@@ -288,72 +250,26 @@ export interface NetworkConditionSessionState {
   iosAppRule?: IosAppNetworkRuleSessionState;
 }
 
-/** The per-app rule a session owns on an iOS Simulator (#10264). */
-export interface IosAppNetworkRuleSessionState {
-  udid: string;
-  bundleId: string;
-  /** Fixed for this session binding; a later binding allocates a newer one. */
-  ownerGeneration: number;
-  /** The newest revision this session has sent for the target (apply or reset). */
-  lastRevision: number;
-  /** The revision the provider acknowledged as installed, while it is believed active. */
-  installedRevision?: number;
-}
-
 /** What a pending network restore must write, resolved before any await. */
-interface NetworkConditionRestoreTarget {
-  restoreGeneration?: number;
-  incarnation?: number;
-  sessionId: string;
-  deviceId: string;
-  profile: NetworkConditionProfile;
-  /**
-   * iOS Simulator: remove this exact rule, with a reset revision allocated when
-   * the target was captured — newer than any apply this session sent.
-   */
-  iosAppRule?: IosAppNetworkRule;
-}
 
 /** Original auto-time value recorded before the first session clock write. */
 export type ClockSessionState = DeviceClockRestoreState;
-type PendingClockRestore = PendingRestore<ClockSessionState>;
 
 export interface ClockRestorer {
   restore(state: ClockSessionState, signal?: AbortSignal): Promise<void>;
 }
 /** Original rotation settings recorded before the first session settings write. */
 export type RotationSessionState = RotationRestoreState;
-type PendingRotationRestore = PendingRestore<RotationSessionState>;
 
 export interface RotationRestorer {
   restore(state: RotationSessionState, signal?: AbortSignal): Promise<void>;
 }
 /** TalkBack/VoiceOver state recorded before the first `accessibility` toggle in a session (#10146). */
 export type ScreenReaderSessionState = ScreenReaderRestoreState;
-type PendingScreenReaderRestore = PendingRestore<ScreenReaderSessionState>;
 
 export interface ScreenReaderRestorer {
   restore(state: ScreenReaderSessionState, signal?: AbortSignal): Promise<void>;
 }
-const clockRestorePolicy: RestoreQueuePolicy = {
-  kind: "clock",
-  retiredOnIncarnationBump: true,
-  setupHandoff: "await-then-track",
-  removedDuringSetupMessage: "Cannot change the clock: device was removed during session setup.",
-};
-const rotationRestorePolicy: RestoreQueuePolicy = {
-  kind: "rotation",
-  retiredOnIncarnationBump: false,
-  setupHandoff: "track-eagerly",
-  removedDuringSetupMessage: "Cannot change rotation: device was removed during session setup.",
-};
-const screenReaderRestorePolicy: RestoreQueuePolicy = {
-  kind: "screen-reader",
-  retiredOnIncarnationBump: false,
-  setupHandoff: "track-eagerly",
-  removedDuringSetupMessage:
-    "Cannot change the screen reader: device was removed during session setup.",
-};
 /** Overrides for the per-session device-state restorers; each omitted one uses production wiring. */
 export interface DeviceStateRestorerFactories {
   networkCondition?: (device: BootedDevice) => NetworkConditionRestorer;
@@ -573,24 +489,6 @@ interface SessionPersistenceMetadata {
   daemonSessionId: string | null;
 }
 
-/**
- * Re-derive the idle deadline after a policy change widened `sessionTimeoutMs`, never shortening
- * it. The deadline is anchored on the last tool activity (`lastUsedAt`), never on the current time:
- * a liveness path may change the idle WINDOW but must not count as use (#10656, #10668).
- */
-function widenIdleDeadlineFromLastActivity(session: Session): void {
-  session.expiresAt = Math.max(session.expiresAt, session.lastUsedAt + session.sessionTimeoutMs);
-}
-
-/**
- * Re-derive the idle deadline after a policy change restored a shorter `sessionTimeoutMs`. Like
- * {@link widenIdleDeadlineFromLastActivity} it is anchored on the last tool activity, so the
- * liveness path that restores the policy cannot extend the deadline (#10656, #10668).
- */
-function rebaseIdleDeadlineOnLastActivity(session: Session): void {
-  session.expiresAt = session.lastUsedAt + session.sessionTimeoutMs;
-}
-
 /** The heartbeat-policy timeouts `adoptCliLivenessPolicy` overwrote (#6870). */
 export interface PreCliLivenessSnapshot {
   heartbeatTimeoutMs: number;
@@ -733,23 +631,6 @@ export interface SessionReleaseSnapshot {
     timeoutMs: number;
     ageMs: number;
   };
-}
-
-/** A release's `markReleased` write did not settle within its deadline (#10836). */
-export class SessionReleasePersistTimeoutError extends ActionableError {
-  readonly reason = RELEASE_PERSIST_TIMEOUT_REASON;
-
-  constructor(
-    readonly sessionId: string,
-    readonly releaseReason: string,
-    readonly timeoutMs: number,
-  ) {
-    super(
-      `Persisting the ${releaseReason} release of session ${sessionId} did not finish within ` +
-        `${timeoutMs}ms (reason=${RELEASE_PERSIST_TIMEOUT_REASON}).`,
-    );
-    this.name = "SessionReleasePersistTimeoutError";
-  }
 }
 
 /**
@@ -1013,7 +894,7 @@ interface PendingSessionRelease {
   reason: ReleaseReasonState;
 }
 
-interface SessionReleaseOperation extends PendingSessionRelease {
+export interface SessionReleaseOperation extends PendingSessionRelease {
   options: SessionReleaseOptions;
   identityReplacement?: {
     deviceId: string;
@@ -1052,7 +933,7 @@ interface SessionReleaseOperation extends PendingSessionRelease {
 }
 
 /** Whether a release was forced while it awaited: it must not touch the device again (#11058). */
-function releaseWasForced(operation: SessionReleaseOperation | undefined): boolean {
+export function releaseWasForced(operation: SessionReleaseOperation | undefined): boolean {
   return operation?.forced === true;
 }
 
@@ -1302,6 +1183,23 @@ function isSessionRecoveryIdentityLossError(error: unknown): error is SessionRec
   );
 }
 
+/** Optional inputs to {@link SessionManager.createSession}. */
+export interface CreateSessionOptions {
+  timeoutMs?: number;
+  heartbeatTimeoutMs?: number;
+  stableDeviceId?: string;
+  recoveredLiveness?: SessionRecoveryLiveness;
+  initialOwnership?: "owned" | "awaiting-owner";
+  /** Persisted `source` recording who created the session; a rehydrated row's own wins. */
+  persistenceSource?: string;
+}
+
+function withCreateSessionDefaults(
+  options: CreateSessionOptions,
+): CreateSessionOptions & { initialOwnership: "owned" | "awaiting-owner" } {
+  return { ...options, initialOwnership: options.initialOwnership ?? "owned" };
+}
+
 export interface RebindSessionOptions {
   /**
    * The runtime behind the same device ID restarted, so device-scoped session
@@ -1317,21 +1215,7 @@ export interface RebindSessionOptions {
 }
 
 export const KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS = 1_000;
-/**
- * A failed keep-awake restore leaves a physical device that never sleeps, so — like the network
- * restorer — it is retried inside the pending cleanup, then handed to health recovery (#11145).
- */
-const KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS = 2;
-const KEEP_SCREEN_AWAKE_RESTORE_RETRY_DELAY_MS = 250;
 export const BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS = 1_000;
-/**
- * A failed restore leaves the simulator holding session-modified enrollment, so
- * the device must not return to the idle pool on the strength of one attempt.
- * Retries run inside the pending-cleanup promise, which keeps the device
- * quarantined until they settle.
- */
-const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS = 2;
-const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_DELAY_MS = 250;
 export const NETWORK_CONDITION_RESTORE_TIMEOUT_MS = 1_000;
 /**
  * Clock restore ends with `adb unroot`, which restarts adbd: the device goes offline and the
@@ -1339,52 +1223,15 @@ export const NETWORK_CONDITION_RESTORE_TIMEOUT_MS = 1_000;
  * 1 s deadline fired on every successful restore and quarantined it for nothing (#10771).
  */
 export const CLOCK_RESTORE_TIMEOUT_MS = 15_000;
-/**
- * A failed network restore leaves the emulator holding session-modified shaping,
- * so — like the biometric restorer — the device must not return to the idle pool
- * on one attempt. Retries run inside the pending-cleanup promise, keeping the
- * device quarantined until they settle (issue #6012 review, was deferred #6085).
- */
-const NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS = 2;
-const NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS = 250;
-/**
- * Each screen-reader restore attempt is a full TalkBack/VoiceOver toggle (it can
- * fall back to a `uiautomator dump`), so unlike the settings writes above it is
- * retried a small bounded number of times, with `Backoff` delays, never forever.
- */
-const SCREEN_READER_RESTORE_RETRY_ATTEMPTS = 2;
+export const NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS = 250;
 const DEFAULT_SCREEN_READER_RESTORE_BACKOFF = exponentialBackoff({
   initialDelayMs: 250,
   maxDelayMs: 2_000,
 });
-/**
- * Rotation restore retries are bounded too. A fold/unfold between the session's
- * rotation and its release can leave the recorded settings unverifiable (the
- * window manager owns the new panel's rotation), so an unbounded retry kept the
- * device quarantined forever. After the cap the device leaves quarantine.
- */
-const ROTATION_RESTORE_RETRY_ATTEMPTS = 5;
 const DEFAULT_ROTATION_RESTORE_BACKOFF = exponentialBackoff({
   initialDelayMs: NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS,
   maxDelayMs: 2_000,
 });
-/**
- * A restore the window manager owns (a foldable re-applying rotation per device state)
- * can never verify by rewriting the setting, so it ends the retry loop immediately.
- */
-function isNonRetryableRotationRestoreError(error: unknown): boolean {
-  if (error instanceof RotationSettingManagedError) {
-    return true;
-  }
-  const details: unknown =
-    typeof error === "object" && error !== null && "details" in error ? error.details : undefined;
-  return (
-    typeof details === "object" &&
-    details !== null &&
-    "retryable" in details &&
-    details.retryable === false
-  );
-}
 export const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
 /**
  * Cap for pending keep-awake, biometric and network teardown retries, measured with the
@@ -1451,8 +1298,6 @@ export function getSessionReleaseCleanupWorstCaseMs(
 }
 
 export type { AbandonablePendingDeviceCleanup } from "./deviceCleanupQuarantine";
-/** Logged reason when a release write outlives {@link SESSION_RELEASE_PERSIST_TIMEOUT_MS}. */
-export const RELEASE_PERSIST_TIMEOUT_REASON = "release-persist-timeout";
 /**
  * Bound on a session creation's own waits (#10963): a release of the same UUID still in flight,
  * and the creation's DB reads and writes. A device bind runs these under the pool's assignment
@@ -1641,24 +1486,9 @@ export class SessionManager {
     SessionReleaseSnapshot,
     PromiseWithResolvers<void>
   >();
-  // Base session → its derived `${base}:${label}` sessions (#11091), outside the base's cache so
-  // it survives the base's removal. Consumed by takeDerivedLabelSessions.
-  private readonly derivedLabelSessionsByBase = new Map<string, Set<string>>();
-  // Retain the base's terminal end while the cascade owns a still-published label (#11640).
-  private readonly endedLabelBases = new Map<
-    string,
-    { baseSessionId: string; releaseReason: string }
-  >();
-  /**
-   * Derived label sessions a plan run's allocation may mint right now, counted per open run
-   * (#11572). See {@link openPlanLabelMints}.
-   */
-  private readonly planLabelMints = new Map<string, number>();
-  /**
-   * Derived label sessions a plan run in this daemon minted, until their base is released
-   * (#11572). Only these may be recovered by name, after a device restart during their run.
-   */
-  private readonly runningPlanLabelSessions = new Set<string>();
+  private readonly planLabels = new PlanLabelRegistry({
+    hasSession: (sessionId) => this.sessions.has(sessionId),
+  });
   private createdCallbacks: SessionCreatedCallback[] = [];
   private deviceUnboundCallbacks: SessionDeviceUnboundCallback[] = [];
   private readonly deviceOwnershipCallbacks = new Set<
@@ -1681,8 +1511,8 @@ export class SessionManager {
   private liveDaemonSessionIds: (() => ReadonlySet<string>) | undefined;
   /** Finalized release state retained only while its exact Session identity is referenced. */
   private readonly finalizedSessionReleases: WeakMap<Session, ReleaseReasonState> = new WeakMap();
-  /** Serializes durable liveness claims within one exact session incarnation. */
-  private readonly livenessOwnershipClaimMutexes = new WeakMap<Session, Mutex>();
+  /** The liveness owner lease and policy changes; its claim mutex serializes one session incarnation (#11797). */
+  private readonly liveness: SessionLivenessController;
   /**
    * The newest activity row issued for each session incarnation, until that write fails (#11079).
    * A heartbeat whose persisted fields match it has nothing to write, so steady-state heartbeats
@@ -1718,39 +1548,6 @@ export class SessionManager {
    * this settles, so no replacement session can race a late setup or keep-awake restore.
    */
   private readonly deviceCleanupQuarantine: DeviceCleanupQuarantine;
-  /**
-   * Active per-condition network TTLs (issue #6085 item 2), keyed by session id.
-   * When a session degrades the network with an `expiresInSeconds`, a timer resets
-   * the profile to `none` when it elapses — independent of session lifetime. The
-   * timer is cancelled on release/rebind (whichever restore runs first wins) and
-   * clears the restore slot when it fires, so it can never fire against a freed
-   * device or double-restore.
-   */
-  private readonly networkConditionExpiryTimers: Map<
-    string,
-    { handle: NodeJS.Timeout; session: Session; deadlineMs: number; generation: number }
-  > = new Map();
-  /**
-   * Monotonic per-session network-condition generation (issue #6177). Bumped by
-   * {@link bumpNetworkConditionGeneration} on every apply/reset mutation, and
-   * captured into a TTL expiry's closure when it is scheduled. A stale expiry
-   * (condition A) that is still awaiting its restore when a newer condition
-   * (B) is applied sees, on completion, that the session's generation has moved
-   * on — so it can detect it was superseded and must not clear B's restore slot.
-   */
-  private readonly networkConditionGeneration: Map<string, number> = new Map();
-  /**
-   * Per-session tail of the promise chain serializing
-   * {@link runNetworkConditionMutationExclusive} critical sections (issue #6178
-   * PR #6183 review, structural fix). The generation guard alone cannot
-   * preserve a displaced expiry: a later generation only proves a mutation was
-   * ATTEMPTED, not that it succeeded, so two overlapping FAILURES (B then C)
-   * could each see nothing to restore while a timed degrade's (A's) original
-   * deadline is lost between them. Serializing the whole apply/reset + TTL
-   * arm/cancel/re-arm sequence per session removes the race family outright —
-   * see {@link runNetworkConditionMutationExclusive}.
-   */
-  private readonly networkConditionMutationQueues: Map<string, Promise<unknown>> = new Map();
   private readonly sessionSlots = new SessionSlots<
     Promise<Session>,
     SharedSessionAssignment,
@@ -1810,144 +1607,9 @@ export class SessionManager {
    */
   private readonly owedSupersededRowReasserts: Map<string, OwedSupersededRowReassert> = new Map();
   private supersededRowReassertBackoff: BackoffPolicy = DEFAULT_SUPERSEDED_ROW_REASSERT_BACKOFF;
-  private readonly keepAwakeRestoreReports = new Map<string, KeepAwakeRestoreReport>();
   private deviceSessionRepository: DeviceSessionPersistence;
   private readonly getBarrier: () => DbWriteBarrier;
-  private readonly keepScreenAwakeRestorerFactory: (
-    device: BootedDevice,
-  ) => KeepScreenAwakeRestorer;
-  private readonly biometricEnrollmentRestorerFactory: (
-    device: BootedDevice,
-  ) => BiometricEnrollmentRestorer;
-  private readonly networkConditionRestorerFactory: (
-    device: BootedDevice,
-  ) => NetworkConditionRestorer;
-  private readonly clockRestorerFactory: (device: BootedDevice) => ClockRestorer;
-  private readonly clockRestores = new DeviceStateRestoreQueue<ClockSessionState>(
-    clockRestorePolicy,
-  );
-  private readonly clockMutationQueues = new Map<string, Promise<unknown>>();
-  private readonly rotationRestorerFactory: (device: BootedDevice) => RotationRestorer;
-  private readonly rotationRestores = new DeviceStateRestoreQueue<RotationSessionState>(
-    rotationRestorePolicy,
-  );
-  private readonly rotationMutationQueues = new Map<string, Promise<unknown>>();
-  private readonly screenReaderRestorerFactory: (device: BootedDevice) => ScreenReaderRestorer;
-  private readonly screenReaderRestores = new DeviceStateRestoreQueue<ScreenReaderSessionState>(
-    screenReaderRestorePolicy,
-  );
-  private readonly screenReaderRestoreBackoff: BackoffPolicy;
-  private readonly rotationRestoreBackoff: BackoffPolicy;
-  /** Rotation settings a device still holds after release cleanup gave up on them (#10714). */
-  private readonly abandonedRotations = new Map<string, RotationSessionState>();
-  private readonly abandonedRotationRetries = new Map<string, Promise<void>>();
-  /** Screen-reader state a device still holds after the bounded retries gave up (#10159). */
-  private readonly abandonedScreenReaders = new Map<string, ScreenReaderSessionState>();
-  private injectedIosAppNetworkRuleRestorer?: IosAppNetworkRuleRestorer;
-  /** Renews each session's installed iOS per-app rule (#10264). */
-  private readonly iosAppNetworkLeases: IosAppNetworkLeases;
-  /** Last owner generation handed out; see {@link allocateIosOwnerGeneration}. */
-  private lastIosOwnerGeneration = 0;
-  private readonly abandonedScreenReaderRetries = new Map<string, Promise<void>>();
-  private readonly clockKind: RestoreKindSpec<ClockSessionState> = {
-    queue: this.clockRestores,
-    name: "Clock",
-    timeoutMs: CLOCK_RESTORE_TIMEOUT_MS,
-    mapStartError: (error) => error,
-    prepare: (deviceId, target) => this.prepareClockRestore(deviceId, target),
-  };
-  private readonly rotationKind: RestoreKindSpec<RotationSessionState> = {
-    queue: this.rotationRestores,
-    name: "Rotation",
-    timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
-    mapStartError: (error) => toActionableError(error, "Rotation restoration failed"),
-    prepare: (deviceId, target) => this.prepareRotationRestore(deviceId, target),
-  };
-  private readonly screenReaderKind: RestoreKindSpec<ScreenReaderSessionState> = {
-    queue: this.screenReaderRestores,
-    name: "Screen reader",
-    timeoutMs: SCREEN_READER_RESTORE_TIMEOUT_MS,
-    mapStartError: (error) => toActionableError(error, "Screen reader restoration failed"),
-    prepare: (deviceId, target) => this.prepareScreenReaderRestore(deviceId, target),
-  };
-  private readonly rotationRetry: BoundedRetrySpec<RotationSessionState> = {
-    attempts: ROTATION_RESTORE_RETRY_ATTEMPTS,
-    delayForAttempt: (attempt) => this.rotationRestoreBackoff.delayForAttempt(attempt),
-    isNonRetryable: isNonRetryableRotationRestoreError,
-    logFirstFailure: (deviceId, error) =>
-      logger.warn(`Failed to restore rotation on ${deviceId}: ${errorMessage(error)}`),
-    logRetryFailure: (deviceId, attempt, error) =>
-      logger.warn(
-        `Rotation restore retry ${attempt}/${ROTATION_RESTORE_RETRY_ATTEMPTS} failed on ${deviceId}; ` +
-          `device remains quarantined: ${errorMessage(error)}`,
-      ),
-    abandon: (deviceId, target, lastError, when) =>
-      this.abandonRotationRestore(deviceId, target, lastError, when),
-  };
-  private readonly screenReaderRetry: BoundedRetrySpec<ScreenReaderSessionState> = {
-    attempts: SCREEN_READER_RESTORE_RETRY_ATTEMPTS,
-    delayForAttempt: (attempt) => this.screenReaderRestoreBackoff.delayForAttempt(attempt),
-    isNonRetryable: () => false,
-    logFirstFailure: (deviceId, error) =>
-      logger.warn(`Failed to restore screen reader on ${deviceId}`, error),
-    logRetryFailure: (deviceId, attempt, error) =>
-      logger.warn(
-        `Screen reader restore retry ${attempt}/${SCREEN_READER_RESTORE_RETRY_ATTEMPTS} failed on ${deviceId}`,
-        error,
-      ),
-    abandon: (deviceId, target) => this.abandonScreenReaderRestore(deviceId, target),
-  };
-  private readonly abandonedRotationRestore: AbandonedRestoreSpec<RotationSessionState> = {
-    memory: this.abandonedRotations,
-    inFlight: this.abandonedRotationRetries,
-    timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
-    label: "Abandoned rotation restoration",
-    restore: (deviceId, state, signal) =>
-      this.rotationRestorerFactory({ name: deviceId, deviceId, platform: "android" }).restore(
-        state,
-        signal,
-      ),
-    restored: (deviceId, state) => {
-      this.forgetAbandonedRestore(this.abandonedRotations, deviceId, state);
-      logger.info(`Restored rotation settings on ${deviceId} on its next natural attempt`);
-    },
-    failed: (deviceId, state, error) => {
-      if (isNonRetryableRotationRestoreError(error)) {
-        this.forgetAbandonedRestore(this.abandonedRotations, deviceId, state);
-        logger.warn(
-          `Rotation settings on ${deviceId} cannot be restored (window manager owns rotation); ` +
-            `dropping the abandoned restore: ${errorMessage(error)}`,
-        );
-        return;
-      }
-      logger.warn(
-        `Rotation settings on ${deviceId} are still not restored; ` +
-          `will try again at the next session start or release: ${errorMessage(error)}`,
-      );
-    },
-  };
-  private readonly abandonedScreenReaderRestore: AbandonedRestoreSpec<ScreenReaderSessionState> = {
-    memory: this.abandonedScreenReaders,
-    inFlight: this.abandonedScreenReaderRetries,
-    timeoutMs: SCREEN_READER_RESTORE_TIMEOUT_MS,
-    label: "Screen reader restoration",
-    restore: (deviceId, state, signal) =>
-      this.screenReaderRestorerFactory({
-        name: deviceId,
-        deviceId,
-        platform: state.platform,
-      }).restore(state, signal),
-    restored: (deviceId, state) => {
-      this.forgetAbandonedRestore(this.abandonedScreenReaders, deviceId, state);
-      logger.info(`Restored the screen reader on ${deviceId} on its next natural attempt`);
-    },
-    failed: (deviceId, state, error) =>
-      logger.warn(
-        `Screen reader on ${deviceId} is still not restored to ${state.previousEnabled ? "enabled" : "disabled"}`,
-        error,
-      ),
-  };
-  private readonly screenReaderMutationQueues = new Map<string, Promise<unknown>>();
+  private readonly stateRestore: SessionDeviceStateRestore;
   private observerSessions?: Pick<ObserverSessionStore, "release"> &
     Partial<Pick<ObserverSessionStore, "list">> &
     Partial<StallForgivingLeases>;
@@ -1960,6 +1622,17 @@ export class SessionManager {
   /** Retry delays for a live row's rewrite over its superseded release's terminal row (#11557). */
   setSupersededRowReassertBackoff(backoff: BackoffPolicy): void {
     this.supersededRowReassertBackoff = backoff;
+  }
+
+  /** Throws unless the daemon attached every late collaborator (their defaults are silent no-ops). */
+  assertDaemonCollaboratorsAttached(): void {
+    assertCollaboratorsAttached("SessionManager", {
+      daemonSessionId: this.daemonSessionId,
+      activeSessionExecutionChecker: this.activeSessionExecutionChecker,
+      sessionExecutionDeadlineLookup: this.sessionExecutionDeadlineLookup,
+      expiryReleaseExecutionCanceller: this.expiryReleaseExecutionCanceller,
+      deviceAcquisitionExecutionCanceller: this.deviceAcquisitionExecutionCanceller,
+    });
   }
 
   /** Attach the owning daemon's id; every later active-row write is stamped with it (#11114). */
@@ -2372,22 +2045,6 @@ export class SessionManager {
     }
   }
 
-  /** Remove only this aborted attempt, preserving its saved baseline if the handoff is superseded. */
-  private forgetFencedRestore<State, Target extends { state: State }>(
-    pending: Map<string, Map<State, Target>>,
-    deviceId: string,
-    target: Target,
-  ): void {
-    const targets = pending.get(deviceId);
-    if (targets?.get(target.state) !== target) {
-      return;
-    }
-    targets.delete(target.state);
-    if (targets.size === 0) {
-      pending.delete(deviceId);
-    }
-  }
-
   private readonly recorderTeardownRetries = new Map<
     string,
     {
@@ -2416,9 +2073,9 @@ export class SessionManager {
     // Clock restoration owns a separate pending registry and retries without a bounded batch.
     if (reason === "clock") {
       return {
-        recovering: [...(this.clockRestores.targets.get(deviceId)?.values() ?? [])].some(
-          (target) => !target.removed,
-        ),
+        recovering: [
+          ...(this.stateRestore.clockRestores.targets.get(deviceId)?.values() ?? []),
+        ].some((target) => !target.removed),
       };
     }
     const key = `${deviceId}#${incarnation}:${reason}`;
@@ -2772,15 +2429,18 @@ export class SessionManager {
     }
   }
 
-  private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
+  private activeSessionExecutionChecker: ActiveSessionExecutionChecker =
+    UNATTACHED.activeSessionExecutionChecker;
   private livenessOwnerCallInFlightReader?: (ownerToken: string) => boolean;
   private ownerConnectedAtReader?: OwnerConnectedAtReader;
   // No lookup means no known deadline: the veto falls back to the unsettled-execution ceiling.
-  private sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup = () => undefined;
+  private sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup =
+    UNATTACHED.sessionExecutionDeadlineLookup;
   // No canceller means nothing to abort: only the daemon tracks executions (#10820).
-  private expiryReleaseExecutionCanceller: ExpiryReleaseExecutionCanceller = () => undefined;
-  private deviceAcquisitionExecutionCanceller: DeviceAcquisitionExecutionCanceller = () =>
-    undefined;
+  private expiryReleaseExecutionCanceller: ExpiryReleaseExecutionCanceller =
+    UNATTACHED.expiryReleaseExecutionCanceller;
+  private deviceAcquisitionExecutionCanceller: DeviceAcquisitionExecutionCanceller =
+    UNATTACHED.deviceAcquisitionExecutionCanceller;
   // Session ids whose acquisition cancellation waits for the pool to commit the create (#10905):
   // a create can still be refused or rolled back after publish. Value: the device it published.
   private readonly deferredAcquisitionCancellations = new Map<string, string | undefined>();
@@ -2826,26 +2486,79 @@ export class SessionManager {
       timeoutError: SessionReleasePersistTimeoutError,
     });
     this.getBarrier = options.barrier ?? getDbWriteBarrier;
-    this.keepScreenAwakeRestorerFactory =
-      options.keepScreenAwakeRestorer ?? defaultKeepScreenAwakeRestorer;
-    this.biometricEnrollmentRestorerFactory =
+    const keepScreenAwake = options.keepScreenAwakeRestorer ?? defaultKeepScreenAwakeRestorer;
+    const biometricEnrollment =
       options.biometricEnrollmentRestorer ?? defaultBiometricEnrollmentRestorer;
     const resolved = resolveDeviceStateRestorers(timer, restorers);
-    this.networkConditionRestorerFactory = resolved.networkCondition;
-    this.clockRestorerFactory = resolved.clock;
-    this.rotationRestorerFactory = resolved.rotation;
-    this.screenReaderRestorerFactory = resolved.screenReader;
-    this.screenReaderRestoreBackoff = resolved.screenReaderBackoff;
-    this.rotationRestoreBackoff = resolved.rotationBackoff;
-    this.injectedIosAppNetworkRuleRestorer = resolved.iosAppNetworkRule;
-    this.iosAppNetworkLeases = new IosAppNetworkLeases(
-      this.timer,
-      () => this.iosAppNetworkRuleRestorer,
+    this.stateRestore = new SessionDeviceStateRestore(
       {
-        leaseMs: IOS_APP_NETWORK_RULE_LEASE_MS,
-        renewIntervalMs: IOS_APP_NETWORK_RULE_RENEW_INTERVAL_MS,
+        timer,
+        dispatchDeviceRestore: (deviceId, restore, generation, teardownStep) =>
+          this.dispatchDeviceRestore(deviceId, restore, generation, teardownStep),
+        restoreGeneration: (deviceId) => this.replacedRestoreGenerations.get(deviceId) ?? 0,
+        hasIdentityReplacementFence: (deviceId) => this.identityReplacementFences.has(deviceId),
+        trackSessionSetup: (session, createSetup) => this.trackSessionSetup(session, createSetup),
+        isPublished: (session) => this.sessions.get(session.sessionId) === session,
+        healthIncarnation: (deviceId) => this.deviceHealth?.incarnation(deviceId),
+        restoreIncarnationIsCurrent: (target) => this.restoreIncarnationIsCurrent(target),
+        clearRestoreHealth: (target, reason) => this.clearRestoreHealth(target, reason),
+        markHealth: (deviceId, incarnation, reason) =>
+          this.deviceHealth?.markers.mark(deviceId, incarnation, reason),
+        clearHealthMarker: (deviceId, incarnation, reason) =>
+          this.deviceHealth?.markers.clear(deviceId, incarnation, reason),
+        waitForIdentityReplacement: (deviceId, generation) =>
+          this.waitForIdentityReplacement(deviceId, generation),
+        abandonRestore: (target, reason, restore, restoreTimeoutMs) =>
+          this.abandonRestore(target, reason, restore, restoreTimeoutMs),
+        sessionSetupsOf: (session) =>
+          Array.from(this.sessionSetupPromises, (setup) =>
+            setup.session === session ? setup.promise : null,
+          ).filter((setup): setup is Promise<void> => setup !== null),
+        waitForSessionSetup: (sessionId, setups, phase) =>
+          this.waitForSessionSetup(sessionId, setups, phase),
+        noteTeardownBound: (bounded, settlesBy) =>
+          this.deviceCleanupQuarantine.noteTeardownBound(bounded, settlesBy),
+        trackPendingDeviceCleanup: (deviceId, cleanups) =>
+          this.trackPendingDeviceCleanup(deviceId, cleanups),
+        isAdmittedForAutomation: (session) => this.isAdmittedForAutomation(session),
+        sessionNow: () => this.sessionNow(),
+        restoreNetworkConditionOnExpiry: (session, clearIfOwned) =>
+          this.restoreNetworkConditionOnExpiryFor(session, clearIfOwned),
+      },
+      {
+        keepScreenAwake,
+        biometricEnrollment,
+        networkCondition: resolved.networkCondition,
+        screenReader: resolved.screenReader,
+        screenReaderBackoff: resolved.screenReaderBackoff,
+        rotation: resolved.rotation,
+        rotationBackoff: resolved.rotationBackoff,
+        clock: resolved.clock,
+        iosAppNetworkRuleRestorer: resolved.iosAppNetworkRule,
+        defaultIosAppNetworkRuleRestorer,
+        iosLease: {
+          leaseMs: IOS_APP_NETWORK_RULE_LEASE_MS,
+          renewIntervalMs: IOS_APP_NETWORK_RULE_RENEW_INTERVAL_MS,
+        },
       },
     );
+    this.liveness = new SessionLivenessController({
+      getSession: (sessionId) => this.getSession(sessionId),
+      peekSession: (sessionId) => this.peekSession(sessionId),
+      unlessBaseEnded: (session) => this.unlessBaseEnded(session),
+      isAdmittedForAutomation: (session) => this.isAdmittedForAutomation(session),
+      sessionNow: () => this.sessionNow(),
+      ownershipSessionUuid: (sessionId) => this.ownershipSessionUuid(sessionId),
+      livenessOwnerView: (session) => this.livenessOwnerView(session),
+      hasUnissuedActivity: (session) => this.hasUnissuedActivity(session),
+      recordSessionActivity: (session) => this.recordSessionActivity(session),
+      getBarrier: () => this.getBarrier(),
+      recordLivenessOwnership: (sessionId, ownerToken) =>
+        this.deviceSessionRepository.recordLivenessOwnership(sessionId, ownerToken),
+      replaceLivenessOwnership: (sessionId, ownerToken) =>
+        this.deviceSessionRepository.replaceLivenessOwnership(sessionId, ownerToken),
+      defaultHeartbeatTimeoutMs: () => getDefaultSessionHeartbeatTimeoutMs(),
+    });
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
   }
@@ -3395,14 +3108,16 @@ export class SessionManager {
     sessionId: string,
     assignedDevice: string,
     platform: Platform,
-    timeoutMs?: number,
-    heartbeatTimeoutMs?: number,
-    stableDeviceId?: string,
-    recoveredLiveness?: SessionRecoveryLiveness,
-    initialOwnership: "owned" | "awaiting-owner" = "owned",
-    /** Persisted `source` recording who created the session; a rehydrated row's own wins. */
-    persistenceSource?: string,
+    options: CreateSessionOptions = {},
   ): Promise<Session> {
+    const {
+      timeoutMs,
+      heartbeatTimeoutMs,
+      stableDeviceId,
+      recoveredLiveness,
+      initialOwnership,
+      persistenceSource,
+    } = withCreateSessionDefaults(options);
     getAbortSignal()?.throwIfAborted();
     if (!this.acceptingSessionCreations) {
       throw new DaemonSessionCreationRejectedError(sessionId);
@@ -3437,7 +3152,7 @@ export class SessionManager {
       return await this.withinCreateDeadline(sessionId, assignedDevice, pendingCreation.promise);
     }
 
-    this.keepAwakeRestoreReports.delete(sessionId);
+    this.stateRestore.forgetKeepAwakeRestoreReport(sessionId);
     const now = this.sessionNow();
     const persistedRecovery = this.sessionSlots.getRecovery(sessionId);
     const creatorSource = this.creatorSourceForCreation(sessionId, persistenceSource);
@@ -3496,8 +3211,8 @@ export class SessionManager {
         },
       );
       // Natural point to retry a rotation or screen reader an earlier release could not restore.
-      await this.retryAbandonedRotationRestore(created.assignedDevice);
-      await this.retryAbandonedScreenReaderRestore(created.assignedDevice);
+      await this.stateRestore.retryAbandonedRotationRestore(created.assignedDevice);
+      await this.stateRestore.retryAbandonedScreenReaderRestore(created.assignedDevice);
       return created;
     } finally {
       if (this.sessionSlots.getCreation(sessionId) === creation) {
@@ -3655,7 +3370,7 @@ export class SessionManager {
     claimedRow?: ClaimedCreationRow,
   ): Promise<Session> {
     // A plan run minting its label writes over the row its previous run left, terminal or not.
-    const persistedTerminalRelease = this.planLabelMints.has(session.sessionId)
+    const persistedTerminalRelease = this.planLabels.isMinting(session.sessionId)
       ? undefined
       : this.unlessBeingReplaced(await this.getPersistedTerminalRelease(session.sessionId));
     if (persistedTerminalRelease) {
@@ -3684,7 +3399,7 @@ export class SessionManager {
     }
     this.observerSessions?.release(session.sessionId, "promotion");
     if (session.persistenceMetadata?.source === PLAN_LABEL_SESSION_SOURCE) {
-      this.runningPlanLabelSessions.add(session.sessionId);
+      this.planLabels.markRunning(session.sessionId);
     }
     this.sessions.set(session.sessionId, session);
     this.rowWriter.noteLive(session.sessionId);
@@ -4364,7 +4079,7 @@ export class SessionManager {
     return this.expireIfDue(sessionId, false);
   }
 
-  /** @internal Pure lookup with getSession's default expiry judgement, apart from the stall probe. */
+  /** Pure lookup with getSession's default expiry judgement, apart from the stall probe. */
   findSession(sessionId: string): Session | null {
     this.stallProbe?.();
     if (this.sessionSlots.hasTerminalSnapshot(sessionId)) {
@@ -5761,14 +5476,9 @@ export class SessionManager {
     const existing = this.sessions.get(sessionId);
     this.assertTerminalRebindAdmission(sessionId, options.terminalReleaseReservationOwner);
     if (!existing) {
-      return await this.createSession(
-        sessionId,
-        assignedDevice,
-        platform,
-        undefined,
-        undefined,
-        options.stableDeviceId,
-      );
+      return await this.createSession(sessionId, assignedDevice, platform, {
+        stableDeviceId: options.stableDeviceId,
+      });
     }
     if (existing.assignedDevice === assignedDevice && !options.force) {
       // Generation only: this no-op rebind retains the same serial, connection and incarnation.
@@ -5873,7 +5583,7 @@ export class SessionManager {
         `Session ${existing.sessionId} setup is still running; retry the device rebind after it settles.`,
       );
     }
-    await this.livenessOwnershipClaimMutexFor(existing).runExclusive(async () => {
+    await this.liveness.livenessOwnershipClaimMutexFor(existing).runExclusive(async () => {
       await this.persistSession(
         this.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
         existing,
@@ -5891,12 +5601,12 @@ export class SessionManager {
     const previousDevice = existing.assignedDevice;
     const replacementFence = this.identityReplacementFences.get(previousDevice);
     const oldView: Session = { ...existing, cacheData: { ...existing.cacheData } };
-    const expiry = this.peekNetworkConditionExpiry(existing.sessionId);
-    const lease = this.iosAppNetworkLeases.active(existing.sessionId);
+    const expiry = this.stateRestore.peekNetworkConditionExpiry(existing.sessionId);
+    const lease = this.stateRestore.activeIosAppNetworkLease(existing.sessionId);
     // These callbacks read the live session. Suspend TTL and transfer lease renewal before
     // publishing B, so neither can address B with A's state. Undo resumes the original deadline.
-    this.cancelNetworkConditionExpiry(existing.sessionId);
-    this.iosAppNetworkLeases.stop(existing.sessionId);
+    this.stateRestore.cancelNetworkConditionExpiry(existing.sessionId);
+    this.stateRestore.stopIosAppNetworkLease(existing.sessionId);
     // A replaced release waits for this rebind: its restore fence must not hold up the rebind.
     if (replacementFence) {
       const generation = this.replacedRestoreGenerations.get(previousDevice) ?? 0;
@@ -5939,10 +5649,10 @@ export class SessionManager {
         oldView,
         () => {
           if (expiry) {
-            this.rearmNetworkConditionExpiry(existing, expiry);
+            this.stateRestore.rearmNetworkConditionExpiry(existing, expiry);
           }
           if (lease) {
-            this.confirmIosAppNetworkRule(existing, lease);
+            this.stateRestore.confirmIosAppNetworkRule(existing, lease);
           }
         },
         lease,
@@ -6021,7 +5731,7 @@ export class SessionManager {
     const leaseKey = `rebind:${oldView.sessionId}:${oldView.assignedDevice}`;
     const finish = () => {
       this.timer.clearTimeout(bound);
-      this.iosAppNetworkLeases.stop(leaseKey);
+      this.stateRestore.stopIosAppNetworkLease(leaseKey);
       this.sessionSlots.deleteDeferredCleanup(cleanup);
     };
     const settle = () => {
@@ -6123,7 +5833,7 @@ export class SessionManager {
       deviceId: oldView.assignedDevice,
     });
     if (lease) {
-      this.iosAppNetworkLeases.start(
+      this.stateRestore.startIosAppNetworkLease(
         leaseKey,
         lease,
         () => state === "deferred" && this.getSessionForDevice(oldView.assignedDevice) === null,
@@ -6139,24 +5849,25 @@ export class SessionManager {
     mayRestore: () => boolean = () => true,
   ): Promise<Promise<void>[]> {
     const restores: Array<() => Promise<{ pending: Promise<void> | null }>> = [
-      () => this.restoreKeepScreenAwakeBestEffort(existing),
-      () => this.restoreBiometricEnrollmentBestEffort(existing),
+      () => this.stateRestore.restoreKeepScreenAwakeBestEffort(existing),
+      () => this.stateRestore.restoreBiometricEnrollmentBestEffort(existing),
       async () => {
-        const networkTarget = this.networkConditionRestoreTarget(existing);
+        const networkTarget = this.stateRestore.networkConditionRestoreTarget(existing);
         if (!networkTarget) {
           return { pending: null };
         }
-        const pending = await this.runUnderTeardownShield(async () => [
+        const pending = await this.stateRestore.runUnderTeardownShield(async () => [
           {
-            ...(await this.restoreNetworkConditionBestEffort(existing)),
-            abandon: () => this.abandonCappedRestore(networkTarget, "network-condition"),
+            ...(await this.stateRestore.restoreNetworkConditionBestEffort(existing)),
+            abandon: () =>
+              this.stateRestore.abandonCappedRestore(networkTarget, "network-condition"),
           },
         ]);
         return { pending: pending[0] ?? null };
       },
-      () => this.getPendingClockRestoration(existing, null),
-      () => this.getPendingRotationRestoration(existing, null),
-      () => this.getPendingScreenReaderRestoration(existing, null),
+      () => this.stateRestore.getPendingClockRestoration(existing, null),
+      () => this.stateRestore.getPendingRotationRestoration(existing, null),
+      () => this.stateRestore.getPendingScreenReaderRestoration(existing, null),
     ];
     const pending: Promise<void>[] = [];
     for (const restore of restores) {
@@ -7120,12 +6831,22 @@ export class SessionManager {
       // redundant — cancel it first so the two restore paths cannot both fire
       // (issue #6085 item 2). Whichever runs first (this release, or the TTL that
       // already cleared the slot) wins.
-      this.cancelNetworkConditionExpiry(sessionId);
+      this.stateRestore.cancelNetworkConditionExpiry(sessionId);
       // Release removes the iOS app rule itself; stop renewing it first.
-      this.iosAppNetworkLeases.stop(sessionId);
-      let pendingCleanup = await this.drainReleaseTeardown(sessionId, session, operation, options);
+      this.stateRestore.stopIosAppNetworkLease(sessionId);
+      let pendingCleanup = await this.stateRestore.drainReleaseTeardown(
+        sessionId,
+        session,
+        operation,
+        options,
+      );
       while (this.revokeSupersededIdentityReplacement(operation)) {
-        pendingCleanup = await this.drainReleaseTeardown(sessionId, session, operation, options);
+        pendingCleanup = await this.stateRestore.drainReleaseTeardown(
+          sessionId,
+          session,
+          operation,
+          options,
+        );
       }
       const deviceId = session.assignedDevice;
       // Forced while tearing down (#11058): the force already fenced the session and handed the
@@ -7179,7 +6900,12 @@ export class SessionManager {
           await this.persistTerminalReleaseWithinDeadline(releaseSnapshot, reason, session));
       }
       while (this.revokeSupersededIdentityReplacement(operation)) {
-        pendingCleanup = await this.drainReleaseTeardown(sessionId, session, operation, options);
+        pendingCleanup = await this.stateRestore.drainReleaseTeardown(
+          sessionId,
+          session,
+          operation,
+          options,
+        );
       }
       if (releaseWasForced(operation)) {
         return null;
@@ -7285,278 +7011,8 @@ export class SessionManager {
     return removed;
   }
 
-  /**
-   * Await tracked setup and start best-effort restoration for a releasing
-   * session, returning the teardown that must still finish before the device
-   * is handed out again.
-   *
-   * Teardown is cleanup that must run to completion whether or not the request
-   * that triggered the release was cancelled or hit its deadline, so it never runs
-   * under the caller's signal: that signal is already aborted for a cancelled plan,
-   * and every adb/simctl call that resolves `signal ?? getAbortSignal()` would fail
-   * before dispatch, leaving the device shaped and marked unhealthy (#10198). The
-   * restores that go through the ambient signal run under a teardown-owned shield
-   * bounded by {@link SESSION_RELEASE_TEARDOWN_CAP_MS}; at the cap the shield aborts
-   * and whatever has not finished is recorded as abandoned. The first attempts are
-   * awaited here as before; only their retries are handed back as pending cleanup.
-   */
-  private async drainReleaseTeardown(
-    sessionId: string,
-    session: Session,
-    operation?: SessionReleaseOperation,
-    options: SessionReleaseOptions = {},
-  ): Promise<readonly Promise<void>[]> {
-    if (!options.deviceIdentityReplaced && !this.releaseNeedsTeardown(session)) {
-      return [];
-    }
-    const forcedSignal = operation?.forcedAbort?.signal;
-    return this.runUnderTeardownShield(async () => {
-      const stages = await this.startReleaseTeardown(sessionId, session, operation, options);
-      // Setup remains in flight; skipped/aborted restores must arm neither quarantine nor retries.
-      return options.deviceIdentityReplaced ? stages.filter((stage) => stage.setup) : stages;
-    }, forcedSignal);
-  }
-
-  /** Own the restore signal until all stages settle, bounded by the shared teardown cap. */
-  private async runUnderTeardownShield(
-    start: () => Promise<readonly ReleaseTeardownStage[]>,
-    /** Aborts the shield early: the release was forced and no longer holds the device (#11058). */
-    forcedSignal?: AbortSignal,
-  ): Promise<readonly Promise<void>[]> {
-    const shield = new AbortController();
-    if (forcedSignal) {
-      if (forcedSignal.aborted) {
-        shield.abort(forcedSignal.reason);
-      } else {
-        forcedSignal.addEventListener("abort", () => shield.abort(forcedSignal.reason), {
-          once: true,
-        });
-      }
-    }
-    const startedAtMs = this.sessionNow();
-    const capHandle = this.timer.setTimeout(() => {
-      shield.abort(new ActionableError("Session release teardown exceeded its budget"));
-    }, SESSION_RELEASE_TEARDOWN_CAP_MS);
-    try {
-      const stages = await runWithAbortSignal(shield.signal, start);
-      const cleanups = stages.flatMap((stage) => {
-        const bounded = this.boundTeardownStage(stage, startedAtMs);
-        return bounded ? [bounded] : [];
-      });
-      void Promise.allSettled(cleanups).then(() => this.timer.clearTimeout(capHandle));
-      return cleanups;
-    } catch (error) {
-      this.timer.clearTimeout(capHandle);
-      throw error;
-    }
-  }
-
-  /** A release with nothing to restore skips the shield and cap timer entirely. */
-  private releaseNeedsTeardown(session: Session): boolean {
-    const {
-      keepScreenAwake,
-      biometricEnrollment,
-      networkCondition,
-      clock,
-      rotation,
-      screenReader,
-    } = session.cacheData;
-    return (
-      keepScreenAwake?.applied === true ||
-      Boolean(biometricEnrollment || networkCondition || clock || rotation || screenReader) ||
-      this.abandonedScreenReaders.has(session.assignedDevice) ||
-      this.abandonedRotations.has(session.assignedDevice) ||
-      Array.from(this.sessionSetupPromises).some((setup) => setup.session === session)
-    );
-  }
-
-  /**
-   * Settle a capped stage at the teardown cap so the device stops being quarantined,
-   * recording the restore it left undone. Stages without `abandon` (setup, screen
-   * reader, clock, rotation) keep their own budgets and run to their own end.
-   */
-  private boundTeardownStage(
-    stage: ReleaseTeardownStage,
-    startedAtMs: number,
-  ): Promise<void> | null {
-    const { pending, abandon } = stage;
-    if (!pending || !abandon) {
-      return pending;
-    }
-    let settled = false;
-    const tracked = pending.finally(() => {
-      settled = true;
-    });
-    const capError = new Error("Session release teardown cap reached");
-    const bounded = raceWithDeadline(tracked, {
-      timer: this.timer,
-      timeoutMs: Math.max(0, SESSION_RELEASE_TEARDOWN_CAP_MS - (this.sessionNow() - startedAtMs)),
-      label: "Session release teardown",
-      timeoutError: () => capError,
-      onTimeout: () => {
-        if (!settled) {
-          abandon();
-        }
-      },
-    }).catch((error: unknown) => {
-      // Reaching the cap is the recorded outcome (`abandon` ran), not a failure to surface.
-      if (error !== capError) {
-        throw error;
-      }
-    });
-    this.deviceCleanupQuarantine.noteTeardownBound(
-      bounded,
-      startedAtMs + SESSION_RELEASE_TEARDOWN_CAP_MS,
-    );
-    return bounded;
-  }
-
   private trackPendingTeardownCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void {
     this.deviceCleanupQuarantine.trackTeardown(deviceId, cleanups);
-  }
-
-  private async startReleaseTeardown(
-    sessionId: string,
-    session: Session,
-    operation?: SessionReleaseOperation,
-    options: SessionReleaseOptions = {},
-  ): Promise<readonly ReleaseTeardownStage[]> {
-    // Captured before any await: a rebind reassigns `session.assignedDevice`.
-    const deviceId = session.assignedDevice;
-    const keepScreenAwakeTarget = this.keepScreenAwakeRestoreTarget(session);
-    const biometricTarget = this.biometricRestoreTarget(session);
-    const networkTarget = this.networkConditionRestoreTarget(session);
-    const setups = Array.from(this.sessionSetupPromises, (setup) =>
-      setup.session === session ? setup.promise : null,
-    ).filter((setup): setup is Promise<void> => setup !== null);
-    if (options.deviceIdentityReplaced) {
-      return await this.startReplacedDeviceTeardown(sessionId, setups);
-    }
-    // A forced release (#11058) stops before its next restore: the device may already belong to
-    // the next owner. Whatever it started is aborted through `forcedAbort` and handed back as is.
-    const forced = () => releaseWasForced(operation) || options.deviceIdentityReplaced === true;
-    // The clock, rotation and screen-reader restorers carry their own budgets and abandon
-    // mechanisms and are not bound to the teardown cap, so they must not inherit its shield
-    // either; the toggles they drive resolve the ambient signal themselves (#10159). They do run
-    // under the release's forced signal, which only a forced release aborts (#11058).
-    const forcedSignal = operation?.forcedAbort?.signal;
-    const ownBudget = <T>(start: () => Promise<T>) => runWithAbortSignal(forcedSignal, start);
-    let pendingSetups: Promise<void> | null = null;
-    const steps: Array<() => Promise<ReleaseTeardownStage>> = [
-      async () => {
-        pendingSetups =
-          setups.length > 0 ? (await this.waitForSessionSetup(sessionId, setups)).pending : null;
-        if (operation) {
-          operation.stuckDeadlineMs = Math.max(
-            operation.stuckDeadlineMs,
-            getSessionReleaseStuckDeadlineMs(session.cacheData),
-          );
-        }
-        return { pending: pendingSetups, setup: true };
-      },
-      async () => ({
-        pending: (await this.restoreKeepScreenAwakeBestEffort(session, forced)).pending,
-        // A forced release (#11058) may already have handed the device to its next owner.
-        abandon: () =>
-          forced()
-            ? logger.warn(
-                `Gave up restoring keep-awake state on ${deviceId} after a forced release; ` +
-                  `the screen may stay awake`,
-              )
-            : this.abandonCappedRestore(keepScreenAwakeTarget, "keep-screen-awake"),
-      }),
-      async () => ({
-        pending: session.cacheData.biometricEnrollment
-          ? (await this.getPendingBiometricRestoration(session, pendingSetups)).pending
-          : null,
-        abandon: () => this.abandonCappedRestore(biometricTarget, "biometric-enrollment"),
-      }),
-      async () => ({
-        pending: session.cacheData.networkCondition
-          ? (await this.getPendingNetworkRestoration(session, pendingSetups)).pending
-          : null,
-        abandon: () => this.abandonCappedRestore(networkTarget, "network-condition"),
-      }),
-      async () => ({
-        pending: session.cacheData.clock
-          ? (await ownBudget(() => this.getPendingClockRestoration(session, pendingSetups))).pending
-          : null,
-      }),
-      async () => {
-        // Snapshot before this release's own restore can record a fresh abandon: that one
-        // waits for the next start or release instead of an immediate repeat attempt.
-        const hadAbandonedRotation = this.abandonedRotations.has(session.assignedDevice);
-        const own = session.cacheData.rotation
-          ? (await ownBudget(() => this.getPendingRotationRestoration(session, pendingSetups)))
-              .pending
-          : null;
-        return {
-          pending:
-            hadAbandonedRotation && !forced()
-              ? ownBudget(() => this.retryAbandonedRotationAfter(session.assignedDevice, own))
-              : own,
-        };
-      },
-      async () => {
-        const own = session.cacheData.screenReader
-          ? (await ownBudget(() => this.getPendingScreenReaderRestoration(session, pendingSetups)))
-              .pending
-          : null;
-        return {
-          pending:
-            this.abandonedScreenReaders.has(session.assignedDevice) && !forced()
-              ? ownBudget(() => this.retryAbandonedScreenReaderAfter(session.assignedDevice, own))
-              : own,
-        };
-      },
-    ];
-    return await this.runReleaseTeardownSteps(steps, operation, forced);
-  }
-
-  private async runReleaseTeardownSteps(
-    steps: readonly (() => Promise<ReleaseTeardownStage>)[],
-    operation: SessionReleaseOperation | undefined,
-    forced: () => boolean,
-  ): Promise<readonly ReleaseTeardownStage[]> {
-    const resumeStep = operation?.teardownResumeStep ?? 0;
-    // Earlier completed steps are not resent, but their outstanding cleanup still quarantines
-    // an ordinary release after revocation. Setup is recaptured by step zero below.
-    const stages = operation?.teardownStages?.slice(1, resumeStep) ?? [];
-    for (const [index, step] of steps.entries()) {
-      if (index > 0 && index < resumeStep) {
-        continue;
-      }
-      if (operation) {
-        operation.teardownStep = index;
-      }
-      const stage = await step();
-      stages.push(stage);
-      this.recordReleaseTeardownStage(operation, index, stage);
-      if (forced()) {
-        break;
-      }
-    }
-    return stages;
-  }
-
-  private recordReleaseTeardownStage(
-    operation: SessionReleaseOperation | undefined,
-    index: number,
-    stage: ReleaseTeardownStage,
-  ): void {
-    if (operation) {
-      (operation.teardownStages ??= [])[index] = stage;
-    }
-  }
-
-  /** Wait for setup without changing saved state or retries before the release's commit fence. */
-  private async startReplacedDeviceTeardown(
-    sessionId: string,
-    setups: readonly Promise<void>[],
-  ): Promise<readonly ReleaseTeardownStage[]> {
-    const pending =
-      setups.length > 0 ? (await this.waitForSessionSetup(sessionId, setups)).pending : null;
-    return pending ? [{ pending, setup: true }] : [];
   }
 
   /** Only a committed handoff retires the old device's saved baselines and serial retries. */
@@ -7577,22 +7033,23 @@ export class SessionManager {
       (this.replacedRestoreGenerations.get(deviceId) ?? 0) + 1,
     );
     const dropped = new Set<string>();
-    if (this.clockRestores.targets.has(deviceId)) {
+    if (this.stateRestore.clockRestores.targets.has(deviceId)) {
       dropped.add("clock");
     }
-    if (this.abandonedRotations.has(deviceId) || this.rotationRestores.targets.has(deviceId)) {
+    if (
+      this.stateRestore.abandonedRotations.has(deviceId) ||
+      this.stateRestore.rotationRestores.targets.has(deviceId)
+    ) {
       dropped.add("rotation");
     }
     if (
-      this.abandonedScreenReaders.has(deviceId) ||
-      this.screenReaderRestores.targets.has(deviceId)
+      this.stateRestore.abandonedScreenReaders.has(deviceId) ||
+      this.stateRestore.screenReaderRestores.targets.has(deviceId)
     ) {
       dropped.add("screen-reader");
     }
     this.dropReplacedDeviceRestoreState(session, dropped);
-    this.retireClockRestoration(deviceId);
-    this.retireRotationRestoration(deviceId);
-    this.retireScreenReaderRestoration(deviceId);
+    this.retireRestorations(deviceId, "removal");
     if (dropped.size > 0) {
       logger.warn(
         `Dropped restore state for session ${sessionId} on replaced serial ${deviceId}: ${[...dropped].join(", ")}`,
@@ -7616,31 +7073,6 @@ export class SessionManager {
         delete session.cacheData[key];
       }
     }
-  }
-
-  /** The teardown budget ran out with this restore unfinished: record it like an exhausted retry. */
-  private abandonCappedRestore(
-    target:
-      | KeepScreenAwakeRestoreTarget
-      | BiometricRestoreTarget
-      | NetworkConditionRestoreTarget
-      | null,
-    reason: "keep-screen-awake" | "biometric-enrollment" | "network-condition",
-  ): void {
-    if (!target) {
-      return;
-    }
-    logger.warn(
-      `Session release teardown exceeded ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms before the ${reason} ` +
-        `restore finished on ${target.deviceId}; the device may hold session-modified state`,
-    );
-    this.abandonRestore(target, reason, () =>
-      "state" in target
-        ? this.restoreKeepScreenAwakeTarget(target)
-        : "enrollment" in target
-          ? this.restoreBiometricEnrollment(target)
-          : this.restoreNetworkCondition(target),
-    );
   }
 
   private async persistTerminalReleaseWithUpgrade(
@@ -8494,20 +7926,7 @@ export class SessionManager {
   }
 
   private upgradeReleaseReason(reason: ReleaseReasonState, candidate: string): void {
-    if (candidate === "device-killed" && reason.value !== candidate) {
-      reason.value = candidate;
-      return;
-    }
-    if (reason.value === "device-killed") {
-      return;
-    }
-    if (candidate === "daemon-shutdown" && !isTerminalReleaseReason(reason.value)) {
-      reason.value = candidate;
-      return;
-    }
-    if (outranksReleaseReason(candidate, reason.value)) {
-      reason.value = candidate;
-    }
+    reason.value = resolveReleaseReason(reason.value, candidate);
   }
 
   private createReleaseReasonState(sessionId: string, releaseReason: string): ReleaseReasonState {
@@ -9347,1406 +8766,89 @@ export class SessionManager {
     return { pending: null };
   }
 
-  private async restoreKeepScreenAwakeBestEffort(
-    session: Session,
-    forced: () => boolean = () => false,
-  ): Promise<{ pending: Promise<void> | null }> {
-    const target = this.keepScreenAwakeRestoreTarget(session);
-    if (!target) {
-      return { pending: null };
-    }
-    const restoration = this.restoreKeepScreenAwakeTarget(target).then(
-      () => ({ outcome: "restored" as const }),
-      (error: unknown) => ({ outcome: "failed" as const, error }),
-    );
-    const timeout = new Error("Keep-awake restore timed out");
-    const result = await raceWithDeadline(restoration, {
-      timer: this.timer,
-      timeoutMs: KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS,
-      label: "Keep-awake restore",
-      timeoutError: () => timeout,
-    }).catch((error: unknown) => {
-      if (error === timeout) {
-        return { outcome: "timed-out" as const };
-      }
-      throw error;
-    });
-    if (this.identityReplacementFences.has(target.deviceId)) {
-      return { pending: null };
-    }
-    if (result.outcome === "failed") {
-      logger.warn(
-        `Failed to restore keep-awake state for session ${session.sessionId}: ${result.error}`,
-      );
-      // Quarantine the device until the retries settle, as the network restore does (#11145).
-      return { pending: this.retryKeepScreenAwakeRestore(target, result.error, forced) };
-    }
-    if (result.outcome === "timed-out") {
-      logger.warn(
-        `Timed out after ${KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS}ms restoring keep-awake state for session ${session.sessionId}`,
-      );
-      return {
-        pending: restoration.then((settled) =>
-          settled.outcome === "failed"
-            ? this.retryKeepScreenAwakeRestore(target, settled.error, forced)
-            : undefined,
-        ),
-      };
-    }
-    return { pending: null };
-  }
-
-  private keepScreenAwakeRestoreTarget(session: Session): KeepScreenAwakeRestoreTarget | null {
-    const state = session.cacheData.keepScreenAwake;
-    if (session.platform !== "android" || !state?.applied) {
-      return null;
-    }
-    return {
-      sessionId: session.sessionId,
-      deviceId: session.assignedDevice,
-      incarnation: this.deviceHealth?.incarnation(session.assignedDevice),
-      restoreGeneration: this.replacedRestoreGenerations.get(session.assignedDevice) ?? 0,
-      state,
-    };
-  }
-
-  getKeepAwakeRestoreReport(sessionId: string): KeepAwakeRestoreReport | undefined {
-    return this.keepAwakeRestoreReports.get(sessionId);
-  }
-
-  private recordKeepAwakeRestoreReport(sessionId: string, report: KeepAwakeRestoreReport): void {
-    this.keepAwakeRestoreReports.delete(sessionId);
-    this.keepAwakeRestoreReports.set(sessionId, report);
-    if (this.keepAwakeRestoreReports.size > 64) {
-      const oldest = this.keepAwakeRestoreReports.keys().next().value;
-      if (oldest !== undefined) {
-        this.keepAwakeRestoreReports.delete(oldest);
-      }
-    }
-  }
-
-  private async restoreKeepScreenAwakeTarget(target: KeepScreenAwakeRestoreTarget): Promise<void> {
-    if (!this.restoreIncarnationIsCurrent(target)) {
-      return;
-    }
-    const device: BootedDevice = {
-      name: target.deviceId,
-      platform: "android",
-      deviceId: target.deviceId,
-    };
-    await this.dispatchDeviceRestore(
-      target.deviceId,
-      (_signal, _identitySignal, acknowledge) =>
-        this.keepScreenAwakeRestorerFactory(device)
-          .restore(target.state)
-          .then((outcome) => {
-            acknowledge();
-            if (outcome.status === "failed") {
-              const error = new KeepAwakeRestoreError(
-                outcome.failures.map(({ setting, error }) => `${setting}: ${error}`).join("; ") +
-                  (outcome.baselineSettings?.length
-                    ? `; baseline applied: ${outcome.baselineSettings.map(({ setting, value }) => `${setting}=${value}`).join(", ")}`
-                    : ""),
-                {
-                  status: "failed",
-                  settings: [...outcome.failures, ...(outcome.baselineSettings ?? [])],
-                },
-              );
-              this.recordKeepAwakeRestoreReport(target.sessionId, error.report);
-              throw error;
-            }
-            this.keepAwakeRestoreReports.delete(target.sessionId);
-            if (outcome.status === "restored_to_baseline") {
-              this.recordKeepAwakeRestoreReport(target.sessionId, {
-                status: outcome.status,
-                settings: [...outcome.settings],
-              });
-              logger.warn(
-                `Keep-awake baseline applied for session ${target.sessionId}, device ${target.deviceId}: ${outcome.settings.map(({ setting, value }) => `${setting}=${value}`).join(", ")}`,
-              );
-            }
-          }),
-      target.restoreGeneration,
-      1,
-    );
-    this.clearRestoreHealth(target, "keep-screen-awake");
-  }
-
-  /** Bounded retries after a failed keep-awake restore, then background health recovery. */
-  private async retryKeepScreenAwakeRestore(
-    target: KeepScreenAwakeRestoreTarget,
-    initialError: unknown,
-    forced: () => boolean,
-  ): Promise<void> {
-    let lastError = initialError;
-    for (let attempt = 1; attempt <= KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS; attempt++) {
-      if (
-        !(await this.waitForIdentityReplacement(target.deviceId, target.restoreGeneration ?? 0))
-      ) {
-        return;
-      }
-      if (forced()) {
-        // The device may belong to the next owner: never retry against it (#11058).
-        logger.warn(
-          `Not retrying the keep-awake restore for session ${target.sessionId} after a forced release: ${lastError}`,
-        );
-        return;
-      }
-      await this.timer.sleep(KEEP_SCREEN_AWAKE_RESTORE_RETRY_DELAY_MS);
-      if (
-        !(await this.waitForIdentityReplacement(target.deviceId, target.restoreGeneration ?? 0))
-      ) {
-        return;
-      }
-      if (forced() || !this.restoreIncarnationIsCurrent(target)) {
-        return;
-      }
-      try {
-        await this.restoreKeepScreenAwakeTarget(target);
-        return;
-      } catch (error) {
-        // Bounded: keep retrying, then hand the last failure to health recovery.
-        lastError = error;
-        logger.debug(
-          `Retry ${attempt} restoring keep-awake state for session ${target.sessionId} failed: ${error}`,
-        );
-      }
-    }
-    logger.warn(
-      `Gave up restoring keep-awake state for session ${target.sessionId} after ` +
-        `${KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS} retries; device ${target.deviceId} ` +
-        `may stay awake: ${lastError}`,
-    );
-    this.abandonRestore(target, "keep-screen-awake", () =>
-      this.restoreKeepScreenAwakeTarget(target),
-    );
-  }
-
   /**
-   * Snapshot of what a restore must write, taken before any await. A rebind
-   * reassigns `session.assignedDevice` while retries are still outstanding, so
-   * resolving the device lazily from the session would aim them at the new
-   * simulator and leave the old one dirty.
+   * Retire every restore queue the cause applies to: removal retires all kinds; a VM restore
+   * (incarnation bump) retires the kinds whose policy says so, today the clock only (#11794).
+   * No retries may target a replacement device.
    */
-  private biometricRestoreTarget(session: Session): BiometricRestoreTarget | null {
-    const state = session.cacheData.biometricEnrollment;
-    // Keyed on the cache alone, not session.platform. The slot is only ever
-    // written by the iOS Simulator biometric path, so its presence is the
-    // authoritative evidence that a simulator needs restoring — whereas
-    // session.platform carries whatever the caller declared to setActiveDevice
-    // and can disagree with the device actually bound.
-    if (!state) {
-      return null;
-    }
-    return {
-      sessionId: session.sessionId,
-      deviceId: session.assignedDevice,
-      incarnation: this.deviceHealth?.incarnation(session.assignedDevice),
-      restoreGeneration: this.replacedRestoreGenerations.get(session.assignedDevice) ?? 0,
-      enrollment: state.initialEnrollment,
-    };
-  }
-
-  private async restoreBiometricEnrollment(target: BiometricRestoreTarget): Promise<void> {
-    const device: BootedDevice = {
-      name: target.deviceId,
-      platform: "ios",
-      deviceId: target.deviceId,
-    };
-    if (!this.restoreIncarnationIsCurrent(target)) {
-      return;
-    }
-    await this.dispatchDeviceRestore(
-      target.deviceId,
-      (_signal, _identitySignal, acknowledge) =>
-        this.biometricEnrollmentRestorerFactory(device)
-          .restore(target.enrollment)
-          .then(acknowledge),
-      target.restoreGeneration,
-      2,
-    );
-    this.clearRestoreHealth(target, "biometric-enrollment");
-  }
-
-  private async restoreBiometricEnrollmentBestEffort(
-    session: Session,
-  ): Promise<{ pending: Promise<void> | null }> {
-    const target = this.biometricRestoreTarget(session);
-    if (!target) {
-      return { pending: null };
-    }
-    const restoration = this.restoreBiometricEnrollment(target).then(
-      () => ({ outcome: "restored" as const }),
-      (error) => ({ outcome: "failed" as const, error }),
-    );
-    const timeout = new Error("Biometric restore timed out");
-    const result = await raceWithDeadline(restoration, {
-      timer: this.timer,
-      timeoutMs: BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS,
-      label: "Biometric restore",
-      timeoutError: () => timeout,
-    }).catch((error: unknown) => {
-      if (error === timeout) {
-        return { outcome: "timed-out" as const };
-      }
-      throw error;
-    });
-    if (this.identityReplacementFences.has(target.deviceId)) {
-      return { pending: null };
-    }
-    if (result.outcome === "failed") {
-      logger.warn(
-        `Failed to restore biometric enrollment for session ${session.sessionId}: ${result.error}`,
-      );
-      // Quarantine the device until the retries below settle; a prompt
-      // rejection otherwise returns a dirty simulator straight to the pool.
-      return { pending: this.retryBiometricEnrollmentRestore(target, result.error) };
-    }
-    if (result.outcome === "timed-out") {
-      logger.warn(
-        `Timed out after ${BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS}ms restoring biometric enrollment for session ${session.sessionId}`,
-      );
-      return { pending: this.settleBiometricEnrollmentRestore(target, restoration) };
-    }
-    return { pending: null };
-  }
-
-  /** A slow restore can still fail; retry before the device leaves quarantine. */
-  private async settleBiometricEnrollmentRestore(
-    target: BiometricRestoreTarget,
-    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
-  ): Promise<void> {
-    const result = await restoration;
-    if (result.outcome === "restored") {
-      return;
-    }
-    logger.warn(
-      `Failed to restore biometric enrollment for session ${target.sessionId}: ${result.error}`,
-    );
-    await this.retryBiometricEnrollmentRestore(target, result.error);
-  }
-
-  private async retryBiometricEnrollmentRestore(
-    target: BiometricRestoreTarget,
-    initialError: unknown,
-  ): Promise<void> {
-    let lastError = initialError;
-    for (let attempt = 1; attempt <= BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS; attempt++) {
-      await this.timer.sleep(BIOMETRIC_ENROLLMENT_RESTORE_RETRY_DELAY_MS);
-      if (!this.restoreIncarnationIsCurrent(target)) {
-        return;
-      }
-      try {
-        await this.restoreBiometricEnrollment(target);
-        logger.info(
-          `Restored biometric enrollment for session ${target.sessionId} on retry ${attempt}`,
-        );
-        return;
-      } catch (error) {
-        // Teardown is best-effort: keep retrying, then report the last failure.
-        lastError = error;
-        logger.debug(
-          `Retry ${attempt} restoring biometric enrollment for session ${target.sessionId} failed: ${error}`,
-        );
-      }
-    }
-    logger.warn(
-      `Gave up restoring biometric enrollment for session ${target.sessionId} after ` +
-        `${BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS} retries; device ${target.deviceId} ` +
-        `may hold session-modified enrollment: ${lastError}`,
-    );
-    this.abandonRestore(target, "biometric-enrollment", () =>
-      this.restoreBiometricEnrollment(target),
-    );
-  }
-
-  /**
-   * A timed-out setup can still write simulator state. Defer its restoration
-   * until that write settles so an old command cannot overwrite the restore.
-   */
-  private restoreBiometricEnrollmentAfterSetups(
-    session: Session,
-    pendingSetups: Promise<void>,
-  ): Promise<void> {
-    return pendingSetups.then(async () => {
-      const pendingRestoration = (await this.restoreBiometricEnrollmentBestEffort(session)).pending;
-      await pendingRestoration;
-    });
-  }
-
-  /**
-   * Sequence a restore after any still-draining setup and deduplicate it by baseline object. A
-   * device removed while setups drain drops the baseline instead of restoring (#11794).
-   */
-  private getPendingRestoration<K extends "clock" | "rotation" | "screenReader">(
-    queue: DeviceStateRestoreQueue<NonNullable<Session["cacheData"][K]> & object>,
-    slot: K,
-    session: Session,
-    pendingSetups: Promise<void> | null,
-    start: (
-      deviceId: string,
-      target: PendingRestore<NonNullable<Session["cacheData"][K]> & object>,
-    ) => Promise<{ pending: Promise<void> | null }>,
-    again: (
-      session: Session,
-      pendingSetups: Promise<void> | null,
-    ) => Promise<{ pending: Promise<void> | null }>,
-  ): { pending: Promise<void> | null } | Promise<{ pending: Promise<void> | null }> {
-    // Deliberately not async: the per-kind async wrappers return this as the original bodies did,
-    // so release and rebind keep their exact microtask turn counts.
-    const deviceId = session.assignedDevice;
-    if (pendingSetups) {
-      const generation = queue.generation(deviceId);
-      return {
-        pending: pendingSetups.then(async () => {
-          if (queue.generation(deviceId) !== generation) {
-            delete session.cacheData[slot];
-            return;
-          }
-          const result = await again(session, null);
-          await result.pending;
-        }),
-      };
-    }
-    const state = session.cacheData[slot] as
-      | (NonNullable<Session["cacheData"][K]> & object)
-      | undefined;
-    if (!state) {
-      return { pending: null };
-    }
-    return queue.join(
-      deviceId,
-      state,
-      () => {
-        if (session.cacheData[slot] === state) {
-          delete session.cacheData[slot];
-        }
-      },
-      (target) => start(deviceId, target),
-    );
-  }
-
-  /**
-   * Returned wrapped, never bare: `return somePromise` inside an async function
-   * adopts that promise, which would make the caller await the very cleanup it
-   * is trying to hand off and stall the release.
-   */
-  private async getPendingBiometricRestoration(
-    session: Session,
-    pendingSetups: Promise<void> | null,
-  ): Promise<{ pending: Promise<void> | null }> {
-    if (pendingSetups && session.cacheData.biometricEnrollment) {
-      return { pending: this.restoreBiometricEnrollmentAfterSetups(session, pendingSetups) };
-    }
-    return { pending: (await this.restoreBiometricEnrollmentBestEffort(session)).pending };
-  }
-
-  /** Use the same setup drain and pending device cleanup as network restoration. */
-  private async getPendingClockRestoration(
-    session: Session,
-    pendingSetups: Promise<void> | null,
-  ): Promise<{ pending: Promise<void> | null }> {
-    return this.getPendingRestoration(
-      this.clockRestores,
-      "clock",
-      session,
-      pendingSetups,
-      (deviceId, target) => this.startClockRestoration(deviceId, target),
-      (next, setups) => this.getPendingClockRestoration(next, setups),
-    );
-  }
-
-  private startClockRestoration(
-    deviceId: string,
-    target: PendingClockRestore,
-  ): Promise<{ pending: Promise<void> | null }> {
-    return this.startRestoration(this.clockKind, deviceId, target);
-  }
-
-  private prepareClockRestore(deviceId: string, target: PendingClockRestore): RestoreRun {
-    const healthTarget = { deviceId, incarnation: this.deviceHealth?.incarnation(deviceId) };
-    const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
-    const signal = defaultDeviceClockRestoreRegistry.signal(deviceId);
-    const generation = this.replacedRestoreGenerations.get(deviceId) ?? 0;
-    const restore = () =>
-      this.dispatchDeviceRestore(
-        deviceId,
-        (fenceSignal, identitySignal, acknowledge) =>
-          defaultDeviceClockRestoreRegistry.runExclusive(
-            deviceId,
-            async () => {
-              target.controller.signal.throwIfAborted();
-              if (!this.restoreIncarnationIsCurrent(healthTarget)) {
-                return;
-              }
-              const dispatchSignal = AbortSignal.any([target.controller.signal, fenceSignal]);
-              identitySignal.throwIfAborted();
-              await this.clockRestorerFactory(device).restore(target.state, dispatchSignal);
-              acknowledge();
-              target.controller.signal.throwIfAborted();
-              defaultDeviceClockRestoreRegistry.restored(deviceId, target.state);
-              target.clear();
-              this.forgetFencedRestore(this.clockRestores.targets, deviceId, target);
-              if (!this.clockRestores.targets.has(deviceId)) {
-                this.clearRestoreHealth(healthTarget, "clock");
-              }
-            },
-            undefined,
-            signal,
-          ),
-        generation,
-        4,
-      );
-    return {
-      restore,
-      quarantined: (outcome) => {
-        logger.warn(`Clock restore ${outcome}; quarantining ${device.deviceId}`);
-        if (healthTarget.incarnation === undefined) {
-          logger.warn(
-            `Failed to restore state on ${deviceId} (clock); no health marker could be keyed because the device has no pool incarnation`,
-          );
-        }
-        if (
-          healthTarget.incarnation !== undefined &&
-          this.restoreIncarnationIsCurrent(healthTarget) &&
-          !target.removed &&
-          this.clockRestores.targets.get(deviceId)?.has(target.state)
-        ) {
-          this.deviceHealth?.markers.mark(deviceId, healthTarget.incarnation, "clock");
-        }
-      },
-      retry: (restoration) => this.retryClockRestore(device.deviceId, target, restoration, restore),
-    };
-  }
-
-  /**
-   * The shared start of a restoration: one dispatch bounded by the kind's timeout, then, if it did
-   * not restore, quarantine and the kind's retry loop (#11794). Not wrapped further, so the turn
-   * counts the release shield suites pin are the ones each kind's copy had.
-   */
-  private async startRestoration<S extends object>(
-    spec: RestoreKindSpec<S>,
-    deviceId: string,
-    target: PendingRestore<S>,
-  ): Promise<{ pending: Promise<void> | null }> {
-    const run = spec.prepare(deviceId, target);
-    const restoration = run.restore().then(
-      () => ({ outcome: "restored" as const }),
-      (error: unknown) => ({ outcome: "failed" as const, error }),
-    );
-    const timeout = new Error(`${spec.name} restoration timed out`);
-    const result = await raceWithDeadline(restoration, {
-      timer: this.timer,
-      timeoutMs: spec.timeoutMs,
-      label: `${spec.name} restoration`,
-      timeoutError: () => timeout,
-    }).catch((error: unknown) => {
-      if (error === timeout) {
-        return { outcome: "timed-out" as const };
-      }
-      throw spec.mapStartError(error);
-    });
-    if (result.outcome === "restored") {
-      return { pending: null };
-    }
-    if (this.identityReplacementFences.has(deviceId)) {
-      // An upgraded release starts no retries; supersede leaves the baseline for a later release.
-      this.forgetFencedRestore(spec.queue.targets, deviceId, target);
-      return { pending: null };
-    }
-    run.quarantined(result.outcome, result.outcome === "failed" ? result.error : timeout);
-    const noun = spec.name.toLowerCase();
-    const pending = raceWithDeadline(run.retry(restoration), {
-      timer: this.timer,
-      signal: target.controller.signal,
-      label: `Pending ${noun} restoration`,
-    }).catch((error: unknown) => {
-      if (!target.removed) {
-        throw toActionableError(error, `${spec.name} restoration failed`);
-      }
-      // Proven removal retires ownership; no restoration may reach a replacement.
-      logger.debug(`Retired ${noun} restoration on removed device ${deviceId}`);
-    });
-    return { pending };
-  }
-
-  /** Retry a failed restore with bounded backoff, then abandon it (rotation, screen reader). */
-  private async retryRestoreBounded<S extends object>(
-    spec: BoundedRetrySpec<S>,
-    deviceId: string,
-    target: PendingRestore<S>,
-    restoration: Promise<RestoreAttemptOutcome>,
-    restore: () => Promise<void>,
-  ): Promise<void> {
-    const result = await restoration;
-    if (result.outcome === "restored") {
-      return;
-    }
-    spec.logFirstFailure(deviceId, result.error);
-    if (spec.isNonRetryable(result.error)) {
-      spec.abandon(deviceId, target, result.error, "without retrying");
-      return;
-    }
-    let lastError: unknown = result.error;
-    for (let attempt = 1; attempt <= spec.attempts; attempt++) {
-      await this.timer.sleep(spec.delayForAttempt(attempt));
-      if (target.removed) {
-        return;
-      }
-      try {
-        await restore();
-        return;
-      } catch (error) {
-        if (spec.isNonRetryable(error)) {
-          spec.abandon(deviceId, target, error, `after ${attempt} retries`);
-          return;
-        }
-        lastError = error;
-        spec.logRetryFailure(deviceId, attempt, error);
-      }
-    }
-    spec.abandon(deviceId, target, lastError, `after ${spec.attempts} retries`);
-  }
-
-  private forgetAbandonedRestore<S>(memory: Map<string, S>, deviceId: string, state: S): void {
-    if (memory.get(deviceId) === state) {
-      memory.delete(deviceId);
-    }
-  }
-
-  /** The older, truer baseline wins, so it runs after the session's own restoration settles. */
-  private async retryAbandonedAfter(
-    own: Promise<void> | null,
-    retry: () => Promise<void>,
-  ): Promise<void> {
-    try {
-      await own;
-    } finally {
-      await retry();
-    }
-  }
-
-  /**
-   * One bounded attempt at a baseline an earlier release gave up on, awaited before the device is
-   * handed to a new session; never on a timer. Either way the device proceeds.
-   */
-  private retryAbandonedRestore<S extends object>(
-    spec: AbandonedRestoreSpec<S>,
-    deviceId: string,
-  ): Promise<void> {
-    const state = spec.memory.get(deviceId);
-    if (!state) {
-      return Promise.resolve();
-    }
-    const inFlight = spec.inFlight.get(deviceId);
-    if (inFlight) {
-      return inFlight;
-    }
-    const controller = new AbortController();
-    const generation = this.replacedRestoreGenerations.get(deviceId) ?? 0;
-    const attempt = (async () => {
-      try {
-        await raceWithDeadline(
-          this.dispatchDeviceRestore(
-            deviceId,
-            (signal) => spec.restore(deviceId, state, AbortSignal.any([signal, controller.signal])),
-            generation,
-          ),
-          { timer: this.timer, timeoutMs: spec.timeoutMs, label: spec.label },
-        );
-        spec.restored(deviceId, state);
-      } catch (error) {
-        controller.abort();
-        spec.failed(deviceId, state, error);
-      }
-    })().finally(() => {
-      if (spec.inFlight.get(deviceId) === attempt) {
-        spec.inFlight.delete(deviceId);
-      }
-    });
-    spec.inFlight.set(deviceId, attempt);
-    return attempt;
-  }
-
-  /** Same setup drain, deadline, retry delay and pool quarantine as network restoration.
-   * Clock ownership remains pending beyond the network path's bounded retry batch.
-   */
-  private async retryClockRestore(
-    deviceId: string,
-    target: PendingClockRestore,
-    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
-    restore: () => Promise<void>,
-  ): Promise<void> {
-    const result = await restoration;
-    if (result.outcome === "restored") {
-      return;
-    }
-    logger.warn(`Failed to restore clock on ${deviceId}`, result.error);
-    while (!target.removed) {
-      await this.timer.sleep(NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS);
-      if (target.removed) {
-        return;
-      }
-      try {
-        await restore();
-        return;
-      } catch (error) {
-        logger.warn(`Clock restore retry failed on ${deviceId}; device remains quarantined`, error);
+  retireRestorations(deviceId: string, cause: "removal" | "incarnation-bump"): void {
+    for (const queue of [
+      this.stateRestore.clockRestores,
+      this.stateRestore.rotationRestores,
+      this.stateRestore.screenReaderRestores,
+    ]) {
+      if (cause === "removal" || queue.policy.retiredOnIncarnationBump) {
+        queue.retire(deviceId);
       }
     }
   }
 
-  /** Removal retires in-memory ownership; no retries may target a replacement device. */
-  retireClockRestoration(deviceId: string): void {
-    const incarnation = this.deviceHealth?.incarnation(deviceId);
-    if (incarnation !== undefined) {
-      this.deviceHealth?.markers.clear(deviceId, incarnation, "clock");
-    }
-    defaultDeviceClockRestoreRegistry.retire(deviceId);
-    this.clockRestores.retire(deviceId);
-  }
-
-  /**
-   * The restores a VM restore (incarnation bump) retires. Today that is the clock only; the
-   * policy table records which kinds, so the open question stays visible (#11794).
-   */
-  retireRestorationsOnIncarnationBump(deviceId: string): void {
-    if (this.clockRestores.policy.retiredOnIncarnationBump) {
-      this.retireClockRestoration(deviceId);
-    }
-    if (this.rotationRestores.policy.retiredOnIncarnationBump) {
-      this.retireRotationRestoration(deviceId);
-    }
-    if (this.screenReaderRestores.policy.retiredOnIncarnationBump) {
-      this.retireScreenReaderRestoration(deviceId);
-    }
-  }
-
-  /**
-   * A timed-out tracked network mutation can still issue `network delay/speed`
-   * commands. Defer the restore until that setup settles, so a `none` restore
-   * cannot land mid-mutation and then be re-shaped by a late command (issue #6012
-   * review P1). Mirrors `restoreBiometricEnrollmentAfterSetups`.
-   */
-  private restoreNetworkConditionAfterSetups(
-    session: Session,
-    pendingSetups: Promise<void>,
-  ): Promise<void> {
-    return pendingSetups.then(async () => {
-      const pendingRestoration = (await this.restoreNetworkConditionBestEffort(session)).pending;
-      await pendingRestoration;
-    });
-  }
-
-  /** Sequence restoration after any still-draining setup; deduplicate by owned slot. */
-  private async getPendingRotationRestoration(
-    session: Session,
-    pendingSetups: Promise<void> | null,
-  ): Promise<{ pending: Promise<void> | null }> {
-    return this.getPendingRestoration(
-      this.rotationRestores,
-      "rotation",
-      session,
-      pendingSetups,
-      (deviceId, target) => this.startRotationRestoration(deviceId, target),
-      (next, setups) => this.getPendingRotationRestoration(next, setups),
-    );
-  }
-
-  private startRotationRestoration(
-    deviceId: string,
-    target: PendingRotationRestore,
-  ): Promise<{ pending: Promise<void> | null }> {
-    return this.startRestoration(this.rotationKind, deviceId, target);
-  }
-
-  private prepareRotationRestore(deviceId: string, target: PendingRotationRestore): RestoreRun {
-    const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
-    const generation = this.replacedRestoreGenerations.get(deviceId) ?? 0;
-    const restore = () =>
-      this.dispatchDeviceRestore(
-        deviceId,
-        async (fenceSignal, identitySignal, acknowledge) => {
-          const dispatchSignal = AbortSignal.any([target.controller.signal, fenceSignal]);
-          target.controller.signal.throwIfAborted();
-          identitySignal.throwIfAborted();
-          await this.rotationRestorerFactory(device).restore(target.state, dispatchSignal);
-          acknowledge();
-          target.controller.signal.throwIfAborted();
-          target.clear();
-          this.forgetFencedRestore(this.rotationRestores.targets, deviceId, target);
-        },
-        generation,
-        5,
-      );
-    return {
-      restore,
-      quarantined: (outcome, error) =>
-        logger.warn(
-          `Rotation restore ${outcome}; quarantining ${device.deviceId}: ${errorMessage(error)}`,
-        ),
-      retry: (restoration) =>
-        this.retryRestoreBounded(this.rotationRetry, device.deviceId, target, restoration, restore),
-    };
-  }
-
-  /** Release the device from quarantine once the bounded rotation retries are spent. */
-  private abandonRotationRestore(
-    deviceId: string,
-    target: PendingRotationRestore,
-    lastError: unknown,
-    when: string,
-  ): void {
-    if (target.removed) {
-      return;
-    }
-    const { userRotation, accelerometerRotation, deviceStateRotationLock } = target.state;
-    const lock =
-      deviceStateRotationLock === undefined
-        ? ""
-        : `, device_state_rotation_lock=${deviceStateRotationLock}`;
-    logger.warn(
-      `Gave up restoring rotation settings on ${deviceId} ${when} ` +
-        `(user_rotation=${userRotation ?? "unchanged"}, accelerometer_rotation=${accelerometerRotation ?? "unchanged"}${lock} ` +
-        `not confirmed: ${errorMessage(lastError)}); releasing the device from cleanup. ` +
-        `A fold or display change during the session can make the recorded settings unverifiable. ` +
-        `Will try once more at the next session start or release on this device.`,
-    );
-    // An older abandoned baseline is the truer original; keep it over a newer session's.
-    if (!this.abandonedRotations.has(deviceId)) {
-      this.abandonedRotations.set(deviceId, target.state);
-    }
-    target.clear();
-    this.forgetFencedRestore(this.rotationRestores.targets, deviceId, target);
-  }
-
-  private retryAbandonedRotationAfter(deviceId: string, own: Promise<void> | null): Promise<void> {
-    return this.retryAbandonedAfter(own, () => this.retryAbandonedRotationRestore(deviceId));
-  }
-
-  /**
-   * A transient failure keeps the record for the next start or release. A window-manager-managed
-   * outcome is definitively unrecoverable, so the record is dropped.
-   */
-  private retryAbandonedRotationRestore(deviceId: string): Promise<void> {
-    return this.retryAbandonedRestore(this.abandonedRotationRestore, deviceId);
-  }
-
-  /** Removal retires in-memory ownership; no retries may target a replacement device. */
-  retireRotationRestoration(deviceId: string): void {
-    this.rotationRestores.retire(deviceId);
-    this.abandonedRotations.delete(deviceId);
-  }
-
-  /** Sequence restoration after any still-draining setup; deduplicate by owned slot (#10146). */
-  private async getPendingScreenReaderRestoration(
-    session: Session,
-    pendingSetups: Promise<void> | null,
-  ): Promise<{ pending: Promise<void> | null }> {
-    return this.getPendingRestoration(
-      this.screenReaderRestores,
-      "screenReader",
-      session,
-      pendingSetups,
-      (deviceId, target) => this.startScreenReaderRestoration(deviceId, target),
-      (next, setups) => this.getPendingScreenReaderRestoration(next, setups),
-    );
-  }
-
-  private startScreenReaderRestoration(
-    deviceId: string,
-    target: PendingScreenReaderRestore,
-  ): Promise<{ pending: Promise<void> | null }> {
-    return this.startRestoration(this.screenReaderKind, deviceId, target);
-  }
-
-  private prepareScreenReaderRestore(
-    deviceId: string,
-    target: PendingScreenReaderRestore,
-  ): RestoreRun {
-    const device: BootedDevice = { name: deviceId, deviceId, platform: target.state.platform };
-    const generation = this.replacedRestoreGenerations.get(deviceId) ?? 0;
-    const restore = () =>
-      this.dispatchDeviceRestore(
-        deviceId,
-        async (fenceSignal, identitySignal, acknowledge) => {
-          const dispatchSignal = AbortSignal.any([target.controller.signal, fenceSignal]);
-          target.controller.signal.throwIfAborted();
-          identitySignal.throwIfAborted();
-          await this.screenReaderRestorerFactory(device).restore(target.state, dispatchSignal);
-          acknowledge();
-          target.controller.signal.throwIfAborted();
-          target.clear();
-          this.forgetFencedRestore(this.screenReaderRestores.targets, deviceId, target);
-        },
-        generation,
-        6,
-      );
-    return {
-      restore,
-      quarantined: (outcome, error) =>
-        logger.warn(`Screen reader restore ${outcome}; quarantining ${device.deviceId}`, error),
-      retry: (restoration) =>
-        this.retryRestoreBounded(
-          this.screenReaderRetry,
-          device.deviceId,
-          target,
-          restoration,
-          restore,
-        ),
-    };
-  }
-
-  private abandonScreenReaderRestore(deviceId: string, target: PendingScreenReaderRestore): void {
-    if (target.removed) {
-      return;
-    }
-    const { platform, previousEnabled } = target.state;
-    logger.warn(
-      `Gave up restoring the screen reader on ${deviceId} after ` +
-        `${SCREEN_READER_RESTORE_RETRY_ATTEMPTS} retries; ${platform === "ios" ? "VoiceOver" : "TalkBack"} ` +
-        `should be ${previousEnabled ? "enabled" : "disabled"} but was not confirmed. ` +
-        `Will try once more at the next session start or release on this device.`,
-    );
-    this.abandonedScreenReaders.set(deviceId, target.state);
-    target.clear();
-    this.forgetFencedRestore(this.screenReaderRestores.targets, deviceId, target);
-  }
-
-  private retryAbandonedScreenReaderAfter(
-    deviceId: string,
-    own: Promise<void> | null,
-  ): Promise<void> {
-    return this.retryAbandonedAfter(own, () => this.retryAbandonedScreenReaderRestore(deviceId));
-  }
-
-  /** One bounded attempt at a state an earlier release gave up on; never on a timer. */
-  private retryAbandonedScreenReaderRestore(deviceId: string): Promise<void> {
-    return this.retryAbandonedRestore(this.abandonedScreenReaderRestore, deviceId);
-  }
-
-  /** Removal retires in-memory ownership; no retries may target a replacement device. */
-  retireScreenReaderRestoration(deviceId: string): void {
-    this.screenReaderRestores.retire(deviceId);
-    this.abandonedScreenReaders.delete(deviceId);
-  }
-
-  /**
-   * Returned wrapped, never bare (see `getPendingBiometricRestoration`): sequence
-   * the network restore after any still-draining setup so it never restores
-   * `none` while a tracked mutation may still shape the device.
-   */
-  private async getPendingNetworkRestoration(
-    session: Session,
-    pendingSetups: Promise<void> | null,
-  ): Promise<{ pending: Promise<void> | null }> {
-    if (pendingSetups && session.cacheData.networkCondition) {
-      return { pending: this.restoreNetworkConditionAfterSetups(session, pendingSetups) };
-    }
-    return { pending: (await this.restoreNetworkConditionBestEffort(session)).pending };
-  }
-
-  /**
-   * Snapshot of the network restore, taken before any await. Like the biometric
-   * target, a rebind reassigns `session.assignedDevice` while a restore is in
-   * flight, so the device is captured up front rather than read lazily.
-   */
-  private networkConditionRestoreTarget(session: Session): NetworkConditionRestoreTarget | null {
-    const state = session.cacheData.networkCondition;
-    // Keyed on the cache alone: the slot is only written by the Android emulator
-    // network path or the iOS Simulator per-app path (`iosAppRule`), so its
-    // presence is the authoritative evidence a device needs restoring —
-    // independent of whatever platform the caller declared.
-    if (!state) {
-      return null;
-    }
-    const ios = state.iosAppRule;
-    return {
-      sessionId: session.sessionId,
-      deviceId: session.assignedDevice,
-      incarnation: this.deviceHealth?.incarnation(session.assignedDevice),
-      restoreGeneration: this.replacedRestoreGenerations.get(session.assignedDevice) ?? 0,
-      profile: state.initialProfile,
-      // Each capture allocates a fresh reset revision, newer than every apply
-      // this session sent, so a late apply cannot outlive the restore.
-      ...(ios
-        ? {
-            iosAppRule: {
-              udid: ios.udid,
-              bundleId: ios.bundleId,
-              owner: session.sessionId,
-              ownerGeneration: ios.ownerGeneration,
-              revision: ++ios.lastRevision,
-            },
-          }
-        : {}),
-    };
-  }
-
-  /** The injected iOS per-app rule restorer, else one over the installed controller. */
-  private get iosAppNetworkRuleRestorer(): IosAppNetworkRuleRestorer {
-    this.injectedIosAppNetworkRuleRestorer ??= defaultIosAppNetworkRuleRestorer();
-    return this.injectedIosAppNetworkRuleRestorer;
-  }
-
-  /**
-   * Owner generations must increase across daemon restarts, because the
-   * provider keeps tombstones of released generations in memory. Seeding from
-   * the host clock (milliseconds) and never repeating a value keeps a new
-   * daemon's generations above an earlier daemon's.
-   */
-  private allocateIosOwnerGeneration(): number {
-    this.lastIosOwnerGeneration = Math.max(
-      this.lastIosOwnerGeneration + 1,
-      Math.floor(this.sessionNow()),
-    );
-    return this.lastIosOwnerGeneration;
-  }
-
-  /**
-   * Publish this session's iOS per-app rule slot before an `apply` (#10264), so
-   * release, rebind and TTL expiry can remove it even if the apply is in flight.
-   * One app per session: a different app must be reset first.
-   */
   beginIosAppNetworkRule(
     session: Session,
     target: { udid: string; bundleId: string },
   ): IosAppNetworkRuleCommandContext {
-    const state = session.cacheData.networkCondition;
-    const existing = state?.iosAppRule;
-    if (existing && (existing.udid !== target.udid || existing.bundleId !== target.bundleId)) {
-      throw new ActionableError(
-        `Session ${session.sessionId} already holds an offline rule for ${existing.bundleId}; ` +
-          `reset it with networkCondition { profile: "none", appId: "${existing.bundleId}" } first.`,
-      );
-    }
-    const rule: IosAppNetworkRuleSessionState = existing ?? {
-      udid: target.udid,
-      bundleId: target.bundleId,
-      ownerGeneration: this.allocateIosOwnerGeneration(),
-      lastRevision: 0,
-    };
-    if (!existing) {
-      session.cacheData.networkCondition = { initialProfile: "none", iosAppRule: rule };
-    }
-    return this.iosRuleContext(session, rule, ++rule.lastRevision);
+    return this.stateRestore.beginIosAppNetworkRule(session, target);
   }
 
-  /**
-   * Ownership for an explicit `reset` of `target`. A session that holds no rule
-   * for it still sends a reset (under a fresh generation it never stores): the
-   * provider then answers `reset` when no rule exists, or refuses to clear
-   * another session's rule.
-   */
   prepareIosAppNetworkReset(
     session: Session,
     target: { udid: string; bundleId: string },
   ): IosAppNetworkRuleCommandContext {
-    const existing = session.cacheData.networkCondition?.iosAppRule;
-    if (existing && existing.udid === target.udid && existing.bundleId === target.bundleId) {
-      return this.iosRuleContext(session, existing, ++existing.lastRevision);
-    }
-    const transient: IosAppNetworkRuleSessionState = {
-      udid: target.udid,
-      bundleId: target.bundleId,
-      ownerGeneration: this.allocateIosOwnerGeneration(),
-      lastRevision: 1,
-    };
-    return this.iosRuleContext(session, transient, transient.lastRevision);
+    return this.stateRestore.prepareIosAppNetworkReset(session, target);
   }
 
-  private iosRuleContext(
-    session: Session,
-    state: IosAppNetworkRuleSessionState,
-    revision: number,
-  ): IosAppNetworkRuleCommandContext {
-    return {
-      rule: {
-        udid: state.udid,
-        bundleId: state.bundleId,
-        owner: session.sessionId,
-        ownerGeneration: state.ownerGeneration,
-        revision,
-      },
-      nextRevision: () => ++state.lastRevision,
-    };
-  }
-
-  /**
-   * The provider acknowledged `rule` as installed: record it and renew its lease
-   * while this exact session still owns this exact revision.
-   */
   confirmIosAppNetworkRule(session: Session, rule: IosAppNetworkRule): void {
-    const state = session.cacheData.networkCondition?.iosAppRule;
-    if (
-      this.sessions.get(session.sessionId) !== session ||
-      !state ||
-      state.ownerGeneration !== rule.ownerGeneration
-    ) {
-      return;
-    }
-    state.installedRevision = rule.revision;
-    this.iosAppNetworkLeases.start(session.sessionId, rule, () => {
-      const current = session.cacheData.networkCondition?.iosAppRule;
-      return (
-        this.isAdmittedForAutomation(session) &&
-        current === state &&
-        current.installedRevision === rule.revision
-      );
-    });
+    this.stateRestore.confirmIosAppNetworkRule(session, rule);
   }
 
-  /**
-   * The session reset its rule (or the provider said it no longer holds one):
-   * stop renewing and drop the slot, so release does not reset it again.
-   */
   finishIosAppNetworkReset(session: Session, rule: IosAppNetworkRule): void {
-    if (this.sessions.get(session.sessionId) !== session) {
-      return;
-    }
-    const state = session.cacheData.networkCondition?.iosAppRule;
-    if (!state || state.ownerGeneration !== rule.ownerGeneration) {
-      return;
-    }
-    this.iosAppNetworkLeases.stop(session.sessionId);
-    delete session.cacheData.networkCondition;
+    this.stateRestore.finishIosAppNetworkReset(session, rule);
   }
 
   /** The iOS rule whose lease this session is renewing, if any (diagnostics and tests). */
   activeIosAppNetworkLease(sessionId: string): IosAppNetworkRule | undefined {
-    return this.iosAppNetworkLeases.active(sessionId);
+    return this.stateRestore.activeIosAppNetworkLease(sessionId);
   }
 
-  private async restoreNetworkCondition(target: NetworkConditionRestoreTarget): Promise<void> {
-    if (target.iosAppRule) {
-      if (!this.restoreIncarnationIsCurrent(target)) {
-        return;
-      }
-      await this.iosAppNetworkRuleRestorer.reset(target.iosAppRule);
-      this.clearRestoreHealth(target, "network-condition");
-      return;
-    }
-    const device: BootedDevice = {
-      name: target.deviceId,
-      platform: "android",
-      deviceId: target.deviceId,
-    };
-    if (!this.restoreIncarnationIsCurrent(target)) {
-      return;
-    }
-    await this.dispatchDeviceRestore(
-      target.deviceId,
-      (_signal, _identitySignal, acknowledge) =>
-        this.networkConditionRestorerFactory(device).restore(target.profile).then(acknowledge),
-      target.restoreGeneration,
-      3,
-    );
-    this.clearRestoreHealth(target, "network-condition");
-  }
-
-  /**
-   * Best-effort network-condition restore, bounded by a timeout so a wedged
-   * emulator console cannot stall release. A timeout hands the still-running
-   * restore back as pending cleanup, keeping the device quarantined until it
-   * settles (issue #6012).
-   */
-  private async restoreNetworkConditionBestEffort(
-    session: Session,
-  ): Promise<{ pending: Promise<void> | null }> {
-    const target = this.networkConditionRestoreTarget(session);
-    if (!target) {
-      return { pending: null };
-    }
-    const restoration = this.restoreNetworkCondition(target).then(
-      () => ({ outcome: "restored" as const }),
-      (error) => ({ outcome: "failed" as const, error }),
-    );
-    const timeout = new Error("Network condition restore timed out");
-    const result = await raceWithDeadline(restoration, {
-      timer: this.timer,
-      timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
-      label: "Network condition restore",
-      timeoutError: () => timeout,
-    }).catch((error: unknown) => {
-      if (error === timeout) {
-        return { outcome: "timed-out" as const };
-      }
-      throw error;
-    });
-    if (this.identityReplacementFences.has(target.deviceId)) {
-      return { pending: null };
-    }
-    if (result.outcome === "failed") {
-      logger.warn(
-        `Failed to restore network condition for session ${session.sessionId}; device ` +
-          `${target.deviceId} may hold session-modified shaping: ${result.error}`,
-      );
-      // Quarantine the device until the retries below settle; a prompt
-      // rejection otherwise returns a shaped emulator straight to the pool.
-      return { pending: this.retryNetworkConditionRestore(target, result.error) };
-    }
-    if (result.outcome === "timed-out") {
-      logger.warn(
-        `Timed out after ${NETWORK_CONDITION_RESTORE_TIMEOUT_MS}ms restoring network condition ` +
-          `for session ${session.sessionId}`,
-      );
-      return { pending: this.settleNetworkConditionRestore(target, restoration) };
-    }
-    return { pending: null };
-  }
-
-  /** A slow restore can still fail; retry before the device leaves quarantine. */
-  private async settleNetworkConditionRestore(
-    target: NetworkConditionRestoreTarget,
-    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
-  ): Promise<void> {
-    const result = await restoration;
-    if (result.outcome === "restored") {
-      return;
-    }
-    logger.warn(
-      `Failed to restore network condition for session ${target.sessionId}: ${result.error}`,
-    );
-    await this.retryNetworkConditionRestore(target, result.error);
-  }
-
-  private async retryNetworkConditionRestore(
-    target: NetworkConditionRestoreTarget,
-    initialError: unknown,
-  ): Promise<void> {
-    await this.retryNetworkConditionRestoreUntilSuccess(target, initialError);
-  }
-
-  /**
-   * Bounded restore retries after an initial failure. Returns `true` if any retry
-   * succeeded, `false` once the attempts are exhausted. The boolean lets the TTL
-   * path decide whether it may release restoration ownership (clear the slot),
-   * while the release path (which discards the session anyway) ignores it.
-   */
-  private async retryNetworkConditionRestoreUntilSuccess(
-    target: NetworkConditionRestoreTarget,
-    initialError: unknown,
-  ): Promise<boolean> {
-    let lastError = initialError;
-    for (let attempt = 1; attempt <= NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS; attempt++) {
-      await this.timer.sleep(NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS);
-      if (!this.restoreIncarnationIsCurrent(target)) {
-        return false;
-      }
-      try {
-        await this.restoreNetworkCondition(target);
-        logger.info(
-          `Restored network condition for session ${target.sessionId} on retry ${attempt}`,
-        );
-        return true;
-      } catch (error) {
-        // Teardown is best-effort: keep retrying, then report the last failure.
-        lastError = error;
-        logger.debug(
-          `Retry ${attempt} restoring network condition for session ${target.sessionId} failed: ${error}`,
-        );
-      }
-    }
-    logger.warn(
-      `Gave up restoring network condition for session ${target.sessionId} after ` +
-        `${NETWORK_CONDITION_RESTORE_RETRY_ATTEMPTS} retries; device ${target.deviceId} ` +
-        `may hold session-modified shaping: ${lastError}`,
-    );
-    this.abandonRestore(target, "network-condition", () => this.restoreNetworkCondition(target));
-    return false;
-  }
-
-  /**
-   * Arm a standalone per-condition network TTL (issue #6085 item 2): when it
-   * elapses, the device is reset to `none` independent of session lifetime.
-   * Re-scheduling (a re-applied condition) cancels the prior timer first, so only
-   * the latest TTL is armed. A non-positive TTL arms nothing (and still clears any
-   * prior timer), matching the "TTL-only / neutral request applies nothing" rule.
-   *
-   * Keyed by session id but IDENTITY-GUARDED by the captured `Session` instance
-   * (issue #6085 review): the caller passes the exact session it just mutated, and
-   * the timer fires against that instance only — so a stale schedule from a
-   * timed-out setup cannot arm or fire a TTL against a same-UUID REPLACEMENT
-   * session. The TTL is clamped to `MAX_NETWORK_CONDITION_TTL_SECONDS` so the
-   * millisecond product cannot overflow `setTimeout`'s signed 32-bit delay (item 4).
-   *
-   * `generation` MUST be the value the caller's own `bumpNetworkConditionGeneration`
-   * call returned for the mutation this TTL belongs to (issue #6181 review) — NOT
-   * re-read from the session's current generation here. Two mutations (B, C) can
-   * bump the shared counter before either reaches this call (B under `await
-   * trackSessionSetup`, C right behind it), so reading "current" at schedule time
-   * can tag B's timer with C's generation. Comparing against a per-call, per-mutation
-   * value closes that window: a timer only ever matches the generation it actually
-   * belongs to. Callers that don't track their own generation (tests, and any
-   * caller predating this parameter) may omit it, falling back to the session's
-   * current generation at schedule time — safe as long as no concurrent mutation is
-   * in flight for that call.
-   */
+  /** Arm a per-condition network TTL; see {@link SessionDeviceStateRestore}. */
   scheduleNetworkConditionExpiry(
     session: Session,
     expiresInSeconds: number,
     generation?: number,
   ): void {
-    const sessionId = session.sessionId;
-    this.cancelNetworkConditionExpiry(sessionId);
-    if (!(expiresInSeconds > 0)) {
-      return;
-    }
-    // A stale schedule (e.g. a setup that finished after this session was released
-    // and replaced) must not arm a timer against the replacement — bail unless the
-    // captured instance is still the live session.
-    if (this.sessions.get(sessionId) !== session) {
-      return;
-    }
-    const effectiveSeconds = Math.min(expiresInSeconds, MAX_NETWORK_CONDITION_TTL_SECONDS);
-    if (effectiveSeconds < expiresInSeconds) {
-      logger.warn(
-        `networkCondition TTL of ${expiresInSeconds}s exceeds the ${MAX_NETWORK_CONDITION_TTL_SECONDS}s ` +
-          `setTimeout limit for session ${sessionId}; clamping to ${effectiveSeconds}s`,
-      );
-    }
-    // Capture the OWNING mutation's generation into the closure (issue #6177,
-    // hardened #6181): if a newer condition supersedes it before this timer's
-    // awaited restore settles, the generation check in restoreNetworkConditionOnExpiry
-    // detects the mismatch and skips clearing the newer condition's restore slot.
-    const effectiveGeneration = generation ?? this.currentNetworkConditionGeneration(sessionId);
-    this.armNetworkConditionExpiryAt(
-      session,
-      this.sessionNow() + effectiveSeconds * 1000,
-      effectiveGeneration,
-    );
+    this.stateRestore.scheduleNetworkConditionExpiry(session, expiresInSeconds, generation);
   }
 
-  /**
-   * Arm the timer for an absolute deadline and a fixed generation, shared by
-   * {@link scheduleNetworkConditionExpiry} (a fresh TTL) and
-   * {@link rearmNetworkConditionExpiry} (restoring a snapshot taken by
-   * {@link peekNetworkConditionExpiry}). Identity-guarded like its callers: a
-   * session that was replaced under the same id since the deadline was captured
-   * is not armed against.
-   */
-  private armNetworkConditionExpiryAt(
-    session: Session,
-    deadlineMs: number,
-    generation: number,
-  ): void {
-    const sessionId = session.sessionId;
-    if (this.sessions.get(sessionId) !== session) {
-      return;
-    }
-    const remainingMs = Math.max(0, deadlineMs - this.sessionNow());
-    const handle = this.timer.setTimeout(() => {
-      this.handleNetworkConditionExpiry(session, generation);
-    }, remainingMs);
-    this.networkConditionExpiryTimers.set(sessionId, { handle, session, deadlineMs, generation });
-  }
-
-  /**
-   * Snapshot a pending network-condition TTL without disturbing it (issue
-   * #6178 item 1). `runSessionNetworkMutation` calls this before cancelling the
-   * timer to run its own mutation race-free (issue #6085 review), then re-arms
-   * the snapshot via {@link rearmNetworkConditionExpiry} if that mutation does
-   * not confirm success — so a manual reset whose emulator command fails does
-   * not permanently drop the deadline a prior timed degrade promised.
-   */
   peekNetworkConditionExpiry(
     sessionId: string,
   ): { deadlineMs: number; generation: number } | undefined {
-    const entry = this.networkConditionExpiryTimers.get(sessionId);
-    return entry ? { deadlineMs: entry.deadlineMs, generation: entry.generation } : undefined;
+    return this.stateRestore.peekNetworkConditionExpiry(sessionId);
   }
 
-  /**
-   * Re-arm a TTL previously captured via {@link peekNetworkConditionExpiry},
-   * preserving its original deadline and generation exactly (issue #6178 item
-   * 1). A deadline already in the past fires on the next tick rather than
-   * being dropped, matching a TTL that elapsed while the failed mutation ran.
-   *
-   * Generation-guarded (issue #6178 PR #6183 review, P1): the caller's own
-   * mutation attempt already bumped the counter to `snapshot.generation`
-   * before it ran, so an UNCHANGED current generation means nothing else has
-   * mutated since. But three overlapping requests on one session (A's timed
-   * degrade, B's slow failing re-apply, C's later successful re-apply) can
-   * settle out of order — B's failure must not blindly re-arm A's deadline
-   * once C has already bumped the counter again and established its own
-   * state (its own fresh TTL, live in the timer map, or a deliberate "no
-   * TTL"). Skipping whenever the generation has moved on avoids both
-   * resurrecting a deadline C already retired AND clobbering C's live timer
-   * handle without cancelling it.
-   *
-   * Also refuses to re-arm a releasing/released session (issue #6178 PR #6183
-   * review, P2): `releaseSessionInternal` cancels any pending TTL BEFORE
-   * awaiting the tracked mutation that may still be in flight. If that
-   * mutation then throws (or otherwise triggers a re-arm) while release is
-   * still draining, blindly re-arming here would undo release's cancellation
-   * — either running a stale timer concurrently with release's own
-   * restoration, or pinning a released session's timer-map entry for up to
-   * `MAX_NETWORK_CONDITION_TTL_SECONDS` (~24.8 days). Release's cancellation
-   * must be the last word, so a releasing/no-longer-current session is never
-   * re-armed.
-   */
   rearmNetworkConditionExpiry(
     session: Session,
     snapshot: { deadlineMs: number; generation: number },
   ): void {
-    const sessionId = session.sessionId;
-    if (this.currentNetworkConditionGeneration(sessionId) !== snapshot.generation) {
-      logger.debug(
-        `Skipping network-condition TTL re-arm for session ${sessionId}: generation ` +
-          `${snapshot.generation} has been superseded by a later mutation`,
-      );
-      return;
-    }
-    if (!this.isAdmittedForAutomation(session)) {
-      logger.debug(
-        `Skipping network-condition TTL re-arm for session ${sessionId}: session is releasing ` +
-          `or no longer live`,
-      );
-      return;
-    }
-    this.armNetworkConditionExpiryAt(session, snapshot.deadlineMs, snapshot.generation);
+    this.stateRestore.rearmNetworkConditionExpiry(session, snapshot);
   }
 
-  /**
-   * Cancel a pending network TTL. Called on release, rebind, and any subsequent
-   * network mutation (a manual reset, or a re-apply BEFORE it re-arms) so the
-   * release-restore and the TTL can never both fire. A no-op when no timer is armed.
-   */
   cancelNetworkConditionExpiry(sessionId: string): void {
-    const entry = this.networkConditionExpiryTimers.get(sessionId);
-    if (entry !== undefined) {
-      this.timer.clearTimeout(entry.handle);
-      this.networkConditionExpiryTimers.delete(sessionId);
-    }
+    this.stateRestore.cancelNetworkConditionExpiry(sessionId);
   }
 
   /**
-   * TTL elapsed: reset the device to `none` via the SAME bounded restore/retry the
-   * session-release path uses, and RETAIN restoration ownership — keep the restore
-   * slot and the device quarantined — until the reset actually SUCCEEDS (issue
-   * #6085 review). A transient emulator-console rejection therefore does not end
-   * quarantine and hand a still-shaped device back to the pool: it retries, and if
-   * every attempt is exhausted the slot is left in place so a later release still
-   * retries. Only on success is the slot cleared, so a subsequent release cannot
-   * double-restore.
-   *
-   * Identity-guarded on the captured `Session`: a fire against a same-UUID
-   * REPLACEMENT session (or an already-released one) is a no-op, so it never acts
-   * on a freed or replaced device.
+   * TTL elapsed for a still-published `session`: reset the device to `none` via the
+   * SAME bounded restore/retry the session-release path uses, and RETAIN restoration
+   * ownership — keep the restore slot and the device quarantined — until the reset
+   * actually SUCCEEDS (issue #6085 review). A transient emulator-console rejection
+   * therefore does not end quarantine and hand a still-shaped device back to the
+   * pool: it retries, and if every attempt is exhausted the slot is left in place so
+   * a later release still retries. Only on success does `clearIfOwned` clear the
+   * slot, so a subsequent release cannot double-restore.
    */
-  private handleNetworkConditionExpiry(session: Session, expectedGeneration: number): void {
+  private restoreNetworkConditionOnExpiryFor(session: Session, clearIfOwned: () => void): void {
     const sessionId = session.sessionId;
-    const entry = this.networkConditionExpiryTimers.get(sessionId);
-    if (entry && entry.session === session) {
-      this.networkConditionExpiryTimers.delete(sessionId);
-    }
-    // Read the raw session map rather than getSession(), so a timer fire cannot
-    // trigger a lazy-expiry release as a side effect. A missing or replaced
-    // session was already released — its release-restore handled connectivity.
-    if (this.sessions.get(sessionId) !== session) {
-      return;
-    }
-    const target = this.networkConditionRestoreTarget(session);
+    const target = this.stateRestore.networkConditionRestoreTarget(session);
     if (!target) {
       // Slot already cleared by a prior restore: nothing to do, no double-restore.
       return;
@@ -10756,70 +8858,22 @@ export class SessionManager {
     );
     this.registerPendingDeviceCleanup(
       target.deviceId,
-      this.runUnderTeardownShield(async () => [
-        {
-          pending: this.restoreNetworkConditionOnExpiry(session, target, expectedGeneration),
-          abandon: () => this.abandonCappedRestore(target, "network-condition"),
-        },
-      ]).then(async (cleanups) => {
-        await Promise.all(cleanups);
-      }),
+      this.stateRestore
+        .runUnderTeardownShield(async () => [
+          {
+            pending: this.stateRestore.restoreNetworkConditionOnExpiry(
+              session,
+              target,
+              clearIfOwned,
+            ),
+            abandon: () => this.stateRestore.abandonCappedRestore(target, "network-condition"),
+          },
+        ])
+        .then(async (cleanups) => {
+          await Promise.all(cleanups);
+        }),
       SESSION_RELEASE_TEARDOWN_CAP_MS,
     );
-  }
-
-  /**
-   * Reset the device on TTL expiry, then bounded-retry on failure — the same
-   * machinery `restoreNetworkConditionBestEffort` uses on release. The restore slot
-   * is cleared only after a definitive success, so ownership (and quarantine) is
-   * retained until the device is actually clean.
-   */
-  private async restoreNetworkConditionOnExpiry(
-    session: Session,
-    target: NetworkConditionRestoreTarget,
-    expectedGeneration: number,
-  ): Promise<void> {
-    try {
-      await this.restoreNetworkCondition(target);
-      this.clearNetworkConditionIfOwned(session, expectedGeneration);
-      return;
-    } catch (error) {
-      logger.warn(
-        `Failed to reset network condition on TTL expiry for session ${session.sessionId}; ` +
-          `device ${target.deviceId} may hold session-modified shaping, retrying: ${error}`,
-      );
-      const succeeded = await this.retryNetworkConditionRestoreUntilSuccess(target, error);
-      if (succeeded) {
-        this.clearNetworkConditionIfOwned(session, expectedGeneration);
-      }
-      // On exhaustion the slot is intentionally retained so a later release retries.
-    }
-  }
-
-  /**
-   * Drop the network restore slot once a reset has satisfied it (issue #6085),
-   * but ONLY while the captured session is still the live one — a same-UUID
-   * replacement must keep its own freshly-published slot — AND only while the
-   * session's network-condition generation still matches the one this expiry was
-   * scheduled against (issue #6177). A stale expiry (condition A) that settles
-   * after a newer condition (B) has been applied must not delete B's restore
-   * slot: the generation mismatch is the signal that A has been superseded.
-   */
-  private clearNetworkConditionIfOwned(session: Session, expectedGeneration: number): void {
-    if (this.sessions.get(session.sessionId) !== session) {
-      return;
-    }
-    if (this.currentNetworkConditionGeneration(session.sessionId) !== expectedGeneration) {
-      logger.debug(
-        `Network condition TTL expiry for session ${session.sessionId} settled after a newer ` +
-          `condition superseded it; leaving that condition's restore binding in place`,
-      );
-      return;
-    }
-    if (session.cacheData.networkCondition) {
-      delete session.cacheData.networkCondition;
-      this.iosAppNetworkLeases.stop(session.sessionId);
-    }
   }
 
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<unknown>[]): void {
@@ -11079,79 +9133,23 @@ export class SessionManager {
     this.updateSessionCache(sessionId, { deviceReadiness: "booted" });
   }
 
-  /**
-   * Track a setup that records a restore baseline. If the device was removed meanwhile the baseline
-   * is dropped; if the setup outlives a bounded release, its restore is handed to device
-   * quarantine so the request can settle (#11794). The queue's policy picks how.
-   */
-  private trackRestoreSetup<K extends "clock" | "rotation" | "screenReader">(
-    queue: DeviceStateRestoreQueue<NonNullable<Session["cacheData"][K]> & object>,
-    slot: K,
-    session: Session,
-    createSetup: (assertCurrentDevice: () => void) => Promise<void>,
-    startRestore: () => Promise<{ pending: Promise<void> | null }>,
-  ): Promise<void> {
-    const deviceId = session.assignedDevice;
-    const generation = queue.generation(deviceId);
-    const outlivedRelease = () =>
-      this.sessions.get(session.sessionId) !== session && Boolean(session.cacheData[slot]);
-    return this.trackSessionSetup(session, async () => {
-      try {
-        await createSetup(() => {
-          if (queue.generation(deviceId) !== generation) {
-            throw new ActionableError(queue.policy.removedDuringSetupMessage);
-          }
-        });
-      } finally {
-        if (queue.generation(deviceId) !== generation) {
-          delete session.cacheData[slot];
-        } else if (outlivedRelease() && queue.policy.setupHandoff === "await-then-track") {
-          // Baseline capture can finish after bounded release. Hand unbounded
-          // retries to device quarantine so the setup/tool request can settle.
-          const restoration = await startRestore();
-          if (restoration.pending) {
-            this.trackPendingDeviceCleanup(deviceId, [restoration.pending]);
-          }
-        } else if (outlivedRelease()) {
-          // The setup still holds the device mutex here. Publish quarantine before
-          // setup settles, then let restoration acquire that mutex after return.
-          const restoration = startRestore().then(async ({ pending }) => {
-            await pending;
-          });
-          this.trackPendingDeviceCleanup(deviceId, [restoration]);
-        }
-      }
-    });
-  }
-
-  /** Tracked setup retains this exact session even after a bounded release times out. */
-  trackClockSessionSetup(session: Session, createSetup: () => Promise<void>): Promise<void> {
-    return this.trackRestoreSetup(
-      this.clockRestores,
-      "clock",
-      session,
-      () => createSetup(),
-      () => this.getPendingClockRestoration(session, null),
-    );
-  }
-
   setClock(session: Session, state: ClockSessionState): void {
     session.cacheData.clock ??= state;
   }
   getClock(sessionId: string): ClockSessionState | undefined {
     return this.findSession(sessionId)?.cacheData.clock;
   }
-  runClockMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
-    return this.runDeviceStateMutationExclusive(this.clockMutationQueues, sessionId, fn);
+  getKeepAwakeRestoreReport(sessionId: string): KeepAwakeRestoreReport | undefined {
+    return this.stateRestore.getKeepAwakeRestoreReport(sessionId);
   }
 
-  trackRotationSessionSetup(
-    session: Session,
-    createSetup: (assertCurrentDevice: () => void) => Promise<void>,
-  ): Promise<void> {
-    return this.trackRestoreSetup(this.rotationRestores, "rotation", session, createSetup, () =>
-      this.getPendingRotationRestoration(session, null),
-    );
+  /** Tracked setup retains this exact session even after a bounded release times out. */
+  trackClockSessionSetup(session: Session, createSetup: () => Promise<void>): Promise<void> {
+    return this.stateRestore.trackClockSessionSetup(session, createSetup);
+  }
+
+  runClockMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+    return this.stateRestore.runClockMutationExclusive(sessionId, fn);
   }
 
   setRotation(session: Session, state: RotationSessionState): void {
@@ -11160,8 +9158,15 @@ export class SessionManager {
   getRotation(sessionId: string): RotationSessionState | undefined {
     return this.findSession(sessionId)?.cacheData.rotation;
   }
+  trackRotationSessionSetup(
+    session: Session,
+    createSetup: (assertCurrentDevice: () => void) => Promise<void>,
+  ): Promise<void> {
+    return this.stateRestore.trackRotationSessionSetup(session, createSetup);
+  }
+
   runRotationMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
-    return this.runDeviceStateMutationExclusive(this.rotationMutationQueues, sessionId, fn);
+    return this.stateRestore.runRotationMutationExclusive(sessionId, fn);
   }
 
   /** Tracked setup retains this exact session even after a bounded release times out (#10146). */
@@ -11169,13 +9174,7 @@ export class SessionManager {
     session: Session,
     createSetup: (assertCurrentDevice: () => void) => Promise<void>,
   ): Promise<void> {
-    return this.trackRestoreSetup(
-      this.screenReaderRestores,
-      "screenReader",
-      session,
-      createSetup,
-      () => this.getPendingScreenReaderRestoration(session, null),
-    );
+    return this.stateRestore.trackScreenReaderSessionSetup(session, createSetup);
   }
 
   /** Write-once: the first toggle's pre-change state is the one release restores. */
@@ -11186,7 +9185,7 @@ export class SessionManager {
     return this.findSession(sessionId)?.cacheData.screenReader;
   }
   runScreenReaderMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
-    return this.runDeviceStateMutationExclusive(this.screenReaderMutationQueues, sessionId, fn);
+    return this.stateRestore.runScreenReaderMutationExclusive(sessionId, fn);
   }
 
   /**
@@ -11219,62 +9218,14 @@ export class SessionManager {
     this.updateSessionCache(sessionId, { networkCondition: state });
   }
 
-  /**
-   * Bump the per-session network-condition generation (issue #6177). Called on
-   * every apply/reset mutation, BEFORE the mutation runs, so a TTL scheduled for
-   * the condition being replaced can never observe the generation it captures as
-   * still current. Returns the new generation for the caller to arm a TTL with.
-   */
+  /** Bump the per-session network-condition generation (issue #6177); see {@link SessionDeviceStateRestore}. */
   bumpNetworkConditionGeneration(sessionId: string): number {
-    const next = (this.networkConditionGeneration.get(sessionId) ?? 0) + 1;
-    this.networkConditionGeneration.set(sessionId, next);
-    return next;
+    return this.stateRestore.bumpNetworkConditionGeneration(sessionId);
   }
 
-  /**
-   * Run `fn` as the next link in a per-session promise-chain mutex, so that
-   * `runSessionNetworkMutation`'s ENTIRE critical section — generation bump,
-   * TTL snapshot/cancel, the mutation itself, and its TTL re-arm/schedule
-   * decision — never overlaps another same-session networkCondition mutation
-   * (issue #6178 PR #6183 review). This is the structural fix for a family of
-   * races the generation guard alone could not close: a later generation only
-   * proves a mutation was ATTEMPTED, not that it succeeded, so two overlapping
-   * FAILURES could each observe nothing to restore while a displaced TTL is
-   * lost between them. With this lock, a later mutation's snapshot always sees
-   * the FULLY SETTLED state (including any prior mutation's own re-arm) of the
-   * one before it — the whole interleaving family becomes impossible, not just
-   * the specific cases already patched.
-   *
-   * Scoped narrowly and reentrancy-safe by construction: keyed per session id
-   * (never blocks a different session's mutations, or unrelated session work
-   * like release/rebind — those act on the timer/session maps directly), and
-   * `fn` is the caller's entire body, so nothing outside this one critical
-   * section is ever held across an await. `.catch(() => undefined)` on the
-   * chain tail ensures one mutation's rejection cannot wedge the queue for the
-   * next; the `finally` drops the map entry once nothing is queued behind it,
-   * so a dead session leaves no residue.
-   */
+  /** Per-session mutex over a whole networkCondition mutation (issue #6178). */
   runNetworkConditionMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
-    return this.runDeviceStateMutationExclusive(this.networkConditionMutationQueues, sessionId, fn);
-  }
-
-  private runDeviceStateMutationExclusive<T>(
-    queues: Map<string, Promise<unknown>>,
-    sessionId: string,
-    fn: () => Promise<T>,
-  ): Promise<T> {
-    const previous = queues.get(sessionId) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(fn);
-    queues.set(sessionId, next);
-    return next.finally(() => {
-      if (queues.get(sessionId) === next) {
-        queues.delete(sessionId);
-      }
-    });
-  }
-
-  private currentNetworkConditionGeneration(sessionId: string): number {
-    return this.networkConditionGeneration.get(sessionId) ?? 0;
+    return this.stateRestore.runNetworkConditionMutationExclusive(sessionId, fn);
   }
 
   /** Read the original network condition without recording session activity. */
@@ -11289,11 +9240,7 @@ export class SessionManager {
    */
   setDeviceLabels(sessionId: string, labels: DeviceLabelMap): void {
     if (this.getSession(sessionId)) {
-      const derived = Object.values(labels).filter((labelSession) => labelSession !== sessionId);
-      if (derived.length > 0) {
-        const indexed = this.derivedLabelSessionsByBase.get(sessionId) ?? [];
-        this.derivedLabelSessionsByBase.set(sessionId, new Set([...indexed, ...derived]));
-      }
+      this.planLabels.indexDerivedLabels(sessionId, labels);
     }
     this.updateSessionCache(sessionId, { deviceLabels: labels });
   }
@@ -11309,27 +9256,7 @@ export class SessionManager {
    * settles.
    */
   openPlanLabelMints(baseSessionId: string, labels: DeviceLabelMap): () => void {
-    const derived = [...new Set(Object.values(labels))].filter(
-      (labelSession) => labelSession !== baseSessionId,
-    );
-    for (const labelSession of derived) {
-      this.planLabelMints.set(labelSession, (this.planLabelMints.get(labelSession) ?? 0) + 1);
-    }
-    let open = true;
-    return () => {
-      if (!open) {
-        return;
-      }
-      open = false;
-      for (const labelSession of derived) {
-        const remaining = (this.planLabelMints.get(labelSession) ?? 1) - 1;
-        if (remaining > 0) {
-          this.planLabelMints.set(labelSession, remaining);
-        } else {
-          this.planLabelMints.delete(labelSession);
-        }
-      }
-    };
+    return this.planLabels.openPlanLabelMints(baseSessionId, labels);
   }
 
   /** The persisted creator of a session being created: a plan run's label mint marks its row. */
@@ -11337,7 +9264,7 @@ export class SessionManager {
     sessionId: string,
     persistenceSource: string | undefined,
   ): string | undefined {
-    return this.planLabelMints.has(sessionId) ? PLAN_LABEL_SESSION_SOURCE : persistenceSource;
+    return this.planLabels.creatorSource(sessionId, persistenceSource, PLAN_LABEL_SESSION_SOURCE);
   }
 
   /**
@@ -11346,10 +9273,10 @@ export class SessionManager {
    * when a release is superseded: they belong to the incarnation that ended.
    */
   private liftPlanLabelFenceForMint(sessionId: string): void {
-    if (!this.planLabelMints.has(sessionId) || this.sessions.has(sessionId)) {
+    if (!this.planLabels.isMintableAndNotLive(sessionId)) {
       return;
     }
-    this.endedLabelBases.delete(sessionId);
+    this.planLabels.clearEndedBase(sessionId);
     this.liftTerminalFence(sessionId, undefined, false, () => {
       this.slotShadowProbe.check(sessionId, "plan-label-fence-lifted");
       this.sessionSlots.deleteTerminalReasonState(sessionId);
@@ -11376,7 +9303,7 @@ export class SessionManager {
       !persisted.release_reason || isRecoverableDaemonReleaseReason(persisted.release_reason);
     // A row this daemon did not mint under a still-running plan is a previous run's, whatever its
     // reason (a restarted daemon finds the old `daemon-shutdown` row): not a handoff to recover.
-    if (recoverable && this.runningPlanLabelSessions.has(sessionId)) {
+    if (recoverable && this.planLabels.isRunning(sessionId)) {
       return;
     }
     throw new TerminalSessionError(sessionId, {
@@ -11394,12 +9321,7 @@ export class SessionManager {
    * `sessionId` is not a known derived label session (#11111).
    */
   getBaseSessionOfDerivedLabel(sessionId: string): string | undefined {
-    for (const [base, derived] of this.derivedLabelSessionsByBase) {
-      if (derived.has(sessionId)) {
-        return base;
-      }
-    }
-    return undefined;
+    return this.planLabels.getBaseSessionOfDerivedLabel(sessionId);
   }
 
   /**
@@ -11412,7 +9334,7 @@ export class SessionManager {
    * {@link getOrCreateSession}, and an id whose prefix is no live session is a session of its own.
    */
   private refuseLabelMintOutsidePlanAllocation(sessionId: string, deviceId: string): void {
-    if (this.planLabelMints.has(sessionId) || this.sessionSlots.hasRecovery(sessionId)) {
+    if (this.planLabels.isMinting(sessionId) || this.sessionSlots.hasRecovery(sessionId)) {
       return;
     }
     const baseSessionId = this.liveBaseOfDerivedId(sessionId);
@@ -11440,17 +9362,9 @@ export class SessionManager {
 
   /** The live session `sessionId` reads as a `${base}:${label}` of, the longest such prefix. */
   private liveBaseOfDerivedId(sessionId: string): string | undefined {
-    for (
-      let separatorIndex = sessionId.lastIndexOf(":");
-      separatorIndex > 0;
-      separatorIndex = sessionId.lastIndexOf(":", separatorIndex - 1)
-    ) {
-      const candidate = sessionId.slice(0, separatorIndex);
-      if (this.peekSession(candidate)) {
-        return candidate;
-      }
-    }
-    return undefined;
+    return this.planLabels.liveBaseOfDerivedId(sessionId, (candidate) =>
+      Boolean(this.peekSession(candidate)),
+    );
   }
 
   /**
@@ -11490,18 +9404,11 @@ export class SessionManager {
    * that are already gone; the caller checks each one.
    */
   takeDerivedLabelSessions(baseSessionId: string, releaseReason?: string): string[] {
-    const derived = this.derivedLabelSessionsByBase.get(baseSessionId);
-    if (releaseReason !== undefined && isTerminalReleaseReason(releaseReason)) {
-      for (const labelSessionId of derived ?? []) {
-        if (this.sessions.has(labelSessionId)) {
-          this.endedLabelBases.set(labelSessionId, { baseSessionId, releaseReason });
-        }
-      }
-    }
-    this.derivedLabelSessionsByBase.delete(baseSessionId);
-    // The base is being released: its plan run, and with it every label session's, is over.
-    derived?.forEach((labelSession) => this.runningPlanLabelSessions.delete(labelSession));
-    return derived ? [...derived] : [];
+    return this.planLabels.takeDerivedLabelSessions(
+      baseSessionId,
+      releaseReason,
+      isTerminalReleaseReason,
+    );
   }
 
   /**
@@ -11569,128 +9476,55 @@ export class SessionManager {
   }
 
   /**
-   * Record a liveness heartbeat for a session.
-   *
-   * A heartbeat proves the owner process is alive; it is not device use (#10656). It renews the
-   * owner lease (`lastHeartbeat`, `lastOwnerHeartbeat`), marks the session as heartbeating, and
-   * promotes an awaiting-owner session to owned. It must never write the tool-activity clocks
-   * (`lastUsedAt`, `expiresAt`): an idle but live owner — a stdio proxy whose keeper ticks every
-   * 2 s while its agent makes no tool calls — would otherwise hold its device forever. Only tool
-   * calls (`getOrCreateSession` at the start, `recordToolCallEnded` at the end) move the idle
-   * deadline. Guarded by
+   * Record a liveness heartbeat for a session (#10656): it renews the owner lease and never the
+   * tool-activity clocks. See {@link SessionLivenessController.recordHeartbeat}. Guarded by
    * `test/lint/livenessActivityClockSeparation.test.ts` (#10668).
    */
   recordHeartbeat(sessionId: string): void {
-    const session = this.unlessBaseEnded(this.getSession(sessionId));
-    if (!session) {
-      logger.warn(`Cannot record heartbeat for session ${sessionId}: not found`);
-      return;
-    }
-    if (!this.isAdmittedForAutomation(session)) {
-      return;
-    }
-    const now = this.sessionNow();
-    const previousHeartbeat = session.lastHeartbeat;
-    session.lastHeartbeat = now;
-    logger.debug(
-      `Heartbeat accepted for session ${sessionId}; previous heartbeat age=${Math.max(0, now - previousHeartbeat)}ms`,
-    );
-    // Only a heartbeat advances the owner lease; both the socket and HTTP routes admit one only
-    // from the owner (or a tokenless client on a session no proxy owns).
-    session.lastOwnerHeartbeat = now;
-    session.activityGeneration++;
-    session.hasReceivedHeartbeat = true;
-    if (session.ownership === "awaiting-owner") {
-      session.ownership = "owned";
-      session.awaitingOwnerSince = undefined;
-    }
-    // The heartbeat's own clocks are in-memory only; the row changes only when a persisted field
-    // does (the first heartbeat, or a state an earlier write failed to store). Skipping the rest
-    // keeps a contended or failing database off the heartbeat path entirely (#11079).
-    if (!this.hasUnissuedActivity(session)) {
-      return;
-    }
-    void this.getBarrier()
-      .track(() => this.recordSessionActivity(session))
-      .catch((error) => {
-        // The heartbeat was acknowledged and the owner really is alive: rolling the lease back
-        // here would release a healthy owner after lease + grace whenever writes fail (disk
-        // full, read-only, busy peer) (#11079). The lease is in-memory; the unstored fields are
-        // retried by the next heartbeat or tool call because the failed write is forgotten.
-        logger.warn(
-          `[SessionManager] Failed to record heartbeat activity for ${sessionId}: ${errorMessage(error)}`,
-          error,
-        );
-      });
+    this.liveness.recordHeartbeat(sessionId);
   }
 
-  /**
-   * Make `ownerToken` the current liveness owner for a session, unless another
-   * token owns it with a live lease (#10050).
-   *
-   * This intentionally does not record activity. The request handler claims
-   * ownership before applying the requested policy and recording its heartbeat,
-   * so a rejected or stale token can be refused without changing any liveness
-   * deadline, and a rejected claim leaves the session's owner and policy intact.
-   *
-   * Who wins is decided by {@link decideLivenessClaim}. A claim naming a derived
-   * `${base}:${label}` session is judged against its base's owner too (#11602); the label keeps
-   * its own liveness record, which the heartbeat path reads and renews under the label's id.
-   */
-  async claimLivenessOwnership(
+  /** Make `ownerToken` the liveness owner unless another holds a live lease (#10050). */
+  claimLivenessOwnership(sessionId: string, ownerToken: string): Promise<LivenessClaimOutcome> {
+    return this.liveness.claimLivenessOwnership(sessionId, ownerToken);
+  }
+
+  /** Clear only the owner token; preserve the device, policy and existing lease/grace deadline. */
+  releaseLivenessOwnership(sessionId: string, ownerToken: string): Promise<LivenessReleaseOutcome> {
+    return this.liveness.releaseLivenessOwnership(sessionId, ownerToken);
+  }
+
+  /** Return whether `ownerToken` is still authorized to refresh the session. */
+  hasLivenessOwnership(sessionId: string, ownerToken: string): boolean {
+    return this.liveness.hasLivenessOwnership(sessionId, ownerToken);
+  }
+
+  /** Recover daemon-local liveness ownership after restart (#11602). */
+  claimUnownedLivenessOwnership(sessionId: string, ownerToken: string): boolean {
+    return this.liveness.claimUnownedLivenessOwnership(sessionId, ownerToken);
+  }
+
+  /** Bind acquisition identity and its claim-only lease start; no heartbeat or release changes. */
+  bindAcquiredLivenessOwnerToken(sessionId: string, ownerToken: string): boolean {
+    return this.liveness.bindAcquiredLivenessOwnerToken(sessionId, ownerToken);
+  }
+
+  /** Move a session onto the CLI liveness policy and record a heartbeat (#6870). */
+  adoptCliLivenessPolicy(sessionId: string, requestedIdleTimeoutMs?: number): boolean {
+    return this.liveness.adoptCliLivenessPolicy(sessionId, requestedIdleTimeoutMs);
+  }
+
+  /** Put a session on the `managed-execution` liveness policy with its idle window (#11176). */
+  adoptManagedExecutionLivenessPolicy(
     sessionId: string,
-    ownerToken: string,
-  ): Promise<LivenessClaimOutcome> {
-    const session = this.unlessBaseEnded(this.getSession(sessionId));
-    if (!session) {
-      logger.warn(`Cannot claim liveness ownership for session ${sessionId}: not found`);
-      return "not-found";
-    }
-    const mutex = this.livenessOwnershipClaimMutexFor(session);
-    return await mutex.runExclusive(async () => {
-      if (this.unlessBaseEnded(this.getSession(sessionId)) !== session) {
-        return "not-found";
-      }
-      const processedClaims = session.livenessOwnershipClaims ?? new Set<string>();
-      session.livenessOwnershipClaims = processedClaims;
-      const base = this.livenessBaseSession(session);
-      // Decided with no await before the takeover below takes effect.
-      const decision = decideLivenessClaim({
-        claimantToken: ownerToken,
-        session: this.livenessOwnerView(session),
-        claimAlreadyProcessed: processedClaims.has(ownerToken),
-        base: base ? this.livenessOwnerView(base) : undefined,
-      });
-      if (decision.outcome === "superseded") {
-        // A retried claim whose token has since been displaced must never take
-        // the session back, whatever the new owner's lease says.
-        return "superseded";
-      }
-      if (decision.outcome === "conflict") {
-        const holder = decision.holdOf === "base" ? `its base session ${base?.sessionId}` : "it";
-        logger.warn(
-          `Rejected liveness ownership claim for session ${sessionId}: another owner holds a live lease on ${holder}`,
-        );
-        return "conflict";
-      }
-      if (session.livenessOwnerToken === ownerToken && processedClaims.has(ownerToken)) {
-        // The owner's own retried claim: nothing to take over.
-        return "claimed";
-      }
-      return await this.takeLivenessOwnership(session, ownerToken, processedClaims);
-    });
+    options: { idleTimeoutMs?: number } = {},
+  ): Promise<Session> {
+    return this.liveness.adoptManagedExecutionLivenessPolicy(sessionId, options);
   }
 
-  /**
-   * The live base session of a derived `${base}:${label}` session (#11602): its outermost base, as
-   * connection ownership is keyed (#11586). Undefined for a session that is not a published label,
-   * and for a label whose base is gone.
-   */
-  private livenessBaseSession(session: Session): Session | undefined {
-    const baseSessionId = this.ownershipSessionUuid(session.sessionId);
-    return baseSessionId === session.sessionId
-      ? undefined
-      : (this.peekSession(baseSessionId) ?? undefined);
+  /** Put a CLI-adopted session back on the strict heartbeat contract (#6870). */
+  restoreHeartbeatLivenessPolicy(sessionId: string): boolean {
+    return this.liveness.restoreHeartbeatLivenessPolicy(sessionId);
   }
 
   /**
@@ -11715,7 +9549,7 @@ export class SessionManager {
     if (label.persistenceMetadata?.source !== PLAN_LABEL_SESSION_SOURCE) {
       return undefined;
     }
-    const retained = this.endedLabelBases.get(label.sessionId);
+    const retained = this.planLabels.retainedEndedBase(label.sessionId);
     if (retained) {
       return retained;
     }
@@ -11866,102 +9700,6 @@ export class SessionManager {
     return { ownerToken, hold };
   }
 
-  /** Clear only the owner token; preserve the device, policy and existing lease/grace deadline. */
-  async releaseLivenessOwnership(
-    sessionId: string,
-    ownerToken: string,
-  ): Promise<LivenessReleaseOutcome> {
-    const session = this.unlessBaseEnded(this.getSession(sessionId));
-    if (!session || !this.isAdmittedForAutomation(session)) {
-      return "not-found";
-    }
-    return await this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
-      if (
-        this.unlessBaseEnded(this.getSession(sessionId)) !== session ||
-        !this.isAdmittedForAutomation(session)
-      ) {
-        return "not-found";
-      }
-      if (session.livenessOwnerToken === undefined) {
-        return "already-unowned";
-      }
-      if (session.livenessOwnerToken !== ownerToken) {
-        return "not-owner";
-      }
-      // Tick adoption has no claim history. Fence all keeper ticks before the release write yields.
-      session.livenessOwnershipClaims ??= new Set<string>();
-      session.livenessOwnershipClaims.add(ownerToken);
-      const previousOwnerBoundAt = session.livenessOwnerBoundAt;
-      session.livenessOwnerToken = undefined;
-      session.livenessOwnerBoundAt = undefined;
-      // Fence an older heartbeat write's failure rollback across the handoff.
-      session.activityGeneration++;
-      try {
-        await this.deviceSessionRepository.recordLivenessOwnership(sessionId, null);
-      } catch (error) {
-        session.livenessOwnerToken = ownerToken;
-        session.livenessOwnerBoundAt = previousOwnerBoundAt;
-        if (!this.isAdmittedForAutomation(session)) {
-          return "not-found";
-        }
-        throw error;
-      }
-      return "released";
-    });
-  }
-
-  private livenessOwnershipClaimMutexFor(session: Session): Mutex {
-    const existing = this.livenessOwnershipClaimMutexes.get(session);
-    if (existing) {
-      return existing;
-    }
-    const mutex = new Mutex();
-    this.livenessOwnershipClaimMutexes.set(session, mutex);
-    return mutex;
-  }
-
-  /** Record a claim {@link decideLivenessClaim} let win. Runs inside the claim mutex. */
-  private async takeLivenessOwnership(
-    session: Session,
-    ownerToken: string,
-    processedClaims: Set<string>,
-  ): Promise<LivenessClaimOutcome> {
-    const previousOwnerToken = session.livenessOwnerToken;
-    const previousOwnerHeartbeat = session.lastOwnerHeartbeat;
-    const previousOwnerBoundAt = session.livenessOwnerBoundAt;
-    const alreadyProcessed = processedClaims.has(ownerToken);
-    processedClaims.add(ownerToken);
-    session.livenessOwnerToken = ownerToken;
-    session.livenessOwnerBoundAt = undefined;
-    // Stamp the lease in the same step as the takeover, still inside the claim mutex. The
-    // request handler records the claimant's heartbeat several awaits later; until then a second
-    // foreign claimant would read the previous, lapsed lease and displace this one (#10050).
-    session.lastOwnerHeartbeat = this.sessionNow();
-    try {
-      await this.persistNewLivenessOwnershipClaim(
-        session,
-        ownerToken,
-        { previousOwnerToken, previousOwnerHeartbeat, previousOwnerBoundAt },
-        processedClaims,
-      );
-    } catch (error) {
-      if (alreadyProcessed) {
-        processedClaims.add(ownerToken);
-      }
-      if (!this.isAdmittedForAutomation(session)) {
-        // The session's release won the race with this claim: its row is no longer active, so
-        // the ownership write matched nothing. The session is gone, as the claim reports.
-        logger.info(
-          `Liveness ownership claim for session ${session.sessionId} lost to its release: ` +
-            errorMessage(error),
-        );
-        return "not-found";
-      }
-      throw error;
-    }
-    return "claimed";
-  }
-
   /**
    * The current owner's hold on the session, judged as a claim is (on the owner's own
    * heartbeats), for a refused claim to report (#10701). For a derived label session it is the
@@ -11970,7 +9708,7 @@ export class SessionManager {
    */
   getOwnerLeaseHold(sessionId: string): LivenessOwnerHold | undefined {
     const named = this.sessions.get(sessionId);
-    const base = named ? this.livenessBaseSession(named) : undefined;
+    const base = named ? this.liveness.livenessBaseSession(named) : undefined;
     const session =
       named &&
       base &&
@@ -12060,7 +9798,7 @@ export class SessionManager {
     const releasingBaseId =
       baseId === session.sessionId ? this.getBaseSessionOfDerivedLabel(session.sessionId) : baseId;
     const base =
-      this.livenessBaseSession(session) ??
+      this.liveness.livenessBaseSession(session) ??
       (releasingBaseId === undefined ? undefined : this.getReleasingSession(releasingBaseId));
     if (
       !base ||
@@ -12391,297 +10129,6 @@ export class SessionManager {
     }
   }
 
-  private async persistNewLivenessOwnershipClaim(
-    session: Session,
-    ownerToken: string,
-    previous: {
-      previousOwnerToken: string | undefined;
-      previousOwnerHeartbeat: number | undefined;
-      previousOwnerBoundAt: number | undefined;
-    },
-    processedClaims: Set<string>,
-  ): Promise<void> {
-    const settleClaimantHeartbeat = this.markAcceptedClaimantHeartbeating(session);
-    try {
-      await this.deviceSessionRepository.recordLivenessOwnership(session.sessionId, ownerToken);
-    } catch (error) {
-      processedClaims.delete(ownerToken);
-      session.livenessOwnerToken = previous.previousOwnerToken;
-      session.lastOwnerHeartbeat = previous.previousOwnerHeartbeat;
-      session.livenessOwnerBoundAt = previous.previousOwnerBoundAt;
-      settleClaimantHeartbeat("undo");
-      throw error;
-    }
-    settleClaimantHeartbeat("keep");
-  }
-
-  /**
-   * An accepted claim is its owner's heartbeat (#11646). The claim arrives on the proxy's first
-   * heartbeat, and the request handler records that heartbeat only after the ownership row write
-   * resolves; until then the monitor would judge the session as one that never heartbeated, or
-   * one still awaiting its rehydrated owner, and release it although its owner is live. The fact
-   * is in-memory and set before the write, so a slow database stays off the heartbeat path
-   * (#11079); the lease itself was stamped with the takeover, and is what the session is judged
-   * on from here. Called only for an accepted claim, so a refused one changes nothing.
-   *
-   * Returns how the claim settles. "undo", for a claim whose write fails, leaves the session as
-   * unheard and as unclaimed as the claim found it; a heartbeat or tool call recorded while the
-   * write was pending moved the activity generation and stands on its own, so the undo leaves it
-   * alone. A rehydrated session's owner window (`awaitingOwnerSince`) stays in place while the
-   * write is pending, so the daemon's stall forgiveness keeps moving it and an undone claim
-   * returns to the forgiven window, not the one the claim found; it is dropped once the
-   * promotion stands.
-   */
-  private markAcceptedClaimantHeartbeating(session: Session): (outcome: "keep" | "undo") => void {
-    const { hasReceivedHeartbeat, ownership, activityGeneration } = session;
-    session.hasReceivedHeartbeat = true;
-    if (ownership === "awaiting-owner") {
-      session.ownership = "owned";
-    }
-    return (outcome) => {
-      if (outcome === "undo" && session.activityGeneration === activityGeneration) {
-        session.hasReceivedHeartbeat = hasReceivedHeartbeat;
-        session.ownership = ownership;
-        return;
-      }
-      if (ownership === "awaiting-owner" && session.ownership === "owned") {
-        session.awaitingOwnerSince = undefined;
-      }
-    };
-  }
-
-  /** Return whether `ownerToken` is still authorized to refresh the session. */
-  hasLivenessOwnership(sessionId: string, ownerToken: string): boolean {
-    return this.unlessBaseEnded(this.getSession(sessionId))?.livenessOwnerToken === ownerToken;
-  }
-
-  /**
-   * Recover daemon-local liveness ownership after restart without allowing a
-   * keeper to replace an owner that was established by this daemon instance.
-   * Decided by {@link mayAdoptUnownedLiveness}: a derived label session is not adopted past
-   * another token that holds its base (#11602).
-   */
-  claimUnownedLivenessOwnership(sessionId: string, ownerToken: string): boolean {
-    const session = this.unlessBaseEnded(this.getSession(sessionId));
-    if (!session || !this.adoptUnownedLivenessOwnerToken(session, ownerToken)) {
-      return false;
-    }
-    session.lastOwnerHeartbeat = this.sessionNow();
-    return true;
-  }
-
-  /** Bind acquisition identity and its claim-only lease start; no heartbeat or release changes. */
-  bindAcquiredLivenessOwnerToken(sessionId: string, ownerToken: string): boolean {
-    const session = this.peekSession(sessionId);
-    if (!session || !this.adoptUnownedLivenessOwnerToken(session, ownerToken)) {
-      return false;
-    }
-    session.livenessOwnerBoundAt = this.sessionNow();
-    return true;
-  }
-
-  private adoptUnownedLivenessOwnerToken(session: Session, ownerToken: string): boolean {
-    const base = this.livenessBaseSession(session);
-    const adopt = mayAdoptUnownedLiveness({
-      claimantToken: ownerToken,
-      session: this.livenessOwnerView(session),
-      sessionHasClaimHistory: Boolean(session.livenessOwnershipClaims?.size),
-      base: base ? this.livenessOwnerView(base) : undefined,
-    });
-    if (!adopt) {
-      return false;
-    }
-    session.livenessOwnerToken = ownerToken;
-    session.livenessOwnerBoundAt = undefined;
-    this.persistAdoptedLivenessOwnerToken(session);
-    return true;
-  }
-
-  private persistAdoptedLivenessOwnerToken(session: Session): void {
-    void this.getBarrier()
-      .track(() =>
-        this.livenessOwnershipClaimMutexFor(session).runExclusive(async () => {
-          if (
-            this.peekSession(session.sessionId) !== session ||
-            !this.isAdmittedForAutomation(session) ||
-            !session.livenessOwnerToken
-          ) {
-            return;
-          }
-          // Read under the claim mutex: a queued adoption must not restore an older owner.
-          await this.deviceSessionRepository.replaceLivenessOwnership(
-            session.sessionId,
-            session.livenessOwnerToken,
-          );
-        }),
-      )
-      .catch((error) => {
-        if (error instanceof DeviceSessionNotActiveError) {
-          // The row may have been released or not yet activated; in-memory adoption still stands.
-          logger.debug("[SessionManager] Adopted liveness owner row is no longer active");
-          return;
-        }
-        // Persistence is best-effort; omit error details because they may contain the token.
-        logger.warn("[SessionManager] Failed to persist adopted liveness ownership");
-      });
-  }
-
-  /**
-   * Move a session onto the CLI liveness policy and record a heartbeat (#6870).
-   *
-   * Called when a one-shot `--cli` process declares ownership of the session it
-   * just minted or joined. From here on the heartbeat monitor stops applying the
-   * 10 s contract (which no one-shot process can keep between invocations) and
-   * reaps the session only after {@link getCliSessionIdleTimeoutMs} of wall-clock
-   * idleness. Returns false when the session is unknown — the CLI's declaration
-   * is best-effort and must never fail the tool call that carried it.
-   */
-  adoptCliLivenessPolicy(sessionId: string, requestedIdleTimeoutMs?: number): boolean {
-    const session = this.unlessBaseEnded(this.getSession(sessionId));
-    if (!session) {
-      logger.warn(`Cannot adopt CLI liveness policy for session ${sessionId}: not found`);
-      return false;
-    }
-    if (session.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY) {
-      // A managed execution's proxy owns this session for the execution's lifetime (#11176); a
-      // one-shot CLI declaration must not widen it onto a heartbeat-free idle policy.
-      logger.warn(
-        `Refusing the CLI liveness policy for managed-execution session ${sessionId}; it stays on its owner lease`,
-      );
-      return false;
-    }
-    // A `--cli` invocation reuses whatever daemon is already running, so the
-    // daemon process environment cannot be the only source of the idle timeout:
-    // the invocation sends its own resolved (and here re-validated, bounded)
-    // value, and only an absent/unusable one falls back to this process's env
-    // (issue #6870 review).
-    const idleTimeoutMs =
-      sanitizeRequestedCliIdleTimeoutMs(requestedIdleTimeoutMs) ??
-      Math.min(resolveCliSessionIdleTimeoutMs(), MAX_CLI_SESSION_IDLE_TIMEOUT_MS);
-    if (session.livenessPolicy === "heartbeat") {
-      // Remember the strict contract exactly once, so a long-lived owner taking
-      // this UUID over can put the session back on it (issue #6870 review). A
-      // re-adoption must not overwrite the snapshot with the CLI's own widened
-      // values.
-      session.preCliLiveness = {
-        heartbeatTimeoutMs: session.heartbeatTimeoutMs,
-        heartbeatTimeoutSource: session.heartbeatTimeoutSource,
-        sessionTimeoutMs: session.sessionTimeoutMs,
-      };
-    }
-    session.livenessPolicy = "cli-idle";
-    session.heartbeatTimeoutMs = idleTimeoutMs;
-    // Widen the ordinary expiry deadline too. An autolocked session is created
-    // with a 60 s `sessionTimeoutMs`, and a later invocation's lookup expires a
-    // session past `expiresAt` — so leaving `expiresAt` on the 60 s clock would
-    // release a CLI-owned session long before the CLI idle timeout the policy
-    // promises. `Math.max` keeps adoption from ever *shortening* the deadline of
-    // a session that already had a longer one (a plain 30-minute session stays
-    // at 30 minutes; the cli-idle policy still reaps it at the idle timeout,
-    // which is the stricter of the two). The widened deadline is measured from
-    // the last tool call, never from this declaration (#10656).
-    session.sessionTimeoutMs = Math.max(session.sessionTimeoutMs, idleTimeoutMs);
-    widenIdleDeadlineFromLastActivity(session);
-    this.recordHeartbeat(sessionId);
-    logger.debug(
-      `Session ${sessionId} adopted the CLI liveness policy (idle timeout ${session.heartbeatTimeoutMs}ms)`,
-    );
-    return true;
-  }
-
-  /**
-   * Put a session on the `managed-execution` liveness policy (#11176) with its idle window: the
-   * launcher-trusted `idleTimeoutMs` (bounded 2–60 minutes) or the 2-minute default. Called by the
-   * broker binding acquisition once it holds the session (epic #11172 step 5); a re-adoption updates
-   * the window. The owner lease is unchanged, and the idle deadline is re-derived from the last
-   * tool activity, never from now, so adopting the policy is not device use (#10656).
-   *
-   * Throws `BindingConfigError` for an out-of-bounds window and `ActionableError` for an
-   * unknown session or a `cli-idle` one (a one-shot CLI session is not an execution's session).
-   * A failed durable write rolls the in-memory change back and throws.
-   */
-  async adoptManagedExecutionLivenessPolicy(
-    sessionId: string,
-    options: { idleTimeoutMs?: number } = {},
-  ): Promise<Session> {
-    const idleTimeoutMs = resolveManagedExecutionIdleTimeoutMs(options.idleTimeoutMs);
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new ActionableError(
-        `Cannot hold session ${sessionId} for a managed execution: the session is not active.`,
-      );
-    }
-    if (session.livenessPolicy === "cli-idle") {
-      throw new ActionableError(
-        `Cannot hold session ${sessionId} for a managed execution: it is owned by a one-shot CLI.`,
-      );
-    }
-    const previous = {
-      livenessPolicy: session.livenessPolicy,
-      sessionTimeoutMs: session.sessionTimeoutMs,
-      expiresAt: session.expiresAt,
-    };
-    session.livenessPolicy = MANAGED_EXECUTION_LIVENESS_POLICY;
-    session.sessionTimeoutMs = idleTimeoutMs;
-    rebaseIdleDeadlineOnLastActivity(session);
-    session.activityGeneration++;
-    const capturedGeneration = session.activityGeneration;
-    try {
-      await this.recordSessionActivity(session);
-    } catch (error) {
-      // Only the latest change may roll back, so an older failure cannot clobber newer state.
-      if (session.activityGeneration === capturedGeneration) {
-        Object.assign(session, previous);
-      }
-      throw error;
-    }
-    logger.info(
-      `Session ${sessionId} is held for a managed execution (idle window ${idleTimeoutMs}ms)`,
-    );
-    return session;
-  }
-
-  /**
-   * Put a CLI-adopted session back on the strict heartbeat contract (#6870).
-   *
-   * `adoptCliLivenessPolicy` is sticky by design — a one-shot process is gone by
-   * the time the next invocation arrives — but a long-lived stdio/HTTP proxy
-   * that later owns the same session UUID *can* keep the 10 s contract, and its
-   * heartbeats say so. Without this, that session would stay on the minutes-long
-   * idle window and keep holding its device for the whole window after the
-   * long-lived client disconnects. Returns false when there was nothing to
-   * restore (unknown session, or one that never adopted the CLI policy).
-   */
-  restoreHeartbeatLivenessPolicy(sessionId: string): boolean {
-    const session = this.unlessBaseEnded(this.getSession(sessionId));
-    if (!session || session.livenessPolicy !== "cli-idle") {
-      return false;
-    }
-    // Defensive fallback: a session that is somehow on the CLI policy without a
-    // snapshot (a future recovery path that persists the policy) must still come
-    // back to a strict timeout rather than keep the minutes-long one.
-    const snapshot: PreCliLivenessSnapshot = session.preCliLiveness ?? {
-      heartbeatTimeoutMs: getDefaultSessionHeartbeatTimeoutMs(),
-      heartbeatTimeoutSource: "default",
-      sessionTimeoutMs: session.sessionTimeoutMs,
-    };
-    session.livenessPolicy = "heartbeat";
-    session.heartbeatTimeoutMs = snapshot.heartbeatTimeoutMs;
-    session.heartbeatTimeoutSource = snapshot.heartbeatTimeoutSource;
-    session.sessionTimeoutMs = snapshot.sessionTimeoutMs;
-    delete session.preCliLiveness;
-    // Re-derive the idle deadline from the restored (shorter) timeout, so the
-    // widened deadline adoption installed does not outlive the policy that
-    // justified it. It is measured from the last tool call: this heartbeat
-    // proves liveness, not use, and must not extend it (#10656).
-    rebaseIdleDeadlineOnLastActivity(session);
-    this.recordHeartbeat(sessionId);
-    logger.debug(
-      `Session ${sessionId} restored the heartbeat liveness policy (timeout ${session.heartbeatTimeoutMs}ms)`,
-    );
-    return true;
-  }
-
   /**
    * Clear session cache (for specific key or all)
    */
@@ -12939,11 +10386,10 @@ export class SessionManager {
     }
     this.sessions.delete(sessionId);
     this.slotShadowProbe.check(sessionId, "unpublished");
-    this.endedLabelBases.delete(sessionId);
+    this.planLabels.clearEndedBase(sessionId);
     // The session ended: its row is no longer rewritten live, and no retry timer outlives it.
     this.settleOwedSupersededRowReassert(session);
-    this.networkConditionGeneration.delete(sessionId);
-    this.networkConditionMutationQueues.delete(sessionId);
+    this.stateRestore.forgetSession(sessionId);
     if (ownedDevice) {
       // Generation only: removing an owner leaves this device's screen/connection intact.
       // Any restore, removal or disconnect separately publishes its full boundary.
@@ -13049,11 +10495,7 @@ export class SessionManager {
     }
     // Cancel any armed per-condition network TTLs so a stopped manager leaves no
     // dangling timer (issue #6085 item 2).
-    for (const entry of this.networkConditionExpiryTimers.values()) {
-      this.timer.clearTimeout(entry.handle);
-    }
-    this.networkConditionExpiryTimers.clear();
-    this.iosAppNetworkLeases.stopAll();
+    this.stateRestore.stopAll();
     this.rowWriter.clearPendingNonTerminalReleases();
     this.supersededRowsUnderPendingRelease.clear();
   }

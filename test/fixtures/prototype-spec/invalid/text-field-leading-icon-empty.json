@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "lead",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "q": "x"
+    },
+    "root": {
+      "type": "textField",
+      "stateKey": "q",
+      "leadingIcon": ""
+    }
+  },
+  "expectedPath": "root.leadingIcon"
+}

@@ -123,7 +123,7 @@ describe("idle release while the holder's device call is in flight", () => {
     sessionManager.onSessionRelease((_sessionId, _deviceId, reason) => {
       releases.push(reason);
     });
-    await sessionManager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     await heartbeat(true);
 
     const blocked = new Promise<void>((resolve) => {

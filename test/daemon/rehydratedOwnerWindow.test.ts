@@ -30,9 +30,10 @@ async function rehydratedDaemon() {
   const timer = new FakeTimer();
   const daemon = new Daemon(
     {},
-    undefined,
-    timer,
-    new DeviceSessionRepository(await createTestDatabase(), timer),
+    {
+      timer,
+      deviceSessionRepository: new DeviceSessionRepository(await createTestDatabase(), timer),
+    },
   );
   const sessionManager = daemon.getSessionManager();
   const internals = daemon as unknown as DaemonMonitorInternals;
@@ -40,16 +41,9 @@ async function rehydratedDaemon() {
   const unsubscribe = SessionReleaseBroadcaster.subscribe((_sessionId, reason) => {
     released.push(reason ?? "");
   });
-  await sessionManager.createSession(
-    "rehydrated",
-    "emulator-5554",
-    "android",
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    "awaiting-owner",
-  );
+  await sessionManager.createSession("rehydrated", "emulator-5554", "android", {
+    initialOwnership: "awaiting-owner",
+  });
   timer.advanceTime(STARTUP_AFTER_REHYDRATION_MS);
   internals.startHeartbeatMonitor();
   const stop = () => {

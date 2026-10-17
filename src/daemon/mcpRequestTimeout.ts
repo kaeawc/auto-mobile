@@ -924,6 +924,24 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   );
 }
 
+const resolvedTimeouts = new WeakMap<DaemonRequest, number>();
+
+/**
+ * {@link resolveMcpRequestTimeoutMs} once per request object (#11817). The control socket asks for
+ * the budget at frame parse, at admission and again inside each input handler; for `executePlan`
+ * that is a YAML parse of the plan each time. The frame is immutable once parsed, so the first
+ * answer holds for every later reader of the same request.
+ */
+export function resolveMcpRequestTimeoutMsOnce(request: DaemonRequest): number {
+  const known = resolvedTimeouts.get(request);
+  if (known !== undefined) {
+    return known;
+  }
+  const resolved = resolveMcpRequestTimeoutMs(request);
+  resolvedTimeouts.set(request, resolved);
+  return resolved;
+}
+
 /**
  * Hard ceiling on how far a progress-emitting request's deadline can be
  * pushed out by its own progress notifications (issue #6222 review, P1). A

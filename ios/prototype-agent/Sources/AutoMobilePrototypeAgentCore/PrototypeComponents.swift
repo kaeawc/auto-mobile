@@ -106,6 +106,10 @@ extension PrototypeNode {
     private func part(named wanted: String, state: [String: JSONValue]) -> PrototypeTapTarget? {
         guard let identifier, wanted.hasPrefix(identifier + ".") else { return nil }
         let name = String(wanted.dropFirst(identifier.count + 1))
+        if let swipeActions, name.hasPrefix("swipe."), let index = Int(name.dropFirst("swipe.".count)) {
+            let entries = swipeActions.entries
+            return entries.indices.contains(index) ? .swipeAction(entries[index].action) : nil
+        }
         switch type {
         case "dialog", "snackbar":
             guard openWhen?.holds(state) ?? false else { return nil }
@@ -159,6 +163,8 @@ enum PrototypeTapTarget {
     case menuItem(PrototypeNode, PrototypeMenuEntry)
     /// A `topAppBar` navigation icon or action.
     case appBarButton(PrototypeAppBarAction)
+    /// A revealed `swipeActions` button of a row or listItem.
+    case swipeAction(PrototypeSwipeAction)
     /// One `radioGroup` or `segmentedButton` option.
     case option(PrototypeNode, PrototypeOption)
 }
@@ -181,6 +187,8 @@ extension PrototypeSession {
         case let .appBarButton(button):
             guard let actions = button.onTap, !actions.isEmpty else { return nil }
             return run(actions)
+        case let .swipeAction(action):
+            return run(action.onTap)
         case let .option(node, option):
             guard isEnabled(node) else { return [] }
             guard let key = node.stateKey else { return nil }

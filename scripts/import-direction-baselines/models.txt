@@ -1,0 +1,15 @@
+src/models/ActionableError.ts -> src/server/elementSelectorSchemas
+src/models/BootedDeviceDiscoveryIncompleteError.ts -> src/devices/deviceUtils
+src/models/DeviceInfo.ts -> src/features/device/virtualDeviceCapabilities
+src/models/EmulatorLaunchCancelledError.ts -> src/utils/HostCommandExecutor
+src/models/ImageRelativePoint.ts -> src/features/observe/screenshot/observeCrop
+src/models/ImageRelativePoint.ts -> src/features/observe/screenshot/rasterGeometry
+src/models/ObserveResult.ts -> src/features/observe/IdentifyMediaViews
+src/models/ObserveResult.ts -> src/features/observe/ObserveError
+src/models/ObserveResult.ts -> src/features/observe/SnapshotReferenceStore
+src/models/ObserveResult.ts -> src/features/performance/PerformanceAudit
+src/models/ObserveResult.ts -> src/utils/interfaces/NavigationGraph
+src/models/PackageSigningInspection.ts -> src/utils/android-cmdline-tools/apkSigningBlock
+src/models/ScreenshotResult.ts -> src/features/observe/ScreenshotMetadata
+src/models/TapOnElementResult.ts -> src/features/talkback/TalkBackTapStrategy
+src/models/ViewHierarchyResult.ts -> src/features/prototype/prototypeHidden

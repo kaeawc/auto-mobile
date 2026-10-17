@@ -18,10 +18,12 @@ describe("ide/* admission table", () => {
     ]);
   });
 
-  test("every classified method has a handler case in the server", () => {
-    const source = readFileSync("src/daemon/socketServer.ts", "utf8");
+  test("every classified method has a handler entry in the server", () => {
+    const source = ["src/daemon/socketServer.ts", "src/daemon/socketServer/ideRouteModule.ts"]
+      .map((file) => readFileSync(file, "utf8"))
+      .join("\n");
     for (const method of Object.keys(IDE_ROUTE_ADMISSION)) {
-      expect(source).toContain(`case "${method}":`);
+      expect(source).toMatch(new RegExp(`\\[\\s*"${method}",`));
     }
   });
 

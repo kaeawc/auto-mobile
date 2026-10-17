@@ -272,6 +272,19 @@ internal object PrototypeBindableFields {
       return null
     }
 
+    /** Swipe action labels and actions on a row or listItem bind like any other part. */
+    fun swipeParts(node: JsonObject, path: String): T? {
+      val swipe = node["swipeActions"] as? JsonObject ?: return null
+      for (side in listOf("start", "end")) {
+        for ((entry, entryPath) in objects(swipe, side, "$path.swipeActions")) {
+          part(entry, entryPath)?.let {
+            return it
+          }
+        }
+      }
+      return null
+    }
+
     /** A `{label, onTap?}` part (dialog or snackbar button, app bar action). */
     fun part(value: JsonElement?, path: String): T? {
       val part = value as? JsonObject ?: return null
@@ -382,6 +395,7 @@ internal object PrototypeBindableFields {
         }
         ?: actions(node, path)
         ?: refreshActions(node, path)
+        ?: swipeParts(node, path)
         ?: keys(node, path)
     }
   }

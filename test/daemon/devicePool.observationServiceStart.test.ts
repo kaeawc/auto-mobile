@@ -1,3 +1,4 @@
+import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { observationServiceStartHarness } from "../helpers/observationServiceStartHarness";
@@ -153,7 +154,8 @@ test.each([
   "recoveringSessionLosses",
 ])("declines %s transition", async (kind) => {
   const h = await harness();
-  const state = Reflect.get(h.pool, kind);
+  // Coordinator and ledger state first; pool-level fields otherwise.
+  const state = Reflect.get(recoveryInternals(h.pool), kind) ?? Reflect.get(h.pool, kind);
   if (kind === "recoveringAndroidDeviceIds") {
     state.add(h.device.deviceId);
   }

@@ -33,7 +33,12 @@
               "type": "text",
               "text": "{\"message\":\"Active device set to 'emulator-5554'\",\"deviceId\":\"emulator-5554\",\"sessionUuid\":\"a0000000-0000-4000-8000-00000000000a\"}"
             }
-          ]
+          ],
+          "structuredContent": {
+            "message": "Active device set to 'emulator-5554'",
+            "deviceId": "emulator-5554",
+            "sessionUuid": "a0000000-0000-4000-8000-00000000000a"
+          }
         }
       }
     },
@@ -209,7 +214,12 @@
               "type": "text",
               "text": "{\"message\":\"Active device set to 'emulator-5554'\",\"deviceId\":\"emulator-5554\",\"sessionUuid\":\"d0000000-0000-4000-8000-000000000001\"}"
             }
-          ]
+          ],
+          "structuredContent": {
+            "message": "Active device set to 'emulator-5554'",
+            "deviceId": "emulator-5554",
+            "sessionUuid": "d0000000-0000-4000-8000-000000000001"
+          }
         }
       }
     },

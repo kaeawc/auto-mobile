@@ -17,7 +17,6 @@ src/devices/DeviceSessionManager.ts -> src/server/appearanceSessionKey
 src/devices/DeviceSessionManager.ts -> src/server/applyAppearanceOnConnect
 src/devices/DeviceSessionManager.ts -> src/server/deviceExecutionBinding
 src/devices/androidDeviceReboot.ts -> src/features/bootAdmission/BootAdmissionGate
-src/devices/coldBootProcessTermination.ts -> src/daemon/lockOwnerGeneration
 src/devices/deviceBootService.ts -> src/daemon/deviceAcquisitionRefusals
 src/devices/deviceBootService.ts -> src/features/bootAdmission/sharedBootAdmissionGates
 src/devices/deviceUtils.ts -> src/features/bootAdmission/sharedBootAdmissionGates
@@ -25,6 +24,5 @@ src/devices/deviceUtils.ts -> src/features/iosSimFleet/IosBootInstrumentation
 src/devices/deviceUtils.ts -> src/features/iosSimFleet/defaultIosBootInstrumentation
 src/devices/exactDeviceProvisioning.ts -> src/daemon/sessionBroker/provisioning/refusal
 src/devices/exactDeviceProvisioning.ts -> src/server/provisionDeviceRecoveryEvidence
-src/devices/hostEmulatorProcessStopper.ts -> src/daemon/lockOwnerGeneration
 src/devices/hostEmulatorProcessStopper.ts -> src/features/bootAdmission/procProcessTable
 src/devices/hostEmulatorProcessStopper.ts -> src/features/bootAdmission/processTableRetry

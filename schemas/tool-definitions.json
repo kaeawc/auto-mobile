@@ -723,6 +723,78 @@
         }
       },
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "changes": {
+          "type": "object",
+          "properties": {
+            "locale": {
+              "type": "string"
+            },
+            "timeZone": {
+              "type": "string"
+            },
+            "textDirection": {
+              "type": "string",
+              "enum": ["ltr", "rtl"]
+            },
+            "timeFormat": {
+              "type": "string",
+              "enum": ["12", "24"]
+            },
+            "calendarSystem": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": {}
+        },
+        "intentBroadcast": {
+          "type": "boolean"
+        },
+        "localeScope": {
+          "type": "string",
+          "enum": ["app", "system"]
+        },
+        "localeAppId": {
+          "type": "string"
+        },
+        "localeMethod": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "timeZoneWarning": {
+          "type": "string"
+        },
+        "iosLiveChanges": {
+          "type": "object",
+          "properties": {
+            "springBoardRestarted": {
+              "type": "boolean"
+            },
+            "notificationPosted": {
+              "type": "boolean"
+            },
+            "appRestarted": {
+              "type": "boolean"
+            }
+          },
+          "required": ["springBoardRestarted", "notificationPosted"],
+          "additionalProperties": {}
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "changes", "intentBroadcast"],
+      "additionalProperties": {}
     }
   },
   {
@@ -1268,6 +1340,150 @@
         }
       },
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "supported": {
+          "type": "object",
+          "properties": {
+            "fontScale": {
+              "type": "boolean"
+            },
+            "density": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "partial"
+                }
+              ]
+            },
+            "theme": {
+              "type": "boolean"
+            }
+          },
+          "required": ["fontScale", "density", "theme"],
+          "additionalProperties": {}
+        },
+        "current": {
+          "type": "object",
+          "properties": {
+            "fontScale": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "const": "default"
+                }
+              ]
+            },
+            "density": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": ["smaller", "default", "larger"]
+                }
+              ]
+            },
+            "theme": {
+              "type": "string",
+              "enum": ["light", "dark", "system", "custom"]
+            }
+          },
+          "additionalProperties": {}
+        },
+        "applied": {
+          "type": "object",
+          "properties": {
+            "fontScale": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "const": "default"
+                }
+              ]
+            },
+            "density": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": ["smaller", "default", "larger"]
+                }
+              ]
+            },
+            "theme": {
+              "type": "string",
+              "enum": ["light", "dark", "system", "custom"]
+            }
+          },
+          "additionalProperties": {}
+        },
+        "previous": {
+          "type": "object",
+          "properties": {
+            "fontScale": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "const": "default"
+                }
+              ]
+            },
+            "density": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "enum": ["smaller", "default", "larger"]
+                }
+              ]
+            },
+            "theme": {
+              "type": "string",
+              "enum": ["light", "dark", "system", "custom"]
+            }
+          },
+          "additionalProperties": {}
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "deviceId", "platform", "supported"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/deviceReadOnlyArgs": [
@@ -30700,6 +30916,33 @@
       },
       "required": ["deviceId"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "sessionUuid": {
+          "type": "string"
+        },
+        "displayPin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["message", "deviceId"],
+      "additionalProperties": {}
     }
   },
   {

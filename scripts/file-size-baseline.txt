@@ -11,7 +11,7 @@
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8441	src/daemon/devicePool.ts
 1011	src/daemon/deviceRuntimeIdentity.ts
-4159	src/daemon/manager.ts
+4263	src/daemon/manager.ts
 1566	src/daemon/sessionBroker/provisioning/executionRelease.ts
 2558	src/daemon/sessionBroker/provisioning/reconciler.ts
 1594	src/daemon/sessionBroker/registry/bindingJournal.ts
@@ -39,7 +39,6 @@
 1887	src/features/action/TapAnyElement.ts
 1424	src/features/action/TapAtCoordinate.ts
 4312	src/features/action/TapOnElement.ts
-1040	src/features/action/sendkeys/DefaultSendKeysCommandExecutor.ts
 1420	src/features/action/swipeon/ScrollUntilVisible.ts
 1833	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
@@ -80,13 +79,12 @@
 1266	src/server/deviceToolsStartDevice.ts
 1170	src/server/executionTracker.ts
 1645	src/server/finalizeToolResponse.ts
-1878	src/server/index.ts
 3152	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts
 2875	src/server/prototypeTools.ts
 1884	src/server/toolOutputSchemas.ts
 1301	src/server/toolRegistry.ts
-1048	src/server/utilityTools.ts
+1050	src/server/utilityTools.ts
 2185	src/server/videoRecordingManager.ts
 1459	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts

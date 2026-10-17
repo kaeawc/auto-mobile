@@ -1,8 +1,7 @@
-import {
-  execFileSync as nodeExecFileSync,
-  type ChildProcess,
-  type SpawnOptions,
-} from "node:child_process";
+import type {
+  HostChildProcess as ChildProcess,
+  HostSpawnOptions as SpawnOptions,
+} from "../utils/HostCommandExecutor";
 import {
   closeSync,
   constants as fsConstants,
@@ -16,6 +15,10 @@ import { ActionableError } from "../models";
 import { trackProcess, waitForExit, type TrackedChildProcess } from "../utils/ChildProcessTracker";
 import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";
 import { releaseVersion } from "../utils/mcpVersion";
+export {
+  runDaemonProcessCommand,
+  type DaemonProcessCommandRunner,
+} from "../utils/daemonProcessCommand";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -190,26 +193,6 @@ export interface DaemonLaunchedProcess extends TrackedChildProcess {
   unref(): void;
   stderr: Pick<NonNullable<ChildProcess["stderr"]>, "on" | "off" | "pause" | "resume"> | null;
 }
-
-/** Injectable synchronous argv-first boundary for bounded daemon process probes. */
-export type DaemonProcessCommandRunner = (
-  command: string,
-  args: readonly string[],
-  options: { timeout: number; env: NodeJS.ProcessEnv },
-) => string;
-
-/**
- * Runs a bounded daemon process probe without a shell.
- *
- * Daemon execution belongs here so callers retain narrow test seams without
- * introducing direct child-process invocations elsewhere in `src/daemon`.
- */
-export const runDaemonProcessCommand: DaemonProcessCommandRunner = (command, args, options) =>
-  nodeExecFileSync(command, args, {
-    encoding: "utf-8",
-    timeout: options.timeout,
-    env: options.env,
-  });
 
 /** Signals or probes the dedicated process group created by a detached POSIX spawn. */
 export type DaemonProcessGroupKiller = (pid: number, signal: NodeJS.Signals | 0) => void;

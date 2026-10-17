@@ -175,7 +175,7 @@ interface ToolRegistrationOptions {
 }
 
 /** Options for a plain (non-device) tool. */
-interface PlainToolOptions extends ToolRegistrationOptions {
+export interface PlainToolOptions extends ToolRegistrationOptions {
   /**
    * The plain tool's read/control classification (#11107): true for a read, a per-args classifier
    * for a mixed tool, absent for control. A read naming a session is admitted read-only: it never

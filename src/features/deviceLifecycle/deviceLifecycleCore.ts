@@ -6,7 +6,7 @@
  * moved verbatim.
  */
 import { deviceReservedForRestartRecoveryError } from "../../daemon/inputDeviceOwnership";
-import { holderOf } from "../../daemon/deviceBinding";
+import { type BindingFields, holderOf } from "../../daemon/deviceBinding";
 import { ActionableError, BootedDevice, DeviceInfo, SomePlatform, Platform } from "../../models";
 import {
   type DevicePool,
@@ -4392,7 +4392,7 @@ export function liveHolderOtherThanThisRequest(deviceId: string): string | undef
     return undefined;
   }
   const holder = holderOf(daemonState.getDevicePool().getDevice(deviceId));
-  if (!holder || !daemonState.getSessionManager().getSession(holder)) {
+  if (!holder || !daemonState.getSessionManager().findSession(holder)) {
     return undefined;
   }
   const receipt = requestAcquisitionReceipt();
@@ -5709,11 +5709,16 @@ export function createRunnerReadinessAttempt(
 }
 
 export function captureSystemUiAnrInitialHolder(
-  input: StartDeviceRunnerReadinessInput,
-  devicePool: DevicePool | undefined,
+  input: {
+    boot: { device: { deviceId: string } };
+    daemonState: { getSessionManager(): Pick<SessionManager, "findSession"> };
+  },
+  devicePool:
+    | { getDevice(id: string): Pick<BindingFields, "sessionId"> | null | undefined }
+    | undefined,
 ): string | undefined {
   const sessionId = holderOf(devicePool?.getDevice(input.boot.device.deviceId));
-  return sessionId && input.daemonState.getSessionManager().getSession(sessionId)
+  return sessionId && input.daemonState.getSessionManager().findSession(sessionId)
     ? sessionId
     : undefined;
 }

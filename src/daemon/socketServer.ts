@@ -56,7 +56,7 @@ import {} from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
 import type { RefusedOwnedSessionRestore } from "./devicePool";
 import { GestureOwnershipRegistry } from "./gestureOwnership";
-import { resolveMcpRequestTimeoutMs, ProgressExtendableDeadline } from "./mcpRequestTimeout";
+import { resolveMcpRequestTimeoutMsOnce, ProgressExtendableDeadline } from "./mcpRequestTimeout";
 import { McpOverloadError, McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -1631,7 +1631,7 @@ export class UnixSocketServer {
         terminal: false,
         idleDeadline: controlFrame
           ? undefined
-          : new ProgressExtendableDeadline(receivedAtMs, resolveMcpRequestTimeoutMs(request)),
+          : new ProgressExtendableDeadline(receivedAtMs, resolveMcpRequestTimeoutMsOnce(request)),
       };
       pending = tracked;
       this.pendingSocketRequests.add(tracked);
@@ -2169,7 +2169,7 @@ export class UnixSocketServer {
       return this.cancelSocketRequest(session, request);
     }
 
-    const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+    const totalTimeoutMs = resolveMcpRequestTimeoutMsOnce(request);
     // Mutable: extended by progress notifications for this specific request
     // (see ProgressExtendableDeadline) -- untouched for a request that never
     // emits progress, which keeps its exact original deadline.
@@ -5795,7 +5795,7 @@ export class UnixSocketServer {
   ): { queueEnterMs: number; totalTimeoutMs: number } {
     return {
       queueEnterMs: input?.receivedAtMs ?? this.timer.now(),
-      totalTimeoutMs: resolveMcpRequestTimeoutMs(request),
+      totalTimeoutMs: resolveMcpRequestTimeoutMsOnce(request),
     };
   }
 

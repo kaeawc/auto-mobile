@@ -9,7 +9,7 @@
 6025	src/daemon/daemonMcpProxy.ts
 1730	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
-8458	src/daemon/devicePool.ts
+8441	src/daemon/devicePool.ts
 1011	src/daemon/deviceRuntimeIdentity.ts
 4159	src/daemon/manager.ts
 1566	src/daemon/sessionBroker/provisioning/executionRelease.ts
@@ -72,7 +72,7 @@
 1005	src/features/webrtc/WebRtcPublisher.ts
 2370	src/server/appFileService.ts
 1431	src/server/appResources.ts
-1530	src/server/appTools.ts
+1537	src/server/appTools.ts
 1985	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
 2530	src/server/deviceToolsProvisioning.ts

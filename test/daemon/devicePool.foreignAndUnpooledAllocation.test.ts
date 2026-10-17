@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -5,12 +6,9 @@ import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwner
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
 
@@ -55,16 +53,12 @@ describe("multi-device allocation on a shared host", () => {
 
   const setUp = async (pooled: string[], booted: string[] = pooled, bindBase = true) => {
     manager.bootedDevices = booted.map(android);
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "shared-host-test", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        foreignDeviceOwnership: ownership,
-        deviceHealthMarkers: markers,
-      }),
-    );
+    pool = makePool(sessions, "shared-host-test", {
+      timer,
+      deviceManager: manager,
+      foreignDeviceOwnership: ownership,
+      deviceHealthMarkers: markers,
+    });
     await pool.initializeWithDevices(pooled.map(android));
     if (bindBase) {
       await pool.bindOrReuseDeviceSession("base", pooled[0], "android");
@@ -301,15 +295,11 @@ describe("single-device allocation on a shared host", () => {
   const setUp = async (pooled: string[]) => {
     const manager = new FakeDeviceManager();
     manager.bootedDevices = pooled.map(android);
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "single-device-claim-test", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        foreignDeviceOwnership: ownership,
-      }),
-    );
+    pool = makePool(sessions, "single-device-claim-test", {
+      timer,
+      deviceManager: manager,
+      foreignDeviceOwnership: ownership,
+    });
     await pool.initializeWithDevices(pooled.map(android));
   };
 

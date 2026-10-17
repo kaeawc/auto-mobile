@@ -16,7 +16,7 @@ export {
   storageTelemetryInputFromWire,
   parseCtrlProxyJson,
 } from "./androidCtrlProxyInboundWire";
-import { screenshotPerformanceMetadataFrom } from "./androidCtrlProxyInboundWire";
+import {} from "./androidCtrlProxyInboundWire";
 
 import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
 
@@ -81,15 +81,8 @@ import {
   ForcedRestartBudget,
   type ForcedRestartSnapshot,
 } from "../../../ctrlProxy/ForcedRestartBudget";
-import {
-  NavigationGraphManager,
-  NavigationEvent,
-  type NavigationBuildContext,
-} from "../../navigation/NavigationGraphManager";
-import {
-  createContentHashProvider,
-  type ContentHashProvider,
-} from "../../../utils/ContentHashProvider";
+import { NavigationGraphManager, NavigationEvent } from "../../navigation/NavigationGraphManager";
+import { type ContentHashProvider } from "../../../utils/ContentHashProvider";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
@@ -104,12 +97,14 @@ import {
 } from "./AndroidServiceRecovery";
 import { AndroidHierarchyUpdateHandler } from "./AndroidHierarchyUpdateHandler";
 import { AndroidCtrlProxyDelegatingFacade } from "./AndroidCtrlProxyDelegatingFacade";
+import { AndroidDeviceStateSync } from "./AndroidDeviceStateSync";
+import { AndroidScreenshotCapture } from "./AndroidScreenshotCapture";
+import { AndroidActionDispatcher } from "./AndroidActionDispatcher";
+import { AndroidClientRequests } from "./AndroidClientRequests";
+import { AndroidBuildContextResolver } from "./AndroidBuildContextResolver";
+import { AndroidSdkScreenIdentityStore } from "./AndroidSdkScreenIdentityStore";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
-import {
-  WEBSOCKET_NOT_CONNECTED_MESSAGE,
-  sendCommand,
-  type SendCommandOptions,
-} from "../DeviceServiceUtils";
+import { WEBSOCKET_NOT_CONNECTED_MESSAGE, type SendCommandOptions } from "../DeviceServiceUtils";
 import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../utils/constants";
 import {
@@ -119,28 +114,13 @@ import {
 } from "../TrackedScreenGeometry";
 import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
 import { COORDINATE_SPACE_PX } from "../../../daemon/canonicalPixels";
+import { ScreenshotBackoffScheduler, ScreenshotCaptureResult } from "../ScreenshotBackoffScheduler";
 import {
-  ScreenshotBackoffScheduler,
-  ScreenshotCaptureResult,
-  computeChecksum,
-} from "../ScreenshotBackoffScheduler";
-import {
-  ANDROID_ADB_SCREENSHOT_METADATA,
   ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
-  metadataForScreenshotFormat,
-  type ScreenshotFallbackReason,
   type ScreenshotMetadata,
 } from "../ScreenshotMetadata";
-import {
-  CTRLPROXY_RATE_LIMITED_ERROR,
-  CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR,
-  fallbackReasonForCtrlProxyFailure,
-} from "./screenshotFallbackReason";
-import {
-  AndroidPhysicalDisplayIdResolver,
-  decodePngBase64Output,
-  withAndroidScreenshotCaptureLock,
-} from "./AndroidPhysicalDisplayId";
+import {} from "./screenshotFallbackReason";
+import { AndroidPhysicalDisplayIdResolver } from "./AndroidPhysicalDisplayId";
 import { type SdkAnrPayload, type SdkCrashPayload } from "../crash/sdkCrashIngestion";
 import {
   AndroidSdkEventIngestor,
@@ -161,9 +141,8 @@ import {
   registerDeviceIncarnationListener,
 } from "../../../utils/deviceIncarnation";
 import type { StackTraceElement } from "../../../server/failuresResources";
-import { NetworkState, simulationRemainingMs } from "../../../server/NetworkState";
+import {} from "../../../server/NetworkState";
 import {
-  buildNetworkMockRules,
   NETWORK_MOCK_REPORT_TIMEOUT_MS,
   type NetworkMockPushResult,
   type NetworkMockRuleSync,
@@ -199,7 +178,7 @@ import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
 import { errorMessage } from "../../../utils/describeUnknownError";
-import { screenshotTempIdToken } from "../../../utils/screenshot/screenshotFormats";
+import {} from "../../../utils/screenshot/screenshotFormats";
 import { shellQuote } from "../../../utils/shellQuote";
 import {
   FileCtrlProxyForwardLease,
@@ -264,11 +243,6 @@ import type {
   HierarchySyncDiagnostics,
   ObserverHierarchyRequestOptions,
 } from "./types";
-
-interface SdkRouteWaiter {
-  sinceMs: number;
-  settle(identity: ScreenIdentity | undefined): void;
-}
 
 /**
  * Interface for accessibility service providing Android UI hierarchy and interaction capabilities
@@ -723,10 +697,6 @@ export class AndroidCtrlProxyClient
   // current session's manager on every event), the set of apps whose resolution is
   // in flight, and a per-app generation bumped on package changes so a resolution
   // that started before an update can't apply a stale build.
-  private contentHashProvider: ContentHashProvider | null = null;
-  private resolvedBuildContexts: Map<string, NavigationBuildContext> = new Map();
-  private buildContextInFlight: Set<string> = new Set();
-  private buildContextGeneration: Map<string, number> = new Map();
 
   // Hierarchy caching (accessed by delegates via context)
   private cachedHierarchy: CachedHierarchy | null = null;
@@ -798,13 +768,7 @@ export class AndroidCtrlProxyClient
 
   // Hierarchy navigation detector
   private sdkNavigationAppIds: Set<string> = new Set();
-  /** Newest AutoMobile SDK navigation route per reporting package, as a screen identity. */
-  private sdkScreenIdentities = new Map<
-    string,
-    { identity: ScreenIdentity; receivedAtMs: number }
-  >();
-  /** Callers waiting for a route newer than a given host time, keyed by reporting package. */
-  private sdkScreenIdentityWaiters = new Map<string, Set<SdkRouteWaiter>>();
+  private readonly sdkScreenIdentityStore = new AndroidSdkScreenIdentityStore(this.timer);
   private navigationWriteTail: Promise<void> = Promise.resolve();
 
   // Screen geometry derived from hierarchies, carrying whether the daemon has actually seen a
@@ -839,11 +803,12 @@ export class AndroidCtrlProxyClient
   // null = unknown, true = supported, false = unsupported (fall back to ADB screencap).
   // Only marked unsupported after consecutive failures to avoid disabling on transient timeouts.
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
-  a11yScreenshotSupported: boolean | null = null;
-  private a11yScreenshotFailures: number = 0;
-  private a11yScreenshotUnsupportedSince: number | null = null;
-  private static readonly A11Y_SCREENSHOT_MAX_FAILURES = 3;
-  private static readonly A11Y_SCREENSHOT_REPROBE_COOLDOWN_MS = 60_000;
+  get a11yScreenshotSupported(): boolean | null {
+    return this.getScreenshotCapture().a11yScreenshotSupported;
+  }
+  set a11yScreenshotSupported(value: boolean | null) {
+    this.getScreenshotCapture().a11yScreenshotSupported = value;
+  }
   // Minimum interval between accessibility takeScreenshot() requests. The platform rate-limits
   // calls below its floor (~333ms, ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT); 350ms sits just
   // above it so a front-loaded backoff burst or an animation's restart storm cannot trip the
@@ -1292,12 +1257,12 @@ export class AndroidCtrlProxyClient
    * Single-activity Compose apps name their screens only this way.
    */
   public getSdkScreenIdentity(applicationId?: string): ScreenIdentity | undefined {
-    return applicationId ? this.sdkScreenIdentities.get(applicationId)?.identity : undefined;
+    return this.sdkScreenIdentityStore.get(applicationId);
   }
 
   /** Host time (this client's timer) at which the app's newest SDK route arrived. */
   public getSdkScreenIdentityReceivedAtMs(applicationId: string): number | undefined {
-    return this.sdkScreenIdentities.get(applicationId)?.receivedAtMs;
+    return this.sdkScreenIdentityStore.getReceivedAtMs(applicationId);
   }
 
   /**
@@ -1310,51 +1275,19 @@ export class AndroidCtrlProxyClient
     sinceMs: number,
     timeoutMs: number,
   ): Promise<ScreenIdentity | undefined> {
-    const current = this.sdkScreenIdentities.get(applicationId);
-    if (current && current.receivedAtMs > sinceMs) {
-      return Promise.resolve(current.identity);
-    }
-    return new Promise((resolve) => {
-      const waiters = this.sdkScreenIdentityWaiters.get(applicationId) ?? new Set();
-      this.sdkScreenIdentityWaiters.set(applicationId, waiters);
-      const waiter: SdkRouteWaiter = {
-        sinceMs,
-        settle: (identity) => {
-          this.timer.clearTimeout(handle);
-          waiters.delete(waiter);
-          resolve(identity);
-        },
-      };
-      const handle = this.timer.setTimeout(() => waiter.settle(undefined), timeoutMs);
-      waiters.add(waiter);
-    });
+    return this.sdkScreenIdentityStore.awaitAfter(applicationId, sinceMs, timeoutMs);
   }
 
   /**
    * Forget the SDK navigation route of an app whose process was replaced (terminated, relaunched
-   * cold, data cleared, crashed), or of every app when none is named (the SDK link was lost). The
-   * next route event the new process reports is the only thing that names its screen again.
+   * cold, data cleared, crashed), or of every app when none is named (the SDK link was lost).
    */
   public clearSdkScreenIdentity(applicationId?: string): void {
-    const applicationIds = applicationId
-      ? [applicationId]
-      : [...new Set([...this.sdkScreenIdentities.keys(), ...this.sdkScreenIdentityWaiters.keys()])];
-    for (const id of applicationIds) {
-      this.sdkScreenIdentities.delete(id);
-      for (const waiter of [...(this.sdkScreenIdentityWaiters.get(id) ?? [])]) {
-        waiter.settle(undefined);
-      }
-    }
+    this.sdkScreenIdentityStore.clear(applicationId);
   }
 
   private recordSdkScreenIdentity(applicationId: string, identity: ScreenIdentity): void {
-    const receivedAtMs = this.timer.now();
-    this.sdkScreenIdentities.set(applicationId, { identity, receivedAtMs });
-    for (const waiter of [...(this.sdkScreenIdentityWaiters.get(applicationId) ?? [])]) {
-      if (receivedAtMs > waiter.sinceMs) {
-        waiter.settle(identity);
-      }
-    }
+    this.sdkScreenIdentityStore.record(applicationId, identity);
   }
 
   /**
@@ -1366,119 +1299,26 @@ export class AndroidCtrlProxyClient
       : NavigationGraphManager.getInstance();
   }
 
-  /**
-   * Ensure the build/device provenance context for an app is applied to the CURRENT
-   * session's navigation manager (#4984). Non-blocking.
-   *
-   * Re-applies an already-resolved context on every event: the per-device client
-   * outlives session rebinds, so a context resolved under session A must still be
-   * set on session B's fresh manager. Otherwise it kicks off a one-in-flight
-   * resolution; a nav event arriving before it lands records under the default key.
-   */
+  /** Ensure the build/device provenance context for an app is applied (#4984). Non-blocking. */
   private ensureBuildContext(appId: string): void {
-    const resolved = this.resolvedBuildContexts.get(appId);
-    if (resolved) {
-      this.getNavigationGraphManager().setBuildContext(resolved);
-      return;
-    }
-    // No resolved context on THIS client for the app: clear it from the currently
-    // selected manager so a context left by a previous binding/selection (e.g. set on
-    // the global manager while unbound, then not cleared when a later package_event
-    // invalidated only the bound manager) is never served as stale (#4984). Falls to
-    // the default/unattributed key until (re)resolution lands. Synchronous, so it
-    // takes effect before this event's write reads provenance.
-    this.getNavigationGraphManager().clearBuildContext(appId);
-    if (this.buildContextInFlight.has(appId)) {
-      return;
-    }
-    this.buildContextInFlight.add(appId);
-    const startGeneration = this.buildContextGeneration.get(appId) ?? 0;
-
-    const resolve = async (): Promise<void> => {
-      try {
-        if (this.closed) {
-          // Provenance is optional; a closed client must not start deferred device work.
-          logger.debug("[CTRL_PROXY] Skipping deferred build-context resolution after close");
-          return;
-        }
-        const info = await this.requestPackageInfo(appId, { includePermissions: false }, 4000);
-        if (this.closed) {
-          // Missing provenance is safe; avoid a new ADB content-hash probe after release.
-          logger.debug("[CTRL_PROXY] Skipping content-hash resolution after close");
-          return;
-        }
-        // A transient package-info failure (timeout / success:false) must NOT be
-        // cached as version 0 — that would attribute the whole install to a bogus
-        // version until a package event. Defer; a later event retries.
-        if (!info.success || typeof info.versionCode !== "number") {
-          logger.debug(
-            `[CTRL_PROXY] Package info unavailable for ${appId}; deferring build-context resolution`,
-          );
-          return;
-        }
-        const versionCode = info.versionCode;
-        if (!this.contentHashProvider) {
-          // Use the injected executor so tests with a fake adb never launch real
-          // `adb`, and custom production executors aren't bypassed (#4984).
-          this.contentHashProvider = createContentHashProvider(this.device, this.adb);
-        }
-        const contentHash = await this.contentHashProvider.resolveContentHash(
-          this.device,
-          appId,
-          versionCode,
-        );
-        // Discard if a package change invalidated this app while we were resolving —
-        // applying now would stamp observations with the pre-update build's hash.
-        if ((this.buildContextGeneration.get(appId) ?? 0) !== startGeneration) {
-          return;
-        }
-        if (contentHash === null) {
-          // Unresolved hash: leave the default build key; a later event retries.
-          return;
-        }
-        const context: NavigationBuildContext = {
-          appId,
-          deviceId: this.device.deviceId,
-          versionCode,
-          contentHash,
-        };
-        this.resolvedBuildContexts.set(appId, context);
-        this.getNavigationGraphManager().setBuildContext(context);
-      } catch (error) {
-        // Best-effort provenance: log at warn (unexpected failure of a diagnostic
-        // path per CLAUDE.md) and let mutations fall back to the default key.
-        logger.warn(`[CTRL_PROXY] Build-context resolution failed for ${appId}: ${error}`);
-      } finally {
-        this.buildContextInFlight.delete(appId);
-      }
-    };
-
-    // Defer the resolution to a macrotask so NO work runs inline with the current
-    // WebSocket message handler (#4984/#2885). resolve() would otherwise call
-    // requestPackageInfo synchronously — a WS send plus a RequestManager timeout
-    // timer — which reorders the barrier-tracked navigation-graph write and the
-    // socket-close cache invalidation on differently-scheduled runners (macOS/Windows
-    // CI). Scheduling on the injected timer keeps the event handler's barrier
-    // registration synchronous and first, with the hash resolving out-of-band.
-    // Fire-and-forget: resolution only sets in-memory build context (no DB write),
-    // so it is NOT enlisted in the DB-write shutdown barrier.
-    this.timer.setTimeout(() => {
-      void resolve();
-    }, 0);
+    this.buildContextResolver.ensure(appId);
   }
 
-  /**
-   * Invalidate all cached build/content-hash provenance for an app (#4984), so its
-   * next nav event re-resolves the hash. Called on a package add/replace/remove — a
-   * rebuild+reinstall (including same-versionCode/different-content) must not keep
-   * recording against the old build. Bumps the generation so an in-flight resolution
-   * that started before the change is discarded rather than applying a stale build.
-   */
+  /** Invalidate all cached build/content-hash provenance for an app (#4984). */
   private invalidateBuildContext(appId: string): void {
-    this.buildContextGeneration.set(appId, (this.buildContextGeneration.get(appId) ?? 0) + 1);
-    this.resolvedBuildContexts.delete(appId);
-    this.contentHashProvider?.invalidate(this.device.deviceId, appId);
-    this.getNavigationGraphManager().clearBuildContext(appId);
+    this.buildContextResolver.invalidate(appId);
+  }
+
+  /** Every app id with cached or in-flight build-context state (#4984). */
+  private knownBuildContextApps(): string[] {
+    return this.buildContextResolver.knownApps();
+  }
+
+  private get contentHashProvider(): ContentHashProvider | null {
+    return this.buildContextResolver.contentHashProvider;
+  }
+  private set contentHashProvider(value: ContentHashProvider | null) {
+    this.buildContextResolver.contentHashProvider = value;
   }
 
   /**
@@ -1549,6 +1389,135 @@ export class AndroidCtrlProxyClient
       });
     }
     return this.hierarchyUpdateHandler;
+  }
+
+  private screenshotCapture: AndroidScreenshotCapture | undefined;
+  private getScreenshotCapture(): AndroidScreenshotCapture {
+    if (!this.screenshotCapture) {
+      const client = this;
+      this.screenshotCapture = new AndroidScreenshotCapture({
+        get adb() {
+          return client.adb;
+        },
+        get timer() {
+          return client.timer;
+        },
+        get deviceId() {
+          return client.device.deviceId;
+        },
+        get closed() {
+          return client.closed;
+        },
+        get logger() {
+          return client.loggerInstance;
+        },
+        get idGenerator() {
+          return client.idGenerator;
+        },
+        get physicalDisplayIdResolver() {
+          return client.physicalDisplayIdResolver;
+        },
+        get screenGeometry() {
+          return client.screenGeometry;
+        },
+        get requestManager() {
+          return client.requestManager;
+        },
+        get screenshotObservationStreamSuppressions() {
+          return client.screenshotObservationStreamSuppressions;
+        },
+        get socket() {
+          return client.ws;
+        },
+        noteScreenshotCaptureStarted: () =>
+          client.getScreenshotBackoffScheduler().noteCaptureStarted(),
+      });
+    }
+    return this.screenshotCapture;
+  }
+
+  private resetA11yScreenshotSupport(): void {
+    this.getScreenshotCapture().resetA11yScreenshotSupport();
+  }
+
+  private buildContextResolverInstance: AndroidBuildContextResolver | undefined;
+  private get buildContextResolver(): AndroidBuildContextResolver {
+    if (!this.buildContextResolverInstance) {
+      const client = this;
+      this.buildContextResolverInstance = new AndroidBuildContextResolver({
+        get closed() {
+          return client.closed;
+        },
+        get device() {
+          return client.device;
+        },
+        get adb() {
+          return client.adb;
+        },
+        get timer() {
+          return client.timer;
+        },
+        getNavigationGraphManager: () => client.getNavigationGraphManager(),
+        requestPackageInfo: (appId, options, timeoutMs) =>
+          client.requestPackageInfo(appId, options, timeoutMs),
+      });
+    }
+    return this.buildContextResolverInstance;
+  }
+  private actionDispatcher: AndroidActionDispatcher | undefined;
+  private getActionDispatcher(): AndroidActionDispatcher {
+    if (!this.actionDispatcher) {
+      const client = this;
+      this.actionDispatcher = new AndroidActionDispatcher({
+        get timer() {
+          return client.timer;
+        },
+        get requestManager() {
+          return client.requestManager;
+        },
+        get pendingFocusedInputClickIds() {
+          return client.pendingFocusedInputClickIds;
+        },
+        get supportedCommands() {
+          return client.supportedCommands;
+        },
+        awaitActionWork: (work, signal) => client.awaitActionWork(work, signal),
+        awaitCancellableRequest: (requestId, promise, signal, startTime) =>
+          client.awaitCancellableRequest(requestId, promise, signal, startTime),
+        connectWebSocket: (perf) => client.connectWebSocket(perf),
+        waitForHandshake: (timeoutMs, signal) => client.waitForHandshake(timeoutMs, signal),
+        isCommandSupported: (messageType) => client.isCommandSupported(messageType),
+        cancelScreenshotBackoff: () => client.cancelScreenshotBackoff(),
+        createDelegateContext: () => client.createDelegateContext(),
+      });
+    }
+    return this.actionDispatcher;
+  }
+
+  private clientRequests: AndroidClientRequests | undefined;
+  private getClientRequests(): AndroidClientRequests {
+    if (!this.clientRequests) {
+      const client = this;
+      this.clientRequests = new AndroidClientRequests({
+        get timer() {
+          return client.timer;
+        },
+        get requestManager() {
+          return client.requestManager;
+        },
+        get logger() {
+          return client.loggerInstance;
+        },
+        get actions() {
+          return client.getActionDispatcher();
+        },
+        isConnected: () => client.isConnected(),
+        connectWebSocket: (perf) => client.connectWebSocket(perf),
+        createDelegateContext: () => client.createDelegateContext(),
+        awaitActionWork: (work, signal) => client.awaitActionWork(work, signal),
+      });
+    }
+    return this.clientRequests;
   }
 
   private getServiceRecovery(): AndroidServiceRecovery {
@@ -2099,78 +2068,20 @@ export class AndroidCtrlProxyClient
    * the device drops what that session installed (issue #10061).
    */
   public syncNetworkStateToDevice(): void {
-    try {
-      const state = NetworkState.getInstance();
-      const deviceId = this.device.deviceId;
-
-      // Always sync mock rules on reconnect, scoped to this device. The device
-      // store keeps consumption per mockId across a re-push (#10060). Sending an
-      // empty list clears stale rules that may linger from a previous connection.
-      const rules = buildNetworkMockRules(state, deviceId);
-      this.sendMessage(serializeCtrlProxyRequest(ctrlProxyRequests.setNetworkMockRules({ rules })));
-
-      // Always re-sync error simulation state (including disabled) so the
-      // device doesn't keep stale simulation config from a previous connection
-      const sim = state.getSimulation(deviceId);
-      this.sendMessage(
-        serializeCtrlProxyRequest(
-          ctrlProxyRequests.setNetworkErrorSimulation({
-            enabled: sim !== null,
-            errorType: sim?.errorType,
-            limit: sim?.limit,
-            expiresAtEpochMs: sim?.expiresAt,
-            // What is left now, not the original duration: the device times it on its own
-            // monotonic clock, so a skewed device clock cannot stretch or kill it (#10062).
-            remainingMs: sim ? simulationRemainingMs(sim, state.timer.now()) : undefined,
-          }),
-        ),
-      );
-    } catch (e) {
-      logger.debug(`[AndroidCtrlProxyClient] Failed to sync network state on reconnect: ${e}`);
-    }
+    this.getDeviceStateSync().syncNetworkState();
   }
 
   private syncAccessibilityFlagsToDevice(): void {
-    try {
-      const flags = serverConfig.getAccessibilityFlagsConfig();
-      const allEnabled =
-        flags.includeNotImportantViews &&
-        flags.reportViewIds &&
-        flags.retrieveInteractiveWindows &&
-        flags.occlusionEnabled;
-      // Diagnostic: without this, "did the push ever get attempted" is unanswerable from
-      // logs alone — the only prior signal was the (info-level) send below, so a no-op
-      // skip and "never called" were indistinguishable (issue occlusion-flag).
-      logger.debug(
-        `[AndroidCtrlProxyClient] syncAccessibilityFlagsToDevice invoked: allEnabled=${allEnabled}, ` +
-          `occlusionEnabled=${flags.occlusionEnabled}`,
-      );
-      if (allEnabled) {
-        return;
-      }
+    this.getDeviceStateSync().syncAccessibilityFlags();
+  }
 
-      logger.info(
-        `[AndroidCtrlProxyClient] Sending accessibility flags config: ` +
-          `includeNotImportantViews=${flags.includeNotImportantViews}, ` +
-          `reportViewIds=${flags.reportViewIds}, ` +
-          `retrieveInteractiveWindows=${flags.retrieveInteractiveWindows}, ` +
-          `occlusionEnabled=${flags.occlusionEnabled}`,
-      );
-      this.sendMessage(
-        serializeCtrlProxyRequest(
-          ctrlProxyRequests.setAccessibilityFlags({
-            includeNotImportantViews: flags.includeNotImportantViews,
-            reportViewIds: flags.reportViewIds,
-            retrieveInteractiveWindows: flags.retrieveInteractiveWindows,
-            occlusionEnabled: flags.occlusionEnabled,
-          }),
-        ),
-      );
-    } catch (e) {
-      logger.debug(
-        `[AndroidCtrlProxyClient] Failed to sync accessibility flags on reconnect: ${e}`,
-      );
-    }
+  private deviceStateSync: AndroidDeviceStateSync | undefined;
+  private getDeviceStateSync(): AndroidDeviceStateSync {
+    this.deviceStateSync ??= new AndroidDeviceStateSync({
+      deviceId: this.device.deviceId,
+      sendMessage: (message) => this.sendMessage(message),
+    });
+    return this.deviceStateSync;
   }
 
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
@@ -2222,13 +2133,6 @@ export class AndroidCtrlProxyClient
 
     // Stop work profile monitor when connection closes
     this.stopWorkProfileMonitor();
-  }
-
-  /** Every app id with cached or in-flight build-context state (#4984). */
-  private knownBuildContextApps(): string[] {
-    return Array.from(
-      new Set([...this.resolvedBuildContexts.keys(), ...this.buildContextInFlight]),
-    );
   }
 
   /**
@@ -2454,67 +2358,43 @@ export class AndroidCtrlProxyClient
   async requestAction(
     action: string,
     resourceId?: string,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
     selector?: AccessibilityNodeSelector,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    return this.dispatchActionRequest(
+    return this.getActionDispatcher().requestAction(
       action,
-      (requestId) =>
-        serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestAction({ requestId, action, resourceId, selector }),
-        ),
+      resourceId,
       timeoutMs,
       perf,
+      selector,
       signal,
     );
   }
 
   async requestClickFocusedInput(
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    try {
-      return await this.dispatchActionRequest(
-        "click",
-        (requestId) => {
-          this.pendingFocusedInputClickIds.add(requestId);
-          return serializeCtrlProxyRequest(
-            ctrlProxyRequests.requestClickFocusedInput({ requestId }),
-          );
-        },
-        timeoutMs,
-        perf,
-        signal,
-      );
-    } finally {
-      this.pendingFocusedInputClickIds.clear();
-    }
+    return this.getActionDispatcher().requestClickFocusedInput(timeoutMs, perf, signal);
   }
 
-  /**
-   * Very old runners reject the focused-input click during decoding without echoing its id; settle
-   * the pending clicks so the host can fall back instead of timing out.
-   */
   private settleUnattributedFocusedClickRejection(
     requestId: string | null | undefined,
     rejectedCommand: string | undefined,
     errorText: string,
   ): void {
-    if (requestId || rejectedCommand !== "request_click_focused_input") {
-      return;
-    }
-    for (const id of this.pendingFocusedInputClickIds) {
-      this.requestManager.resolveError(id, errorText);
-    }
+    this.getActionDispatcher().settleUnattributedFocusedClickRejection(
+      requestId,
+      rejectedCommand,
+      errorText,
+    );
   }
 
   /** These legacy client requests bypass the generic capability/deadline gate. */
-  private async sendClientCommand<
-    T extends { success: boolean; totalTimeMs: number; error?: string },
-  >(
+  private sendClientCommand<T extends { success: boolean; totalTimeMs: number; error?: string }>(
     requestId: string,
     serializeRequest: (requestId: string) => string,
     options: Pick<
@@ -2524,196 +2404,38 @@ export class AndroidCtrlProxyClient
     cancellation?: { signal: AbortSignal | undefined; startTime: number },
     perf?: PerformanceTracker,
   ): Promise<T> {
-    const dispatch = () =>
-      sendCommand<T>(
-        {
-          ...this.createDelegateContext(),
-          isCommandSupported: undefined,
-          wireDeadlineParams: undefined,
-          serializeRequest: () => serializeRequest(requestId),
-        },
-        {
-          ...options,
-          responseError: options.responseError ?? null,
-          idPrefix: options.responseType,
-          createRequestId: () => requestId,
-          requireExistingConnection: true,
-          cancelScreenshotBackoff: false,
-          // A socket lost after the caller's connection check must take its catch path.
-          notConnectedError: () => {
-            throw new Error(WEBSOCKET_NOT_CONNECTED_MESSAGE);
-          },
-          unsupportedCommandError: (_type, error) => {
-            throw new Error(error);
-          },
-        },
-      );
-    const { promise } = perf
-      ? await perf.track("sendRequest", async () => ({ promise: dispatch() }))
-      : { promise: dispatch() };
-    // sendCommand's abortSignal rejects. These callers instead settle a typed
-    // cancellation through RequestManager, including an abort during ws.send.
-    return cancellation
-      ? this.awaitCancellableRequest(
-          requestId,
-          promise,
-          cancellation.signal,
-          cancellation.startTime,
-        )
-      : promise;
-  }
-
-  private async dispatchActionRequest(
-    action: string,
-    serializeRequest: (requestId: string) => string,
-    timeoutMs: number,
-    perf: PerformanceTracker,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult> {
-    const startTime = this.timer.now();
-    const combinedSignal = combineWithAmbientAbort(signal);
-    let pendingRequestId: string | undefined;
-    let dispatched = false;
-
-    this.cancelScreenshotBackoff();
-
-    try {
-      const connected = await this.awaitActionWork(
-        () => perf.track("ensureConnection", () => this.connectWebSocket(perf)),
-        combinedSignal,
-      );
-      combinedSignal?.throwIfAborted();
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for action");
-        return {
-          success: false,
-          action,
-          totalTimeMs: this.timer.now() - startTime,
-          error: "Failed to connect to accessibility service",
-          dispatched: false,
-          acknowledged: false,
-        };
-      }
-
-      const requestId = this.requestManager.generateId("action");
-      pendingRequestId = requestId;
-      logger.debug(
-        `[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action})`,
-      );
-
-      const cancellableAction = this.sendClientCommand<A11yActionResult>(
-        requestId,
-        serializeRequest,
-        {
-          responseType: "action",
-          messageType: "request_action",
-          timeoutMs,
-          beforeSend: () => combinedSignal?.throwIfAborted(),
-          onDispatch: () => {
-            dispatched = true;
-            logger.debug(
-              `[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action})`,
-            );
-          },
-          timeoutError: (timeout) => ({
-            success: false,
-            action,
-            totalTimeMs: this.timer.now() - startTime,
-            error: `Action timeout after ${timeout}ms`,
-            acknowledged: false,
-          }),
-          responseError: (error, totalTimeMs) => ({
-            success: false,
-            action,
-            totalTimeMs,
-            error,
-            acknowledged: true,
-          }),
-        },
-        { signal: combinedSignal, startTime },
-        perf,
-      );
-
-      const result = await perf.track("waitForAction", () => cancellableAction);
-      combinedSignal?.throwIfAborted();
-      const clientDuration = this.timer.now() - startTime;
-
-      if (result.success) {
-        logger.debug(
-          `[CTRL_PROXY] Action completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, action=${result.action}`,
-        );
-      } else {
-        logger.warn(`[CTRL_PROXY] Action failed after ${clientDuration}ms: ${result.error}`);
-      }
-
-      return { ...result, dispatched, acknowledged: result.acknowledged ?? true };
-    } catch (error) {
-      if (pendingRequestId) {
-        this.requestManager.resolveError(
-          pendingRequestId,
-          String(error),
-          this.timer.now() - startTime,
-        );
-      }
-      // A unit test reached the real WebSocket factory; fail it, never report a failed action.
-      rethrowRealCtrlProxyWebSocketInTestError(error);
-      const duration = this.timer.now() - startTime;
-      logger.warn(`[CTRL_PROXY] Action request failed after ${duration}ms: ${error}`);
-      return {
-        success: false,
-        action,
-        totalTimeMs: duration,
-        error: `${error}`,
-        dispatched,
-        acknowledged: false,
-      };
-    }
+    return this.getActionDispatcher().sendClientCommand<T>(
+      requestId,
+      serializeRequest,
+      options,
+      cancellation,
+      perf,
+    );
   }
 
   async requestNodeAction(
     action: string,
     selector: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<A11yActionResult> {
-    return this.requestAction(action, selector.resourceId, timeoutMs, perf, selector, signal);
+    return this.getActionDispatcher().requestNodeAction(action, selector, timeoutMs, perf, signal);
   }
 
   async supportsNodeActionSelectors(
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    const combinedSignal = combineWithAmbientAbort(signal);
-    const connected = await this.awaitActionWork(
-      () => perf.track("ensureConnection", () => this.connectWebSocket(perf)),
-      combinedSignal,
-    );
-    combinedSignal?.throwIfAborted();
-    if (connected && this.supportedCommands === null) {
-      await this.waitForHandshake(undefined, combinedSignal);
-    }
-    combinedSignal?.throwIfAborted();
-    // Unknown selector support must stay closed: an old runner could click the wrong repeated node.
-    return (
-      connected &&
-      this.supportedCommands !== null &&
-      this.isCommandSupported("node_selector_actions")
-    );
+    return this.getActionDispatcher().supportsNodeActionSelectors(perf, signal);
   }
 
   public async supportsCommand(name: string): Promise<boolean> {
     return (await this.getSupportedCommands())?.includes(name) === true;
   }
 
-  async supportsAccessibilityLinkActivation(
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-  ): Promise<boolean> {
-    const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
-    if (connected && this.supportedCommands === null) {
-      await this.waitForHandshake();
-    }
-    return connected && this.isCommandSupported("request_activate_accessibility_link");
+  async supportsAccessibilityLinkActivation(perf?: PerformanceTracker): Promise<boolean> {
+    return this.getActionDispatcher().supportsAccessibilityLinkActivation(perf);
   }
 
   // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
@@ -2722,486 +2444,65 @@ export class AndroidCtrlProxyClient
     text: string,
     occurrence: number,
     selector?: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
     signal?: AbortSignal,
     onDispatch?: () => void,
   ): Promise<A11yActionResult> {
-    const startTime = this.timer.now();
-    const action = "activate_accessibility_link";
-    const combinedSignal = combineWithAmbientAbort(signal);
-    const checkCancellation = (): void => combinedSignal?.throwIfAborted();
-    let requestId: string | undefined;
-    let dispatched = false;
-    const unconfirmed = (error: string): A11yActionResult => ({
-      success: false,
-      action,
-      totalTimeMs: this.timer.now() - startTime,
-      error,
-      dispatched,
-      acknowledged: false,
-      ...(dispatched ? { retryable: false } : {}),
-    });
-    try {
-      const supported = await this.awaitActionWork(
-        () => this.supportsAccessibilityLinkActivation(perf),
-        combinedSignal,
-      );
-      checkCancellation();
-      if (!supported) {
-        return unconfirmed(
-          "Connected Android runner does not support semantic accessibility-link activation",
-        );
-      }
-      requestId = this.requestManager.generateId("accessibility-link");
-      const result = await this.sendClientCommand<A11yActionResult>(
-        requestId,
-        (requestId) =>
-          serializeCtrlProxyRequest(
-            ctrlProxyRequests.requestActivateAccessibilityLink({
-              requestId,
-              text,
-              occurrence,
-              selector,
-            }),
-          ),
-        {
-          responseType: "accessibility-link",
-          messageType: "request_activate_accessibility_link",
-          timeoutMs,
-          beforeSend: checkCancellation,
-          onDispatch: () => {
-            dispatched = true;
-            onDispatch?.();
-          },
-          timeoutError: () =>
-            unconfirmed(`Semantic link activation timed out after ${timeoutMs}ms`),
-          responseError: (error, totalTimeMs) => ({
-            success: false,
-            action,
-            totalTimeMs,
-            error,
-            acknowledged: true,
-          }),
-        },
-        { signal: combinedSignal, startTime },
-      );
-      checkCancellation();
-      return { ...result, dispatched, acknowledged: result.acknowledged ?? true };
-    } catch (error) {
-      if (requestId) {
-        this.requestManager.resolveError(
-          requestId,
-          errorMessage(error),
-          this.timer.now() - startTime,
-        );
-      }
-      // A unit test reached the real WebSocket factory; fail it, never report an unconfirmed activation.
-      rethrowRealCtrlProxyWebSocketInTestError(error);
-      logger.warn("[CTRL_PROXY] Semantic link activation failed", error);
-      return unconfirmed(errorMessage(error));
-    } finally {
-      if (!dispatched) {
-        checkCancellation();
-      }
-    }
+    return this.getActionDispatcher().requestActivateAccessibilityLink(
+      text,
+      occurrence,
+      selector,
+      timeoutMs,
+      perf,
+      signal,
+      onDispatch,
+    );
   }
 
-  async requestClipboard(
-    action: "copy" | "paste" | "clear" | "get",
-    text?: string,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<A11yClipboardResult & { acknowledged?: boolean }> {
-    const startTime = this.timer.now();
-    const combinedSignal = combineWithAmbientAbort(signal);
-    let requestId: string | undefined;
-
-    try {
-      combinedSignal?.throwIfAborted();
-      if (action === "copy" && !text) {
-        return {
-          success: false,
-          acknowledged: false,
-          action,
-          totalTimeMs: this.timer.now() - startTime,
-          error: "Text is required for copy action",
-        };
-      }
-
-      const connected = await this.awaitActionWork(
-        () => perf.track("ensureConnection", () => this.connectWebSocket(perf)),
-        combinedSignal,
-      );
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for clipboard");
-        return {
-          success: false,
-          acknowledged: false,
-          action,
-          totalTimeMs: this.timer.now() - startTime,
-          error: "Failed to connect to accessibility service",
-        };
-      }
-
-      combinedSignal?.throwIfAborted();
-      requestId = this.requestManager.generateId("clipboard");
-      const clipboardRequestId = requestId;
-
-      const clipboardPromise = this.sendClientCommand<
-        A11yClipboardResult & { acknowledged?: boolean }
-      >(
-        clipboardRequestId,
-        (requestId) =>
-          serializeCtrlProxyRequest(
-            ctrlProxyRequests.requestClipboard({ requestId, action, text }),
-          ),
-        {
-          responseType: "clipboard",
-          messageType: "request_clipboard",
-          timeoutMs,
-          beforeSend: () => combinedSignal?.throwIfAborted(),
-          onDispatch: () => {
-            onDispatch?.();
-            logger.debug(
-              `[CTRL_PROXY] Sent clipboard request (requestId: ${requestId}, action: ${action})`,
-            );
-          },
-          responseError: null,
-          timeoutError: (timeout) => ({
-            success: false,
-            acknowledged: false,
-            action,
-            totalTimeMs: this.timer.now() - startTime,
-            error: `Clipboard ${action} timeout after ${timeout}ms`,
-          }),
-        },
-        { signal: combinedSignal, startTime },
-        perf,
-      );
-      const result = await perf.track("waitForClipboard", () =>
-        clipboardPromise.then((result) => ({
-          ...result,
-          // Only a device reply confirms an outcome; timeout and local cancellation do not.
-          acknowledged: result.acknowledged ?? !combinedSignal?.aborted,
-        })),
-      );
-      const clientDuration = this.timer.now() - startTime;
-
-      if (result.success) {
-        logger.info(
-          `[CTRL_PROXY] Clipboard ${action} completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms`,
-        );
-      } else {
-        logger.warn(
-          `[CTRL_PROXY] Clipboard ${action} failed after ${clientDuration}ms: ${result.error}`,
-        );
-      }
-
-      return result;
-    } catch (error) {
-      if (requestId) {
-        this.requestManager.resolveError(requestId, String(error), this.timer.now() - startTime);
-      }
-      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
-      rethrowRealCtrlProxyWebSocketInTestError(error);
-      const duration = this.timer.now() - startTime;
-      logger.warn(`[CTRL_PROXY] Clipboard request failed after ${duration}ms: ${error}`);
-      return {
-        success: false,
-        action,
-        totalTimeMs: duration,
-        error: `${error}`,
-        acknowledged: false,
-      };
-    }
+  requestClipboard(
+    ...args: Parameters<AndroidClientRequests["requestClipboard"]>
+  ): ReturnType<AndroidClientRequests["requestClipboard"]> {
+    return this.getClientRequests().requestClipboard(...args);
   }
 
   requestSettingsGet(
-    namespace: SettingsNamespace,
-    key: string,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-  ): Promise<A11ySettingsGetResult> {
-    return this.sendSettingsCommand(
-      "get",
-      { namespace, key },
-      {
-        timeoutMs,
-        perf,
-        signal,
-        failure: (error, totalTimeMs) => ({ success: false, found: false, totalTimeMs, error }),
-      },
-    );
+    ...args: Parameters<AndroidClientRequests["requestSettingsGet"]>
+  ): ReturnType<AndroidClientRequests["requestSettingsGet"]> {
+    return this.getClientRequests().requestSettingsGet(...args);
   }
 
   requestSettingsPut(
-    namespace: SettingsNamespace,
-    key: string,
-    value: string | null,
-    valueType: SettingsValueType = "string",
-    timeoutMs: number = 5000,
-    ...[perf = new NoOpPerformanceTracker(), signal]: [
-      perf?: PerformanceTracker,
-      signal?: AbortSignal,
-    ]
-  ): Promise<A11ySettingsPutResult> {
-    return this.sendSettingsCommand(
-      "put",
-      { namespace, key, value, valueType },
-      {
-        timeoutMs,
-        perf,
-        signal,
-        failure: (error, totalTimeMs) => ({ success: false, totalTimeMs, error }),
-      },
-    );
+    ...args: Parameters<AndroidClientRequests["requestSettingsPut"]>
+  ): ReturnType<AndroidClientRequests["requestSettingsPut"]> {
+    return this.getClientRequests().requestSettingsPut(...args);
   }
 
   requestSettingsList(
-    namespace: SettingsNamespace,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-  ): Promise<A11ySettingsListResult> {
-    return this.sendSettingsCommand(
-      "list",
-      { namespace },
-      {
-        timeoutMs,
-        perf,
-        signal,
-        failure: (error, totalTimeMs) => ({ success: false, totalTimeMs, error }),
-      },
-    );
+    ...args: Parameters<AndroidClientRequests["requestSettingsList"]>
+  ): ReturnType<AndroidClientRequests["requestSettingsList"]> {
+    return this.getClientRequests().requestSettingsList(...args);
   }
 
-  private async sendSettingsCommand<T>(
-    operation: "get" | "put" | "list",
-    params: Record<string, unknown>,
-    options: {
-      timeoutMs: number;
-      perf: PerformanceTracker;
-      signal?: AbortSignal;
-      failure: (error: string, totalTimeMs: number) => T;
-    },
-  ): Promise<T> {
-    const startTime = this.timer.now();
-    const failure = (error: string): T => options.failure(error, this.timer.now() - startTime);
-    try {
-      // Cleanup/restore callers such as Rotate must survive a cancelled ambient signal.
-      const abortSignal = options.signal;
-      abortSignal?.throwIfAborted();
-      return await sendCommand<T>(
-        {
-          ...this.createDelegateContext(),
-          // Settings historically dispatch even when omitted from the handshake or rejected.
-          isCommandSupported: undefined,
-        },
-        {
-          idPrefix: `settings_${operation}`,
-          responseType: `settings_${operation}`,
-          messageType: `request_settings_${operation}`,
-          // The Android serializer leaves settings fields untouched; createMessage has the
-          // same type, requestId, params order as the typed settings builders.
-          params,
-          timeoutMs: options.timeoutMs,
-          perf: options.perf,
-          abortSignal,
-          requireExistingConnection: true,
-          cancelScreenshotBackoff: false,
-          notConnectedError: () => failure(WEBSOCKET_NOT_CONNECTED_MESSAGE),
-          timeoutError: (timeout) => failure(`Settings ${operation} timeout after ${timeout}ms`),
-          unsupportedCommandError: (_type, error) => failure(error),
-        },
-      );
-    } catch (error) {
-      const duration = this.timer.now() - startTime;
-      logger.warn(`[CTRL_PROXY] Settings ${operation} failed after ${duration}ms`, error);
-      return options.failure(`${error}`, duration);
-    }
+  requestGlobalAction(
+    ...args: Parameters<AndroidClientRequests["requestGlobalAction"]>
+  ): ReturnType<AndroidClientRequests["requestGlobalAction"]> {
+    return this.getClientRequests().requestGlobalAction(...args);
   }
 
-  /**
-   * Execute a global action (back, home, recents, etc.) via the accessibility service.
-   */
-  async requestGlobalAction(
-    action: string,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    frameContext?: string,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
-  ): Promise<{
-    success: boolean;
-    action: string;
-    totalTimeMs: number;
-    error?: string;
-    acknowledged?: boolean;
-  }> {
-    const startTime = this.timer.now();
-    // Combine with the ambient request signal so a cancelled request (e.g.
-    // session teardown mid-home-press) can free this keyed device operation
-    // immediately rather than blocking on the CtrlProxy wait until its timeout
-    // (issue #6289).
-    const combinedSignal = combineWithAmbientAbort(signal);
-    let requestId: string | undefined;
-    try {
-      // Fast-fail if not already connected to avoid stalling callers
-      // (undelivered requests are safe to fall back to ADB keyevents)
-      if (!this.isConnected()) {
-        return {
-          success: false,
-          acknowledged: false,
-          action,
-          totalTimeMs: this.timer.now() - startTime,
-          error: WEBSOCKET_NOT_CONNECTED_MESSAGE,
-        };
-      }
-      if (combinedSignal?.aborted) {
-        return {
-          success: false,
-          acknowledged: false,
-          action,
-          totalTimeMs: this.timer.now() - startTime,
-          error: OPERATION_CANCELLED_MESSAGE,
-        };
-      }
-
-      requestId = this.requestManager.generateId("global_action");
-      return await this.sendClientCommand<{
-        success: boolean;
-        action: string;
-        totalTimeMs: number;
-        error?: string;
-        acknowledged?: boolean;
-      }>(
-        requestId,
-        (requestId) =>
-          serializeCtrlProxyRequest(
-            ctrlProxyRequests.requestGlobalAction({ requestId, action, frameContext }),
-          ),
-        {
-          responseType: "global_action",
-          messageType: "request_global_action",
-          timeoutMs,
-          onDispatch: () => {
-            onDispatch?.();
-            logger.debug(
-              `[CTRL_PROXY] Sent global action request (requestId: ${requestId}, action: ${action})`,
-            );
-          },
-          responseError: null,
-          timeoutError: (timeout) => ({
-            success: false,
-            action,
-            totalTimeMs: this.timer.now() - startTime,
-            error: `Global action timeout after ${timeout}ms`,
-            acknowledged: false,
-          }),
-        },
-        { signal: combinedSignal, startTime },
-      ).then((result) => ({
-        ...result,
-        // Only a device reply confirms an outcome; timeout and local cancellation do not.
-        acknowledged: result.acknowledged ?? !combinedSignal?.aborted,
-      }));
-    } catch (error) {
-      const logger = this.loggerInstance;
-      // The local alias keeps the injected logger visible to the catch-convention lint rule.
-      logger.warn(`[CTRL_PROXY] Global action failed: ${errorMessage(error)}`, error);
-      if (requestId) {
-        // Settle the abandoned wait, as in requestClipboard; return the typed failure below.
-        this.requestManager.resolveError(requestId, String(error), this.timer.now() - startTime);
-      }
-      return {
-        success: false,
-        action,
-        totalTimeMs: this.timer.now() - startTime,
-        error: error instanceof Error ? error.toString() : errorMessage(error),
-        acknowledged: false,
-      };
-    }
+  validateFrameContext(
+    ...args: Parameters<AndroidClientRequests["validateFrameContext"]>
+  ): ReturnType<AndroidClientRequests["validateFrameContext"]> {
+    return this.getClientRequests().validateFrameContext(...args);
   }
 
-  /**
-   * Verifies that an observed frame context still matches device state immediately before
-   * an ADB-only input action is issued.
-   */
-  async validateFrameContext(
-    frameContext: string,
-    timeoutMs: number = 5000,
-    signal?: AbortSignal,
-  ): Promise<{ success: boolean; totalTimeMs: number; error?: string }> {
-    const startTime = this.timer.now();
-    // See requestGlobalAction: cancel the CtrlProxy wait on abort so a torn-down
-    // request does not keep the keyed device operation busy for the remaining
-    // request budget (issue #6289).
-    const combinedSignal = combineWithAmbientAbort(signal);
-    let requestId: string | undefined;
-    try {
-      if (!this.isConnected()) {
-        return {
-          success: false,
-          totalTimeMs: this.timer.now() - startTime,
-          error: WEBSOCKET_NOT_CONNECTED_MESSAGE,
-        };
-      }
-      if (combinedSignal?.aborted) {
-        return {
-          success: false,
-          totalTimeMs: this.timer.now() - startTime,
-          error: OPERATION_CANCELLED_MESSAGE,
-        };
-      }
-
-      requestId = this.requestManager.generateId("validate_frame_context");
-      return await this.sendClientCommand(
-        requestId,
-        (requestId) =>
-          serializeCtrlProxyRequest(
-            ctrlProxyRequests.validateFrameContext({ requestId, frameContext }),
-          ),
-        {
-          responseType: "validate_frame_context",
-          messageType: "validate_frame_context",
-          timeoutMs,
-          timeoutError: (timeout) => ({
-            success: false,
-            totalTimeMs: this.timer.now() - startTime,
-            error: `Frame context validation timeout after ${timeout}ms`,
-          }),
-        },
-        { signal: combinedSignal, startTime },
-      );
-    } catch (error) {
-      const logger = this.loggerInstance;
-      logger.warn(`[CTRL_PROXY] Frame validation failed: ${errorMessage(error)}`, error);
-      if (requestId) {
-        this.requestManager.reject(
-          requestId,
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-      return {
-        success: false,
-        totalTimeMs: this.timer.now() - startTime,
-        error: error instanceof Error ? error.toString() : errorMessage(error),
-      };
-    }
+  requestDeviceInfo(
+    ...args: Parameters<AndroidClientRequests["requestDeviceInfo"]>
+  ): ReturnType<AndroidClientRequests["requestDeviceInfo"]> {
+    return this.getClientRequests().requestDeviceInfo(...args);
   }
 
-  /**
-   * Await a pending CtrlProxy request, but early-resolve it with a cancellation
-   * failure the moment `signal` aborts, so a cancelled caller (e.g. session
-   * teardown) frees the keyed device operation immediately instead of blocking
-   * until the request's timeout fires. `resolveError` no-ops if the response
-   * already landed, and the listener is always removed once the promise settles.
-   */
-  private async awaitCancellableRequest<
+  private awaitCancellableRequest<
     T extends { success: boolean; totalTimeMs: number; error?: string },
   >(
     requestId: string,
@@ -3209,94 +2510,7 @@ export class AndroidCtrlProxyClient
     signal: AbortSignal | undefined,
     startTime: number,
   ): Promise<T> {
-    if (!signal) {
-      return promise;
-    }
-    const onAbort = (): void => {
-      this.requestManager.resolveError(
-        requestId,
-        OPERATION_CANCELLED_MESSAGE,
-        this.timer.now() - startTime,
-      );
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    if (signal.aborted) {
-      onAbort();
-    }
-    try {
-      return await promise;
-    } finally {
-      signal.removeEventListener("abort", onAbort);
-    }
-  }
-
-  /**
-   * Request device metadata from the accessibility service.
-   */
-  async requestDeviceInfo(
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-  ): Promise<{
-    success: boolean;
-    screenWidth?: number;
-    screenHeight?: number;
-    density?: number;
-    rotation?: number;
-    sdkInt?: number;
-    deviceModel?: string;
-    isEmulator?: boolean;
-    wakefulness?: string;
-    foregroundActivity?: string;
-    totalTimeMs: number;
-    error?: string;
-  }> {
-    const startTime = this.timer.now();
-    let requestId: string | undefined;
-    try {
-      const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
-      if (!connected) {
-        return {
-          success: false,
-          totalTimeMs: this.timer.now() - startTime,
-          error: "Failed to connect to accessibility service",
-        };
-      }
-
-      requestId = this.requestManager.generateId("device_info");
-      return await this.sendClientCommand(
-        requestId,
-        (requestId) =>
-          serializeCtrlProxyRequest(ctrlProxyRequests.requestDeviceInfo({ requestId })),
-        {
-          responseType: "device_info",
-          messageType: "request_device_info",
-          timeoutMs,
-          onDispatch: () =>
-            logger.debug(`[CTRL_PROXY] Sent device info request (requestId: ${requestId})`),
-          timeoutError: (timeout) => ({
-            success: false,
-            totalTimeMs: this.timer.now() - startTime,
-            error: `Device info timeout after ${timeout}ms`,
-          }),
-        },
-      );
-    } catch (error) {
-      const logger = this.loggerInstance;
-      logger.warn(`[CTRL_PROXY] Device info failed: ${errorMessage(error)}`, error);
-      if (requestId) {
-        this.requestManager.reject(
-          requestId,
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-      // A unit test reached the real WebSocket factory; fail it, never resolve a typed failure.
-      rethrowRealCtrlProxyWebSocketInTestError(error);
-      return {
-        success: false,
-        totalTimeMs: this.timer.now() - startTime,
-        error: error instanceof Error ? error.toString() : errorMessage(error),
-      };
-    }
+    return this.getClientRequests().awaitCancellableRequest(requestId, promise, signal, startTime);
   }
 
   /**
@@ -4186,165 +3400,7 @@ export class AndroidCtrlProxyClient
   }
 
   async captureScreenshotForObservationStream(): Promise<ScreenshotCaptureResult> {
-    // Keep unsupported devices on ADB between probes, but periodically recheck in case the
-    // CtrlProxy service/APK was updated without replacing this client instance.
-    if (this.a11yScreenshotSupported === false && !this.prepareA11yScreenshotReprobe()) {
-      return this.captureScreenshotViaAdb("a11y_screenshot_unsupported");
-    }
-
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      return this.captureScreenshotViaAdb("websocket_unavailable");
-    }
-
-    const requestId = this.requestManager.generateId("screenshot-backoff");
-    const message = serializeCtrlProxyRequest(ctrlProxyRequests.requestScreenshot({ requestId }));
-    // Bind the capture identity current at INITIATION and carry it through the await, so a
-    // hierarchy forwarded while this frame is in flight cannot relabel it.
-    const captureBinding = this.screenGeometry.bind() ?? undefined;
-
-    try {
-      this.screenshotObservationStreamSuppressions.add(requestId);
-      const screenshotPromise = this.requestManager.register<ScreenshotResult>(
-        requestId,
-        "screenshot",
-        3000,
-        (_id, _type, _timeout) => ({ success: false, error: CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR }),
-      );
-
-      // Advance the shared rate-limit floor clock at the a11y-request boundary so a direct capture
-      // (e.g. the initial subscriber frame) and a scheduler-armed capture cannot both hit the
-      // accessibility screenshot API in the same floor window (issue #4927).
-      this.getScreenshotBackoffScheduler().noteCaptureStarted();
-      this.ws.send(message);
-
-      const result = await screenshotPromise;
-
-      if (!result.success || !result.data) {
-        if (result.error === CTRLPROXY_RATE_LIMITED_ERROR) {
-          this.a11yScreenshotFailures = 0;
-          return this.captureScreenshotViaAdb(fallbackReasonForCtrlProxyFailure(result.error));
-        }
-
-        this.a11yScreenshotFailures++;
-        if (
-          this.a11yScreenshotSupported === null &&
-          this.a11yScreenshotFailures >= AndroidCtrlProxyClient.A11Y_SCREENSHOT_MAX_FAILURES
-        ) {
-          logger.info(
-            "[CTRL_PROXY] Accessibility service screenshot not supported after " +
-              `${this.a11yScreenshotFailures} consecutive failures, falling back to ADB screencap`,
-          );
-          this.a11yScreenshotSupported = false;
-          this.a11yScreenshotUnsupportedSince = this.timer.now();
-        }
-        return this.captureScreenshotViaAdb(fallbackReasonForCtrlProxyFailure(result.error));
-      }
-
-      this.a11yScreenshotFailures = 0;
-      this.a11yScreenshotSupported = true;
-      const checksum = computeChecksum(result.data);
-
-      return {
-        success: true,
-        data: result.data,
-        checksum,
-        captureBinding,
-        frameContext: result.frameContext,
-        rotation: result.rotation,
-        ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, result.format),
-        ...screenshotPerformanceMetadataFrom(result),
-      };
-    } catch (error) {
-      this.requestManager.resolve<ScreenshotResult>(requestId, {
-        success: false,
-        error: `${error}`,
-      });
-      return this.captureScreenshotViaAdb("ctrlproxy_exception");
-    } finally {
-      this.screenshotObservationStreamSuppressions.delete(requestId);
-    }
-  }
-
-  private resetA11yScreenshotSupport(): void {
-    this.a11yScreenshotSupported = null;
-    this.a11yScreenshotFailures = 0;
-    this.a11yScreenshotUnsupportedSince = null;
-  }
-
-  private prepareA11yScreenshotReprobe(): boolean {
-    const unsupportedSince = this.a11yScreenshotUnsupportedSince;
-    if (
-      unsupportedSince === null ||
-      this.timer.now() - unsupportedSince <
-        AndroidCtrlProxyClient.A11Y_SCREENSHOT_REPROBE_COOLDOWN_MS
-    ) {
-      return false;
-    }
-
-    this.a11yScreenshotSupported = null;
-    // One failed post-cooldown probe should relatch immediately and restart the cooldown.
-    this.a11yScreenshotFailures = AndroidCtrlProxyClient.A11Y_SCREENSHOT_MAX_FAILURES - 1;
-    this.a11yScreenshotUnsupportedSince = null;
-    return true;
-  }
-
-  /**
-   * Fallback screenshot capture via ADB screencap for devices that don't support
-   * accessibility service screenshots (API < 30).
-   */
-  private async captureScreenshotViaAdb(
-    fallbackReason?: ScreenshotFallbackReason,
-  ): Promise<ScreenshotCaptureResult> {
-    // Once the client is terminally closed, suppress the signal-less ADB screencap
-    // fallback so a capture rejected by close() cannot keep the transport referenced
-    // past teardown (#5493). A transient websocket disconnect does not set this flag,
-    // so the fallback still fires during reconnect windows.
-    if (this.closed) {
-      return {
-        success: false,
-        error: "AndroidCtrlProxyClient closed; ADB screencap fallback suppressed",
-      };
-    }
-
-    // Bind the geometry current when the ADB request begins, before its await can let a newer
-    // hierarchy relabel the returned pixels.
-    const captureBinding = this.screenGeometry.bind() ?? undefined;
-
-    try {
-      const tempFile = `/data/local/tmp/am-shot-${screenshotTempIdToken(this.idGenerator.next())}.png`;
-      const displayId = await this.physicalDisplayIdResolver.resolve(
-        this.adb,
-        this.device.deviceId,
-      );
-      const displayArgument = displayId ? `-d ${displayId} ` : "";
-      const quotedTempFile = shellQuote(tempFile);
-      const command = `shell "screencap ${displayArgument}-p ${quotedTempFile} && base64 ${quotedTempFile} && rm ${quotedTempFile}"`;
-      const maxBuffer = 50 * 1024 * 1024;
-      const result = await withAndroidScreenshotCaptureLock(this.device.deviceId, () =>
-        this.adb.executeCommand(command, { maxBuffer }),
-      );
-
-      if (!result.stdout || result.stdout.trim().length === 0) {
-        return { success: false, error: "No data from ADB screencap" };
-      }
-
-      const data = decodePngBase64Output(result.stdout).toString("base64");
-      const checksum = computeChecksum(data);
-
-      return {
-        success: true,
-        data,
-        checksum,
-        captureBinding,
-        ...ANDROID_ADB_SCREENSHOT_METADATA,
-        screenshotFallbackReason: fallbackReason,
-      };
-    } catch (error) {
-      const logger = this.loggerInstance;
-      const message = errorMessage(error);
-      logger.warn(`[CTRL_PROXY] ADB screencap failed: ${message}`, error);
-      return { success: false, error: `ADB screencap failed: ${message}` };
-    }
+    return this.getScreenshotCapture().captureForObservationStream();
   }
 
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */

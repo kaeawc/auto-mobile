@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -8,12 +9,9 @@ import {
 } from "../../src/daemon/ownerDisconnectRelease";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks, drainUntil, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 
 const DEVICE: BootedDevice = { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" };
@@ -65,14 +63,10 @@ describe("DevicePool owner-disconnect release (#10503)", () => {
     });
     const fakeDeviceManager = new FakeDeviceManager();
     fakeDeviceManager.bootedDevices = [DEVICE];
-    devicePool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
-        timer: fakeTimer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: fakeDeviceManager,
-        retryExecutor: new DefaultRetryExecutor(fakeTimer),
-      }),
-    );
+    devicePool = makePool(sessionManager, "test-daemon-session-id", {
+      timer: fakeTimer,
+      deviceManager: fakeDeviceManager,
+    });
     await devicePool.initializeWithDevices([DEVICE]);
     await bind(OWNER_SESSION, OWNER_CONNECTION);
   });

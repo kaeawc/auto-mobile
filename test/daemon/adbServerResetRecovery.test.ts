@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
@@ -36,16 +37,12 @@ async function idleTrackedCohort(stopSignals: NodeJS.Signals[], onLoss = true) {
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new StoppedDeviceManager();
   const incidents = new InMemoryEmulatorLossIncidentStore(timer);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon-session", {
-      timer,
-      deviceManager: manager,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      retryExecutor: new DefaultRetryExecutor(timer),
-      emulatorLossIncidentStore: incidents,
-      recoveryPolicy: { onLoss, maxAttempts: 1 },
-    }),
-  );
+  const pool = makePool(sessions, "daemon-session", {
+    timer,
+    deviceManager: manager,
+    emulatorLossIncidentStore: incidents,
+    recoveryPolicy: { onLoss, maxAttempts: 1 },
+  });
   const children = stopSignals.map((stopSignal) => {
     const process = new FakeChildProcess(timer);
     const signals: Array<NodeJS.Signals | number | undefined> = [];
@@ -202,14 +199,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new FakeDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "daemon-session", {
-        timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessions, "daemon-session", { timer, deviceManager: manager });
     const booted: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -271,14 +261,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new ReplacementSerialDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const original: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -480,15 +463,11 @@ describe("ADB server reset session recovery", () => {
         await attempt();
       },
     };
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        androidDeviceReboot: reboot,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      androidDeviceReboot: reboot,
+    });
     const original: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -544,14 +523,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new StoppedDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const original: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -598,14 +570,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new StoppedDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const device: BootedDevice = {
       platform: "android",
       name: "Pixel 8",
@@ -629,14 +594,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new StoppedDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const devices: BootedDevice[] = [
       { platform: "android", name: "Pixel_8_API_35", deviceId: "emulator-5554" },
       { platform: "android", name: "Pixel_9_API_36", deviceId: "emulator-5556" },
@@ -691,14 +649,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new StoppedDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const devices: BootedDevice[] = [
       {
         platform: "android",
@@ -746,14 +697,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new StoppedDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const active: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -830,24 +774,20 @@ describe("ADB server reset session recovery", () => {
     }> = [];
     const cancellationStarted = Promise.withResolvers<void>();
     const releaseCancellation = Promise.withResolvers<void>();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        cancelDeviceSessionExecutions: async (sessionId, reason) => {
-          cancellations.push({
-            sessionId,
-            reason,
-            deviceStillPooled: pool.getDevice("emulator-5554") !== null,
-          });
-          cancellationStarted.resolve();
-          await releaseCancellation.promise;
-          return 1;
-        },
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      cancelDeviceSessionExecutions: async (sessionId, reason) => {
+        cancellations.push({
+          sessionId,
+          reason,
+          deviceStillPooled: pool.getDevice("emulator-5554") !== null,
+        });
+        cancellationStarted.resolve();
+        await releaseCancellation.promise;
+        return 1;
+      },
+    });
     const device: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -915,22 +855,18 @@ describe("ADB server reset session recovery", () => {
       source: "local",
     };
     let replacementSession: NonNullable<ReturnType<SessionManager["getSession"]>> | undefined;
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-        cancelDeviceSessionExecutions: async (sessionId) => {
-          await sessionManager.releaseSession(sessionId, "allocation-rollback");
-          await pool.releaseDevice(device.deviceId, sessionId);
-          await pool.bindOrReuseDeviceSession(sessionId, device.deviceId, "android", image);
-          replacementSession = sessionManager.getSession(sessionId) ?? undefined;
-          return 1;
-        },
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+      cancelDeviceSessionExecutions: async (sessionId) => {
+        await sessionManager.releaseSession(sessionId, "allocation-rollback");
+        await pool.releaseDevice(device.deviceId, sessionId);
+        await pool.bindOrReuseDeviceSession(sessionId, device.deviceId, "android", image);
+        replacementSession = sessionManager.getSession(sessionId) ?? undefined;
+        return 1;
+      },
+    });
     manager.bootedDevices = [device];
     await pool.addDevice(device, image);
     await pool.bindOrReuseDeviceSession("session-active", device.deviceId, "android", image);
@@ -980,15 +916,11 @@ describe("ADB server reset session recovery", () => {
         return await backingStore.list(limit);
       },
     };
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        emulatorLossIncidentStore: incidentStore,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      emulatorLossIncidentStore: incidentStore,
+    });
     const device: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -1061,14 +993,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new SwappedSerialDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const originals: BootedDevice[] = [
       { platform: "android", name: "Pixel_8_API_35", deviceId: "emulator-5554" },
       { platform: "android", name: "Pixel_9_API_36", deviceId: "emulator-5556" },
@@ -1126,14 +1051,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new StoppedDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const original: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -1180,14 +1098,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new StoppedDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const original: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -1238,17 +1149,13 @@ describe("ADB server reset session recovery", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new StoppedDeviceManager();
     const releasedSessionIds: string[] = [];
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        releaseSessionForDisconnectedDevice: async (sessionId) => {
-          releasedSessionIds.push(sessionId);
-        },
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      releaseSessionForDisconnectedDevice: async (sessionId) => {
+        releasedSessionIds.push(sessionId);
+      },
+    });
     const original: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -1287,14 +1194,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new StoppedDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const original: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -1346,14 +1246,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new StoppedDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const original: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -1402,15 +1295,11 @@ describe("ADB server reset session recovery", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new StoppedDeviceManager();
     const incidents = new InMemoryEmulatorLossIncidentStore(timer);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        emulatorLossIncidentStore: incidents,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      emulatorLossIncidentStore: incidents,
+    });
     const active: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -1497,14 +1386,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new StoppedDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const replacement: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -1561,14 +1443,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new SwappedSerialDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const originals: BootedDevice[] = [
       { platform: "android", name: "Pixel_8_API_35", deviceId: "emulator-5554" },
       { platform: "android", name: "Pixel_9_API_36", deviceId: "emulator-5556" },
@@ -1618,14 +1493,7 @@ describe("ADB server reset session recovery", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const manager = new StoppedDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const original: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -1667,20 +1535,16 @@ describe("ADB server reset session recovery", () => {
         throw new Error("reboot runner unavailable");
       },
     };
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, releaseReason) => {
-          releasedSessionIds.push(sessionId);
-          await sessionManager.releaseSession(sessionId, releaseReason);
-        },
-        androidDeviceReboot: reboot,
-        emulatorLossIncidentStore: incidentStore,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, releaseReason) => {
+        releasedSessionIds.push(sessionId);
+        await sessionManager.releaseSession(sessionId, releaseReason);
+      },
+      androidDeviceReboot: reboot,
+      emulatorLossIncidentStore: incidentStore,
+    });
     const original: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -1750,28 +1614,24 @@ describe("ADB server reset session recovery", () => {
         throw new Error("reboot runner unavailable");
       },
     };
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, releaseReason) => {
-          releaseAttempts += 1;
-          releaseReasons.push(releaseReason);
-          try {
-            await sessionManager.releaseSession(sessionId, releaseReason);
-          } finally {
-            if (releaseAttempts === 1) {
-              persistence.failure = null;
-            }
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      releaseSessionForDisconnectedDevice: async (sessionId, _deviceId, releaseReason) => {
+        releaseAttempts += 1;
+        releaseReasons.push(releaseReason);
+        try {
+          await sessionManager.releaseSession(sessionId, releaseReason);
+        } finally {
+          if (releaseAttempts === 1) {
+            persistence.failure = null;
           }
-        },
-        androidDeviceReboot: reboot,
-        recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-        emulatorLossIncidentStore: incidentStore,
-      }),
-    );
+        }
+      },
+      androidDeviceReboot: reboot,
+      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+      emulatorLossIncidentStore: incidentStore,
+    });
     const original: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",
@@ -1843,14 +1703,7 @@ describe("ADB server reset session recovery", () => {
     };
     const sessionManager = new SessionManager(timer, persistence);
     const manager = new StoppedDeviceManager();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     const original: BootedDevice = {
       platform: "android",
       name: "Pixel_8_API_35",

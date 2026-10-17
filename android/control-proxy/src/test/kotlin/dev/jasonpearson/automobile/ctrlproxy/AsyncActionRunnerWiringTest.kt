@@ -195,11 +195,15 @@ class AsyncActionRunnerWiringTest {
   // Source location
   // ---------------------------------------------------------------------------
 
-  private fun readCtrlProxySource(): String = locateCtrlProxySource().readText()
+  // The storage handlers moved into StorageController; the dispatch contract spans both files.
+  private fun readCtrlProxySource(): String =
+    listOf("CtrlProxy.kt", "StorageController.kt").joinToString("\n") {
+      locateCtrlProxySource(it).readText()
+    }
 
-  private fun locateCtrlProxySource(): File {
+  private fun locateCtrlProxySource(fileName: String): File {
     // Forward slashes only: paths are compared/joined below and this test also runs on Windows CI.
-    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"
+    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/$fileName"
     // Depending on the Gradle working directory the module root may be the cwd (AGP unit tests),
     // the `android` dir, or the repo root. Try the common anchors, then walk up as a fallback.
     val direct =

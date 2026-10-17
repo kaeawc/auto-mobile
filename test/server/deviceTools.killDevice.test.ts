@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { readFileSync } from "node:fs";
 import { parsePsSnapshot } from "../../src/features/iosSimFleet/psSnapshot";
 import {
@@ -838,15 +839,11 @@ describe("killDevice handler", () => {
     ): Promise<void> {
       const timer = new FakeTimer();
       sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "daemon-session", {
-          timer: timer,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          deviceSessionRepository: new FakeDeviceSessionRepository(),
-        }),
-      );
+      const pool = makePool(sessionManager, "daemon-session", {
+        timer,
+        deviceManager: manager,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      });
       DaemonState.getInstance().initialize(sessionManager, pool);
       await pool.addDevice(booted, {
         platform: "android",
@@ -1256,15 +1253,11 @@ describe("killDevice handler", () => {
       setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
       const timer = new FakeTimer();
       sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "daemon-session", {
-          timer: timer,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          deviceSessionRepository: new FakeDeviceSessionRepository(),
-        }),
-      );
+      const pool = makePool(sessionManager, "daemon-session", {
+        timer,
+        deviceManager: manager,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      });
       DaemonState.getInstance().initialize(sessionManager, pool);
       // The pool started this AVD on the serial and knows it by name...
       await pool.addDevice(
@@ -1601,15 +1594,11 @@ describe("killDevice handler", () => {
       source: "local",
     };
     manager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
 
@@ -1646,15 +1635,11 @@ describe("killDevice handler", () => {
     manager.killDevice = async () => {
       throw new ActionableError("Timed out waiting for android platform shutdown command");
     };
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
 
@@ -1694,15 +1679,11 @@ describe("killDevice handler", () => {
     manager = hungManager;
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     hungManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: hungManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: hungManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 60_000, "android");
     await pool.releaseDevice(image.deviceId!, "session-1");
@@ -1771,15 +1752,11 @@ describe("killDevice handler", () => {
       source: "local",
     };
     successfulManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: successfulManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: successfulManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
 
@@ -1829,15 +1806,11 @@ describe("killDevice handler", () => {
       source: "local",
     };
     manager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: manager,
+      deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     const reserve = pool.reserveDeviceForShutdown.bind(pool);
@@ -1913,15 +1886,11 @@ describe("killDevice handler", () => {
       };
       successfulManager.setDeviceImages("android", [image]);
       setDeviceToolsDependencies({ deviceManagerFactory: () => successfulManager, timer });
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "daemon-session", {
-          timer,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          deviceManager: successfulManager,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          deviceSessionRepository,
-        }),
-      );
+      const pool = makePool(sessionManager, "daemon-session", {
+        timer,
+        deviceManager: successfulManager,
+        deviceSessionRepository,
+      });
       DaemonState.getInstance().initialize(sessionManager, pool);
       await pool.assignMultipleDevices(["session-1"], 1_000, "android");
       let releaseCalls = 0;
@@ -1986,15 +1955,11 @@ describe("killDevice handler", () => {
       source: "local",
     };
     releaseDuringWaitManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: releaseDuringWaitManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: releaseDuringWaitManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     await pool.addDevice({
@@ -2048,15 +2013,11 @@ describe("killDevice handler", () => {
       source: "local",
     };
     successfulManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: successfulManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: successfulManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     await sessionManager.releaseSession("session-1", "explicit-release");
@@ -2098,15 +2059,11 @@ describe("killDevice handler", () => {
       source: "local",
     };
     successfulManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: successfulManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: successfulManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
 
@@ -2159,15 +2116,11 @@ describe("killDevice handler", () => {
       source: "local",
     };
     successfulManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: successfulManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: successfulManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     let reservationReleaseCalls = 0;
@@ -2233,15 +2186,11 @@ describe("killDevice handler", () => {
       source: "local",
     };
     successfulManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: successfulManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: successfulManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     let reservationReleaseCalls = 0;
@@ -2309,15 +2258,11 @@ describe("killDevice handler", () => {
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     successfulManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: successfulManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: successfulManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     const initiatingPlan = executionTracker.startExecution("executePlan", undefined, "session-1");
@@ -2396,33 +2341,20 @@ describe("killDevice handler", () => {
       });
       sessionManager = new SessionManager(timer, deviceSessionRepository);
       placeholderManager.setDeviceImages("android", [image]);
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "daemon-session", {
-          timer: timer,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          deviceManager: placeholderManager,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          deviceSessionRepository: deviceSessionRepository,
-          cancelDeviceSessionExecutions: Object.assign(
-            async (
-              sessionId: string,
-              reason: string,
-              options?: { excludeExecutionId?: string },
-            ) => {
-              cancelledSessions.push(sessionId);
-              return await executionTracker.cancelDeviceSessionExecutions(
-                sessionId,
-                reason,
-                options,
-              );
-            },
-            {
-              cancelDeviceExecutions:
-                executionTracker.cancelDeviceExecutions.bind(executionTracker),
-            },
-          ),
-        }),
-      );
+      const pool = makePool(sessionManager, "daemon-session", {
+        timer,
+        deviceManager: placeholderManager,
+        deviceSessionRepository: deviceSessionRepository,
+        cancelDeviceSessionExecutions: Object.assign(
+          async (sessionId: string, reason: string, options?: { excludeExecutionId?: string }) => {
+            cancelledSessions.push(sessionId);
+            return await executionTracker.cancelDeviceSessionExecutions(sessionId, reason, options);
+          },
+          {
+            cancelDeviceExecutions: executionTracker.cancelDeviceExecutions.bind(executionTracker),
+          },
+        ),
+      });
       DaemonState.getInstance().initialize(sessionManager, pool);
       await pool.assignMultipleDevices(["session-1"], 1_000, "android");
       const initiatingKill = executionTracker.startExecution("killDevice", undefined, "session-1");
@@ -2608,15 +2540,11 @@ describe("killDevice handler", () => {
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     cacheAwareManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: cacheAwareManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: cacheAwareManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     const tool = ToolRegistry.getTool("killDevice");
@@ -2663,15 +2591,11 @@ describe("killDevice handler", () => {
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     cacheAwareManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: cacheAwareManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: cacheAwareManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     const tool = ToolRegistry.getTool("killDevice");
@@ -2725,15 +2649,11 @@ describe("killDevice handler", () => {
       timer,
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: targetOnlyManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: targetOnlyManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     targetOnlyManager.setBootedDevices("android", [target, ...peers]);
     for (const device of [target, ...peers]) {
@@ -2792,15 +2712,11 @@ describe("killDevice handler", () => {
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     currentRuntimeManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: currentRuntimeManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: currentRuntimeManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     const tool = ToolRegistry.getTool("killDevice");
@@ -2942,15 +2858,11 @@ describe("killDevice handler", () => {
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     delayedManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: delayedManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: delayedManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     const original = pool.getDevice(image.deviceId!);
@@ -3013,15 +2925,11 @@ describe("killDevice handler", () => {
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     delayedManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: delayedManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: delayedManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     delayedManager.setBootedDevices("android", [
@@ -3066,15 +2974,11 @@ describe("killDevice handler", () => {
     const deviceSessionRepository = new FakeDeviceSessionRepository();
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     successfulManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: successfulManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: successfulManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     await pool.releaseDevice(image.deviceId!, "session-1");
@@ -3137,15 +3041,11 @@ describe("killDevice handler", () => {
     let recordingListCalls = 0;
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     successfulManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: successfulManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: successfulManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     await setVideoRecordingManagerDependencies({
@@ -3245,15 +3145,11 @@ describe("killDevice handler", () => {
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     delayedManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: delayedManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: delayedManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     delayedManager.setBootedDevices("android", [
@@ -3309,15 +3205,11 @@ describe("killDevice handler", () => {
         source: "local",
       },
     ]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: transientManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: transientManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     const tool = ToolRegistry.getTool("killDevice");
@@ -3544,15 +3436,11 @@ describe("killDevice handler", () => {
       });
       sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
       successfulManager.setDeviceImages("ios", [image]);
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessionManager, "daemon-session", {
-          timer: timer,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          deviceManager: successfulManager,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          deviceSessionRepository: new FakeDeviceSessionRepository(),
-        }),
-      );
+      const pool = makePool(sessionManager, "daemon-session", {
+        timer,
+        deviceManager: successfulManager,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      });
       DaemonState.getInstance().initialize(sessionManager, pool);
       await pool.assignMultipleDevices(["session-1"], 1_000, "ios");
       await pool.releaseDevice(image.deviceId!, "session-1");
@@ -3728,14 +3616,7 @@ describe("killDevice handler", () => {
     };
     manager.setBootedDevices("android", [device]);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionRepository());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", { timer, deviceManager: manager });
     await pool.addDevice(device, { name: device.name, platform: "android", isRunning: true });
     DaemonState.getInstance().initialize(sessionManager, pool);
     const reserve = pool.reserveDeviceForShutdown.bind(pool);
@@ -4053,15 +3934,11 @@ describe("killDevice handler", () => {
         source: "local",
       },
     ]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: hungManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: hungManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     expect(pool.getDevice("emulator-5554")?.avdName).toBe("Old AVD");
@@ -4167,15 +4044,11 @@ describe("killDevice handler", () => {
     manager = hungManager;
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     hungManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: hungManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: hungManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     await pool.releaseDevice(image.deviceId!, "session-1");
@@ -4643,15 +4516,11 @@ describe("killDevice handler", () => {
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     shutdownManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: shutdownManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: shutdownManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     const tool = ToolRegistry.getTool("killDevice");
@@ -4702,15 +4571,11 @@ describe("killDevice handler", () => {
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     replacementManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: replacementManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: replacementManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     const tool = ToolRegistry.getTool("killDevice");
@@ -4905,15 +4770,11 @@ describe("killDevice handler", () => {
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     replacementManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: replacementManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: replacementManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     const tool = ToolRegistry.getTool("killDevice");
@@ -5028,15 +4889,11 @@ describe("killDevice handler", () => {
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     discoveryManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: discoveryManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: discoveryManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     const tool = ToolRegistry.getTool("killDevice");
@@ -5208,15 +5065,11 @@ describe("killDevice handler", () => {
     });
     sessionManager = new SessionManager(timer, deviceSessionRepository);
     successfulManager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session", {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: successfulManager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        deviceSessionRepository: deviceSessionRepository,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session", {
+      timer,
+      deviceManager: successfulManager,
+      deviceSessionRepository: deviceSessionRepository,
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
     const tool = ToolRegistry.getTool("killDevice");
@@ -5716,15 +5569,11 @@ describe("killDevice handler", () => {
           source: "local",
         };
         manager.setDeviceImages("android", [image]);
-        const pool = new DevicePool(
-          createDevicePoolDependencies(sessionManager, "daemon-session", {
-            timer: timer,
-            installedAppsRepository: new FakeInstalledAppsRepository(),
-            deviceManager: manager,
-            retryExecutor: new DefaultRetryExecutor(timer),
-            deviceSessionRepository: deviceSessionRepository,
-          }),
-        );
+        const pool = makePool(sessionManager, "daemon-session", {
+          timer,
+          deviceManager: manager,
+          deviceSessionRepository: deviceSessionRepository,
+        });
         DaemonState.getInstance().initialize(sessionManager, pool);
         await pool.assignMultipleDevices(["session-5503"], 1_000, "android");
         let releaseCalls = 0;

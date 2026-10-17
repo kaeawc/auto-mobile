@@ -138,8 +138,8 @@ Platform notes to record:
   with `via:"device"`: if the app's ATS blocks it, expect a `network` error whose message points to
   `via: "host"`; `via:"host"` must still succeed.
 - **Saved Android prototype.** Save the spec, launch it from the home screen with no host attached:
-  Load with `via:"device"` works (given a reachable URL); with `via:"host"` it fails with a typed
-  `network` error naming `via: "host"`.
+  Load with `via:"device"` works (given a reachable URL); with `via:"host"` it fails with an
+  `invalid_request` error saying host requests are not available in saved prototypes.
 
 ## Cleanup
 

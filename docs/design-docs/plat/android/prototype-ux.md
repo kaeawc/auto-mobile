@@ -1277,7 +1277,8 @@ tested against the same fixture, `request-actions.json`.
   on the `base-config`. There is no host allowlist; CtrlProxy is sideloaded over adb and never
   distributed.
 - Saved prototypes (`SavedPrototypeActivity`) run `via: "device"` requests on the same Retrofit
-  client; `via: "host"` finishes as a `network` error, since no host connection serves the activity.
+  client; `via: "host"` finishes as an `invalid_request` error, since no host connection serves the
+  activity.
 
 Worked example: a feed that shows a spinner, the result and an error (state
 `{"feedStatus": "idle", "search": "cats"}`, data `{"title": "Feed"}`):
@@ -1688,7 +1689,7 @@ exempt, other cleartext hosts fail with `network` and a message pointing to `via
 **Saved prototypes.** A saved Android prototype (see
 [Saved prototypes on the Android home screen](#saved-prototypes-on-the-android-home-screen)) supports
 `request` actions with `via: "device"` (it still needs a reachable URL, since no host runs `adb reverse`
-when it launches alone). `via: "host"` has no host to run it there, so it fails with a typed `network`
+when it launches alone). `via: "host"` has no host to run it there, so it fails with an `invalid_request`
 error whose message points to `via: "device"`.
 
 **Limits.**

@@ -293,3 +293,71 @@ SCRIPT
     [ ! -s "$SLEEP_LOG" ]
   done
 }
+
+@test "purges the module cache when a restored cache is missing artifacts (#12706)" {
+  write_fake_gradle <<'SCRIPT'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--stop" ]]; then
+  exit 0
+fi
+
+state_file="${FAKE_GRADLE_STATE}"
+attempt="$(cat "$state_file" 2>/dev/null || echo 0)"
+attempt=$((attempt + 1))
+echo "$attempt" > "$state_file"
+
+if [[ "$attempt" -eq 1 ]]; then
+  echo "Could not resolve all artifacts for configuration 'classpath'."
+  echo "Cause 1: org.gradle.internal.resolve.ArtifactNotFoundException: Could not find kotlin-stdlib-2.4.10.jar (org.jetbrains.kotlin:kotlin-stdlib:2.4.10)."
+  exit 1
+fi
+
+if [[ -d "${GRADLE_USER_HOME}/caches/modules-2" ]]; then
+  echo "stale cache survived"
+  exit 1
+fi
+echo "BUILD SUCCESSFUL"
+SCRIPT
+
+  mkdir -p "${TEST_ROOT}/gh/caches/modules-2/files-2.1" "${TEST_ROOT}/gh/caches/other"
+
+  run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" GRADLE_RETRY_DELAY_SECONDS=1 \
+    SLEEP_LOG="$SLEEP_LOG" GRADLE_USER_HOME="${TEST_ROOT}/gh" \
+    FAKE_GRADLE_STATE="${TEST_ROOT}/state" \
+    bash "$SCRIPT" -- "$COMMAND" :junit-runner:test
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Partial dependency cache detected"* ]]
+  [ ! -d "${TEST_ROOT}/gh/caches/modules-2" ]
+  [ -d "${TEST_ROOT}/gh/caches/other" ]
+}
+
+@test "keeps the module cache for an ordinary network failure" {
+  write_fake_gradle <<'SCRIPT'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--stop" ]]; then
+  exit 0
+fi
+
+state_file="${FAKE_GRADLE_STATE}"
+attempt="$(cat "$state_file" 2>/dev/null || echo 0)"
+attempt=$((attempt + 1))
+echo "$attempt" > "$state_file"
+
+if [[ "$attempt" -eq 1 ]]; then
+  echo "Read timed out"
+  exit 1
+fi
+echo "BUILD SUCCESSFUL"
+SCRIPT
+
+  mkdir -p "${TEST_ROOT}/gh/caches/modules-2"
+
+  run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" GRADLE_RETRY_DELAY_SECONDS=1 \
+    SLEEP_LOG="$SLEEP_LOG" GRADLE_USER_HOME="${TEST_ROOT}/gh" \
+    FAKE_GRADLE_STATE="${TEST_ROOT}/state" \
+    bash "$SCRIPT" -- "$COMMAND" :junit-runner:test
+
+  [ "$status" -eq 0 ]
+  [ -d "${TEST_ROOT}/gh/caches/modules-2" ]
+}

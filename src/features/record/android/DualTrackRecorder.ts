@@ -13,6 +13,7 @@ import { AndroidCtrlProxyClient } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { discoverTouchNode } from "./TouchNodeDiscovery";
 import { queryDensity, queryDisplaySize } from "./AxisRanges";
+import { normalizedAxis } from "../normalizedAxis";
 import { ROTATION_UNKNOWN_CAVEAT, ScreenGeometryTimeline } from "./ScreenGeometryTimeline";
 import {
   createAdbGeometryProbe,
@@ -688,18 +689,7 @@ export class DualTrackRecorder {
       density,
       timer: this.timer,
     });
-    const rotated = rotation % 2 !== 0;
-    const geometry = {
-      platform: "android" as const,
-      deviceWidth: rotated ? display.height : display.width,
-      deviceHeight: rotated ? display.width : display.height,
-      orientation: rotation,
-    };
-    return {
-      start: (onGesture, onError) =>
-        reader.start((event) => onGesture({ ...event, geometry }), onError),
-      stop: () => reader.stop(),
-    };
+    return withTimelineGeometry(reader, timeline, this.timer);
   }
 }
 
@@ -902,11 +892,6 @@ function isDiagonalSwipe({ from, to }: SwipeEndpoints): boolean {
   return Math.min(dx, dy) >= Math.max(dx, dy) * DIAGONAL_SWIPE_MIN_OFF_AXIS_RATIO;
 }
 
-/** Four decimals keep a point within a quarter pixel on a 2400 px axis without float noise. */
-function normalizedAxis(value: number, size: number): number {
-  return Math.round(Math.min(1, Math.max(0, value / size)) * 10_000) / 10_000;
-}
-
 function buildSwipeAtStep(gesture: GestureEvent, endpoints: SwipeEndpoints): PlanStep {
   const params: Record<string, unknown> = { from: endpoints.from, to: endpoints.to };
   const width = gesture.geometry?.deviceWidth;
@@ -1008,5 +993,32 @@ function buildPinchStep(gesture: GestureEvent): PlanStep | null {
       direction: gesture.pinchDirection,
       scale: gesture.scale,
     },
+  };
+}
+
+/**
+ * Stamp each gesture with the display geometry in force at its DOWN, not the geometry at
+ * recording start, so tapAt provenance and swipeAt normalization survive a mid-recording
+ * rotation (#12880).
+ */
+export function withTimelineGeometry(
+  reader: GestureEmitter,
+  timeline: ScreenGeometryTimeline,
+  timer: Timer,
+): GestureEmitter {
+  return {
+    start: (onGesture, onError) =>
+      reader.start(
+        (event) =>
+          onGesture({
+            ...event,
+            geometry: {
+              platform: "android" as const,
+              ...timeline.geometryAt(event.downAt ?? timer.now()),
+            },
+          }),
+        onError,
+      ),
+    stop: () => reader.stop(),
   };
 }

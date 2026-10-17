@@ -32,7 +32,7 @@ set -euo pipefail
 
 # Source paths whose changes require a rebuild of the published site. Keep in
 # sync with what deploy_pages.py / mkdocs.yml actually consume: the docs tree,
-# the MkDocs config, the two files copied into docs/ at build time, the MkDocs
+# the MkDocs config and theme overrides, the two files copied into docs/ at build time, the MkDocs
 # tooling/deploy script, and this workflow itself. The docs-assets TypeScript
 # sources and their build script emit docs/assets/javascripts/*.js (already
 # under "docs"), but are listed so a change to a source or the generator that
@@ -41,6 +41,7 @@ DOCS_PATHS=(
   "docs"
   "docs-assets"
   "mkdocs.yml"
+  "overrides"
   "CHANGELOG.md"
   ".github/CONTRIBUTING.md"
   "scripts/github"

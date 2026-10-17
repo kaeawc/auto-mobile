@@ -29,6 +29,7 @@ plugins:
 
 theme:
   name: "material"
+  custom_dir: overrides
   favicon: img/favicon.ico
   logo: img/auto_mobile_sticker_splash.png
   palette:

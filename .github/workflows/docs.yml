@@ -20,6 +20,7 @@ on:
       - "docs/**"
       - "docs-assets/**"
       - "mkdocs.yml"
+      - "overrides/**"
       - "scripts/github/**"
       - "scripts/docs/**"
       - ".github/workflows/docs.yml"

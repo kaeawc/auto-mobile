@@ -1,4 +1,5 @@
 import { holderOf } from "./deviceBinding";
+import { wireSessionLifecycle } from "./daemonSessionLifecycleWiring";
 import { getNativeHelperRegistry } from "../utils/nativeHelpers/NativeHelperRegistry";
 import { terminateActiveAdbProcesses } from "../utils/android-cmdline-tools/AdbClient";
 import type { SessionReleaseReason } from "./releaseReasons";
@@ -36,7 +37,6 @@ import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
 import {
   defaultLocationRouteRegistry,
-  registerLocationRouteSessionCleanup,
   stopLocationRouteForRemovedDevice,
 } from "../features/utility/LocationRoutePlayer";
 import { defaultMockLocationClearRegistry } from "../features/utility/MockLocationClear";
@@ -52,7 +52,6 @@ import {
   type Session,
   type SessionReleaseOptions,
 } from "./sessionManager";
-import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
 import {
   hasActiveSessionExecution,
   latestSessionExecutionDeadlineMs,
@@ -193,38 +192,18 @@ import {
   notifyBootedDeviceResourcesUpdated,
   resetBootedDevicesResourceCache,
 } from "../server/bootedDeviceResources";
-import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import {
   DAEMON_HANDOFF_INTERRUPTED_MESSAGE,
   DaemonHandoffInterruptionError,
 } from "./daemonHandoffInterruption";
 import { transitionalHeldSimulators } from "../server/adbOfflineHeldDevices";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
-import { announceSessionRelease } from "./announceSessionRelease";
 import { clearSessionAppearanceConfig } from "../server/appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
-import {
-  DefaultDeviceSettingsAccess,
-  DeviceSettingDefaults,
-  createDeviceSettingDefaultsAcquisitionReset,
-  installDeviceSettingDefaults,
-  registerDeviceSettingDefaultsIdentityListener,
-  recordDeviceSettingDefaultsBeforeChange,
-} from "../features/utility/DeviceSettingDefaults";
-import { DeviceSettingDefaultsRepository } from "../db/deviceSettingDefaultsRepository";
+import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
 import { NetworkState } from "../server/NetworkState";
-import {
-  createOwnerlessNetworkStateAcquisitionCleanup,
-  registerNetworkStateSessionCleanup,
-} from "../server/networkStateSessionCleanup";
-import { registerPerformanceMonitorSessionCleanup } from "../server/performanceMonitorSessionCleanup";
-import {
-  createOwnerlessRecordingAcquisitionCleanup,
-  createRecorderTeardownRecoveryMarker,
-  defaultRecordingSessionCleanupDeps,
-  takeRecordingIdsFinalizedByRelease,
-  registerRecordingSessionCleanup,
-} from "../server/recordingSessionCleanup";
+import {} from "../server/networkStateSessionCleanup";
+import {} from "../server/recordingSessionCleanup";
 import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownRedrive";
 import { HybridVideoCaptureBackend } from "../features/video/HybridVideoCaptureBackend";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
@@ -345,7 +324,6 @@ import { initializeIosCtrlProxyAtStartup, selectIosStartupWarmupDevices } from "
 import { selectObservationStreamDevices } from "./observationInitialFrame";
 import {
   startAppearanceSyncScheduler,
-  syncAppearanceForDevice,
   stopAppearanceSyncScheduler,
   type AppearanceSyncTarget,
 } from "./AppearanceSyncScheduler";
@@ -1386,176 +1364,25 @@ export class Daemon {
   }
 
   private configureSessionLifecycleCallbacks(): void {
-    registerLocationRouteSessionCleanup(this.sessionManager);
-    registerNetworkStateSessionCleanup(this.sessionManager);
-    registerPerformanceMonitorSessionCleanup(this.sessionManager);
-    registerRecordingSessionCleanup(this.sessionManager, {
-      ...defaultRecordingSessionCleanupDeps,
-      markDeviceNeedsRecorderRecovery: createRecorderTeardownRecoveryMarker(this.sessionManager),
-    });
-    this.sessionManager.onDeviceOwnershipChange((deviceId, frameInvalidation) => {
-      // Generation only for unchanged-screen acquire/release; full for runtime-changing rebinds.
-      if (frameInvalidation === "full") {
-        this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId);
-      } else {
-        this.deviceDataStreamServer?.invalidateInitialDeviceFrames(deviceId);
-      }
-    });
-    this.sessionManager.setManagedExecutionRecoveryListener((id, recovered) =>
-      this.managedExecutionReowner?.noteRecovering(id, recovered),
-    );
-    this.sessionManager.setLateRehydrationListener((rehydrated) =>
-      this.reownRehydratedManagedExecutions(rehydrated),
-    );
-    this.sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
-      this.hasActiveSessionExecution(sessionId, query),
-    );
-    this.sessionManager.setSessionExecutionDeadlineLookup((sessionId, query) =>
-      this.latestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true, ...query }),
-    );
-    // Deadlines are stamped on the wall clock; remember how far the session clock stood from it
-    // so the idle veto can judge them without a later wall step (#11105).
-    executionTracker.setSessionClockOffsetProvider(
-      () => this.sessionManager.sessionNow() - this.timer.now(),
-    );
-    this.sessionManager.setExpiryReleaseExecutionCanceller(
-      (sessionId, cancellation, query, releasedDeviceId) =>
+    wireSessionLifecycle(this.sessionManager, this.timer, {
+      deviceDataStreamServer: () => this.deviceDataStreamServer,
+      socketServer: () => this.socketServer,
+      managedExecutionReowner: () => this.managedExecutionReowner,
+      devicePool: () => this.devicePool,
+      passiveWorkPolicy: () => this.passiveWorkPolicy,
+      navigationGraphListenerManagers: this.navigationGraphListenerManagers,
+      shutdownReleaseNotifications: () => this.shutdownReleaseNotifications,
+      shutdownFallbackReleaseNotifications: () => this.shutdownFallbackReleaseNotifications,
+      setupNavigationGraphUpdateListener: (manager) =>
+        this.setupNavigationGraphUpdateListener(manager),
+      reownRehydratedManagedExecutions: (rehydrated) =>
+        this.reownRehydratedManagedExecutions(rehydrated),
+      hasActiveSessionExecution: (sessionId, query) =>
+        this.hasActiveSessionExecution(sessionId, query),
+      latestSessionExecutionDeadlineMs: (sessionId, options) =>
+        this.latestSessionExecutionDeadlineMs(sessionId, options),
+      cancelExecutionsForExpiryRelease: (sessionId, cancellation, query, releasedDeviceId) =>
         this.cancelExecutionsForExpiryRelease(sessionId, cancellation, query, releasedDeviceId),
-    );
-    // A sessionless call admitted while the device was free must not keep driving it for the new
-    // holder (#10829). The call performing the acquisition is spared.
-    // The acquiring holder adopts active sessionless recordings without stopping them (#11665).
-    const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
-      this.sessionManager,
-    );
-    // Sessionless network mocks and simulations are cleared the same way (#11130).
-    const clearOwnerlessNetworkState = createOwnerlessNetworkStateAcquisitionCleanup(
-      this.sessionManager,
-      { timer: this.timer },
-    );
-    // Display/system settings a previous session changed are reset to the recorded device
-    // defaults when a different session acquires the device (#11145).
-    const settingDefaults = new DeviceSettingDefaults(
-      new DeviceSettingDefaultsRepository(),
-      new DefaultDeviceSettingsAccess(),
-      (deviceId) => this.sessionManager.getSessionForDevice(deviceId),
-      this.timer,
-    );
-    installDeviceSettingDefaults(settingDefaults);
-    registerDeviceSettingDefaultsIdentityListener(settingDefaults);
-    const resetSettingDefaults = createDeviceSettingDefaultsAcquisitionReset(
-      this.sessionManager,
-      settingDefaults,
-      this.timer,
-    );
-    this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
-      executionTracker.cancelSessionlessDeviceUse(deviceId, {
-        excludeExecutionId: getToolSelectionContext()?.execution?.executionId,
-      });
-      // A sessionless stroke parked on the device with no frame in flight is lifted too (#11541).
-      this.socketServer?.liftSessionlessStrokesOn(deviceId);
-      adoptOwnerlessRecordings(deviceId, sessionId);
-      clearOwnerlessNetworkState(deviceId);
-      resetSettingDefaults(deviceId, sessionId);
-    });
-    this.sessionManager.onSessionCreated((session) => {
-      NavigationGraphManager.clearReleasedSession(session.sessionId);
-      this.setupNavigationGraphUpdateListener(
-        NavigationGraphManager.getInstanceForSession(session.sessionId),
-      );
-      if (this.passiveWorkPolicy.allows("android", "appearance-sync", session.assignedDevice)) {
-        const device = this.devicePool.getDevice(session.assignedDevice);
-        if (device?.platform === "android") {
-          void syncAppearanceForDevice({
-            deviceId: device.id,
-            name: device.id,
-            platform: "android",
-            incarnation: device.incarnation,
-            sessionKey: resolveAppearanceSessionKey(session.sessionId),
-          });
-        }
-      }
-    });
-    // Register centralized cleanup for session-scoped state
-    this.sessionManager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, options) => {
-      // A terminal upgrade of an already-cleaned-up release must not touch the device's next
-      // owner: its pin, caches and CtrlProxy binding (#10825).
-      if (options?.upgradeOnly) {
-        return;
-      }
-      DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
-      // Only this session's own manager: the lookup with fallback returns the global manager for
-      // an already-released session, and dropping it would silence its listeners (#10825).
-      const navigationManager = NavigationGraphManager.findInstanceForSession(sessionId);
-      if (navigationManager) {
-        this.navigationGraphListenerManagers.delete(navigationManager);
-      }
-      NavigationGraphManager.releaseSession(sessionId);
-      RealObserveScreen.clearCache(deviceId);
-      defaultDisplayInventoryProvider.invalidate(deviceId);
-      // Clear the per-device CtrlProxy client's binding to the released session
-      // (#4984) so a nav/hierarchy event arriving before the next session binds the
-      // still-connected device is never attributed to the ended session, and its
-      // cached hierarchy detector (which retains the released session's manager) is
-      // dropped. Central here so it covers EVERY release path — explicit, idle,
-      // heartbeat, device-switch, and derived `${base}:${label}` sessions alike.
-      AndroidCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
-      IOSCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
-    });
-    // A released base takes its derived `${base}:${label}` sessions with it (#11091).
-    // The pool is created after these callbacks are wired, so resolve it per release.
-    registerDerivedLabelSessionReleaseCascade(
-      this.sessionManager,
-      lazySessionReleasePool(() => this.devicePool),
-    );
-    // A rebind keeps the session live, but its navigation state was collected on
-    // the old device and must not follow it to the new one.
-    this.sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
-      this.socketServer?.liftStrokesHeldByOn(sessionId, deviceId);
-      DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
-      const previousNavigationManager = NavigationGraphManager.getInstanceForSession(sessionId);
-      NavigationGraphManager.resetSession(sessionId);
-      this.navigationGraphListenerManagers.delete(previousNavigationManager);
-      this.setupNavigationGraphUpdateListener(
-        NavigationGraphManager.getInstanceForSession(sessionId),
-      );
-      RealObserveScreen.clearCache(deviceId);
-      defaultDisplayInventoryProvider.invalidate(deviceId);
-      AndroidCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
-      IOSCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
-    });
-    // Emit a real "session released" signal so a connected DaemonMcpProxy clears
-    // its remembered session binding the moment the daemon releases the session
-    // (heartbeat / idle / plan), rather than guessing with the replay TTL. Fires
-    // for every released key — base and derived `${base}:${label}` alike; the
-    // proxy matches its bound (base) UUID by exact equality (issue #4610).
-    this.sessionManager.onSessionRelease((sessionId, _deviceId, releaseReason, snapshot, opts) => {
-      // Name the recordings this release is finalizing so the previous owner can fetch them
-      // (#10958); the recording cleanup captured them when the release began.
-      announceSessionRelease(
-        {
-          takeRecordingIds: takeRecordingIdsFinalizedByRelease,
-          emit: (...args) => SessionReleaseBroadcaster.emit(...args),
-        },
-        {
-          fallbacks: this.shutdownFallbackReleaseNotifications,
-          announced: this.shutdownReleaseNotifications,
-        },
-        sessionId,
-        releaseReason,
-        snapshot,
-        { upgradeOnly: opts?.upgradeOnly },
-      );
-      if (this.shutdownFallbackReleaseNotifications?.has(sessionId)) {
-        return;
-      }
-      // A session that is gone for good takes its appearance config with it (#10976). A derived
-      // `${base}:${label}` session stores none, so its release clears nothing.
-      if (snapshot.terminal) {
-        clearSessionAppearanceConfig(sessionId).catch((error: unknown) => {
-          logger.warn(`[Appearance] Failed to drop config of released session ${sessionId}`, error);
-        });
-      }
     });
   }
 

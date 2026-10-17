@@ -218,3 +218,9 @@ export function matchesRequestedAvdOrUnknown(
     (targetDeviceId === emulator.deviceId && isUnknownEmulatorName(avdName, targetDeviceId))
   );
 }
+
+export function throwIfReadinessAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw signal.reason;
+  }
+}

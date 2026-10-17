@@ -30,8 +30,6 @@ import {
 } from "./sessionDeviceStateRestore";
 import {
   DeviceStateRestoreQueue,
-  type AbandonedRestoreSpec,
-  type BoundedRetrySpec,
   type PendingRestore,
   type RestoreKindSpec,
   type RestoreQueuePolicy,
@@ -56,7 +54,6 @@ import type { TimingData } from "../utils/PerformanceTracker";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
 import { type RotationRestoreState } from "../features/action/Rotate";
-import { RotationSettingManagedError } from "../models/RotationSettingManagedError";
 import {
   SCREEN_READER_RESTORE_TIMEOUT_MS,
   type ScreenReaderRestoreState,
@@ -314,7 +311,6 @@ export interface ClockRestorer {
 }
 /** Original rotation settings recorded before the first session settings write. */
 export type RotationSessionState = RotationRestoreState;
-type PendingRotationRestore = PendingRestore<RotationSessionState>;
 
 export interface RotationRestorer {
   restore(state: RotationSessionState, signal?: AbortSignal): Promise<void>;
@@ -330,12 +326,6 @@ const clockRestorePolicy: RestoreQueuePolicy = {
   retiredOnIncarnationBump: true,
   setupHandoff: "await-then-track",
   removedDuringSetupMessage: "Cannot change the clock: device was removed during session setup.",
-};
-const rotationRestorePolicy: RestoreQueuePolicy = {
-  kind: "rotation",
-  retiredOnIncarnationBump: false,
-  setupHandoff: "track-eagerly",
-  removedDuringSetupMessage: "Cannot change rotation: device was removed during session setup.",
 };
 /** Overrides for the per-session device-state restorers; each omitted one uses production wiring. */
 export interface DeviceStateRestorerFactories {
@@ -1316,34 +1306,10 @@ const DEFAULT_SCREEN_READER_RESTORE_BACKOFF = exponentialBackoff({
   initialDelayMs: 250,
   maxDelayMs: 2_000,
 });
-/**
- * Rotation restore retries are bounded too. A fold/unfold between the session's
- * rotation and its release can leave the recorded settings unverifiable (the
- * window manager owns the new panel's rotation), so an unbounded retry kept the
- * device quarantined forever. After the cap the device leaves quarantine.
- */
-const ROTATION_RESTORE_RETRY_ATTEMPTS = 5;
 const DEFAULT_ROTATION_RESTORE_BACKOFF = exponentialBackoff({
   initialDelayMs: NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS,
   maxDelayMs: 2_000,
 });
-/**
- * A restore the window manager owns (a foldable re-applying rotation per device state)
- * can never verify by rewriting the setting, so it ends the retry loop immediately.
- */
-function isNonRetryableRotationRestoreError(error: unknown): boolean {
-  if (error instanceof RotationSettingManagedError) {
-    return true;
-  }
-  const details: unknown =
-    typeof error === "object" && error !== null && "details" in error ? error.details : undefined;
-  return (
-    typeof details === "object" &&
-    details !== null &&
-    "retryable" in details &&
-    details.retryable === false
-  );
-}
 export const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
 /**
  * Cap for pending keep-awake, biometric and network teardown retries, measured with the
@@ -1743,75 +1709,13 @@ export class SessionManager {
     },
   );
   private readonly clockMutationQueues = new Map<string, Promise<unknown>>();
-  private readonly rotationRestorerFactory: (device: BootedDevice) => RotationRestorer;
-  private readonly rotationRestores = new DeviceStateRestoreQueue<RotationSessionState>(
-    rotationRestorePolicy,
-    (deviceId) => {
-      this.abandonedRotations.delete(deviceId);
-    },
-  );
-  private readonly rotationMutationQueues = new Map<string, Promise<unknown>>();
-  private readonly rotationRestoreBackoff: BackoffPolicy;
   private readonly stateRestore: SessionDeviceStateRestore;
-  /** Rotation settings a device still holds after release cleanup gave up on them (#10714). */
-  private readonly abandonedRotations = new Map<string, RotationSessionState>();
-  private readonly abandonedRotationRetries = new Map<string, Promise<void>>();
   private readonly clockKind: RestoreKindSpec<ClockSessionState> = {
     queue: this.clockRestores,
     name: "Clock",
     timeoutMs: CLOCK_RESTORE_TIMEOUT_MS,
     mapStartError: (error) => error,
     prepare: (deviceId, target) => this.prepareClockRestore(deviceId, target),
-  };
-  private readonly rotationKind: RestoreKindSpec<RotationSessionState> = {
-    queue: this.rotationRestores,
-    name: "Rotation",
-    timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
-    mapStartError: (error) => toActionableError(error, "Rotation restoration failed"),
-    prepare: (deviceId, target) => this.prepareRotationRestore(deviceId, target),
-  };
-  private readonly rotationRetry: BoundedRetrySpec<RotationSessionState> = {
-    attempts: ROTATION_RESTORE_RETRY_ATTEMPTS,
-    delayForAttempt: (attempt) => this.rotationRestoreBackoff.delayForAttempt(attempt),
-    isNonRetryable: isNonRetryableRotationRestoreError,
-    logFirstFailure: (deviceId, error) =>
-      logger.warn(`Failed to restore rotation on ${deviceId}: ${errorMessage(error)}`),
-    logRetryFailure: (deviceId, attempt, error) =>
-      logger.warn(
-        `Rotation restore retry ${attempt}/${ROTATION_RESTORE_RETRY_ATTEMPTS} failed on ${deviceId}; ` +
-          `device remains quarantined: ${errorMessage(error)}`,
-      ),
-    abandon: (deviceId, target, lastError, when) =>
-      this.abandonRotationRestore(deviceId, target, lastError, when),
-  };
-  private readonly abandonedRotationRestore: AbandonedRestoreSpec<RotationSessionState> = {
-    memory: this.abandonedRotations,
-    inFlight: this.abandonedRotationRetries,
-    timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
-    label: "Abandoned rotation restoration",
-    restore: (deviceId, state, signal) =>
-      this.rotationRestorerFactory({ name: deviceId, deviceId, platform: "android" }).restore(
-        state,
-        signal,
-      ),
-    restored: (deviceId, state) => {
-      this.stateRestore.forgetAbandonedRestore(this.abandonedRotations, deviceId, state);
-      logger.info(`Restored rotation settings on ${deviceId} on its next natural attempt`);
-    },
-    failed: (deviceId, state, error) => {
-      if (isNonRetryableRotationRestoreError(error)) {
-        this.stateRestore.forgetAbandonedRestore(this.abandonedRotations, deviceId, state);
-        logger.warn(
-          `Rotation settings on ${deviceId} cannot be restored (window manager owns rotation); ` +
-            `dropping the abandoned restore: ${errorMessage(error)}`,
-        );
-        return;
-      }
-      logger.warn(
-        `Rotation settings on ${deviceId} are still not restored; ` +
-          `will try again at the next session start or release: ${errorMessage(error)}`,
-      );
-    },
   };
   private observerSessions?: Pick<ObserverSessionStore, "release"> &
     Partial<Pick<ObserverSessionStore, "list">> &
@@ -2696,7 +2600,6 @@ export class SessionManager {
     const resolved = resolveDeviceStateRestorers(timer, restorers);
     this.networkConditionRestorerFactory = resolved.networkCondition;
     this.clockRestorerFactory = resolved.clock;
-    this.rotationRestorerFactory = resolved.rotation;
     this.stateRestore = new SessionDeviceStateRestore(
       {
         timer,
@@ -2716,6 +2619,8 @@ export class SessionManager {
       {
         screenReader: resolved.screenReader,
         screenReaderBackoff: resolved.screenReaderBackoff,
+        rotation: resolved.rotation,
+        rotationBackoff: resolved.rotationBackoff,
         iosAppNetworkRuleRestorer: resolved.iosAppNetworkRule,
         defaultIosAppNetworkRuleRestorer,
         iosLease: {
@@ -2724,7 +2629,6 @@ export class SessionManager {
         },
       },
     );
-    this.rotationRestoreBackoff = resolved.rotationBackoff;
     this.liveness = new SessionLivenessController({
       getSession: (sessionId) => this.getSession(sessionId),
       peekSession: (sessionId) => this.peekSession(sessionId),
@@ -3394,7 +3298,7 @@ export class SessionManager {
         },
       );
       // Natural point to retry a rotation or screen reader an earlier release could not restore.
-      await this.retryAbandonedRotationRestore(created.assignedDevice);
+      await this.stateRestore.retryAbandonedRotationRestore(created.assignedDevice);
       await this.stateRestore.retryAbandonedScreenReaderRestore(created.assignedDevice);
       return created;
     } finally {
@@ -6048,7 +5952,7 @@ export class SessionManager {
         return { pending: pending[0] ?? null };
       },
       () => this.getPendingClockRestoration(existing, null),
-      () => this.getPendingRotationRestoration(existing, null),
+      () => this.stateRestore.getPendingRotationRestoration(existing, null),
       () => this.stateRestore.getPendingScreenReaderRestoration(existing, null),
     ];
     const pending: Promise<void>[] = [];
@@ -7258,7 +7162,7 @@ export class SessionManager {
       keepScreenAwake?.applied === true ||
       Boolean(biometricEnrollment || networkCondition || clock || rotation || screenReader) ||
       this.stateRestore.abandonedScreenReaders.has(session.assignedDevice) ||
-      this.abandonedRotations.has(session.assignedDevice) ||
+      this.stateRestore.abandonedRotations.has(session.assignedDevice) ||
       Array.from(this.sessionSetupPromises).some((setup) => setup.session === session)
     );
   }
@@ -7378,15 +7282,22 @@ export class SessionManager {
       async () => {
         // Snapshot before this release's own restore can record a fresh abandon: that one
         // waits for the next start or release instead of an immediate repeat attempt.
-        const hadAbandonedRotation = this.abandonedRotations.has(session.assignedDevice);
+        const hadAbandonedRotation = this.stateRestore.abandonedRotations.has(
+          session.assignedDevice,
+        );
         const own = session.cacheData.rotation
-          ? (await ownBudget(() => this.getPendingRotationRestoration(session, pendingSetups)))
-              .pending
+          ? (
+              await ownBudget(() =>
+                this.stateRestore.getPendingRotationRestoration(session, pendingSetups),
+              )
+            ).pending
           : null;
         return {
           pending:
             hadAbandonedRotation && !forced()
-              ? ownBudget(() => this.retryAbandonedRotationAfter(session.assignedDevice, own))
+              ? ownBudget(() =>
+                  this.stateRestore.retryAbandonedRotationAfter(session.assignedDevice, own),
+                )
               : own,
         };
       },
@@ -7478,7 +7389,10 @@ export class SessionManager {
     if (this.clockRestores.targets.has(deviceId)) {
       dropped.add("clock");
     }
-    if (this.abandonedRotations.has(deviceId) || this.rotationRestores.targets.has(deviceId)) {
+    if (
+      this.stateRestore.abandonedRotations.has(deviceId) ||
+      this.stateRestore.rotationRestores.targets.has(deviceId)
+    ) {
       dropped.add("rotation");
     }
     if (
@@ -9686,7 +9600,7 @@ export class SessionManager {
   retireRestorations(deviceId: string, cause: "removal" | "incarnation-bump"): void {
     for (const queue of [
       this.clockRestores,
-      this.rotationRestores,
+      this.stateRestore.rotationRestores,
       this.stateRestore.screenReaderRestores,
     ]) {
       if (cause === "removal" || queue.policy.retiredOnIncarnationBump) {
@@ -9709,108 +9623,6 @@ export class SessionManager {
       const pendingRestoration = (await this.restoreNetworkConditionBestEffort(session)).pending;
       await pendingRestoration;
     });
-  }
-
-  /** Sequence restoration after any still-draining setup; deduplicate by owned slot. */
-  private async getPendingRotationRestoration(
-    session: Session,
-    pendingSetups: Promise<void> | null,
-  ): Promise<{ pending: Promise<void> | null }> {
-    return this.stateRestore.getPendingRestoration(
-      this.rotationRestores,
-      "rotation",
-      session,
-      pendingSetups,
-      (deviceId, target) => this.startRotationRestoration(deviceId, target),
-      (next, setups) => this.getPendingRotationRestoration(next, setups),
-    );
-  }
-
-  private startRotationRestoration(
-    deviceId: string,
-    target: PendingRotationRestore,
-  ): Promise<{ pending: Promise<void> | null }> {
-    return this.stateRestore.startRestoration(this.rotationKind, deviceId, target);
-  }
-
-  private prepareRotationRestore(deviceId: string, target: PendingRotationRestore): RestoreRun {
-    const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
-    const generation = this.replacedRestoreGenerations.get(deviceId) ?? 0;
-    const restore = () =>
-      this.dispatchDeviceRestore(
-        deviceId,
-        async (fenceSignal, identitySignal, acknowledge) => {
-          const dispatchSignal = AbortSignal.any([target.controller.signal, fenceSignal]);
-          target.controller.signal.throwIfAborted();
-          identitySignal.throwIfAborted();
-          await this.rotationRestorerFactory(device).restore(target.state, dispatchSignal);
-          acknowledge();
-          target.controller.signal.throwIfAborted();
-          target.clear();
-          this.stateRestore.forgetFencedRestore(this.rotationRestores.targets, deviceId, target);
-        },
-        generation,
-        5,
-      );
-    return {
-      restore,
-      quarantined: (outcome, error) =>
-        logger.warn(
-          `Rotation restore ${outcome}; quarantining ${device.deviceId}: ${errorMessage(error)}`,
-        ),
-      retry: (restoration) =>
-        this.stateRestore.retryRestoreBounded(
-          this.rotationRetry,
-          device.deviceId,
-          target,
-          restoration,
-          restore,
-        ),
-    };
-  }
-
-  /** Release the device from quarantine once the bounded rotation retries are spent. */
-  private abandonRotationRestore(
-    deviceId: string,
-    target: PendingRotationRestore,
-    lastError: unknown,
-    when: string,
-  ): void {
-    if (target.removed) {
-      return;
-    }
-    const { userRotation, accelerometerRotation, deviceStateRotationLock } = target.state;
-    const lock =
-      deviceStateRotationLock === undefined
-        ? ""
-        : `, device_state_rotation_lock=${deviceStateRotationLock}`;
-    logger.warn(
-      `Gave up restoring rotation settings on ${deviceId} ${when} ` +
-        `(user_rotation=${userRotation ?? "unchanged"}, accelerometer_rotation=${accelerometerRotation ?? "unchanged"}${lock} ` +
-        `not confirmed: ${errorMessage(lastError)}); releasing the device from cleanup. ` +
-        `A fold or display change during the session can make the recorded settings unverifiable. ` +
-        `Will try once more at the next session start or release on this device.`,
-    );
-    // An older abandoned baseline is the truer original; keep it over a newer session's.
-    if (!this.abandonedRotations.has(deviceId)) {
-      this.abandonedRotations.set(deviceId, target.state);
-    }
-    target.clear();
-    this.stateRestore.forgetFencedRestore(this.rotationRestores.targets, deviceId, target);
-  }
-
-  private retryAbandonedRotationAfter(deviceId: string, own: Promise<void> | null): Promise<void> {
-    return this.stateRestore.retryAbandonedAfter(own, () =>
-      this.retryAbandonedRotationRestore(deviceId),
-    );
-  }
-
-  /**
-   * A transient failure keeps the record for the next start or release. A window-manager-managed
-   * outcome is definitively unrecoverable, so the record is dropped.
-   */
-  private retryAbandonedRotationRestore(deviceId: string): Promise<void> {
-    return this.stateRestore.retryAbandonedRestore(this.abandonedRotationRestore, deviceId);
   }
 
   /**
@@ -10397,27 +10209,21 @@ export class SessionManager {
     return runDeviceStateMutationExclusive(this.clockMutationQueues, sessionId, fn);
   }
 
-  trackRotationSessionSetup(
-    session: Session,
-    createSetup: (assertCurrentDevice: () => void) => Promise<void>,
-  ): Promise<void> {
-    return this.stateRestore.trackRestoreSetup(
-      this.rotationRestores,
-      "rotation",
-      session,
-      createSetup,
-      () => this.getPendingRotationRestoration(session, null),
-    );
-  }
-
   setRotation(session: Session, state: RotationSessionState): void {
     session.cacheData.rotation ??= state;
   }
   getRotation(sessionId: string): RotationSessionState | undefined {
     return this.findSession(sessionId)?.cacheData.rotation;
   }
+  trackRotationSessionSetup(
+    session: Session,
+    createSetup: (assertCurrentDevice: () => void) => Promise<void>,
+  ): Promise<void> {
+    return this.stateRestore.trackRotationSessionSetup(session, createSetup);
+  }
+
   runRotationMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
-    return runDeviceStateMutationExclusive(this.rotationMutationQueues, sessionId, fn);
+    return this.stateRestore.runRotationMutationExclusive(sessionId, fn);
   }
 
   /** Tracked setup retains this exact session even after a bounded release times out (#10146). */

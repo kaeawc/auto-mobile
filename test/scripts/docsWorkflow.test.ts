@@ -33,4 +33,16 @@ describe("docs deployment workflow", () => {
       "github.ref == 'refs/heads/main' && needs.check.outputs.changed == 'true'",
     );
   });
+
+  test("pull requests verify the built site but never publish", () => {
+    const verify = workflow.jobs?.["verify-site"];
+    expect(verify?.if).toBe("github.event_name == 'pull_request'");
+    expect(verify?.permissions).toBeUndefined();
+    expect(check?.if).toBe("github.event_name != 'pull_request'");
+    const runs = (verify?.steps ?? []).map((step) => step.run ?? "");
+    expect(runs).toContain("bun scripts/docs/check-built-site.ts site");
+    expect(
+      runs.some((run) => run.startsWith("bun scripts/docs/check-site-in-browser.ts site")),
+    ).toBe(true);
+  });
 });

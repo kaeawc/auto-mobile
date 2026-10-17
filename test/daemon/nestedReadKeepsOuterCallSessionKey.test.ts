@@ -124,9 +124,11 @@ describe("nested sessionless calls keep the outer control execution's session ke
     try {
       daemon = new Daemon(
         {},
-        new FakeInstalledAppsRepository(),
-        timer,
-        new FakeDeviceSessionRepository(),
+        {
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          timer,
+          deviceSessionRepository: new FakeDeviceSessionRepository(),
+        },
       );
     } finally {
       poolFactory.mockRestore();

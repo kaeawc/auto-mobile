@@ -66,7 +66,7 @@ async function setUp(connected: boolean | undefined = true) {
       ).success,
     ).toBe(true);
   };
-  await manager.createSession(ID, "emulator-5554", "android", 120_000);
+  await manager.createSession(ID, "emulator-5554", "android", { timeoutMs: 120_000 });
   await heartbeat();
   const session = manager.getSession(ID)!;
   const reaped: string[] = [];

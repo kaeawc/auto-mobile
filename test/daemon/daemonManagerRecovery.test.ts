@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DaemonProcessSpawner } from "../../src/daemon/manager";
+import type { DaemonManagerOptions, DaemonProcessSpawner } from "../../src/daemon/manager";
 import type {
   DaemonProcessFinder,
   DaemonProcessLivenessChecker,
@@ -18,15 +18,17 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // Keep ownership probes fake: these tests exercise PID records in isolated temp
 // paths, never connect to a live socket or invoke the default OS signaler/spawner.
 class DaemonManager extends SafeDaemonManager {
-  constructor(...args: ConstructorParameters<typeof SafeDaemonManager>) {
-    args[11] ??= { next: () => "recovery-unit-owner" };
-    args[12] ??= { isReachable: async () => false };
-    args[17] ??= {
-      socketExists: () => false,
-      readRecord: () => (args[4] ? readPidFileDataSync(args[4]) : null),
-      probe: async () => ({ running: false }),
-    };
-    super(...args);
+  constructor(options: DaemonManagerOptions = {}) {
+    super({
+      ...options,
+      idGenerator: options.idGenerator ?? { next: () => "recovery-unit-owner" },
+      peerSocketReachability: options.peerSocketReachability ?? { isReachable: async () => false },
+      identityRecoveryIO: options.identityRecoveryIO ?? {
+        socketExists: () => false,
+        readRecord: () => (options.pidFilePath ? readPidFileDataSync(options.pidFilePath) : null),
+        probe: async () => ({ running: false }),
+      },
+    });
   }
 }
 
@@ -110,30 +112,20 @@ describe("DaemonManager control-state recovery", () => {
           timer.advanceTime(scanMs);
         }
       });
-      const manager = new DaemonManager(
-        undefined,
-        undefined,
+      const manager = new DaemonManager({
         timer,
-        lock,
-        pid,
-        socket,
-        processes,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        {
+        lockFilePath: lock,
+        pidFilePath: pid,
+        socketPath: socket,
+        processFinder: processes,
+        portAvailabilityChecker: {
           isPortFree: async (_port, _host, timeoutMs) => {
             probes.push(timeoutMs);
             return false;
           },
         },
-        undefined,
-        async () => false,
-      );
+        daemonProtocolHealthProbe: async () => false,
+      });
       await expect(
         manager.recoverControlState({}, async () => false, undefined, 50),
       ).rejects.toThrow(scanMs === 50 ? "deadline elapsed" : "still in use");
@@ -168,27 +160,20 @@ describe("DaemonManager control-state recovery", () => {
     const processes = new MutableDaemonProcesses([], unrelatedLivePids);
     const spawner = new CapturingDaemonSpawner();
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-    const manager = new ImmediatelyReadyRecoveryManager(
-      undefined,
-      undefined,
+    const manager = new ImmediatelyReadyRecoveryManager({
       timer,
-      lock,
-      pid,
-      socket,
-      processes,
-      spawner,
-      undefined,
-      () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
-      {
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: processes,
+      processSpawner: spawner,
+      launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+      processSignaler: {
         signal: (processId, signal) => signals.push({ pid: processId, signal }),
       },
-      undefined,
-      undefined,
-      undefined,
-      { isPortFree: async () => true },
-      undefined,
-      async () => false,
-    );
+      portAvailabilityChecker: { isPortFree: async () => true },
+      daemonProtocolHealthProbe: async () => false,
+    });
 
     await expect(manager.recoverControlState()).resolves.toBe("restarted");
 
@@ -230,27 +215,21 @@ describe("DaemonManager control-state recovery", () => {
       );
       const spawner = new CapturingDaemonSpawner();
       const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-      const manager = new ImmediatelyReadyRecoveryManager(
-        undefined,
-        undefined,
+      const manager = new ImmediatelyReadyRecoveryManager({
         timer,
-        lock,
-        pid,
-        socket,
-        new MutableDaemonProcesses([], new Set()),
-        spawner,
-        undefined,
-        () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
-        {
+        lockFilePath: lock,
+        pidFilePath: pid,
+        socketPath: socket,
+        processFinder: new MutableDaemonProcesses([], new Set()),
+        processSpawner: spawner,
+        launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+        processSignaler: {
           signal: (processId, signal) => signals.push({ pid: processId, signal }),
         },
-        undefined,
-        undefined,
-        platformOverride,
-        { isPortFree: async () => true },
-        undefined,
-        async () => false,
-      );
+        platform: platformOverride,
+        portAvailabilityChecker: { isPortFree: async () => true },
+        daemonProtocolHealthProbe: async () => false,
+      });
 
       await expect(
         manager.recoverControlState({
@@ -287,27 +266,21 @@ describe("DaemonManager control-state recovery", () => {
       writeFileSync(pid, "{ definitely not valid JSON");
       const spawner = new CapturingDaemonSpawner();
       const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-      const manager = new ImmediatelyReadyRecoveryManager(
-        undefined,
-        undefined,
+      const manager = new ImmediatelyReadyRecoveryManager({
         timer,
-        lock,
-        pid,
-        socket,
-        new MutableDaemonProcesses([], new Set([9876])),
-        spawner,
-        undefined,
-        () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
-        {
+        lockFilePath: lock,
+        pidFilePath: pid,
+        socketPath: socket,
+        processFinder: new MutableDaemonProcesses([], new Set([9876])),
+        processSpawner: spawner,
+        launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+        processSignaler: {
           signal: (processId, signal) => signals.push({ pid: processId, signal }),
         },
-        undefined,
-        undefined,
-        platformOverride,
-        { isPortFree: async () => true },
-        undefined,
-        async () => false,
-      );
+        platform: platformOverride,
+        portAvailabilityChecker: { isPortFree: async () => true },
+        daemonProtocolHealthProbe: async () => false,
+      });
 
       await expect(manager.recoverControlState()).resolves.toBe("restarted");
 
@@ -345,30 +318,24 @@ describe("DaemonManager control-state recovery", () => {
       );
       const spawner = new CapturingDaemonSpawner();
       const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-      const manager = new ImmediatelyReadyRecoveryManager(
-        undefined,
-        undefined,
+      const manager = new ImmediatelyReadyRecoveryManager({
         timer,
-        lock,
-        pid,
-        socket,
-        processes,
-        spawner,
-        undefined,
-        () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
-        {
+        lockFilePath: lock,
+        pidFilePath: pid,
+        socketPath: socket,
+        processFinder: processes,
+        processSpawner: spawner,
+        launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+        processSignaler: {
           signal: (processId, signal) => {
             signals.push({ pid: processId, signal });
             livePids.delete(processId);
           },
         },
-        undefined,
-        undefined,
-        platformOverride,
-        { isPortFree: async () => true },
-        undefined,
-        async () => false,
-      );
+        platform: platformOverride,
+        portAvailabilityChecker: { isPortFree: async () => true },
+        daemonProtocolHealthProbe: async () => false,
+      });
 
       await expect(manager.recoverControlState()).resolves.toBe("restarted");
 
@@ -401,27 +368,20 @@ describe("DaemonManager control-state recovery", () => {
     );
     const spawner = new CapturingDaemonSpawner();
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-    const manager = new ImmediatelyReadyRecoveryManager(
-      undefined,
-      undefined,
+    const manager = new ImmediatelyReadyRecoveryManager({
       timer,
-      lock,
-      pid,
-      socket,
-      processes,
-      spawner,
-      undefined,
-      () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
-      {
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: processes,
+      processSpawner: spawner,
+      launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+      processSignaler: {
         signal: (processId, signal) => signals.push({ pid: processId, signal }),
       },
-      undefined,
-      undefined,
-      undefined,
-      { isPortFree: async () => true },
-      undefined,
-      async () => false,
-    );
+      portAvailabilityChecker: { isPortFree: async () => true },
+      daemonProtocolHealthProbe: async () => false,
+    });
 
     await expect(manager.recoverControlState()).resolves.toBe("restarted");
 
@@ -451,25 +411,15 @@ describe("DaemonManager control-state recovery", () => {
         signals++;
       },
     };
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      lock,
-      pid,
-      socket,
-      processes,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      async () => true,
-    );
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: processes,
+      processSignaler: signaler,
+      daemonProtocolHealthProbe: async () => true,
+    });
 
     await expect(manager.recoverControlState()).resolves.toBe("joined");
     expect(signals).toBe(0);
@@ -490,25 +440,16 @@ describe("DaemonManager control-state recovery", () => {
         livePids.delete(processId);
       },
     };
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      lock,
-      pid,
-      socket,
-      processes,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      { isPortFree: async () => false },
-      undefined,
-      async () => false,
-    );
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: processes,
+      processSignaler: signaler,
+      portAvailabilityChecker: { isPortFree: async () => false },
+      daemonProtocolHealthProbe: async () => false,
+    });
 
     await expect(manager.recoverControlState()).rejects.toThrow("still in use");
     expect(signals).toEqual([]);
@@ -548,30 +489,21 @@ describe("DaemonManager control-state recovery", () => {
       },
     };
     const portChecks: Array<{ port: number; host: string }> = [];
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      lock,
-      pid,
-      socket,
-      processes,
-      undefined,
-      undefined,
-      undefined,
-      signaler,
-      undefined,
-      undefined,
-      undefined,
-      {
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: processes,
+      processSignaler: signaler,
+      portAvailabilityChecker: {
         isPortFree: async (port, host) => {
           portChecks.push({ port, host });
           return false;
         },
       },
-      undefined,
-      async () => false,
-    );
+      daemonProtocolHealthProbe: async () => false,
+    });
 
     await expect(manager.recoverControlState()).rejects.toThrow("port 4321");
     expect(signals).toEqual([{ pid: 1234, signal: "SIGTERM" }]);
@@ -591,28 +523,19 @@ describe("DaemonManager control-state recovery", () => {
       }),
     );
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      lock,
-      pid,
-      socket,
-      new MutableDaemonProcesses(
+    const manager = new DaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: new MutableDaemonProcesses(
         [{ pid: 1234, ppid: 1, command: "auto-mobile --daemon-mode", startedAt: 10_000 }],
         new Set([1234]),
       ),
-      undefined,
-      undefined,
-      undefined,
-      { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
-      undefined,
-      undefined,
-      undefined,
-      { isPortFree: async () => true },
-      undefined,
-      async () => false,
-    );
+      processSignaler: { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
+      portAvailabilityChecker: { isPortFree: async () => true },
+      daemonProtocolHealthProbe: async () => false,
+    });
 
     await expect(manager.recoverControlState()).rejects.toThrow("potentially reused PID");
     expect(signals).toEqual([]);
@@ -633,28 +556,19 @@ describe("DaemonManager control-state recovery", () => {
       }),
     );
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      lock,
-      pid,
-      socket,
-      new MutableDaemonProcesses(
+    const manager = new DaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: new MutableDaemonProcesses(
         [{ pid: 1234, ppid: 1, command: "auto-mobile --daemon-mode", startedAt: 1_000 }],
         new Set([1234]),
       ),
-      undefined,
-      undefined,
-      undefined,
-      { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
-      undefined,
-      undefined,
-      undefined,
-      { isPortFree: async () => true },
-      undefined,
-      async () => false,
-    );
+      processSignaler: { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
+      portAvailabilityChecker: { isPortFree: async () => true },
+      daemonProtocolHealthProbe: async () => false,
+    });
 
     await expect(manager.recoverControlState()).rejects.toThrow("potentially reused PID");
     expect(signals).toEqual([]);
@@ -687,30 +601,24 @@ describe("DaemonManager control-state recovery", () => {
       );
       const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
       const spawner = new CapturingDaemonSpawner();
-      const manager = new ImmediatelyReadyRecoveryManager(
-        undefined,
-        undefined,
+      const manager = new ImmediatelyReadyRecoveryManager({
         timer,
-        lock,
-        pid,
-        socket,
-        processes,
-        spawner,
-        undefined,
-        () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
-        {
+        lockFilePath: lock,
+        pidFilePath: pid,
+        socketPath: socket,
+        processFinder: processes,
+        processSpawner: spawner,
+        launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+        processSignaler: {
           signal: (processId, signal) => {
             signals.push({ pid: processId, signal });
             livePids.delete(processId);
           },
         },
-        undefined,
-        undefined,
-        platformOverride,
-        { isPortFree: async () => true },
-        undefined,
-        async () => false,
-      );
+        platform: platformOverride,
+        portAvailabilityChecker: { isPortFree: async () => true },
+        daemonProtocolHealthProbe: async () => false,
+      });
 
       await expect(manager.recoverControlState()).resolves.toBe("restarted");
 
@@ -753,30 +661,24 @@ describe("DaemonManager control-state recovery", () => {
         }),
       );
       const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-      const manager = new ImmediatelyReadyRecoveryManager(
-        undefined,
-        undefined,
+      const manager = new ImmediatelyReadyRecoveryManager({
         timer,
-        lock,
-        pid,
-        socket,
-        processes,
-        new CapturingDaemonSpawner(),
-        undefined,
-        () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
-        {
+        lockFilePath: lock,
+        pidFilePath: pid,
+        socketPath: socket,
+        processFinder: processes,
+        processSpawner: new CapturingDaemonSpawner(),
+        launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+        processSignaler: {
           signal: (processId, signal) => {
             signals.push({ pid: processId, signal });
             livePids.delete(processId);
           },
         },
-        undefined,
-        undefined,
-        platformOverride,
-        { isPortFree: async () => true },
-        undefined,
-        async () => false,
-      );
+        platform: platformOverride,
+        portAvailabilityChecker: { isPortFree: async () => true },
+        daemonProtocolHealthProbe: async () => false,
+      });
 
       await expect(manager.recoverControlState()).resolves.toBe("restarted");
       expect(signals).toEqual([{ pid: 1234, signal: "SIGTERM" }]);
@@ -817,30 +719,24 @@ describe("DaemonManager control-state recovery", () => {
         }),
       );
       const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-      const manager = new ImmediatelyReadyRecoveryManager(
-        undefined,
-        undefined,
+      const manager = new ImmediatelyReadyRecoveryManager({
         timer,
-        lock,
-        pid,
-        socket,
-        processes,
-        new CapturingDaemonSpawner(),
-        undefined,
-        () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
-        {
+        lockFilePath: lock,
+        pidFilePath: pid,
+        socketPath: socket,
+        processFinder: processes,
+        processSpawner: new CapturingDaemonSpawner(),
+        launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+        processSignaler: {
           signal: (processId, signal) => {
             signals.push({ pid: processId, signal });
             livePids.delete(processId);
           },
         },
-        undefined,
-        undefined,
-        platformOverride,
-        { isPortFree: async () => true },
-        undefined,
-        async () => false,
-      );
+        platform: platformOverride,
+        portAvailabilityChecker: { isPortFree: async () => true },
+        daemonProtocolHealthProbe: async () => false,
+      });
 
       await expect(manager.recoverControlState()).resolves.toBe("restarted");
       expect(signals).toEqual([{ pid: 1234, signal: "SIGTERM" }]);
@@ -879,25 +775,16 @@ describe("DaemonManager control-state recovery", () => {
       }),
     );
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      lock,
-      pid,
-      socket,
-      processes,
-      undefined,
-      undefined,
-      undefined,
-      { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
-      undefined,
-      undefined,
-      undefined,
-      { isPortFree: async () => true },
-      undefined,
-      async () => false,
-    );
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: processes,
+      processSignaler: { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
+      portAvailabilityChecker: { isPortFree: async () => true },
+      daemonProtocolHealthProbe: async () => false,
+    });
 
     await expect(manager.recoverControlState()).rejects.toThrow("PID was reused");
     expect(signals).toEqual([]);
@@ -936,25 +823,16 @@ describe("DaemonManager control-state recovery", () => {
       }),
     );
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      lock,
-      pid,
-      socket,
-      processes,
-      undefined,
-      undefined,
-      undefined,
-      { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
-      undefined,
-      undefined,
-      undefined,
-      { isPortFree: async () => true },
-      undefined,
-      async () => false,
-    );
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: processes,
+      processSignaler: { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
+      portAvailabilityChecker: { isPortFree: async () => true },
+      daemonProtocolHealthProbe: async () => false,
+    });
 
     await expect(manager.recoverControlState()).rejects.toThrow("PID was reused");
     expect(signals).toEqual([{ pid: expected.pid, signal: "SIGTERM" }]);
@@ -992,25 +870,16 @@ describe("DaemonManager control-state recovery", () => {
       }),
     );
     const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      lock,
-      pid,
-      socket,
-      processes,
-      undefined,
-      undefined,
-      undefined,
-      { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
-      undefined,
-      undefined,
-      undefined,
-      { isPortFree: async () => true },
-      undefined,
-      async () => false,
-    );
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: processes,
+      processSignaler: { signal: (processId, signal) => signals.push({ pid: processId, signal }) },
+      portAvailabilityChecker: { isPortFree: async () => true },
+      daemonProtocolHealthProbe: async () => false,
+    });
 
     await expect(manager.recoverControlState({}, async () => false, undefined, 50)).rejects.toThrow(
       "deadline elapsed before process-table inspection",
@@ -1041,33 +910,25 @@ describe("DaemonManager control-state recovery", () => {
       }
     }
 
-    const manager = new LockTakeoverRecoveryManager(
-      undefined,
-      undefined,
+    const manager = new LockTakeoverRecoveryManager({
       timer,
-      lock,
-      pid,
-      socket,
-      {
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: {
         findDaemonProcesses: () => [],
         isProcessRunning: () => false,
       },
-      spawner,
-      undefined,
-      () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
+      processSpawner: spawner,
+      launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
+      portAvailabilityChecker: {
         isPortFree: async (port, host) => {
           portChecks.push({ port, host });
           return false;
         },
       },
-      undefined,
-      async () => false,
-    );
+      daemonProtocolHealthProbe: async () => false,
+    });
 
     await expect(manager.recoverControlState({ port: 4321 })).rejects.toThrow("port 4321");
 
@@ -1082,14 +943,12 @@ describe("DaemonManager control-state recovery", () => {
     const scanTimeouts: Array<number | undefined> = [];
     const portProbeTimeouts: Array<number | undefined> = [];
     let scans = 0;
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
+    const manager = new DaemonManager({
       timer,
-      lock,
-      pid,
-      socket,
-      {
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: {
         findDaemonProcesses: (timeoutMs) => {
           scanTimeouts.push(timeoutMs);
           scans++;
@@ -1100,22 +959,14 @@ describe("DaemonManager control-state recovery", () => {
         },
         isProcessRunning: () => false,
       },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
+      portAvailabilityChecker: {
         isPortFree: async (_port, _host, timeoutMs) => {
           portProbeTimeouts.push(timeoutMs);
           return false;
         },
       },
-      undefined,
-      async () => false,
-    );
+      daemonProtocolHealthProbe: async () => false,
+    });
 
     await expect(manager.recoverControlState({}, async () => false, undefined, 25)).rejects.toThrow(
       "port 3000",
@@ -1144,9 +995,15 @@ describe("DaemonManager control-state recovery", () => {
         },
       }),
     );
-    const manager = new DaemonManager(undefined, undefined, timer, lock, pid, socket, {
-      findDaemonProcesses: () => [],
-      isProcessRunning: () => false,
+    const manager = new DaemonManager({
+      timer,
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: {
+        findDaemonProcesses: () => [],
+        isProcessRunning: () => false,
+      },
     });
 
     const recoveryOptions = await (
@@ -1178,9 +1035,15 @@ describe("DaemonManager control-state recovery", () => {
 
   test("preserves requested daemon-wide tool defaults during recovery", async () => {
     const { lock, pid, socket } = paths();
-    const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lock, pid, socket, {
-      findDaemonProcesses: () => [],
-      isProcessRunning: () => false,
+    const manager = new DaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: lock,
+      pidFilePath: pid,
+      socketPath: socket,
+      processFinder: {
+        findDaemonProcesses: () => [],
+        isProcessRunning: () => false,
+      },
     });
 
     const recoveryOptions = await (
@@ -1218,9 +1081,15 @@ describe("DaemonManager control-state recovery", () => {
     "recovery tool request wins conflicts with recorded %sTools",
     async (_requestedMode, recordedOptions, requestedOptions, enabledTools, disabledTools) => {
       const { lock, pid, socket } = paths();
-      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lock, pid, socket, {
-        findDaemonProcesses: () => [],
-        isProcessRunning: () => false,
+      const manager = new DaemonManager({
+        timer: new FakeTimer(),
+        lockFilePath: lock,
+        pidFilePath: pid,
+        socketPath: socket,
+        processFinder: {
+          findDaemonProcesses: () => [],
+          isProcessRunning: () => false,
+        },
       });
       const recoveryOptions = await (
         manager as unknown as {

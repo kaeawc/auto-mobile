@@ -20,28 +20,22 @@ test("daemon stop closes its binding acquisition in the managed execution stage"
   const timer = new FakeTimer();
   const daemon = new Daemon(
     {},
-    new FakeInstalledAppsRepository(),
-    timer,
-    new FakeDeviceSessionRepository(),
-    new FakeIdGenerator(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    {},
-    undefined,
-    undefined,
-    undefined,
-    () => timer.now(),
-    () => "fake-process-generation",
-    undefined,
-    new IncumbentOwnerGuard({
-      readPidFile: () => null,
-      persistPidFile: () => {},
-      isProcessRunning: () => false,
-      readProcessGenerationToken: () => undefined,
-      selfPid: 4242,
-    }),
+    {
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      timer,
+      deviceSessionRepository: new FakeDeviceSessionRepository(),
+      idGenerator: new FakeIdGenerator(),
+      recoveryPolicyEnvironment: {},
+      processBirthTime: () => timer.now(),
+      processGenerationToken: () => "fake-process-generation",
+      incumbentOwnerGuard: new IncumbentOwnerGuard({
+        readPidFile: () => null,
+        persistPidFile: () => {},
+        isProcessRunning: () => false,
+        readProcessGenerationToken: () => undefined,
+        selfPid: 4242,
+      }),
+    },
   );
   const wiring = daemon as unknown as ManagedAcquisitionShutdownWiring;
   let closes = 0;

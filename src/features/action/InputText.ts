@@ -1167,27 +1167,19 @@ export class InputText extends BaseVisualChange {
         for (const key of keys) {
           assertInputNotAborted(signal);
           await this.withTextDispatch(() =>
-            this.adb.executeCommand(
-              `shell input keyevent ${key}`,
-              undefined,
-              undefined,
-              undefined,
+            this.adb.executeCommand(`shell input keyevent ${key}`, {
               signal,
-              true,
-            ),
+              waitForProcessSettlementAfterAbort: true,
+            }),
           );
           assertInputNotAborted(signal);
         }
       } else {
         await this.withTextDispatch(() =>
-          this.adb.executeCommand(
-            `shell input keyevent ${keyCode}`,
-            undefined,
-            undefined,
-            undefined,
+          this.adb.executeCommand(`shell input keyevent ${keyCode}`, {
             signal,
-            true,
-          ),
+            waitForProcessSettlementAfterAbort: true,
+          }),
         );
         assertInputNotAborted(signal);
       }

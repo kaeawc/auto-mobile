@@ -417,15 +417,10 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       const pool: SessionDeviceAssigner = {
         async assignDeviceToSession(id, platform, target) {
           targets.push(target);
-          await manager.createSession(
-            id,
-            DEVICE,
-            platform ?? "android",
-            undefined,
-            undefined,
-            target?.stableDeviceId,
-            target?.liveness,
-          );
+          await manager.createSession(id, DEVICE, platform ?? "android", {
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+          });
           return DEVICE;
         },
       };
@@ -606,15 +601,10 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
         const pool: SessionDeviceAssigner = {
           async assignDeviceToSession(id, platform, target) {
             targets.push(target);
-            await manager.createSession(
-              id,
-              DEVICE,
-              platform ?? "android",
-              undefined,
-              undefined,
-              target?.stableDeviceId,
-              target?.liveness,
-            );
+            await manager.createSession(id, DEVICE, platform ?? "android", {
+              stableDeviceId: target?.stableDeviceId,
+              recoveredLiveness: target?.liveness,
+            });
             return DEVICE;
           },
         };
@@ -664,16 +654,11 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       const result = await manager.rehydratePersistedSessions({
         async assignDeviceToSession(id, platform, target) {
           targets.push(target);
-          await manager.createSession(
-            id,
-            DEVICE,
-            platform ?? "android",
-            undefined,
-            undefined,
-            target?.stableDeviceId,
-            target?.liveness,
-            target?.initialOwnership,
-          );
+          await manager.createSession(id, DEVICE, platform ?? "android", {
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          });
           return DEVICE;
         },
       });
@@ -713,15 +698,10 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
     const pool: SessionDeviceAssigner = {
       async assignDeviceToSession(id, platform, target) {
         targets.push(target);
-        await manager.createSession(
-          id,
-          DEVICE,
-          platform ?? "android",
-          undefined,
-          undefined,
-          target?.stableDeviceId,
-          target?.liveness,
-        );
+        await manager.createSession(id, DEVICE, platform ?? "android", {
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+        });
         return DEVICE;
       },
     };

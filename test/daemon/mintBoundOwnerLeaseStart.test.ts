@@ -468,16 +468,13 @@ test("rehydrated awaiting-owner keeps its release window and claim behaviour wit
   manager.stopCleanupTimer();
   const assigner: SessionDeviceAssigner = {
     async assignDeviceToSession(id, _platform, target) {
-      const session = await manager.createSession(
-        id,
-        id,
-        "android",
-        target?.liveness?.sessionTimeoutMs,
-        target?.liveness?.heartbeatTimeoutMs,
-        target?.stableDeviceId,
-        target?.liveness,
-        target?.initialOwnership,
-      );
+      const session = await manager.createSession(id, id, "android", {
+        timeoutMs: target?.liveness?.sessionTimeoutMs,
+        heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+        stableDeviceId: target?.stableDeviceId,
+        recoveredLiveness: target?.liveness,
+        initialOwnership: target?.initialOwnership,
+      });
       return session.assignedDevice;
     },
   };

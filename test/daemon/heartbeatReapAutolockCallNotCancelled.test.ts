@@ -51,9 +51,11 @@ describe("heartbeat reap of a session with an implicit (autolock) control call i
     timer = new FakeTimer();
     daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     daemon.getSessionManager().stopCleanupTimer();
     started = [];

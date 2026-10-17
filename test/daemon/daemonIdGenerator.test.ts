@@ -20,10 +20,11 @@ describe("Daemon UUID source", function () {
     const idGenerator = new CountingIdGenerator("daemon-session");
     const daemon = new Daemon(
       {},
-      undefined,
-      new FakeTimer(),
-      new DeviceSessionRepository(),
-      idGenerator,
+      {
+        timer: new FakeTimer(),
+        deviceSessionRepository: new DeviceSessionRepository(),
+        idGenerator,
+      },
     );
 
     // First id minted during construction (daemonSessionId).
@@ -35,7 +36,10 @@ describe("Daemon UUID source", function () {
   test("retires a removed device epoch and mints a replacement through daemon wiring", async () => {
     const timer = new FakeTimer();
     const idGenerator = new CountingIdGenerator("device-session");
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, undefined, idGenerator);
+    const daemon = new Daemon(
+      {},
+      { installedAppsRepository: new FakeInstalledAppsRepository(), timer, idGenerator },
+    );
     const pool = daemon.getDevicePool();
     const registry = (
       daemon as unknown as {

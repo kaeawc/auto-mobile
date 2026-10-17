@@ -92,7 +92,7 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
         throw new Error("These requests must not consult the pool");
       },
     };
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     manager.setKeepScreenAwake(SESSION, { applied: true, method: "svc", svcWasEnabled: false });
   });
 
@@ -201,7 +201,7 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
     try {
       const registration = register();
       await drainUntil(() => reading, { description: "blocked persisted snapshot read" });
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
       manager.setKeepScreenAwake(SESSION, { applied: true, method: "svc", svcWasEnabled: false });
       expireWithoutLookup();
       finishRead.resolve();

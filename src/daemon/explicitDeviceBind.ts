@@ -793,12 +793,14 @@ export class ExplicitDeviceBind {
           sessionId,
           deviceId,
           platform,
-          creation.recoveryTarget?.liveness?.sessionTimeoutMs,
-          creation.recoveryTarget?.liveness?.heartbeatTimeoutMs,
-          stableDeviceId,
-          creation.recoveryTarget?.liveness,
-          creation.recoveryTarget?.initialOwnership,
-          persistenceSource,
+          {
+            timeoutMs: creation.recoveryTarget?.liveness?.sessionTimeoutMs,
+            heartbeatTimeoutMs: creation.recoveryTarget?.liveness?.heartbeatTimeoutMs,
+            stableDeviceId,
+            recoveredLiveness: creation.recoveryTarget?.liveness,
+            initialOwnership: creation.recoveryTarget?.initialOwnership,
+            persistenceSource,
+          },
         );
         if (previousSession && platform === "android") {
           this.port.sessionManager.invalidateAutomationReadiness(

@@ -65,9 +65,11 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const timer = new FakeTimer();
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const warnSpy = spyOn(logger, "warn");
 
@@ -84,7 +86,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("retried release keeps the device busy and unclaimable during backoff", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const manager = daemon.getSessionManager();
     const pool = daemon.getDevicePool();
     // One allocation attempt proves another session cannot claim the busy device.
@@ -147,7 +156,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("exhausted release retries free the removed session's device exactly once", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const manager = daemon.getSessionManager();
     const pool = daemon.getDevicePool();
     const device: BootedDevice = {
@@ -221,7 +237,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     async (owner) => {
       const timer = new FakeTimer();
       const repository = new FakeDeviceSessionRepository();
-      const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+      const daemon = new Daemon(
+        {},
+        {
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          timer,
+          deviceSessionRepository: repository,
+        },
+      );
       const manager = daemon.getSessionManager();
       const pool = daemon.getDevicePool();
       const device: BootedDevice = {
@@ -290,7 +313,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("daemon fallback pool failure warns and preserves the original release error", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const manager = daemon.getSessionManager();
     const pool = daemon.getDevicePool();
     const device: BootedDevice = {
@@ -343,7 +373,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     "release persistence failure respects the real caller reason: %s",
     async (branch) => {
       const repository = new FakeDeviceSessionRepository();
-      const daemon = new Daemon({}, new FakeInstalledAppsRepository(), new FakeTimer(), repository);
+      const daemon = new Daemon(
+        {},
+        {
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          timer: new FakeTimer(),
+          deviceSessionRepository: repository,
+        },
+      );
       const manager = daemon.getSessionManager();
       const pool = daemon.getDevicePool();
       const device: BootedDevice = {
@@ -415,9 +452,11 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     async (branch) => {
       const daemon = new Daemon(
         {},
-        new FakeInstalledAppsRepository(),
-        new FakeTimer(),
-        new FakeDeviceSessionRepository(),
+        {
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          timer: new FakeTimer(),
+          deviceSessionRepository: new FakeDeviceSessionRepository(),
+        },
       );
       const manager = daemon.getSessionManager();
       const pool = daemon.getDevicePool();
@@ -453,7 +492,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
 
   test("persistence failure keeps device ownership for a newer same-UUID incarnation", async () => {
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), new FakeTimer(), repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: new FakeTimer(),
+        deviceSessionRepository: repository,
+      },
+    );
     const manager = daemon.getSessionManager();
     const pool = daemon.getDevicePool();
     const device: BootedDevice = {
@@ -501,9 +547,11 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("waits for pending device cleanup before closing the database", async () => {
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      new FakeTimer(),
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: new FakeTimer(),
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const cleanup = Promise.withResolvers<void>();
     const cleanupStarted = Promise.withResolvers<void>();
@@ -545,9 +593,11 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const timer = new FakeTimer();
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const cleanup = Promise.withResolvers<void>();
     const cleanupStarted = Promise.withResolvers<void>();
@@ -584,7 +634,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("releases active sessions before closing the database", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
     const sessionId = "shutdown-session";
@@ -647,17 +704,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const repository = new FakeDeviceSessionRepository();
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      repository,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      process.env,
-      async () => {
-        repository.events.push("stopManagedAdbServer");
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+        recoveryPolicyEnvironment: process.env,
+        managedAdbServerShutdown: async () => {
+          repository.events.push("stopManagedAdbServer");
+        },
       },
     );
     const sessionManager = daemon.getSessionManager();
@@ -688,7 +742,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("continues releasing other sessions when one teardown fails", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     const brokenSessionId = "broken-shutdown-session";
     const healthySessionId = "healthy-shutdown-session";
@@ -729,7 +790,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("continues releasing remaining sessions when restoration fails", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
     const brokenSessionId = "broken-shutdown-session";
@@ -790,7 +858,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("publishes each concurrent bound-session shutdown before closing the control socket (#6336)", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     const events: string[] = [];
     const stopAcceptingSessionCreations =
@@ -849,7 +924,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("rejects a session creation that outlives control-socket quiescence (#6336)", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     const continueAcquisition = Promise.withResolvers<void>();
     const lateCreation = (async () => {
@@ -895,7 +977,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     const finishAssignment = Promise.withResolvers<void>();
     const assignmentStarted = Promise.withResolvers<void>();
@@ -945,7 +1034,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("drains a monitor release that removed its session before shutdown snapshots it", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     let allowPersistence!: () => void;
     const persistence = new Promise<void>((resolve) => {
@@ -992,7 +1088,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     const events: string[] = [];
     const persistence = Promise.withResolvers<void>();
@@ -1054,7 +1157,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("publishes a daemon-shutdown reason upgrade after an ordinary release callback (#6336)", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     const persistence = Promise.withResolvers<void>();
     const persistenceStarted = Promise.withResolvers<void>();
@@ -1123,7 +1233,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     // before advancing time can run ahead of the drain deadline's registration.
     timer.enableAutoAdvance();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const internals = daemon;
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
     const warnSpy = spyOn(logger, "warn");
@@ -1144,7 +1261,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("releases expired sessions that remain in memory during shutdown", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
     const sessionId = "expired-shutdown-session";
@@ -1192,7 +1316,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
   test("cleans up daemon pid/socket files only after the logger has flushed and closed (issue #6194)", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const events: string[] = [];
     const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
       events.push("closeDatabase");
@@ -1229,9 +1360,11 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const timer = new FakeTimer();
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const events: string[] = [];
     const releaseSpy = spyOn(

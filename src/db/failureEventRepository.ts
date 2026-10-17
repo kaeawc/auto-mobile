@@ -5,6 +5,7 @@ import type { CrashEvent, AnrEvent } from "../utils/interfaces/CrashMonitor";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import { nowIso } from "./nowIso";
 import {
   CLEANUP_CHECK_INTERVAL,
   pruneTableByRowCap,
@@ -208,7 +209,7 @@ export class FailureEventRepository {
 
     const newToolCall: NewToolCall = {
       tool_name: toolName,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso(this.timer),
       session_uuid: options.sessionUuid ?? null,
       status: options.status ?? "success",
       error_message: options.errorMessage ?? null,

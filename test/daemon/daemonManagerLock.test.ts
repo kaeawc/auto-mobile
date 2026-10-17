@@ -55,7 +55,7 @@ describe("DaemonManager file lock", () => {
   describe("acquireLock", () => {
     test("succeeds when no lock file exists", () => {
       const lockPath = createTempLockPath();
-      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      const manager = new DaemonManager({ timer: new FakeTimer(), lockFilePath: lockPath });
 
       expect(manager.acquireLock()).toBe(true);
       expect(existsSync(lockPath)).toBe(true);
@@ -65,7 +65,7 @@ describe("DaemonManager file lock", () => {
 
     test("writes a per-instance owner token alongside the PID (#5904)", () => {
       const lockPath = createTempLockPath();
-      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      const manager = new DaemonManager({ timer: new FakeTimer(), lockFilePath: lockPath });
 
       expect(manager.acquireLock()).toBe(true);
       const { pid, token } = parseLockContent(readFileSync(lockPath, "utf-8").trim());
@@ -81,12 +81,12 @@ describe("DaemonManager file lock", () => {
     test("two managers in one process write distinct owner tokens (#5904)", () => {
       const lockPath = createTempLockPath();
 
-      const first = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      const first = new DaemonManager({ timer: new FakeTimer(), lockFilePath: lockPath });
       expect(first.acquireLock()).toBe(true);
       const tokenA = parseLockContent(readFileSync(lockPath, "utf-8").trim()).token;
       first.releaseLock();
 
-      const second = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      const second = new DaemonManager({ timer: new FakeTimer(), lockFilePath: lockPath });
       expect(second.acquireLock()).toBe(true);
       const tokenB = parseLockContent(readFileSync(lockPath, "utf-8").trim()).token;
       second.releaseLock();
@@ -100,11 +100,11 @@ describe("DaemonManager file lock", () => {
 
     test("fails when lock is held by a live process", () => {
       const lockPath = createTempLockPath();
-      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      const manager = new DaemonManager({ timer: new FakeTimer(), lockFilePath: lockPath });
 
       expect(manager.acquireLock()).toBe(true);
 
-      const manager2 = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      const manager2 = new DaemonManager({ timer: new FakeTimer(), lockFilePath: lockPath });
       expect(manager2.acquireLock()).toBe(false);
 
       manager.releaseLock();
@@ -114,7 +114,7 @@ describe("DaemonManager file lock", () => {
       const lockPath = createTempLockPath();
       writeFileSync(lockPath, "99999999");
 
-      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      const manager = new DaemonManager({ timer: new FakeTimer(), lockFilePath: lockPath });
       expect(manager.acquireLock()).toBe(true);
       expect(existsSync(lockPath)).toBe(true);
 
@@ -125,7 +125,7 @@ describe("DaemonManager file lock", () => {
       const lockPath = createTempLockPath();
       writeFileSync(lockPath, "not-a-pid");
 
-      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      const manager = new DaemonManager({ timer: new FakeTimer(), lockFilePath: lockPath });
       // NaN PID → treated as actively held to avoid race with concurrent writer
       expect(manager.acquireLock()).toBe(false);
 
@@ -138,7 +138,7 @@ describe("DaemonManager file lock", () => {
       const lockPath = createTempLockPath();
       writeFileSync(lockPath, "");
 
-      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      const manager = new DaemonManager({ timer: new FakeTimer(), lockFilePath: lockPath });
       // Empty → writer just created the file, hasn't written PID yet
       expect(manager.acquireLock()).toBe(false);
 
@@ -151,7 +151,7 @@ describe("DaemonManager file lock", () => {
   describe("releaseLock", () => {
     test("removes the lock file", () => {
       const lockPath = createTempLockPath();
-      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      const manager = new DaemonManager({ timer: new FakeTimer(), lockFilePath: lockPath });
 
       manager.acquireLock();
       expect(existsSync(lockPath)).toBe(true);
@@ -162,7 +162,7 @@ describe("DaemonManager file lock", () => {
 
     test("is safe when no lock file exists", () => {
       const lockPath = createTempLockPath();
-      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      const manager = new DaemonManager({ timer: new FakeTimer(), lockFilePath: lockPath });
 
       // Should not throw
       manager.releaseLock();
@@ -170,7 +170,7 @@ describe("DaemonManager file lock", () => {
 
     test("is idempotent", () => {
       const lockPath = createTempLockPath();
-      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      const manager = new DaemonManager({ timer: new FakeTimer(), lockFilePath: lockPath });
 
       manager.acquireLock();
       manager.releaseLock();
@@ -201,21 +201,12 @@ describe("DaemonManager file lock", () => {
         }
       }
 
-      const manager = new TestDaemonManager(
-        unavailableDaemonClient,
-        undefined,
-        fakeTimer,
-        lockPath,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { isReachable: async () => false },
-      );
+      const manager = new TestDaemonManager({
+        clientFactory: unavailableDaemonClient,
+        timer: fakeTimer,
+        lockFilePath: lockPath,
+        peerSocketReachability: { isReachable: async () => false },
+      });
 
       await manager.start();
 
@@ -235,7 +226,7 @@ describe("DaemonManager file lock", () => {
 
       const holderLogsDir = join(dirname(lockPath), "holder-logs");
       process.env.AUTOMOBILE_LOG_DIR = holderLogsDir;
-      const holder = new DaemonManager(undefined, undefined, fakeTimer, lockPath);
+      const holder = new DaemonManager({ timer: fakeTimer, lockFilePath: lockPath });
       expect(holder.acquireLock()).toBe(true);
       mkdirSync(holderLogsDir, { recursive: true });
       writeFileSync(
@@ -259,21 +250,12 @@ describe("DaemonManager file lock", () => {
         }
       }
 
-      const manager = new TestDaemonManager(
-        unavailableDaemonClient,
-        undefined,
-        fakeTimer,
-        lockPath,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { isReachable: async () => false },
-      );
+      const manager = new TestDaemonManager({
+        clientFactory: unavailableDaemonClient,
+        timer: fakeTimer,
+        lockFilePath: lockPath,
+        peerSocketReachability: { isReachable: async () => false },
+      });
 
       await expect(manager.start()).rejects.toThrow(
         /Another process is starting the daemon but it failed to become ready[\s\S]*holder-logs[\s\S]*SIMULATOR-B/,
@@ -303,7 +285,7 @@ describe("DaemonManager file lock", () => {
           waitCount++;
           if (waitCount === 1) {
             process.env.AUTOMOBILE_LOG_DIR = holderLogsDir;
-            retryHolder = new DaemonManager(undefined, undefined, fakeTimer, lockPath);
+            retryHolder = new DaemonManager({ timer: fakeTimer, lockFilePath: lockPath });
             expect(retryHolder.acquireLock()).toBe(true);
             mkdirSync(holderLogsDir, { recursive: true });
             writeFileSync(
@@ -321,21 +303,12 @@ describe("DaemonManager file lock", () => {
         }
       }
 
-      const manager = new TestDaemonManager(
-        unavailableDaemonClient,
-        undefined,
-        fakeTimer,
-        lockPath,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { isReachable: async () => false },
-      );
+      const manager = new TestDaemonManager({
+        clientFactory: unavailableDaemonClient,
+        timer: fakeTimer,
+        lockFilePath: lockPath,
+        peerSocketReachability: { isReachable: async () => false },
+      });
 
       await expect(manager.start()).rejects.toThrow(
         /Another process is starting the daemon but it failed to become ready[\s\S]*retry-holder-logs[\s\S]*Retry holder failed/,
@@ -377,21 +350,14 @@ describe("DaemonManager file lock", () => {
         }
       }
 
-      const manager = new TestDaemonManager(
-        unavailableDaemonClient,
-        undefined,
-        fakeTimer,
-        lockPath,
-        pidPath,
+      const manager = new TestDaemonManager({
+        clientFactory: unavailableDaemonClient,
+        timer: fakeTimer,
+        lockFilePath: lockPath,
+        pidFilePath: pidPath,
         socketPath,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { isReachable: async () => false },
-      );
+        peerSocketReachability: { isReachable: async () => false },
+      });
 
       await expect(manager.start()).rejects.toThrow();
       // Wait #1 on holder A, then the token-B replacement is recognized as a genuinely
@@ -417,7 +383,7 @@ describe("DaemonManager file lock", () => {
         }
       }
 
-      const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
+      const manager = new TestDaemonManager({ timer: fakeTimer, lockFilePath: lockPath });
 
       // start() will acquire the lock, try to run startUnlocked (which calls waitForReady
       // internally), and then release the lock. Since we can't fully mock startUnlocked
@@ -448,7 +414,7 @@ describe("DaemonManager file lock", () => {
         }
       }
 
-      const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
+      const manager = new TestDaemonManager({ timer: fakeTimer, lockFilePath: lockPath });
 
       await expect(manager.start()).rejects.toThrow("simulated failure");
 

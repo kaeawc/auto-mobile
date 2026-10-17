@@ -89,7 +89,7 @@ export function refuseControlOnForeignOwnedSession(
   }
   const deviceId = DaemonState.getInstance()
     .getSessionManager()
-    .getSession(sessionUuid)?.assignedDevice;
+    .findSession(sessionUuid)?.assignedDevice;
   const forced = typeof args === "object" && args !== null && Reflect.get(args, "force") === true;
   const remedy = forced
     ? `${FOREIGN_SESSION_REMEDY} ${FORCED_CALL_REMEDY}`

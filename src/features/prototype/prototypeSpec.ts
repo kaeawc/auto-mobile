@@ -538,8 +538,32 @@ const repeatShape = { repeat: repeatSchema.optional() };
 const boxBaseSchema = z
   .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["box"]) })
   .strict();
+const swipeActionSchema = z
+  .object({
+    label: z.string().min(1),
+    icon: iconNameSchema.optional(),
+    role: z.enum(["default", "destructive"]).optional(),
+    color: colorTokenSchema.optional(),
+    onTap: z.array(actionSchema).min(1).max(32),
+  })
+  .strict();
+const swipeActionListSchema = z.array(swipeActionSchema).min(1).max(3);
+const swipeActionsSchema = z
+  .object({
+    start: swipeActionListSchema.optional(),
+    end: swipeActionListSchema.optional(),
+    fullSwipe: z.boolean().optional(),
+  })
+  .strict();
+const swipeActionsShape = { swipeActions: swipeActionsSchema.optional() };
 const rowBaseSchema = z
-  .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["row"]) })
+  .object({
+    ...commonNodeShape,
+    ...gestureNodeShape,
+    ...swipeActionsShape,
+    ...repeatShape,
+    type: z.enum(["row"]),
+  })
   .strict();
 const columnBaseSchema = z
   .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["column"]) })
@@ -632,6 +656,7 @@ const textFieldBaseSchema = z
     minLines: z.number().int().min(1).max(20).optional(),
     maxLines: z.number().int().min(1).max(20).optional(),
     maxLength: z.number().int().min(1).max(10000).optional(),
+    leadingIcon: iconNameSchema.optional(),
     trailingIcon: appBarActionSchema.optional(),
     imeAction: z.enum(["done", "next", "search", "send", "go"]).optional(),
     onSubmit: actionListSchema.optional(),
@@ -708,6 +733,7 @@ const listItemBaseSchema = z
   .object({
     ...commonNodeShape,
     ...enabledShape,
+    ...swipeActionsShape,
     type: z.enum(["listItem"]),
     headline: z.string().min(1),
     supporting: z.string().min(1).optional(),

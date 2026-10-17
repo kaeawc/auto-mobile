@@ -10,10 +10,6 @@ plugins {
   id("automobile.published-library")
 }
 
-java {
-  toolchain { languageVersion.set(JavaLanguageVersion.of(libs.versions.build.java.target.get())) }
-}
-
 dependencies {
   api(libs.kotlin.stdlib.consumer)
 

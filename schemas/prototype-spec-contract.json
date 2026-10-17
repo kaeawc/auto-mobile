@@ -1697,6 +1697,13 @@
               },
               "optional": true
             },
+            "swipeActions": {
+              "rule": {
+                "kind": "ref",
+                "name": "swipeActions"
+              },
+              "optional": true
+            },
             "style": {
               "rule": {
                 "kind": "ref",
@@ -3028,6 +3035,13 @@
               },
               "optional": true
             },
+            "leadingIcon": {
+              "rule": {
+                "kind": "ref",
+                "name": "iconName"
+              },
+              "optional": true
+            },
             "trailingIcon": {
               "rule": {
                 "kind": "ref",
@@ -3871,6 +3885,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "listItemTrailing"
+              },
+              "optional": true
+            },
+            "swipeActions": {
+              "rule": {
+                "kind": "ref",
+                "name": "swipeActions"
               },
               "optional": true
             },
@@ -9800,6 +9821,88 @@
       "integer": false,
       "min": 0,
       "max": 10000
+    },
+    "swipeAction": {
+      "kind": "object",
+      "fields": {
+        "label": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "icon": {
+          "rule": {
+            "kind": "ref",
+            "name": "iconName"
+          },
+          "optional": true
+        },
+        "role": {
+          "rule": {
+            "kind": "enum",
+            "values": ["default", "destructive"]
+          },
+          "optional": true
+        },
+        "color": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorToken"
+          },
+          "optional": true
+        },
+        "onTap": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            },
+            "min": 1,
+            "unique": false,
+            "max": 32
+          },
+          "optional": false
+        }
+      }
+    },
+    "swipeActions": {
+      "kind": "object",
+      "fields": {
+        "start": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "swipeAction"
+            },
+            "min": 1,
+            "unique": false,
+            "max": 3
+          },
+          "optional": true
+        },
+        "end": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "swipeAction"
+            },
+            "min": 1,
+            "unique": false,
+            "max": 3
+          },
+          "optional": true
+        },
+        "fullSwipe": {
+          "rule": {
+            "kind": "boolean"
+          },
+          "optional": true
+        }
+      }
     },
     "pagerPageSize": {
       "kind": "choice",

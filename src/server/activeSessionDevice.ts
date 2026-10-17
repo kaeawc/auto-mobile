@@ -41,7 +41,7 @@ export function resolveActiveSessionDevice(sessionUuid: string): ActiveSessionDe
     return resolveDirectSessionDevice(sessionUuid);
   }
 
-  const session = daemonState.getSessionManager().getSession(sessionUuid);
+  const session = daemonState.getSessionManager().findSession(sessionUuid);
   if (!session) {
     return undefined;
   }

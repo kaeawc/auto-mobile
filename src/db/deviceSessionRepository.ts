@@ -20,7 +20,7 @@ import {
   releaseReasonStrength,
   sessionReleaseReasonFamily,
   type SessionReleaseReasonFamily,
-} from "../daemon/releaseReasons";
+} from "../models/releaseReasons";
 
 // Terminal-state (`released`/`expired`) rows accumulate for the life of the
 // on-disk DB with no delete path (#6464). Bound their retention window rather

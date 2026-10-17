@@ -333,16 +333,10 @@ export class DeviceAutolockManager {
     // declares the CLI liveness policy, which moves the session onto wall-clock
     // idleness instead.
     const session = await this.pool.createSessionOrRestore(device, assignmentSnapshot, () =>
-      this.pool
-        .getSessionManager()
-        .createSession(
-          sessionId,
-          deviceId,
-          platform,
-          timeoutMs,
-          undefined,
-          this.pool.stableDeviceIdFor(device),
-        ),
+      this.pool.getSessionManager().createSession(sessionId, deviceId, platform, {
+        timeoutMs,
+        stableDeviceId: this.pool.stableDeviceIdFor(device),
+      }),
     );
     // #6227 (round 9): record the achieved readiness BEFORE publishing the
     // autolock route below. `mcpSessionAutolockMap.set` makes this session

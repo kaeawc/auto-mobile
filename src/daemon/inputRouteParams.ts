@@ -241,3 +241,10 @@ export function parseInputGestureParams(params: unknown, route: string) {
   const parse = GESTURE_PARSERS.get(route) ?? routeParser(route, gestureSchema(route));
   return parse(params);
 }
+
+export type InputTapParams = ReturnType<typeof parseInputTapParams>;
+export type InputSwipeParams = ReturnType<typeof parseInputSwipeParams>;
+export type InputTypeTextParams = ReturnType<typeof parseInputTypeTextParams>;
+export type InputPressButtonParams = ReturnType<typeof parseInputPressButtonParams>;
+export type InputKeyParams = ReturnType<typeof parseInputKeyParams>;
+export type InputGestureParams = ReturnType<typeof parseInputGestureParams>;

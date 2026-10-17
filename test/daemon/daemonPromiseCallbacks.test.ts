@@ -32,7 +32,7 @@ describe("daemon transport callback rejection ownership", () => {
   beforeEach(() => {
     timer = new FakeTimer();
     // Construct only: no daemon startup, sockets, devices, or real timers.
-    internals = new Daemon({}, undefined, timer) as unknown as CallbackInternals;
+    internals = new Daemon({}, { timer }) as unknown as CallbackInternals;
     transport = new FakeTransport();
     internals.configureHttpTransportCallbacks(
       transport as unknown as StreamableHTTPServerTransport,

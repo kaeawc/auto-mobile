@@ -460,9 +460,9 @@ describe("TelemetryRecorder", () => {
       changeType: "put",
     });
 
-    expect(repo.storageEvents).toHaveLength(1);
+    expect(repo.storageInputs).toHaveLength(1);
     // Absent field → repository falls back to its auto-lookup path.
-    expect(repo.storageEvents[0].previousValue).toBeUndefined();
+    expect(repo.storageInputs[0].previousValue).toBeUndefined();
   });
 
   it("recordStorageEvent pushes category storage to socket", async () => {

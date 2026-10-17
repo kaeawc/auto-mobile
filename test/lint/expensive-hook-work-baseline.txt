@@ -29,6 +29,7 @@ test/daemon/devicePool.incompleteScanStart.test.ts	heavy-harness
 test/daemon/devicePool.multiDeviceAllocationContention.test.ts	heavy-harness
 test/daemon/devicePool.multiDeviceScheduling.test.ts	heavy-harness
 test/daemon/devicePool.ownerDisconnectRelease.test.ts	heavy-harness
+test/daemon/devicePool.rebindOldDeviceEviction.test.ts	heavy-harness
 test/daemon/devicePool.recoveryOutsideMutex.test.ts	heavy-harness
 test/daemon/devicePool.refreshDevices.test.ts	heavy-harness
 test/daemon/devicePool.removeDeviceLeaks.test.ts	heavy-harness

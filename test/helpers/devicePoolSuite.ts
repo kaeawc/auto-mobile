@@ -703,20 +703,8 @@ export function devicePoolSuiteActions(context: DevicePoolSuiteContext) {
     const { sessionManager } = context();
     const createSession = sessionManager.createSession.bind(sessionManager);
     let sessionCreates = 0;
-    sessionManager.createSession = async (
-      sessionId,
-      deviceId,
-      platform,
-      timeoutMs,
-      heartbeatTimeoutMs,
-    ) => {
-      const session = await createSession(
-        sessionId,
-        deviceId,
-        platform,
-        timeoutMs,
-        heartbeatTimeoutMs,
-      );
+    sessionManager.createSession = async (sessionId, deviceId, platform, options) => {
+      const session = await createSession(sessionId, deviceId, platform, options);
       sessionCreates++;
       if (sessionCreates === 1) {
         configure();

@@ -210,9 +210,9 @@ async function makeScratchDirectory(): Promise<string> {
 
 describe(".oxlintrc.json rule scoping (via oxlint --print-config)", () => {
   test("catch-convention and no-unknown-cast are scoped to src/**", () => {
-    for (const rule of ["auto-mobile/catch-convention", "auto-mobile/no-unknown-cast"]) {
-      expectScopedRule(rule, ["src/**/*.ts"], "warn");
-    }
+    expectScopedRule("auto-mobile/catch-convention", ["src/**/*.ts"], "warn");
+    // Fully burned down, so enforced directly by oxlint (printed as "deny").
+    expectScopedRule("auto-mobile/no-unknown-cast", ["src/**/*.ts"], "deny");
   });
 
   test("max-params and max-lines-per-function are scoped to src/**", () => {

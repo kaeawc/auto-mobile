@@ -291,11 +291,13 @@ describe("restart recovery device reservation: the rehydration batch (#11294)", 
           sessionId,
           target?.deviceId ?? "unknown",
           "ios",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
+          {
+            timeoutMs: target?.liveness?.sessionTimeoutMs,
+            heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          },
         );
         return session.assignedDevice;
       },

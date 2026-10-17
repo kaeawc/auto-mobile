@@ -97,6 +97,7 @@ export const FINAL_OBSERVATION_RETRY_BACKOFF_MS: readonly number[] = [50, 100, 2
 
 const COORDINATE_ACTIONS = new Set([
   "tapAt",
+  "swipeAt",
   "tapOn",
   "tapAny",
   "swipeOn",

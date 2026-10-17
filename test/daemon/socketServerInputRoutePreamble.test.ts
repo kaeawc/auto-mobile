@@ -22,12 +22,6 @@ interface Preamble {
     queueEnterMs: number,
     totalTimeoutMs: number,
   ): number;
-  requireLiveInputAttempt(
-    signal: AbortSignal | undefined,
-    deviceId: string,
-    frameContext: string | undefined,
-    label: string,
-  ): void;
 }
 
 function fixture() {
@@ -88,15 +82,6 @@ describe("input/* request preamble (#11814)", () => {
     const request = { id: "1", type: "mcp_request", method: "input/tap" } as DaemonRequest;
     expect(preamble.inputRouteClock(request, { receivedAtMs: 100 }).queueEnterMs).toBe(100);
     expect(preamble.inputRouteClock(request, undefined).queueEnterMs).toBe(timer.now());
-  });
-
-  test("an aborted attempt is refused before any frame-context check", () => {
-    const { preamble } = fixture();
-    const controller = new AbortController();
-    controller.abort(new Error("owner left"));
-    expect(() =>
-      preamble.requireLiveInputAttempt(controller.signal, "device", "stale-frame", "input/tap"),
-    ).toThrow("owner left");
   });
 
   test("the budget check exists once in the socket server", () => {

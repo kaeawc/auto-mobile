@@ -101,19 +101,12 @@ describe("concurrent client restart during provisionDevice", () => {
           signalCalls.push({ pid, signal });
         },
       };
-      const realManager = new DaemonManager(
-        undefined,
-        undefined,
-        undefined,
+      const realManager = new DaemonManager({
         lockFilePath,
         pidFilePath,
         socketPath,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
         processSignaler,
-      );
+      });
 
       let enterRestart!: () => void;
       const restartEntered = new Promise<void>((resolve) => {

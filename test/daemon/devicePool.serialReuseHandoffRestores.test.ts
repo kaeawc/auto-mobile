@@ -1038,12 +1038,19 @@ for (const key of savedKeys) {
 
 function startRetry(h: Awaited<ReturnType<typeof setup>>, kind: (typeof retryKinds)[number]) {
   if (kind === "clock") {
-    return h.sessions["getPendingClockRestoration"](h.holder, null);
+    return h.sessions["stateRestore"].getPendingClockRestoration.bind(h.sessions["stateRestore"])(
+      h.holder,
+      null,
+    );
   }
   if (kind === "rotation") {
-    return h.sessions["getPendingRotationRestoration"](h.holder, null);
+    return h.sessions["stateRestore"].getPendingRotationRestoration.bind(
+      h.sessions["stateRestore"],
+    )(h.holder, null);
   }
-  return h.sessions["getPendingScreenReaderRestoration"](h.holder, null);
+  return h.sessions["stateRestore"].getPendingScreenReaderRestoration.bind(
+    h.sessions["stateRestore"],
+  )(h.holder, null);
 }
 
 for (const kind of retryKinds) {
@@ -1261,15 +1268,19 @@ for (const kind of ["rotation", "screen-reader"] as const) {
         expect(h.restores).toHaveLength(kind === "rotation" ? 6 : 3);
         const abandoned =
           kind === "rotation"
-            ? h.sessions["abandonedRotations"]
-            : h.sessions["abandonedScreenReaders"];
+            ? h.sessions["stateRestore"].abandonedRotations
+            : h.sessions["stateRestore"].abandonedScreenReaders;
         expect(abandoned.has(original.deviceId)).toBe(true);
         h.behavior.failingKind = "";
         h.restores.length = 0;
         const retry =
           kind === "rotation"
-            ? h.sessions["retryAbandonedRotationAfter"](original.deviceId, own.promise)
-            : h.sessions["retryAbandonedScreenReaderAfter"](original.deviceId, own.promise);
+            ? h.sessions["stateRestore"].retryAbandonedRotationAfter.bind(
+                h.sessions["stateRestore"],
+              )(original.deviceId, own.promise)
+            : h.sessions["stateRestore"].retryAbandonedScreenReaderAfter.bind(
+                h.sessions["stateRestore"],
+              )(original.deviceId, own.promise);
         if (outcome === "control") {
           own.resolve();
           await retry;

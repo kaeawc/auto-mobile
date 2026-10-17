@@ -1,5 +1,4 @@
 import { unbindDevice, holderOf, isBusy } from "./deviceBinding";
-import type { Mutex } from "async-mutex";
 import { ActionableError, type DeviceInfo } from "../models";
 import type { Session, SessionManager } from "./sessionManager";
 import type { DeviceRecoveryCoordinator } from "./deviceRecoveryCoordinator";
@@ -19,8 +18,8 @@ import type {
 export interface AdbServerResetQuarantinePoolPort {
   /** Tell resource subscribers a status or holder write committed (#11413). */
   noteDeviceStateChanged?(device: Pick<PooledDevice, "id" | "platform">): void;
-  getAssignmentMutex(): Mutex;
-  getDevices(): Map<string, PooledDevice>;
+  withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
+  getDevices(): ReadonlyMap<string, PooledDevice>;
   getSessionManager(): SessionManager;
   getStartedDeviceProcesses(): Map<string, DeviceAutolockChildProcess>;
   getAdbServerResetTrackedProcesses(): WeakMap<PooledDevice, DeviceAutolockChildProcess>;
@@ -111,7 +110,7 @@ export class AdbServerResetQuarantine {
   async detachAdbServerResetCohort(
     cohort: readonly PooledDevice[],
   ): Promise<AdbServerResetCohortDetachment> {
-    return await this.pool.getAssignmentMutex().runExclusive(async () => {
+    return await this.pool.withAssignmentLock(async () => {
       if (
         cohort.some(
           (device) =>
@@ -366,7 +365,7 @@ export class AdbServerResetQuarantine {
     for (;;) {
       let matchingReservations: AdbServerResetRecoveryReservation[] = [];
       let matchingRecoveryAvdNames: string[] = [];
-      await this.pool.getAssignmentMutex().runExclusive(() => {
+      await this.pool.withAssignmentLock(() => {
         ({ matchingReservations, matchingRecoveryAvdNames } =
           this.getAndroidStartupRecoveryMatches(request));
         if (matchingReservations.length === 0 && matchingRecoveryAvdNames.length === 0) {
@@ -393,7 +392,7 @@ export class AdbServerResetQuarantine {
         return;
       }
       released = true;
-      await this.pool.getAssignmentMutex().runExclusive(() => {
+      await this.pool.withAssignmentLock(() => {
         this.pool.getAndroidStartupLeases().delete(owner);
       });
     };
@@ -436,7 +435,7 @@ export class AdbServerResetQuarantine {
   }
 
   async releaseAdbServerResetCohortReservations(cohort: readonly PooledDevice[]): Promise<void> {
-    await this.pool.getAssignmentMutex().runExclusive(() => {
+    await this.pool.withAssignmentLock(() => {
       for (const device of cohort) {
         if (device.adbServerResetSessionId) {
           const sessionId = device.adbServerResetSessionId;

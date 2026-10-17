@@ -119,16 +119,13 @@ async function daemonShutdownStages(
 ): Promise<Map<string, ShutdownCleanupStage>> {
   const daemon = new Daemon(
     {},
-    new FakeInstalledAppsRepository(),
-    timer,
-    new FakeDeviceSessionRepository(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    process.env,
-    managedAdbShutdown(timer, adbCommands),
+    {
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      timer,
+      deviceSessionRepository: new FakeDeviceSessionRepository(),
+      recoveryPolicyEnvironment: process.env,
+      managedAdbServerShutdown: managedAdbShutdown(timer, adbCommands),
+    },
   );
   let captured: readonly ShutdownCleanupStage[] = [];
   const run = spyOn(shutdownCleanupModule, "runShutdownCleanupStages").mockImplementation(

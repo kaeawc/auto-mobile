@@ -212,12 +212,14 @@ describe("sessionless identity quarantine", () => {
   test("production daemon wiring cancels and drains sessionless work without starting a daemon", async () => {
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      new FakeTimer(),
-      new FakeDeviceSessionRepository(),
-      new FakeIdGenerator(),
-      new FakeDatabaseInitializer(),
-      new FakeStartupFailureTracker(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: new FakeTimer(),
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+        idGenerator: new FakeIdGenerator(),
+        databaseInitializer: new FakeDatabaseInitializer(),
+        startupFailureTracker: new FakeStartupFailureTracker(),
+      },
     );
     const work = executionTracker.startExecution("takeScreenshot");
     try {
@@ -242,12 +244,14 @@ describe("sessionless identity quarantine", () => {
   test("production identity quarantine preserves the ambient sessionless caller and drains other work", async () => {
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      new FakeTimer(),
-      new FakeDeviceSessionRepository(),
-      new FakeIdGenerator(),
-      new FakeDatabaseInitializer(),
-      new FakeStartupFailureTracker(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: new FakeTimer(),
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+        idGenerator: new FakeIdGenerator(),
+        databaseInitializer: new FakeDatabaseInitializer(),
+        startupFailureTracker: new FakeStartupFailureTracker(),
+      },
     );
     const caller = executionTracker.startExecution("setActiveDevice");
     const other = executionTracker.startExecution("takeScreenshot");

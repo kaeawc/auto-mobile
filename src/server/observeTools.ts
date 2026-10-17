@@ -46,16 +46,16 @@ import { DaemonState } from "../daemon/daemonState";
 import { logger } from "../utils/logger";
 import { type ScreenshotMode } from "../features/observe/automaticScreenshotPolicy";
 import { observeCropSchema } from "../features/observe/screenshot/observeCrop";
-import { waitForObservation } from "./observeWaitEvaluation";
+import { waitForObservation } from "../features/observe/wait/WaitEvaluation";
 
 import {
   overrideWaitForJsonSchema,
   refineWaitForArgs,
   settledSchema,
   waitForSchema,
-} from "./observeWaitForSchemas";
+} from "../features/observe/wait/WaitForSchemas";
 
-// The waitFor / settled schemas live in ./observeWaitForSchemas (#11828); these names stay
+// The waitFor / settled schemas live in ../features/observe/wait/WaitForSchemas (#11828); these names stay
 // importable from here.
 export {
   assertActiveWindowWaitForSupportedOnPlatform,
@@ -68,7 +68,7 @@ export {
   type WaitForConditionDsl,
   type WaitForConditionKind,
   type WaitForWithSettled,
-} from "./observeWaitForSchemas";
+} from "../features/observe/wait/WaitForSchemas";
 
 import {
   attachObserveCrop,
@@ -84,7 +84,7 @@ import {
   type ObserveToolDependencies,
 } from "./observeResponse";
 
-// The waitFor / settle evaluation lives in ./observeWaitEvaluation (#11828); these names stay
+// The waitFor / settle evaluation lives in ../features/observe/wait/WaitEvaluation (#11828); these names stay
 // importable from here.
 export {
   buildConditionPredicate,
@@ -92,7 +92,7 @@ export {
   hashHierarchyForSettle,
   waitForObservation,
   type WaitForObservationOutcome,
-} from "./observeWaitEvaluation";
+} from "../features/observe/wait/WaitEvaluation";
 
 // Progressive-disclosure scoping of the returned hierarchy (issue #4344). The
 // agent picks where to zoom on THIS screen, so region/anchor are per-call inputs

@@ -10,7 +10,22 @@ import {
   swapNodes,
 } from "../helpers/entrypointOrder";
 const entrypointSource = readFileSync("src/index.ts", "utf8");
-const daemonSource = readFileSync("src/daemon/daemon.ts", "utf8");
+const fullDaemonSource = readFileSync("src/daemon/daemon.ts", "utf8");
+
+/**
+ * Only the statements from the phase start to the phase end matter to the auxiliary guard, so the
+ * tests parse that window instead of the whole 240 KB daemon file (parsing it per test blew the
+ * 100 ms unit budget on loaded CI runners).
+ */
+function auxiliaryPhaseWindow(source: string): string {
+  const start = source.indexOf('startupBenchmark.startPhase("auxiliarySocketServerStart")');
+  const endCall = source.indexOf('startupBenchmark.endPhase("auxiliarySocketServerStart")');
+  if (start < 0 || endCall < start) {
+    throw new Error("auxiliarySocketServerStart phase window not found in src/daemon/daemon.ts");
+  }
+  return source.slice(source.lastIndexOf("\n", start) + 1, source.indexOf("\n", endCall));
+}
+const daemonSource = auxiliaryPhaseWindow(fullDaemonSource);
 
 /** The awaited forms of these calls: an un-awaited start would let the phase end early. */
 function awaited(calls: ts.CallExpression[]): ts.AwaitExpression[] {

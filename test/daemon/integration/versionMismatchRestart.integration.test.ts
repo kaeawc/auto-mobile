@@ -53,14 +53,11 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), "automobile-version-test-"));
     pidFilePath = join(tempDir, "test.pid");
-    realManager = new DaemonManager(
-      undefined,
-      undefined,
-      undefined,
-      join(tempDir, "test.lock"),
+    realManager = new DaemonManager({
+      lockFilePath: join(tempDir, "test.lock"),
       pidFilePath,
-      join(tempDir, "test.sock"),
-    );
+      socketPath: join(tempDir, "test.sock"),
+    });
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     fakeTimer = new FakeTimer();
     fakeTimer.advanceTime(100_000);

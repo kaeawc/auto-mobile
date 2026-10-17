@@ -13,7 +13,9 @@ let cancellations: number;
 beforeEach(async () => {
   rig = slotAgreementRig();
   slots = Reflect.get(rig.manager, "sessionSlots") as SessionManager["sessionSlots"];
-  session = await rig.manager.createSession("find-id", "fake-device", "android", 1000);
+  session = await rig.manager.createSession("find-id", "fake-device", "android", {
+    timeoutMs: 1000,
+  });
   hold = Promise.withResolvers<"teardown">();
   rig.manager.setReleaseDeviceHold(() => ({ settled: hold.promise, capMs: 1000 }));
   cancellations = 0;

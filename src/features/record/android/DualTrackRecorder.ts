@@ -503,7 +503,11 @@ export class DualTrackRecorder {
   }
 
   private trackGeometrySpan(gesture: GestureEvent, step: PlanStep | null): void {
-    if (step && gesture.downAt !== undefined && ["tapAt", "swipeOn"].includes(step.tool)) {
+    if (
+      step &&
+      gesture.downAt !== undefined &&
+      ["tapAt", "swipeOn", "swipeAt"].includes(step.tool)
+    ) {
       this.geometrySpans.set(step, { downAt: gesture.downAt, upAt: gesture.arrivedAt });
     }
   }
@@ -868,11 +872,76 @@ function buildMergedStep(
   }
 }
 
+/**
+ * Off-axis travel, as a fraction of the on-axis travel, from which a swipe is no longer well
+ * described by one of the four `swipeOn` directions (about 26.6 degrees from the nearest axis).
+ */
+const DIAGONAL_SWIPE_MIN_OFF_AXIS_RATIO = 0.5;
+
+type SwipeEndpoints = { from: { x: number; y: number }; to: { x: number; y: number } };
+
+/** Both ends of a swipe with a known path; unknown axes mean the coordinates cannot be trusted. */
+function swipeEndpoints(gesture: GestureEvent): SwipeEndpoints | null {
+  const { startX, startY, endX, endY } = gesture;
+  if (
+    hasUnknownAxes(gesture) ||
+    startX === undefined ||
+    startY === undefined ||
+    endX === undefined ||
+    endY === undefined ||
+    (startX === endX && startY === endY)
+  ) {
+    return null;
+  }
+  return { from: { x: startX, y: startY }, to: { x: endX, y: endY } };
+}
+
+function isDiagonalSwipe({ from, to }: SwipeEndpoints): boolean {
+  const dx = Math.abs(to.x - from.x);
+  const dy = Math.abs(to.y - from.y);
+  return Math.min(dx, dy) >= Math.max(dx, dy) * DIAGONAL_SWIPE_MIN_OFF_AXIS_RATIO;
+}
+
+/** Four decimals keep a point within a quarter pixel on a 2400 px axis without float noise. */
+function normalizedAxis(value: number, size: number): number {
+  return Math.round(Math.min(1, Math.max(0, value / size)) * 10_000) / 10_000;
+}
+
+function buildSwipeAtStep(gesture: GestureEvent, endpoints: SwipeEndpoints): PlanStep {
+  const params: Record<string, unknown> = { from: endpoints.from, to: endpoints.to };
+  const width = gesture.geometry?.deviceWidth;
+  const height = gesture.geometry?.deviceHeight;
+  if (width && height && width > 0 && height > 0) {
+    // Native pixels only replay on a screen of the same size, and a digitizer-edge touch can map
+    // to exactly the display size, which replay refuses. Fractions of the recorded screen adapt to
+    // the replay screen, and 1 resolves to its last pixel.
+    params.from = {
+      x: normalizedAxis(endpoints.from.x, width),
+      y: normalizedAxis(endpoints.from.y, height),
+    };
+    params.to = {
+      x: normalizedAxis(endpoints.to.x, width),
+      y: normalizedAxis(endpoints.to.y, height),
+    };
+    params.coordinateSpace = "normalized";
+  }
+  if (gesture.speed === "fast") {
+    params.speed = "fast";
+  }
+  return { tool: "swipeAt", params };
+}
+
 function buildSwipeStep(gesture: GestureEvent, event: ReceivedInteraction): PlanStep | null {
   const selector = buildSelector(event.element);
   const direction = hasUnknownAxes(gesture)
     ? selector && resolveSwipeDirection(event.scrollDeltaX, event.scrollDeltaY)
     : (gesture.direction ?? resolveSwipeDirection(event.scrollDeltaX, event.scrollDeltaY));
+  // A diagonal swipe loses its angle as a direction, and a swipe with no direction would be
+  // dropped; both keep their path as swipeAt.
+  const endpoints = swipeEndpoints(gesture);
+  if (endpoints && (!direction || isDiagonalSwipe(endpoints))) {
+    return buildSwipeAtStep(gesture, endpoints);
+  }
   if (!direction) {
     return null;
   }

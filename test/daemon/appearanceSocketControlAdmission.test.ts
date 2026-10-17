@@ -91,7 +91,7 @@ describe("appearance socket set_appearance as a control call on the holder's ses
     trackedDuringApply = undefined;
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    await sessionManager.createSession(SESSION, DEVICE.deviceId, "android", 60_000);
+    await sessionManager.createSession(SESSION, DEVICE.deviceId, "android", { timeoutMs: 60_000 });
     const claim = await handleDaemonRequest(
       {
         id: "claim",

@@ -37,7 +37,14 @@ describe("Daemon identity fence at the session-release commit (#7031 round 2)", 
     // that await must stop the stale eviction from retiring the live session.
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer, repository);
+    const daemon = new Daemon(
+      {},
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: repository,
+      },
+    );
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
     const device = stamped(

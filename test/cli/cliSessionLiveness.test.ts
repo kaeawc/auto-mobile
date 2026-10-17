@@ -118,9 +118,7 @@ class SessionContinuityDaemonClient implements DaemonClientLike {
           this.acquiredSessionUuid,
           "emulator-5554",
           "android",
-          30 * 60_000,
-          undefined,
-          "Pixel_8_API_35",
+          { timeoutMs: 30 * 60_000, stableDeviceId: "Pixel_8_API_35" },
         );
       }
       return deviceStartResult(this.acquiredSessionUuid);
@@ -213,7 +211,9 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       timer: warmTimer,
     });
     try {
-      await warmSessions.createSession("warm-cli", "emulator-5554", "android", 30 * 60_000);
+      await warmSessions.createSession("warm-cli", "emulator-5554", "android", {
+        timeoutMs: 30 * 60_000,
+      });
       await proxy.callTool("getAndroid", {});
     } finally {
       try {
@@ -254,7 +254,9 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("minted") : undefined),
       onCallDaemonMethod: daemonHeartbeatHandler(sessionManager),
     });
-    await sessionManager.createSession("minted", "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession("minted", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     const proxy = proxyOver(client);
 
     try {
@@ -318,7 +320,9 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       toolResultFor: (name) => (name === "getAndroid" ? deviceStartResult("minted") : undefined),
       onCallDaemonMethod: daemonHeartbeatHandler(sessionManager),
     });
-    await sessionManager.createSession("minted", "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession("minted", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     const reaped: Array<{ sessionId: string; reason: string }> = [];
     const monitor = new SessionHeartbeatMonitor(
       sessionManager,
@@ -383,7 +387,9 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         );
       },
     });
-    await sessionManager.createSession("shared", "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession("shared", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     sessionManager.adoptCliLivenessPolicy("shared");
     expect(sessionManager.getSession("shared")!.livenessPolicy).toBe("cli-idle");
 
@@ -428,7 +434,9 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         );
       },
     });
-    await sessionManager.createSession("shared", "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession("shared", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     sessionManager.adoptCliLivenessPolicy("shared");
 
     await runDaemonCommand("heartbeat", ["shared"], {
@@ -488,7 +496,9 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       }),
     };
     const logSpy = spyOn(console, "log").mockImplementation(() => {});
-    await sessionManager.createSession("shared", "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession("shared", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
 
     try {
       await runDaemonCommand(
@@ -561,7 +571,9 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         );
       },
     });
-    await sessionManager.createSession("shared", "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession("shared", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     const proxy = proxyOver(client);
 
     try {
@@ -589,7 +601,9 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         );
       },
     });
-    await sessionManager.createSession("shared", "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession("shared", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     const proxy = new DaemonMcpProxy({
       clientFactory: () => client,
       daemonManager: matchingDaemonManager(),
@@ -677,7 +691,9 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         );
       },
     });
-    await sessionManager.createSession("shared", "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession("shared", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     const proxy = proxyOver(client);
 
     try {
@@ -746,7 +762,9 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
           : undefined,
       onCallDaemonMethod: daemonHeartbeatHandler(sessionManager),
     });
-    await sessionManager.createSession("joined", "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession("joined", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     const proxy = proxyOver(client);
 
     try {
@@ -770,7 +788,9 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
           : undefined,
       onCallDaemonMethod: daemonHeartbeatHandler(sessionManager),
     });
-    await sessionManager.createSession("joined", "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession("joined", "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     const proxy = proxyOver(client);
 
     try {
@@ -884,7 +904,9 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     // to take the session over before the old proxy reconnects. The proxy's lease
     // is live, so the daemon rejects the CLI (#10050) and the proxy resumes.
     const sessionUuid = "continuity-android-session";
-    await sessionManager.createSession(sessionUuid, "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession(sessionUuid, "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     const initialMcpClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid, {
       dropHeartbeatResponses: 1,
     });
@@ -995,7 +1017,10 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     // The CLI can only take the session once the proxy's 5 s lease has expired;
     // rewind its last heartbeat to model a proxy that stalled past the lease.
     const sessionUuid = "stale-keeper-session";
-    await sessionManager.createSession(sessionUuid, "emulator-5554", "android", 30 * 60_000, 5_000);
+    await sessionManager.createSession(sessionUuid, "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+      heartbeatTimeoutMs: 5_000,
+    });
     const staleClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
     const cliClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
     const staleProxy = new DaemonMcpProxy({
@@ -1060,7 +1085,9 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
 
   test("keeps a live proxy owner's ticks authoritative when a CLI tries to take its session", async () => {
     const sessionUuid = "live-proxy-session";
-    await sessionManager.createSession(sessionUuid, "emulator-5554", "android", 30 * 60_000);
+    await sessionManager.createSession(sessionUuid, "emulator-5554", "android", {
+      timeoutMs: 30 * 60_000,
+    });
     const proxyClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
     const cliClient = new SessionContinuityDaemonClient(sessionManager, sessionUuid);
     const proxy = new DaemonMcpProxy({

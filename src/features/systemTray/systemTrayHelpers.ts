@@ -56,7 +56,7 @@ import {
   traverseForHint,
 } from "./notificationHints";
 import type { ProgressCallback } from "../../server/toolRegistry";
-import type { SystemTrayNotificationArgs } from "../../server/interactionToolTypes";
+import type { SystemTrayNotificationArgs } from "./systemTrayTypes";
 import { boundsArea, boundsEqual } from "../../utils/bounds";
 import { logger } from "../../utils/logger";
 import {
@@ -1202,10 +1202,14 @@ const hasTextMatch = (
   text: string,
   partialMatch: boolean,
 ): boolean =>
-  selector.selectByText(viewHierarchy, text, {
-    ...ignoreCasePolicy(partialMatch),
-    ...INSPECT_INTENT,
-  }).totalMatches > 0;
+  selector.select(
+    viewHierarchy,
+    { text },
+    {
+      ...ignoreCasePolicy(partialMatch),
+      ...INSPECT_INTENT,
+    },
+  ).totalMatches > 0;
 
 const findTextMatch = (
   selector: ResolverElementSelector,
@@ -1256,10 +1260,14 @@ const findFirstElementMatch = (
   const candidates = texts.map((text) => text.trim()).filter(Boolean);
   for (const matchType of ["exact", "partial"] as const) {
     for (const text of candidates) {
-      const { element } = selector.selectByText(viewHierarchy, text, {
-        ...ignoreCasePolicy(matchType === "partial"),
-        ...INSPECT_INTENT,
-      });
+      const { element } = selector.select(
+        viewHierarchy,
+        { text },
+        {
+          ...ignoreCasePolicy(matchType === "partial"),
+          ...INSPECT_INTENT,
+        },
+      );
       if (element) {
         return { text, matchType, element };
       }

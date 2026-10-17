@@ -51,7 +51,7 @@ test("the default writer stays idle through manager create and release", async (
   const writer = Reflect.get(manager, "rowWriter") as SerializedSessionRowWriter;
   const slots = Reflect.get(manager, "sessionSlots") as SessionManager["sessionSlots"];
   expect(writer).toBeInstanceOf(SerializedSessionRowWriter);
-  await manager.createSession("idle-writer", "fake-device", "android", 60_000);
+  await manager.createSession("idle-writer", "fake-device", "android", { timeoutMs: 60_000 });
   expect(slots.rowPending("idle-writer")).toBe(false);
   await manager.releaseSession("idle-writer", "explicit-release");
   expect(slots.rowPending("idle-writer")).toBe(false);
@@ -244,7 +244,7 @@ test("non-terminal commit without a fence does not resolve or reload the journal
   );
   manager.attachTerminalReleaseJournal(journal);
   const resolve = spyOn(journal, "resolve");
-  await manager.createSession("no-fence", "fake-device", "android", 60_000);
+  await manager.createSession("no-fence", "fake-device", "android", { timeoutMs: 60_000 });
   await manager.releaseSession("no-fence", "plan-auto-release");
   expect(resolve).not.toHaveBeenCalled();
 });

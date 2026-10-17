@@ -338,6 +338,12 @@ export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor):
     return entry;
   });
   mapActions(copy, path, visit);
+  mapObject(copy, "swipeActions", path, (entry, entryPath) => {
+    for (const side of ["start", "end"]) {
+      mapList(entry, side, entryPath, (action, actionPath) => mapPart(action, actionPath, visit));
+    }
+    return entry;
+  });
   mapObject(copy, "refresh", path, (entry, entryPath) => {
     mapList(entry, "onRefresh", entryPath, (action, actionPath) =>
       mapAction(action, actionPath, visit),

@@ -144,27 +144,27 @@ function failurePoint(
     : point;
 }
 
-function imageOptionError(options: TapAtOptions): string | undefined {
+function imageOptionError(options: TapAtOptions, toolName: string): string | undefined {
   return options.x !== undefined || options.y !== undefined || options.coordinateSpace !== undefined
-    ? "tapAt image is mutually exclusive with x, y, and coordinateSpace"
+    ? `${toolName} image is mutually exclusive with x, y, and coordinateSpace`
     : undefined;
 }
 
-function coordinateOptionError(options: TapAtOptions): string | undefined {
+function coordinateOptionError(options: TapAtOptions, toolName: string): string | undefined {
   if (options.image !== undefined) {
-    return imageOptionError(options);
+    return imageOptionError(options, toolName);
   }
   const { x, y } = options;
   const space = options.coordinateSpace ?? "absolute";
   if (space !== "absolute" && space !== "normalized" && space !== "percent") {
-    return "tapAt coordinateSpace is unsupported";
+    return `${toolName} coordinateSpace is unsupported`;
   }
   if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    return "tapAt requires finite x and y coordinates";
+    return `${toolName} requires finite x and y coordinates`;
   }
   const max = space === "normalized" ? 1 : space === "percent" ? 100 : undefined;
   if (max !== undefined && !axesWithinRange(x, y, max)) {
-    return `tapAt ${space} coordinates must be between 0 and ${max}`;
+    return `${toolName} ${space} coordinates must be between 0 and ${max}`;
   }
   return undefined;
 }
@@ -219,7 +219,7 @@ export function resolveTapAtCoordinates(
   toolName: string = "tapAt",
 ): { x: number; y: number } | { x: number; y: number; error: string } {
   const { x: rawX, y: rawY } = inputPoint(options);
-  const optionError = coordinateOptionError(options);
+  const optionError = coordinateOptionError(options, toolName);
   if (optionError) {
     return { x: rawX, y: rawY, error: optionError };
   }

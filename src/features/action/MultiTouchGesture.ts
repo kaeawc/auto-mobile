@@ -258,7 +258,7 @@ export class MultiTouchGesture extends BaseVisualChange {
       return { ...base, success: true };
     }
     const refusal = outcome.unsupportedCapability
-      ? `${plan.fingers}-finger gestures need the CtrlProxy capability ${outcome.unsupportedCapability}, which the connected device service does not advertise; update CtrlProxy or use two fingers. Nothing was dispatched.`
+      ? `${plan.fingers}-finger gestures need the CtrlProxy capability ${outcome.unsupportedCapability}, but the connected CtrlProxy build does not advertise multi-finger gestures (the installed APK is likely older than this daemon). Two-finger gestures (fingers: 2) still work. To get a build that supports ${plan.fingers} fingers, upgrade AutoMobile, or set AUTOMOBILE_CTRL_PROXY_APK_PATH to a CtrlProxy APK built from matching source (android/control-proxy) and restart the daemon. Nothing was dispatched.`
       : undefined;
     // A request written to the device whose reply never arrived may already have landed.
     const indeterminate = refusal === undefined && isOutcomeUnknown(outcome, dispatched);

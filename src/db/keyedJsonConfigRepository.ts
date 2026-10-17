@@ -4,6 +4,8 @@ import { DEFAULT_DEVICE_SNAPSHOT_CONFIG } from "../features/snapshot/DeviceSnaps
 import { errorMessage } from "../utils/describeUnknownError";
 import type { AppearanceConfig, DeviceSnapshotConfig, VideoRecordingConfig } from "../models";
 import { logger, type Logger } from "../utils/logger";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { nowIso } from "./nowIso";
 import { getDatabase } from "./database";
 import type { Database } from "./types";
 
@@ -20,6 +22,7 @@ export interface KeyedJsonConfigRepositoryOptions<TConfig> {
   loggerTag?: string;
   db?: Kysely<Database>;
   logger?: Logger;
+  timer?: Timer;
 }
 
 // Non-strict objects strip removed keys such as backupTimeoutMs and userApps.
@@ -91,6 +94,7 @@ export class KeyedJsonConfigRepository<TConfig> implements KeyedConfigRepository
   private readonly loggerTag: string;
   private readonly db: Kysely<Database> | null;
   private readonly logger: Logger;
+  private readonly timer: Timer;
   private readonly schema: z.ZodType<TConfig>;
 
   constructor(options: KeyedJsonConfigRepositoryOptions<TConfig>) {
@@ -99,6 +103,7 @@ export class KeyedJsonConfigRepository<TConfig> implements KeyedConfigRepository
     this.loggerTag = options.loggerTag ?? "KeyedJsonConfigRepository";
     this.db = options.db ?? null;
     this.logger = options.logger ?? logger;
+    this.timer = options.timer ?? defaultTimer;
   }
 
   // Migration gating is owned by startup (ensureMigrations) plus the app dialect
@@ -141,7 +146,7 @@ export class KeyedJsonConfigRepository<TConfig> implements KeyedConfigRepository
 
   async setConfig(config: TConfig, key: string = CONFIG_KEY): Promise<void> {
     const db = await this.getDb();
-    const now = new Date().toISOString();
+    const now = nowIso(this.timer);
 
     const payload = {
       key,

@@ -18,7 +18,7 @@ export function toPosixPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/\r/g, "");
 }
 
-function sourceFiles(directory: string): string[] {
+export function sourceFiles(directory: string): string[] {
   return sortedReaddirEntriesSync(directory).flatMap((entry) => {
     const file = join(directory, entry.name);
     return entry.isDirectory()
@@ -29,7 +29,8 @@ function sourceFiles(directory: string): string[] {
   });
 }
 
-function findViolations(file: string): Violation[] {
+/** Every relative import/export/require/dynamic-import target in `file`, as a `src/...` path sans extension. */
+export function relativeImportTargets(file: string): string[] {
   const sourceFile = ts.createSourceFile(
     file,
     readFileSync(file, "utf8"),
@@ -37,20 +38,18 @@ function findViolations(file: string): Violation[] {
     true,
     ts.ScriptKind.TS,
   );
-  const violations: Violation[] = [];
+  const targets: string[] = [];
 
   const record = (specifier: string): void => {
     if (!specifier.startsWith(".")) {
       return;
     }
-    const target = relative(process.cwd(), resolve(dirname(file), specifier)).replace(
-      /\.(?:d\.ts|[cm]?[jt]sx?|json)$/,
-      "",
+    targets.push(
+      relative(process.cwd(), resolve(dirname(file), specifier)).replace(
+        /\.(?:d\.ts|[cm]?[jt]sx?|json)$/,
+        "",
+      ),
     );
-    const [root, tier] = target.split(/[\\/]/);
-    if (root !== "src" || !ALLOWED_TIERS.has(tier)) {
-      violations.push({ file, target });
-    }
   };
 
   const visit = (node: ts.Node): void => {
@@ -82,7 +81,16 @@ function findViolations(file: string): Violation[] {
   };
 
   visit(sourceFile);
-  return violations;
+  return targets;
+}
+
+function findViolations(file: string): Violation[] {
+  return relativeImportTargets(file)
+    .filter((target) => {
+      const [root, tier] = target.split(/[\\/]/);
+      return root !== "src" || !ALLOWED_TIERS.has(tier);
+    })
+    .map((target) => ({ file, target }));
 }
 
 if (import.meta.main) {

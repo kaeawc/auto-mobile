@@ -30,14 +30,10 @@ type Case = (typeof cases)[number];
 
 async function fixture(kind: Case) {
   const rig = slotAgreementRig();
-  const session = await rig.manager.createSession(
-    "id",
-    "fake-device",
-    "android",
-    1000,
-    undefined,
-    "stable-id",
-  );
+  const session = await rig.manager.createSession("id", "fake-device", "android", {
+    timeoutMs: 1000,
+    stableDeviceId: "stable-id",
+  });
   const slots = Reflect.get(rig.manager, "sessionSlots") as Store;
   const sessions = Reflect.get(rig.manager, "sessions") as Map<string, Session>;
   const older: Session = { ...session };

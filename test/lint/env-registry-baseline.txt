@@ -215,7 +215,6 @@ src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	ANDROID_HOME
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	ANDROID_SDK_HOME
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	ANDROID_SDK_ROOT
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	AUTOMOBILE_EMULATOR_AUDIO
-src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	EMULATOR_POLLING_INTERVAL_MS
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	HOME
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	PATH
 src/utils/android-cmdline-tools/AndroidEmulatorClient.ts	USERPROFILE
@@ -233,6 +232,7 @@ src/utils/android-cmdline-tools/EmulatorLaunchSupport.ts	AUTOMOBILE_EMULATOR_HEA
 src/utils/android-cmdline-tools/EmulatorLaunchSupport.ts	DISPLAY
 src/utils/android-cmdline-tools/EmulatorLaunchSupport.ts	WAYLAND_DISPLAY
 src/utils/android-cmdline-tools/EmulatorLauncher.ts	AUTOMOBILE_EMULATOR_ARGS
+src/utils/android-cmdline-tools/EmulatorReadinessPoller.ts	EMULATOR_POLLING_INTERVAL_MS
 src/utils/android-cmdline-tools/RunningAvdAdvertisementReader.ts	LOGNAME
 src/utils/android-cmdline-tools/RunningAvdAdvertisementReader.ts	USER
 src/utils/android-cmdline-tools/RunningAvdAdvertisementReader.ts	XDG_RUNTIME_DIR

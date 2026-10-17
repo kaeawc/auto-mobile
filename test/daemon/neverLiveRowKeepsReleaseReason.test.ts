@@ -154,7 +154,7 @@ describe("rows released before their latest incarnation was handed out", () => {
         status: "released",
         release_reason: reason,
       });
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
       expect(await wire("daemon/sessionInfo")).toMatchObject({
         success: true,
         result: { sessionId: SESSION, assignedDevice: DEVICE },

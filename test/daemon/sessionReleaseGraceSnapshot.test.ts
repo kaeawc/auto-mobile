@@ -31,7 +31,7 @@ describe("release snapshot reports the deadline that fired (issue #5689)", () =>
     const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     try {
       // Default heartbeat policy: heartbeat timeout defaults to 10s.
-      await manager.createSession("session-nfh", "emulator-5554", "android", 60_000);
+      await manager.createSession("session-nfh", "emulator-5554", "android", { timeoutMs: 60_000 });
       // Reaped after the 5s pre-first-heartbeat grace elapsed.
       timer.advanceTime(5_963);
       await manager.releaseSession("session-nfh", "missing-first-heartbeat");
@@ -53,7 +53,9 @@ describe("release snapshot reports the deadline that fired (issue #5689)", () =>
     const timer = new FakeTimer();
     const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     try {
-      await manager.createSession("session-nfh2", "emulator-5554", "android", 60_000);
+      await manager.createSession("session-nfh2", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+      });
       timer.advanceTime(3_500);
       await manager.releaseSession("session-nfh2", "missing-first-heartbeat");
 
@@ -69,7 +71,10 @@ describe("release snapshot reports the deadline that fired (issue #5689)", () =>
     const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     try {
       // Explicit heartbeat timeout of 2s (custom source).
-      await manager.createSession("session-hbt", "emulator-5554", "android", 60_000, 2_000);
+      await manager.createSession("session-hbt", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 2_000,
+      });
       timer.advanceTime(3_000);
       await manager.releaseSession("session-hbt", "heartbeat-timeout");
 

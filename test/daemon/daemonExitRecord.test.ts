@@ -62,20 +62,15 @@ interface ManagerInternals {
 }
 
 function manager(files: FakeDaemonExitRecordFileSystem, timer = new FakeTimer()) {
-  const args: ConstructorParameters<typeof SafeDaemonManager> = [
-    undefined,
-    undefined,
+  const instance = new SafeDaemonManager({
     timer,
-    undefined,
-    undefined,
-    SOCKET,
-  ];
-  args[17] = {
-    socketExists: () => false,
-    readRecord: () => null,
-    probe: async () => ({ running: false }),
-  };
-  const instance = new SafeDaemonManager(...args);
+    socketPath: SOCKET,
+    identityRecoveryIO: {
+      socketExists: () => false,
+      readRecord: () => null,
+      probe: async () => ({ running: false }),
+    },
+  });
   const internals = instance as unknown as ManagerInternals;
   internals.exitRecordFileSystem = files;
   internals.currentBuildId = () => "build-a";

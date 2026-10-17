@@ -113,7 +113,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     reaped = [];
     monitor = monitorFor(sessionManager);
-    await sessionManager.createSession(SESSION, DEVICE, "android", 60_000);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     const claim = await heartbeat(OWNER, true);
     expect(claim.success).toBe(true);
     leaseStartedAt = timer.now();
@@ -643,7 +643,9 @@ describe("suspect grace window and daemon stall (#10051)", () => {
 
     test("a session no owner token judges is still kept alive by its tool calls", async () => {
       const unowned = "unowned-session";
-      await sessionManager.createSession(unowned, "emulator-5556", "android", 60_000);
+      await sessionManager.createSession(unowned, "emulator-5556", "android", {
+        timeoutMs: 60_000,
+      });
       timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS + 1);
 
       await expect(sessionManager.getOrCreateSession(unowned)).resolves.toMatchObject({
@@ -779,7 +781,7 @@ describe("suspect grace window and daemon stall (#10051)", () => {
         sessionManager.stopCleanupTimer();
         sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
         const sleeper = monitorFor(sessionManager);
-        await sessionManager.createSession(SESSION, DEVICE, "android", 60_000);
+        await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
         expect((await heartbeat(OWNER, true)).success).toBe(true);
         sleeper.start();
         const scanAndBeat = async (): Promise<void> => {
@@ -987,16 +989,13 @@ describe("suspect grace window and daemon stall (#10051)", () => {
       const restartedMonitor = monitorFor(restarted);
       const devicePool: SessionDeviceAssigner = {
         async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
-          const session = await restarted.createSession(
-            sessionId,
-            DEVICE,
-            "android",
-            target?.liveness?.sessionTimeoutMs,
-            target?.liveness?.heartbeatTimeoutMs,
-            target?.stableDeviceId,
-            target?.liveness,
-            target?.initialOwnership,
-          );
+          const session = await restarted.createSession(sessionId, DEVICE, "android", {
+            timeoutMs: target?.liveness?.sessionTimeoutMs,
+            heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          });
           return session.assignedDevice;
         },
       };

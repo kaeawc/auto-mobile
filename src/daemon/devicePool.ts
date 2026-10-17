@@ -113,6 +113,7 @@ import {
   SessionRecoveryAssignmentError,
   formatSessionRecoveryIncidentContext,
 } from "../models/SessionRecoveryAssignmentError";
+import { assertPoolCapacity } from "./poolCapacityError";
 import { Mutex } from "async-mutex";
 import {
   MultiPlatformDeviceManager,
@@ -381,9 +382,9 @@ export interface PooledDevice {
   id: string; // Device ID (e.g., "emulator-5554")
   name: string; // Device name (e.g., "Pixel 7")
   platform: Platform; // Device platform
-  sessionId: string | null; // Session currently using it, null if idle
-  status: BindingStatus; // Binding state
-  health?: DeviceHealth; // Absent means healthy
+  readonly sessionId: string | null; // Session currently using it, null if idle
+  readonly status: BindingStatus; // Binding state
+  readonly health?: DeviceHealth; // Absent means healthy
   lastUsedAt: number; // Last usage timestamp
   assignmentCount: number; // How many times assigned
   errorCount: number; // Consecutive errors
@@ -1025,15 +1026,6 @@ export class DevicePool {
   private readonly sessionPreservingRecovery: SessionPreservingRecoveryRunner;
   private readonly adbResetSessionRecovery: AdbResetSessionRecovery;
   private readonly adbServerResetQuarantine: AdbServerResetQuarantine;
-  private get recoveringAndroidImages(): Map<string, DeviceInfo> {
-    return this.recoveryCoordinator.recoveringAndroidImages;
-  }
-  private get recoveringAndroidDeviceIds(): Set<string> {
-    return this.recoveryCoordinator.recoveringAndroidDeviceIds;
-  }
-  private get androidRecoveryHandoffOwners(): Map<string, symbol> {
-    return this.recoveryCoordinator.androidRecoveryHandoffOwners;
-  }
   private afterAndroidStartupRecoverySnapshot?: () => void;
   /**
    * A reset cohort is reserved before its first member is restarted. This keeps
@@ -1054,9 +1046,6 @@ export class DevicePool {
   private readonly androidStartupLeases: Map<symbol, AndroidStartupLeaseRequest> = new Map();
   /** Sessions whose old serial may be reused before their reset cohort settles. */
   private readonly adbServerResetQuarantinedSessions: Set<string> = new Set();
-  private get sessionPreservingRecoveries(): Map<string, SessionPreservingRecovery> {
-    return this.recoveryCoordinator.sessionPreservingRecoveries;
-  }
   private readonly emulatorProcessLifecycle: EmulatorProcessLifecycle;
   private readonly missingDeviceLiveness: MissingDeviceLiveness;
   private readonly refreshCoordinator: DevicePoolRefresh;
@@ -1072,21 +1061,6 @@ export class DevicePool {
   private readonly autolockManager: DeviceAutolockManager;
   private readonly disconnectHandler: DeviceDisconnectHandler;
   private readonly androidRebootCoordinator: AndroidRebootCoordinator;
-  private get recoveringSessionLosses(): Map<string, AndroidRecoveryRecord> {
-    return this.androidRecoveryRecordLedger.recoveringSessionLosses;
-  }
-  private get failedTerminalRecoveryReleases(): Set<string> {
-    return this.androidRecoveryRecordLedger.failedTerminalRecoveryReleases;
-  }
-  private get emulatorLossIncidentStore(): EmulatorLossIncidentStore {
-    return this.emulatorLossLedger.emulatorLossIncidentStore;
-  }
-  private get emulatorLossRecoverySettlements(): Map<string, Promise<void>> {
-    return this.emulatorLossLedger.emulatorLossRecoverySettlements;
-  }
-  private get emulatorLossRecoveryResolvers(): Map<string, () => void> {
-    return this.emulatorLossLedger.emulatorLossRecoveryResolvers;
-  }
   /** A late kill settled; only a later fresh observation can lift its fence. */
   private readonly settledLateShutdowns = new Map<
     string,
@@ -1429,7 +1403,7 @@ export class DevicePool {
         return pool.retryExecutor;
       },
       get emulatorLossIncidentStore() {
-        return pool.emulatorLossIncidentStore;
+        return pool.emulatorLossLedger.emulatorLossIncidentStore;
       },
       get emulatorLossLedger() {
         return pool.emulatorLossLedger;
@@ -1762,7 +1736,7 @@ export class DevicePool {
         return pool.lifecycleCoordinator;
       },
       get recoveringAndroidImages() {
-        return pool.recoveringAndroidImages;
+        return pool.recoveryCoordinator.recoveringAndroidImages;
       },
       get assignmentMutex() {
         return pool.assignmentMutex;
@@ -1934,7 +1908,7 @@ export class DevicePool {
   private createShutdownReservationsPort(): DeviceShutdownReservationsPoolPort {
     return {
       getDevices: () => this.devices,
-      getAssignmentMutex: () => this.assignmentMutex,
+      withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getIntentionalShutdowns: () => this.intentionalShutdowns,
       assertReadinessReservationOwner: (device, client) =>
         this.assertReadinessReservationOwner(device, client),
@@ -1959,7 +1933,7 @@ export class DevicePool {
       noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
       getDevices: () => this.devices,
       getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
-      getAssignmentMutex: () => this.assignmentMutex,
+      withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getDeviceManager: () => this.deviceManager,
       getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
       shouldRebootDisconnectedAndroidDevice: (device) =>
@@ -2009,7 +1983,8 @@ export class DevicePool {
       getTimer: () => this.timer,
       getDeviceManager: () => this.deviceManager,
       getDevices: () => this.devices,
-      getAssignmentMutex: () => this.assignmentMutex,
+      addPooledDevice: (device) => this.devices.set(device.id, device),
+      withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getCriteriaMatcher: () => this.criteriaMatcher,
       identityEvidenceForBootedDevice: (device) =>
         this.runtimeIdentity.identityEvidenceForBootedDevice(device),
@@ -2135,9 +2110,9 @@ export class DevicePool {
         (await this.deviceManager.getAndroidOfflineDeviceIds?.(deviceIds, {
           timeoutMs: ANDROID_OFFLINE_PROBE_TIMEOUT_MS,
         })) ?? new Set<string>(),
-      getRecoveringSessionLosses: () => this.recoveringSessionLosses,
+      getRecoveringSessionLosses: () => this.androidRecoveryRecordLedger.recoveringSessionLosses,
       getPooledDevice: (id) => this.devices.get(id),
-      getEmulatorLossIncident: (id) => this.emulatorLossIncidentStore.get(id),
+      getEmulatorLossIncident: (id) => this.emulatorLossLedger.emulatorLossIncidentStore.get(id),
       completeJoinedEmulatorLossRecovery: (id, outcome, state) =>
         this.completeEmulatorLossRecovery(id, outcome, state),
       getSessionForDevice: (id) => this.sessionManager.getSessionForDevice(id),
@@ -2161,7 +2136,8 @@ export class DevicePool {
       getTimer: () => this.timer,
       getAndroidRecoveryRecordLedger: () => this.androidRecoveryRecordLedger,
       getAdbServerResetQuarantinedSessions: () => this.adbServerResetQuarantinedSessions,
-      getEmulatorLossRecoverySettlements: () => this.emulatorLossRecoverySettlements,
+      getEmulatorLossRecoverySettlements: () =>
+        this.emulatorLossLedger.emulatorLossRecoverySettlements,
       hasReleasedDeviceCapture: (sessionId) => this.releasedDeviceCaptures.has(sessionId),
       refreshEmulatorLossRecoverySettlement: (incidentId, outcome) =>
         this.refreshEmulatorLossRecoverySettlement(incidentId, outcome),
@@ -2176,7 +2152,8 @@ export class DevicePool {
 
   private createSessionPreservingRecovery(): SessionPreservingRecoveryRunner {
     return new SessionPreservingRecoveryRunner({
-      getRecoveringSessionLoss: (id) => this.recoveringSessionLosses.get(id),
+      getRecoveringSessionLoss: (id) =>
+        this.androidRecoveryRecordLedger.recoveringSessionLosses.get(id),
       noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
       startAndroidRecoveryRecord: (id, details, reservations, replace) =>
         this.startAndroidRecoveryRecord(id, details, reservations, replace),
@@ -2212,7 +2189,7 @@ export class DevicePool {
       removeDevice: (id, awaitCacheCleanup, device) =>
         this.removeDevice(id, awaitCacheCleanup, device),
       suppressAutoStartForDevice: (device) => this.suppressAutoStartForDevice(device),
-      getEmulatorLossIncident: (id) => this.emulatorLossIncidentStore.get(id),
+      getEmulatorLossIncident: (id) => this.emulatorLossLedger.emulatorLossIncidentStore.get(id),
       getFinalizedReleaseReason: (session) =>
         this.sessionManager.getFinalizedReleaseReason(session),
       now: () => this.timer.now(),
@@ -2224,7 +2201,8 @@ export class DevicePool {
       {
         maxDeferredRecoveryShutdowns: MAX_DEFERRED_RECOVERY_SHUTDOWNS,
         unconfirmedRecoveryShutdownCooldownMs: UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS,
-        getRecoveryRecord: (sessionId) => this.recoveringSessionLosses.get(sessionId),
+        getRecoveryRecord: (sessionId) =>
+          this.androidRecoveryRecordLedger.recoveringSessionLosses.get(sessionId),
         getPooledDevice: (deviceId) => this.devices.get(deviceId),
         isPreservedSessionCurrent: (session, deviceId) =>
           this.isPreservedSessionCurrent(session, deviceId),
@@ -2365,17 +2343,18 @@ export class DevicePool {
     return createAdbServerResetQuarantine(
       {
         noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
-        getAssignmentMutex: () => this.assignmentMutex,
+        withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
         getDevices: () => this.devices,
         getSessionManager: () => this.sessionManager,
         getStartedDeviceProcesses: () => this.startedDeviceProcesses,
         getAdbServerResetTrackedProcesses: () => this.adbServerResetTrackedProcesses,
         getAdbServerResetRecoveryReservations: () => this.adbServerResetRecoveryReservations,
         getAndroidStartupLeases: () => this.androidStartupLeases,
-        getRecoveringAndroidImages: () => this.recoveringAndroidImages,
-        getRecoveringAndroidDeviceIds: () => this.recoveringAndroidDeviceIds,
-        getRecoveringSessionLosses: () => this.recoveringSessionLosses,
-        getFailedTerminalRecoveryReleases: () => this.failedTerminalRecoveryReleases,
+        getRecoveringAndroidImages: () => this.recoveryCoordinator.recoveringAndroidImages,
+        getRecoveringAndroidDeviceIds: () => this.recoveryCoordinator.recoveringAndroidDeviceIds,
+        getRecoveringSessionLosses: () => this.androidRecoveryRecordLedger.recoveringSessionLosses,
+        getFailedTerminalRecoveryReleases: () =>
+          this.androidRecoveryRecordLedger.failedTerminalRecoveryReleases,
         getRecoveryCoordinator: () => this.recoveryCoordinator,
         getAfterAndroidStartupRecoverySnapshot: () => this.afterAndroidStartupRecoverySnapshot,
         getDevice: (id) => this.getDevice(id),
@@ -2750,9 +2729,7 @@ export class DevicePool {
     this.deviceHealthMarkers.clear(deviceId);
     // Full: removal retires this runtime; onDeviceRemoved prunes stream state after registry retirement.
     this.notifyDeviceFramesInvalidated(deviceId);
-    this.sessionManager.retireClockRestoration(deviceId);
-    this.sessionManager.retireRotationRestoration(deviceId);
-    this.sessionManager.retireScreenReaderRestoration(deviceId);
+    this.sessionManager.retireRestorations(deviceId, "removal");
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
     this.refreshCoordinator.recordDeviceRemoval(deviceId);
@@ -2927,7 +2904,7 @@ export class DevicePool {
       this.settledLateShutdowns.delete(deviceId);
       return commitRestartHoldStop;
     }
-    if (this.recoveringAndroidDeviceIds.has(deviceId)) {
+    if (this.recoveryCoordinator.recoveringAndroidDeviceIds.has(deviceId)) {
       // No pooled device yet (an in-flight recovery owns the serial); the mark
       // applies to whatever incarnation the recovery produces.
       this.intentionalShutdowns.set(deviceId, INCARNATION_ANY);
@@ -3221,9 +3198,14 @@ export class DevicePool {
       if (shortfall.refresh) {
         refreshFailure = shortfall.refresh.failure;
       }
-      const stats = shortfall.stats;
-
-      this.assertMultiDeviceCapacity(stats, requiredCount, platform, refreshFailure);
+      assertPoolCapacity(
+        this.criteriaMatcher,
+        shortfall.stats,
+        requiredCount,
+        platform,
+        this.recoveryCoordinator.recoveringAndroidImages.size,
+        refreshFailureContext(refreshFailure),
+      );
 
       this.multiDeviceAllocations.enqueue(ticket);
       // Queue waits consume deadline time, but never allocation attempts.
@@ -3752,36 +3734,6 @@ export class DevicePool {
     return undefined;
   }
 
-  private assertMultiDeviceCapacity(
-    stats: ReturnType<DevicePool["getStatsForPlatform"]>,
-    requiredCount: number,
-    platform: Platform | undefined,
-    refreshFailure: string | undefined,
-  ): void {
-    if (
-      !this.criteriaMatcher.hasSufficientCapacityIncludingAndroidRecovery(
-        stats.total,
-        requiredCount,
-        this.recoveringAndroidImages.size,
-        platform,
-      )
-    ) {
-      throw new ActionableError(
-        `Not enough devices in pool: need ${requiredCount}, have ${stats.total}.\n` +
-          refreshFailureContext(refreshFailure) +
-          `Device pool status:\n` +
-          `  Total devices: ${stats.total}\n` +
-          `  Idle: ${stats.idle}\n` +
-          `  Assigned: ${stats.assigned}\n` +
-          `  Error: ${stats.error}\n\n` +
-          `Suggestions:\n` +
-          `  - Start ${requiredCount - stats.total} more emulator(s) or simulators\n` +
-          `  - Reduce the number of devices required in the test plan\n` +
-          `  - Verify ADB is working: adb devices`,
-      );
-    }
-  }
-
   /**
    * Whether a device could serve a claim once its holder releases it. Error,
    * unhealthy and unassignable transport-alias devices never pass
@@ -4018,14 +3970,15 @@ export class DevicePool {
   private hasPendingAndroidRecovery(platform?: Platform): boolean {
     return (
       (platform === undefined || platform === "android") &&
-      (this.recoveringAndroidImages.size > 0 || this.adbServerResetRecoveryReservations.size > 0)
+      (this.recoveryCoordinator.recoveringAndroidImages.size > 0 ||
+        this.adbServerResetRecoveryReservations.size > 0)
     );
   }
 
   private hasPendingAndroidRecoveryMatching(criteria?: DeviceAllocationCriteria): boolean {
     return (
       this.criteriaMatcher.someDeviceImageMatchesCriteria(
-        this.recoveringAndroidImages.values(),
+        this.recoveryCoordinator.recoveringAndroidImages.values(),
         criteria,
       ) ||
       this.criteriaMatcher.someDeviceImageMatchesCriteria(
@@ -4145,6 +4098,22 @@ export class DevicePool {
       : undefined;
   }
 
+  /**
+   * A holder whose assignment moved elsewhere only pins the lost device for deferred rebind
+   * cleanup (cf. isCapturedDisconnectTargetCurrent): drop that hold, leaving the session on its
+   * new device. Returns whether the hold was dropped.
+   */
+  private dropRebindCleanupHold(device: PooledDevice, sessionId: string): boolean {
+    const held = this.sessionManager.findSession(sessionId);
+    if (!held || held.assignedDevice === device.id) {
+      return false;
+    }
+    this.deferredDeviceReleases.delete(device.id);
+    unbindDevice(device, { expectedSessionId: sessionId, status: "keep" });
+    this.notifyDeviceStateChanged(device);
+    return true;
+  }
+
   private async releaseSessionForEvictedDevice(
     device: PooledDevice,
     incidentId: string | undefined,
@@ -4171,6 +4140,9 @@ export class DevicePool {
           "superseded this eviction",
       );
       return false;
+    }
+    if (this.dropRebindCleanupHold(device, sessionId)) {
+      return true;
     }
     const releaseReason =
       this.restartReleaseReasonForIdentityReplacement(device, identityObservation) ??
@@ -4319,7 +4291,7 @@ export class DevicePool {
       (options.bypassRecoveryPolicy || this.getRecoveryPolicy().onLoss) &&
       this.isAndroidEmulatorActiveRelaunchEligible(device) &&
       (options.allowExistingRecoveryReservation ||
-        !this.recoveringAndroidImages.has(device.avdName))
+        !this.recoveryCoordinator.recoveringAndroidImages.has(device.avdName))
     );
   }
 
@@ -4474,11 +4446,16 @@ export class DevicePool {
       return true;
     }
     const stableDeviceId = this.stableDeviceIdFor(device);
-    return stableDeviceId !== undefined && !this.recoveringAndroidImages.has(stableDeviceId);
+    return (
+      stableDeviceId !== undefined &&
+      !this.recoveryCoordinator.recoveringAndroidImages.has(stableDeviceId)
+    );
   }
 
   private canRetryDeferredSessionRecovery(device: PooledDevice): boolean {
-    const deferredUntil = this.recoveringSessionLosses.get(holderOf(device) ?? "")?.deferredUntil;
+    const deferredUntil = this.androidRecoveryRecordLedger.recoveringSessionLosses.get(
+      holderOf(device) ?? "",
+    )?.deferredUntil;
     return deferredUntil !== undefined && this.timer.now() >= deferredUntil;
   }
 
@@ -4508,7 +4485,7 @@ export class DevicePool {
       return false;
     }
 
-    const inFlight = this.sessionPreservingRecoveries.get(session.sessionId);
+    const inFlight = this.recoveryCoordinator.sessionPreservingRecoveries.get(session.sessionId);
     if (inFlight) {
       return (await this.joinSessionPreservingRecovery(inFlight, undefined)) === "recovered";
     }
@@ -6790,9 +6767,9 @@ export class DevicePool {
         recoveringSerial: recovery.serials.has(device.id),
         recoveringName: recovery.names.has(device.name),
         recoveringStableId: recovery.names.has(stableId),
-        recoveringSessionLoss: Array.from(this.recoveringSessionLosses.values()).some(
-          (record) => record.deviceId === device.id && record.state !== "finalized",
-        ),
+        recoveringSessionLoss: Array.from(
+          this.androidRecoveryRecordLedger.recoveringSessionLosses.values(),
+        ).some((record) => record.deviceId === device.id && record.state !== "finalized"),
         mcpSessionRecoveryLease: Array.from(this.mcpSessionRecoveryDevices.values()).some(
           (lease) => lease.device === device,
         ),
@@ -7148,7 +7125,7 @@ export class DevicePool {
         const skipTransportWait = [
           shutdownReserved,
           shutdownMarker !== undefined,
-          this.recoveringAndroidDeviceIds.has(deviceId),
+          this.recoveryCoordinator.recoveringAndroidDeviceIds.has(deviceId),
           this.hasForeignTargetDeviceHolder(capturedEntry, sessionId, readinessReservationOwners),
         ].some(Boolean);
         if (
@@ -8208,7 +8185,7 @@ export class DevicePool {
     if (!device) {
       return false;
     }
-    this.sessionManager.retireRestorationsOnIncarnationBump(deviceId);
+    this.sessionManager.retireRestorations(deviceId, "incarnation-bump");
     this.deviceHealthMarkers.clear(deviceId);
     device.incarnation = this.nextDeviceIncarnation();
     // Full: a VM restore can replace the rendered screen even on the same connection/serial.
@@ -8233,7 +8210,7 @@ export class DevicePool {
       throw ownershipRefusal;
     }
     if (this.adbServerResetQuarantinedSessions.has(sessionId)) {
-      const loss = this.recoveringSessionLosses.get(sessionId);
+      const loss = this.androidRecoveryRecordLedger.recoveringSessionLosses.get(sessionId);
       if (loss) {
         throw new DeviceLostError(
           loss.deviceId,

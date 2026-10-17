@@ -22,7 +22,10 @@ async function setup() {
     createDevicePoolDependencies(manager, "test-daemon", { timer, deviceManager: utils }),
   );
   await pool.initializeWithDevices([device]);
-  await manager.createSession("owner", device.deviceId, "android", 1_000, 1_000);
+  await manager.createSession("owner", device.deviceId, "android", {
+    timeoutMs: 1_000,
+    heartbeatTimeoutMs: 1_000,
+  });
   await pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
   manager.recordHeartbeat("owner");
   manager.stopCleanupTimer();

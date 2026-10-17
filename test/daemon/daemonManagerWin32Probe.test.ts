@@ -52,28 +52,19 @@ describe("default Windows namespace owner probe", () => {
     // The launch log is opened under the resolved AutoMobile data dir; keep it
     // off the developer's real ~/.auto-mobile.
     process.env.AUTOMOBILE_DATA_DIR = dir;
-    return new ReadyWin32Manager(
-      () => {
+    return new ReadyWin32Manager({
+      clientFactory: () => {
         throw new Error("Unit tests must not create a real daemon client");
       },
-      undefined,
       timer,
-      join(dir, "daemon.lock"),
-      join(dir, "daemon.pid"),
-      windowsSocketPath,
-      table,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      "win32",
-      { isPortFree: async () => true },
-      undefined,
-      undefined,
+      lockFilePath: join(dir, "daemon.lock"),
+      pidFilePath: join(dir, "daemon.pid"),
+      socketPath: windowsSocketPath,
+      processFinder: table,
+      platform: "win32",
+      portAvailabilityChecker: { isPortFree: async () => true },
       identityRecoveryIO,
-    );
+    });
   }
 
   afterEach(() => {

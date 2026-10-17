@@ -145,16 +145,13 @@ describe("ObserverSessionRegistry", () => {
       registry.register(sessionId, "desktop");
       const pool: SessionDeviceAssigner = {
         assignDeviceToSession: async (id, _platform, target) => {
-          const session = await restarted.createSession(
-            id,
-            "device-a",
-            "android",
-            target?.liveness?.sessionTimeoutMs,
-            target?.liveness?.heartbeatTimeoutMs,
-            target?.stableDeviceId,
-            target?.liveness,
-            target?.initialOwnership,
-          );
+          const session = await restarted.createSession(id, "device-a", "android", {
+            timeoutMs: target?.liveness?.sessionTimeoutMs,
+            heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          });
           return session.assignedDevice;
         },
       };

@@ -11,6 +11,8 @@ import type {
 } from "../../../../src/features/record/android/types";
 import type { BootedDevice } from "../../../../src/models";
 import { sendKeysSchema } from "../../../../src/server/interactionTools";
+import { swipeAtSchema } from "../../../../src/server/swipeAtTools";
+import { createSwipeAt } from "../../../helpers/swipeAtCoordinate";
 import { logger } from "../../../../src/utils/logger";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { GestureClassifier } from "../../../../src/features/record/android/GestureClassifier";
@@ -1150,6 +1152,259 @@ describe("DualTrackRecorder", () => {
     } finally {
       warning.mockRestore();
     }
+  });
+
+  describe("swipes that no direction describes (#12533)", () => {
+    async function recordedSwipe(gesture: Record<string, unknown>) {
+      await recorder.start();
+      fakeGestures.emit({ type: "swipe", arrivedAt: 0, ...gesture } as never);
+      fakeTimer.advanceTime(MERGE_WINDOW_MS);
+      return (await recorder.stop()).steps;
+    }
+
+    test("a diagonal swipe exports swipeAt with both endpoints", async () => {
+      expect(
+        await recordedSwipe({
+          direction: "right",
+          startX: 100,
+          startY: 900,
+          endX: 700,
+          endY: 300,
+        }),
+      ).toEqual([
+        { tool: "swipeAt", params: { from: { x: 100, y: 900 }, to: { x: 700, y: 300 } } },
+      ]);
+    });
+
+    test("a diagonal swipe keeps its fast speed", async () => {
+      expect(
+        await recordedSwipe({
+          direction: "down",
+          speed: "fast",
+          startX: 800,
+          startY: 200,
+          endX: 200,
+          endY: 700,
+        }),
+      ).toEqual([
+        {
+          tool: "swipeAt",
+          params: { from: { x: 800, y: 200 }, to: { x: 200, y: 700 }, speed: "fast" },
+        },
+      ]);
+    });
+
+    test("a swipe at the diagonal threshold exports swipeAt", async () => {
+      // Off-axis travel is exactly half the on-axis travel (about 26.6 degrees).
+      const steps = await recordedSwipe({
+        direction: "up",
+        startX: 500,
+        startY: 1000,
+        endX: 700,
+        endY: 600,
+      });
+
+      expect(steps.map((step) => step.tool)).toEqual(["swipeAt"]);
+    });
+
+    test.each([
+      ["a slightly slanted vertical swipe", { direction: "up", endX: 590 }],
+      [
+        "a slightly slanted horizontal swipe",
+        { direction: "left", startX: 800, endX: 200, endY: 1190 },
+      ],
+    ])("%s stays a swipeOn direction", async (_label, overrides) => {
+      const steps = await recordedSwipe({
+        startX: 500,
+        startY: 1200,
+        endX: 500,
+        endY: 600,
+        ...overrides,
+      });
+
+      expect(steps.map((step) => step.tool)).toEqual(["swipeOn"]);
+    });
+
+    test("a diagonal swipe over a scrollable container is still swipeAt, without the container", async () => {
+      await recorder.start();
+      fakeGestures.emit({
+        type: "swipe",
+        arrivedAt: fakeTimer.now(),
+        direction: "right",
+        startX: 100,
+        startY: 900,
+        endX: 700,
+        endY: 300,
+      });
+      fakeA11y.emit({
+        type: "scroll",
+        timestamp: fakeTimer.now(),
+        element: {
+          "resource-id": "com.example:id/map",
+          bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+        },
+        scrollDeltaX: 100,
+        scrollDeltaY: 100,
+      });
+
+      const { steps } = await recorder.stop();
+
+      expect(steps).toEqual([
+        { tool: "swipeAt", params: { from: { x: 100, y: 900 }, to: { x: 700, y: 300 } } },
+      ]);
+    });
+
+    describe("with the recorded screen geometry", () => {
+      const portrait = {
+        platform: "android" as const,
+        deviceWidth: 1080,
+        deviceHeight: 2400,
+        orientation: 0,
+      };
+
+      test("a diagonal swipe exports normalized endpoints, so replay adapts to the screen size", async () => {
+        expect(
+          await recordedSwipe({
+            geometry: portrait,
+            direction: "up",
+            startX: 108,
+            startY: 2160,
+            endX: 864,
+            endY: 720,
+          }),
+        ).toEqual([
+          {
+            tool: "swipeAt",
+            params: {
+              from: { x: 0.1, y: 0.9 },
+              to: { x: 0.8, y: 0.3 },
+              coordinateSpace: "normalized",
+            },
+          },
+        ]);
+      });
+
+      test("a landscape recording normalizes against its landscape size", async () => {
+        const steps = await recordedSwipe({
+          geometry: { ...portrait, deviceWidth: 2400, deviceHeight: 1080, orientation: 1 },
+          direction: "right",
+          startX: 240,
+          startY: 108,
+          endX: 1680,
+          endY: 972,
+        });
+
+        expect(steps).toEqual([
+          {
+            tool: "swipeAt",
+            params: {
+              from: { x: 0.1, y: 0.1 },
+              to: { x: 0.7, y: 0.9 },
+              coordinateSpace: "normalized",
+            },
+          },
+        ]);
+      });
+
+      test("an endpoint on the digitizer edge, which maps to the display size, stays replayable", async () => {
+        const [step] = await recordedSwipe({
+          geometry: portrait,
+          direction: "left",
+          startX: 1080,
+          startY: 1200,
+          endX: 0,
+          endY: 0,
+        });
+
+        expect(step.params).toEqual({
+          from: { x: 1, y: 0.5 },
+          to: { x: 0, y: 0 },
+          coordinateSpace: "normalized",
+        });
+        expect(swipeAtSchema.safeParse({ platform: "android", ...step.params }).success).toBe(true);
+      });
+
+      test("coordinates keep four decimals, not raw floating-point noise", async () => {
+        const [step] = await recordedSwipe({
+          geometry: portrait,
+          direction: "up",
+          startX: 100,
+          startY: 900,
+          endX: 700,
+          endY: 300,
+        });
+
+        expect(step.params).toMatchObject({
+          from: { x: 0.0926, y: 0.375 },
+          to: { x: 0.6481, y: 0.125 },
+        });
+      });
+
+      test.each([
+        ["half-size", 540, 1200, [54, 1080, 432, 360]],
+        ["double-size", 2160, 4800, [216, 4320, 1728, 1440]],
+      ])(
+        "a recorded swipe replays proportionally on a %s screen",
+        async (_label, width, height, expected) => {
+          const [step] = await recordedSwipe({
+            geometry: portrait,
+            direction: "up",
+            startX: 108,
+            startY: 2160,
+            endX: 864,
+            endY: 720,
+          });
+          const parsed = swipeAtSchema.parse({ platform: "android", ...step.params });
+          const { swipeAt, swipes } = createSwipeAt(
+            { deviceId: "replay", platform: "android", name: "Replay" },
+            width,
+            height,
+          );
+
+          const result = await swipeAt.execute({
+            from: parsed.from!,
+            to: parsed.to!,
+            coordinateSpace: parsed.coordinateSpace,
+          });
+
+          expect(result.success).toBe(true);
+          expect(swipes.map(({ x1, y1, x2, y2 }) => [x1, y1, x2, y2])).toEqual([expected]);
+        },
+      );
+    });
+
+    test("a swipe with endpoints but no direction exports swipeAt instead of being dropped", async () => {
+      const warning = spyOn(logger, "warn");
+      try {
+        expect(await recordedSwipe({ startX: 100, startY: 900, endX: 100, endY: 300 })).toEqual([
+          { tool: "swipeAt", params: { from: { x: 100, y: 900 }, to: { x: 100, y: 300 } } },
+        ]);
+        expect(warning).toHaveBeenCalledWith(expect.stringContaining("recorded swipeAt fallback"));
+      } finally {
+        warning.mockRestore();
+      }
+    });
+
+    test("a swipe with a start point only is still skipped", async () => {
+      expect(await recordedSwipe({ startX: 100, startY: 900 })).toEqual([]);
+    });
+
+    test("a zero-length drag is never exported as a swipe", async () => {
+      expect(await recordedSwipe({ startX: 100, startY: 900, endX: 100, endY: 900 })).toEqual([]);
+    });
+
+    test("unknown-axis swipes never invent coordinates", async () => {
+      expect(
+        await recordedSwipe({
+          direction: "right",
+          unknownAxes: ["y"],
+          startX: 100,
+          startY: 900,
+          endX: 700,
+          endY: 300,
+        }),
+      ).toEqual([]);
+    });
   });
 
   test("matching bounds without a selector still preserve the touch", async () => {

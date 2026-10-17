@@ -42,9 +42,9 @@ import {
   applyObserveScopeExperiments,
   buildObserveScopeConfig,
 } from "../features/observe/output/ObserveScopeExperiments";
-import { type WaitForObservationOutcome } from "./observeWaitEvaluation";
+import { type WaitForObservationOutcome } from "../features/observe/wait/WaitEvaluation";
 import type { ObserveArgs } from "./observeTools";
-import { assertActiveWindowWaitForSupportedOnPlatform } from "./observeWaitForSchemas";
+import { assertActiveWindowWaitForSupportedOnPlatform } from "../features/observe/wait/WaitForSchemas";
 
 export interface ObserveToolDependencies {
   crop?: ObserveCropDependencies;

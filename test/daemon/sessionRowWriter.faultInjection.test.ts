@@ -109,7 +109,11 @@ class Run {
   }
 
   create() {
-    return this.manager.createSession(UUID, DEVICE, "android", WINDOW, WINDOW, "Fake_AVD");
+    return this.manager.createSession(UUID, DEVICE, "android", {
+      timeoutMs: WINDOW,
+      heartbeatTimeoutMs: WINDOW,
+      stableDeviceId: "Fake_AVD",
+    });
   }
 
   /** Drive the manager's original promises without introducing real sleeps. */
@@ -202,7 +206,11 @@ class Run {
 
   async force(reason = "heartbeat-timeout"): Promise<void> {
     const teardown = Promise.withResolvers<Promise<void>[]>();
-    Reflect.set(this.manager, "drainReleaseTeardown", () => teardown.promise);
+    Reflect.set(
+      Reflect.get(this.manager, "stateRestore") as object,
+      "drainReleaseTeardown",
+      () => teardown.promise,
+    );
     const release = this.manager.releaseSession(UUID, reason);
     await flush();
     if (!this.manager.forceStuckRelease(UUID)) {
@@ -232,16 +240,13 @@ class Run {
     const pool: SessionDeviceAssigner = {
       assignDeviceToSession: async (id, _platform, target) =>
         (
-          await this.manager.createSession(
-            id,
-            target?.deviceId ?? DEVICE,
-            "android",
-            WINDOW,
-            WINDOW,
-            target?.stableDeviceId ?? "Fake_AVD",
-            target?.liveness,
-            target?.initialOwnership,
-          )
+          await this.manager.createSession(id, target?.deviceId ?? DEVICE, "android", {
+            timeoutMs: WINDOW,
+            heartbeatTimeoutMs: WINDOW,
+            stableDeviceId: target?.stableDeviceId ?? "Fake_AVD",
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          })
         ).assignedDevice,
     };
     const before = await this.persistence.getSession(UUID);

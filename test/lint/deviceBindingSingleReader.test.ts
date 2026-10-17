@@ -51,12 +51,16 @@ const DIRECT_READ_ALLOWLIST: Readonly<Record<string, number>> = {
   "src/daemon/deviceReservations.ts": 1,
   // existingSession is a Session, not its assigned PooledDevice.
   "src/daemon/explicitDeviceBind.ts": 1,
-  // Session objects and keep-awake restore targets.
-  "src/daemon/sessionManager.ts": 28,
+  // Session objects.
+  "src/daemon/sessionManager.ts": 13,
+  // Keep-awake, biometric and network restore targets moved from SessionManager; no additional reads.
+  "src/daemon/sessionDeviceStateRestore.ts": 15,
   // Finalization callback record moved from SessionManager; no additional reads.
   "src/daemon/sessionSlots.ts": 1,
   // MCP failure options and live-acceptance Session candidates.
-  "src/daemon/socketServer.ts": 3,
+  "src/daemon/socketServer.ts": 1,
+  // Live-acceptance Session candidates, moved from socketServer.ts.
+  "src/daemon/socketServer/restartAdmission.ts": 2,
   // CoreDevice diagnostic capability entries.
   "src/doctor/checks/ios.ts": 1,
   // targetUserResult is a PromiseSettledResult.
@@ -66,7 +70,7 @@ const DIRECT_READ_ALLOWLIST: Readonly<Record<string, number>> = {
   // Restart-resume admission target records.
   "src/server/deviceToolsStartDevice.ts": 1,
   // deviceStateResult is a PromiseSettledResult from an ADB command.
-  "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts": 2,
+  "src/utils/android-cmdline-tools/EmulatorReadinessPoller.ts": 2,
 };
 
 function memberName(node: MemberExpression): string | undefined {

@@ -3,7 +3,7 @@ import { Element } from "./Element";
 import { ElementBounds } from "./ElementBounds";
 import { ElementSelectionStrategy } from "./ElementSelectionStrategy";
 import { BaseActionResult } from "./BaseActionResult";
-import { ToolDebugInfo } from "../utils/DebugContextBuilder";
+import { ToolDebugInfo } from "./ToolDebugInfo";
 import type { ScreenReaderNavigationResult } from "../features/talkback/TalkBackTapStrategy";
 
 export type TapEffectBasis =

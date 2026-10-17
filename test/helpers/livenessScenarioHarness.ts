@@ -659,37 +659,38 @@ export class LivenessScenario {
     const clock = new ProcessTimer(this.timer);
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      clock,
-      repository,
-      daemonIds,
-      new FakeDatabaseInitializer(),
-      new FakeStartupFailureTracker(),
-      { check: async () => {} },
-      async () => {
-        throw new Error("LivenessScenario: database health recovery would exit the process");
-      },
-      undefined,
-      async () => {},
-      new FakeToolSelectionProfileProvenanceLoader(),
-      () => {
-        throw new Error("LivenessScenario: the HTTP listener is never created");
-      },
-      () => 0,
-      () => undefined,
-      { collectLiveDaemonSessionIds: () => new Set<string>() },
-      new IncumbentOwnerGuard({
-        readPidFile: () => null,
-        persistPidFile: () => {
-          throw new Error("LivenessScenario: the PID file is never written");
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: clock,
+        deviceSessionRepository: repository,
+        idGenerator: daemonIds,
+        databaseInitializer: new FakeDatabaseInitializer(),
+        startupFailureTracker: new FakeStartupFailureTracker(),
+        databaseHealthProbe: { check: async () => {} },
+        recoverFromDatabaseHealthFailure: async () => {
+          throw new Error("LivenessScenario: database health recovery would exit the process");
         },
-        isProcessRunning: () => false,
-        readProcessGenerationToken: () => undefined,
-        selfPid: SCENARIO_DAEMON_PID,
-      }),
-      () => ({ listDeviceImages: async () => [] }),
-      () => NO_BINDINGS,
-      () => undefined,
+        managedAdbServerShutdown: async () => {},
+        toolSelectionProfileProvenanceLoader: new FakeToolSelectionProfileProvenanceLoader(),
+        httpServerFactory: () => {
+          throw new Error("LivenessScenario: the HTTP listener is never created");
+        },
+        processBirthTime: () => 0,
+        processGenerationToken: () => undefined,
+        liveDaemonSessionIdProvider: { collectLiveDaemonSessionIds: () => new Set<string>() },
+        incumbentOwnerGuard: new IncumbentOwnerGuard({
+          readPidFile: () => null,
+          persistPidFile: () => {
+            throw new Error("LivenessScenario: the PID file is never written");
+          },
+          isProcessRunning: () => false,
+          readProcessGenerationToken: () => undefined,
+          selfPid: SCENARIO_DAEMON_PID,
+        }),
+        avdManagerFactory: () => ({ listDeviceImages: async () => [] }),
+        bindingExclusionFactory: () => NO_BINDINGS,
+        foreignCtrlProxyForwardEvidence: () => undefined,
+      },
     );
     const exitFiles = new FakeDaemonExitRecordFileSystem();
     (

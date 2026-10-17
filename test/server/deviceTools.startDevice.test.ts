@@ -1,3 +1,4 @@
+import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { warmedTests } from "../helpers/warmedTests";
@@ -812,9 +813,7 @@ describe("startDevice handler", () => {
       deviceId: "emulator-5556",
     };
     const availableImage = { ...androidImage, name: "Pixel_9_API_34", osVersion: "14" };
-    (
-      pool as unknown as { recoveringAndroidImages: Map<string, DeviceInfo> }
-    ).recoveringAndroidImages.set(recoveringImage.name, recoveringImage);
+    recoveryInternals(pool).recoveringAndroidImages.set(recoveringImage.name, recoveringImage);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveringImage, availableImage]);
     setDeviceToolsDependencies({ deviceMatcherFactory: () => new DefaultDeviceMatcher() });
@@ -864,9 +863,7 @@ describe("startDevice handler", () => {
 
     const start = callStartDevice({ platform: "android" });
     await readinessStarted.promise;
-    (pool as unknown as { recoveringAndroidDeviceIds: Set<string> }).recoveringAndroidDeviceIds.add(
-      androidDevice.deviceId,
-    );
+    recoveryInternals(pool).recoveringAndroidDeviceIds.add(androidDevice.deviceId);
     releaseReadiness.resolve();
 
     await expect(start).rejects.toThrow(
@@ -890,9 +887,7 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(androidDevice);
     const reserveDeviceForReadiness = pool.reserveDeviceForReadiness.bind(pool);
     pool.reserveDeviceForReadiness = async (...args) => {
-      (
-        pool as unknown as { recoveringAndroidDeviceIds: Set<string> }
-      ).recoveringAndroidDeviceIds.add(androidDevice.deviceId);
+      recoveryInternals(pool).recoveringAndroidDeviceIds.add(androidDevice.deviceId);
       return await reserveDeviceForReadiness(...args);
     };
 

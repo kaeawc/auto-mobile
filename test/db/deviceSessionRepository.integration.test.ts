@@ -312,14 +312,11 @@ describe("DeviceSessionRepository", () => {
   test("rehydrates a device-restart release onto the same AVD after its adb port changes", async () => {
     const originalManager = new SessionManager(timer, repo);
     try {
-      await originalManager.createSession(
-        "emulator-session",
-        "emulator-5554",
-        "android",
-        60_000,
-        10_000,
-        "Pixel_8_API_35",
-      );
+      await originalManager.createSession("emulator-session", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 10_000,
+        stableDeviceId: "Pixel_8_API_35",
+      });
       await originalManager.releaseSession(
         "emulator-session",
         deviceRestartReleaseReason("Pixel_8_API_35"),
@@ -1201,7 +1198,10 @@ describe("DeviceSessionRepository", () => {
     const delayed = new DelayedReleaseRepository(db, timer);
     const sessionManager = new SessionManager(timer, delayed);
     try {
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+      });
       const release = sessionManager.releaseSession("session-1", "daemon-shutdown");
       while (releaseGate === undefined) {
         await Promise.resolve();
@@ -1209,13 +1209,10 @@ describe("DeviceSessionRepository", () => {
       await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
       await release.catch(() => undefined);
 
-      const resumed = await sessionManager.createSession(
-        "session-1",
-        "emulator-5554",
-        "android",
-        60_000,
-        60_000,
-      );
+      const resumed = await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+      });
       const resumedRow = await repo.getSession("session-1");
       const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
       try {
@@ -1245,7 +1242,10 @@ describe("DeviceSessionRepository", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, repo);
     try {
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+      });
       // A peer daemon judged this daemon dead and expired the row.
       await repo.markReleased("session-1", "expired", 500, "daemon-restart");
       timer.advanceTime(1000);
@@ -1264,7 +1264,10 @@ describe("DeviceSessionRepository", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, repo);
     try {
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+      });
       await repo.markReleased("session-1", "released", 500, "explicit-release");
       timer.advanceTime(1000);
       // The row's terminal release ends the live session with the typed refusal (#11498).
@@ -1324,7 +1327,10 @@ describe("DeviceSessionRepository", () => {
       timer.stepWallClock(-3_600_000);
       const wallClock = timer.now();
       expect(wallClock).toBe(sessionClock - 3_600_000);
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+      });
       await sessionManager.rehydratePersistedSessions({
         assignSessionToDevice: async () => {
           throw new Error("no rows to assign");
@@ -1345,7 +1351,10 @@ describe("DeviceSessionRepository", () => {
     const sessionManager = new SessionManager(timer, repo);
 
     try {
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+      });
       timer.advanceTime(1000);
       await sessionManager.getOrCreateSession("session-1");
       await sessionManager.releaseSession("session-1");
@@ -1367,7 +1376,10 @@ describe("DeviceSessionRepository", () => {
     const sessionManager = new SessionManager(timer, repo);
 
     try {
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+      });
       await sessionManager.releaseSession("session-1", "device-disconnected:emulator-5554");
 
       const row = await repo.getSession("session-1");
@@ -1382,20 +1394,14 @@ describe("DeviceSessionRepository", () => {
     const sessionManager = new SessionManager(timer, repo);
 
     try {
-      await sessionManager.createSession(
-        "missing-heartbeat",
-        "emulator-5554",
-        "android",
-        60_000,
-        60_000,
-      );
-      await sessionManager.createSession(
-        "stale-heartbeat",
-        "emulator-5556",
-        "android",
-        60_000,
-        60_000,
-      );
+      await sessionManager.createSession("missing-heartbeat", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+      });
+      await sessionManager.createSession("stale-heartbeat", "emulator-5556", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+      });
 
       await sessionManager.releaseSession("missing-heartbeat", "missing-first-heartbeat");
       await sessionManager.releaseSession("stale-heartbeat", "heartbeat-timeout");

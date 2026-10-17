@@ -35,6 +35,16 @@ final class PrototypeTextFieldActionsTests: XCTestCase {
         XCTAssertNil(PrototypeTextFieldOptions(node: unknown).imeAction)
     }
 
+    func testLeadingIconDecodesAndIsNotATapTarget() throws {
+        let field = try node(#"{"type":"textField","stateKey":"q","testTag":"q","leadingIcon":"search"}"#)
+        XCTAssertEqual(field.leadingIcon, "search")
+        XCTAssertNil(field.tapTarget(identifier: "q.leadingIcon", state: [:]))
+        XCTAssertTrue(
+            PrototypeAgentProtocol.capabilities
+                .contains(PrototypeAgentProtocol.textFieldLeadingIconCapability)
+        )
+    }
+
     func testTheTrailingIconIsATapTargetByItsPartIdentifier() throws {
         let field = try node(#"""
         {"type":"textField","stateKey":"q","testTag":"q",

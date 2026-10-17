@@ -42,9 +42,11 @@ async function expiredUnscannedBase(): Promise<World> {
   manager.onSessionRelease((sessionId) => {
     released.push(sessionId);
   });
-  const base = await manager.createSession(BASE, "emulator-5554", "android", BASE_IDLE_MS);
+  const base = await manager.createSession(BASE, "emulator-5554", "android", {
+    timeoutMs: BASE_IDLE_MS,
+  });
   await asPlanAllocation(manager, BASE, [LABEL], () =>
-    manager.createSession(LABEL, "emulator-5556", "android", LABEL_IDLE_MS),
+    manager.createSession(LABEL, "emulator-5556", "android", { timeoutMs: LABEL_IDLE_MS }),
   );
   manager.setDeviceLabels(BASE, buildDeviceLabelMap(["A", "B"], BASE));
   timer.advanceTime(BASE_IDLE_MS + 1);

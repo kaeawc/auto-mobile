@@ -135,16 +135,13 @@ describe("session persistence guards live in the statement, not in a prior read"
     manager.attachLiveDaemonSessionIds(() => new Set(["daemon-a", "daemon-b"]));
     const pool: SessionDeviceAssigner = {
       async assignDeviceToSession(id, _platform, target): Promise<string> {
-        const session = await manager.createSession(
-          id,
-          DEVICE,
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await manager.createSession(id, DEVICE, "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };
@@ -317,14 +314,10 @@ describe("session persistence guards live in the statement, not in a prior read"
       manager.onSessionRelease((_sessionId, deviceId, reason, _snapshot, options) => {
         releases.push({ reason, deviceId, expiryOrigin: options.expiryOrigin });
       });
-      await manager.createSession(
-        SESSION,
-        DEVICE,
-        "android",
-        IDLE_WINDOW_MS,
-        undefined,
-        STABLE_DEVICE,
-      );
+      await manager.createSession(SESSION, DEVICE, "android", {
+        timeoutMs: IDLE_WINDOW_MS,
+        stableDeviceId: STABLE_DEVICE,
+      });
       expect(await peer.getSession(SESSION)).toMatchObject({ status: "active" });
       await peer.markReleased(SESSION, "expired", timer.now(), "daemon-restart");
       timer.advanceTime(1_000);
@@ -425,7 +418,7 @@ describe("session persistence guards live in the statement, not in a prior read"
       manager.stopCleanupTimer();
       const releases: string[] = [];
       manager.onSessionRelease((_sessionId, _deviceId, reason) => releases.push(reason));
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
       let landReleaseWrite!: () => void;
       store.park = new Promise<void>((resolve) => {
         landReleaseWrite = resolve;
@@ -476,7 +469,7 @@ describe("session persistence guards live in the statement, not in a prior read"
       managers.push(manager);
       manager.stopCleanupTimer();
       manager.attachDaemonSessionId("daemon-a");
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
       await fake.markReleased(SESSION, "released", timer.now(), "explicit-release");
       timer.advanceTime(1_000);
 

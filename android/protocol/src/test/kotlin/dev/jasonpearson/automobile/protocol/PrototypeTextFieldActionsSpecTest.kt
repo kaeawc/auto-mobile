@@ -28,6 +28,16 @@ class PrototypeTextFieldActionsSpecTest {
   }
 
   @Test
+  fun `leading icon decodes and an unknown or empty icon name fails at its path`() {
+    val node =
+      Json.decodeFromString(PrototypeSpec.serializer(), spec(""""leadingIcon":"search"""")).root
+        as PrototypeTextFieldNode
+    assertEquals("search", node.leadingIcon)
+    assertEquals("root.leadingIcon", failure(spec(""""leadingIcon":"not_an_icon_name"""")))
+    assertEquals("root.leadingIcon", failure(spec("\"leadingIcon\":\"\"")))
+  }
+
+  @Test
   fun `multiline refuses the IME fields and bad values fail at their paths`() {
     assertEquals("root.imeAction", failure(spec(""""multiline":true,"imeAction":"done"""")))
     assertEquals(

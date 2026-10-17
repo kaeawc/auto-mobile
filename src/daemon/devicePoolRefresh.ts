@@ -1,7 +1,6 @@
 import { truncateBodyText } from "../utils/truncateBodyText";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import { Mutex } from "async-mutex";
 import type { BootedDevice, Platform } from "../models";
 import type {
   BootedDeviceDiscovery,
@@ -88,8 +87,10 @@ export interface DevicePoolRefreshPort {
   isAndroidTransportAssignable?(device: BootedDevice): boolean;
   getTimer(): Timer;
   getDeviceManager(): PlatformDeviceManager;
-  getDevices(): Map<string, PooledDevice>;
-  getAssignmentMutex(): Mutex;
+  getDevices(): ReadonlyMap<string, PooledDevice>;
+  /** Publish a newly discovered device in the pool (the caller holds the assignment lock). */
+  addPooledDevice(device: PooledDevice): void;
+  withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
   getCriteriaMatcher(): DeviceCriteriaMatcher;
   identityEvidenceForBootedDevice(device: BootedDevice): IdentityEvidence;
   identityEvidenceFields(
@@ -246,7 +247,7 @@ export class DevicePoolRefresh {
             );
             return updated;
           }
-          this.pool.getDevices().set(device.deviceId, {
+          this.pool.addPooledDevice({
             id: device.deviceId,
             name: device.name,
             platform: device.platform,
@@ -271,7 +272,7 @@ export class DevicePoolRefresh {
         };
         const added = assignmentLockHeld
           ? await updatePooledDevice()
-          : await this.pool.getAssignmentMutex().runExclusive(updatePooledDevice);
+          : await this.pool.withAssignmentLock(updatePooledDevice);
         if (added) {
           addedCount++;
         }

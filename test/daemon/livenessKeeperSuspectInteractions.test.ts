@@ -88,7 +88,7 @@ describe("CLI keeper against a proxy-owned session whose lease lapsed (#10051 x 
       },
       timer,
     );
-    await sessionManager.createSession(SESSION, DEVICE, "android", 60_000);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     const claim = await heartbeat({
       livenessPolicy: "heartbeat",
       livenessOwnerToken: PROXY_TOKEN,

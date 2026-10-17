@@ -67,10 +67,11 @@ async function observeAs(options: {
   const db = await createTestDatabase();
   const daemon = new Daemon(
     {},
-    undefined,
-    new FakeTimer(),
-    new DeviceSessionRepository(db),
-    new CountingIdGenerator("device-session"),
+    {
+      timer: new FakeTimer(),
+      deviceSessionRepository: new DeviceSessionRepository(db),
+      idGenerator: new CountingIdGenerator("device-session"),
+    },
   );
   const internals = daemon as unknown as Internals;
   const pooled = {

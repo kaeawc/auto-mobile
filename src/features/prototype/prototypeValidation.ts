@@ -634,6 +634,31 @@ function emitContextPagerError(
   }
   return undefined;
 }
+/** A swipe needs an action side, and a horizontal pager or carousel would steal its drag. */
+function swipeActionsErrors(context: Context): PrototypeValidationError | undefined {
+  for (const { value, path } of context.nodes) {
+    const swipe = object(value.swipeActions);
+    if (!swipe) {
+      continue;
+    }
+    if (swipe.start === undefined && swipe.end === undefined) {
+      return fail(`${path}.swipeActions`, "swipeActions needs start or end");
+    }
+    const blocked = context.nodes.some(
+      ({ value: ancestor, path: ancestorPath }) =>
+        path.startsWith(`${ancestorPath}.`) &&
+        (ancestor.type === "carousel" ||
+          (ancestor.type === "pager" && ancestor.axis !== "vertical")),
+    );
+    if (blocked) {
+      return fail(
+        `${path}.swipeActions`,
+        "swipeActions cannot appear inside a horizontal pager or carousel",
+      );
+    }
+  }
+  return undefined;
+}
 function pagerErrors(context: Context): PrototypeValidationError | undefined {
   const pagers = new Set<string>();
   for (const { value, path } of context.nodes) {
@@ -1175,6 +1200,7 @@ function validateValue(value: unknown): PrototypeValidationResult {
   const error =
     walk(value, definitions.spec, "", context, 0) ??
     gridSpanErrors(context) ??
+    swipeActionsErrors(context) ??
     repeatErrors(value, repeats) ??
     pagerErrors(context) ??
     stackErrors(context) ??

@@ -22,23 +22,15 @@ function buildDaemon(
 ): Daemon {
   return new Daemon(
     {},
-    new FakeInstalledAppsRepository(),
-    timer,
-    new FakeDeviceSessionRepository(),
-    new CountingIdGenerator("daemon-session"),
-    new FakeDatabaseInitializer(),
-    new FakeStartupFailureTracker(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    avdManagerFactory,
+    {
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      timer,
+      deviceSessionRepository: new FakeDeviceSessionRepository(),
+      idGenerator: new CountingIdGenerator("daemon-session"),
+      databaseInitializer: new FakeDatabaseInitializer(),
+      startupFailureTracker: new FakeStartupFailureTracker(),
+      avdManagerFactory,
+    },
   );
 }
 

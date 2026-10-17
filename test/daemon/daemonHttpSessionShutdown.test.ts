@@ -79,7 +79,7 @@ describe("Daemon HTTP session shutdown", () => {
 
   test("reaps an idle HTTP session by closing its transport", async () => {
     const timer = new FakeTimer();
-    const daemon = new Daemon({}, undefined, timer);
+    const daemon = new Daemon({}, { timer });
     const internals = daemon as unknown as DaemonHttpSessionInternals;
     const transport = new FakeTransport();
     internals.acceptingHttpSessions = true;
@@ -95,7 +95,7 @@ describe("Daemon HTTP session shutdown", () => {
 
   test("idle reaper waits until an active HTTP request finishes", async () => {
     const timer = new FakeTimer();
-    const daemon = new Daemon({}, undefined, timer);
+    const daemon = new Daemon({}, { timer });
     const internals = daemon as unknown as DaemonHttpSessionInternals;
     const transport = new FakeTransport();
     internals.acceptingHttpSessions = true;
@@ -121,7 +121,7 @@ describe("Daemon HTTP session shutdown", () => {
   });
 
   test("HTTP body read preserves UTF-8 split across data events", async () => {
-    const daemon = new Daemon({}, undefined, new FakeTimer());
+    const daemon = new Daemon({}, { timer: new FakeTimer() });
     const internals = daemon as unknown as DaemonHttpSessionInternals;
     const req = new FakeRequest();
     const read = internals.readHttpBody(req as unknown as IncomingMessage);
@@ -134,7 +134,7 @@ describe("Daemon HTTP session shutdown", () => {
   });
 
   test("HTTP body read settles when upload closes without end", async () => {
-    const daemon = new Daemon({}, undefined, new FakeTimer());
+    const daemon = new Daemon({}, { timer: new FakeTimer() });
     const internals = daemon as unknown as DaemonHttpSessionInternals;
     const req = new FakeRequest();
     const read = internals.readHttpBody(req as unknown as IncomingMessage);
@@ -144,7 +144,7 @@ describe("Daemon HTTP session shutdown", () => {
   });
 
   test.each(["aborted", "error"])("HTTP body read settles on %s", async (event) => {
-    const daemon = new Daemon({}, undefined, new FakeTimer());
+    const daemon = new Daemon({}, { timer: new FakeTimer() });
     const internals = daemon as unknown as DaemonHttpSessionInternals;
     const req = new FakeRequest();
     const read = internals.readHttpBody(req as unknown as IncomingMessage);
@@ -156,7 +156,7 @@ describe("Daemon HTTP session shutdown", () => {
 
   test("HTTP body read times out a stalled upload", async () => {
     const timer = new FakeTimer();
-    const daemon = new Daemon({}, undefined, timer);
+    const daemon = new Daemon({}, { timer });
     const internals = daemon as unknown as DaemonHttpSessionInternals;
     const req = new FakeRequest();
     const read = internals.readHttpBody(req as unknown as IncomingMessage);

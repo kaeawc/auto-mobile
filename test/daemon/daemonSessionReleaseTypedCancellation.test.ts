@@ -71,9 +71,11 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
     timer = new FakeTimer();
     daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     // Only the release under test may end the session.
     daemon.getSessionManager().stopCleanupTimer();
@@ -99,16 +101,9 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
 
   test("the heartbeat monitor's reap answers the read it cuts with the terminal refusal", async () => {
     const sessionManager = daemon.getSessionManager();
-    await sessionManager.createSession(
-      SESSION,
-      DEVICE.deviceId,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      "awaiting-owner",
-    );
+    await sessionManager.createSession(SESSION, DEVICE.deviceId, "android", {
+      initialOwnership: "awaiting-owner",
+    });
     (daemon as unknown as DaemonMonitorInternals).startHeartbeatMonitor();
     // A read never keeps the session (#11322), so the reap lands while it is still running.
     const read = track(executionTracker.startExecution("observe", undefined, SESSION));
@@ -193,9 +188,13 @@ describe("Daemon session releases cancel in-flight calls with the typed release 
 
     async function baseWithDerivedLabel(): Promise<void> {
       const sessionManager = daemon.getSessionManager();
-      await sessionManager.createSession(BASE, BASE_DEVICE, "android", LONG_TIMEOUT_MS);
+      await sessionManager.createSession(BASE, BASE_DEVICE, "android", {
+        timeoutMs: LONG_TIMEOUT_MS,
+      });
       await asPlanAllocation(sessionManager, BASE, [DERIVED], () =>
-        sessionManager.createSession(DERIVED, DERIVED_DEVICE, "android", DERIVED_TIMEOUT_MS),
+        sessionManager.createSession(DERIVED, DERIVED_DEVICE, "android", {
+          timeoutMs: DERIVED_TIMEOUT_MS,
+        }),
       );
       sessionManager.setDeviceLabels(BASE, { A: DERIVED });
     }

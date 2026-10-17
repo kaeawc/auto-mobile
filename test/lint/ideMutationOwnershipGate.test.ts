@@ -14,11 +14,12 @@ describe("mutating ide/* routes reach the device ownership gate (#10827)", () =>
   );
   const GATE = "assertIdeMutationOwnership(";
 
+  /** The handler method a route's table entry names (`ide/setKeyValue` -> `ideSetKeyValue`). */
   function caseBody(route: string): string {
-    const start = source.indexOf(`case "${route}":`);
+    const name = `ide${route.slice("ide/".length).replace(/^./, (c) => c.toUpperCase())}`;
+    const start = source.indexOf(`private async ${name}(`);
     expect(start).toBeGreaterThan(-1);
-    const next = source.indexOf("\n      case ", start + 1);
-    return source.slice(start, next === -1 ? undefined : next);
+    return source.slice(start, source.indexOf("\n  }\n", start));
   }
 
   test("ide/updateService calls the gate", () => {

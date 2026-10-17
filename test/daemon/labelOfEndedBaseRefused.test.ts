@@ -55,9 +55,11 @@ async function liveBaseAndLabel(baseIdleMs = BASE_IDLE_MS): Promise<World> {
   manager.onSessionRelease((sessionId, _deviceId, reason) => {
     released.push([sessionId, reason]);
   });
-  const base = await manager.createSession(BASE, "emulator-5554", "android", baseIdleMs);
+  const base = await manager.createSession(BASE, "emulator-5554", "android", {
+    timeoutMs: baseIdleMs,
+  });
   const label = await asPlanAllocation(manager, BASE, [LABEL], () =>
-    manager.createSession(LABEL, "emulator-5556", "android", LABEL_IDLE_MS),
+    manager.createSession(LABEL, "emulator-5556", "android", { timeoutMs: LABEL_IDLE_MS }),
   );
   manager.setDeviceLabels(BASE, buildDeviceLabelMap(["A", "B"], BASE));
   return { timer, manager, base, label, released };
@@ -214,7 +216,9 @@ describe("a label whose base is past its idle deadline and not yet scanned", () 
 describe("a label whose base is live", () => {
   test("is admitted, and a session that is no plan's label is never judged by a base", async () => {
     const w = await liveBaseAndLabel();
-    const own = await w.manager.createSession("other:B", "emulator-5558", "android", LABEL_IDLE_MS);
+    const own = await w.manager.createSession("other:B", "emulator-5558", "android", {
+      timeoutMs: LABEL_IDLE_MS,
+    });
 
     expect(await w.manager.getOrCreateSession(LABEL)).toBe(w.label);
     w.timer.advanceTime(BASE_IDLE_MS + 1);

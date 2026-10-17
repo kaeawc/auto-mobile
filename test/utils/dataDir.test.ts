@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ActionableError } from "../../src/models/ActionableError";
 import { useScratchRoot } from "../helpers/scratchRoot";
+import { parseProbeJson } from "../helpers/spawnProbe";
 import {
   resolveAutoMobileBaseDir,
   resolveAutoMobileLogsDir,
@@ -62,7 +63,7 @@ console.log(JSON.stringify({ homedir: os.userInfo().homedir,
     });
     exitCode = result.exitCode;
     stderr = result.stderr.toString();
-    child = JSON.parse(result.stdout.toString());
+    child = parseProbeJson(result);
   });
 
   test("both coordination roots follow the child's os.userInfo().homedir", () => {

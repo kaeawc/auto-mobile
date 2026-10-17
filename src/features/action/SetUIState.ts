@@ -1418,10 +1418,14 @@ export class SetUIState extends BaseVisualChange {
       }
       if (this.device.platform === "ios") {
         return (
-          this.selector.selectByText(viewHierarchy, selector.text, {
-            ...FOCUS_INPUT_INSPECT_INTENT,
-            screenSizeOptions: selector.screenSizeOptions,
-          }).element ?? null
+          this.selector.select(
+            viewHierarchy,
+            { text: selector.text },
+            {
+              ...FOCUS_INPUT_INSPECT_INTENT,
+              screenSizeOptions: selector.screenSizeOptions,
+            },
+          ).element ?? null
         );
       }
       return this.findAndroidTextElement(selector.text, viewHierarchy, selector.screenSizeOptions);
@@ -1446,11 +1450,15 @@ export class SetUIState extends BaseVisualChange {
     screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
   ): Element | null {
     const android = this.device.platform !== "ios";
-    const element = this.selector.selectByText(viewHierarchy, text, {
-      ...TOGGLE_INSPECT_INTENT,
-      ...(android ? CONTAINS_IGNORE_CASE : {}),
-      screenSizeOptions,
-    }).element;
+    const element = this.selector.select(
+      viewHierarchy,
+      { text },
+      {
+        ...TOGGLE_INSPECT_INTENT,
+        ...(android ? CONTAINS_IGNORE_CASE : {}),
+        screenSizeOptions,
+      },
+    ).element;
     if (!element) {
       return null;
     }
@@ -1468,10 +1476,14 @@ export class SetUIState extends BaseVisualChange {
     screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
   ): Element | null {
     return (
-      this.selector.selectByResourceId(viewHierarchy, resourceId, {
-        ...INSPECT_INTENT,
-        screenSizeOptions,
-      }).element ?? null
+      this.selector.select(
+        viewHierarchy,
+        { elementId: resourceId },
+        {
+          ...INSPECT_INTENT,
+          screenSizeOptions,
+        },
+      ).element ?? null
     );
   }
 
@@ -1480,16 +1492,24 @@ export class SetUIState extends BaseVisualChange {
     viewHierarchy: ViewHierarchyResult,
     screenSizeOptions?: ScreenSizeForOffscreenCheckOptions,
   ): Element | null {
-    const matched = this.selector.selectByText(viewHierarchy, text, {
-      ...INSPECT_INTENT,
-      ...CONTAINS_IGNORE_CASE,
-      screenSizeOptions,
-    }).element;
-    if (!matched) {
-      return this.selector.selectByText(viewHierarchy, text, {
-        ...FOCUS_INPUT_WITH_HINT_FALLBACK,
+    const matched = this.selector.select(
+      viewHierarchy,
+      { text },
+      {
+        ...INSPECT_INTENT,
+        ...CONTAINS_IGNORE_CASE,
         screenSizeOptions,
-      }).element;
+      },
+    ).element;
+    if (!matched) {
+      return this.selector.select(
+        viewHierarchy,
+        { text },
+        {
+          ...FOCUS_INPUT_WITH_HINT_FALLBACK,
+          screenSizeOptions,
+        },
+      ).element;
     }
     // Preserve legacy matching and all classified controls. Only an unclassified
     // label may use the same bounded label-to-input promotion as sendKeys.
@@ -1502,18 +1522,22 @@ export class SetUIState extends BaseVisualChange {
       screenSizeOptions,
     };
     let focused = identity
-      ? this.selector.selectByResourceId(viewHierarchy, identity, focusOptions)
-      : this.selector.selectByText(viewHierarchy, text, {
-          ...focusOptions,
-          ...CONTAINS_IGNORE_CASE,
-        });
+      ? this.selector.select(viewHierarchy, { elementId: identity }, focusOptions)
+      : this.selector.select(
+          viewHierarchy,
+          { text },
+          {
+            ...focusOptions,
+            ...CONTAINS_IGNORE_CASE,
+          },
+        );
     const source = getHierarchyNodeSource(matched);
     if (identity && source !== getHierarchyNodeSource(focused.matchedElement ?? matched)) {
       // Legacy text search prefers hierarchy; the resolver may choose a separately
       // deserialized window copy. Retry that primary tree, then require exact source equality.
-      focused = this.selector.selectByResourceId(
+      focused = this.selector.select(
         { ...resolveViewHierarchyForSearch(viewHierarchy)!, windows: undefined },
-        identity,
+        { elementId: identity },
         focusOptions,
       );
     }

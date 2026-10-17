@@ -83,6 +83,15 @@ class PrototypeSpecContentScreenshotTest {
       pending = true,
     )
 
+  // Pending: #12065 swipe actions render closed; no Linux baseline recorded yet.
+  @Test
+  fun swipeActionsListItem() =
+    prototypeScreenshotTest(
+      "swipe_actions_list_item",
+      validPrototypeFixture("swipe-actions-list-item"),
+      pending = true,
+    )
+
   @Test
   fun flowBasic() =
     prototypeScreenshotTest("flow_basic", validPrototypeFixture("flow-basic"), pending = true)

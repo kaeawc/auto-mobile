@@ -52,7 +52,7 @@ const SESSION_KINDS: readonly SessionKind[] = [
     name: "cli-idle",
     heartbeats: false,
     async setUp(manager) {
-      await manager.createSession(SESSION, DEVICE, "android", 60_000);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
       expect(manager.adoptCliLivenessPolicy(SESSION, IDLE_MS)).toBe(true);
     },
   },
@@ -62,7 +62,7 @@ const SESSION_KINDS: readonly SessionKind[] = [
     name: "cli-idle adopted from a 30-minute session",
     heartbeats: false,
     async setUp(manager) {
-      await manager.createSession(SESSION, DEVICE, "android", 30 * 60_000);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: 30 * 60_000 });
       expect(manager.adoptCliLivenessPolicy(SESSION, IDLE_MS)).toBe(true);
     },
   },
@@ -70,7 +70,7 @@ const SESSION_KINDS: readonly SessionKind[] = [
     name: "proxy-owned (liveness token)",
     heartbeats: true,
     async setUp(manager) {
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
       expect(await manager.claimLivenessOwnership(SESSION, "proxy-token")).toBe("claimed");
     },
   },
@@ -78,14 +78,14 @@ const SESSION_KINDS: readonly SessionKind[] = [
     name: "heartbeat without an owner token",
     heartbeats: true,
     async setUp(manager) {
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     },
   },
   {
     name: "managed execution",
     heartbeats: true,
     async setUp(manager) {
-      await manager.createSession(SESSION, DEVICE, "android", 60_000);
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
       await manager.adoptManagedExecutionLivenessPolicy(SESSION, { idleTimeoutMs: IDLE_MS });
     },
   },

@@ -47,29 +47,21 @@ describe("daemon owner stamp on persisted sessions (#11114)", () => {
   test("a rehydrated session is re-owned by the current daemon, not the dead one", async () => {
     const persistence = new FakeDeviceSessionPersistence();
     const predecessor = managerFor("dead-daemon", persistence);
-    await predecessor.createSession(
-      "restarted-session",
-      "emulator-5554",
-      "android",
-      undefined,
-      undefined,
-      "Pixel_8_API_35",
-    );
+    await predecessor.createSession("restarted-session", "emulator-5554", "android", {
+      stableDeviceId: "Pixel_8_API_35",
+    });
     await persistence.markReleased("restarted-session", "expired", 1_000, "daemon-restart");
 
     const restarted = managerFor("daemon-b", persistence);
     const pool: SessionDeviceAssigner = {
       async assignDeviceToSession(id, _platform, target): Promise<string> {
-        const session = await restarted.createSession(
-          id,
-          "emulator-5554",
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await restarted.createSession(id, "emulator-5554", "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };
@@ -85,7 +77,7 @@ describe("daemon owner stamp on persisted sessions (#11114)", () => {
   test("the daemon wires its own id into its session manager", async () => {
     const timer = new FakeTimer();
     const repository = new RecordingDeviceSessionRepository(undefined, timer);
-    const daemon = new Daemon({}, undefined, timer, repository);
+    const daemon = new Daemon({}, { timer, deviceSessionRepository: repository });
     daemon.getSessionManager().stopCleanupTimer();
 
     await daemon.getSessionManager().createSession("daemon-session", "emulator-5554", "android");

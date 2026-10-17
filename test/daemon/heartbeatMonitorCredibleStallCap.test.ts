@@ -45,7 +45,7 @@ async function linuxModel(idleMs: number, bunVersion = "1.3.14", timer = new Fak
     timer,
     { bunVersion },
   );
-  const session = await sessions.createSession(SESSION, DEVICE, "android", idleMs);
+  const session = await sessions.createSession(SESSION, DEVICE, "android", { timeoutMs: idleMs });
   monitor.start();
   return { timer, manager: sessions, monitor, session };
 }

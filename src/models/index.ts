@@ -75,6 +75,7 @@ export * from "./SetTextDirectionResult";
 export * from "./SetTimeZoneResult";
 export * from "./ShakeOptions";
 export * from "./ShakeResult";
+export * from "./SwipeAtOptions";
 export * from "./SwipeResult";
 export * from "./SwipeOnOptions";
 export * from "./MultiTouchOptions";

@@ -21,7 +21,7 @@ export interface EmulatorProcessLifecyclePoolPort {
   getTimer(): Timer;
   getStartedDeviceProcesses(): Map<string, ChildProcess>;
   getStartedDeviceProcessOutput(): Map<string, EmulatorProcessOutputTail>;
-  getDevices(): Map<string, PooledDevice>;
+  getDevices(): ReadonlyMap<string, PooledDevice>;
   getSessionManager(): SessionManager;
   isReservedForShutdown(device: PooledDevice): boolean;
   prepareSessionPreservingRecovery(

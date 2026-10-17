@@ -162,8 +162,7 @@ describe("held-session heartbeats under the daemon's live-owner rule (#10050)", 
         sessionId,
         device,
         sessionId.startsWith("ios") ? "ios" : "android",
-        60_000,
-        LEASE_MS,
+        { timeoutMs: 60_000, heartbeatTimeoutMs: LEASE_MS },
       );
     }
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);

@@ -1,4 +1,5 @@
 import { ActionableError } from "../../models";
+import { isCoordinationTool } from "./coordinationTools";
 import { Plan, PlanStep } from "../../models/Plan";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
@@ -21,12 +22,7 @@ interface GenerationSpan {
   arrivals: Arrival[];
 }
 
-const COORDINATION_TOOLS = new Set(["barrier", "criticalSection"]);
-
-/** True for the plan tools that rendezvous several device tracks. */
-export function isCoordinationTool(tool: string): boolean {
-  return COORDINATION_TOOLS.has(tool);
-}
+export { isCoordinationTool };
 
 /**
  * Resolve a coordination field (`lock`/`deviceCount`) honoring PlanNormalizer's
@@ -278,7 +274,7 @@ function collectGenerationSpans(
 
   for (let planIndex = 0; planIndex < plan.steps.length; planIndex++) {
     const step = plan.steps[planIndex];
-    if (!COORDINATION_TOOLS.has(step.tool)) {
+    if (!isCoordinationTool(step.tool)) {
       continue;
     }
     const lock = effectiveField(step, "lock");
@@ -344,7 +340,7 @@ function lockArrivalsByLock(plan: Plan): Map<string, Arrival[]> {
   const arrivalsByLock = new Map<string, Arrival[]>();
   for (let planIndex = 0; planIndex < plan.steps.length; planIndex++) {
     const step = plan.steps[planIndex];
-    if (!COORDINATION_TOOLS.has(step.tool)) {
+    if (!isCoordinationTool(step.tool)) {
       continue;
     }
     const lock = effectiveField(step, "lock");
@@ -368,7 +364,7 @@ function collectDeviceLockOrder(plan: Plan, safe: number): Map<string, string[]>
   const deviceLockOrder = new Map<string, string[]>();
   for (let planIndex = safe; planIndex < plan.steps.length; planIndex++) {
     const step = plan.steps[planIndex];
-    if (!COORDINATION_TOOLS.has(step.tool)) {
+    if (!isCoordinationTool(step.tool)) {
       continue;
     }
     const lock = effectiveField(step, "lock");

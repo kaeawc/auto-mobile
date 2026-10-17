@@ -108,7 +108,10 @@ async function world() {
   /** Daemon A holds `s`, loses its device (a recoverable release), and B starts beside it. */
   const lostDeviceBesidePeer = async () => {
     const a = start("daemon-a");
-    await a.manager.createSession("s", DEVICES[0], "android", IDLE_MS, undefined, STABLE_ID);
+    await a.manager.createSession("s", DEVICES[0], "android", {
+      timeoutMs: IDLE_MS,
+      stableDeviceId: STABLE_ID,
+    });
     await repository.markReleased(
       "s",
       "expired",
@@ -141,16 +144,13 @@ async function world() {
 function assigner(manager: SessionManager): SessionDeviceAssigner {
   return {
     async assignDeviceToSession(id, _platform, target): Promise<string> {
-      const session = await manager.createSession(
-        id,
-        DEVICES[0],
-        "android",
-        target?.liveness?.sessionTimeoutMs,
-        target?.liveness?.heartbeatTimeoutMs,
-        target?.stableDeviceId,
-        target?.liveness,
-        target?.initialOwnership,
-      );
+      const session = await manager.createSession(id, DEVICES[0], "android", {
+        timeoutMs: target?.liveness?.sessionTimeoutMs,
+        heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+        stableDeviceId: target?.stableDeviceId,
+        recoveredLiveness: target?.liveness,
+        initialOwnership: target?.initialOwnership,
+      });
       return session.assignedDevice;
     },
   };
@@ -323,7 +323,7 @@ describe("a survivor adopts a dead peer's terminal-release journal (#11355)", ()
   test("a still-active row of the dead peer is terminalized, not left owned by a dead daemon", async () => {
     const { timer, repository, live, start } = await world();
     const a = start("daemon-a");
-    await a.manager.createSession("s", DEVICES[0], "android", IDLE_MS);
+    await a.manager.createSession("s", DEVICES[0], "android", { timeoutMs: IDLE_MS });
     const b = start("daemon-b");
     a.journal.record({ sessionId: "s", reason: "explicit-release", at: timer.now() });
     live.delete("daemon-a");
@@ -340,10 +340,10 @@ describe("a survivor adopts a dead peer's terminal-release journal (#11355)", ()
   test("an adopted intent never terminalizes a row another daemon took over", async () => {
     const { timer, repository, live, start } = await world();
     const a = start("daemon-a");
-    await a.manager.createSession("s", DEVICES[0], "android", IDLE_MS);
+    await a.manager.createSession("s", DEVICES[0], "android", { timeoutMs: IDLE_MS });
     const b = start("daemon-b");
     // B holds t; A's journal carries a stale release of it from before B took it over.
-    await b.manager.createSession("t", DEVICES[1], "android", IDLE_MS);
+    await b.manager.createSession("t", DEVICES[1], "android", { timeoutMs: IDLE_MS });
     a.journal.record({ sessionId: "t", reason: "device-killed", at: timer.now() });
     a.journal.record({ sessionId: "s", reason: "explicit-release", at: timer.now() });
     live.delete("daemon-a");

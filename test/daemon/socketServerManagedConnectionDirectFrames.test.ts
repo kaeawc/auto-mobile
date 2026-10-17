@@ -148,8 +148,12 @@ describe("direct frames from a managed connection outside its slots", () => {
     bindingHeld = true;
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    await sessionManager.createSession(SLOT_SESSION, slotDevice.deviceId, "android", 60_000);
-    await sessionManager.createSession(GENERIC_SESSION, heldDevice.deviceId, "android", 60_000);
+    await sessionManager.createSession(SLOT_SESSION, slotDevice.deviceId, "android", {
+      timeoutMs: 60_000,
+    });
+    await sessionManager.createSession(GENERIC_SESSION, heldDevice.deviceId, "android", {
+      timeoutMs: 60_000,
+    });
     scopes = new BrokerConnectionScopes();
 
     discovered = [slotDevice, freeDevice, heldDevice];

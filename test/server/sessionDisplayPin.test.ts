@@ -34,11 +34,7 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { snapshotPlatformDeviceManagerFactory } from "../helpers/platformDeviceManagerSnapshot";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
-import {
-  createJSONToolResponse,
-  createStructuredToolResponse,
-  getStructuredPayload,
-} from "../../src/utils/toolUtils";
+import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
 import {
   resolveTargetDisplay,
   DisplaySelectionError,
@@ -499,6 +495,10 @@ test("direct mode display refuses before device selection; omitted is unchanged"
           }),
         },
       ],
+      structuredContent: {
+        message: "Active device set to 'pin-device'",
+        deviceId: device.deviceId,
+      },
     });
     expect(pin).toHaveBeenCalledWith(device);
   } finally {
@@ -622,6 +622,7 @@ for (const name of [
   "tapOn",
   "swipeOn",
   "tapAt",
+  "swipeAt",
   "pinchOn",
   "dragAndDrop",
   "sendKeys",
@@ -1074,7 +1075,7 @@ for (const name of ["observe", "tapOn", "tapAny", "swipeOn"]) {
 }
 
 test("session setActiveDevice without display matches main's entire JSON envelope", async () => {
-  const expected = createJSONToolResponse({
+  const expected = createStructuredToolResponse({
     message: "Active device set to 'pin-device'",
     deviceId: device.deviceId,
     sessionUuid: "one",
@@ -1082,8 +1083,14 @@ test("session setActiveDevice without display matches main's entire JSON envelop
   const response = await select();
   expect(response).toEqual(expected);
   expect(response.content[0].text).toBe(expected.content[0].text);
-  expect(response).not.toHaveProperty("structuredContent");
-  expect(ToolRegistry.getTool("setActiveDevice")!.outputSchema).toBeUndefined();
+  expect(response.content[0].text).toBe(
+    JSON.stringify({
+      message: "Active device set to 'pin-device'",
+      deviceId: device.deviceId,
+      sessionUuid: "one",
+    }),
+  );
+  expect(ToolRegistry.getTool("setActiveDevice")!.outputSchema).toBeDefined();
 });
 
 test("legacy setActiveDevice without display matches main's entire JSON envelope and registration", async () => {
@@ -1092,17 +1099,20 @@ test("legacy setActiveDevice without display matches main's entire JSON envelope
   const ready = spyOn(manager, "ensureDeviceReady").mockResolvedValue(device);
   const pin = spyOn(manager, "setExplicitDevicePin").mockImplementation(() => {});
   try {
-    const expected = createJSONToolResponse({
+    const expected = createStructuredToolResponse({
       message: "Active device set to 'pin-device'",
       deviceId: device.deviceId,
     });
     const response = await ToolRegistry.getTool("setActiveDevice")!.handler({
       deviceId: device.deviceId,
     });
-    expect(response).toEqual(expected);
-    expect(response.content[0].text).toBe(expected.content[0].text);
-    expect(response).not.toHaveProperty("structuredContent");
-    expect(ToolRegistry.getTool("setActiveDevice")!.outputSchema).toBeUndefined();
+    // The wire text is byte-identical to the pre-structured response (#11830).
+    expect(response.content).toEqual(expected.content);
+    expect(response.structuredContent).toEqual({
+      message: "Active device set to 'pin-device'",
+      deviceId: device.deviceId,
+    });
+    expect(ToolRegistry.getTool("setActiveDevice")!.outputSchema).toBeDefined();
   } finally {
     ready.mockRestore();
     pin.mockRestore();
@@ -1111,7 +1121,7 @@ test("legacy setActiveDevice without display matches main's entire JSON envelope
 
 test("setActiveDevice with display adds the resulting pin to main's JSON envelope", async () => {
   expect(await select("inner")).toEqual(
-    createJSONToolResponse({
+    createStructuredToolResponse({
       message: "Active device set to 'pin-device'",
       deviceId: device.deviceId,
       sessionUuid: "one",
@@ -1257,11 +1267,13 @@ test("pin clear restores the complete main response envelope on the next plain c
     deviceId: device.deviceId,
     sessionUuid: "one",
   };
-  expect(await select()).toEqual(createJSONToolResponse(payload));
+  expect(await select()).toEqual(createStructuredToolResponse(payload));
   await select("inner");
-  expect(await select()).toEqual(createJSONToolResponse({ ...payload, displayPin: "inner" }));
-  expect(await select(null)).toEqual(createJSONToolResponse({ ...payload, displayPin: null }));
-  expect(await select()).toEqual(createJSONToolResponse(payload));
+  expect(await select()).toEqual(createStructuredToolResponse({ ...payload, displayPin: "inner" }));
+  expect(await select(null)).toEqual(
+    createStructuredToolResponse({ ...payload, displayPin: null }),
+  );
+  expect(await select()).toEqual(createStructuredToolResponse(payload));
 });
 
 for (const name of ["observe", "tapOn", "tapAny", "swipeOn"]) {

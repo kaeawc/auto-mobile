@@ -1,4 +1,5 @@
 import type { Kysely } from "kysely";
+import { z } from "zod/v4";
 import { getDatabase } from "./database";
 import type { DeviceSnapshotManifest, DeviceSnapshotMetadata, DeviceSnapshotType } from "../models";
 import type {
@@ -8,6 +9,7 @@ import type {
   DeviceSnapshotUpdate,
 } from "./types";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 
 export interface DeviceSnapshotRecord extends DeviceSnapshotMetadata {}
 
@@ -22,15 +24,84 @@ export interface DeviceSnapshotQuery {
   pendingReclaim?: boolean;
 }
 
+const stringRecord = z.record(z.string(), z.string());
+const stringArray = z.array(z.string());
+
+export const deviceSnapshotManifestSchema = z.object({
+  snapshotName: z.string(),
+  timestamp: z.string(),
+  deviceId: z.string(),
+  deviceName: z.string(),
+  platform: z.enum(["android", "ios"]),
+  deviceType: z.string().optional(),
+  osVersion: z.string().optional(),
+  snapshotType: z.enum(["vm", "adb", "simctl", "app_data"]),
+  includeAppData: z.boolean(),
+  includeSettings: z.boolean(),
+  packages: stringArray.optional(),
+  foregroundApp: z.string().optional(),
+  settings: z
+    .object({
+      global: stringRecord.optional(),
+      secure: stringRecord.optional(),
+      system: stringRecord.optional(),
+    })
+    .optional(),
+  iosSettings: z
+    .object({
+      values: stringRecord,
+      ui: z
+        .object({
+          appearance: z.enum(["light", "dark"]).optional(),
+          contentSize: z.string().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  appDataBackup: z
+    .object({
+      backupFile: z.string().optional(),
+      backedUpPackages: stringArray.optional(),
+      skippedPackages: stringArray.optional(),
+      failedPackages: stringArray.optional(),
+      totalPackages: z.number().optional(),
+      backupTimedOut: z.boolean().optional(),
+      backupMethod: z.enum(["root_pull", "none", "simctl_copy"]).optional(),
+      bundleStatuses: z
+        .array(
+          z.object({
+            bundleId: z.string(),
+            status: z.enum(["captured", "skipped-no-container", "not-installed", "failed"]),
+          }),
+        )
+        .optional(),
+    })
+    .optional(),
+}) satisfies z.ZodType<DeviceSnapshotManifest>;
+
 function parseManifest(snapshotName: string, manifestJson: string): DeviceSnapshotManifest | null {
+  let parsed: unknown;
   try {
-    return JSON.parse(manifestJson) as DeviceSnapshotManifest;
+    parsed = JSON.parse(manifestJson);
   } catch (error) {
     logger.warn(
-      `[DeviceSnapshotRepository] Failed to parse manifest for ${snapshotName}: ${error}`,
+      `[DeviceSnapshotRepository] Failed to parse manifest for ${snapshotName}: ${errorMessage(error)}`,
     );
     return null;
   }
+  const result = deviceSnapshotManifestSchema.safeParse(parsed);
+  if (result.success) {
+    return result.data;
+  }
+  logger.warn(
+    `[DeviceSnapshotRepository] Manifest for ${snapshotName} failed validation: ${result.error.message}`,
+  );
+  // Keep a well-formed but off-schema object (e.g. a manifest written by a newer or older
+  // version) so the row stays visible to retention and pending-reclaim sweeps, which read
+  // only listSnapshots; dropping it would leak its payload outside every budget.
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+    ? (parsed as DeviceSnapshotManifest)
+    : null;
 }
 
 function toRecord(row: DbDeviceSnapshot): DeviceSnapshotRecord | null {

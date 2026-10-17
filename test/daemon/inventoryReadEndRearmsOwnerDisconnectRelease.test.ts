@@ -74,9 +74,11 @@ describe("an in-flight inventory read never holds owner-disconnect release (#113
     timer = new FakeTimer();
     daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const sessionManager = daemon.getSessionManager();
     // Only the owner-disconnect release may end the session.

@@ -23,7 +23,7 @@ describe("an open input stroke vs. its holder rebinding to another device", () =
   beforeEach(async () => {
     rig = createDirectFrameRig([android(OLD_DEVICE), android(NEW_DEVICE)]);
     pane = rig.connect();
-    await rig.sessionManager.createSession(HOLDER, OLD_DEVICE, "android", IDLE_MS);
+    await rig.sessionManager.createSession(HOLDER, OLD_DEVICE, "android", { timeoutMs: IDLE_MS });
     expect(
       await rig.request(pane, gestureFrame("Start", OLD_DEVICE, { sessionUuid: HOLDER })),
     ).toMatchObject({ success: true });
@@ -53,7 +53,9 @@ describe("an open input stroke vs. its holder rebinding to another device", () =
 
   test("the next session to acquire the old device does not get it with the pointer down", async () => {
     await rig.sessionManager.rebindSession(HOLDER, NEW_DEVICE, "android");
-    await rig.sessionManager.createSession(NEXT_OWNER, OLD_DEVICE, "android", IDLE_MS);
+    await rig.sessionManager.createSession(NEXT_OWNER, OLD_DEVICE, "android", {
+      timeoutMs: IDLE_MS,
+    });
     await rig.settle();
 
     expect(rig.sessionManager.getSessionForDevice(OLD_DEVICE)).toBe(NEXT_OWNER);
@@ -83,7 +85,7 @@ describe("an open input stroke vs. its holder rebinding to another device", () =
       },
     });
     pane = rig.connect();
-    await rig.sessionManager.createSession(HOLDER, OLD_DEVICE, "android", IDLE_MS);
+    await rig.sessionManager.createSession(HOLDER, OLD_DEVICE, "android", { timeoutMs: IDLE_MS });
     await rig.request(pane, gestureFrame("Start", OLD_DEVICE, { sessionUuid: HOLDER }));
     expect(rig.isDeviceWorkQueued(OLD_DEVICE)).toBe(false);
     const queuedAtUnbind: boolean[] = [];
@@ -94,7 +96,9 @@ describe("an open input stroke vs. its holder rebinding to another device", () =
     await rig.sessionManager.rebindSession(HOLDER, NEW_DEVICE, "android");
     expect(queuedAtUnbind).toEqual([true]);
     offeredToNextOwner = true;
-    await rig.sessionManager.createSession(NEXT_OWNER, OLD_DEVICE, "android", IDLE_MS);
+    await rig.sessionManager.createSession(NEXT_OWNER, OLD_DEVICE, "android", {
+      timeoutMs: IDLE_MS,
+    });
     await rig.request(
       pane,
       gestureFrame("Start", OLD_DEVICE, {
@@ -117,7 +121,7 @@ describe("an open input stroke vs. its holder rebinding to another device", () =
       requestGestureEnd: () => lift.promise,
     });
     pane = rig.connect();
-    await rig.sessionManager.createSession(HOLDER, OLD_DEVICE, "android", IDLE_MS);
+    await rig.sessionManager.createSession(HOLDER, OLD_DEVICE, "android", { timeoutMs: IDLE_MS });
     await rig.request(pane, gestureFrame("Start", OLD_DEVICE, { sessionUuid: HOLDER }));
     try {
       await rig.sessionManager.rebindSession(HOLDER, NEW_DEVICE, "android");
@@ -135,7 +139,7 @@ describe("an open input stroke vs. its holder rebinding to another device", () =
       requestGestureStart: () => start.promise,
     });
     pane = rig.connect();
-    await rig.sessionManager.createSession(HOLDER, OLD_DEVICE, "android", IDLE_MS);
+    await rig.sessionManager.createSession(HOLDER, OLD_DEVICE, "android", { timeoutMs: IDLE_MS });
     await rig.request(pane, gestureFrame("Start", OLD_DEVICE, { sessionUuid: HOLDER }));
     await rig.sessionManager.rebindSession(HOLDER, NEW_DEVICE, "android");
     start.resolve({ success: true });

@@ -74,21 +74,9 @@ function daemonWithFakeHttpServer(
   options: ConstructorParameters<typeof Daemon>[0],
   outcome: "bind-ok" | "bind-refused",
 ): Daemon {
-  return new Daemon(
-    options,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    () => new FakeBindServer(outcome) as unknown as HttpServer,
-  );
+  return new Daemon(options, {
+    httpServerFactory: () => new FakeBindServer(outcome) as unknown as HttpServer,
+  });
 }
 
 describe("Daemon strict-port bind (issue #6260)", () => {

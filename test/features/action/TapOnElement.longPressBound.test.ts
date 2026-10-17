@@ -1,5 +1,6 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { describe, expect, spyOn, test } from "bun:test";
+import { resolveGestureCtrlProxyTimeoutMs } from "../../../src/features/action/gestureTransportTimeout";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { LONG_PRESS_HARD_MAX_MS } from "../../../src/features/action/tapAtGesture";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -85,7 +86,7 @@ describe("tapOn long press safety", () => {
     expect(h.adb.getCommandCalls()).toEqual([
       expect.objectContaining({
         command: `shell input touchscreen swipe 60 45 60 45 ${effective}`,
-        timeoutMs: effective! + 2000,
+        timeoutMs: resolveGestureCtrlProxyTimeoutMs(effective!),
       }),
     ]);
   });
@@ -101,7 +102,7 @@ describe("tapOn long press safety", () => {
     expect(h.adb.getCommandCalls()).toEqual([
       expect.objectContaining({
         command: `shell input touchscreen swipe 60 45 60 45 ${duration ?? 500}`,
-        timeoutMs: (duration ?? 500) + 2000,
+        timeoutMs: resolveGestureCtrlProxyTimeoutMs(duration ?? 500),
       }),
     ]);
   });

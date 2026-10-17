@@ -101,10 +101,13 @@ struct PrototypeTextFieldView: View {
             }
             .padding(.leading, 16)
             .frame(minHeight: 56)
-        } else if let icon = node.trailingIcon {
+        } else if node.trailingIcon != nil || node.leadingIcon != nil {
             HStack(spacing: 4) {
+                if let symbol = prototypeSymbol(node.leadingIcon) {
+                    PrototypeGlyph(symbol: symbol).accessibilityHidden(true)
+                }
                 field
-                trailingIconView(icon)
+                if let icon = node.trailingIcon { trailingIconView(icon) }
             }
         } else {
             field

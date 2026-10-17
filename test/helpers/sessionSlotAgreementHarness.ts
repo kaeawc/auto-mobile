@@ -61,14 +61,10 @@ export function slotAgreementRig(
   });
   const pool: SessionDeviceAssigner = {
     assignDeviceToSession: async (uuid) => {
-      await manager.createSession(
-        uuid,
-        `device-${uuid}`,
-        "android",
-        1000,
-        undefined,
-        `stable-${uuid}`,
-      );
+      await manager.createSession(uuid, `device-${uuid}`, "android", {
+        timeoutMs: 1000,
+        stableDeviceId: `stable-${uuid}`,
+      });
       return `device-${uuid}`;
     },
   };
@@ -253,14 +249,10 @@ export async function runSlotAgreement(seed: number): Promise<SlotAgreementRun> 
       case "create":
         issue(
           op,
-          rig.manager.createSession(
-            uuid,
-            `device-${uuid}`,
-            "android",
-            1000,
-            undefined,
-            `stable-${uuid}`,
-          ),
+          rig.manager.createSession(uuid, `device-${uuid}`, "android", {
+            timeoutMs: 1000,
+            stableDeviceId: `stable-${uuid}`,
+          }),
         );
         break;
       case "reissue":
@@ -303,14 +295,10 @@ export async function runSlotAgreement(seed: number): Promise<SlotAgreementRun> 
   // Shutdown handoff + restart use only the injected in-memory row store and journal.
   issue(
     "restart-fixture",
-    rig.manager.createSession(
-      ids[3],
-      "device-restart",
-      "android",
-      1000,
-      undefined,
-      "stable-restart",
-    ),
+    rig.manager.createSession(ids[3], "device-restart", "android", {
+      timeoutMs: 1000,
+      stableDeviceId: "stable-restart",
+    }),
   );
   await settle();
   rig.manager.stopAcceptingSessionCreations();

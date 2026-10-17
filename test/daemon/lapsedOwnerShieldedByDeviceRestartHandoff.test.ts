@@ -41,7 +41,7 @@ describe("a device restart under a session whose owner already lost its heartbea
   let announced: string[];
 
   function createOnPixelA(sessionId: string) {
-    return manager.createSession(sessionId, DEVICE, "android", undefined, undefined, "Pixel_A");
+    return manager.createSession(sessionId, DEVICE, "android", { stableDeviceId: "Pixel_A" });
   }
 
   /** `restoreMs` is how long the handoff release's device teardown takes. */
@@ -325,16 +325,13 @@ describe("a device restart under a session whose owner already lost its heartbea
       const summary = await successor.rehydratePersistedSessions({
         assignDeviceToSession: async (id, _platform, target) =>
           (
-            await successor.createSession(
-              id,
-              DEVICE,
-              "android",
-              target?.liveness?.sessionTimeoutMs,
-              target?.liveness?.heartbeatTimeoutMs,
-              target?.stableDeviceId,
-              target?.liveness,
-              target?.initialOwnership,
-            )
+            await successor.createSession(id, DEVICE, "android", {
+              timeoutMs: target?.liveness?.sessionTimeoutMs,
+              heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+              stableDeviceId: target?.stableDeviceId,
+              recoveredLiveness: target?.liveness,
+              initialOwnership: target?.initialOwnership,
+            })
           ).assignedDevice,
       });
       expect(summary).toEqual({

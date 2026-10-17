@@ -1,3 +1,4 @@
+import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { DeviceRecoveryPoolPort } from "../../src/daemon/deviceRecoveryCoordinator";
@@ -24,8 +25,6 @@ const ios: BootedDevice = {
 interface RecoveryInternals {
   performSessionPreservingRecovery: DeviceRecoveryPoolPort["performSessionPreservingRecovery"];
   finishEmulatorLossIncident: DevicePool["finishEmulatorLossIncident"];
-  emulatorLossRecoveryResolvers: Map<string, () => void>;
-  emulatorLossRecoverySettlements: Map<string, Promise<void>>;
 }
 
 async function harness(booted: BootedDevice) {
@@ -49,7 +48,15 @@ async function harness(booted: BootedDevice) {
   device.status = "assigned";
   // Same private-map inspection as devicePool.test.ts, with the public finalizer as the overlap.
   const internals = pool as RecoveryInternals;
-  return { sessions, persistence, pool, session, device, internals };
+  return {
+    sessions,
+    persistence,
+    pool,
+    session,
+    device,
+    internals,
+    recoveryState: recoveryInternals(pool),
+  };
 }
 
 async function flush() {
@@ -61,7 +68,8 @@ async function flush() {
 for (const booted of [android, ios]) {
   for (const reason of ["explicit-release", "heartbeat-timeout"]) {
     test(`${booted.platform} loss joins ${reason} without starting recovery`, async () => {
-      const { sessions, persistence, pool, session, device, internals } = await harness(booted);
+      const { sessions, persistence, pool, session, device, internals, recoveryState } =
+        await harness(booted);
       const finishSetup = Promise.withResolvers<void>();
       const perform = spyOn(internals, "performSessionPreservingRecovery");
       const finishIncident = spyOn(pool, "finishEmulatorLossIncident");
@@ -77,8 +85,8 @@ for (const booted of [android, ios]) {
         );
         if (booted.platform === "android") {
           expect(incidentId).toBeDefined();
-          expect(internals.emulatorLossRecoveryResolvers.has(incidentId!)).toBe(true);
-          expect(internals.emulatorLossRecoverySettlements.has(incidentId!)).toBe(true);
+          expect(recoveryState.emulatorLossRecoveryResolvers.has(incidentId!)).toBe(true);
+          expect(recoveryState.emulatorLossRecoverySettlements.has(incidentId!)).toBe(true);
         }
         let returned = false;
         const recovery = pool.recoverSessionBoundDeviceAfterLoss(device.id, incidentId, device);
@@ -113,13 +121,13 @@ for (const booted of [android, ios]) {
             session: { state: "released" },
             recovery: { outcome: "not-attempted", attempts: [] },
           });
-          expect(internals.emulatorLossRecoveryResolvers.has(incidentId)).toBe(false);
-          expect(internals.emulatorLossRecoverySettlements.has(incidentId)).toBe(false);
+          expect(recoveryState.emulatorLossRecoveryResolvers.has(incidentId)).toBe(false);
+          expect(recoveryState.emulatorLossRecoverySettlements.has(incidentId)).toBe(false);
           // The caller's normal fallthrough finalization is harmless.
           await pool.finishEmulatorLossIncident(incidentId, "not-attempted");
           expect(await pool.waitForEmulatorLossIncident(incidentId, 0)).toEqual(settled);
-          expect(internals.emulatorLossRecoveryResolvers.has(incidentId)).toBe(false);
-          expect(internals.emulatorLossRecoverySettlements.has(incidentId)).toBe(false);
+          expect(recoveryState.emulatorLossRecoveryResolvers.has(incidentId)).toBe(false);
+          expect(recoveryState.emulatorLossRecoverySettlements.has(incidentId)).toBe(false);
         }
       } finally {
         finishSetup.resolve();
@@ -131,7 +139,7 @@ for (const booted of [android, ios]) {
   }
 
   test(`${booted.platform} admitted session still starts ordinary recovery`, async () => {
-    const { sessions, pool, device, internals } = await harness(booted);
+    const { sessions, pool, device, internals, recoveryState } = await harness(booted);
     const perform = spyOn(internals, "performSessionPreservingRecovery");
     try {
       const incidentId = await pool.recordEmulatorLossIncident(device.id, "device-discovery-miss");
@@ -144,8 +152,8 @@ for (const booted of [android, ios]) {
           session: { state: "awaiting-device" },
           recovery: { outcome: "not-attempted", attempts: [] },
         });
-        expect(internals.emulatorLossRecoveryResolvers.has(incidentId)).toBe(false);
-        expect(internals.emulatorLossRecoverySettlements.has(incidentId)).toBe(false);
+        expect(recoveryState.emulatorLossRecoveryResolvers.has(incidentId)).toBe(false);
+        expect(recoveryState.emulatorLossRecoverySettlements.has(incidentId)).toBe(false);
       }
     } finally {
       perform.mockRestore();
@@ -155,7 +163,7 @@ for (const booted of [android, ios]) {
 }
 
 test("superseded release settles loss as active without starting recovery", async () => {
-  const { sessions, pool, session, device, internals } = await harness(android);
+  const { sessions, pool, session, device, internals, recoveryState } = await harness(android);
   const finishSetup = Promise.withResolvers<void>();
   const perform = spyOn(internals, "performSessionPreservingRecovery");
   let shouldCommit = true;
@@ -178,8 +186,8 @@ test("superseded release settles loss as active without starting recovery", asyn
       session: { state: "active" },
       recovery: { outcome: "not-attempted", attempts: [] },
     });
-    expect(internals.emulatorLossRecoveryResolvers.has(incidentId!)).toBe(false);
-    expect(internals.emulatorLossRecoverySettlements.has(incidentId!)).toBe(false);
+    expect(recoveryState.emulatorLossRecoveryResolvers.has(incidentId!)).toBe(false);
+    expect(recoveryState.emulatorLossRecoverySettlements.has(incidentId!)).toBe(false);
   } finally {
     finishSetup.resolve();
     perform.mockRestore();

@@ -944,16 +944,13 @@ export class DeviceAllocation {
       device.autolockSessionId = sessionId;
     }
     const session = await this.port.createSessionOrRestore(device, assignmentSnapshot, () =>
-      this.port.sessionManager.createSession(
-        sessionId,
-        device.id,
-        device.platform,
-        recoveryTarget?.liveness?.sessionTimeoutMs,
-        recoveryTarget?.liveness?.heartbeatTimeoutMs,
-        this.port.stableDeviceIdFor(device),
-        recoveryTarget?.liveness,
-        recoveryTarget?.initialOwnership,
-      ),
+      this.port.sessionManager.createSession(sessionId, device.id, device.platform, {
+        timeoutMs: recoveryTarget?.liveness?.sessionTimeoutMs,
+        heartbeatTimeoutMs: recoveryTarget?.liveness?.heartbeatTimeoutMs,
+        stableDeviceId: this.port.stableDeviceIdFor(device),
+        recoveredLiveness: recoveryTarget?.liveness,
+        initialOwnership: recoveryTarget?.initialOwnership,
+      }),
     );
     if (session.assignedDevice !== device.id) {
       this.port.restoreSessionAssignment(device, assignmentSnapshot);

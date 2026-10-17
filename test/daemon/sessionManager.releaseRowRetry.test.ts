@@ -51,7 +51,7 @@ describe("the row of a released session (#11557)", () => {
   const row = async () => await store.getSession(SESSION);
 
   async function planReleaseWithFailingWrite(failures: number): Promise<void> {
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
     store.failReleaseWrites = failures;
     expect(await manager.releaseSession(SESSION, PLAN_AUTO_RELEASE_REASON)).toBe(DEVICE);
     await settleMicrotasks();
@@ -65,7 +65,7 @@ describe("the row of a released session (#11557)", () => {
    * session lives on, its live row rewritten; the returned function lands (or fails) that write.
    */
   async function supersededReleaseWithParkedWrite(): Promise<() => void> {
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
     let landReleaseWrite!: () => void;
     store.park = new Promise<void>((resolve) => {
       landReleaseWrite = resolve;
@@ -129,7 +129,9 @@ describe("the row of a released session (#11557)", () => {
   test("the name issued again ends the retry, and its row stays live", async () => {
     await planReleaseWithFailingWrite(1);
 
-    const reissued = await manager.createSession(SESSION, OTHER_DEVICE, "android", IDLE_WINDOW_MS);
+    const reissued = await manager.createSession(SESSION, OTHER_DEVICE, "android", {
+      timeoutMs: IDLE_WINDOW_MS,
+    });
     expect(timer.getPendingTimeouts()).toEqual([RELEASE_RETRY_DELAY_MS]);
     await timer.advanceTimeAsync(RELEASE_RETRY_DELAY_MS);
     await settleMicrotasks();
@@ -145,7 +147,7 @@ describe("the row of a released session (#11557)", () => {
 
   test("a parked non-terminal release refuses the re-created row without warning or retry (#11129)", async () => {
     manager.attachDaemonSessionId("daemon-a");
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
     const gate = Promise.withResolvers<void>();
     store.park = gate.promise;
     const releaseWriteSpy = spyOn(store, "markReleased");
@@ -158,7 +160,9 @@ describe("the row of a released session (#11557)", () => {
       await expect(release).resolves.toBe(DEVICE);
       expect(manager.getSession(SESSION)).toBeNull();
 
-      const reissued = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      const reissued = await manager.createSession(SESSION, DEVICE, "android", {
+        timeoutMs: IDLE_WINDOW_MS,
+      });
       // Drain the deadline's already-armed retry; recreation makes it obsolete.
       await timer.advanceTimeAsync(RELEASE_RETRY_DELAY_MS);
       await settleMicrotasks();
@@ -220,7 +224,7 @@ describe("the row of a released session (#11557)", () => {
   });
 
   test("a release that took the shutdown handoff's reason is not retried with its first", async () => {
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
     let failFirstWrite!: () => void;
     store.park = new Promise<void>((resolve) => {
       failFirstWrite = resolve;
@@ -255,7 +259,9 @@ describe("the row of a released session (#11557)", () => {
     });
     expect(releases).toEqual([PLAN_AUTO_RELEASE_REASON]);
     expect(timer.getPendingTimeoutCount()).toBe(0);
-    const reissued = await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    const reissued = await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: IDLE_WINDOW_MS,
+    });
     expect(manager.getSession(SESSION)).toBe(reissued);
   });
 
@@ -271,7 +277,7 @@ describe("the row of a released session (#11557)", () => {
     expect(await row()).toMatchObject({ release_reason: DEVICE_LOSS });
     expect(releases).toContain(DEVICE_LOSS);
     expect(
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS).then(
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS }).then(
         () => "issued",
         (error: unknown) => (error instanceof Error ? error.name : String(error)),
       ),
@@ -285,7 +291,7 @@ describe("the row of a released session (#11557)", () => {
     store.seed({ ...released, status: "released", release_reason: DEVICE_LOSS });
 
     expect(
-      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS).then(
+      await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS }).then(
         () => "issued",
         (error: unknown) => (error instanceof Error ? error.name : String(error)),
       ),
@@ -314,7 +320,7 @@ describe("the row of a released session (#11557)", () => {
 
     expect(await lookup).not.toBe("TerminalSessionError");
     expect(await row()).toMatchObject({ release_reason: PLAN_AUTO_RELEASE_REASON });
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
     expect(manager.getSession(SESSION)).not.toBeNull();
   });
 
@@ -357,7 +363,7 @@ describe("the row of a released session (#11557)", () => {
   });
 
   test("a rebind's row that lands after its session was forced out is released again", async () => {
-    await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+    await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_WINDOW_MS });
     let landRebindWrite!: () => void;
     store.duringPlainUpsert = () =>
       new Promise<void>((resolve) => {

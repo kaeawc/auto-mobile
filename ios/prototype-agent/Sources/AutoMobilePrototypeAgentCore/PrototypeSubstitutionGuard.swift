@@ -170,6 +170,15 @@ private struct PrototypeSubstitutionGuard {
         case "textField":
             try part(fields["trailingIcon"], path: "\(path).trailingIcon", scope: scope)
             try actions(fields, path: path, scope: scope, list: "onSubmit")
+        case "row", "listItem":
+            if case let .object(swipe)? = fields["swipeActions"] {
+                for side in ["start", "end"] {
+                    guard case let .array(entries)? = swipe[side] else { continue }
+                    for (index, entry) in entries.enumerated() {
+                        try part(entry, path: "\(path).swipeActions.\(side)[\(index)]", scope: scope)
+                    }
+                }
+            }
         case "topAppBar":
             try field(fields, "title", path: path, text: true, scope: scope)
             try part(fields["navigationIcon"], path: "\(path).navigationIcon", scope: scope)

@@ -259,6 +259,7 @@ object PrototypeSpecValidator {
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
         ?: gridSpanErrors(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
+        ?: swipeActionsErrors(context)
         ?: pagerErrors(context)
         ?: stackErrors(context)
         ?: stateTypeErrors(value, context, repeats)
@@ -941,6 +942,27 @@ object PrototypeSpecValidator {
       val screen = value.text("screen")
       if (screen != null && !screens.containsKey(screen))
         return fail("$path.screen", "Unknown stack screen")
+    }
+    return null
+  }
+
+  /** A swipe needs an action side, and a horizontal pager or carousel would steal its drag. */
+  private fun swipeActionsErrors(context: Context): PrototypeSpecError? {
+    for ((value, path) in context.nodes) {
+      val swipe = value["swipeActions"] as? JsonObject ?: continue
+      if (!swipe.containsKey("start") && !swipe.containsKey("end"))
+        return fail("$path.swipeActions", "swipeActions needs start or end")
+      val blocked =
+        context.nodes.any { (ancestor, ancestorPath) ->
+          path.startsWith("$ancestorPath.") &&
+            (ancestor.text("type") == "carousel" ||
+              (ancestor.text("type") == "pager" && ancestor.text("axis") != "vertical"))
+        }
+      if (blocked)
+        return fail(
+          "$path.swipeActions",
+          "swipeActions cannot appear inside a horizontal pager or carousel",
+        )
     }
     return null
   }

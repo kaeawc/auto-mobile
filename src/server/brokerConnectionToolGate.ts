@@ -35,7 +35,7 @@ export function assertBrokerConnectionPlainToolCall(input: {
       ? (resolveToolSelectionBaseSessionUuid(input.sessionUuid, sessionManager) ??
         input.sessionUuid)
       : undefined,
-    grantedDeviceOf: (sessionUuid) => sessionManager.getSession(sessionUuid)?.assignedDevice,
+    grantedDeviceOf: (sessionUuid) => sessionManager.findSession(sessionUuid)?.assignedDevice,
   });
   if (refusal) {
     throw refusal;

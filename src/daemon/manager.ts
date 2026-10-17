@@ -128,7 +128,7 @@ import {
   tryAcquireExclusiveLock,
   type LockOwnerGenerationProbe,
 } from "../utils/fileLock";
-import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { defaultIdGenerator } from "../utils/IdGenerator";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   resolveDaemonLaunchWorkingDirectory,
@@ -140,7 +140,6 @@ import {
   DaemonLauncher,
   type DaemonLaunchCommand,
   type DaemonLaunchedProcess,
-  type DaemonProcessSpawner,
 } from "./DaemonLauncher";
 import { RUNNER_READINESS_TIMEOUT_FLAG } from "../utils/runnerReadinessConfig";
 import { daemonProcessEnvironment, daemonProcessOptions } from "./daemonOptionScopes";
@@ -164,6 +163,8 @@ import {
 } from "./cli/runDaemonCommand";
 
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
+export type { DaemonManagerOptions } from "./managerOptions";
+import type { DaemonManagerOptions } from "./managerOptions";
 export {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
   PsDaemonProcessFinder,
@@ -565,30 +566,32 @@ export class DaemonManager implements DaemonManagerLike {
    * same way {@link DaemonClient.isAvailable} already is.
    */
   private readonly platform: NodeJS.Platform;
+  private readonly lockOwnerGenerationProbe: LockOwnerGenerationProbe;
 
-  constructor(
-    clientFactory: DaemonClientFactory | undefined = undefined,
-    stateProvider: () => DaemonStateLike = () => DaemonState.getInstance(),
-    timer: Timer = defaultTimer,
-    lockFilePath: string = LOCK_FILE_PATH,
-    pidFilePath: string = PID_FILE_PATH,
-    socketPath: string = SOCKET_PATH,
-    processFinderOrSpawner:
-      | DaemonProcessFinder
-      | DaemonProcessSpawner = createDefaultDaemonProcessFinder(),
-    processSpawner: DaemonProcessSpawner | undefined = undefined,
-    extractionCleaner: ExtractionCleaner = fileSystemExtractionCleaner,
-    launcher: DaemonLauncher | (() => DaemonLaunchCommand) | undefined = undefined,
-    processSignaler: DaemonProcessSignaler = defaultDaemonProcessSignaler,
-    idGenerator: IdGenerator = defaultIdGenerator,
-    peerSocketReachability: DaemonSocketReachabilityLike | undefined = undefined,
-    platformOverride: NodeJS.Platform = process.platform,
-    portAvailabilityChecker: DaemonPortAvailabilityChecker = new NetDaemonPortAvailabilityChecker(),
-    retryExecutor: RetryExecutor = new DefaultRetryExecutor(timer),
-    daemonProtocolHealthProbe: (() => Promise<boolean>) | undefined = undefined,
-    identityRecoveryIO?: IdentityRecoveryIO,
-    private readonly lockOwnerGenerationProbe: LockOwnerGenerationProbe = defaultLockOwnerGenerationProbe,
-  ) {
+  constructor(options: DaemonManagerOptions = {}) {
+    const {
+      clientFactory,
+      stateProvider = () => DaemonState.getInstance(),
+      timer = defaultTimer,
+      lockFilePath = LOCK_FILE_PATH,
+      pidFilePath = PID_FILE_PATH,
+      socketPath = SOCKET_PATH,
+      processFinder = createDefaultDaemonProcessFinder(),
+      processSpawner,
+      extractionCleaner = fileSystemExtractionCleaner,
+      launcher,
+      launchCommandResolver,
+      processSignaler = defaultDaemonProcessSignaler,
+      idGenerator = defaultIdGenerator,
+      peerSocketReachability,
+      platform: platformOverride = process.platform,
+      portAvailabilityChecker = new NetDaemonPortAvailabilityChecker(),
+      retryExecutor = new DefaultRetryExecutor(timer),
+      daemonProtocolHealthProbe,
+      identityRecoveryIO,
+      lockOwnerGenerationProbe = defaultLockOwnerGenerationProbe,
+    } = options;
+    this.lockOwnerGenerationProbe = lockOwnerGenerationProbe;
     this.identityRecoveryIO = identityRecoveryIO ?? {
       // Windows named pipes cannot use this POSIX socket identity probe. This accepted
       // platform gap means a live Windows daemon with missing PID metadata will not
@@ -619,22 +622,15 @@ export class DaemonManager implements DaemonManagerLike {
     this.lockFilePath = resolvePathFromDaemonLaunchWorkingDirectory(lockFilePath);
     this.pidFilePath = resolvePathFromDaemonLaunchWorkingDirectory(pidFilePath);
     this.socketPath = resolvePathFromDaemonLaunchWorkingDirectory(socketPath);
-    if ("findDaemonProcesses" in processFinderOrSpawner) {
-      this.processFinder = processFinderOrSpawner;
-      this.processLivenessChecker = hasProcessLivenessChecker(processFinderOrSpawner)
-        ? processFinderOrSpawner
-        : createDefaultDaemonProcessFinder();
-    } else {
-      const processFinder = createDefaultDaemonProcessFinder();
-      this.processFinder = processFinder;
-      this.processLivenessChecker = processFinder;
-      processSpawner = processFinderOrSpawner;
-    }
+    this.processFinder = processFinder;
+    this.processLivenessChecker = hasProcessLivenessChecker(processFinder)
+      ? processFinder
+      : createDefaultDaemonProcessFinder();
     this.processSignaler = processSignaler;
     this.extractionCleaner = extractionCleaner;
-    this.launchCommandResolver = typeof launcher === "function" ? launcher : undefined;
+    this.launchCommandResolver = launchCommandResolver;
     this.launcher =
-      (typeof launcher === "object" ? launcher : undefined) ??
+      launcher ??
       new DaemonLauncher({
         spawn: processSpawner?.spawn.bind(processSpawner),
         timer,
@@ -1320,6 +1316,34 @@ export class DaemonManager implements DaemonManagerLike {
     // prevent. Bounding the rejoin by the time REMAINING under this deadline keeps
     // the error deliverable.
     const startDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
+    const admission = await this.admitStart(
+      options,
+      recoverySignal,
+      inheritExitRecord,
+      startDeadline,
+    );
+    if ("done" in admission) {
+      return admission.done;
+    }
+    return this.launchDaemon(
+      admission.options,
+      admission.inheritExitRecord,
+      startDeadline,
+      recoverySignal,
+    );
+  }
+
+  /**
+   * Phase 1 of {@link startUnlocked}: decide whether this start is already satisfied (joined a live
+   * or peer daemon, recovered an identity) or must launch one, taking over a strictly older daemon
+   * first. Returns the final result, or the options and exit-record policy to launch with.
+   */
+  private async admitStart(
+    options: DaemonOptions,
+    recoverySignal: AbortSignal | undefined,
+    inheritExitRecord: boolean,
+    startDeadline: number,
+  ): Promise<{ done: DaemonStartResult } | { options: DaemonOptions; inheritExitRecord: boolean }> {
     let status = await this.lifecycleStatus();
     this.throwIfRecoveryCancelled(recoverySignal);
     if (
@@ -1333,78 +1357,118 @@ export class DaemonManager implements DaemonManagerLike {
       status = { running: false };
     }
     if (!status.running && status.recovery) {
-      const owner =
-        status.recovery.state === "unauthenticated" ? await this.probeNamespaceOwner() : undefined;
-      // Older socket owners lack identity-republication fields. Reuse their
-      // answering namespace socket without granting permission to signal them.
-      if (
-        owner?.reportedSocketPath === undefined &&
-        owner?.reportedPidFilePath === undefined &&
-        owner?.pid !== undefined &&
-        (await this.waitForExistingDaemon(
-          Math.min(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS, this.remainingTime(startDeadline)),
-        ))
-      ) {
-        return "joined";
-      }
-      return this.startIdentityRecovery(status);
+      return { done: await this.recoverOrJoinNamespaceIdentity(status, startDeadline) };
     }
     if (status.running) {
-      // ensureVersionMatches/compareStrictNumericVersions treat empty/unparseable as older (+Infinity); this start guard deliberately protects it.
-      if (shouldProtectLiveDaemonVersion(status.version, DAEMON_VERSION)) {
-        stderrLog(`Daemon is already running (PID ${status.pid}, port ${status.port})`);
-        return "joined";
+      const takeover = await this.takeOverOlderDaemon(status, options);
+      if ("done" in takeover) {
+        return takeover;
       }
-      if (status.startedAt) {
-        const daemonAgeMs = this.timer.now() - status.startedAt;
-        if (daemonAgeMs < DAEMON_VERSION_RESTART_COOLDOWN_MS) {
-          logger.warn(
-            `[DaemonManager] Skipping strictly-older daemon takeover due to cooldown: daemon ${status.version} is ${daemonAgeMs}ms old, current version is ${DAEMON_VERSION}`,
-          );
-          throw new DaemonRestartDeferredError("restart is in cooldown");
-        }
-      }
-
-      const preparation = await this.prepareDaemonForConditionalRestart(status);
-      if (!preparation.accepted) {
-        if (
-          preparation.reason === "generation_changed" ||
-          preparation.reason === "restart_pending"
-        ) {
-          stderrLog("Daemon restart is already in progress; joining its successor");
-          return "joined";
-        }
-        if (preparation.reason === "active_operations") {
-          throw new DaemonRestartDeferredError("a device operation is active");
-        }
-        if (preparation.reason === "shutdown_unavailable") {
-          throw new DaemonRestartDeferredError("the daemon could not initiate its own shutdown");
-        }
-        throw new DaemonRestartDeferredError(
-          "the daemon returned an unrecognized safe-restart admission result",
-        );
-      }
-
-      const requestedOptions = daemonProcessOptions(
-        Object.fromEntries(
-          Object.entries(options).filter(([, value]) => value !== undefined),
-        ) as DaemonOptions,
-      );
-      options = {
-        ...daemonProcessOptions(status.options),
-        ...requestedOptions,
-        strictPort: true,
-      };
-      stderrLog(
-        `Detected strictly older AutoMobile daemon version ${status.version} (PID ${status.pid}); stopping it before upgrade...`,
-      );
-      await this.stopRunningDaemon(status, DAEMON_SHUTDOWN_TIMEOUT_MS, false);
+      options = takeover.options;
       // This takeover already has the running generation's authoritative options.
       inheritExitRecord = false;
-      await this.assertNoSurvivingDaemonBeforeRestart(options);
-      await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
     }
 
+    if (await this.joinLiveDaemonWithoutRecord(options, startDeadline, recoverySignal)) {
+      return { done: "joined" };
+    }
+    return { options, inheritExitRecord };
+  }
+
+  /** A stopped daemon with recovery evidence: reuse an old answering owner, or recover the identity. */
+  private async recoverOrJoinNamespaceIdentity(
+    status: DaemonStatus,
+    startDeadline: number,
+  ): Promise<DaemonStartResult> {
+    const owner =
+      status.recovery?.state === "unauthenticated" ? await this.probeNamespaceOwner() : undefined;
+    // Older socket owners lack identity-republication fields. Reuse their
+    // answering namespace socket without granting permission to signal them.
+    if (
+      owner?.reportedSocketPath === undefined &&
+      owner?.reportedPidFilePath === undefined &&
+      owner?.pid !== undefined &&
+      (await this.waitForExistingDaemon(
+        Math.min(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS, this.remainingTime(startDeadline)),
+      ))
+    ) {
+      return "joined";
+    }
+    return this.startIdentityRecovery(status);
+  }
+
+  /**
+   * Stop a strictly older live daemon so this start can replace it, unless it must be left alone
+   * (version protected, in cooldown, or another restart owns it). Returns the options to launch
+   * with, or the final result when the start is already satisfied.
+   */
+  private async takeOverOlderDaemon(
+    status: DaemonStatus,
+    options: DaemonOptions,
+  ): Promise<{ done: DaemonStartResult } | { options: DaemonOptions }> {
+    // ensureVersionMatches/compareStrictNumericVersions treat empty/unparseable as older (+Infinity); this start guard deliberately protects it.
+    if (shouldProtectLiveDaemonVersion(status.version, DAEMON_VERSION)) {
+      stderrLog(`Daemon is already running (PID ${status.pid}, port ${status.port})`);
+      return { done: "joined" };
+    }
+    if (status.startedAt) {
+      const daemonAgeMs = this.timer.now() - status.startedAt;
+      if (daemonAgeMs < DAEMON_VERSION_RESTART_COOLDOWN_MS) {
+        logger.warn(
+          `[DaemonManager] Skipping strictly-older daemon takeover due to cooldown: daemon ${status.version} is ${daemonAgeMs}ms old, current version is ${DAEMON_VERSION}`,
+        );
+        throw new DaemonRestartDeferredError("restart is in cooldown");
+      }
+    }
+
+    const preparation = await this.prepareDaemonForConditionalRestart(status);
+    if (!preparation.accepted) {
+      if (preparation.reason === "generation_changed" || preparation.reason === "restart_pending") {
+        stderrLog("Daemon restart is already in progress; joining its successor");
+        return { done: "joined" };
+      }
+      if (preparation.reason === "active_operations") {
+        throw new DaemonRestartDeferredError("a device operation is active");
+      }
+      if (preparation.reason === "shutdown_unavailable") {
+        throw new DaemonRestartDeferredError("the daemon could not initiate its own shutdown");
+      }
+      throw new DaemonRestartDeferredError(
+        "the daemon returned an unrecognized safe-restart admission result",
+      );
+    }
+
+    const requestedOptions = daemonProcessOptions(
+      Object.fromEntries(
+        Object.entries(options).filter(([, value]) => value !== undefined),
+      ) as DaemonOptions,
+    );
+    options = {
+      ...daemonProcessOptions(status.options),
+      ...requestedOptions,
+      strictPort: true,
+    };
+    stderrLog(
+      `Detected strictly older AutoMobile daemon version ${status.version} (PID ${status.pid}); stopping it before upgrade...`,
+    );
+    await this.stopRunningDaemon(status, DAEMON_SHUTDOWN_TIMEOUT_MS, false);
+    // This takeover already has the running generation's authoritative options.
+    await this.assertNoSurvivingDaemonBeforeRestart(options);
+    await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
+
+    return { options };
+  }
+
+  /**
+   * A missing or stale PID record must not turn an ordinary start into permission to terminate a
+   * live daemon. True when a live daemon without a usable record became reachable and is reused;
+   * throws when one is live but never becomes reachable; false when none is live.
+   */
+  private async joinLiveDaemonWithoutRecord(
+    options: DaemonOptions,
+    startDeadline: number,
+    recoverySignal: AbortSignal | undefined,
+  ): Promise<boolean> {
     // A missing or stale PID record must not turn an ordinary start request into
     // permission to terminate a live daemon. This happens when a second client
     // reaches the shared socket during a long-running tool call and races a
@@ -1435,7 +1499,7 @@ export class DaemonManager implements DaemonManagerLike {
       this.throwIfRecoveryCancelled(recoverySignal);
       if (existingDaemonReady) {
         stderrLog("Reusing existing responsive daemon");
-        return "joined";
+        return true;
       }
 
       throw new ActionableError(
@@ -1444,7 +1508,16 @@ export class DaemonManager implements DaemonManagerLike {
           `inspect it or run \`bunx ${resolveDaemonInstallSpecifier()} --daemon restart\` explicitly.`,
       );
     }
+    return false;
+  }
 
+  /** Phase 2 of {@link startUnlocked}: spawn the daemon, wait for it, and rejoin a racing peer. */
+  private async launchDaemon(
+    options: DaemonOptions,
+    inheritExitRecord: boolean,
+    startDeadline: number,
+    recoverySignal: AbortSignal | undefined,
+  ): Promise<DaemonStartResult> {
     // Do not pre-emptively remove namespace files here. The lock serializes
     // cooperative managers, but a direct daemon may still own a socket which
     // this manager cannot prove stale. The child uses the shared bind guard to
@@ -1461,7 +1534,7 @@ export class DaemonManager implements DaemonManagerLike {
     // Resolve the current binary so the daemon uses the same version.
     // process.argv[1] is the entry script (e.g. dist/src/index.js).
     // Falls back to bunx to avoid requiring a global install.
-    let { command: autoMobileCmd, args } = this.withDaemonOptions(
+    const { command: autoMobileCmd, args } = this.withDaemonOptions(
       this.resolveLaunchCommand(),
       options,
     );
@@ -1500,69 +1573,12 @@ export class DaemonManager implements DaemonManagerLike {
     const logFd = this.launchLogFileSystem.openSync(logPath, "w", 0o600);
 
     try {
-      let retriedIncompleteExtraction = false;
-      while (true) {
-        const attemptBudget = this.remainingTime(startDeadline);
-        if (attemptBudget <= 0) {
-          throw new ActionableError(
-            "Daemon startup deadline elapsed before launch; refusing to start a daemon after the client deadline.",
-          );
-        }
-        try {
-          this.throwIfRecoveryCancelled(recoverySignal);
-          await this.launcher.launchAndWait({
-            command: autoMobileCmd,
-            args,
-            spawnOptions: {
-              detached: true,
-              cwd: this.launchWorkingDirectory(),
-              stdio: [
-                "ignore",
-                capturesLaunchOutput ? logFd : "ignore",
-                logSink === "stderr" || logSink === "both" ? "pipe" : logFd,
-              ],
-              env: childEnv,
-            },
-            onSpawn: logSink === "stderr" || logSink === "both" ? relayDaemonStderr : undefined,
-            timeoutMs: attemptBudget,
-            waitForReady: (timeoutMs, signal) => this.waitForReady(timeoutMs, signal),
-            isReadyForLaunchedProcess: (pid, timeoutMs, signal) =>
-              this.isLaunchedProcessReady(pid, timeoutMs, signal),
-            formatFailure: (summary) => this.createDaemonStartupFailure(summary, logPath),
-            formatExitFailure: (code, signal) =>
-              this.createDaemonExitFailure(code, signal, logPath),
-          });
-          break;
-        } catch (error) {
-          if (!this.isIncompleteExtractionStartupError(error) || retriedIncompleteExtraction) {
-            throw error;
-          }
-
-          retriedIncompleteExtraction = true;
-          const entryScript = args[0];
-          let removed = false;
-          try {
-            removed = entryScript
-              ? await this.extractionCleaner.removeExtractionForEntryScript(entryScript)
-              : false;
-            this.throwIfRecoveryCancelled(recoverySignal);
-          } catch (cleanupError) {
-            throw new ActionableError(
-              `${this.describeError(error)}\nFailed to remove incomplete extraction before retry: ${this.describeError(cleanupError)}`,
-            );
-          }
-          if (!removed) {
-            throw error;
-          }
-          ({ command: autoMobileCmd, args } = this.withDaemonOptions(
-            this.fallbackLauncher.resolveCommand(),
-            options,
-          ));
-          stderrLog(
-            `Detected incomplete daemon package extraction (${INCOMPLETE_EXTRACTION_CODE}); removed it and retrying once...`,
-          );
-        }
-      }
+      await this.launchWithExtractionRetry(
+        { options, childEnv, logSink, capturesLaunchOutput, logFd, logPath },
+        { command: autoMobileCmd, args },
+        startDeadline,
+        recoverySignal,
+      );
     } catch (error) {
       this.throwIfRecoveryCancelled(recoverySignal);
       // Our spawned subprocess failed before becoming ready. Under a concurrent
@@ -1598,6 +1614,97 @@ export class DaemonManager implements DaemonManagerLike {
     stderrLog(`Socket: ${newStatus.socketPath}`);
     stderrLog(`Logs: ${logPath}`);
     return "started";
+  }
+
+  /**
+   * Run the launcher, retrying once after removing an incomplete package extraction. The
+   * launch command is re-resolved through the fallback launcher after a successful cleanup.
+   */
+  private async launchWithExtractionRetry(
+    launch: {
+      options: DaemonOptions;
+      childEnv: NodeJS.ProcessEnv;
+      logSink: ReturnType<typeof resolveAutomobileLogSink>;
+      capturesLaunchOutput: boolean;
+      logFd: number;
+      logPath: string;
+    },
+    initial: { command: string; args: string[] },
+    startDeadline: number,
+    recoverySignal: AbortSignal | undefined,
+  ): Promise<void> {
+    const { options, childEnv, logSink, capturesLaunchOutput, logFd, logPath } = launch;
+    let { command: autoMobileCmd, args } = initial;
+    let retriedIncompleteExtraction = false;
+    while (true) {
+      const attemptBudget = this.remainingTime(startDeadline);
+      if (attemptBudget <= 0) {
+        throw new ActionableError(
+          "Daemon startup deadline elapsed before launch; refusing to start a daemon after the client deadline.",
+        );
+      }
+      try {
+        this.throwIfRecoveryCancelled(recoverySignal);
+        await this.launcher.launchAndWait({
+          command: autoMobileCmd,
+          args,
+          spawnOptions: {
+            detached: true,
+            cwd: this.launchWorkingDirectory(),
+            stdio: [
+              "ignore",
+              capturesLaunchOutput ? logFd : "ignore",
+              logSink === "stderr" || logSink === "both" ? "pipe" : logFd,
+            ],
+            env: childEnv,
+          },
+          onSpawn: logSink === "stderr" || logSink === "both" ? relayDaemonStderr : undefined,
+          timeoutMs: attemptBudget,
+          waitForReady: (timeoutMs, signal) => this.waitForReady(timeoutMs, signal),
+          isReadyForLaunchedProcess: (pid, timeoutMs, signal) =>
+            this.isLaunchedProcessReady(pid, timeoutMs, signal),
+          formatFailure: (summary) => this.createDaemonStartupFailure(summary, logPath),
+          formatExitFailure: (code, signal) => this.createDaemonExitFailure(code, signal, logPath),
+        });
+        break;
+      } catch (error) {
+        if (!this.isIncompleteExtractionStartupError(error) || retriedIncompleteExtraction) {
+          throw error;
+        }
+
+        retriedIncompleteExtraction = true;
+        const removed = await this.removeIncompleteExtraction(args[0], error, recoverySignal);
+        if (!removed) {
+          throw error;
+        }
+        ({ command: autoMobileCmd, args } = this.withDaemonOptions(
+          this.fallbackLauncher.resolveCommand(),
+          options,
+        ));
+        stderrLog(
+          `Detected incomplete daemon package extraction (${INCOMPLETE_EXTRACTION_CODE}); removed it and retrying once...`,
+        );
+      }
+    }
+  }
+
+  /** Remove the incomplete package extraction behind a failed launch; true when one was removed. */
+  private async removeIncompleteExtraction(
+    entryScript: string | undefined,
+    launchError: unknown,
+    recoverySignal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    try {
+      const removed = entryScript
+        ? await this.extractionCleaner.removeExtractionForEntryScript(entryScript)
+        : false;
+      this.throwIfRecoveryCancelled(recoverySignal);
+      return removed;
+    } catch (cleanupError) {
+      throw new ActionableError(
+        `${this.describeError(launchError)}\nFailed to remove incomplete extraction before retry: ${this.describeError(cleanupError)}`,
+      );
+    }
   }
 
   private daemonLaunchEnvironment(options: DaemonOptions): NodeJS.ProcessEnv {

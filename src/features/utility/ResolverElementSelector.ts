@@ -2,7 +2,11 @@ import { isStrictlyScoped, propagateUniqueStrategy } from "./ScopedSelection";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import { getHierarchySnapshot } from "../observe/HierarchyCapture";
-import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
+import type {
+  ElementSelectionOptions,
+  ElementSelector,
+} from "../../utils/interfaces/ElementSelector";
+import type { ElementQuery } from "../../models/ElementQuery";
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
 import type { Element, ViewHierarchyResult } from "../../models";
 import { nodeAttributes } from "../../models/ViewHierarchyResult";
@@ -13,7 +17,6 @@ import {
   isMissingContainerError,
   matchedSourceNode,
   type ElementResolution,
-  type ResolutionAction,
   type ResolutionIntent,
   type ResolverSnapshot,
 } from "./ElementResolver";
@@ -22,7 +25,6 @@ import {
   screenSizeForOffscreenCheck,
   type ScreenSizeForOffscreenCheckOptions,
 } from "./ElementGeometry";
-import type { TextSelectionIntent } from "../../utils/interfaces/TextSelectionIntent";
 import { resolveViewHierarchyForSearch } from "./viewHierarchySearch";
 
 /** A text selector, the kind a client copies from an observed label. */
@@ -30,19 +32,7 @@ function selectsByText(selector: ResolverSelector): boolean {
   return selector.text !== undefined || selector.sibling?.text !== undefined;
 }
 
-interface SelectionOptions {
-  container?: ElementContainerSelector | null;
-  partialMatch?: boolean;
-  caseSensitive?: boolean;
-  fuzzyMatch?: boolean;
-  strategy?: ElementSelectionStrategy;
-  index?: number;
-  selectionIntent?: TextSelectionIntent;
-  allowHintFallback?: boolean;
-  intentAction?: ResolutionAction;
-  scrollableContainer?: boolean;
-  screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
-}
+type SelectionOptions = ElementSelectionOptions;
 
 function resolutionIntent(
   selector: ResolverSelector,
@@ -64,6 +54,27 @@ function resolutionIntent(
   };
 }
 
+function withMatchPolicy(query: ElementQuery, options: SelectionOptions): ResolverSelector {
+  if (query.match !== undefined) {
+    return query;
+  }
+  const sibling = query.sibling;
+  if (sibling) {
+    const contains =
+      sibling.text !== undefined ? options.fuzzyMatch === true : options.partialMatch === true;
+    return {
+      ...query,
+      sibling: sibling.match || !contains ? sibling : { ...sibling, match: "contains" },
+    };
+  }
+  if (query.text !== undefined) {
+    return options.partialMatch === false ? { ...query, match: "exact" } : query;
+  }
+  return query.elementId !== undefined && options.partialMatch === true
+    ? { ...query, match: "contains" }
+    : query;
+}
+
 /** A resolved container plus the capture's visibility flag for its node. */
 export interface ContainerMatch {
   element?: Element;
@@ -79,30 +90,25 @@ export class ResolverElementSelector implements ElementSelector {
     private readonly options: ScreenSizeForOffscreenCheckOptions = {},
   ) {}
 
+  /** @deprecated Use `select` with `{ text }`. */
   selectByText(
     capture: ViewHierarchyResult,
     text: string,
     options: SelectionOptions = {},
   ): ElementSelectionResult {
-    return this.select(
-      capture,
-      { text, ...(options.partialMatch === false ? ({ match: "exact" } as const) : {}) },
-      options,
-    );
+    return this.select(capture, { text }, options);
   }
 
+  /** @deprecated Use `select` with `{ elementId }`. */
   selectByResourceId(
     capture: ViewHierarchyResult,
     elementId: string,
     options: SelectionOptions = {},
   ): ElementSelectionResult {
-    return this.select(
-      capture,
-      { elementId, ...(options.partialMatch === true ? ({ match: "contains" } as const) : {}) },
-      options,
-    );
+    return this.select(capture, { elementId }, options);
   }
 
+  /** @deprecated Use `select` with `{ testTag }`. */
   selectByTestTag(
     capture: ViewHierarchyResult,
     testTag: string,
@@ -111,49 +117,30 @@ export class ResolverElementSelector implements ElementSelector {
     return this.select(capture, { testTag }, options);
   }
 
+  /** @deprecated Use `select` with `{}` and a tap intent. */
   selectClickable(
     capture: ViewHierarchyResult,
     options: SelectionOptions = {},
   ): ElementSelectionResult {
-    return this.select(
-      capture,
-      {},
-      {
-        ...options,
-        intentAction: options.intentAction ?? "tap",
-      },
-    );
+    return this.select(capture, {}, { ...options, intentAction: options.intentAction ?? "tap" });
   }
 
+  /** @deprecated Use `select` with `{ sibling: { text } }`. */
   selectClickableSiblingOfText(
     capture: ViewHierarchyResult,
     text: string,
     options: SelectionOptions = {},
   ): ElementSelectionResult {
-    return this.select(
-      capture,
-      {
-        sibling: { text, ...(options.fuzzyMatch === true ? ({ match: "contains" } as const) : {}) },
-      },
-      options,
-    );
+    return this.select(capture, { sibling: { text } }, options);
   }
 
+  /** @deprecated Use `select` with `{ sibling: { elementId } }`. */
   selectClickableSiblingOfResourceId(
     capture: ViewHierarchyResult,
     elementId: string,
     options: SelectionOptions = {},
   ): ElementSelectionResult {
-    return this.select(
-      capture,
-      {
-        sibling: {
-          elementId,
-          ...(options.partialMatch === true ? ({ match: "contains" } as const) : {}),
-        },
-      },
-      options,
-    );
+    return this.select(capture, { sibling: { elementId } }, options);
   }
 
   hasContainer(capture: ViewHierarchyResult, container: ElementContainerSelector): boolean {
@@ -217,11 +204,18 @@ export class ResolverElementSelector implements ElementSelector {
     return screenSizeForOffscreenCheck(capture, { ...this.options, ...options });
   }
 
-  private select(
+  /**
+   * The one entry point: resolve `query` against the capture with the caller's named intent. A
+   * query without an explicit `match` takes it from the options' match policy: `partialMatch`
+   * false makes a text query exact, true makes an element ID (or sibling ID) contain-match, and
+   * `fuzzyMatch` makes a sibling text contain-match; otherwise the resolver's default applies.
+   */
+  select(
     capture: ViewHierarchyResult,
-    selector: ResolverSelector,
-    options: SelectionOptions,
+    query: ElementQuery,
+    options: SelectionOptions = {},
   ): ElementSelectionResult {
+    const selector = withMatchPolicy(query, options);
     const snapshot = { id: this.snapshotId(capture), nodes: this.selectionNodes(capture, options) };
     const resolverSelector: ResolverSelector = {
       ...selector,
@@ -238,7 +232,7 @@ export class ResolverElementSelector implements ElementSelector {
     const result = this.resolver.resolve(snapshot, resolverSelector, intent);
     this.checkResolutionError(result, options);
     if (!result.error && !result.chosen && options.intentAction === "long-press") {
-      return this.select(capture, selector, { ...options, intentAction: "tap" });
+      return this.select(capture, query, { ...options, intentAction: "tap" });
     }
     const selection = this.selectionResult(result, capture, options.strategy ?? "first", selector);
     return intent.excludeImeKeys && !result.error && !result.chosen

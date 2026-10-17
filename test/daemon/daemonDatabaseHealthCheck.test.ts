@@ -63,14 +63,15 @@ function buildDaemon(
 ): Daemon {
   const daemon = new Daemon(
     {},
-    new FakeInstalledAppsRepository(),
-    timer,
-    undefined,
-    new CountingIdGenerator("daemon-session"),
-    new FakeDatabaseInitializer(),
-    new FakeStartupFailureTracker(),
-    databaseHealthProbe,
-    exitProcess,
+    {
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      timer,
+      idGenerator: new CountingIdGenerator("daemon-session"),
+      databaseInitializer: new FakeDatabaseInitializer(),
+      startupFailureTracker: new FakeStartupFailureTracker(),
+      databaseHealthProbe,
+      recoverFromDatabaseHealthFailure: exitProcess,
+    },
   );
   (daemon as unknown as DaemonHealthInternals).observationStreamHealth = {
     isHealthy: () => true,

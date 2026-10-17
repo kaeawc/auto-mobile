@@ -68,7 +68,7 @@ describe("heartbeat monitor on a monotonic clock that runs through host sleep", 
       timer,
       { maxCredibleStallMs: MAX_CREDIBLE_STALL_MS },
     );
-    await sessionManager.createSession(SESSION, DEVICE, "android", SESSION_IDLE_MS);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: SESSION_IDLE_MS });
     expect((await heartbeat()).success).toBe(true);
     monitor.start();
   }

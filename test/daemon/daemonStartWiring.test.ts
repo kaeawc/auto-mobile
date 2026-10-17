@@ -64,25 +64,14 @@ class InertIncumbentGuard extends IncumbentOwnerGuard {
 
 async function makeDaemon(options: DaemonOptions, guard = new InertIncumbentGuard()) {
   const timer = new FakeTimer();
-  const daemon = new Daemon(
-    options,
-    undefined,
+  const daemon = new Daemon(options, {
     timer,
-    new DeviceSessionRepository(await createTestDatabase(), timer),
-    new FakeIdGenerator(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    () => 0,
-    () => "memory-generation",
-    undefined,
-    guard,
-  );
+    deviceSessionRepository: new DeviceSessionRepository(await createTestDatabase(), timer),
+    idGenerator: new FakeIdGenerator(),
+    processBirthTime: () => 0,
+    processGenerationToken: () => "memory-generation",
+    incumbentOwnerGuard: guard,
+  });
   const internals = daemon as unknown as DaemonStartInternals;
   return { daemon, internals, timer };
 }

@@ -83,7 +83,10 @@ describe("deliberate liveness ownership release", () => {
       },
       timer,
     );
-    await manager.createSession(SESSION, DEVICE, "android", 60_000, undefined, "Pixel_8_API_35");
+    await manager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: 60_000,
+      stableDeviceId: "Pixel_8_API_35",
+    });
     expect((await claim(OWNER)).success).toBe(true);
   });
   afterEach(async () => {

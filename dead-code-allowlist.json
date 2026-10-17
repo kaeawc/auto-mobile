@@ -1,14 +1,8 @@
 {
   "ignorePaths": [
     "src/daemon/socketServer/index.ts",
-    "src/db/index.ts",
-    "src/features/action/UninstallApp.ts",
     "src/features/action/swipeon/index.ts",
-    "src/features/appearance/index.ts",
-    "src/features/snapshot/index.ts",
-    "src/features/webrtc/index.ts",
-    "src/models/index.ts",
-    "src/server/deviceMatcher.ts"
+    "src/features/appearance/index.ts"
   ],
   "ignorePathPatterns": ["scripts/memory/", "^src/daemon/sessionBroker/registry/migrations/"],
   "ignoreEntries": [
@@ -26,11 +20,6 @@
       "file": "src/constants/release.ts",
       "name": "IOS_CTRL_PROXY_RELEASE_VERSION",
       "reason": "Auto-generated release constant (DO NOT EDIT MANUALLY); kept for the generated API"
-    },
-    {
-      "file": "src/server/preferenceTools.ts",
-      "name": "setPreferenceToolsDependencies",
-      "reason": "Test-only dependency injection seam (used by test/server/preferenceTools.test.ts)"
     },
     {
       "file": "src/db/types.ts",

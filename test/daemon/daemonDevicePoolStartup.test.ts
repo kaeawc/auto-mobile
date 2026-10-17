@@ -55,12 +55,14 @@ class DeferredDiscoveryDeviceManager extends FakeDeviceManager {
 function buildDaemon(timer: FakeTimer): Daemon {
   return new Daemon(
     {},
-    new FakeInstalledAppsRepository(),
-    timer,
-    new FakeDeviceSessionRepository(),
-    new CountingIdGenerator("daemon-session"),
-    new FakeDatabaseInitializer(),
-    new FakeStartupFailureTracker(),
+    {
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      timer,
+      deviceSessionRepository: new FakeDeviceSessionRepository(),
+      idGenerator: new CountingIdGenerator("daemon-session"),
+      databaseInitializer: new FakeDatabaseInitializer(),
+      startupFailureTracker: new FakeStartupFailureTracker(),
+    },
   );
 }
 
@@ -452,12 +454,14 @@ describe("Daemon startup device discovery", () => {
     const pendingPrefetchSpy = spyOn(IosCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
     const daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      persistence as unknown as DeviceSessionRepository,
-      new CountingIdGenerator("daemon-session"),
-      new FakeDatabaseInitializer(),
-      new FakeStartupFailureTracker(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: persistence as unknown as DeviceSessionRepository,
+        idGenerator: new CountingIdGenerator("daemon-session"),
+        databaseInitializer: new FakeDatabaseInitializer(),
+        startupFailureTracker: new FakeStartupFailureTracker(),
+      },
     );
     const internals = daemon;
     const bootedDevices: BootedDevice[] = [
@@ -472,16 +476,13 @@ describe("Daemon startup device discovery", () => {
       const sessions = daemon.getSessionManager();
       const summary = await sessions.rehydratePersistedSessions({
         assignDeviceToSession: async (sessionId, _platform, target) => {
-          const session = await sessions.createSession(
-            sessionId,
-            "owned-simulator",
-            "ios",
-            target?.liveness?.sessionTimeoutMs,
-            target?.liveness?.heartbeatTimeoutMs,
-            target?.stableDeviceId,
-            target?.liveness,
-            target?.initialOwnership,
-          );
+          const session = await sessions.createSession(sessionId, "owned-simulator", "ios", {
+            timeoutMs: target?.liveness?.sessionTimeoutMs,
+            heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+            stableDeviceId: target?.stableDeviceId,
+            recoveredLiveness: target?.liveness,
+            initialOwnership: target?.initialOwnership,
+          });
           return session.assignedDevice;
         },
       });

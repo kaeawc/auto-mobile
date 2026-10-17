@@ -150,13 +150,10 @@ test("shutdown identity completion ignores a recorded session that a same-id rep
   try {
     // Non-terminal release reasons allow the UUID to be reused by a newer incarnation.
     await manager.releaseSession(SESSION_ID, "allocation-rollback");
-    const live = await manager.createSession(
-      SESSION_ID,
-      ORIGINAL.deviceId,
-      "android",
-      1_000,
-      1_000,
-    );
+    const live = await manager.createSession(SESSION_ID, ORIGINAL.deviceId, "android", {
+      timeoutMs: 1_000,
+      heartbeatTimeoutMs: 1_000,
+    });
     expect(live).not.toBe(stale);
     expect(pool["pooledSessionIdentities"].get(original)).toBe(stale);
     const identity = pool.reserveShutdownSessionIdentity(ORIGINAL.deviceId);

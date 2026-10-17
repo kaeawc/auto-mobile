@@ -35,9 +35,11 @@ describe("a control call on a lapsed owner lease before the monitor's scan (#112
     timer = new FakeTimer();
     daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     const sessionManager = daemon.getSessionManager();
     sessionManager.stopCleanupTimer();
@@ -165,9 +167,11 @@ describe("an implicit call reusing its holder on a lapsed owner lease (#11400)",
     timer = new FakeTimer();
     daemon = new Daemon(
       {},
-      new FakeInstalledAppsRepository(),
-      timer,
-      new FakeDeviceSessionRepository(),
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer,
+        deviceSessionRepository: new FakeDeviceSessionRepository(),
+      },
     );
     daemon.getSessionManager().stopCleanupTimer();
     started = [];

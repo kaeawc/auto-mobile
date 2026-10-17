@@ -114,13 +114,9 @@ export class TargetFocus {
   async topFocusedPanel(signal?: AbortSignal): Promise<DisplayPanel | undefined> {
     try {
       const adb = this.deps.adb();
-      const result = await adb.executeCommand(
-        "shell dumpsys window | grep mTopFocusedDisplayId",
-        undefined,
-        undefined,
-        undefined,
+      const result = await adb.executeCommand("shell dumpsys window | grep mTopFocusedDisplayId", {
         signal,
-      );
+      });
       const displayId = parseTopFocusedDisplayId(result.stdout);
       return await new ObservedAndroidDisplayCache(this.deps.timer).panelForLogicalId(
         this.deps.device,

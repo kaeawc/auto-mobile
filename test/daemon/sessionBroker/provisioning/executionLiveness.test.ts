@@ -135,14 +135,9 @@ describe("managed-execution session liveness", () => {
       },
       timer,
     );
-    await manager.createSession(
-      SESSION,
-      DEVICE,
-      "android",
-      undefined,
-      undefined,
-      "Pixel_managed_execution",
-    );
+    await manager.createSession(SESSION, DEVICE, "android", {
+      stableDeviceId: "Pixel_managed_execution",
+    });
     expect(await heartbeat({ claimLivenessOwnership: true })).toMatchObject({ success: true });
   });
 
@@ -462,11 +457,13 @@ describe("managed-execution session liveness", () => {
             sessionId,
             target?.deviceId ?? DEVICE,
             "android",
-            target?.liveness?.sessionTimeoutMs,
-            target?.liveness?.heartbeatTimeoutMs,
-            target?.stableDeviceId,
-            target?.liveness,
-            target?.initialOwnership,
+            {
+              timeoutMs: target?.liveness?.sessionTimeoutMs,
+              heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+              stableDeviceId: target?.stableDeviceId,
+              recoveredLiveness: target?.liveness,
+              initialOwnership: target?.initialOwnership,
+            },
           );
           return session.assignedDevice;
         },

@@ -35,20 +35,6 @@ export interface PressButtonArgs {
   platform?: Platform;
 }
 
-export interface SystemTrayNotificationArgs {
-  title?: string;
-  body?: string;
-  appId?: string;
-  tapActionLabel?: string;
-}
-
-export interface SystemTrayArgs {
-  action: "open" | "close" | "list" | "find" | "tap" | "dismiss" | "clearAll";
-  notification?: SystemTrayNotificationArgs;
-  awaitTimeout?: number;
-  platform?: Platform;
-}
-
 export interface SendKeysArgs extends SendKeysFocusOptions {
   display?: string;
   commands: SendKeysCommand[];
@@ -217,3 +203,8 @@ export interface ClipboardArgs {
   text?: string;
   platform?: Platform;
 }
+
+export type {
+  SystemTrayNotificationArgs,
+  SystemTrayArgs,
+} from "../features/systemTray/systemTrayTypes";

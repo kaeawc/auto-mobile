@@ -301,14 +301,16 @@ describe("DevicePool autolock", () => {
       "autolock-session",
       "emulator-5554",
       "android",
-      5000, // 5 second timeout
+      { timeoutMs: 5000 }, // 5 second timeout
     );
 
     expect(session.expiresAt).toBe(timer.now() + 5000);
   });
 
   it("session with custom timeout expires at correct time", async () => {
-    await sessionManager.createSession("autolock-session", "emulator-5554", "android", 5000);
+    await sessionManager.createSession("autolock-session", "emulator-5554", "android", {
+      timeoutMs: 5000,
+    });
 
     // Not expired yet
     timer.advanceTime(4000);
@@ -320,7 +322,9 @@ describe("DevicePool autolock", () => {
   });
 
   it("a heartbeat does not extend the idle deadline (#10656, #11107)", async () => {
-    await sessionManager.createSession("autolock-session", "emulator-5554", "android", 5000);
+    await sessionManager.createSession("autolock-session", "emulator-5554", "android", {
+      timeoutMs: 5000,
+    });
 
     // Advance to just before expiry
     timer.advanceTime(4000);

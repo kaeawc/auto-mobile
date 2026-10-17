@@ -96,7 +96,7 @@ function acquiringClient(
       if (toolName === acquisitionTool) {
         const sessionId = mintedIds[acquired];
         acquired += 1;
-        await sessionManager.createSession(sessionId, deviceId, platform, 60_000);
+        await sessionManager.createSession(sessionId, deviceId, platform, { timeoutMs: 60_000 });
       }
     },
     toolResultFor: (toolName) =>
@@ -303,7 +303,9 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
     const client = new FakeDaemonClient({
       onCallTool: async (toolName) => {
         if (toolName === "getAndroid") {
-          await sessionManager.createSession(MINTED, "emulator-5554", "android", 60_000);
+          await sessionManager.createSession(MINTED, "emulator-5554", "android", {
+            timeoutMs: 60_000,
+          });
         }
       },
       toolResultFor: (toolName) =>
@@ -347,7 +349,9 @@ describe("proxy binds and heartbeats a result-minted device session (issue #5689
     const staleClient = new FakeDaemonClient({
       onCallTool: async (toolName) => {
         if (toolName === "getAndroid") {
-          await sessionManager.createSession(MINTED, "emulator-5554", "android", 60_000);
+          await sessionManager.createSession(MINTED, "emulator-5554", "android", {
+            timeoutMs: 60_000,
+          });
         }
       },
       toolResultFor: (toolName) =>

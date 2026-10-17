@@ -61,7 +61,7 @@ describe("startup appearance-row sweep (#11076)", () => {
           { sessionUuid: "not-recoverable", reason: "not-recoverable" },
         ],
       }),
-      { getSession: (id) => (id === "live" ? {} : null) },
+      { findSession: (id) => (id === "live" ? {} : null) },
       NO_PEERS,
       prune,
     );
@@ -77,7 +77,7 @@ describe("startup appearance-row sweep (#11076)", () => {
   test("a timed-out rehydration keeps every row", async () => {
     const dropped = await sweepStaleAppearanceConfigs(
       summary({ timedOut: true }),
-      { getSession: () => null },
+      { findSession: () => null },
       NO_PEERS,
       prune,
     );
@@ -102,7 +102,7 @@ describe("startup appearance-row sweep (#11076)", () => {
 
     const dropped = await sweepStaleAppearanceConfigs(
       summary(),
-      { getSession: () => null },
+      { findSession: () => null },
       peers,
       prune,
     );
@@ -116,7 +116,7 @@ describe("startup appearance-row sweep (#11076)", () => {
   test("without a live peer, an unknown or terminal session row is dropped", async () => {
     const dropped = await sweepStaleAppearanceConfigs(
       summary(),
-      { getSession: () => null },
+      { findSession: () => null },
       {
         liveDaemonSessionIds: new Set(["self"]),
         ownDaemonSessionId: "self",
@@ -137,7 +137,7 @@ describe("startup appearance-row sweep (#11076)", () => {
   test("a failed session lookup keeps the row", async () => {
     const dropped = await sweepStaleAppearanceConfigs(
       summary(),
-      { getSession: () => null },
+      { findSession: () => null },
       {
         liveDaemonSessionIds: new Set(),
         ownDaemonSessionId: "self",

@@ -173,7 +173,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
       hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
     );
     unsubscribeActivity = subscribeToolCallEndActivity(executionTracker, sessionManager, pool);
-    await sessionManager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     await claimingHeartbeat();
 
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
@@ -243,7 +243,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
     try {
       sessionManager.onSessionRelease((sessionId) => void internals.liftStrokesHeldBy(sessionId));
       await reapHolderWithStrokeOpen();
-      await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", IDLE_MS);
+      await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
       await sendGesture("Move");
     } finally {
       await tearDown();
@@ -263,7 +263,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
     expect(strokes).toEqual(["start", "cancel"]);
 
     // The pane's next frame is refused by the new owner's gate and lifts nothing a second time.
-    await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     expect(await sendGesture("Move")).toMatchObject({
       success: false,
       code: "device_owned_by_other_session",
@@ -301,7 +301,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
     expect(strokes).toEqual(["start", "cancel"]);
     // Not terminal: the UUID is issued again by name and a new stroke starts under it.
     expect(sessionManager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
-    await sessionManager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     await claimingHeartbeat();
     expect(await sendGesture("Start")).toMatchObject({ success: true });
     socket.destroy();
@@ -311,7 +311,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
 
   test("a gestureMove refused because the reaped holder's device has a new owner lifts the stroke", async () => {
     await reapHolderWithStrokeOpen();
-    await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
 
     const response = await sendGesture("Move");
 
@@ -324,7 +324,7 @@ describe("an open input stroke vs. a release of its holder session", () => {
 
   test("a gestureEnd refused the same way does not leave the pointer down either", async () => {
     await reapHolderWithStrokeOpen();
-    await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", IDLE_MS);
+    await sessionManager.createSession(NEXT_SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
 
     const response = await sendGesture("End");
 

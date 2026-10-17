@@ -1,4 +1,3 @@
-import { Mutex } from "async-mutex";
 import { ActionableError, type BootedDevice } from "../models";
 import { throwIfRequestAborted } from "../utils/AbortContext";
 import type { AutolockClient } from "./deviceAutolockManager";
@@ -24,8 +23,8 @@ export interface ShutdownDeviceReservation {
 
 /** All mutable pool state is obtained when used, including after awaits. */
 export interface DeviceShutdownReservationsPoolPort {
-  getDevices(): Map<string, PooledDevice>;
-  getAssignmentMutex(): Mutex;
+  getDevices(): ReadonlyMap<string, PooledDevice>;
+  withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
   getIntentionalShutdowns(): Map<string, number>;
   assertReadinessReservationOwner(device: PooledDevice, client: AutolockClient | undefined): void;
   assertRuntimeIdentity(
@@ -86,7 +85,7 @@ export class DeviceShutdownReservations {
     });
     const owner = Symbol("readiness-reservation");
     let trackStableName = false;
-    await this.pool.getAssignmentMutex().runExclusive(async () => {
+    await this.pool.withAssignmentLock(async () => {
       throwIfRequestAborted();
       const pooled = this.pool.getDevices().get(deviceId);
       if (pooled) {
@@ -125,7 +124,7 @@ export class DeviceShutdownReservations {
         return;
       }
       released = true;
-      await this.pool.getAssignmentMutex().runExclusive(() => {
+      await this.pool.withAssignmentLock(() => {
         const deviceOwners = this.readinessOwnersByDevice.get(deviceId);
         deviceOwners?.delete(owner);
         if (deviceOwners?.size === 0) {
@@ -295,7 +294,7 @@ export class DeviceShutdownReservations {
     recoveryRouteLease: symbol | undefined,
     assertHolder: (() => void) | undefined,
   ): Promise<PooledDevice | undefined> {
-    return await this.pool.getAssignmentMutex().runExclusive(() => {
+    return await this.pool.withAssignmentLock(() => {
       if (abortSignal?.aborted) {
         throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
       }
@@ -370,16 +369,14 @@ export class DeviceShutdownReservations {
   /** Read the shutdown fence under the assignment lock used to install it. */
   // Do not call inside assignmentMutex.runExclusive: this accessor takes the same mutex.
   async isShutdownReserved(deviceId: string): Promise<boolean> {
-    return await this.pool
-      .getAssignmentMutex()
-      .runExclusive(() => this.isDeviceUnderShutdown(deviceId));
+    return await this.pool.withAssignmentLock(() => this.isDeviceUnderShutdown(deviceId));
   }
 
   /** Read only the active shutdown reservation under the assignment lock. */
   // Do not call inside assignmentMutex.runExclusive: this accessor takes the same mutex.
   async isShutdownReservationHeld(deviceId: string): Promise<boolean> {
-    return await this.pool
-      .getAssignmentMutex()
-      .runExclusive(() => this.isDeviceUnderShutdownReservation(deviceId));
+    return await this.pool.withAssignmentLock(() =>
+      this.isDeviceUnderShutdownReservation(deviceId),
+    );
   }
 }

@@ -76,16 +76,18 @@ const LIVENESS_READS: ReadonlySet<string> = new Set([
 
 /** Liveness-only entry points, per file. Keys are `Class.method` or a module function name. */
 const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
-  "src/daemon/sessionManager.ts": [
-    "SessionManager.recordHeartbeat",
-    "SessionManager.claimLivenessOwnership",
-    "SessionManager.takeLivenessOwnership",
-    "SessionManager.persistNewLivenessOwnershipClaim",
-    "SessionManager.claimUnownedLivenessOwnership",
-    "SessionManager.releaseLivenessOwnership",
-    "SessionManager.adoptCliLivenessPolicy",
-    "SessionManager.restoreHeartbeatLivenessPolicy",
-    "SessionManager.forgiveDaemonStall",
+  "src/daemon/sessionManager.ts": ["SessionManager.forgiveDaemonStall"],
+  // The lease and policy moved out of SessionManager (#11797); it reaches SessionManager's own
+  // helpers (`getSession`, `recordSessionActivity`, ...) through its `port`.
+  "src/daemon/sessionLivenessLease.ts": [
+    "SessionLivenessController.recordHeartbeat",
+    "SessionLivenessController.claimLivenessOwnership",
+    "SessionLivenessController.takeLivenessOwnership",
+    "SessionLivenessController.persistNewLivenessOwnershipClaim",
+    "SessionLivenessController.claimUnownedLivenessOwnership",
+    "SessionLivenessController.releaseLivenessOwnership",
+    "SessionLivenessController.adoptCliLivenessPolicy",
+    "SessionLivenessController.restoreHeartbeatLivenessPolicy",
   ],
   "src/daemon/daemonRequestHandlers.ts": ["handleHeartbeat"],
   "src/daemon/daemon.ts": ["Daemon.handleHeartbeatHttpRequest"],
@@ -205,7 +207,7 @@ const LEASE_JUDGEMENTS: Readonly<Record<string, readonly string[]>> = {
  * from the last tool activity. Rule 2 verifies each one never reads the clock.
  */
 const DEADLINE_REDERIVATION_HELPERS: Readonly<Record<string, readonly string[]>> = {
-  "src/daemon/sessionManager.ts": [
+  "src/daemon/sessionLivenessLease.ts": [
     "widenIdleDeadlineFromLastActivity",
     "rebaseIdleDeadlineOnLastActivity",
   ],
@@ -266,22 +268,23 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
       "so idleness counts from the end of the last call; the execution tracker fires it, and " +
       "only a call admitted under the session writes (#10824).",
   },
-  "src/daemon/sessionManager.ts widenIdleDeadlineFromLastActivity": {
+  "src/daemon/sessionLivenessLease.ts widenIdleDeadlineFromLastActivity": {
     writes: 1,
     reason: "Policy: CLI adoption re-derives expiresAt from lastUsedAt (verified by rule 2).",
   },
-  "src/daemon/sessionManager.ts rebaseIdleDeadlineOnLastActivity": {
+  "src/daemon/sessionLivenessLease.ts rebaseIdleDeadlineOnLastActivity": {
     writes: 1,
     reason:
       "Policy: heartbeat restoration and managed-execution adoption (#11176) re-derive " +
       "expiresAt from lastUsedAt (rule 2).",
   },
-  "src/daemon/sessionManager.ts SessionManager.adoptManagedExecutionLivenessPolicy": {
-    writes: 1,
-    reason:
-      "Policy (#11176): a failed durable write of the managed-execution adoption restores the " +
-      "previous expiresAt; the new deadline itself comes from rebaseIdleDeadlineOnLastActivity.",
-  },
+  "src/daemon/sessionLivenessLease.ts SessionLivenessController.adoptManagedExecutionLivenessPolicy":
+    {
+      writes: 1,
+      reason:
+        "Policy (#11176): a failed durable write of the managed-execution adoption restores the " +
+        "previous expiresAt; the new deadline itself comes from rebaseIdleDeadlineOnLastActivity.",
+    },
   "src/daemon/sessionManager.ts SessionManager.forgiveDaemonStall": {
     writes: 2,
     reason:
@@ -1048,11 +1051,12 @@ function activityWritingMethods(
   model: FileModel,
   className: string,
   sanctioned: ReadonlySet<string>,
+  scan?: PortScan,
 ): Set<string> {
   return new Set(
     [...model.functions.values()]
       .filter((unit) => unit.className === className)
-      .filter((unit) => livenessViolations(model, [unit.key], sanctioned).length > 0)
+      .filter((unit) => livenessViolations(model, [unit.key], sanctioned, scan).length > 0)
       .map((unit) => unit.key.slice(className.length + 1)),
   );
 }
@@ -1195,7 +1199,7 @@ function forbiddenReads(
 /** The innermost named function enclosing `node`, or `<module>`. */
 /** The device-tool admission sites, and the read-classification names their guard must negate. */
 const ADMISSION_SITES: Readonly<Record<string, readonly string[]>> = {
-  "src/server/toolRegistry.ts": ["readOnly", "readSession"],
+  "src/server/pipeline/executionTarget.ts": ["readOnly", "readSession"],
 };
 
 /** Whether `condition` contains `!name` for one of `names`, possibly among `&&` operands. */
@@ -1387,13 +1391,58 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     );
   });
 
+  test("the liveness controller roots reach SessionManager behind their port (#11797)", () => {
+    const controllerPath = "src/daemon/sessionLivenessLease.ts";
+    const managerPath = "src/daemon/sessionManager.ts";
+    const roots = LIVENESS_ONLY[controllerPath]!;
+    const reached = reachableFrom(models.get(controllerPath)!, roots, new Set(), { models, ports });
+    expect(reached.map((ref) => `${ref.path} ${ref.key}`)).toEqual(
+      expect.arrayContaining([
+        `${managerPath} SessionManager.getSession`,
+        `${managerPath} SessionManager.recordSessionActivity`,
+      ]),
+    );
+  });
+
+  test("every public liveness controller method has a same-named SessionManager delegate (#11797)", () => {
+    const controller = models.get("src/daemon/sessionLivenessLease.ts")!;
+    const manager = models.get("src/daemon/sessionManager.ts")!;
+    // Read by SessionManager's own lease judgements and rebind, not delegated to callers.
+    const internal = new Set(["livenessBaseSession", "livenessOwnershipClaimMutexFor"]);
+    const prefix = "SessionLivenessController.";
+    const missing = [...controller.functions.values()]
+      .filter((unit) => unit.className === "SessionLivenessController")
+      .filter((unit) => ts.isMethodDeclaration(unit.node))
+      .filter(
+        (unit) =>
+          !ts
+            .getModifiers(unit.node as ts.MethodDeclaration)
+            ?.some((modifier) => modifier.kind === ts.SyntaxKind.PrivateKeyword),
+      )
+      .map((unit) => unit.key.slice(prefix.length))
+      .filter((name) => !internal.has(name))
+      .filter((name) => !manager.functions.has(`SessionManager.${name}`));
+    expect(missing).toEqual([]);
+  });
+
   test("liveness paths in other files never call a SessionManager method that records tool activity", () => {
     const sessionManagerPath = "src/daemon/sessionManager.ts";
-    const writers = activityWritingMethods(
-      models.get(sessionManagerPath)!,
-      "SessionManager",
-      new Set(DEADLINE_REDERIVATION_HELPERS[sessionManagerPath] ?? []),
-    );
+    // The lease and policy methods moved to the controller (#11797); SessionManager keeps
+    // same-named delegates, so its tool-activity writers are the union of both classes.
+    const controllerPath = "src/daemon/sessionLivenessLease.ts";
+    const writers = new Set([
+      ...activityWritingMethods(
+        models.get(sessionManagerPath)!,
+        "SessionManager",
+        new Set(DEADLINE_REDERIVATION_HELPERS[sessionManagerPath] ?? []),
+      ),
+      ...activityWritingMethods(
+        models.get(controllerPath)!,
+        "SessionLivenessController",
+        new Set(DEADLINE_REDERIVATION_HELPERS[controllerPath] ?? []),
+        { models, ports },
+      ),
+    ]);
     // Sanity: the tool-usage paths are detected, so an empty result cannot pass vacuously.
     expect([...writers]).toEqual(
       expect.arrayContaining(["getOrCreateSession", "recordToolCallEnded", "createSession"]),
@@ -1405,7 +1454,7 @@ describe("liveness paths never write activity clocks (#10656, #10668)", () => {
     // The baselined stall forgiveness (#10662) is the daemon's own path, not a liveness call.
     writers.delete("forgiveDaemonStall");
     const calls = Object.entries(LIVENESS_ONLY)
-      .filter(([path]) => path !== sessionManagerPath)
+      .filter(([path]) => path !== sessionManagerPath && path !== controllerPath)
       .flatMap(([path, roots]) => crossFileCalls(models.get(path)!, roots, writers));
     expect(calls).toEqual([]);
   });

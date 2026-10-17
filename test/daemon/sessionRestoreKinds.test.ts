@@ -67,7 +67,8 @@ function retryBounded(
   restoration: Promise<RestoreAttemptOutcome>,
   restore: () => Promise<void>,
 ): Promise<void> {
-  return Reflect.apply(Reflect.get(manager, "retryRestoreBounded"), manager, [
+  const owner = Reflect.get(manager, "stateRestore") as object;
+  return Reflect.apply(Reflect.get(owner, "retryRestoreBounded"), owner, [
     s,
     "d1",
     t,
@@ -181,24 +182,48 @@ test("rotation keeps the older abandoned baseline, the screen reader the newest"
   try {
     const older = { accelerometerRotation: 1, userRotation: 0 } as const;
     const newer = { accelerometerRotation: 0, userRotation: 1 } as const;
-    const abandonRotation = Reflect.get(manager, "abandonRotationRestore") as (
-      ...args: unknown[]
-    ) => void;
-    abandonRotation.call(manager, "d1", target({ ...older }), "x", "after 5 retries");
-    abandonRotation.call(manager, "d1", target({ ...newer }), "x", "after 5 retries");
-    const rotations = Reflect.get(manager, "abandonedRotations") as Map<string, object>;
+    const abandonRotation = Reflect.get(
+      Reflect.get(manager, "stateRestore") as object,
+      "abandonRotationRestore",
+    ) as (...args: unknown[]) => void;
+    abandonRotation.call(
+      Reflect.get(manager, "stateRestore"),
+      "d1",
+      target({ ...older }),
+      "x",
+      "after 5 retries",
+    );
+    abandonRotation.call(
+      Reflect.get(manager, "stateRestore"),
+      "d1",
+      target({ ...newer }),
+      "x",
+      "after 5 retries",
+    );
+    const rotations = Reflect.get(
+      Reflect.get(manager, "stateRestore") as object,
+      "abandonedRotations",
+    ) as Map<string, object>;
     expect(rotations.get("d1")).toEqual(older);
 
-    const abandonScreenReader = Reflect.get(manager, "abandonScreenReaderRestore") as (
+    const stateRestore = Reflect.get(manager, "stateRestore") as object;
+    const abandonScreenReader = Reflect.get(stateRestore, "abandonScreenReaderRestore") as (
       ...args: unknown[]
     ) => void;
     abandonScreenReader.call(
-      manager,
+      stateRestore,
       "d1",
       target({ platform: "android", previousEnabled: false }),
     );
-    abandonScreenReader.call(manager, "d1", target({ platform: "android", previousEnabled: true }));
-    const screenReaders = Reflect.get(manager, "abandonedScreenReaders") as Map<string, object>;
+    abandonScreenReader.call(
+      stateRestore,
+      "d1",
+      target({ platform: "android", previousEnabled: true }),
+    );
+    const screenReaders = Reflect.get(stateRestore, "abandonedScreenReaders") as Map<
+      string,
+      object
+    >;
     expect(screenReaders.get("d1")).toEqual({ platform: "android", previousEnabled: true });
   } finally {
     warn.mockRestore();
@@ -211,8 +236,19 @@ test("a removed target is not abandoned", () => {
   try {
     const t = target({ accelerometerRotation: 1, userRotation: 0 });
     t.removed = true;
-    Reflect.apply(Reflect.get(manager, "abandonRotationRestore"), manager, ["d1", t, "x", "when"]);
-    expect((Reflect.get(manager, "abandonedRotations") as Map<string, object>).size).toBe(0);
+    Reflect.apply(
+      Reflect.get(Reflect.get(manager, "stateRestore") as object, "abandonRotationRestore"),
+      Reflect.get(manager, "stateRestore"),
+      ["d1", t, "x", "when"],
+    );
+    expect(
+      (
+        Reflect.get(Reflect.get(manager, "stateRestore") as object, "abandonedRotations") as Map<
+          string,
+          object
+        >
+      ).size,
+    ).toBe(0);
   } finally {
     warn.mockRestore();
   }

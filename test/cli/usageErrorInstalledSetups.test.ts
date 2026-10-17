@@ -108,18 +108,14 @@ describe("daemon child process argv (src/daemon/manager.ts withDaemonOptions)", 
       }
     }
 
-    const manager = new TestDaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      join(stateDir, "daemon.lock"),
-      join(stateDir, "daemon.pid"),
-      join(stateDir, "daemon.sock"),
-      undefined,
+    const manager = new TestDaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: join(stateDir, "daemon.lock"),
+      pidFilePath: join(stateDir, "daemon.pid"),
+      socketPath: join(stateDir, "daemon.sock"),
       processSpawner,
-      undefined,
-      resolveLaunch,
-    );
+      launchCommandResolver: resolveLaunch,
+    });
     await manager.start(options);
     expect(captured).toBeDefined();
     return captured ?? [];

@@ -83,7 +83,7 @@ async function stuckRelease(
   manager.onSessionRelease((sessionId, _deviceId, reason) => {
     released.push(`${sessionId}:${reason}`);
   });
-  await manager.createSession("s", DEVICE, "android", idleWindowMs);
+  await manager.createSession("s", DEVICE, "android", { timeoutMs: idleWindowMs });
   manager.recordHeartbeat("s");
 
   // The owner stays alive but makes no tool call, then dies.
@@ -249,7 +249,9 @@ describe("a stuck idle release is held to the same deadline", () => {
         barrier: () => new FakeDbWriteBarrier(),
       });
       cleanups.push(() => manager.stopCleanupTimer());
-      await manager.createSession("s", DEVICE, "android", DEFAULT_SESSION_IDLE_TIMEOUT_MS);
+      await manager.createSession("s", DEVICE, "android", {
+        timeoutMs: DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+      });
       const forced: string[] = [];
       const monitor = new SessionHeartbeatMonitor(
         manager,

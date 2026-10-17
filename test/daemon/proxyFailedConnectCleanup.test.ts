@@ -29,7 +29,7 @@ describe("proxy failed partial connect", () => {
   beforeEach(async () => {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    await sessionManager.createSession(SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(SESSION, "emulator-5554", "android", { timeoutMs: 60_000 });
     state = {
       isInitialized: () => true,
       getSessionManager: () => sessionManager,

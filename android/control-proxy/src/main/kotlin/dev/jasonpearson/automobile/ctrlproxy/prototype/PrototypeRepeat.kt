@@ -53,6 +53,8 @@ import dev.jasonpearson.automobile.protocol.PrototypeSnackbarNode
 import dev.jasonpearson.automobile.protocol.PrototypeSpacerNode
 import dev.jasonpearson.automobile.protocol.PrototypeStackNode
 import dev.jasonpearson.automobile.protocol.PrototypeStyleWhen
+import dev.jasonpearson.automobile.protocol.PrototypeSwipeAction
+import dev.jasonpearson.automobile.protocol.PrototypeSwipeActions
 import dev.jasonpearson.automobile.protocol.PrototypeSwitchNode
 import dev.jasonpearson.automobile.protocol.PrototypeTabBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeTextFieldNode
@@ -151,6 +153,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
+        swipeActions = swipeActions?.bound(instance),
         children = children.bound(),
       )
     is PrototypeColumnNode ->
@@ -383,6 +386,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         trailing = trailing?.bound(instance),
+        swipeActions = swipeActions?.bound(instance),
       )
     is PrototypeDialogNode ->
       copy(
@@ -477,6 +481,12 @@ private fun PrototypeListItemTrailing.bound(instance: RepeatInstance): Prototype
     is PrototypeListItemCheckbox -> copy(stateKey = instance.interpolate(stateKey))
     else -> this
   }
+
+private fun PrototypeSwipeActions.bound(instance: RepeatInstance) =
+  copy(start = start?.map { it.bound(instance) }, end = end?.map { it.bound(instance) })
+
+private fun PrototypeSwipeAction.bound(instance: RepeatInstance) =
+  copy(label = instance.interpolate(label), onTap = onTap.map { it.bound(instance) })
 
 private fun PrototypeAppBarAction.bound(instance: RepeatInstance) =
   copy(label = instance.interpolate(label), onTap = onTap?.map { it.bound(instance) })

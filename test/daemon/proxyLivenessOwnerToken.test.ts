@@ -57,7 +57,7 @@ describe("proxy liveness owner token (#10050)", () => {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     responses = [];
-    await sessionManager.createSession(SESSION, "emulator-5554", "android", 60_000);
+    await sessionManager.createSession(SESSION, "emulator-5554", "android", { timeoutMs: 60_000 });
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
   });
 

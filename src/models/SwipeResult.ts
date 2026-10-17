@@ -10,6 +10,8 @@ export interface SwipeResult extends BaseActionResult {
   y2: number;
   duration: number;
   path?: number;
+  /** swipeAt: straight-line distance / dispatched duration in px/s (#12538). */
+  velocityPxPerSecond?: number;
   easing?: "linear" | "decelerate" | "accelerate" | "accelerateDecelerate";
   // A11y mode timing (when scrollMode="a11y")
   a11yTotalTimeMs?: number; // Total time on device for swipe (including gesture dispatch)

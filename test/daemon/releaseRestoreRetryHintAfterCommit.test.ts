@@ -107,7 +107,7 @@ test("only the capped cleanup contributes a bound while an own-budget clock retr
   });
   dispose.push(() => {
     clockRetry.resolve();
-    manager.retireClockRestoration(deviceId);
+    manager.retireRestorations(deviceId, "removal");
     defaultDeviceClockRestoreRegistry.retire(deviceId);
     manager.stopCleanupTimer();
     timer.reset();

@@ -164,12 +164,16 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "pool before deciding whether it resolves the requested identity or matching the pooled " +
         "entry it is about to hand out.",
     },
-    "src/server/toolRegistry.ts": {
-      calls: 2,
+    "src/server/pipeline/readTarget.ts": {
+      calls: 1,
       reason:
         "A control call naming an ADB transport address the pool has never folded (#11618) lists " +
         "fresh raw rows so the pool can fold the alias, then reconciles the folded listing " +
-        "before the holder check reads pooled identity for it. " +
+        "before the holder check reads pooled identity for it.",
+    },
+    "src/server/pipeline/deviceCallDispatch.ts": {
+      calls: 1,
+      reason:
         "The held-alias gate lists cached raw rows to get an unidentifiable transport's real row " +
         "and reconciles the listing before the shared rule reads pooled identity (#11596).",
     },

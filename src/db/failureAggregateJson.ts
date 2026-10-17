@@ -1,7 +1,7 @@
 import { z } from "zod/v4";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
-import type { AggregatedToolCallInfo, StackTraceElement } from "../server/failuresResources";
+import type { AggregatedToolCallInfo, StackTraceElement } from "../models/failureAnalytics";
 
 const stackTraceElementsSchema = z.array(
   z.object({

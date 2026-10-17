@@ -112,11 +112,6 @@
         let defaultValue: String?
     }
 
-    struct SdkDatabaseErrorPayload: Codable {
-        let error: String
-        let diagnostic: StorageDiagnostic?
-    }
-
     final class SdkDatabaseRouteHandler {
         /// Wire code (HTTP 503) for a database the app holds locked past the SDK's bounded wait. Same
         /// string as the driver's `busy_lock` diagnostic.

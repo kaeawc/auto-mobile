@@ -883,10 +883,6 @@ public struct StorageInspectionConfiguration: Sendable
   public var maxBytes: Int
   public var allowMutations: Bool
   public init( allowedDatabasePaths: Set<String> = [], registeredAppGroupSuites: Set<String> = [], coreDataStores: [CoreDataStoreRegistration] = [], sensitiveKeys: Set<String> = [], maxRows: Int = 500, maxBytes: Int = 512 * 1024, allowMutations: Bool = false )
-public struct StorageDiagnostic: Sendable, Codable, Equatable
-  public let code: String
-  public let message: String
-  public init(code: String, message: String)
 
 // Storage/UserDefaultsInspector.swift
 public final class UserDefaultsInspector: @unchecked Sendable

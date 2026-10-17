@@ -1,3 +1,4 @@
+import { resolveSwipeDirection } from "./swipeOnUtils";
 import type { Element, SwipeDirection, SwipeEdge, SwipeOnOptions } from "../../../models";
 
 /** Default distance in px (points on iOS) the touch starts inside the edge. */
@@ -54,6 +55,14 @@ export function validateEdgeSwipeOptions(options: EdgeOptions): string | null {
     return `fromEdge "${options.fromEdge}" swipes inward, so the finger direction must be "${inward}"`;
   }
   return null;
+}
+
+/** Edge validation compares the finger direction, so resolve gestureType first. */
+export function validateResolvedEdgeSwipe(options: SwipeOnOptions): string | null {
+  return validateEdgeSwipeOptions({
+    ...options,
+    direction: resolveSwipeDirection(options).direction ?? options.direction,
+  });
 }
 
 /** Start point at the edge plus an inward end point, inside `bounds`. */

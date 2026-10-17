@@ -84,7 +84,7 @@ export class FailureEventRepository {
     insertsSinceCleanup: CLEANUP_CHECK_INTERVAL,
   };
 
-  constructor(timer: Timer = defaultTimer, db?: Kysely<Database>) {
+  constructor(db?: Kysely<Database>, timer: Timer = defaultTimer) {
     this.timer = timer;
     this.db = db ?? null;
   }

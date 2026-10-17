@@ -1015,6 +1015,7 @@ describe("BindingReconciler", () => {
           deleting: 0,
           orphaned: 0,
         },
+        charged: [],
         retained: [{ stableDeviceId: "held", reason: "session_holds_device" }],
         evictionFailures: [],
       };
@@ -1040,7 +1041,7 @@ describe("BindingReconciler", () => {
       expect(failed.failure).toEqual({
         code: "binding_budget_exhausted",
         retryable: true,
-        message: "Managed-binding total-resource budget is exhausted.",
+        message: "Managed-binding total-resource budget is exhausted (2 charged, limit 1).",
         nextAction:
           "Free unused broker resources or raise limits.totalDeviceCap in the broker host configuration, then retry.",
         budget: {
@@ -1053,6 +1054,7 @@ describe("BindingReconciler", () => {
             deleting: 0,
             orphaned: 0,
           },
+          charged: [],
           retained: [{ stableDeviceId: "held", reason: "session_holds_device" }],
           evictionFailures: [],
         },
@@ -1167,6 +1169,7 @@ describe("BindingReconciler", () => {
           deleting: 0,
           orphaned: 0,
         },
+        charged: [],
         retained: [{ stableDeviceId: "held", reason: "session_holds_device" }],
         evictionFailures: [],
       });

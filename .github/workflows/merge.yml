@@ -30,12 +30,8 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-build-desktop-core
         with:
-          gradle-tasks: ":desktop-core:build -x test"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
   # The full desktop-core suite stays off the merge path (consistently >1 minute, not required for
@@ -99,32 +95,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-build-ide-plugin
         with:
-          gradle-tasks: "build -x test"
-          gradle-project-directory: "android/ide-plugin"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Build Plugin ZIP"
-        shell: bash
-        working-directory: android/ide-plugin
-        run: |
-          ./gradlew buildPlugin --stacktrace --continue
-
-      - name: "Verify Plugin"
-        shell: bash
-        working-directory: android/ide-plugin
-        run: |
-          ./gradlew verifyPlugin --stacktrace --continue
-
-      - name: "Upload IDE Plugin ZIP"
-        uses: actions/upload-artifact@v6
-        if: success()
-        with:
-          name: ide-plugin-zip
-          path: android/ide-plugin/build/distributions/*.zip
 
   ide-plugin-unit-tests:
     name: "Run IDE Plugin Unit Tests"
@@ -142,20 +115,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-ide-plugin-unit-tests
         with:
-          gradle-tasks: "test"
-          gradle-project-directory: "android/ide-plugin"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Upload Test Results"
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: ide-plugin-test-results
-          path: android/ide-plugin/build/reports/tests/test/
 
   desktop-app-unit-tests:
     name: "Run Desktop App Unit Tests"
@@ -172,20 +134,9 @@ jobs:
         with:
           lfs: false
 
-      - uses: ./.github/actions/gradle-task-run
+      - uses: ./.github/actions/ci-desktop-app-unit-tests
         with:
-          gradle-tasks: ":desktop-app:test"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-
-      - name: "Upload Test Results"
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: desktop-app-test-results
-          path: android/desktop-app/build/reports/tests/test/
 
   validate-xml:
     name: "Validate XML"

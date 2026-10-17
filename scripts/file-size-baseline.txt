@@ -40,7 +40,7 @@
 1424	src/features/action/TapAtCoordinate.ts
 3788	src/features/action/TapOnElement.ts
 1420	src/features/action/swipeon/ScrollUntilVisible.ts
-1833	src/features/action/swipeon/SwipeOn.ts
+1830	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
 5883	src/features/deviceLifecycle/deviceLifecycleCore.ts
 1385	src/features/navigation/Explore.ts
@@ -49,7 +49,7 @@
 1866	src/features/observe/ObserveScreen.ts
 1032	src/features/observe/TakeScreenshot.ts
 1056	src/features/observe/ViewHierarchy.ts
-3227	src/features/observe/android/AndroidCtrlProxyClient.ts
+3153	src/features/observe/android/AndroidCtrlProxyClient.ts
 1857	src/features/observe/android/CtrlProxyHierarchy.ts
 1875	src/features/observe/android/ctrlProxyProtocol.ts
 1121	src/features/observe/android/ctrlProxyWireManifest.ts
@@ -78,11 +78,11 @@
 1269	src/server/deviceToolsShutdown.ts
 1266	src/server/deviceToolsStartDevice.ts
 1170	src/server/executionTracker.ts
-1646	src/server/finalizeToolResponse.ts
+1661	src/server/finalizeToolResponse.ts
 3133	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts
 2852	src/server/prototypeTools.ts
-1884	src/server/toolOutputSchemas.ts
+1894	src/server/toolOutputSchemas.ts
 1099	src/server/toolRegistry.ts
 1045	src/server/utilityTools.ts
 2185	src/server/videoRecordingManager.ts

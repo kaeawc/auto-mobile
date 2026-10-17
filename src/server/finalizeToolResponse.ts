@@ -749,7 +749,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             (servedObservation.skeleton !== undefined &&
               classifyObservationAction(ctx.name, ctx.args) !== "scroll" &&
               replacedMostActionableNodes(diff));
-          observationOut = emitFull ? servedObservation : diff;
+          observationOut = emitFull ? servedObservation : dropDiffNodeLists(diff);
           observationDiff = {
             mode: emitFull ? "full" : "diff",
             reason: emitFull ? "screen_changed" : "diff_emitted",
@@ -1661,6 +1661,22 @@ function hasScreenChangedEffect(payload: Record<string, unknown>): boolean {
     typeof effect === "object" &&
     (effect as Record<string, unknown>).screenChanged === true
   );
+}
+
+/**
+ * Owner decision on #11637 item 2: a diff always ships beside its `skeleton`
+ * (#6221/#6242), which already lists every actionable node on the current
+ * screen, so the added/removed node lists repeat it. Call after the emptiness /
+ * replacement checks read them; `changed` stays because the skeleton cannot say
+ * what moved from what.
+ */
+function dropDiffNodeLists(
+  diff: ReturnType<typeof diffObserveResult>,
+): Partial<ReturnType<typeof diffObserveResult>> {
+  const wireDiff: Partial<typeof diff> = { ...diff };
+  delete wireDiff.added;
+  delete wireDiff.removed;
+  return wireDiff;
 }
 
 function isEmptyObserveDiff(diff: ReturnType<typeof diffObserveResult>): boolean {

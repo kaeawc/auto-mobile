@@ -2824,9 +2824,10 @@ label of its nearest labelled enclosing row, so a `checked` state is attributabl
 to the setting it belongs to (`com.android.settings:id/switchWidget | Airplane
 mode | toggle checked=false`).
 
-Action-observation diffs under the default skeleton projection use those same
-compact row fields for `added` and `removed` nodes; rows with no affordances are
-omitted. Their `fields.layoutWarnings` value is an `{ added, removed }` pair
+Action-observation diffs always ship beside the current `skeleton` (the rows
+above), so they carry no `added` or `removed` node lists: a node that appeared is
+a skeleton row, and one that disappeared is simply absent from it. Only `changed`
+entries (what moved from what) remain. Their `fields.layoutWarnings` value is an `{ added, removed }` pair
 rather than a whole `{ from, to }` envelope, and excludes Android system-status
 bar notification chrome. An artifact-spilled diff keeps its `skeleton`,
 `context`, and capture metadata inline while the bulky node and field deltas are

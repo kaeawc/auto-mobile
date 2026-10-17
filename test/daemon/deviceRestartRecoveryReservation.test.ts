@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
@@ -18,14 +19,11 @@ import {
 } from "../../src/features/bootAdmission/AndroidBootAdmissionGate";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { fixedBackoff } from "../../src/utils/Backoff";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeAndroidCapacitySource } from "../fakes/FakeAndroidCapacitySource";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks, drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 const SIM: BootedDevice = { deviceId: "restart-sim", name: "restart-sim", platform: "ios" };
@@ -136,16 +134,12 @@ describe("device restart reserves the entire recovery window", () => {
       manager = new FakeDeviceManager();
     }
     manager.bootedDevices = devices;
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "restart-reservation", {
-        timer,
-        deviceManager: manager,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        retryExecutor: new DefaultRetryExecutor(timer),
-        recoveryPolicy: { onLoss: false, maxAttempts: 1 },
-        ...(withSlots ? { bindingExclusion: bindings } : {}),
-      }),
-    );
+    pool = makePool(sessions, "restart-reservation", {
+      timer,
+      deviceManager: manager,
+      recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+      ...(withSlots ? { bindingExclusion: bindings } : {}),
+    });
     internals = pool as unknown as ReservationInternals;
     const notify = internals.notifyRehydrationReservationChanged.bind(pool);
     internals.notifyRehydrationReservationChanged = (target) => {

@@ -8,6 +8,10 @@ import type { IosAppNetworkRuleRestorer } from "../../src/daemon/iosAppNetworkLe
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { DeviceClockRestoreRegistry } from "../../src/features/utility/DeviceClock";
 import type { IosAppNetworkRule } from "../../src/features/networkFilter/IosAppNetworkRuleClient";
+import type {
+  KeepScreenAwakeRestoreOutcome,
+  KeepScreenAwakeState,
+} from "../../src/utils/KeepScreenAwakeManager";
 import type { BackoffPolicy } from "../../src/utils/Backoff";
 import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -85,6 +89,13 @@ class FakeHost implements SessionDeviceStateRestoreHost {
   clearHealthMarker(deviceId: string, _incarnation: number, reason: string): void {
     this.healthEvents.push(`clear:${deviceId}:${reason}`);
   }
+  abandoned: string[] = [];
+  async waitForIdentityReplacement(): Promise<boolean> {
+    return true;
+  }
+  abandonRestore(target: { deviceId: string }, reason: string): void {
+    this.abandoned.push(`${target.deviceId}:${reason}`);
+  }
   trackPendingDeviceCleanup(deviceId: string): void {
     this.tracked.push(deviceId);
   }
@@ -113,8 +124,12 @@ function makeRestore(
   }),
   rotation: SessionDeviceStateRestoreOptions["rotation"] = () => ({ restore: async () => {} }),
   clock: SessionDeviceStateRestoreOptions["clock"] = () => ({ restore: async () => {} }),
+  keepScreenAwake: SessionDeviceStateRestoreOptions["keepScreenAwake"] = () => ({
+    restore: async () => ({ status: "restored" as const }),
+  }),
 ): SessionDeviceStateRestore {
   return new SessionDeviceStateRestore(host, {
+    keepScreenAwake,
     screenReader,
     screenReaderBackoff: backoff,
     rotation,
@@ -510,6 +525,102 @@ describe("clock family", () => {
       await flush();
       expect(h.calls()).toBe(settled);
       expect(h.host.healthEvents).toContain("clear:emulator-5558:clock");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("keep-awake family", () => {
+  const APPLIED: KeepScreenAwakeState = { applied: true, method: "settings" };
+
+  async function createKeepAwake(
+    outcome: (call: number) => Promise<KeepScreenAwakeRestoreOutcome>,
+  ) {
+    const timer = new FakeTimer();
+    const host = new FakeHost(timer);
+    host.publishAll = true;
+    let calls = 0;
+    const restore = makeRestore(host, undefined, undefined, undefined, () => ({
+      restore: () => {
+        calls++;
+        return outcome(calls);
+      },
+    }));
+    const factory = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
+    factory.stopCleanupTimer();
+    const session = await factory.createSession("s1", "emulator-5554", "android");
+    factory.setKeepScreenAwake("s1", APPLIED);
+    return { timer, restore, session, host, calls: () => calls };
+  }
+
+  test("no applied keep-awake state means no restore", async () => {
+    const h = await createKeepAwake(async () => ({ status: "restored" }));
+    delete h.session.cacheData.keepScreenAwake;
+    expect(h.restore.keepScreenAwakeRestoreTarget(h.session)).toBeNull();
+    expect((await h.restore.restoreKeepScreenAwakeBestEffort(h.session)).pending).toBeNull();
+    expect(h.calls()).toBe(0);
+  });
+
+  test("a restored keep-awake state clears its health marker and records no report", async () => {
+    const h = await createKeepAwake(async () => ({ status: "restored" }));
+    expect((await h.restore.restoreKeepScreenAwakeBestEffort(h.session)).pending).toBeNull();
+    expect(h.calls()).toBe(1);
+    expect(h.host.healthEvents).toEqual(["clear:emulator-5554:keep-screen-awake"]);
+    expect(h.restore.getKeepAwakeRestoreReport("s1")).toBeUndefined();
+  });
+
+  test("a baseline restore is recorded as a report and forgotten with the session id", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await createKeepAwake(async () => ({
+        status: "restored_to_baseline",
+        settings: [{ setting: "screen_off_timeout", value: "60000" }],
+      }));
+      await h.restore.restoreKeepScreenAwakeBestEffort(h.session);
+      expect(h.restore.getKeepAwakeRestoreReport("s1")?.status).toBe("restored_to_baseline");
+      h.restore.forgetKeepAwakeRestoreReport("s1");
+      expect(h.restore.getKeepAwakeRestoreReport("s1")).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a failing keep-awake restore retries twice, then hands the device to health recovery", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await createKeepAwake(async () => ({
+        status: "failed",
+        failures: [{ setting: "svc_stayon", error: "adb offline" }],
+      }));
+      const { pending } = await h.restore.restoreKeepScreenAwakeBestEffort(h.session);
+      expect(pending).not.toBeNull();
+      for (let i = 0; i < 2; i++) {
+        await flush();
+        h.timer.advanceTime(250);
+      }
+      await pending;
+      expect(h.calls()).toBe(3);
+      expect(h.host.abandoned).toContain("emulator-5554:keep-screen-awake");
+      expect(h.restore.getKeepAwakeRestoreReport("s1")?.status).toBe("failed");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a forced release never retries against a device that may belong to the next owner", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await createKeepAwake(async () => ({
+        status: "failed",
+        failures: [{ setting: "svc_stayon", error: "adb offline" }],
+      }));
+      const { pending } = await h.restore.restoreKeepScreenAwakeBestEffort(h.session, () => true);
+      await pending;
+      expect(h.calls()).toBe(1);
+      expect(h.host.abandoned).not.toContain("emulator-5554:keep-screen-awake");
     } finally {
       warn.mockRestore();
     }

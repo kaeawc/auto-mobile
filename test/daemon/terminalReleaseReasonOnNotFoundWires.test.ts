@@ -81,7 +81,7 @@ export async function setUpRig(idleTimeoutMs: number): Promise<Rig> {
     getDevicePool: () => DEVICE_POOL,
     getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
   };
-  await manager.createSession(SESSION, DEVICE, "android", idleTimeoutMs);
+  await manager.createSession(SESSION, DEVICE, "android", { timeoutMs: idleTimeoutMs });
   monitor.start();
   const advance = (ms: number) => timer.setCurrentTime(timer.getCurrentTime() + ms);
   return {
@@ -144,7 +144,7 @@ describe("not-found answers for a session whose terminal release is still writin
     const r = rig;
     const labelId = `${SESSION}:B`;
     await asPlanAllocation(r.manager, SESSION, [labelId], () =>
-      r.manager.createSession(labelId, "emulator-5556", "android", 120_000),
+      r.manager.createSession(labelId, "emulator-5556", "android", { timeoutMs: 120_000 }),
     );
     r.manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
     await r.manager.releaseSession(SESSION, "explicit-release");
@@ -160,7 +160,7 @@ describe("not-found answers for a session whose terminal release is still writin
     const r = rig;
     const labelId = `${SESSION}:B`;
     await asPlanAllocation(r.manager, SESSION, [labelId], () =>
-      r.manager.createSession(labelId, "emulator-5556", "android", 120_000),
+      r.manager.createSession(labelId, "emulator-5556", "android", { timeoutMs: 120_000 }),
     );
     r.manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
     await r.manager.releaseSession(SESSION, "explicit-release");

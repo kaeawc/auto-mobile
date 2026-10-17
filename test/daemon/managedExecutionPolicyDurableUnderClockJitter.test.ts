@@ -33,14 +33,9 @@ test("managed policy survives a lower second conversion and daemon rehydration",
   const repository = new DeviceSessionRepository(db, timer);
   const writer = new SessionManager(timer, repository);
   managers.push(writer);
-  const session = await writer.createSession(
-    SESSION,
-    DEVICE,
-    "android",
-    undefined,
-    undefined,
-    "Pixel_fake",
-  );
+  const session = await writer.createSession(SESSION, DEVICE, "android", {
+    stableDeviceId: "Pixel_fake",
+  });
   await writer.claimLivenessOwnership(SESSION, "proxy-token");
   const original = await repository.getSession(SESSION);
   timer.jitterMs = 1;
@@ -60,16 +55,13 @@ test("managed policy survives a lower second conversion and daemon rehydration",
   const assigner: SessionDeviceAssigner = {
     async assignDeviceToSession(id, _platform, target) {
       return (
-        await reader.createSession(
-          id,
-          DEVICE,
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        )
+        await reader.createSession(id, DEVICE, "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        })
       ).assignedDevice;
     },
   };

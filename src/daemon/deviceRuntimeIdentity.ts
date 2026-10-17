@@ -33,7 +33,7 @@ function unknownAndroidRuntimeName(deviceId: string): string {
 /** Mutable pool state is read at use time, including after every await. */
 export interface DeviceRuntimeIdentityPoolPort {
   getAmbientExecutionId?(): string | undefined;
-  getDevices(): Map<string, PooledDevice>;
+  getDevices(): ReadonlyMap<string, PooledDevice>;
   notifyDeviceFramesInvalidated?(deviceId: string): void;
   getDeviceManager(): PlatformDeviceManager;
   getRetryExecutor(): RetryExecutor;

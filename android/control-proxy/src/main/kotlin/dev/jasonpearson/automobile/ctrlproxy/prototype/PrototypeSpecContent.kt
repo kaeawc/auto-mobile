@@ -19,6 +19,8 @@ import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActionScope
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -29,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -49,6 +52,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.text.AnnotatedString
@@ -56,6 +60,7 @@ import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
@@ -170,6 +175,8 @@ internal fun PrototypeRuntimeContent(
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
         LocalPrototypeMotion provides motion,
+        LocalPrototypeSwipeCoordinator provides
+          (LocalPrototypeSwipeCoordinator.current ?: remember { SwipeCoordinator() }),
       ) {
         val traceSink = PrototypeTrace.sink
         val traceEnabled = traceSink.isEnabled()
@@ -502,6 +509,14 @@ private fun RenderPrototypeNodeContent(
   weightAxis: PrototypeWeightAxis? = null,
   windowRoot: Boolean = false,
 ) {
+  prototypeSwipeActions(node.source)?.let { swipe ->
+    // The row keeps its own layout modifier; the foreground renders as an ordinary node.
+    val plain = remember(node) { node.copy(source = prototypeWithoutSwipe(node.source)) }
+    PrototypeSwipeRow(node, swipe, interact, parentModifier) {
+      RenderPrototypeNodeContent(plain, interact, Modifier, weightAxis, windowRoot)
+    }
+    return
+  }
   val traceSink = PrototypeTrace.sink
   val traceEnabled = traceSink.isEnabled()
   if (traceEnabled) traceSink.begin(PrototypeTrace.NODE)
@@ -819,12 +834,39 @@ private fun RenderPrototypeTextField(
           }
         }
       } else null
+    val ime = prototypeTextFieldImeAction(source.imeAction, !source.onSubmit.isNullOrEmpty())
     val keyboardOptions =
-      if (source.keyboardType == null && source.secure != true) KeyboardOptions.Default
+      if (source.keyboardType == null && source.secure != true && ime == ImeAction.Default)
+        KeyboardOptions.Default
       else
         KeyboardOptions(
           keyboardType = prototypeTextFieldKeyboardType(source.keyboardType, source.secure),
+          imeAction = ime,
         )
+    val focus = LocalFocusManager.current
+    val submit: KeyboardActionScope.() -> Unit = {
+      if (ime == ImeAction.Next) focus.moveFocus(FocusDirection.Next)
+      val actions = source.onSubmit.orEmpty()
+      if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions))
+    }
+    val keyboardActions =
+      if (ime == ImeAction.Default) KeyboardActions.Default
+      else
+        KeyboardActions(
+          onDone = submit,
+          onNext = submit,
+          onSearch = submit,
+          onSend = submit,
+          onGo = submit,
+        )
+    val leadingIcon: (@Composable () -> Unit)? =
+      prototypeIcon(source.leadingIcon)?.let { icon ->
+        { Icon(icon, contentDescription = null) }
+      }
+    val trailingIcon: (@Composable () -> Unit)? =
+      source.trailingIcon?.let { action ->
+        { PrototypeTextFieldTrailingIcon(node, action, interact) }
+      }
     val visualTransformation =
       if (prototypeTextFieldSecure(source.secure, source.keyboardType))
         PasswordVisualTransformation()
@@ -844,6 +886,9 @@ private fun RenderPrototypeTextField(
           label = label,
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
+          keyboardActions = keyboardActions,
+          leadingIcon = leadingIcon,
+          trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
         )
       } else {
@@ -858,6 +903,9 @@ private fun RenderPrototypeTextField(
           label = label,
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
+          keyboardActions = keyboardActions,
+          leadingIcon = leadingIcon,
+          trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
           singleLine = !multiline,
           minLines = source.minLines ?: 1,
@@ -877,6 +925,9 @@ private fun RenderPrototypeTextField(
           label = label,
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
+          keyboardActions = keyboardActions,
+          leadingIcon = leadingIcon,
+          trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
         )
       } else {
@@ -891,6 +942,9 @@ private fun RenderPrototypeTextField(
           label = label,
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
+          keyboardActions = keyboardActions,
+          leadingIcon = leadingIcon,
+          trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
           singleLine = !multiline,
           minLines = source.minLines ?: 1,

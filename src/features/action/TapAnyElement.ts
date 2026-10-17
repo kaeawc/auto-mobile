@@ -90,6 +90,7 @@ import {
   type PerformanceTracker,
 } from "../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { pollSearchUntil } from "./searchUntilPoller";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import { type Timer } from "../../utils/SystemTimer";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
@@ -112,7 +113,7 @@ import {
   indeterminateTapError,
 } from "./coordinateTapDispatch";
 import { dispatchAndroidDoubleTap } from "./androidDoubleTap";
-import { assertTouchscreenInputSucceeded } from "./touchscreenInput";
+import { dispatchAndroidLongPress } from "./androidLongPress";
 import {
   requiresNodeSelector,
   stableNodeSelectorForElement,
@@ -628,43 +629,15 @@ export class TapAnyElement extends BaseVisualChange {
   ): Promise<void> {
     const fence = resolveDisplayFence(fenceOptions);
     throwIfAborted(signal);
-    try {
-      // Match tapOn's touchscreen source and retain the generic input fallback.
-      try {
-        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-        fence.assertCurrent();
-        const command = `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`;
-        const result = await this.adb.executeCommand(command, {
-          timeoutMs: resolveTapAnyCtrlProxyTimeoutMs(durationMs),
-          signal,
-        });
-        assertTouchscreenInputSucceeded(command, result);
-        return;
-      } catch (error) {
-        logger.warn(`[TapAnyElement] touch input swipe failed: ${errorMessage(error)}`, error);
-        this.throwIfLongPressInterrupted(error, durationMs, signal);
-        if (error instanceof StaleDisplayError) {
-          throw error;
-        }
-        throwIfAborted(signal);
-      }
-      // Only a non-cancellation failure may use the legacy input source.
-      fence.assertCurrent();
-      const command = `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`;
-      const result = await this.adb.executeCommand(command, {
-        timeoutMs: resolveTapAnyCtrlProxyTimeoutMs(durationMs),
-        signal,
-      });
-      assertTouchscreenInputSucceeded(command, result);
-      return;
-    } catch (error) {
-      logger.warn(`[TapAnyElement] Android long press failed: ${errorMessage(error)}`, error);
-      this.throwIfLongPressInterrupted(error, durationMs, signal);
-      if (error instanceof StaleDisplayError) {
-        throw error;
-      }
-      throw toActionableError(error, "Android long press failed");
-    }
+    await dispatchAndroidLongPress({
+      adb: this.adb,
+      x,
+      y,
+      durationMs,
+      signal,
+      assertCurrent: () => fence.assertCurrent(),
+      logTag: "TapAnyElement",
+    });
   }
 
   private throwIfLongPressInterrupted(
@@ -1520,53 +1493,44 @@ export class TapAnyElement extends BaseVisualChange {
     let requestCount = 0;
     let changeCount = 0;
     let element: Element | null = null;
-    const deadline = startTime + searchDurationMs;
-    while (this.timer.now() < deadline) {
-      throwIfAborted(signal);
-      await this.timer.sleep(TapAnyElement.SEARCH_POLL_INTERVAL_MS);
-      const remainingTimeMs = Math.max(0, deadline - this.timer.now());
-      if (remainingTimeMs <= 0) {
-        break;
-      }
-      const refreshed = await refresh(remainingTimeMs, observeResult.screenSize, signal);
-      requestCount += 1;
-      if (!refreshed) {
-        continue;
-      }
+    const polled = await pollSearchUntil({
+      timer: this.timer,
+      startTime,
+      durationMs: searchDurationMs,
+      intervalMs: TapAnyElement.SEARCH_POLL_INTERVAL_MS,
+      pacing: "sleepFirst",
+      // A hierarchy request can consume the last millisecond of the search window. Do not
+      // select from its result after the deadline: CtrlProxy may have served a stale fallback
+      // when its synchronous refresh timed out, and a late candidate must not turn a bounded
+      // search into an unbounded tap.
+      discardLateResult: true,
+      signal,
+      fetch: (remainingTimeMs) => refresh(remainingTimeMs, observeResult.screenSize, signal),
+      accept: (refreshed) => {
+        const hash = this.hashViewHierarchy(refreshed);
+        if (hash && hash !== lastHash) {
+          changeCount += 1;
+          lastHash = hash;
+        }
 
-      // A hierarchy request can consume the last millisecond of the
-      // search window. Do not select from its result after the
-      // deadline: CtrlProxy may have served a stale fallback when its
-      // synchronous refresh timed out, and a late candidate must not
-      // turn a bounded search into an unbounded tap.
-      if (this.timer.now() >= deadline) {
-        break;
-      }
-
-      const hash = this.hashViewHierarchy(refreshed);
-      if (hash && hash !== lastHash) {
-        changeCount += 1;
-        lastHash = hash;
-      }
-
-      selectedCapture = identifyObservedHierarchy(
-        this.device.platform,
-        refreshed,
-        "fresh",
-        this.timer,
-        undefined,
-        { iosMultiPanel: this.iosMultiPanel },
-      );
-      const found = this.findClickableElement(options, selectedCapture.hierarchy, {
-        observationScreenSize: observeResult.screenSize,
-        display: observeResult.viewHierarchy,
-      });
-      element = found.element;
-      containerFoundEver = containerFoundEver || found.containerFound;
-      if (element) {
-        break;
-      }
-    }
+        selectedCapture = identifyObservedHierarchy(
+          this.device.platform,
+          refreshed,
+          "fresh",
+          this.timer,
+          undefined,
+          { iosMultiPanel: this.iosMultiPanel },
+        );
+        const found = this.findClickableElement(options, selectedCapture.hierarchy, {
+          observationScreenSize: observeResult.screenSize,
+          display: observeResult.viewHierarchy,
+        });
+        element = found.element;
+        containerFoundEver = containerFoundEver || found.containerFound;
+        return element !== null;
+      },
+    });
+    requestCount = polled.requestCount;
 
     if (!element) {
       this.throwMissingClickableElement(options, containerFoundEver);

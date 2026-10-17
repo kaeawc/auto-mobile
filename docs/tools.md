@@ -721,7 +721,10 @@ require `prototype_data_model_v1`; the host refuses an unsupported device before
 require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show.
 `onLongPress`/`onDoubleTap` on box/row/column/text/image/icon/card require
 `prototype_gestures_v1`, with the same refusal before uploads or show.
+`swipeActions` on a row or listItem requires `prototype_swipe_actions_v1`, with the same refusal.
+textField `trailingIcon`, `imeAction` and `onSubmit` require `prototype_text_field_actions_v1`, with the same refusal.
 `carousel` nodes and `pager.indicator` require `prototype_carousel_v1`, with the same refusal.
+textField `leadingIcon` requires `prototype_text_field_leading_icon_v1`, with the same refusal.
 `scroll.refresh` (`{stateKey, onRefresh}`, pull-to-refresh on a vertical scroll) requires
 `prototype_refresh_v1`, with the same refusal.
 Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve

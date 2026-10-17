@@ -64,13 +64,10 @@ describe("#10701: a restarted harness's handoff waits out the daemon's lease for
   }
 
   async function setUp(daemonLeaseMs: number): Promise<void> {
-    await sessionManager.createSession(
-      SESSION,
-      "emulator-5554",
-      "android",
-      10 * 60_000,
-      daemonLeaseMs,
-    );
+    await sessionManager.createSession(SESSION, "emulator-5554", "android", {
+      timeoutMs: 10 * 60_000,
+      heartbeatTimeoutMs: daemonLeaseMs,
+    });
     // The old harness's proxy owns the session.
     expect((await heartbeat("old-harness", true)).success).toBe(true);
     const client = new FakeDaemonClient({

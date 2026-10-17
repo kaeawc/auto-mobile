@@ -101,8 +101,35 @@ struct PrototypeTextFieldView: View {
             }
             .padding(.leading, 16)
             .frame(minHeight: 56)
+        } else if node.trailingIcon != nil || node.leadingIcon != nil {
+            HStack(spacing: 4) {
+                if let symbol = prototypeSymbol(node.leadingIcon) {
+                    PrototypeGlyph(symbol: symbol).accessibilityHidden(true)
+                }
+                field
+                if let icon = node.trailingIcon { trailingIconView(icon) }
+            }
         } else {
             field
+        }
+    }
+
+    /// An SF Symbol button (or plain glyph without `onTap`) beside the field; the label names it.
+    @ViewBuilder
+    private func trailingIconView(_ icon: PrototypeAppBarAction) -> some View {
+        if let symbol = prototypeSymbol(icon.icon) {
+            if icon.onTap?.isEmpty == false {
+                Button { model.activate(.appBarButton(icon)) } label: {
+                    PrototypeGlyph(symbol: symbol)
+                        .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(icon.label)
+                .prototypeIdentifier(node.partIdentifier("trailingIcon"))
+            } else {
+                PrototypeGlyph(symbol: symbol).accessibilityHidden(true)
+            }
         }
     }
 
@@ -135,7 +162,7 @@ struct PrototypeTextFieldView: View {
         }
         .onSubmit {
             draft.endEditing(stored: model.state[key]?.displayString ?? "")
-            if node.type == "searchBar" { model.run(node.onSubmit ?? []) }
+            if node.type == "searchBar" || node.type == "textField" { model.run(node.onSubmit ?? []) }
         }
         .onChange(of: stored) { _, value in
             draft.storedChanged(to: value)
@@ -180,6 +207,7 @@ struct PrototypeTextFieldView: View {
         }
         .focused($focused)
         .keyboardType(keyboardType)
+        .submitLabel(options.submitLabel)
     }
 
     @ViewBuilder private var configuredInput: some View {
@@ -1111,5 +1139,19 @@ struct PrototypeSnackbarView: View {
         .frame(minHeight: 48)
         .background(RoundedRectangle(cornerRadius: 4).fill(colors.inverseSurface))
         .padding(12)
+    }
+}
+
+extension PrototypeTextFieldOptions {
+    /// SwiftUI's name for the authored keyboard action key; the system default without one.
+    var submitLabel: SubmitLabel {
+        switch imeAction {
+        case .done: .done
+        case .next: .next
+        case .search: .search
+        case .send: .send
+        case .go: .go
+        case nil: .return
+        }
     }
 }

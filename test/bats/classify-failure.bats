@@ -157,6 +157,21 @@ JSON
   [[ "$output" != *$'}\nat'* ]]
 }
 
+@test "Installer Minimal action-download failures from codeload.github.com classify as rerun" {
+  fixture="$BATS_TEST_TMPDIR/installer-codeload-run.json"
+  cat > "$fixture" <<'JSON'
+{"headBranch":"work/ci","jobs":[{"databaseId":64,"name":"Installer Minimal (macos-latest)","conclusion":"failure","steps":[{"name":"Set up job","conclusion":"failure"}]}]}
+JSON
+  for message in \
+    'nodename nor servname provided, or not known (codeload.github.com:443)' \
+    'Failed to download archive https://codeload.github.com/actions/checkout/tar.gz/abc after 3 attempts.' \
+    "Action 'actions/upload-artifact@v6' download has timed out after 3 attempts."; do
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$fixture" FAKE_ANNOTATION="$message" bash "$SCRIPT" 604
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — self-hosted Mac pool cannot fetch actions"* ]]
+  done
+}
+
 @test "does not treat signal evidence as diagnosis when status is ordinary failure" {
   fixture="$BATS_TEST_TMPDIR/ordinary-exit-run.json"
   cat > "$fixture" <<'JSON'

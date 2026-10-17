@@ -11,6 +11,7 @@ import {
   requireTestTag,
   type FocusIdentifierKey,
 } from "./tapFocusIdentity";
+import { pollSearchUntil } from "./searchUntilPoller";
 import { matchedTapElement } from "./tapPointGeometry";
 import {
   isContainerAvailable,
@@ -35,7 +36,7 @@ import {
   type TalkBackTargetContext,
 } from "../talkback/resourceIdActionError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
-import { inputDurationArgument } from "./touchscreenInput";
+import { dispatchAndroidLongPress } from "./androidLongPress";
 import { LONG_PRESS_HARD_MAX_MS } from "./tapAtGesture";
 import { unsupportedDisplayOptionMessage } from "../observe/SessionDisplayContext";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
@@ -50,7 +51,7 @@ import {
   type DisplayFenceDependencies,
 } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../observe/StaleDisplayError";
-import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import { KeyboardOcclusionError } from "../../models/KeyboardOcclusionError";
 import {
   ElementResolver,
@@ -65,7 +66,7 @@ import {
   type HierarchyCapture,
 } from "../observe/HierarchyCapture";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import { BaseVisualChange, ProgressCallback, type ObservedActionResult } from "./BaseVisualChange";
 import {
   displayTransitions,
   type DisplayTransitionReader,
@@ -122,7 +123,7 @@ import {
 import { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../accessibility/AccessibilityDetector";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
-import { MAX_SETTIMEOUT_DELAY_MS, type Timer } from "../../utils/SystemTimer";
+import { type Timer } from "../../utils/SystemTimer";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
@@ -2959,82 +2960,77 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         element = null;
         offScreenRejections += 1;
       }
-      const deadline = startTime + searchDurationMs;
       // Fast cached iOS responses must yield just like device round-trips.
       // Keep an independent request ceiling even if the wall clock moves backward.
-      const maxRequests = Math.ceil(searchDurationMs / TapOnElement.SEARCH_POLL_INTERVAL_MS);
-      let nextPollAt = startTime;
-      while (this.timer.now() < deadline && requestCount < maxRequests) {
-        throwIfAborted(signal);
-        const delayMs = Math.min(nextPollAt, deadline) - this.timer.now();
-        if (delayMs > 0) {
-          await this.timer.sleep(delayMs);
-          throwIfAborted(signal);
-        }
-        if (this.timer.now() >= deadline) {
-          break;
-        }
-        nextPollAt = this.timer.now() + TapOnElement.SEARCH_POLL_INTERVAL_MS;
-        const remainingTimeMs = Math.max(0, deadline - this.timer.now());
-        const refreshedHierarchy = await this.tapVerificationRefresh({
-          refresh: options.verification?.refresh,
-          screenSize: latestScreenSize,
-          signal,
-        })(remainingTimeMs);
-        requestCount += 1;
+      const polled = await pollSearchUntil({
+        timer: this.timer,
+        startTime,
+        durationMs: searchDurationMs,
+        intervalMs: TapOnElement.SEARCH_POLL_INTERVAL_MS,
+        pacing: "cadence",
+        maxRequests: Math.ceil(searchDurationMs / TapOnElement.SEARCH_POLL_INTERVAL_MS),
+        discardLateResult: false,
+        signal,
+        fetch: (remainingTimeMs) =>
+          this.tapVerificationRefresh({
+            refresh: options.verification?.refresh,
+            screenSize: latestScreenSize,
+            signal,
+          })(remainingTimeMs),
+        accept: (refreshedHierarchy) => {
+          latestScreenSize = this.getScreenSizeFromHierarchy(refreshedHierarchy, {
+            observationScreenSize: latestScreenSize,
+            display: latestViewHierarchy,
+          });
+          latestViewHierarchy = refreshedHierarchy;
+          const hash = this.hashViewHierarchy(refreshedHierarchy);
+          if (hash && hash !== lastHash) {
+            changeCount += 1;
+            lastHash = hash;
+          } else if (hash && !lastHash) {
+            changeCount += 1;
+            lastHash = hash;
+          }
 
-        if (!refreshedHierarchy) {
-          continue;
-        }
-
-        latestScreenSize = this.getScreenSizeFromHierarchy(refreshedHierarchy, {
-          observationScreenSize: latestScreenSize,
-          display: latestViewHierarchy,
-        });
-        latestViewHierarchy = refreshedHierarchy;
-        const hash = this.hashViewHierarchy(refreshedHierarchy);
-        if (hash && hash !== lastHash) {
-          changeCount += 1;
-          lastHash = hash;
-        } else if (hash && !lastHash) {
-          changeCount += 1;
-          lastHash = hash;
-        }
-
-        const searchResult = this.findElementForSearch(
-          {
-            ...options,
-            screenSizeOptions: {
-              observationScreenSize: latestScreenSize,
-              display: latestViewHierarchy,
+          const searchResult = this.findElementForSearch(
+            {
+              ...options,
+              screenSizeOptions: {
+                observationScreenSize: latestScreenSize,
+                display: latestViewHierarchy,
+              },
             },
-          },
-          refreshedHierarchy,
-        );
-        selection = searchResult.selection;
-        element = selection.element;
-        containerFoundEver = containerFoundEver || searchResult.containerFound;
-        if (!element && selection.matchedElement) {
-          visibilityError = invisibleError();
-        }
-        if (
-          element &&
-          this.isElementTapTargetOffScreen(selection, refreshedHierarchy, latestScreenSize, options)
-        ) {
-          visibilityError = invisibleError();
-          logger.warn(
-            `[TapOnElement] Element found but tap target is off-screen, retrying. ` +
-              `bounds=${JSON.stringify(element.bounds)}`,
+            refreshedHierarchy,
           );
-          selection = { ...selection, element: null };
-          element = null;
-          offScreenRejections += 1;
-          continue;
-        }
-        if (element) {
-          break;
-        }
-      }
+          selection = searchResult.selection;
+          element = selection.element;
+          containerFoundEver = containerFoundEver || searchResult.containerFound;
+          if (!element && selection.matchedElement) {
+            visibilityError = invisibleError();
+          }
+          if (
+            element &&
+            this.isElementTapTargetOffScreen(
+              selection,
+              refreshedHierarchy,
+              latestScreenSize,
+              options,
+            )
+          ) {
+            visibilityError = invisibleError();
+            logger.warn(
+              `[TapOnElement] Element found but tap target is off-screen, retrying. ` +
+                `bounds=${JSON.stringify(element.bounds)}`,
+            );
+            selection = { ...selection, element: null };
+            element = null;
+            offScreenRejections += 1;
+            return false;
+          }
+          return element !== null;
+        },
+      });
+      requestCount = polled.requestCount;
     }
 
     if (this.isPrototypeWindowPending(options, latestViewHierarchy)) {
@@ -4096,34 +4092,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           }
 
           if (options.accessibilityLink) {
-            const occurrence = options.index ?? 0;
-            const owner = this.resolveContainerElement(
-              viewHierarchy,
-              this.withObservationScreenSize(options, observeResult),
-            );
-            if (options.container && !owner) {
-              return { success: false, error: "Semantic link container is no longer present" };
-            }
-            const activation = await this.activateSemanticLink(
+            return this.activateAccessibilityLinkPhase(
+              options,
               options.accessibilityLink,
-              occurrence,
-              owner,
+              observeResult,
               viewHierarchy,
+              activationWarnings,
               signal,
             );
-            if (!activation.success) {
-              return { success: false, error: activation.error };
-            }
-            return {
-              success: true,
-              action: options.action,
-              element: {
-                text: options.accessibilityLink,
-                bounds: { left: 0, top: 0, right: 0, bottom: 0 },
-              } as Element,
-              activatedSubtext: { text: options.accessibilityLink, occurrence },
-              ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
-            };
           }
 
           let searchOutcome = await perf.track("findElement", () =>
@@ -4208,26 +4184,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             return ensureCheckedResult;
           }
           if (options.subtext) {
-            const occurrence = options.subtext.occurrence ?? 0;
-            const activation = await this.activateSemanticLink(
-              options.subtext.text,
-              occurrence,
+            return this.activateSubtextPhase({
+              options,
+              subtext: options.subtext,
               element,
               viewHierarchy,
-              signal,
-            );
-            if (!activation.success) {
-              return { success: false, error: activation.error };
-            }
-            return {
-              success: true,
-              action: options.action,
-              element,
               selectedElement: selectedElementMetadata,
               searchUntil: searchOutcome.stats,
-              activatedSubtext: { text: options.subtext.text, occurrence },
-              ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
-            };
+              activationWarnings,
+              signal,
+            });
           }
           const initialTapPoint = this.geometry.getElementCenter(element);
           let action = options.action;
@@ -4355,70 +4321,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           }
           appendDisabledElementWarning(this.device.platform, tapElement, activationWarnings);
           this.logClickableParentSelection(usedParent);
-          const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy, {
-            observationScreenSize: observeResult.screenSize,
-            display: observeResult.viewHierarchy,
-          });
-          const visibleBounds = this.visibleTapBounds(
+          const { tapPoint, warning: tapPointWarning } = this.planVisibleTapPoint({
+            options,
+            requestedAction,
+            observeResult,
+            viewHierarchy,
             finalSelection,
-            viewHierarchy,
-            screenSize,
-            requestedAction === "focus" ? { ...options, action: "focus" } : options,
             tapElement,
-          );
-          if (!visibleBounds) {
-            throw this.invisibleMatchFailure(
-              finalSelection,
-              options,
-              viewHierarchy,
-              screenSize,
-              "Matched element has no visible tap area on this screen. " +
-                "Scroll it into view with swipeOn, then retry tapOn.",
-            );
-          }
-          const visibleTapPoint = this.resolveVisibleTapPoint(
-            tapElement,
-            viewHierarchy,
-            visibleBounds,
-            {
-              options,
-              screenSize,
-              chromeElements: [
-                matchedTapElement(
-                  finalSelection,
-                  tapElement,
-                  requestedAction === "focus" ? { ...options, action: "focus" } : options,
-                ),
-                tapElement,
-              ],
-            },
-          );
-          if (!visibleTapPoint) {
-            throw this.invisibleMatchFailure(
-              finalSelection,
-              options,
-              viewHierarchy,
-              screenSize,
-              "Matched element has no unobstructed visible tap area. " +
-                "Dismiss the keyboard or scroll it into view, then retry tapOn.",
-            );
-          }
-          const barDecision = this.prototypeBarTapDecision(
-            viewHierarchy,
-            tapElement,
-            visibleTapPoint,
-          );
-          if (barDecision.kind === "refuse") {
-            throw new ActionableError(
-              `Cannot tap (${visibleTapPoint.x}, ${visibleTapPoint.y}): the AutoMobile prototype control is under the ${barDecision.bar} and the touch would not reach it. ` +
-                "Move the control inside the safe area (safeAreaPadding on the node, or an offset in the floating placement), then retry.",
-            );
-          }
-          const tapPoint = barDecision.point;
-          // The selector resolved in the scoped tree; the touch lands on whatever is on top (#9305).
-          assertAppGestureNotUnderPrototype(viewHierarchy, options.layer, tapPoint, "tap");
-          if (barDecision.warning) {
-            activationWarnings.push(barDecision.warning);
+          });
+          if (tapPointWarning) {
+            activationWarnings.push(tapPointWarning);
           }
           const tapBounds = tapElement.bounds;
           logger.info(
@@ -4582,26 +4494,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         this.enforceFreshnessConsistencyWithEffect(previousObserveResult, result);
       }
 
-      if (requestedAction === "focus" && result.success && !result.wasAlreadyFocused) {
-        const target = focusTarget ?? result.element;
-        result.focusVerified = await this.verifyFocusAfterTap(
-          result,
-          (observation) =>
-            this.verifyFocusedInputTarget(
-              { ...options, action: "focus" },
-              target,
-              observation,
-              focusLabelText,
-              result.selectedElement?.indexInMatches,
-              preTapHierarchy,
-            ),
-          signal,
-        );
-        if (!result.focusVerified) {
-          result.success = false;
-          result.error = `Failed to confirm focus on editable input ${describeFocusTarget(target, options)}: the focused field could not be matched to the target`;
-        }
-      }
+      await this.confirmFocusAfterTap({
+        result,
+        options,
+        requestedAction,
+        focusTarget,
+        focusLabelText,
+        preTapHierarchy,
+        signal,
+      });
 
       if (options.action === "longPress") {
         const metadata = this.detectLongPressMetadata(previousObserveResult, result.observation);
@@ -4637,6 +4538,198 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         searchUntilStats,
         debugContext,
       );
+    }
+  }
+
+  private async activateAccessibilityLinkPhase(
+    options: TapOnElementOptions,
+    linkText: string,
+    observeResult: ObserveResult,
+    viewHierarchy: ViewHierarchyResult,
+    activationWarnings: string[],
+    signal?: AbortSignal,
+  ): Promise<TapOnFocusOutcome | ObservedActionResult> {
+    const occurrence = options.index ?? 0;
+    const owner = this.resolveContainerElement(
+      viewHierarchy,
+      this.withObservationScreenSize(options, observeResult),
+    );
+    if (options.container && !owner) {
+      return { success: false, error: "Semantic link container is no longer present" };
+    }
+    const activation = await this.activateSemanticLink(
+      linkText,
+      occurrence,
+      owner,
+      viewHierarchy,
+      signal,
+    );
+    if (!activation.success) {
+      return { success: false, error: activation.error };
+    }
+    return {
+      success: true,
+      action: options.action,
+      element: {
+        text: linkText,
+        bounds: { left: 0, top: 0, right: 0, bottom: 0 },
+      } as Element,
+      activatedSubtext: { text: linkText, occurrence },
+      ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
+    };
+  }
+
+  private async activateSubtextPhase({
+    options,
+    subtext,
+    element,
+    viewHierarchy,
+    selectedElement,
+    searchUntil,
+    activationWarnings,
+    signal,
+  }: {
+    options: TapOnElementOptions;
+    subtext: NonNullable<TapOnElementOptions["subtext"]>;
+    element: Element;
+    viewHierarchy: ViewHierarchyResult;
+    selectedElement: TapOnFocusResult["selectedElement"];
+    searchUntil: SearchUntilStats;
+    activationWarnings: string[];
+    signal?: AbortSignal;
+  }): Promise<TapOnFocusOutcome | ObservedActionResult> {
+    const occurrence = subtext.occurrence ?? 0;
+    const activation = await this.activateSemanticLink(
+      subtext.text,
+      occurrence,
+      element,
+      viewHierarchy,
+      signal,
+    );
+    if (!activation.success) {
+      return { success: false, error: activation.error };
+    }
+    return {
+      success: true,
+      action: options.action,
+      element,
+      selectedElement,
+      searchUntil,
+      activatedSubtext: { text: subtext.text, occurrence },
+      ...warningsField(withActivationWarning(activationWarnings, activation.warning)),
+    };
+  }
+
+  /** Pick the tap point inside the visible, unobstructed part of the resolved element. */
+  private planVisibleTapPoint({
+    options,
+    requestedAction,
+    observeResult,
+    viewHierarchy,
+    finalSelection,
+    tapElement,
+  }: {
+    options: TapOnElementOptions;
+    requestedAction: NonNullable<TapOnElementOptions["action"]>;
+    observeResult: ObserveResult;
+    viewHierarchy: ViewHierarchyResult;
+    finalSelection: ElementSelectionResult;
+    tapElement: Element;
+  }): { tapPoint: { x: number; y: number }; warning?: string } {
+    const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy, {
+      observationScreenSize: observeResult.screenSize,
+      display: observeResult.viewHierarchy,
+    });
+    const visibleBounds = this.visibleTapBounds(
+      finalSelection,
+      viewHierarchy,
+      screenSize,
+      requestedAction === "focus" ? { ...options, action: "focus" } : options,
+      tapElement,
+    );
+    if (!visibleBounds) {
+      throw this.invisibleMatchFailure(
+        finalSelection,
+        options,
+        viewHierarchy,
+        screenSize,
+        "Matched element has no visible tap area on this screen. " +
+          "Scroll it into view with swipeOn, then retry tapOn.",
+      );
+    }
+    const visibleTapPoint = this.resolveVisibleTapPoint(tapElement, viewHierarchy, visibleBounds, {
+      options,
+      screenSize,
+      chromeElements: [
+        matchedTapElement(
+          finalSelection,
+          tapElement,
+          requestedAction === "focus" ? { ...options, action: "focus" } : options,
+        ),
+        tapElement,
+      ],
+    });
+    if (!visibleTapPoint) {
+      throw this.invisibleMatchFailure(
+        finalSelection,
+        options,
+        viewHierarchy,
+        screenSize,
+        "Matched element has no unobstructed visible tap area. " +
+          "Dismiss the keyboard or scroll it into view, then retry tapOn.",
+      );
+    }
+    const barDecision = this.prototypeBarTapDecision(viewHierarchy, tapElement, visibleTapPoint);
+    if (barDecision.kind === "refuse") {
+      throw new ActionableError(
+        `Cannot tap (${visibleTapPoint.x}, ${visibleTapPoint.y}): the AutoMobile prototype control is under the ${barDecision.bar} and the touch would not reach it. ` +
+          "Move the control inside the safe area (safeAreaPadding on the node, or an offset in the floating placement), then retry.",
+      );
+    }
+    const tapPoint = barDecision.point;
+    // The selector resolved in the scoped tree; the touch lands on whatever is on top (#9305).
+    assertAppGestureNotUnderPrototype(viewHierarchy, options.layer, tapPoint, "tap");
+    return { tapPoint, ...(barDecision.warning ? { warning: barDecision.warning } : {}) };
+  }
+
+  /** Mark a focus-requested tap as failed unless the focused field matches the target (mutates `result`). */
+  private async confirmFocusAfterTap({
+    result,
+    options,
+    requestedAction,
+    focusTarget,
+    focusLabelText,
+    preTapHierarchy,
+    signal,
+  }: {
+    result: TapOnFocusOutcome;
+    options: TapOnElementOptions;
+    requestedAction: NonNullable<TapOnElementOptions["action"]>;
+    focusTarget: Element | undefined;
+    focusLabelText: string | undefined;
+    preTapHierarchy: ViewHierarchyResult | undefined;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    if (requestedAction !== "focus" || !result.success || result.wasAlreadyFocused) {
+      return;
+    }
+    const target = focusTarget ?? result.element;
+    result.focusVerified = await this.verifyFocusAfterTap(
+      result,
+      (observation) =>
+        this.verifyFocusedInputTarget(
+          { ...options, action: "focus" },
+          target,
+          observation,
+          focusLabelText,
+          result.selectedElement?.indexInMatches,
+          preTapHierarchy,
+        ),
+      signal,
+    );
+    if (!result.focusVerified) {
+      result.success = false;
+      result.error = `Failed to confirm focus on editable input ${describeFocusTarget(target, options)}: the focused field could not be matched to the target`;
     }
   }
 
@@ -5535,37 +5628,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
     }
 
-    const longPressTimeoutMs = Math.min(durationMs + 2_000, MAX_SETTIMEOUT_DELAY_MS);
-    try {
-      try {
-        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-        fence?.assertCurrent();
-        await this.adb.executeCommand(
-          `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`,
-          { timeoutMs: longPressTimeoutMs, signal },
-        );
-      } catch (error) {
-        logger.warn(`[TapOnElement] touch input swipe failed: ${errorMessage(error)}`, error);
-        this.throwIfLongPressInterrupted(error, durationMs, signal);
-        if (error instanceof StaleDisplayError) {
-          throw error;
-        }
-        throwIfAborted(signal);
-        // Only a non-cancellation failure may use the legacy input source.
-        fence?.assertCurrent();
-        await this.adb.executeCommand(
-          `shell input swipe ${x} ${y} ${x} ${y} ${inputDurationArgument(durationMs)}`,
-          { timeoutMs: longPressTimeoutMs, signal },
-        );
-      }
-    } catch (error) {
-      logger.warn(`[TapOnElement] Android long press failed: ${errorMessage(error)}`, error);
-      this.throwIfLongPressInterrupted(error, durationMs, signal);
-      if (error instanceof StaleDisplayError) {
-        throw error;
-      }
-      throw toActionableError(error, "Android long press failed");
-    }
+    await dispatchAndroidLongPress({
+      adb: this.adb,
+      x,
+      y,
+      durationMs,
+      signal,
+      assertCurrent: fence ? () => fence.assertCurrent() : undefined,
+      logTag: "TapOnElement",
+    });
   }
 
   private throwIfLongPressInterrupted(

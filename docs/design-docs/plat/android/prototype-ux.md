@@ -658,6 +658,22 @@ All these options require `prototype_text_field_options_v1`. A device without th
 is refused before uploads or show; nothing is shown. Update CtrlProxy, or relaunch the iOS
 app with `launchApp prototype: true`, or drop the textField options.
 
+A `textField` may also declare `trailingIcon: {icon, label, onTap?}` (a built-in icon, its
+nonempty accessible `label` and optional 1-32 `onTap` actions, for example a clear button that
+`setState`s the field's key to an empty string; without `onTap` it is decoration),
+`imeAction` (`done`, `next`, `search`, `send` or `go`: the keyboard's action key) and
+`onSubmit` (1-32 actions run when that key is pressed; without `imeAction` the key is
+`done`). Multiline text has no IME action, so `imeAction` and `onSubmit` are refused with
+`multiline: true`. These need `prototype_text_field_actions_v1`, with the same refusal.
+
+Android draws `trailingIcon` as an `IconButton` (its `label` is the content description, its tag is
+`<testTag>.trailingIcon`) in the field's trailing slot and maps `imeAction` to Compose
+`ImeAction` with `KeyboardActions`; `next` also moves focus. iOS maps `imeAction` to `submitLabel`
+and `onSubmit`, and draws the trailing icon as an SF Symbol button inside the field.
+
+`leadingIcon` is a built-in icon name drawn in the field's leading slot (decoration, no actions; an
+SF Symbol on iOS), gated by `prototype_text_field_leading_icon_v1`.
+
 Open question: a `secure` field's value still lives in state and in `change` events/`inspect`;
 this slice does not redact it.
 
@@ -1704,6 +1720,28 @@ Android draws it with Material `PullToRefreshBox` around the scroll; the authore
 size modifiers sit on the box. iOS uses `refreshable`, whose async closure stays open until the key
 is false again; a key set true without a pull (an agent patch) shows a plain `ProgressView` at the
 top because SwiftUI cannot start `refreshable` programmatically.
+
+## Swipe actions (not device-verified)
+
+A `row` or `listItem` may declare `swipeActions: {start?, end?, fullSwipe?}` (needs
+`prototype_swipe_actions_v1`). `start` is revealed by swiping right and `end` by swiping left
+(mirrored in right-to-left layouts is not done: sides are physical). Each side holds 1-3 entries
+`{label, icon?, role?, color?, onTap}`: `label` is the button text and its accessibility name,
+`icon` a built-in icon name (an SF Symbol on iOS), `role` `default` (primary colours) or
+`destructive` (error colours), `color` a hex or theme role that overrides the background, and
+`onTap` 1-32 actions. The first entry of a side sits at the screen edge. A release past 40% of
+the revealed width, or a fling past the open velocity, leaves the row open; a drag beyond the
+revealed width resists (rubber-band). With `fullSwipe: true` a drag past 60% of the row (or a hard
+fling) runs the swiped side's first entry and closes the row. Only one row is open at a time, and a
+tap on an open row closes it instead of running its `onTap`. Revealed buttons get the test tag
+`<rowTestTag>.swipe.<index>`, counting `start` entries first and then `end`; they exist only while
+the row is open. Every entry is also an accessibility action (TalkBack custom action, VoiceOver
+action) on the row, so assistive technology can run it without swiping. Reduced motion or spec
+`motion: "none"` snaps instead of animating. Put swipeActions on repeated rows; a row inside a
+horizontal `pager` or a `carousel` is refused because their drag would compete.
+
+Android drags the row's foreground with `draggable` over the revealed buttons, announces every entry as
+a TalkBack custom action and uses the shared swipe thresholds in `PrototypeSwipe.kt`.
 
 ## Prototype gesture action lists
 

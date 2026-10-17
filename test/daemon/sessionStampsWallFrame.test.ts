@@ -67,16 +67,13 @@ async function world() {
 function assigner(manager: SessionManager): SessionDeviceAssigner {
   return {
     async assignDeviceToSession(id, _platform, target): Promise<string> {
-      const session = await manager.createSession(
-        id,
-        DEVICE,
-        "android",
-        target?.liveness?.sessionTimeoutMs,
-        target?.liveness?.heartbeatTimeoutMs,
-        target?.stableDeviceId,
-        target?.liveness,
-        target?.initialOwnership,
-      );
+      const session = await manager.createSession(id, DEVICE, "android", {
+        timeoutMs: target?.liveness?.sessionTimeoutMs,
+        heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+        stableDeviceId: target?.stableDeviceId,
+        recoveredLiveness: target?.liveness,
+        initialOwnership: target?.initialOwnership,
+      });
       return session.assignedDevice;
     },
   };
@@ -89,7 +86,7 @@ describe("persisted session stamps cross daemons as wall epoch ms (#11162)", () 
     timer.stepWallClock(-HOUR_MS);
     expect(writer.sessionNow() - timer.now()).toBe(HOUR_MS);
 
-    await writer.createSession("s", DEVICE, "android", IDLE_MS);
+    await writer.createSession("s", DEVICE, "android", { timeoutMs: IDLE_MS });
     const active = await repository.getSession("s");
     expect(active).toMatchObject({
       created_at_ms: timer.now(),
@@ -179,7 +176,7 @@ describe("a daemon reads back its own rows without a wall step shifting them (#1
     // counted as host sleep and the session clock ignores it.
     timer.simulateSleepCountingMonotonicClock();
     const writer = daemon();
-    await writer.createSession("s", DEVICE, "android", IDLE_MS);
+    await writer.createSession("s", DEVICE, "android", { timeoutMs: IDLE_MS });
     await writer.releaseSession("s", deviceRestartReleaseReason("Pixel_8_API_35"));
 
     timer.stepWallClock(stepMs);
@@ -193,7 +190,7 @@ describe("a daemon reads back its own rows without a wall step shifting them (#1
   test("a stamp another process wrote is converted, not served from the writer's memory", async () => {
     const { timer, repository, daemon } = await world();
     const writer = daemon();
-    await writer.createSession("s", DEVICE, "android", IDLE_MS);
+    await writer.createSession("s", DEVICE, "android", { timeoutMs: IDLE_MS });
     await writer.releaseSession("s", deviceRestartReleaseReason("Pixel_8_API_35"));
     // A peer daemon takes the row over and releases it again 5 minutes later in wall ms.
     timer.advanceTime(300_000);

@@ -99,6 +99,11 @@ enum PrototypeRepeat {
                 return .object(member)
             })
         }
+        if case var .object(swipe)? = fields["swipeActions"] {
+            list("start", in: &swipe)
+            list("end", in: &swipe)
+            fields["swipeActions"] = .object(swipe)
+        }
         if case let .array(checks)? = fields["checks"] {
             fields["checks"] = .array(checks.map { check in
                 guard case var .object(rule) = check else { return check }
@@ -133,6 +138,8 @@ enum PrototypeRepeat {
             string("title", in: &fields)
             part("navigationIcon", in: &fields)
             list("actions", in: &fields)
+        case .string("textField")?:
+            part("trailingIcon", in: &fields)
         case .string("searchBar")?:
             string("placeholder", in: &fields)
             list("trailingActions", in: &fields)
@@ -323,11 +330,21 @@ private struct Instance {
 
     /// Part actions bind independently of the shared text-kind field mapping.
     private func bindComponentActions(_ fields: inout [String: JSONValue]) {
+        if case var .object(swipe)? = fields["swipeActions"] {
+            bindList("start", in: &swipe) { bindPartFields(&$0) }
+            bindList("end", in: &swipe) { bindPartFields(&$0) }
+            fields["swipeActions"] = .object(swipe)
+        }
         guard case let .string(type)? = fields["type"] else { return }
         switch type {
         case "topAppBar":
             bindPart("navigationIcon", in: &fields)
             bindList("actions", in: &fields) { bindPartFields(&$0) }
+        case "textField":
+            bindPart("trailingIcon", in: &fields)
+            if case let .array(actions)? = fields["onSubmit"] {
+                fields["onSubmit"] = .array(actions.map(bindAction))
+            }
         case "searchBar":
             bindList("trailingActions", in: &fields) { bindPartFields(&$0) }
             if case let .array(actions)? = fields["onSubmit"] {

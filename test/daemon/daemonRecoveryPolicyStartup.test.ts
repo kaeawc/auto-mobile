@@ -19,17 +19,13 @@ describe("daemon device recovery policy startup", () => {
     try {
       const daemon = new Daemon(
         {},
-        undefined,
-        new FakeTimer(),
-        new DeviceSessionRepository(),
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
         {
-          AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS: "true",
-          AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS: "999",
+          timer: new FakeTimer(),
+          deviceSessionRepository: new DeviceSessionRepository(),
+          recoveryPolicyEnvironment: {
+            AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS: "true",
+            AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS: "999",
+          },
         },
       );
 

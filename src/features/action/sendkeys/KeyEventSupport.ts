@@ -207,7 +207,7 @@ export class KeyEventSupport {
           logLabel: "shell input <password key event>",
         });
       } else {
-        await this.host.adb.executeCommand(command, undefined, undefined, undefined, signal);
+        await this.host.adb.executeCommand(command, { signal });
       }
     }
   }

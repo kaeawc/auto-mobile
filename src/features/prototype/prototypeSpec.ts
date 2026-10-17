@@ -538,8 +538,32 @@ const repeatShape = { repeat: repeatSchema.optional() };
 const boxBaseSchema = z
   .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["box"]) })
   .strict();
+const swipeActionSchema = z
+  .object({
+    label: z.string().min(1),
+    icon: iconNameSchema.optional(),
+    role: z.enum(["default", "destructive"]).optional(),
+    color: colorTokenSchema.optional(),
+    onTap: z.array(actionSchema).min(1).max(32),
+  })
+  .strict();
+const swipeActionListSchema = z.array(swipeActionSchema).min(1).max(3);
+const swipeActionsSchema = z
+  .object({
+    start: swipeActionListSchema.optional(),
+    end: swipeActionListSchema.optional(),
+    fullSwipe: z.boolean().optional(),
+  })
+  .strict();
+const swipeActionsShape = { swipeActions: swipeActionsSchema.optional() };
 const rowBaseSchema = z
-  .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["row"]) })
+  .object({
+    ...commonNodeShape,
+    ...gestureNodeShape,
+    ...swipeActionsShape,
+    ...repeatShape,
+    type: z.enum(["row"]),
+  })
   .strict();
 const columnBaseSchema = z
   .object({ ...commonNodeShape, ...gestureNodeShape, ...repeatShape, type: z.enum(["column"]) })
@@ -609,6 +633,11 @@ const iconBaseSchema = z
   })
   .strict();
 const spacerBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["spacer"]) }).strict();
+const actionListSchema = z.array(actionSchema).min(1).max(32);
+// An icon-only control in a top app bar: the icon, its accessible label and its tap.
+const appBarActionSchema = z
+  .object({ icon: iconNameSchema, label: z.string().min(1), onTap: actionListSchema.optional() })
+  .strict();
 const textFieldBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -627,6 +656,10 @@ const textFieldBaseSchema = z
     minLines: z.number().int().min(1).max(20).optional(),
     maxLines: z.number().int().min(1).max(20).optional(),
     maxLength: z.number().int().min(1).max(10000).optional(),
+    leadingIcon: iconNameSchema.optional(),
+    trailingIcon: appBarActionSchema.optional(),
+    imeAction: z.enum(["done", "next", "search", "send", "go"]).optional(),
+    onSubmit: actionListSchema.optional(),
   })
   .strict();
 const switchBaseSchema = z
@@ -700,6 +733,7 @@ const listItemBaseSchema = z
   .object({
     ...commonNodeShape,
     ...enabledShape,
+    ...swipeActionsShape,
     type: z.enum(["listItem"]),
     headline: z.string().min(1),
     supporting: z.string().min(1).optional(),
@@ -738,11 +772,6 @@ const cardBaseSchema = z
   })
   .strict();
 const stateKeyFieldSchema = stateKeySchema;
-const actionListSchema = z.array(actionSchema).min(1).max(32);
-// An icon-only control in a top app bar: the icon, its accessible label and its tap.
-const appBarActionSchema = z
-  .object({ icon: iconNameSchema, label: z.string().min(1), onTap: actionListSchema.optional() })
-  .strict();
 const searchBarBaseSchema = z
   .object({
     ...commonNodeShape,

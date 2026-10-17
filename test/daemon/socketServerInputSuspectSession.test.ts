@@ -123,16 +123,10 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
 
   /** The session in one of the states the heartbeat monitor judges differently. */
   async function createSession(kind: SessionKind): Promise<void> {
-    await sessionManager.createSession(
-      SESSION,
-      DEVICE,
-      "android",
-      IDLE_MS,
-      undefined,
-      undefined,
-      undefined,
-      kind === "awaiting-owner" ? "awaiting-owner" : "owned",
-    );
+    await sessionManager.createSession(SESSION, DEVICE, "android", {
+      timeoutMs: IDLE_MS,
+      initialOwnership: kind === "awaiting-owner" ? "awaiting-owner" : "owned",
+    });
     if (kind === "owned-with-token") {
       await heartbeat(true);
     } else if (kind === "cli-idle") {

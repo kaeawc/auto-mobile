@@ -1144,8 +1144,17 @@ export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
 /** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
 export const PROTOTYPE_GESTURES_CAPABILITY = "prototype_gestures_v1";
 
+/** Draws `swipeActions` on a row or listItem and exposes them as accessibility actions. */
+export const PROTOTYPE_SWIPE_ACTIONS_CAPABILITY = "prototype_swipe_actions_v1";
+
+/** Draws the textField `trailingIcon` (with its tap actions) and runs `imeAction` with `onSubmit`. */
+export const PROTOTYPE_TEXT_FIELD_ACTIONS_CAPABILITY = "prototype_text_field_actions_v1";
+
 /** Draws the `carousel` node and the pager `indicator` option. */
 export const PROTOTYPE_CAROUSEL_CAPABILITY = "prototype_carousel_v1";
+
+/** Draws the textField `leadingIcon` in the field's leading slot. */
+export const PROTOTYPE_TEXT_FIELD_LEADING_ICON_CAPABILITY = "prototype_text_field_leading_icon_v1";
 
 /** Draws pull-to-refresh on a vertical prototype `scroll` bound to a boolean state key. */
 export const PROTOTYPE_REFRESH_CAPABILITY = "prototype_refresh_v1";

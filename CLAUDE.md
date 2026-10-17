@@ -199,10 +199,11 @@ Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (its
 exit code is authoritative; CI disables fixes so even auto-fixable violations
 exit non-zero). The ratchet's violation counts cover only the rules set to `warn`
 because they carry pre-existing violations: `complexity`, `max-depth`, `max-params`,
-`max-lines-per-function`, `auto-mobile/catch-convention`,
-`auto-mobile/no-unknown-cast`,
-`auto-mobile/no-caught-error-interpolation`, and the two type-aware promise rules
-(`typescript/no-floating-promises`, `typescript/no-misused-promises`). Inline suppressions of ANY rule are ratcheted too: a
+`max-lines-per-function`, `auto-mobile/catch-convention`, and the two type-aware
+promise rules (`typescript/no-floating-promises`, `typescript/no-misused-promises`,
+currently at a zero baseline but kept here because the fast stage is not type-aware).
+`auto-mobile/no-unknown-cast` and `auto-mobile/no-caught-error-interpolation` are
+fully burned down and are `error` in `.oxlintrc.json`. Inline suppressions of ANY rule are ratcheted too: a
 TypeScript-scanner comment scan (`scripts/lib/oxlintDisableScan.ts`) of every
 file oxlint lints (repo-wide via `git ls-files`, TypeScript extensions only,
 minus the `.oxlintrc.json` `ignorePatterns`) adds

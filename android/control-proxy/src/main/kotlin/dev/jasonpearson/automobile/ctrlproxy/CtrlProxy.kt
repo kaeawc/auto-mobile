@@ -1421,6 +1421,25 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
+  private val storageController by lazy {
+    StorageController(
+      manager = { storageSubscriptionManager },
+      asyncActionRunner = asyncActionRunner,
+      resultBroadcaster = resultBroadcaster,
+      timeProvider = timeProvider,
+      jsonCompact = jsonCompact,
+      responseSender =
+        object : StorageController.ResponseSender {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcast(message: String) {
+            webSocketServer.broadcast(message)
+          }
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+        },
+    )
+  }
   @Volatile private var lastWindowClassName: String? = null
   /**
    * Changes immediately on a native UI event; capture and input share this device-owned context.
@@ -2343,7 +2362,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               TAG,
               "Storage change: ${event.packageName}:${event.fileName} key=${event.key}",
             )
-            broadcastStorageChange(event)
+            storageController.broadcastStorageChange(event)
           }
           .launchIn(serviceScope)
 
@@ -3456,10 +3475,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   override suspend fun listPreferenceFiles(requestId: String?, packageName: String) =
-    handleListPreferenceFiles(requestId, packageName)
+    storageController.handleListPreferenceFiles(requestId, packageName)
 
   override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
-    handleGetPreferences(requestId, packageName, fileName)
+    storageController.handleGetPreferences(requestId, packageName, fileName)
 
   override suspend fun discoverKeystore(requestId: String?, packageName: String) {
     asyncActionRunner.launch(requestId, "discover_keystore") {
@@ -3501,30 +3520,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     requestId: String?,
     packageName: String,
     adapterName: String,
-  ) = handleListDataStores(requestId, packageName, adapterName)
+  ) = storageController.handleListDataStores(requestId, packageName, adapterName)
 
   override suspend fun getDataStore(
     requestId: String?,
     packageName: String,
     adapterName: String,
     storeName: String,
-  ) = handleGetDataStore(requestId, packageName, adapterName, storeName)
+  ) = storageController.handleGetDataStore(requestId, packageName, adapterName, storeName)
 
   override suspend fun subscribeStorage(requestId: String?, packageName: String, fileName: String) =
-    handleSubscribeStorage(requestId, packageName, fileName)
+    storageController.handleSubscribeStorage(requestId, packageName, fileName)
 
   override suspend fun unsubscribeStorage(
     requestId: String?,
     packageName: String,
     fileName: String,
-  ) = handleUnsubscribeStorage(requestId, packageName, fileName)
+  ) = storageController.handleUnsubscribeStorage(requestId, packageName, fileName)
 
   override suspend fun getPreference(
     requestId: String?,
     packageName: String,
     fileName: String,
     key: String,
-  ) = handleGetPreference(requestId, packageName, fileName, key)
+  ) = storageController.handleGetPreference(requestId, packageName, fileName, key)
 
   override suspend fun setPreference(
     requestId: String?,
@@ -3533,17 +3552,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     key: String,
     value: String?,
     type: String,
-  ) = handleSetPreference(requestId, packageName, fileName, key, value, type)
+  ) = storageController.handleSetPreference(requestId, packageName, fileName, key, value, type)
 
   override suspend fun removePreference(
     requestId: String?,
     packageName: String,
     fileName: String,
     key: String,
-  ) = handleRemovePreference(requestId, packageName, fileName, key)
+  ) = storageController.handleRemovePreference(requestId, packageName, fileName, key)
 
   override suspend fun clearPreferences(requestId: String?, packageName: String, fileName: String) =
-    handleClearPreferences(requestId, packageName, fileName)
+    storageController.handleClearPreferences(requestId, packageName, fileName)
 
   override suspend fun startRecording() {
     // Accepted for wire compatibility; currently has no effect on the device.
@@ -6849,89 +6868,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  /** Find the next focusable node after the given node in document order. */
-  private fun findNextFocusableNode(
-    root: android.view.accessibility.AccessibilityNodeInfo?,
-    currentNode: android.view.accessibility.AccessibilityNodeInfo,
-  ): android.view.accessibility.AccessibilityNodeInfo? {
-    if (root == null) return null
-
-    // Collect all focusable editable nodes in document order
-    val focusableNodes = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
-    collectFocusableNodes(root, focusableNodes)
-
-    // Find current node's position and return the next one
-    var foundCurrent = false
-    for (node in focusableNodes) {
-      if (foundCurrent) {
-        // This is the next node - return it (don't recycle it)
-        // Recycle all remaining nodes
-        focusableNodes.forEach { n -> if (n != node) n.recycle() }
-        return node
-      }
-      if (isSameNode(node, currentNode)) {
-        foundCurrent = true
-      }
-    }
-
-    // If no next node found, recycle all collected nodes
-    focusableNodes.forEach { it.recycle() }
-    return null
-  }
-
-  /** Find the previous focusable node before the given node in document order. */
-  private fun findPreviousFocusableNode(
-    root: android.view.accessibility.AccessibilityNodeInfo?,
-    currentNode: android.view.accessibility.AccessibilityNodeInfo,
-  ): android.view.accessibility.AccessibilityNodeInfo? {
-    if (root == null) return null
-
-    // Collect all focusable editable nodes in document order
-    val focusableNodes = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
-    collectFocusableNodes(root, focusableNodes)
-
-    // Find current node's position and return the previous one. Each copy is released exactly once.
-    return selectPreviousFocusable(focusableNodes) { isSameNode(it, currentNode) }
-  }
-
-  /** Collect all focusable and editable nodes in document order (pre-order traversal). */
-  private fun collectFocusableNodes(
-    node: android.view.accessibility.AccessibilityNodeInfo,
-    result: MutableList<android.view.accessibility.AccessibilityNodeInfo>,
-  ) {
-    // Approximate traversal must only include editors the user can reach.
-    if (
-      isImeFocusCandidate(
-        ImeFocusCandidate(node.isEditable, node.isFocusable, node.isVisibleToUser, node.isEnabled),
-      )
-    ) {
-      // Create a copy to add to our list (we'll recycle the originals as we traverse)
-      result.add(android.view.accessibility.AccessibilityNodeInfo.obtain(node))
-    }
-
-    // Traverse children in order
-    for (i in 0 until node.childCount) {
-      val child = node.getChild(i) ?: continue
-      collectFocusableNodes(child, result)
-      child.recycle()
-    }
-  }
-
-  /** Check if two AccessibilityNodeInfo objects refer to the same node. */
-  private fun isSameNode(
-    node1: android.view.accessibility.AccessibilityNodeInfo,
-    node2: android.view.accessibility.AccessibilityNodeInfo,
-  ): Boolean {
-    // Compare by bounds and text/id since we can't reliably compare node objects directly
-    val bounds1 = android.graphics.Rect()
-    val bounds2 = android.graphics.Rect()
-    node1.getBoundsInScreen(bounds1)
-    node2.getBoundsInScreen(bounds2)
-    return bounds1 == bounds2 &&
-      node1.viewIdResourceName == node2.viewIdResourceName &&
-      node1.text?.toString() == node2.text?.toString()
-  }
-
   /**
    * Search the active window's root first, then the other windows the hierarchy extractor reports
    * for the active display (topmost first), for the first node [find] returns. The extractor's own
@@ -6951,114 +6887,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       Log.w(TAG, "Failed to enumerate display windows for node lookup", e)
       emptyList()
     }
-
-  private fun findNodeBySelector(
-    root: android.view.accessibility.AccessibilityNodeInfo?,
-    selector: NodeSelector,
-  ): android.view.accessibility.AccessibilityNodeInfo? {
-    if (root == null) return null
-
-    if (matchesSelector(root, selector)) {
-      return root
-    }
-
-    for (i in 0 until root.childCount) {
-      val child = root.getChild(i) ?: continue
-      val found = findNodeBySelector(child, selector)
-      if (found != null) {
-        if (found != child) {
-          child.recycle()
-        }
-        return found
-      }
-      child.recycle()
-    }
-
-    return null
-  }
-
-  private fun matchesSelector(
-    node: android.view.accessibility.AccessibilityNodeInfo,
-    selector: NodeSelector,
-  ): Boolean =
-    nodeSelectorMatches(
-      selector,
-      NodeSelectorFields(
-        resourceId = node.viewIdResourceName,
-        testTag = extractTestTag(node),
-        uniqueId = if (Build.VERSION.SDK_INT >= 33) node.uniqueId else null,
-        collectionRow = node.collectionItemInfo?.rowIndex,
-        collectionColumn = node.collectionItemInfo?.columnIndex,
-      ),
-    )
-
-  private fun extractTestTag(node: android.view.accessibility.AccessibilityNodeInfo): String? {
-    val extras = node.extras ?: return null
-    val candidates =
-      listOf(
-        "androidx.compose.ui.semantics.testTag",
-        "androidx.compose.ui.semantics.TestTag",
-        "androidx.compose.ui.testTag",
-        "testTag",
-        "test-tag",
-      )
-    for (key in candidates) {
-      val value = extras.get(key)?.toString()
-      if (!value.isNullOrBlank()) {
-        return value
-      }
-    }
-    return extras
-      .keySet()
-      .firstOrNull { it.contains("testtag", ignoreCase = true) }
-      ?.let { key ->
-        extras.get(key)?.toString()
-      }
-  }
-
-  /** Find the currently focused editable node. */
-  private fun findFocusedEditableNode(
-    root: android.view.accessibility.AccessibilityNodeInfo?,
-  ): android.view.accessibility.AccessibilityNodeInfo? {
-    if (root == null) return null
-
-    // First try to find the input-focused node
-    val focusedNode = root.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT)
-    if (focusedNode != null && focusedNode.isEditable) {
-      return focusedNode
-    }
-    focusedNode?.recycle()
-
-    // Fallback: search for any focused editable node in hierarchy
-    return findFocusedEditableInHierarchy(root)
-  }
-
-  /** Recursively search for a focused editable node in the hierarchy. */
-  private fun findFocusedEditableInHierarchy(
-    node: android.view.accessibility.AccessibilityNodeInfo?,
-  ): android.view.accessibility.AccessibilityNodeInfo? {
-    if (node == null) return null
-
-    // Check if this node is focused and editable
-    if (node.isFocused && node.isEditable) {
-      return node
-    }
-
-    // Search children
-    for (i in 0 until node.childCount) {
-      val child = node.getChild(i) ?: continue
-      val found = findFocusedEditableInHierarchy(child)
-      if (found != null) {
-        if (found != child) {
-          child.recycle()
-        }
-        return found
-      }
-      child.recycle()
-    }
-
-    return null
-  }
 
   /** Broadcast set text result to WebSocket clients */
   private suspend fun broadcastSetTextResult(
@@ -8077,492 +7905,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         TAG,
         "Broadcasted traversal order error to ${webSocketServer.getConnectionCount()} clients",
       )
-    }
-  }
-
-  // ================= Storage Inspection Methods =================
-
-  private fun handleListPreferenceFiles(requestId: String?, packageName: String) {
-    Log.d(TAG, "handleListPreferenceFiles: requestId=$requestId, packageName=$packageName")
-    asyncActionRunner.launch(requestId, "list_preference_files") {
-      Log.d(TAG, "handleListPreferenceFiles: coroutine started, calling listPreferenceFiles")
-      val result = storageSubscriptionManager.listPreferenceFiles(packageName)
-      Log.d(TAG, "handleListPreferenceFiles: result=$result")
-      result.fold(
-        onSuccess = { files ->
-          Log.d(TAG, "handleListPreferenceFiles: success, files count=${files.size}")
-          broadcastPreferenceFilesResult(requestId, packageName, files, null)
-        },
-        onFailure = { error ->
-          Log.e(TAG, "handleListPreferenceFiles: failure, error=${error.message}", error)
-          broadcastPreferenceFilesResult(requestId, packageName, null, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleGetPreferences(requestId: String?, packageName: String, fileName: String) {
-    asyncActionRunner.launch(requestId, "get_preferences") {
-      val result = storageSubscriptionManager.getPreferences(packageName, fileName)
-      result.fold(
-        onSuccess = { entries ->
-          broadcastPreferencesResult(requestId, packageName, fileName, entries, null)
-        },
-        onFailure = { error ->
-          broadcastPreferencesResult(requestId, packageName, fileName, null, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleListDataStores(requestId: String?, packageName: String, adapterName: String) {
-    asyncActionRunner.launch(requestId, "list_data_stores") {
-      val result = storageSubscriptionManager.listDataStores(packageName, adapterName)
-      result.fold(
-        // DataStore descriptors reuse the SharedPreferences `preference_files` result envelope
-        // (StorageResponse.FileList); the awaiting TS client disambiguates by requestId.
-        onSuccess = { files ->
-          broadcastPreferenceFilesResult(requestId, packageName, files, null)
-        },
-        onFailure = { error ->
-          broadcastPreferenceFilesResult(requestId, packageName, null, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleGetDataStore(
-    requestId: String?,
-    packageName: String,
-    adapterName: String,
-    storeName: String,
-  ) {
-    asyncActionRunner.launch(requestId, "get_data_store") {
-      val result = storageSubscriptionManager.getDataStore(packageName, adapterName, storeName)
-      result.fold(
-        // Reuses the SharedPreferences `preferences` result envelope; storeName maps to fileName.
-        onSuccess = { entries ->
-          broadcastPreferencesResult(requestId, packageName, storeName, entries, null)
-        },
-        onFailure = { error ->
-          broadcastPreferencesResult(requestId, packageName, storeName, null, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleSubscribeStorage(requestId: String?, packageName: String, fileName: String) {
-    asyncActionRunner.launch(requestId, "subscribe_storage") {
-      val result = storageSubscriptionManager.subscribe(packageName, fileName)
-      result.fold(
-        onSuccess = { subscription ->
-          broadcastSubscribeStorageResult(
-            requestId,
-            packageName,
-            fileName,
-            subscription.subscriptionId,
-            null,
-          )
-        },
-        onFailure = { error ->
-          broadcastSubscribeStorageResult(requestId, packageName, fileName, null, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleUnsubscribeStorage(requestId: String?, packageName: String, fileName: String) {
-    asyncActionRunner.launch(requestId, "unsubscribe_storage") {
-      val success = storageSubscriptionManager.unsubscribe(packageName, fileName)
-      broadcastUnsubscribeStorageResult(requestId, packageName, fileName, success)
-    }
-  }
-
-  private fun handleGetPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-  ) {
-    asyncActionRunner.launch(requestId, "get_preference") {
-      val result = storageSubscriptionManager.getPreference(packageName, fileName, key)
-      result.fold(
-        onSuccess = { entry ->
-          broadcastGetPreferenceResult(requestId, packageName, fileName, key, entry, null)
-        },
-        onFailure = { error ->
-          broadcastGetPreferenceResult(requestId, packageName, fileName, key, null, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleSetPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-  ) {
-    asyncActionRunner.launch(requestId, "set_preference") {
-      val result = storageSubscriptionManager.setPreference(packageName, fileName, key, value, type)
-      result.fold(
-        onSuccess = { broadcastSetPreferenceResult(requestId, packageName, fileName, key, null) },
-        onFailure = { error ->
-          broadcastSetPreferenceResult(requestId, packageName, fileName, key, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleRemovePreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-  ) {
-    asyncActionRunner.launch(requestId, "remove_preference") {
-      val result = storageSubscriptionManager.removePreference(packageName, fileName, key)
-      result.fold(
-        onSuccess = {
-          broadcastRemovePreferenceResult(requestId, packageName, fileName, key, null)
-        },
-        onFailure = { error ->
-          broadcastRemovePreferenceResult(requestId, packageName, fileName, key, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleClearPreferences(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-  ) {
-    asyncActionRunner.launch(requestId, "clear_preferences") {
-      val result = storageSubscriptionManager.clearPreferences(packageName, fileName)
-      result.fold(
-        onSuccess = { broadcastClearPreferencesResult(requestId, packageName, fileName, null) },
-        onFailure = { error ->
-          broadcastClearPreferencesResult(requestId, packageName, fileName, error.message)
-        },
-      )
-    }
-  }
-
-  private suspend fun broadcastPreferenceFilesResult(
-    requestId: String?,
-    packageName: String,
-    files: List<dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceFileInfo>?,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping preference files broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "preference_files") {
-      val message = buildString {
-        append("""{"type":"preference_files","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        if (files != null) {
-          append(""","success":true,"files":${jsonCompact.encodeToString(files)}""")
-        } else {
-          append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
-          )
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(TAG, "Broadcasted preference files to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
-  private suspend fun broadcastPreferencesResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    entries: List<dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceEntry>?,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping preferences broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "preferences") {
-      val message = buildString {
-        append("""{"type":"preferences","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        if (entries != null) {
-          append(""","success":true,"entries":${jsonCompact.encodeToString(entries)}""")
-        } else {
-          append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
-          )
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(TAG, "Broadcasted preferences to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
-  private suspend fun broadcastSubscribeStorageResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    subscriptionId: String?,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping subscribe storage broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "subscribe_storage_result") {
-      val message = buildString {
-        append("""{"type":"subscribe_storage_result","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        if (subscriptionId != null) {
-          append(
-            ""","success":true,"subscriptionId":${jsonCompact.encodeToString(subscriptionId)}""",
-          )
-        } else {
-          append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
-          )
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted subscribe storage result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastUnsubscribeStorageResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    success: Boolean,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping unsubscribe storage broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "unsubscribe_storage_result") {
-      val message = buildString {
-        append("""{"type":"unsubscribe_storage_result","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","success":$success""")
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted unsubscribe storage result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastGetPreferenceResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    entry: dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceEntry?,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping get preference broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "get_preference_result") {
-      val message = buildString {
-        append("""{"type":"get_preference_result","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","key":${jsonCompact.encodeToString(key)}""")
-        if (error != null) {
-          append(""","success":false,"found":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else if (entry != null) {
-          append(""","success":true,"found":true""")
-          if (entry.value != null) {
-            append(""","value":${jsonCompact.encodeToString(entry.value)}""")
-          } else {
-            append(""","value":null""")
-          }
-          append(""","valueType":${jsonCompact.encodeToString(entry.type)}""")
-        } else {
-          append(""","success":true,"found":false""")
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted get preference result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastSetPreferenceResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping set preference broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "set_preference_result") {
-      val message = buildString {
-        append("""{"type":"set_preference_result","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","key":${jsonCompact.encodeToString(key)}""")
-        if (error != null) {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else {
-          append(""","success":true""")
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted set preference result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastRemovePreferenceResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping remove preference broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "remove_preference_result") {
-      val message = buildString {
-        append("""{"type":"remove_preference_result","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","key":${jsonCompact.encodeToString(key)}""")
-        if (error != null) {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else {
-          append(""","success":true""")
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted remove preference result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastClearPreferencesResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping clear preferences broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "clear_preferences_result") {
-      val message = buildString {
-        append("""{"type":"clear_preferences_result","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        if (error != null) {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else {
-          append(""","success":true""")
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted clear preferences result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastStorageChange(
-    event: dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceChangeEvent,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping storage change broadcast")
-      return
-    }
-
-    try {
-      // Build the wire payload via the extracted, unit-tested encoder. It emits the
-      // prior value so the TS telemetry ingest can skip its per-insert previous-value
-      // lookup (#3000), quoting it by its OWN type so a removed/type-changed STRING
-      // stays valid JSON. An absent prior value is emitted as JSON null.
-      val message =
-        dev.jasonpearson.automobile.ctrlproxy.storage.buildStorageChangedMessage(
-          event,
-          System.currentTimeMillis(),
-          jsonCompact,
-        )
-      webSocketServer.broadcast(message)
-      Log.d(TAG, "Broadcasted storage change to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: CancellationException) {
-      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting storage change", e)
     }
   }
 }

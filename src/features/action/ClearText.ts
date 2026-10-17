@@ -1,7 +1,6 @@
 import { getTextRequestDeadlineMs } from "./textTransportTimeout";
 import { clearIosFieldWithVerification } from "./iosClearVerification";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../utils/android-cmdline-tools/asciiKeyEvents";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -310,7 +309,7 @@ export class ClearText extends BaseVisualChange {
 
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     parser: ElementParser = new DefaultElementParser(),
     timer: Timer = defaultTimer,
   ) {

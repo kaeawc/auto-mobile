@@ -23,7 +23,7 @@ import {
   PinchOnOptions,
   PinchOnResult,
 } from "../../models";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ElementResolver } from "../utility/ElementResolver";
 import { isUsableScreenSize, screenSizeForOffscreenCheck } from "../utility/ElementGeometry";
 import {
@@ -171,7 +171,11 @@ export class PinchOn extends BaseVisualChange {
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;
 
-  constructor(device: BootedDevice, adb: AdbClient | null = null, deps: PinchOnDependencies = {}) {
+  constructor(
+    device: BootedDevice,
+    adb: AdbExecutor | null = null,
+    deps: PinchOnDependencies = {},
+  ) {
     super(device, adb, deps.timer, deps.renderedDisplayRevision, deps);
     this.lastRenderedObservation = deps.lastRenderedObservation;
     this.resolver = deps.resolver ?? new ElementResolver();

@@ -25,7 +25,7 @@ import {
 } from "../utils/deviceReadinessLock";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { serverConfig } from "../utils/ServerConfig";
-import type { DeviceReadinessLevel } from "../devices/DeviceSessionManager";
+import type { DeviceReadinessLevel } from "../devices/DeviceReadiness";
 import type { ProxySetupErrorCategory, ProxySetupResult } from "../utils/interfaces/ProxyManager";
 
 /** Fallback timings are tagged to prevent unresolved sessions crossing owners. */

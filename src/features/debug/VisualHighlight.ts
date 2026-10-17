@@ -4,7 +4,7 @@ import {
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { DeviceSessionManager } from "../../devices/DeviceSessionManager";
+import { DeviceReadiness } from "../../devices/DeviceReadiness";
 import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -172,11 +172,11 @@ export class VisualHighlight {
 }
 
 export class VisualHighlightClient {
-  private readonly deviceSessionManager: DeviceSessionManager;
+  private readonly deviceSessionManager: DeviceReadiness;
   private readonly visualHighlightFactory: (device: BootedDevice) => VisualHighlight;
 
   constructor(
-    deviceSessionManager: DeviceSessionManager = DeviceSessionManager.getInstance(),
+    deviceSessionManager: DeviceReadiness = DeviceReadiness.getInstance(),
     visualHighlightFactory: (device: BootedDevice) => VisualHighlight = (device) =>
       new VisualHighlight(device),
   ) {

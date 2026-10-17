@@ -117,7 +117,7 @@ function fakeAdbOf(setup: DefaultUIStateSetup): FakeAdbClient {
 
 function makeSetup(observeScreenProvider?: () => ObserveScreenLike): DefaultUIStateSetup {
   const fake = new FakeAdbClient();
-  const fakeAdb = fake as unknown as AdbClient;
+  const fakeAdb = fake;
   // Auto-advancing fake timer so the internal `sleep()` delays resolve
   // immediately — keeps these unit tests fast (<100ms) and non-flaky.
   const timer = new FakeTimer();

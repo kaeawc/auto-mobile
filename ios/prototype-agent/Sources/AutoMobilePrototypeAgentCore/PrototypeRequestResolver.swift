@@ -83,6 +83,8 @@ enum PrototypeRequestResolver {
             guard value.isScalar, PrototypeDataValues.isScalar(value) else {
                 return .failure(.init(.invalidRequest, "\(what) must resolve to a string, number or boolean"))
             }
+            // The host builds these with `String(value)`, which spells numbers as JavaScript does.
+            if case let .number(number) = value { return .success(PrototypeScalarText.javascriptString(number)) }
             return .success(value.displayString)
         }
     }

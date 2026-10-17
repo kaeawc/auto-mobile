@@ -29,6 +29,7 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../utils/logger";
+import { grantLocalNetworkPermission } from "./grantLocalNetworkPermission";
 import { VerifiedArtifactCache } from "../utils/VerifiedArtifactCache";
 import { isPathInside } from "../utils/filesystem/pathContainment";
 import { packageListingContains } from "../utils/android-cmdline-tools/shellOutputHeuristics";
@@ -1661,6 +1662,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       perf.endOperation("installApk");
       logger.info("[CTRL_PROXY] APK upgraded successfully");
       this.clearAvailabilityCache();
+      await this.grantLocalNetworkAfterInstall();
       return {
         ...result,
         status: "upgraded",
@@ -2089,6 +2091,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       logger.info("APK installed successfully");
       this.clearAvailabilityCache();
+      await this.grantLocalNetworkAfterInstall();
     } catch (error) {
       // A failed adb install can still have changed package state before the
       // command reported an error.
@@ -2102,6 +2105,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       }
       throw toActionableError(error, "Failed to install APK");
     }
+  }
+
+  private async grantLocalNetworkAfterInstall(): Promise<void> {
+    const [apiLevel] = await this.getApiLevel();
+    await grantLocalNetworkPermission(this.adb, AndroidCtrlProxyManager.PACKAGE, apiLevel);
   }
 
   /**

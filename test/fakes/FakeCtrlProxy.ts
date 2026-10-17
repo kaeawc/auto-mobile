@@ -90,6 +90,22 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   getTapHistory() {
     return [...this.tapHistory];
   }
+
+  private tapResult: A11yTapCoordinatesResult | null = null;
+  /**
+   * Configure the result requestTapCoordinates returns, e.g. a device refusal
+   * (`{ success: false, error }`), which the real client reports as a result, not a throw.
+   * @param result - The tap result to return (or null for the default success)
+   */
+  setTapResult(result: A11yTapCoordinatesResult | null): void {
+    this.tapResult = result;
+  }
+
+  private readonly gestureRequestLog: Array<Record<string, unknown> & { type: string }> = [];
+  /** Gesture requests (tap, swipe, drag) in the order they arrived, shaped like the wire frames. */
+  getGestureRequestLog(): Array<Record<string, unknown> & { type: string }> {
+    return this.gestureRequestLog.map((request) => ({ ...request }));
+  }
   async requestTapCoordinates(
     x: number,
     y: number,
@@ -111,8 +127,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       ...(signal ? { signal } : {}),
       ...(displayId === undefined ? {} : { displayId }),
     });
+    this.gestureRequestLog.push({ type: "request_tap_coordinates", x, y, duration });
     onDispatch?.();
-    return { success: true, totalTimeMs: duration };
+    return this.tapResult ?? { success: true, totalTimeMs: duration };
   }
 
   readonly saveRequests: { spec: PrototypeSpec; label: string; icon?: string }[] = [];
@@ -876,6 +893,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     }
     this.checkFailure("swipe");
 
+    this.gestureRequestLog.push({ type: "request_swipe", x1, y1, x2, y2, duration });
     this.swipeHistory.push({
       x1,
       y1,
@@ -917,6 +935,16 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     beforeSend?.();
     this.checkFailure("drag");
 
+    this.gestureRequestLog.push({
+      type: "request_drag",
+      x1,
+      y1,
+      x2,
+      y2,
+      pressDurationMs,
+      dragDurationMs,
+      holdDurationMs,
+    });
     this.dragHistory.push({
       x1,
       y1,

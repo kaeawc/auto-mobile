@@ -227,9 +227,9 @@ describe("gesture request sequences", () => {
         selector.setNextElement(element);
         return hierarchy;
       });
-      tap["executeAndroidTap"] = async (_action, x, y, duration, _target, _signal, context) => {
+      tap["executeAndroidTap"] = async (_action, x, y, duration, _target, context) => {
         calls.push(`tap:${x}:${y}:${duration}`);
-        throwIfAborted(_signal);
+        throwIfAborted(context?.signal);
         context?.onActivationWarnings?.(["activation warning"]);
       };
       tap["retryAndroidTapIfNoChange"] = async () => {

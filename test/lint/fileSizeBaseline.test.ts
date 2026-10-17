@@ -8,7 +8,7 @@ const ROOT = join(import.meta.dir, "../..");
 const CAP = 1000;
 
 function rows(): Array<{ count: number; file: string }> {
-  // Split on CRLF too: a Windows checkout of the baseline has CRLF line endings.
+  // Windows checkouts are CRLF; split on either line ending so file names carry no "\r".
   return readFileSync(join(ROOT, "scripts/file-size-baseline.txt"), "utf8")
     .split(/\r?\n/)
     .filter((line) => line !== "" && !line.startsWith("#"))

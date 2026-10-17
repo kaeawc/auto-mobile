@@ -1,0 +1,103 @@
+{
+  "responses": [
+    {
+      "name": "tap_coordinates_result",
+      "wire": {
+        "type": "tap_coordinates_result",
+        "timestamp": 1700000000000,
+        "requestId": "fixture-request-id",
+        "success": true,
+        "totalTimeMs": 42,
+        "gestureTimeMs": 10,
+        "error": null,
+        "perfTiming": null
+      }
+    },
+    {
+      "name": "tap_coordinates_refused",
+      "wire": {
+        "type": "tap_coordinates_result",
+        "timestamp": 1700000000000,
+        "requestId": "fixture-request-id",
+        "success": false,
+        "totalTimeMs": 7,
+        "gestureTimeMs": null,
+        "error": "Gesture dispatch was cancelled",
+        "perfTiming": null
+      }
+    },
+    {
+      "name": "swipe_result",
+      "wire": {
+        "type": "swipe_result",
+        "timestamp": 1700000000000,
+        "requestId": "fixture-request-id",
+        "success": true,
+        "totalTimeMs": 330,
+        "gestureTimeMs": 300,
+        "error": null,
+        "perfTiming": null
+      }
+    },
+    {
+      "name": "swipe_refused",
+      "wire": {
+        "type": "swipe_result",
+        "timestamp": 1700000000000,
+        "requestId": "fixture-request-id",
+        "success": false,
+        "totalTimeMs": 5,
+        "gestureTimeMs": null,
+        "error": "Gesture dispatch was cancelled",
+        "perfTiming": null
+      }
+    },
+    {
+      "name": "drag_result",
+      "wire": {
+        "type": "drag_result",
+        "timestamp": 1700000000000,
+        "requestId": "fixture-request-id",
+        "success": true,
+        "totalTimeMs": 900,
+        "gestureTimeMs": 600,
+        "error": null,
+        "perfTiming": null
+      }
+    },
+    {
+      "name": "global_action_result",
+      "wire": {
+        "type": "global_action_result",
+        "timestamp": 1700000000000,
+        "requestId": "fixture-request-id",
+        "success": true,
+        "action": "back",
+        "totalTimeMs": 12,
+        "error": null
+      }
+    },
+    {
+      "name": "global_action_refused",
+      "wire": {
+        "type": "global_action_result",
+        "timestamp": 1700000000000,
+        "requestId": "fixture-request-id",
+        "success": false,
+        "action": "back",
+        "totalTimeMs": 3,
+        "error": "Global action back was not performed"
+      }
+    },
+    {
+      "name": "error_decode_failed",
+      "wire": {
+        "type": "error",
+        "timestamp": 1700000000000,
+        "requestId": "fixture-request-id",
+        "success": false,
+        "error": "Failed to decode request_swipe: missing field x2"
+      }
+    }
+  ]
+}

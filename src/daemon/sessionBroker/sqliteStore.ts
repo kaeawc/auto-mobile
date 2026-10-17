@@ -161,7 +161,7 @@ export class SqliteSessionBrokerStore {
 
   /**
    * The receipts a recovery pass can still act on, read without a write transaction: every
-   * non-terminal request, plus an abandoned one whose granted session may still need draining
+   * non-terminal request (an IN list, as NOT IN scans all receipts), plus an abandoned one whose granted session may still need draining
    * because its device is not yet confirmed destroyed. Settled terminal receipts are skipped, so
    * the pass costs nothing per finished request however many accumulate.
    */
@@ -171,7 +171,7 @@ export class SqliteSessionBrokerStore {
       .selectAll()
       .where((eb) =>
         eb.or([
-          eb("state", "not in", TERMINAL_REQUEST_STATES),
+          eb("state", "in", ["acquiring", "active", "releasing"]),
           eb.and([
             eb("state", "=", "failed"),
             eb("error_code", "=", SESSION_REQUEST_ABANDONED_CODE),

@@ -6,6 +6,7 @@ import type {
   AndroidVersionPrecision,
   CatalogMetadataState,
 } from "../sessionRequirements";
+import { preferredAbis } from "../deviceProvisioning";
 import { parseNumericVersion } from "../sessionRequirements";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { apiLevelToVersion } from "../../utils/android-cmdline-tools/AvdConfigReader";
@@ -39,6 +40,8 @@ export interface AndroidCatalogPolicy {
 
 export interface AndroidCatalogAdapterOptions {
   metadataState?: CatalogMetadataState;
+  /** Host CPU architecture (`process.arch` values); defaults to the running host. */
+  hostArchitecture?: string;
 }
 
 export interface AndroidCatalogReadOptions extends AndroidCatalogAdapterOptions {
@@ -172,6 +175,7 @@ export function adaptAndroidSessionDeviceCatalog(
     provenance: { source: ANDROID_CATALOG_SOURCE, revision, state: "ready" },
     profiles: adaptedProfiles,
     releases,
+    hostAbis: preferredAbis(options.hostArchitecture ?? process.arch),
   };
 }
 

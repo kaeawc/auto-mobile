@@ -703,6 +703,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         ) {
           const diff = diffObserveResult(baseline, sanitized, {
             collapseKeyboard: servedObservation.skeleton !== undefined,
+            skipStatusBar: servedObservation.skeleton !== undefined,
             layoutWarningsDiffMode: servedObservation.skeleton !== undefined ? "perEntry" : "full",
             projectAddedRemoved: servedObservation.skeleton !== undefined,
           });

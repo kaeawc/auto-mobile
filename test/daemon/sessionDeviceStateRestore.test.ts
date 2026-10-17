@@ -5,7 +5,11 @@ import {
   type SessionDeviceStateRestoreOptions,
 } from "../../src/daemon/sessionDeviceStateRestore";
 import type { IosAppNetworkRuleRestorer } from "../../src/daemon/iosAppNetworkLease";
-import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import {
+  SESSION_RELEASE_TEARDOWN_CAP_MS,
+  SessionManager,
+  type Session,
+} from "../../src/daemon/sessionManager";
 import { DeviceClockRestoreRegistry } from "../../src/features/utility/DeviceClock";
 import type { IosAppNetworkRule } from "../../src/features/networkFilter/IosAppNetworkRuleClient";
 import type {
@@ -120,8 +124,9 @@ class FakeHost implements SessionDeviceStateRestoreHost {
   sessionNow(): number {
     return this.timer.now();
   }
-  restoreNetworkConditionOnExpiry(session: Session, clearIfOwned: () => void): void {
-    this.expiries.push({ session, clearIfOwned });
+  registered: Array<{ deviceId: string; capMs: number }> = [];
+  registerPendingDeviceCleanup(deviceId: string, _cleanup: Promise<unknown>, capMs: number): void {
+    this.registered.push({ deviceId, capMs });
   }
 }
 
@@ -251,6 +256,12 @@ describe("SessionDeviceStateRestore network-condition TTL (#11795)", () => {
     timer = new FakeTimer();
     host = new FakeHost(timer);
     restore = makeRestore(host);
+    // These cases pin the timer wiring only; the restore itself is covered below.
+    spyOn(restore, "restoreNetworkConditionOnExpiryFor").mockImplementation(
+      (expired, clearIfOwned) => {
+        host.expiries.push({ session: expired, clearIfOwned });
+      },
+    );
     session = makeSession("s1");
     host.published.add(session);
   });
@@ -380,6 +391,12 @@ describe("SessionDeviceStateRestore iOS app rule lease (#10264)", () => {
     timer = new FakeTimer();
     host = new FakeHost(timer);
     restore = makeRestore(host);
+    // These cases pin the timer wiring only; the restore itself is covered below.
+    spyOn(restore, "restoreNetworkConditionOnExpiryFor").mockImplementation(
+      (expired, clearIfOwned) => {
+        host.expiries.push({ session: expired, clearIfOwned });
+      },
+    );
     session = makeSession("s1");
     host.published.add(session);
   });
@@ -806,6 +823,18 @@ describe("network-condition family", () => {
     expect(h.calls()).toBe(0);
     expect(resets).toEqual([{ udid: "UDID-1", revision: 5 }]);
     expect(h.session.cacheData.networkCondition.iosAppRule?.lastRevision).toBe(5);
+  });
+
+  test("expiry registers a capped quarantine only while the slot still holds a baseline", async () => {
+    const h = await createNetwork(async () => {});
+    h.restore.restoreNetworkConditionOnExpiryFor(h.session, () => {});
+    await flush();
+    expect(h.host.registered).toEqual([
+      { deviceId: "emulator-5560", capMs: SESSION_RELEASE_TEARDOWN_CAP_MS },
+    ]);
+    delete h.session.cacheData.networkCondition;
+    h.restore.restoreNetworkConditionOnExpiryFor(h.session, () => {});
+    expect(h.host.registered).toHaveLength(1);
   });
 
   test("expiry restore clears the slot only after a definitive success", async () => {

@@ -17,13 +17,13 @@
 1594	src/daemon/sessionBroker/registry/bindingJournal.ts
 1213	src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts
 1002	src/daemon/sessionBroker/sqliteStore.ts
-2307	src/daemon/sessionDeviceStateRestore.ts
-10433	src/daemon/sessionManager.ts
+2339	src/daemon/sessionDeviceStateRestore.ts
+10394	src/daemon/sessionManager.ts
 8087	src/daemon/socketServer.ts
 1808	src/daemon/videoStreamSocketServer.ts
 1147	src/db/deviceSessionRepository.ts
 1089	src/db/failureAnalyticsRepository.ts
-1451	src/db/navigationRepository.ts
+1456	src/db/navigationRepository.ts
 1403	src/db/navigationRetention.ts
 2611	src/devices/DeviceReadiness.ts
 1953	src/devices/deviceBootService.ts

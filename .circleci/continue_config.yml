@@ -245,7 +245,7 @@ jobs:
       - run:
           name: "Resolve Xcode project Swift package dependencies"
           command: |
-            for package in ios/highlight-core ios/auto-mobile-sdk ios/control-proxy; do
+            for package in ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy; do
               (cd "${package}" && swift package resolve)
             done
       - run:
@@ -322,7 +322,7 @@ jobs:
       - run:
           name: "Resolve Swift package dependencies"
           command: |
-            for package in ios/screen-capture ios/network-filter ios/highlight-core ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
+            for package in ios/screen-capture ios/network-filter ios/highlight-core ios/sdk-wire ios/auto-mobile-sdk ios/control-proxy ios/XCTestRunner; do
               (cd "${package}" && swift package resolve)
             done
       - run:

@@ -1276,8 +1276,8 @@ tested against the same fixture, `request-actions.json`.
   `android.permission.INTERNET` and a `network_security_config` with `cleartextTrafficPermitted="true"`
   on the `base-config`. There is no host allowlist; CtrlProxy is sideloaded over adb and never
   distributed.
-- Saved prototypes (`SavedPrototypeActivity`) are not wired to a transport yet: a `request` in one
-  finishes as a `network` error.
+- Saved prototypes (`SavedPrototypeActivity`) run `via: "device"` requests on the same Retrofit
+  client; `via: "host"` finishes as a `network` error, since no host connection serves the activity.
 
 Worked example: a feed that shows a spinner, the result and an error (state
 `{"feedStatus": "idle", "search": "cats"}`, data `{"title": "Feed"}`):
@@ -1689,7 +1689,7 @@ exempt, other cleartext hosts fail with `network` and a message pointing to `via
 [Saved prototypes on the Android home screen](#saved-prototypes-on-the-android-home-screen)) supports
 `request` actions with `via: "device"` (it still needs a reachable URL, since no host runs `adb reverse`
 when it launches alone). `via: "host"` has no host to run it there, so it fails with a typed `network`
-error naming `via: "host"`.
+error whose message points to `via: "device"`.
 
 **Limits.**
 

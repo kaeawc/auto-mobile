@@ -243,7 +243,7 @@
     },
     "check:android-emulator-boundary": {
       "description": "Prevent Android emulator execution outside AndroidEmulatorClient",
-      "inputs": ["src/**", "scripts/check-android-emulator-boundary.sh", "package.json"],
+      "inputs": ["src/**", "scripts/check-android-emulator-boundary.ts", "package.json"],
       "outputs": [],
       "outputLogs": "new-only"
     },
@@ -252,7 +252,7 @@
       "inputs": [
         "src/**",
         "scripts/check-ios-ctrl-proxy-process-boundary.ts",
-        "scripts/check-ios-ctrl-proxy-process-boundary.sh",
+        "scripts/check-ios-ctrl-proxy-process-boundary.ts",
         "package.json"
       ],
       "outputs": [],

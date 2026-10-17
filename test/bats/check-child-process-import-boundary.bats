@@ -5,7 +5,7 @@
 # serial-tagged files in a dedicated serial pass (scripts/ci/run-bats.sh);
 # the tag is enforced by test/scripts/batsSerialTags.test.ts.
 
-SCRIPT="scripts/check-child-process-import-boundary.sh"
+SCRIPT="scripts/check-child-process-import-boundary.ts"
 FIXTURE="src/utils/ChildProcessBoundaryFixture.ts"
 
 teardown() {
@@ -13,7 +13,7 @@ teardown() {
 }
 
 @test "allows the current production importers" {
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no unlisted production imports"* ]]
@@ -22,7 +22,7 @@ teardown() {
 @test "rejects a new child_process import" {
   printf '%s\n' 'import { execFile } from "child_process";' > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"ChildProcessBoundaryFixture.ts"* ]]
@@ -31,7 +31,7 @@ teardown() {
 @test "rejects import equals and require forms" {
   printf '%s\n' 'import child = require("node:child_process"); const other = require("child_process");' > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"ChildProcessBoundaryFixture.ts"* ]]

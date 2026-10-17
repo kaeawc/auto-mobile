@@ -267,7 +267,51 @@ class RetrofitPrototypeHttpClientTest {
     val error = failure(execute(request(timeoutMs = 50)))
 
     assertEquals(PrototypeRequestErrorCode.TIMEOUT, error.code)
-    assertEquals("Request timed out after 50ms.", error.message)
+    assertTrue(error.message, error.message.startsWith("Request timed out after 50ms."))
+  }
+
+  @Test
+  fun `a timeout is logged and names the local network permission only for private hosts`() {
+    assertTrue(RetrofitPrototypeHttpClient.isLocalNetworkHost("10.0.2.2"))
+    assertTrue(RetrofitPrototypeHttpClient.isLocalNetworkHost("192.168.1.5"))
+    assertTrue(RetrofitPrototypeHttpClient.isLocalNetworkHost("172.20.0.1"))
+    assertTrue(RetrofitPrototypeHttpClient.isLocalNetworkHost("localhost"))
+    assertTrue(!RetrofitPrototypeHttpClient.isLocalNetworkHost("172.32.0.1"))
+    assertTrue(!RetrofitPrototypeHttpClient.isLocalNetworkHost("example.com"))
+    assertTrue(!RetrofitPrototypeHttpClient.isLocalNetworkHost("93.184.216.34"))
+  }
+
+  @Test
+  fun `a stalled loopback request logs the timeout and hints at the permission`() {
+    server.enqueue(MockResponse.Builder().onRequestStart(SocketEffect.Stall).build())
+
+    val error = failure(execute(request(timeoutMs = 50, url = "http://127.0.0.1:${server.port}/")))
+
+    assertEquals(PrototypeRequestErrorCode.TIMEOUT, error.code)
+    assertTrue(error.message, error.message.contains("ACCESS_LOCAL_NETWORK"))
+    assertEquals(1, warnings.size)
+  }
+
+  @Test
+  fun `a cleartext refusal is an immediate network error naming the policy`() {
+    val refusing =
+      okhttp3.OkHttpClient.Builder()
+        .addInterceptor {
+          throw java.net.UnknownServiceException(
+            "CLEARTEXT communication to x not permitted by network security policy",
+          )
+        }
+        .build()
+
+    val response = runBlocking {
+      RetrofitPrototypeHttpClient(refusing, clock = { time }, warn = { m, _ -> warnings += m })
+        .execute(request(url = "http://10.0.2.2:18080/feed"))
+    }
+    val error = failure(response)
+
+    assertEquals(PrototypeRequestErrorCode.NETWORK, error.code)
+    assertTrue(error.message, error.message.contains("network security policy"))
+    assertEquals(1, warnings.size)
   }
 
   @Test

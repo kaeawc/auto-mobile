@@ -119,7 +119,8 @@ export class DragPath extends BaseVisualChange {
         );
       }
       return await this.observedInteraction(
-        (observation) => this.drive(options, observation, call, undefined, undefined),
+        (observation, fence) =>
+          this.drive(options, observation, call, undefined, fence && (() => fence.assertCurrent())),
         { changeExpected: false, progress, perf, signal },
       );
     } finally {

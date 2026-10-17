@@ -73,7 +73,7 @@ export const PLAN_RELEVANT_TOOLS = new Set([
 
 /**
  * Params that reference observation state which cannot outlive the recording
- * session. `tapAt.snapshotId` and `swipeAt.snapshotId` are short-lived observe
+ * session. `tapAt`, `swipeAt` and `dragPath` `snapshotId`s are short-lived observe
  * snapshotReferences that replay rejects as "unknown or evicted"
  * (SnapshotReferenceStore). tapAny, tapOn, swipeOn, dragAndDrop and pinchOn
  * declare no such param.
@@ -81,6 +81,7 @@ export const PLAN_RELEVANT_TOOLS = new Set([
 const SESSION_SCOPED_PARAMS: Readonly<Record<string, readonly string[]>> = {
   tapAt: ["snapshotId"],
   swipeAt: ["snapshotId"],
+  dragPath: ["snapshotId"],
 };
 
 export function stripSessionScopedParams(

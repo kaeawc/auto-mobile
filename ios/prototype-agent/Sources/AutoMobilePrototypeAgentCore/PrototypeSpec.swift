@@ -125,6 +125,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeLimits.guardTree(resolved)
         let expanded = PrototypeRepeat.expand(resolved)
         try PrototypePagerOptions.validate(expanded)
+        try PrototypeSwipe.validate(expanded)
         try PrototypeCarousel.validate(expanded)
         try PrototypeRefresh.validate(expanded)
         // Menus validate against state, but state is decoded (and checked) after root to keep the
@@ -690,6 +691,8 @@ final class PrototypeNode: Decodable {
     let supporting: String?
     let leadingIcon: String?
     let trailing: PrototypeListItemTrailing?
+    /// Swipe-revealed actions on a row or listItem (`prototype_swipe_actions_v1`).
+    let swipeActions: PrototypeSwipeActions?
     /// Text field trailing icon button and keyboard action key (`prototype_text_field_actions_v1`).
     let trailingIcon: PrototypeAppBarAction?
     let imeAction: String?
@@ -713,7 +716,7 @@ final class PrototypeNode: Decodable {
         case scrollable, openWhen, detents, scrim, dragHandle, options, icon, size
         case orientation, min, max, step, title, navigationIcon, actions, confirm
         case dismiss, action, durationMs, hourKey, minuteKey, is24Hour, headline, supporting
-        case leadingIcon, trailing
+        case leadingIcon, trailing, swipeActions
         case refresh
         case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
              activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, indicator, itemWidth, itemSpacing,
@@ -781,6 +784,7 @@ final class PrototypeNode: Decodable {
         supporting = try container.decodeIfPresent(String.self, forKey: .supporting)
         leadingIcon = try container.decodeIfPresent(String.self, forKey: .leadingIcon)
         trailing = try container.decodeIfPresent(PrototypeListItemTrailing.self, forKey: .trailing)
+        swipeActions = try container.decodeIfPresent(PrototypeSwipeActions.self, forKey: .swipeActions)
         onLongPress = try container.decodeIfPresent([PrototypeAction].self, forKey: .onLongPress)
         onDoubleTap = try container.decodeIfPresent([PrototypeAction].self, forKey: .onDoubleTap)
         enabledWhen = try container.decodeIfPresent(Condition.self, forKey: .enabledWhen)

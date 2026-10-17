@@ -54,7 +54,7 @@ export interface MissingDeviceLivenessPoolPort {
   needsAndroidTransportNormalization?(devices: readonly BootedDevice[]): boolean;
   mapAndroidDiscovery?(devices: readonly BootedDevice[]): BootedDevice[];
   isTransportEmulator?(deviceId: string): boolean;
-  getDevices(): Map<string, PooledDevice>;
+  getDevices(): ReadonlyMap<string, PooledDevice>;
   getRefreshMissingDeviceMisses(): Map<string, number>;
   withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
   getDeviceManager(): PlatformDeviceManager;

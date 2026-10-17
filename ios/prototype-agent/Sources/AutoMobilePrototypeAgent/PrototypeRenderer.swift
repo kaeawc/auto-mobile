@@ -206,6 +206,10 @@ struct NodeView: View {
                         .accessibilityIdentifier(node.partIdentifier("error") ?? "")
                 }
             }
+        } else if let swipe = node.swipeActions {
+            PrototypeSwipeRowView(node: node, swipe: swipe, model: model) {
+                styled(content).disabled(!model.isEnabled(node))
+            }
         } else {
             styled(content).disabled(!model.isEnabled(node))
         }

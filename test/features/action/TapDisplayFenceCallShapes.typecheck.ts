@@ -251,7 +251,7 @@ void call8(...args8, { assertCurrent: 1 });
 declare const call9: TapAnyElement["executeAndroidTap"];
 declare const args9: Parameters<typeof call9>;
 void call9(...args9);
-const options9 = call9.bind(undefined, args9[0], args9[1], args9[2], args9[3], args9[4], args9[5]);
+const options9 = call9.bind(undefined, args9[0], args9[1], args9[2], args9[3], args9[4]);
 void options9();
 void options9({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -295,15 +295,7 @@ void call10(...args10, { assertCurrent: 1 });
 declare const call11: TapAnyElement["retryAndroidTapIfNoChange"];
 declare const args11: Parameters<typeof call11>;
 void call11(...args11);
-const options11 = call11.bind(
-  undefined,
-  args11[0],
-  args11[1],
-  args11[2],
-  args11[3],
-  args11[4],
-  args11[5],
-);
+const options11 = call11.bind(undefined, args11[0], args11[1], args11[2], args11[3], args11[4]);
 void options11();
 void options11({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -325,15 +317,7 @@ void call11(...args11, { assertCurrent: 1 });
 declare const call12: TapAnyElement["executeIosTap"];
 declare const args12: Parameters<typeof call12>;
 void call12(...args12);
-const options12 = call12.bind(
-  undefined,
-  args12[0],
-  args12[1],
-  args12[2],
-  args12[3],
-  args12[4],
-  args12[5],
-);
+const options12 = call12.bind(undefined, args12[0], args12[1], args12[2], args12[3], args12[4]);
 void options12();
 void options12({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.
@@ -355,15 +339,7 @@ void call12(...args12, { assertCurrent: 1 });
 declare const call13: TapAnyElement["executeIosTapWithCoordinates"];
 declare const args13: Parameters<typeof call13>;
 void call13(...args13);
-const options13 = call13.bind(
-  undefined,
-  args13[0],
-  args13[1],
-  args13[2],
-  args13[3],
-  args13[4],
-  args13[5],
-);
+const options13 = call13.bind(undefined, args13[0], args13[1], args13[2], args13[3], args13[4]);
 void options13();
 void options13({ displayFence: fence });
 // @ts-expect-error A fence must implement assertCurrent(): void.

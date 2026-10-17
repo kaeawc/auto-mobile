@@ -1,0 +1,4 @@
+INFO    | Android emulator version 36.1.9.0
+Hax is enabled
+Detected GPU type: host
+emulator: ControlSocket: console and adb ports 5554/5555

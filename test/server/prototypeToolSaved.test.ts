@@ -142,6 +142,26 @@ describe("prototype saved actions", () => {
       });
     },
   );
+  test("a pin transport failure keeps the completed save", async () => {
+    proxy.setFailureMode("requestPinSavedPrototype", new Error("socket closed"));
+    const output = await save({ pin: true });
+    expect(output).toMatchObject({ success: false, saved });
+    expect(output.error).toContain("Saved, but pinning failed");
+    expect(output.error).toContain("socket closed");
+  });
+  test("cancellation after the save stops before pinning and keeps the save", async () => {
+    const controller = new AbortController();
+    const request = proxy.requestSavePrototype.bind(proxy);
+    proxy.requestSavePrototype = async (...args) => {
+      const result = await request(...args);
+      controller.abort(new Error("caller stopped"));
+      return result;
+    };
+    const output = await call({ action: "save", spec, pin: true }, android, controller.signal);
+    expect(output).toMatchObject({ success: true, saved });
+    expect(output.warning).toContain("cancelled");
+    expect(proxy.pinRequests).toEqual([]);
+  });
   test("a failed save never requests a pin", async () => {
     proxy.setSaveResult({ success: false, errorCode: "storage_failure" });
     expect((await save({ pin: true })).success).toBe(false);
@@ -343,7 +363,10 @@ describe("prototype saved actions", () => {
       error: savedPrototypeErrorMessages.not_found,
     });
   });
-  const CLEAR = "shell cmd shortcut clear-shortcuts dev.jasonpearson.automobile.ctrlproxy";
+  const CURRENT_USER = "shell am get-current-user";
+  const clearFor = (userId: number) =>
+    `shell cmd shortcut clear-shortcuts --user ${userId} dev.jasonpearson.automobile.ctrlproxy`;
+  const CLEAR = clearFor(0);
   test("deleteSaved without removeIcon never runs adb", async () => {
     const output = await call({ action: "deleteSaved", id: "demo" });
     expect(output.warning).toContain("disabled home-screen icon may remain");
@@ -355,7 +378,14 @@ describe("prototype saved actions", () => {
     expect(output).toMatchObject({ success: true });
     expect(output.warning).toContain("Cleared");
     expect(proxy.deleteRequests).toEqual(["demo"]);
-    expect(adb.getExecutedCommands()).toEqual([CLEAR]);
+    expect(adb.getExecutedCommands()).toEqual([CURRENT_USER, CLEAR]);
+  });
+  test("removeIcon clears the active work profile's shortcuts, not user 0's", async () => {
+    proxy.setListSavedResult({ success: true, savedPrototypes: [] });
+    adb.setCommandResponse(CURRENT_USER, { stdout: "10\n", stderr: "" });
+    const output = await call({ action: "deleteSaved", id: "demo", removeIcon: true });
+    expect(output.warning).toContain("Cleared");
+    expect(adb.getExecutedCommands()).toEqual([CURRENT_USER, clearFor(10)]);
   });
   test("removeIcon leaves the icon while other prototypes remain", async () => {
     proxy.setListSavedResult({
@@ -364,6 +394,22 @@ describe("prototype saved actions", () => {
     });
     const output = await call({ action: "deleteSaved", id: "demo", removeIcon: true });
     expect(output.warning).toContain("Other saved prototypes remain");
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+  test("removeIcon never clears when the saved list is absent", async () => {
+    proxy.setListSavedResult({ success: true });
+    const output = await call({ action: "deleteSaved", id: "demo", removeIcon: true });
+    expect(output).toMatchObject({ success: true });
+    expect(output.warning).toContain("Could not confirm");
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+  test("removeIcon keeps delete success when the list probe throws", async () => {
+    proxy.setFailureMode("requestListSavedPrototypes", new Error("probe timed out"));
+    const output = await call({ action: "deleteSaved", id: "demo", removeIcon: true });
+    expect(output.success).toBe(true);
+    expect(output.warning).toContain("Could not confirm");
+    expect(output.warning).toContain("probe timed out");
+    expect(proxy.deleteRequests).toEqual(["demo"]);
     expect(adb.getExecutedCommands()).toEqual([]);
   });
   test("removeIcon reports an adb failure without failing the delete", async () => {

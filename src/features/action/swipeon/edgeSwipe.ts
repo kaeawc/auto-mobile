@@ -1,3 +1,4 @@
+import { resolveSwipeDirection } from "./swipeOnUtils";
 import type { Element, SwipeDirection, SwipeEdge, SwipeOnOptions } from "../../../models";
 
 /** Default distance in px (points on iOS) the touch starts inside the edge. */
@@ -56,6 +57,14 @@ export function validateEdgeSwipeOptions(options: EdgeOptions): string | null {
   return null;
 }
 
+/** Edge validation compares the finger direction, so resolve gestureType first. */
+export function validateResolvedEdgeSwipe(options: SwipeOnOptions): string | null {
+  return validateEdgeSwipeOptions({
+    ...options,
+    direction: resolveSwipeDirection(options).direction ?? options.direction,
+  });
+}
+
 /** Start point at the edge plus an inward end point, inside `bounds`. */
 export function edgeSwipeCoordinates(input: {
   edge: SwipeEdge;
@@ -73,24 +82,37 @@ export function edgeSwipeCoordinates(input: {
   const alongY = clamp(Math.round(bounds.top + at * height), bounds.top, bounds.bottom - 1);
   const travelX = Math.round(width * EDGE_SWIPE_TRAVEL_FRACTION);
   const travelY = Math.round(height * EDGE_SWIPE_TRAVEL_FRACTION);
+  // Inset plus travel can exceed a narrow panel; keep every endpoint inside `bounds`.
+  const cx = (value: number) => clamp(value, bounds.left, bounds.right - 1);
+  const cy = (value: number) => clamp(value, bounds.top, bounds.bottom - 1);
   switch (edge) {
     case "left":
-      return { x1: bounds.left + inset, y1: alongY, x2: bounds.left + inset + travelX, y2: alongY };
+      return {
+        x1: cx(bounds.left + inset),
+        y1: alongY,
+        x2: cx(bounds.left + inset + travelX),
+        y2: alongY,
+      };
     case "right":
       return {
-        x1: bounds.right - 1 - inset,
+        x1: cx(bounds.right - 1 - inset),
         y1: alongY,
-        x2: bounds.right - 1 - inset - travelX,
+        x2: cx(bounds.right - 1 - inset - travelX),
         y2: alongY,
       };
     case "top":
-      return { x1: alongX, y1: bounds.top + inset, x2: alongX, y2: bounds.top + inset + travelY };
+      return {
+        x1: alongX,
+        y1: cy(bounds.top + inset),
+        x2: alongX,
+        y2: cy(bounds.top + inset + travelY),
+      };
     case "bottom":
       return {
         x1: alongX,
-        y1: bounds.bottom - 1 - inset,
+        y1: cy(bounds.bottom - 1 - inset),
         x2: alongX,
-        y2: bounds.bottom - 1 - inset - travelY,
+        y2: cy(bounds.bottom - 1 - inset - travelY),
       };
   }
 }

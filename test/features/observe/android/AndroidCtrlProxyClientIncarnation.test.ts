@@ -69,10 +69,12 @@ describe("Android CtrlProxy singleton incarnation", () => {
       const warmup = AndroidCtrlProxyClient.createForTesting(
         { ...device, deviceId: "warm-up" },
         new FakeAdbExecutor(),
-        () => {
-          throw new Error("Constructor warm-up must never connect");
+        {
+          webSocketFactory: () => {
+            throw new Error("Constructor warm-up must never connect");
+          },
+          timer: new FakeTimer(),
         },
-        new FakeTimer(),
       );
       await warmup.close();
     } finally {

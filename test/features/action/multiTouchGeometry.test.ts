@@ -104,6 +104,18 @@ describe("planMultiTouch geometry (#12535)", () => {
   });
 });
 
+describe("explicit short swipe distance (#12995)", () => {
+  test("a distance under the minimum is honoured when there is room", () => {
+    const plan = planMultiTouch(
+      { action: "swipe", direction: "right", distance: 10, fingerSpacing: 100 },
+      { x: 500, y: 1000 },
+      bounds,
+    );
+    expect(plan).toMatchObject({ end: { x: 460, y: 1000 } });
+    expect(plan).not.toHaveProperty("error");
+  });
+});
+
 describe("validateMultiTouchOptions", () => {
   test("rejects finger counts outside 2-5 and non-integers", () => {
     for (const fingers of [0, 1, MULTI_TOUCH_MAX_FINGERS + 1, 2.5, -2]) {

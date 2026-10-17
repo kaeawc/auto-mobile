@@ -156,7 +156,7 @@ async function main() {
   const webrtcStreamSocketServer = await import("./daemon/webrtcStreamSocketServer");
   const appearanceSyncScheduler = await import("./daemon/AppearanceSyncScheduler");
   const { isAppearanceSyncEnabled } = await import("./daemon/PassiveWorkPolicy");
-  const { DeviceSessionManager } = await import("./devices/DeviceSessionManager");
+  const { DeviceReadiness } = await import("./devices/DeviceReadiness");
   const { FeatureFlagService } = await import("./features/featureFlags/FeatureFlagService");
   const { serverConfig } = await import("./utils/ServerConfig");
   const { AndroidCtrlProxyManager } = await import("./ctrlProxy/CtrlProxyManager");
@@ -746,7 +746,7 @@ async function main() {
         await startWebRtcStreamSocketServer();
         startAppearanceSyncScheduler({
           getTargets: () => {
-            const current = DeviceSessionManager.getInstance().getCurrentDevice();
+            const current = DeviceReadiness.getInstance().getCurrentDevice();
             return current?.platform === "android" ? [current] : [];
           },
           isEnabled: () => isAppearanceSyncEnabled(process.env.AUTOMOBILE_APPEARANCE_SYNC),
@@ -843,12 +843,21 @@ async function main() {
 
 /** Prepare one durable broker request while stdin and owner-loss cancellation are already armed. */
 async function acquireBrokerSessionBeforeServing(
-  proxy: { acquireBrokerSession(config: SessionConfig): Promise<SessionBrokerResult> },
+  proxy: {
+    acquireBrokerSession(config: SessionConfig): Promise<SessionBrokerResult>;
+    setExecutionOwnerLossProbe(probe: () => boolean): void;
+  },
   config: SessionConfig,
   launchParentPid: number,
   ownerGenerationToken?: string,
 ): Promise<SessionBrokerResult> {
-  await startExecutionOwnerWatch(launchParentPid, config.executionOwnerPid, ownerGenerationToken);
+  const ownerWatch = await startExecutionOwnerWatch(
+    launchParentPid,
+    config.executionOwnerPid,
+    ownerGenerationToken,
+  );
+  // Stdin EOF can start the close before the watch's next poll; ask the owner directly (#12986).
+  proxy.setExecutionOwnerLossProbe(() => ownerWatch.check() !== undefined);
   const result = await proxy.acquireBrokerSession(config);
   const { logger } = await import("./utils/logger");
   logger.info(
@@ -863,7 +872,7 @@ async function startExecutionOwnerWatch(
   launchParentPid: number,
   ownerPid?: number,
   ownerGenerationToken?: string,
-): Promise<void> {
+): Promise<{ check(): unknown }> {
   const [
     { ExecutionOwnerWatch },
     { isProcessRunning },
@@ -877,7 +886,7 @@ async function startExecutionOwnerWatch(
     import("./daemon/lockOwnerGeneration"),
     import("./daemon/processGeneration"),
   ]);
-  new ExecutionOwnerWatch(
+  const watch = new ExecutionOwnerWatch(
     {
       launchParentPid,
       ownerPid,
@@ -888,7 +897,9 @@ async function startExecutionOwnerWatch(
     { isProcessRunning: (pid) => isProcessRunning(pid), currentParentPid: () => process.ppid },
     defaultTimer,
     defaultLockOwnerGenerationProbe,
-  ).start();
+  );
+  watch.start();
+  return watch;
 }
 
 // Bun sets import.meta.main on the entrypoint module; under `module: ESNext`

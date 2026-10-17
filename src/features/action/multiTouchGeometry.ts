@@ -194,7 +194,9 @@ function planSwipeTravel(
       (horizontal ? limits.maxX : limits.maxY) * MULTI_TOUCH_SWIPE_TRAVEL_FRACTION,
   );
   const travel = Math.min(requested, room);
-  if (travel < MULTI_TOUCH_MIN_TRAVEL_PX) {
+  // Refuse only when clamping to the edge left too little travel; an explicit short distance with
+  // room to spare is the caller's choice.
+  if (travel < 1 || (travel < requested && travel < MULTI_TOUCH_MIN_TRAVEL_PX)) {
     return {
       error: `Only ${Math.max(0, room)} px remain ${direction}ward of the fingers; start the swipe farther from that edge`,
     };

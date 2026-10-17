@@ -122,7 +122,10 @@ describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function ()
 
   test("setAccessibilityFocus sends request_action with action='focus' and resolves on success", async function () {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -154,7 +157,10 @@ describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function ()
 
   test("clearAccessibilityFocus sends request_action with action='clear_focus'", async function () {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -186,7 +192,10 @@ describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function ()
 
   test("setAccessibilityFocus on an already-focused node resolves as alreadySatisfied (#10148)", async function () {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -216,7 +225,10 @@ describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function ()
 
   test("clearAccessibilityFocus on an unfocused node resolves as alreadySatisfied (#10148)", async function () {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -249,7 +261,10 @@ describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function ()
     // same one a node that genuinely cannot take accessibility focus produces, so the host cannot
     // tell the two apart and must not guess.
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -279,7 +294,10 @@ describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function ()
 
   test("setAccessibilityFocus throws with the service error on node-not-found", async function () {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -309,7 +327,10 @@ describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function ()
 
   test("setAccessibilityFocus rejects empty resource-id without sending a request", async function () {
     const { factory } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await expect(client.setAccessibilityFocus("")).rejects.toThrow(/requires a resource-id/);
     } finally {
@@ -319,7 +340,10 @@ describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function ()
 
   test("setAccessibilityFocus surfaces the timeout error when no result arrives", async function () {
     const { factory, getSocket } = createCapturingFactory(fakeTimer);
-    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: factory,
+      timer: fakeTimer,
+    });
     try {
       await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -341,12 +365,10 @@ describe("CtrlProxyFocus (Android) - set/clear accessibility focus", function ()
     // so a harness TypeError can no longer masquerade as a connection failure (the old bare
     // rejects.toThrow() accepted any throw, and — because the capturing socket connects fine —
     // actually exercised the RequestManager timeout path, duplicating the timeout test above).
-    const client = AndroidCtrlProxyClient.createForTesting(
-      testDevice,
-      fakeAdb,
-      createInstantFailureWebSocketFactory(fakeTimer),
-      fakeTimer,
-    );
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
+      webSocketFactory: createInstantFailureWebSocketFactory(fakeTimer),
+      timer: fakeTimer,
+    });
     try {
       await expect(client.setAccessibilityFocus("com.example:id/title", 50)).rejects.toThrow(
         /connect/i,

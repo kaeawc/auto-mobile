@@ -30,7 +30,7 @@ import {
   stopVideoRecording,
 } from "./videoRecordingManager";
 import type { VideoRecordingConfigInput } from "../models";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { ownerVisibleInScope, type VideoRecordingRecord } from "../db/videoRecordingRepository";
 import { highlightShapeSchema } from "../features/debug/VisualHighlight";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScreenrecord";
@@ -385,7 +385,7 @@ export async function finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice(
 
 /**
  * Narrow device-detection seam used by {@link resolveTargetDevices} when a call targets
- * all devices (e.g. a bare, by-device stop). The real {@link DeviceSessionManager} singleton
+ * all devices (e.g. a bare, by-device stop). The real {@link DeviceReadiness} singleton
  * satisfies it. Exposing only `detectConnectedPlatforms` keeps this honest under strict `tsc`
  * (a fake need not reproduce the manager's nominal private members) and lets a test resolve
  * devices without spawning real `adb`/`xcrun simctl` subprocesses — the latter can stall past
@@ -397,7 +397,7 @@ interface ConnectedDeviceDetector {
 
 /** Collaborators the recording tools resolve devices and requesters through. */
 export interface VideoRecordingToolDependencies {
-  /** Resolves all-device targets; defaults to the live `DeviceSessionManager`. */
+  /** Resolves all-device targets; defaults to the live `DeviceReadiness`. */
   deviceDetector?: ConnectedDeviceDetector;
   /** Resolves requester and owner sessions; defaults to the daemon-backed resolver. */
   requesterResolver?: RecordingRequesterResolver;
@@ -1489,7 +1489,7 @@ export function registerVideoRecordingTools(
   const ctx: RecordingToolContext = {
     deviceDetector: dependencies.deviceDetector ?? {
       detectConnectedPlatforms: (signal) =>
-        DeviceSessionManager.getInstance().detectConnectedPlatforms(signal),
+        DeviceReadiness.getInstance().detectConnectedPlatforms(signal),
     },
     requesterResolver: dependencies.requesterResolver ?? daemonRecordingRequesterResolver,
   };

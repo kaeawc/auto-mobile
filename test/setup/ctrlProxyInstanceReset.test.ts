@@ -29,14 +29,12 @@ describe("CtrlProxy unit-test preload registry cleanup", () => {
   // Exercise the exact hook function without relying on other files' order.
   test("Android cleanup clears a registered client", () => {
     const timer = new FakeTimer();
-    const client = AndroidCtrlProxyClient.createForTesting(
-      androidDevice,
-      new FakeAdbExecutor(),
-      () => {
+    const client = AndroidCtrlProxyClient.createForTesting(androidDevice, new FakeAdbExecutor(), {
+      webSocketFactory: () => {
         throw new Error("Registry test must not open a WebSocket");
       },
       timer,
-    );
+    });
 
     AndroidCtrlProxyClient.registerForTesting(client, androidDevice.deviceId);
     expect(AndroidCtrlProxyClient.getExistingInstance(androidDevice.deviceId)).toBe(client);

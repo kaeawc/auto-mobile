@@ -584,6 +584,7 @@ export class DaemonMcpProxy {
   private readonly resourceSubscriptionManager: ResourceSubscriptions;
   private client: DaemonClientLike | null = null;
   private closePromise: Promise<void> | undefined;
+  private executionOwnerLossProbe: (() => boolean) | undefined;
   private config: DaemonMcpProxyConfig;
   private daemonManager: DaemonManagerLike;
   private clientFactory: DaemonClientFactory;
@@ -6264,6 +6265,28 @@ export class DaemonMcpProxy {
    * EOF hard bound, `OutputGatedTransport` still writes received answers while dropping all
    * unsolicited output; a stdout write error closes that gate fully at once (#11951).
    */
+  /**
+   * Live owner-liveness check consulted when close begins (#12986). Stdin EOF or a transport
+   * close can start the close before the owner watch's next poll notices the owner is gone;
+   * asking the owner directly makes owner death win whichever signal arrives first.
+   */
+  setExecutionOwnerLossProbe(probe: () => boolean): void {
+    this.executionOwnerLossProbe = probe;
+  }
+
+  private executionOwnerLost(options?: DaemonMcpProxyCloseOptions): boolean {
+    if (options?.executionOwnerLost) {
+      return true;
+    }
+    try {
+      return this.executionOwnerLossProbe?.() === true;
+    } catch (error) {
+      // An unanswerable probe proves nothing: fall back to the ordinary release classification.
+      logger.warn(`[DaemonMcpProxy] Execution owner probe failed: ${errorMessage(error)}`, error);
+      return false;
+    }
+  }
+
   close(options?: DaemonMcpProxyCloseOptions): Promise<void> {
     // EOF and signal/transport shutdown may overlap: keep the socket until the same release settles.
     return (this.closePromise ??= this.closeOnce(options));
@@ -6271,6 +6294,7 @@ export class DaemonMcpProxy {
 
   private async closeOnce(options?: DaemonMcpProxyCloseOptions): Promise<void> {
     const connectedClient = this.connected ? this.client : null;
+    const ownerLost = this.executionOwnerLost(options);
     this.closing = true;
     const closingError = new DaemonUnavailableError("MCP proxy is closing");
     this.sessionBrokerAcquisitionAbort?.abort(closingError);
@@ -6291,9 +6315,7 @@ export class DaemonMcpProxy {
     // Before the keeper stops, so the lease stays live until the release lands (#11176).
     await Promise.all([
       this.releaseOwnedSessions(connectedClient),
-      this.releaseBrokerSessions(
-        options?.executionOwnerLost ? SESSION_OWNER_EXITED_CODE : undefined,
-      ),
+      this.releaseBrokerSessions(ownerLost ? SESSION_OWNER_EXITED_CODE : undefined),
       this.joinConnectionAttempt(),
     ]);
     await this.latestBindingKeeper.stopBoundSessionHeartbeat();

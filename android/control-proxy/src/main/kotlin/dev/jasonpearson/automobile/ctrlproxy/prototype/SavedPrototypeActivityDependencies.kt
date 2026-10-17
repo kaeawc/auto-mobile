@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import okhttp3.OkHttpClient
 
 /** Credential-encrypted app-private root shared by saving and shortcut publishing. */
 fun savedPrototypeRoot(context: Context): File = File(context.filesDir, "saved-prototypes")
@@ -75,6 +76,12 @@ internal object SavedPrototypeActivityDependencies {
   @Volatile var clock: () -> Long = System::currentTimeMillis
   @Volatile var eventSink: PrototypeEventSink = PrototypeEventSink { SavedPrototypeEvents.send(it) }
 
+  /** The transports behind a saved prototype's `request` actions (#12970). */
+  @Volatile var httpClients: () -> PrototypeHttpClients = ::defaultHttpClients
+
+  private fun defaultHttpClients(): PrototypeHttpClients =
+    PrototypeHttpClients.forSavedPrototype(RetrofitPrototypeHttpClient(OkHttpClient()))
+
   fun reset() {
     storageStore = { PrototypeStorageStores.inDirectory(prototypeStorageRoot(it.filesDir)) }
     store = { SavedPrototypeStores.inDirectory(savedPrototypeRoot(it)) }
@@ -83,5 +90,6 @@ internal object SavedPrototypeActivityDependencies {
     flushScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     clock = System::currentTimeMillis
     eventSink = PrototypeEventSink { SavedPrototypeEvents.send(it) }
+    httpClients = ::defaultHttpClients
   }
 }

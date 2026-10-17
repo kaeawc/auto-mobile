@@ -526,7 +526,7 @@ export abstract class DeviceServiceClient {
    * Force-close a socket a caller has independently determined to be stale —
    * e.g. `readyState === OPEN` yet the service behind it is not responding to
    * application requests (issue #7554,
-   * {@link DeviceSessionManager.verifyAndroidDevice}'s connected-but-unresponsive
+   * {@link DeviceReadiness.verifyAndroidDevice}'s connected-but-unresponsive
    * branch). Unlike {@link close}, this does not disable auto-reconnect or run
    * any teardown itself: it calls `ws.terminate()` on the live socket, which
    * fires the socket's own `close` handler and drives the exact same

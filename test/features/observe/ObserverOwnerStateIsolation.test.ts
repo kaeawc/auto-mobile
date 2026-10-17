@@ -260,10 +260,8 @@ test.each(["active", "all"])(
     Reflect.set(daemon, "deviceSessionRegistry", {});
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     let reply!: () => void;
-    const client = AndroidCtrlProxyClient.createForTesting(
-      device,
-      adb,
-      (url) => {
+    const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+      webSocketFactory: (url) => {
         const socket = new FakeWebSocket(url, "none", 0, timer);
         spyOn(socket, "send").mockImplementation((wire: string) => {
           const request = JSON.parse(wire) as {
@@ -308,7 +306,7 @@ test.each(["active", "all"])(
         return socket;
       },
       timer,
-    );
+    });
     await client.ensureConnected();
     AndroidCtrlProxyClient.registerForTesting(client, device.deviceId);
     // The ordinary read is equal; aggregate active and secondary frames differ from this owner seed.

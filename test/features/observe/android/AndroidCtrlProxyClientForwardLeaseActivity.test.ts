@@ -51,21 +51,11 @@ describe("AndroidCtrlProxyClient forwarding-lease activity (#10497 review)", () 
   });
 
   test("counts every CtrlProxy request, not just tool calls, and floors idleness at lease acquisition", async () => {
-    const client = AndroidCtrlProxyClient.createForTesting(
-      DEVICE,
-      new FakeAdbExecutor(),
-      (url) => new FakeWebSocket(url, "none", 0, timer),
+    const client = AndroidCtrlProxyClient.createForTesting(DEVICE, new FakeAdbExecutor(), {
+      webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      new HeldLease(1_000),
-    );
+      ctrlProxyForwardLease: new HeldLease(1_000),
+    });
     AndroidCtrlProxyClient.registerForTesting(client, DEVICE.deviceId);
     expect(AndroidCtrlProxyClient.getForwardLeaseHeldDeviceIds()).toEqual([DEVICE.deviceId]);
 
@@ -104,21 +94,11 @@ describe("AndroidCtrlProxyClient forwarding-lease activity (#10497 review)", () 
   test("readiness holds keep the idle releaser and lease status busy until idempotent release", async () => {
     const timer = new FakeTimer();
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
-    const client = AndroidCtrlProxyClient.createForTesting(
-      DEVICE,
-      new FakeAdbExecutor(),
-      (url) => new FakeWebSocket(url, "none", 0, timer),
+    const client = AndroidCtrlProxyClient.createForTesting(DEVICE, new FakeAdbExecutor(), {
+      webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
       timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      new HeldLease(0),
-    );
+      ctrlProxyForwardLease: new HeldLease(0),
+    });
     AndroidCtrlProxyClient.registerForTesting(client, DEVICE.deviceId);
     try {
       const activity = (deviceId: string) =>

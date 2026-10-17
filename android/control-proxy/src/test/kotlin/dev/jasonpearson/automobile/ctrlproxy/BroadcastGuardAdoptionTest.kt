@@ -166,6 +166,7 @@ class BroadcastGuardAdoptionTest {
       listOf(
         "broadcastCaCertResult",
         "broadcastSettingsGetResult",
+        "broadcastPreferencesResult",
         "broadcastInstalledPackagesResult",
         "broadcastDeviceOwnerStatusResult",
         "broadcastSetTextResult",
@@ -902,6 +903,7 @@ class BroadcastGuardAdoptionTest {
         "CaCertificateController.kt",
         "SettingsController.kt",
         "PackageController.kt",
+        "StorageController.kt",
       )
       .map { fileName ->
         fileName to locateSource(fileName).readText()

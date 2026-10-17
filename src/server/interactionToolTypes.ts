@@ -1,5 +1,6 @@
 import type { z } from "zod/v4";
 import type {
+  keyboardTool,
   selectAllTextTool,
   pressButtonTool,
   wakeAndUnlockTool,
@@ -160,21 +161,7 @@ export interface PinchOnArgs {
 
 export type ShakeArgs = z.output<typeof shakeTool.schema>;
 
-export interface KeyboardArgs {
-  action:
-    | "open"
-    | "close"
-    | "detect"
-    | "setProfile"
-    | "listProfiles"
-    | "listImes"
-    | "setIme"
-    | "tapImeKey";
-  profile?: import("../features/action/keyboardProfiles").KeyboardProfileId;
-  imeId?: string;
-  key?: string;
-  platform?: Platform;
-}
+export type KeyboardArgs = z.output<typeof keyboardTool.schema>;
 
 export type RecentAppsArgs = z.output<typeof recentAppsTool.schema>;
 

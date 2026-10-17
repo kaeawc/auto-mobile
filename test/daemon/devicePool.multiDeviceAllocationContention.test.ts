@@ -1,13 +1,11 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 
 for (const criteria of [false, true]) {
@@ -26,14 +24,7 @@ for (const criteria of [false, true]) {
         platform: "android" as const,
       }));
       manager.bootedDevices = devices;
-      pool = new DevicePool(
-        createDevicePoolDependencies(sessions, "contention-test", {
-          timer,
-          deviceManager: manager,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-        }),
-      );
+      pool = makePool(sessions, "contention-test", { timer, deviceManager: manager });
       await pool.initializeWithDevices(devices);
     });
     afterEach(() => {

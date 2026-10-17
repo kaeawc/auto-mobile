@@ -1,4 +1,4 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { makePool } from "../helpers/makePool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { expect, spyOn, test } from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
@@ -15,14 +15,11 @@ import { up as addActivitySequence } from "../../src/db/migrations/2026_10_15_00
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
 import { DeviceShuttingDownError } from "../../src/daemon/deviceAcquisitionRefusals";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../../test/fakes/FakeTimer";
 import { FakeIdGenerator } from "../../test/fakes/FakeIdGenerator";
 import { FakeDeviceManager } from "../../test/fakes/FakeDeviceManager";
-import { FakeInstalledAppsRepository } from "../../test/fakes/FakeInstalledAppsRepository";
 import { FakeDbWriteBarrier } from "../../test/fakes/FakeDbWriteBarrier";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { FakeDeviceMatcher } from "../../test/fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../../test/fakes/FakeDeviceUtils";
@@ -56,18 +53,14 @@ async function harness(deviceUtils?: FakeDeviceUtils) {
     [],
     [{ deviceId: "emulator-5554", name: "Agent A AVD", platform: "android" }],
   );
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "hunt-daemon", {
-      timer: timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: deviceUtils ?? devices,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      deviceSessionRepository: repository,
-      recoveryPolicy: { onLoss: false, maxAttempts: 2 },
-      idGenerator: new FakeIdGenerator(),
-      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
-    }),
-  );
+  const pool = makePool(manager, "hunt-daemon", {
+    timer,
+    deviceManager: deviceUtils ?? devices,
+    deviceSessionRepository: repository,
+    recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+    idGenerator: new FakeIdGenerator(),
+    lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+  });
   await pool.initializeWithDevices(devices.bootedDevices);
   return {
     db,

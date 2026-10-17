@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import type { FailureAnalyticsRepository } from "../../src/db/failureAnalyticsRepository";
 import { registerFailuresResources } from "../../src/server/failuresResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { FakeFailureAnalyticsRepository } from "../fakes/FakeFailureAnalyticsRepository";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -14,40 +14,16 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // QUERY value must reach the timeline's own validation and come back as the
 // timeline's JSON error envelope — neither a throw nor the registry's McpError.
 
-type TimelineQuery = Parameters<FailureAnalyticsRepository["getTimelineData"]>[0];
-
 const NOW = Date.UTC(2026, 9, 5, 12, 0, 0);
 
-class FakeFailuresRepository {
-  timelineQueries: TimelineQuery[] = [];
-  failure: Error | undefined;
-
-  async getFailureGroups(): ReturnType<FailureAnalyticsRepository["getFailureGroups"]> {
-    return [];
-  }
-
-  async getTimelineData(
-    query: TimelineQuery,
-  ): ReturnType<FailureAnalyticsRepository["getTimelineData"]> {
-    this.timelineQueries.push(query);
-    if (this.failure) {
-      throw this.failure;
-    }
-    return {
-      dataPoints: [],
-      previousPeriodTotals: { crashes: 0, anrs: 0, toolFailures: 0, nonfatals: 0 },
-    };
-  }
-}
-
 describe("failures timeline query vs the malformed-URI backstop (#10117 + #10119)", () => {
-  let repository: FakeFailuresRepository;
+  let repository: FakeFailureAnalyticsRepository;
   let readHandler: (request: { params: { uri: string } }, extra: object) => Promise<unknown>;
 
   beforeEach(() => {
     const timer = new FakeTimer();
     timer.setCurrentTime(NOW);
-    repository = new FakeFailuresRepository();
+    repository = new FakeFailureAnalyticsRepository();
     ResourceRegistry.clearResources();
     registerFailuresResources(repository, timer);
     // The #10117 backstop target: a handler that decodes its capture unguarded.

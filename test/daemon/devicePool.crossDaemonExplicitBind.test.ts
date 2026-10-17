@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { resolve, sep } from "node:path";
 import type { AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
@@ -14,12 +15,9 @@ import {
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { Platform } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // #10980 (owner decision 2026-10-09): an explicit bind of a device another daemon has claimed is
 // refused with a typed retryable device_owned_by_other_daemon error, on Android and iOS alike.
@@ -71,17 +69,13 @@ for (const [platform, deviceId] of [
       const devices = new FakeDeviceManager();
       const device = { deviceId, name: `${platform}-device`, platform };
       devices.bootedDevices = [device];
-      const pool = new DevicePool(
-        createDevicePoolDependencies(sessions, `daemon-${pid}`, {
-          timer,
-          deviceManager: devices,
-          retryExecutor: new DefaultRetryExecutor(timer),
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          ...(platform === "android"
-            ? { foreignDeviceOwnership: ownership }
-            : { iosForeignDeviceOwnership: ownership }),
-        }),
-      );
+      const pool = makePool(sessions, `daemon-${pid}`, {
+        timer,
+        deviceManager: devices,
+        ...(platform === "android"
+          ? { foreignDeviceOwnership: ownership }
+          : { iosForeignDeviceOwnership: ownership }),
+      });
       await pool.initializeWithDevices([device]);
       return { sessions, pool };
     };

@@ -31,7 +31,8 @@ import {
 } from "../features/prototype/ios/iosPrototypeBundleId";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import type { BootedDevice } from "../models";
-import type { AdbCommandRunner } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AndroidUserTargetResolver } from "../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { CTRL_PROXY_PACKAGE } from "../ctrlProxy/constants";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { outputLooksLikeShellFailure } from "../utils/android-cmdline-tools/shellOutputHeuristics";
@@ -71,7 +72,7 @@ export interface PrototypeSavedDependencies {
     "save" | "listSaved" | "deleteSaved" | "pinSaved" | "supportsCommand"
   >;
   /** Host-side adb for `removeIcon`; absent means the icon cannot be cleared from the host. */
-  adb?: AdbCommandRunner;
+  adb?: AdbExecutor;
   stageAssets: () => Promise<{ uploaded: UploadedPrototypeAsset[]; failure?: PrototypeResult }>;
   signal?: AbortSignal;
 }
@@ -139,7 +140,8 @@ export function savedPrototypeSuccess(
 }
 const DISABLED_ICON_WARNING = "A deleted prototype's disabled home-screen icon may remain.";
 /** Clearing is only safe when no saved prototype is left: it clears every CtrlProxy shortcut. */
-const CLEAR_SHORTCUTS_COMMAND = `shell cmd shortcut clear-shortcuts ${CTRL_PROXY_PACKAGE}`;
+const clearShortcutsCommand = (userId: number) =>
+  `shell cmd shortcut clear-shortcuts --user ${userId} ${CTRL_PROXY_PACKAGE}`;
 function savedPrototypeRequestFailure(
   error: unknown,
   action: PrototypeSavedAction,
@@ -320,7 +322,12 @@ async function removeIconWarning(
     return `Other saved prototypes remain, and clearing shortcuts would remove their icons too, so the icon was left. ${DISABLED_ICON_WARNING}`;
   }
   try {
-    const cleared = await deps.adb.executeCommand(CLEAR_SHORTCUTS_COMMAND, {
+    // ShortcutService defaults to user 0, so a work or secondary profile needs the active user.
+    const { userId } = await new AndroidUserTargetResolver(deps.adb).resolve({
+      currentUser: true,
+      signal: deps.signal,
+    });
+    const cleared = await deps.adb.executeCommand(clearShortcutsCommand(userId), {
       noRetry: true,
       signal: deps.signal,
     });

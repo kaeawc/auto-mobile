@@ -26,6 +26,8 @@ import type {
 } from "./types";
 import { logger } from "../utils/logger";
 import { storedEdgeActionKey } from "../features/navigation/edgeReplayKey";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { nowIso } from "./nowIso";
 
 /**
  * Flat row of a node-provenance join (nav (app,build) Phase 2, #4985):
@@ -74,7 +76,10 @@ export interface NavigationEdgeTarget {
 export class NavigationRepository {
   private db: Kysely<Database> | null;
 
-  constructor(db?: Kysely<Database>) {
+  constructor(
+    db?: Kysely<Database>,
+    private readonly timer: Timer = defaultTimer,
+  ) {
     this.db = db ?? null;
   }
 
@@ -109,7 +114,7 @@ export class NavigationRepository {
    * busy_timeout escape (the in-process JS mutex, not SQLite's lock).
    */
   withExecutor(executor: Kysely<Database>): NavigationRepository {
-    return new NavigationRepository(executor);
+    return new NavigationRepository(executor, this.timer);
   }
 
   /**
@@ -136,7 +141,7 @@ export class NavigationRepository {
     // own value) so this stays a pure get-or-create that never mutates an existing
     // row — timestamp bumps remain the job of touchApp — while DO UPDATE still lets
     // RETURNING return the existing row.
-    const now = new Date().toISOString();
+    const now = nowIso(this.timer);
     const newApp: NewNavigationApp = {
       app_id: appId,
       updated_at: now,
@@ -163,7 +168,7 @@ export class NavigationRepository {
     const db = this.getDb();
     await db
       .updateTable("navigation_apps")
-      .set({ updated_at: new Date().toISOString() })
+      .set({ updated_at: nowIso(this.timer) })
       .where("app_id", "=", appId)
       .execute();
   }

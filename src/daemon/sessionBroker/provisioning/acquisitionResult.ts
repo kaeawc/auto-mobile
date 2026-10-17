@@ -53,7 +53,13 @@ export interface BindingBudgetEvidence {
       | "preparing"
       | "orphaned";
     uncounted?: true;
+    /** Inventory name of the device (orphans), when it differs from `stableDeviceId`. */
+    name?: string;
+    /** Why an `orphaned` device is charged: it is running, or its power state is unknown. */
+    orphanState?: "running" | "power_unknown";
   }>;
+  /** Charged devices beyond the bounded `charged` list; `usage.total` is always the full count. */
+  chargedOmitted?: number;
   retained: Array<{
     platform: "android" | "ios";
     stableDeviceId: string;

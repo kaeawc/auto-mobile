@@ -6,6 +6,7 @@ import {
   rememberSessionDeviceId,
 } from "./proxy/SessionBinding";
 import { HeartbeatKeeper, type HeartbeatKeeperPort } from "./proxy/HeartbeatKeeper";
+import { DaemonErrorClassifier } from "./proxy/DaemonErrorClassifier";
 import {
   DaemonLifecycleReconciler,
   type DaemonLifecycleReconcilerDeps,
@@ -16,7 +17,6 @@ import {
   LifecycleConnectionInFlightError,
   DaemonVersionMismatchError,
   DaemonBuildMismatchError,
-  DaemonAssetVersionMismatchError,
   DaemonBoundSessionExpiredError,
   DaemonSessionStalledError,
   DaemonConnectionSessionReleasedError,
@@ -93,13 +93,11 @@ export {
 } from "./proxy/startupOptions";
 import { anyDeviceReadOnlyArgShapeMatches } from "../server/deviceReadOnlyArgShapes";
 import { SessionOutsideBoundSessionError } from "../server/deviceOutsideBoundSessionRefusal";
-import { isMcpQueueTimeoutError } from "./McpTimeoutError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { getRemovedToolHint } from "../models/removedTools";
 import {
   DaemonBoundSessionLostError,
   DaemonClient,
-  DaemonHandshakeMismatchError,
   DaemonRequestNotDeliveredError,
   DaemonShuttingDownError,
   DaemonUnavailableError,
@@ -137,14 +135,9 @@ import {
 } from "./constants";
 import { getSessionIdleTimeoutMs } from "./sessionLivenessWindows";
 import {
-  DAEMON_SESSION_NOT_ACTIVE_CODE,
-  DAEMON_SESSION_NOT_FOUND_CODE,
-  DAEMON_UNKNOWN_TOOL_CODE,
-  errorCodeOf,
   releaseReasonFromError,
   daemonInstanceFromError,
   DAEMON_TOOL_UNAVAILABLE_CODE,
-  isGatedToolErrorCode,
   DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
   PROGRESS_NOTIFICATION_METHOD,
   type DaemonNotification,
@@ -598,6 +591,7 @@ export class DaemonMcpProxy {
   private readonly heartbeatKeeper: SingleFlightInterval;
   private readonly proxyHeartbeatKeeper: HeartbeatKeeper;
   private readonly sessionBinding: SessionBinding;
+  private readonly errorClassifier: DaemonErrorClassifier;
   private readonly heartbeatLeashMs: number;
   private readonly heartbeatIntervalMs: number;
   /**
@@ -987,6 +981,11 @@ export class DaemonMcpProxy {
       livenessRecovery: this.livenessRecovery,
       ownershipConflictLeashMs: this.ownershipConflictLeashMs,
       port: this.createHeldSessionHeartbeatOutcomesPort(),
+    });
+    this.errorClassifier = new DaemonErrorClassifier({
+      structuredSessionNotFound: () => this.structuredSessionNotFound,
+      structuredToolErrorCodes: () => this.structuredToolErrorCodes,
+      frontendRegistersTool: (name) => this.frontendRegistersTool(name),
     });
     this.heldSessionLosses = new HeldSessionLosses(
       this.sessionPlatforms,
@@ -2561,7 +2560,7 @@ export class DaemonMcpProxy {
       this.throwIfBoundSessionFenced(allowReleasedSession, attemptedSessionUuid);
       this.throwIfBoundSessionLost(error);
       this.throwIfSessionEndedAnswer(error, attemptedSessionUuid, fenceSessionNotFoundOnRetry);
-      if (!this.isRecoverableDaemonSessionError(error, established)) {
+      if (!this.errorClassifier.isRecoverableDaemonSessionError(error, established)) {
         throw error;
       }
       if (error instanceof DaemonShuttingDownError) {
@@ -2651,7 +2650,7 @@ export class DaemonMcpProxy {
     retryError: unknown,
     nonIdempotentToolName: string | undefined,
   ): Promise<void> {
-    if (!this.isRecoverableDaemonSessionError(retryError, true)) {
+    if (!this.errorClassifier.isRecoverableDaemonSessionError(retryError, true)) {
       return;
     }
     const refusedToolName = this.ambiguousReplayToolName(retryError, true, nonIdempotentToolName);
@@ -2767,7 +2766,10 @@ export class DaemonMcpProxy {
    * calls counted are never its own.
    */
   private isSessionAnswerOnSharedConnection(error: unknown): boolean {
-    return this.isDaemonSessionNotFoundError(error) && this.connectionCarriesCallsInFlight();
+    return (
+      this.errorClassifier.isDaemonSessionNotFoundError(error) &&
+      this.connectionCarriesCallsInFlight()
+    );
   }
 
   /**
@@ -2784,7 +2786,7 @@ export class DaemonMcpProxy {
     error: unknown,
     attemptedSessionUuid: string | undefined,
   ): string | undefined {
-    if (!this.isDaemonSessionNotFoundError(error)) {
+    if (!this.errorClassifier.isDaemonSessionNotFoundError(error)) {
       return undefined;
     }
     const releaseReason = releaseReasonFromError(error);
@@ -2834,38 +2836,11 @@ export class DaemonMcpProxy {
       !fenceSessionNotFoundOnRetry ||
       !attemptedSessionUuid ||
       this.boundSessionUuid !== attemptedSessionUuid ||
-      !this.isDaemonSessionNotFoundError(error)
+      !this.errorClassifier.isDaemonSessionNotFoundError(error)
     ) {
       return undefined;
     }
     return attemptedSessionUuid;
-  }
-
-  private isRecoverableDaemonSessionError(error: unknown, established = true): boolean {
-    if (!established) {
-      return error instanceof DaemonPreflightConnectionError;
-    }
-    // Compatibility policy failures cannot be healed by another connection
-    // attempt (and repeating a failed reconciliation could restart twice).
-    if (
-      error instanceof DaemonVersionMismatchError ||
-      error instanceof DaemonBuildMismatchError ||
-      error instanceof DaemonAssetVersionMismatchError
-    ) {
-      return false;
-    }
-    // Structured server evidence proves rejection happened before dispatch.
-    // Legacy message-only errors remain non-retryable rather than guessing.
-    if (error instanceof DaemonHandshakeMismatchError) {
-      return true;
-    }
-    if (error instanceof DaemonUnavailableError) {
-      return true;
-    }
-
-    // "Unknown tool" is recoverable only when the frontend advertises that tool.
-    // A reconnect cannot make a frontend-unregistered name exist in the daemon.
-    return this.isDaemonSessionNotFoundError(error) || this.isRecoverableUnknownToolError(error);
   }
 
   private throwIfBoundSessionLost(error: unknown): void {
@@ -2897,107 +2872,10 @@ export class DaemonMcpProxy {
     established: boolean,
     nonIdempotentToolName: string | undefined,
   ): string | undefined {
-    if (!established || this.isProvablyUndispatchedError(error)) {
+    if (!established || this.errorClassifier.isProvablyUndispatchedError(error)) {
       return undefined;
     }
     return nonIdempotentToolName;
-  }
-
-  /**
-   * Structured evidence that the daemon never dispatched the request: the frame
-   * was never written, or the daemon rejected it before admission. Message
-   * substrings (e.g. "Session not found") are deliberately not evidence here.
-   */
-  private isProvablyUndispatchedError(error: unknown): boolean {
-    return (
-      error instanceof DaemonRequestNotDeliveredError ||
-      (error instanceof DaemonShuttingDownError && !error.requestMayHaveDispatched) ||
-      error instanceof DaemonHandshakeMismatchError ||
-      isMcpQueueTimeoutError(error) ||
-      this.isRecoverableUnknownToolError(error)
-    );
-  }
-
-  private isDaemonSessionNotFoundError(error: unknown): boolean {
-    if (
-      error !== null &&
-      typeof error === "object" &&
-      "code" in error &&
-      error.code !== undefined
-    ) {
-      return error.code === DAEMON_SESSION_NOT_FOUND_CODE;
-    }
-    if (this.structuredSessionNotFound) {
-      return false;
-    }
-    // Older daemons return only the bare message, without a structured error code.
-    return errorMessage(error).includes("Session not found");
-  }
-
-  private isPreDispatchDaemonSessionError(error: unknown): boolean {
-    return (
-      this.isUnknownToolError(error) ||
-      errorCodeOf(error) === DAEMON_SESSION_NOT_ACTIVE_CODE ||
-      this.matchesLegacyMessage(error, "is not an active daemon session")
-    );
-  }
-
-  private isUnknownToolError(error: unknown): boolean {
-    return (
-      this.isGatedToolError(error) ||
-      errorCodeOf(error) === DAEMON_UNKNOWN_TOOL_CODE ||
-      this.matchesLegacyMessage(error, "Unknown tool:")
-    );
-  }
-
-  /**
-   * Message-text classification, kept only for daemons that predate the structured codes: a daemon
-   * advertising `structuredToolErrorCodes` always sends the code, so its prose is never evidence.
-   */
-  private matchesLegacyMessage(error: unknown, text: string): boolean {
-    return !this.structuredToolErrorCodes && errorMessage(error).includes(text);
-  }
-
-  /** The tool an unknown-tool refusal names, from the frame's evidence or (old daemons) its prose. */
-  private unknownToolName(error: unknown): string | undefined {
-    if (errorCodeOf(error) === DAEMON_UNKNOWN_TOOL_CODE) {
-      const details: unknown = error instanceof Error ? Reflect.get(error, "details") : undefined;
-      const toolName: unknown =
-        details !== null && typeof details === "object"
-          ? Reflect.get(details, "toolName")
-          : undefined;
-      return typeof toolName === "string" ? toolName : "";
-    }
-    if (this.structuredToolErrorCodes) {
-      return undefined;
-    }
-    return errorMessage(error).match(/Unknown tool:\s*(\S+)/)?.[1];
-  }
-
-  /**
-   * The daemon registers the tool but its availability gate (debug-only,
-   * embedded-SDK-only, plan-only) rejected the call (issue #10177). Structured
-   * code only: the gate-reason prose is never parsed. A daemon that predates the
-   * code sends none, so it falls through to the stale-daemon recovery below —
-   * that daemon is necessarily a different build than this proxy, so the
-   * reconnect re-runs the build-identity reconciliation and replaces it.
-   */
-  private isGatedToolError(error: unknown): boolean {
-    return isGatedToolErrorCode(error);
-  }
-
-  private isRecoverableUnknownToolError(error: unknown): boolean {
-    // A gate is daemon configuration, not skew: a reconnect cannot lift it, and
-    // resetting would abort every sibling call in flight on the shared client.
-    if (this.isGatedToolError(error)) {
-      return false;
-    }
-    const rawName = this.unknownToolName(error);
-    if (rawName === undefined) {
-      return this.isUnknownToolError(error);
-    }
-    const name = rawName.replace(/[.,;:!?]+$/, "");
-    return name.length === 0 || this.frontendRegistersTool(name);
   }
 
   private shouldSkipLeaseRefreshForDeviceControlTransportError(error: unknown): boolean {
@@ -3728,11 +3606,11 @@ export class DaemonMcpProxy {
       // A still-"Unknown tool" failure means the daemon genuinely cannot provide a
       // tool this frontend advertises — surface an actionable error naming both
       // builds instead of the opaque -32603.
-      if (this.isUnknownToolError(error)) {
+      if (this.errorClassifier.isUnknownToolError(error)) {
         throw await this.toolUnavailableError(
           name,
           errorMessage(error),
-          this.isGatedToolError(error),
+          this.errorClassifier.isGatedToolError(error),
         );
       }
       throw error;
@@ -4924,7 +4802,7 @@ export class DaemonMcpProxy {
       } catch (error) {
         // The daemon listed this session as the token's a moment ago: the answer is about the
         // session, not about a daemon that has yet to rehydrate it.
-        throw this.isDaemonSessionNotFoundError(error)
+        throw this.errorClassifier.isDaemonSessionNotFoundError(error)
           ? new HeldSessionNotFoundError(
               sessionUuid,
               this.boundHeartbeat.noteNotFoundAnswer(
@@ -5057,7 +4935,10 @@ export class DaemonMcpProxy {
         this.livenessAcks.set(sessionUuid, this.timer.now());
       }
     } catch (error) {
-      if (this.isDaemonSessionNotFoundError(error) && this.boundSessionUuid === sessionUuid) {
+      if (
+        this.errorClassifier.isDaemonSessionNotFoundError(error) &&
+        this.boundSessionUuid === sessionUuid
+      ) {
         // The first heartbeat is the session's first answer on the connection just established:
         // decided like every other not-found answer, so only a release reason that ends the
         // session fences it. With no reason the daemon may not have rehydrated it yet (#11570).
@@ -5209,7 +5090,8 @@ export class DaemonMcpProxy {
   private createHeldSessionHeartbeatOutcomesPort(): HeldSessionHeartbeatOutcomesPort {
     return {
       isClosing: () => this.closing,
-      isDaemonSessionNotFoundError: (...args) => this.isDaemonSessionNotFoundError(...args),
+      isDaemonSessionNotFoundError: (...args) =>
+        this.errorClassifier.isDaemonSessionNotFoundError(...args),
       applyNotFoundOutcome: (...args) => this.boundHeartbeat.applyNotFoundOutcome(...args),
       recordHeldSessionTerminalLoss: (...args) => this.recordHeldSessionTerminalLoss(...args),
       dropHeldSession: (...args) => this.dropHeldSession(...args),
@@ -5223,7 +5105,8 @@ export class DaemonMcpProxy {
       answersOwnershipReestablishment: (...args) => this.answersOwnershipReestablishment(...args),
       noteHeartbeatDaemonInstance: (...args) => this.noteHeartbeatDaemonInstance(...args),
       noteDaemonIdleEvidence: (...args) => this.noteDaemonIdleEvidence(...args),
-      isDaemonSessionNotFoundError: (...args) => this.isDaemonSessionNotFoundError(...args),
+      isDaemonSessionNotFoundError: (...args) =>
+        this.errorClassifier.isDaemonSessionNotFoundError(...args),
       isHeldSession: (...args) => this.latestBindingKeeper.isHeldSession(...args),
       latestBindingClaimable: () => this.latestBindingKeeper.latestBindingClaimable(),
       withRecoverableReconnect: (...args) => this.withRecoverableReconnect(...args),
@@ -5292,7 +5175,8 @@ export class DaemonMcpProxy {
       endLostSessionHandover: (...args) => this.handoverResolution.endLostSessionHandover(...args),
       isDefinitiveSessionLoss: (...args) =>
         this.handoverResolution.isDefinitiveSessionLoss(...args),
-      isDaemonSessionNotFoundError: (...args) => this.isDaemonSessionNotFoundError(...args),
+      isDaemonSessionNotFoundError: (...args) =>
+        this.errorClassifier.isDaemonSessionNotFoundError(...args),
       startProbeInterval: () => this.stallResumeProbe.start(),
       stopProbeInterval: () => {
         void this.stallResumeProbe.stop();
@@ -5527,7 +5411,7 @@ export class DaemonMcpProxy {
     error: unknown,
     attemptedClient: DaemonClientLike | null,
   ): RecoveryAttemptOutcome {
-    if (this.isDaemonSessionNotFoundError(error)) {
+    if (this.errorClassifier.isDaemonSessionNotFoundError(error)) {
       // The same decision as any other heartbeat's not-found: an attempt that reached a daemon
       // this proxy just connected to gets that session's first answer on the connection (#11570).
       const releaseReason = releaseReasonFromError(error);
@@ -5970,8 +5854,8 @@ export class DaemonMcpProxy {
   private failureNeverReachedLiveSession(error: unknown): boolean {
     return (
       isUnprovenSessionAdmissionError(error) ||
-      this.isRecoverableDaemonSessionError(error) ||
-      this.isPreDispatchDaemonSessionError(error) ||
+      this.errorClassifier.isRecoverableDaemonSessionError(error) ||
+      this.errorClassifier.isPreDispatchDaemonSessionError(error) ||
       this.shouldSkipLeaseRefreshForDeviceControlTransportError(error)
     );
   }

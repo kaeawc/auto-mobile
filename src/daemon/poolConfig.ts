@@ -1,3 +1,4 @@
+import type { DeviceRecoveryPolicy } from "../models/DeviceRecoveryPolicy";
 import { readEnvPositiveInteger } from "../utils/envNumbers";
 import type { MatchingStrategy } from "../models/DeviceMatchCriteria";
 
@@ -12,10 +13,7 @@ export const MAX_DEVICE_RECOVERY_ATTEMPTS = 10;
  */
 export const DEFAULT_DEVICE_RECOVERY_WINDOW_MS = 15 * 60 * 1000;
 
-export interface DeviceRecoveryPolicy {
-  onLoss: boolean;
-  maxAttempts: number;
-}
+export type { DeviceRecoveryPolicy };
 
 export interface DeviceRecoveryPolicyParseResult {
   policy: DeviceRecoveryPolicy;

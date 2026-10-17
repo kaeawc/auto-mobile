@@ -1,8 +1,6 @@
 src/db/deviceSessionRepository.ts -> src/daemon/sessionBroker/provisioning/executionLiveness
 src/db/deviceSettingDefaultsRepository.ts -> src/features/utility/DeviceSettingDefaults
-src/db/emulatorLossIncidentRepository.ts -> src/daemon/emulatorLossIncident
 src/db/keyedJsonConfigRepository.ts -> src/features/snapshot/DeviceSnapshotConfig
-src/db/migrationLock.ts -> src/daemon/lockOwnerGeneration
 src/db/navigationRepository.ts -> src/features/navigation/edgeReplayKey
 src/db/videoRecordingRepository.ts -> src/features/video
 src/db/videoRecordingRepository.ts -> src/features/video/VideoRecorderService

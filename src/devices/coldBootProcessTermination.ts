@@ -5,7 +5,7 @@ import { isProcessRunning } from "../utils/processLiveness";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import type { LockOwnerGenerationProbe } from "../utils/fileLock";
-import { defaultLockOwnerGenerationProbe } from "../daemon/lockOwnerGeneration";
+import { defaultLockOwnerGenerationProbe } from "../utils/lockOwnerGeneration";
 
 export const COLD_BOOT_SETTLEMENT_GRACE_MS = 1_000;
 /** Cadence of the liveness re-check on an emulator that survived SIGTERM and SIGKILL (#9920). */

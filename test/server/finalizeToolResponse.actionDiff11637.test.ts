@@ -99,8 +99,8 @@ test("#11637 item 5: a status-bar signal-strength change is not a screen change"
 
   expect(out.observation.isDiff).toBe(true);
   expect(out.observation.changed).toEqual([]);
-  expect(out.observation.added).toEqual([]);
-  expect(out.observation.removed).toEqual([]);
+  expect(out.observation.added).toBeUndefined();
+  expect(out.observation.removed).toBeUndefined();
 });
 
 test("#11637 item 5: app changes still diff next to a status-bar change", () => {
@@ -130,7 +130,7 @@ test("#11637 item 4: element is not repeated as selectedElement.matchedElement",
   expect(out.element).toBeUndefined();
 });
 
-test("#11637 item 2: added/removed carry only actionable nodes beside the skeleton", () => {
+test("#11637 item 2: a diff beside its skeleton carries no added/removed lists", () => {
   const out = tapOn(
     observation((root) =>
       visit(root, (n) => {
@@ -142,8 +142,26 @@ test("#11637 item 2: added/removed carry only actionable nodes beside the skelet
   );
 
   const diff = out.observation;
+  expect(diff.isDiff).toBe(true);
   expect(diff.skeleton.length).toBeGreaterThan(0);
-  for (const node of [...diff.added, ...diff.removed]) {
-    expect(node.attributes.affordances.length).toBeGreaterThan(0);
-  }
+  expect("added" in diff).toBe(false);
+  expect("removed" in diff).toBe(false);
+  // `changed` stays: the skeleton cannot say what moved from what.
+  expect(diff.changed.map((c: any) => c.selector.elementId)).toContain("android:id/checkbox");
+});
+
+test("#11637 item 2: a node that appears is visible in the skeleton, not an added entry", () => {
+  const out = tapOn(
+    observation((root) =>
+      visit(root, (n) => {
+        if (n["resource-id"] === "android:id/checkbox" && n.checked === "true") {
+          n["resource-id"] = "android:id/brand_new_checkbox";
+        }
+      }),
+    ),
+  );
+
+  expect("added" in out.observation).toBe(false);
+  expect("removed" in out.observation).toBe(false);
+  expect(JSON.stringify(out.observation.skeleton)).toContain("brand_new_checkbox");
 });

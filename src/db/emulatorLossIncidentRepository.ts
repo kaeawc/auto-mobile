@@ -9,7 +9,7 @@ import {
   type EmulatorLossRecoverySettlement,
   type EmulatorRecoveryOutcome,
   type OpenEmulatorLossIncidentInput,
-} from "../daemon/emulatorLossIncident";
+} from "../utils/emulatorLossIncident";
 import type { IdGenerator } from "../utils/IdGenerator";
 import { defaultIdGenerator } from "../utils/IdGenerator";
 import type { Timer } from "../utils/SystemTimer";

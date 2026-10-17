@@ -8,5 +8,3 @@ src/ctrlProxy/IOSCtrlProxyManager.ts -> src/doctor/deadline
 src/ctrlProxy/IOSCtrlProxyManager.ts -> src/doctor/types
 src/ctrlProxy/RunnerReadinessService.ts -> src/features/observe/android
 src/ctrlProxy/RunnerReadinessService.ts -> src/features/observe/ios
-src/ctrlProxy/ios/IosCtrlProxyProcessClient.ts -> src/daemon/lockOwnerGeneration
-src/ctrlProxy/ios/IosTunnelClient.ts -> src/daemon/lockOwnerGeneration

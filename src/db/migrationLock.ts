@@ -1,4 +1,4 @@
-import { defaultLockOwnerGenerationProbe } from "../daemon/lockOwnerGeneration";
+import { defaultLockOwnerGenerationProbe } from "../utils/lockOwnerGeneration";
 import { errorMessage } from "../utils/describeUnknownError";
 import { existsSync, realpathSync } from "fs";
 import { basename, dirname, join } from "path";

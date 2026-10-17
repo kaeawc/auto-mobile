@@ -1,6 +1,9 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { recordedProcessGenerationToken } from "./processGenerationFields";
+import type { DaemonGenerationIdentity } from "../utils/daemonGenerationIdentity";
 import { stableStringify } from "../utils/stableStringify";
+
+export type { DaemonGenerationIdentity };
 
 /**
  * A live-acceptance harness creates this secret before it starts a daemon. It
@@ -9,15 +12,6 @@ import { stableStringify } from "../utils/stableStringify";
  */
 export const DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV =
   "AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET";
-
-export interface DaemonGenerationIdentity {
-  pid: number;
-  startedAt: number;
-  processGenerationToken?: string;
-  version: string;
-  buildId: string;
-  entryScript: string;
-}
 
 export function daemonGenerationIdentityFromStatus(
   status: Partial<DaemonGenerationIdentity> & { processGenerationTokenUtc?: unknown },

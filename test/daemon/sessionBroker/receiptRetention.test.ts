@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  RECEIPT_PRUNE_BATCH,
   RECEIPT_RETENTION_MS,
   SessionBroker,
   type SessionBrokerOptions,
@@ -180,6 +181,25 @@ describe("terminal receipt recovery cost and retention", () => {
     expect(prune).toHaveBeenCalledTimes(1);
     await timer.advanceTimeAsync(RECEIPT_PRUNE_INTERVAL_MS);
     expect(prune).toHaveBeenCalledTimes(2);
+    await service.close();
+  });
+
+  test("a full prune batch is followed by another pass without waiting the interval (#12761)", async () => {
+    const lock = { acquire: () => undefined, release: () => undefined };
+    const prune = spyOn(broker, "pruneReceipts")
+      .mockResolvedValueOnce(RECEIPT_PRUNE_BATCH)
+      .mockResolvedValueOnce(RECEIPT_PRUNE_BATCH)
+      .mockResolvedValue(3);
+    spyOn(broker, "recover").mockResolvedValue(undefined);
+    const service = new SessionBrokerService(broker, "scope", lock, timer);
+    service.start();
+    for (let pass = 0; pass < 5; pass++) {
+      await timer.advanceTimeAsync(5_000);
+    }
+    // Two full batches and the short one that ends the backlog; then the interval applies again.
+    expect(prune).toHaveBeenCalledTimes(3);
+    await timer.advanceTimeAsync(RECEIPT_PRUNE_INTERVAL_MS);
+    expect(prune).toHaveBeenCalledTimes(4);
     await service.close();
   });
 });

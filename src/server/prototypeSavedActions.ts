@@ -31,7 +31,8 @@ import {
 } from "../features/prototype/ios/iosPrototypeBundleId";
 import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import type { BootedDevice } from "../models";
-import type { AdbCommandRunner } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { AndroidUserTargetResolver } from "../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { CTRL_PROXY_PACKAGE } from "../ctrlProxy/constants";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { outputLooksLikeShellFailure } from "../utils/android-cmdline-tools/shellOutputHeuristics";
@@ -71,7 +72,7 @@ export interface PrototypeSavedDependencies {
     "save" | "listSaved" | "deleteSaved" | "pinSaved" | "supportsCommand"
   >;
   /** Host-side adb for `removeIcon`; absent means the icon cannot be cleared from the host. */
-  adb?: AdbCommandRunner;
+  adb?: AdbExecutor;
   stageAssets: () => Promise<{ uploaded: UploadedPrototypeAsset[]; failure?: PrototypeResult }>;
   signal?: AbortSignal;
 }
@@ -139,7 +140,8 @@ export function savedPrototypeSuccess(
 }
 const DISABLED_ICON_WARNING = "A deleted prototype's disabled home-screen icon may remain.";
 /** Clearing is only safe when no saved prototype is left: it clears every CtrlProxy shortcut. */
-const CLEAR_SHORTCUTS_COMMAND = `shell cmd shortcut clear-shortcuts ${CTRL_PROXY_PACKAGE}`;
+const clearShortcutsCommand = (userId: number) =>
+  `shell cmd shortcut clear-shortcuts --user ${userId} ${CTRL_PROXY_PACKAGE}`;
 function savedPrototypeRequestFailure(
   error: unknown,
   action: PrototypeSavedAction,
@@ -223,6 +225,15 @@ async function saveAndroidPrototype(
   if (!args.pin || !output.success) {
     return { ...output, ...uploaded };
   }
+  // The pin transport takes no signal, so a cancellation that landed during the save must stop
+  // the second mutation here; the completed save is still reported.
+  if (deps.signal?.aborted) {
+    return {
+      ...output,
+      warning: "The request was cancelled after the save, so the prototype was not pinned.",
+      ...uploaded,
+    };
+  }
   return {
     ...output,
     ...(await pinSavedPrototype(deps, args, result.saved?.id ?? args.spec!.id)),
@@ -239,7 +250,17 @@ async function pinSavedPrototype(
   args: PrototypeSavedArgs,
   id: string,
 ): Promise<Partial<PrototypeSavedOutput>> {
-  const reply = await deps.client.pinSaved(id, args.icon, args.timeoutMs);
+  let reply: PrototypeResult;
+  try {
+    reply = await deps.client.pinSaved(id, args.icon, args.timeoutMs);
+  } catch (error) {
+    if (deps.signal?.aborted) {
+      throw error;
+    }
+    // The save already succeeded; a pin transport failure must not hide it.
+    logger.warn(`[prototype] pin request failed: ${errorMessage(error)}`, error);
+    return { success: false, error: `Saved, but pinning failed. ${errorMessage(error)}` };
+  }
   const autoConfirm = args.autoConfirm
     ? " autoConfirm is not implemented yet (#12266): accept the launcher's Add to home screen dialog on the device."
     : "";
@@ -263,6 +284,29 @@ async function pinSavedPrototype(
   };
 }
 
+/** The saved ids still present after a delete, or the warning that the list could not be confirmed. */
+async function probeRemainingSaved(
+  deps: PrototypeSavedDependencies,
+  timeoutMs: number | undefined,
+): Promise<readonly unknown[] | string> {
+  const unconfirmed = (detail: string) =>
+    `Could not confirm that no saved prototype remains${detail}, so no icon was cleared. ${DISABLED_ICON_WARNING}`;
+  try {
+    const remaining = await deps.client.listSaved(timeoutMs);
+    // Only an explicit empty list proves nothing else would lose its shortcut.
+    return remaining.success && remaining.savedPrototypes !== undefined
+      ? remaining.savedPrototypes
+      : unconfirmed("");
+  } catch (error) {
+    if (deps.signal?.aborted) {
+      throw error;
+    }
+    // The delete already succeeded; an unconfirmed probe only means the icon is left alone.
+    logger.warn(`[prototype] saved-list probe failed: ${errorMessage(error)}`, error);
+    return unconfirmed(` (${errorMessage(error)})`);
+  }
+}
+
 async function removeIconWarning(
   deps: PrototypeSavedDependencies,
   timeoutMs: number | undefined,
@@ -270,15 +314,20 @@ async function removeIconWarning(
   if (!deps.adb) {
     return `removeIcon is unavailable without host adb. ${DISABLED_ICON_WARNING}`;
   }
-  const remaining = await deps.client.listSaved(timeoutMs);
-  if (!remaining.success) {
-    return `Could not confirm that no saved prototype remains, so no icon was cleared. ${DISABLED_ICON_WARNING}`;
+  const remaining = await probeRemainingSaved(deps, timeoutMs);
+  if (typeof remaining === "string") {
+    return remaining;
   }
-  if ((remaining.savedPrototypes ?? []).length > 0) {
+  if (remaining.length > 0) {
     return `Other saved prototypes remain, and clearing shortcuts would remove their icons too, so the icon was left. ${DISABLED_ICON_WARNING}`;
   }
   try {
-    const cleared = await deps.adb.executeCommand(CLEAR_SHORTCUTS_COMMAND, {
+    // ShortcutService defaults to user 0, so a work or secondary profile needs the active user.
+    const { userId } = await new AndroidUserTargetResolver(deps.adb).resolve({
+      currentUser: true,
+      signal: deps.signal,
+    });
+    const cleared = await deps.adb.executeCommand(clearShortcutsCommand(userId), {
       noRetry: true,
       signal: deps.signal,
     });

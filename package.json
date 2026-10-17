@@ -208,7 +208,7 @@
     "js-yaml": "^5.1.0",
     "knip": "^6.0.0",
     "kysely": "0.29.6",
-    "oxc-parser": "0.153.0",
+    "oxc-parser": "0.154.0",
     "oxfmt": "0.72.0",
     "oxlint": "1.87.0",
     "oxlint-tsgolint": "7.0.2004",

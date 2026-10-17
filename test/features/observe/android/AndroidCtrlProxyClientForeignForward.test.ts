@@ -52,25 +52,15 @@ function harness(acquire = true, recorded = false) {
     },
   };
   let recoveries = 0;
-  client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    createSuccessWebSocketFactory(),
+  client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: createSuccessWebSocketFactory(),
     timer,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    lease,
-    () => {
+    ctrlProxyForwardLease: lease,
+    serviceManagerFactory: () => {
       recoveries++;
       throw new Error("unexpected recovery");
     },
-  );
+  });
   return { client, adb, recoveries: () => recoveries };
 }
 

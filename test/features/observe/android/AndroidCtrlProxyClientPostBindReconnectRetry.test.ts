@@ -54,25 +54,14 @@ function createHarness(timer: FakeTimer, gateMs: number, onGateStart?: () => voi
   };
   const gatedFactory = createTimeGatedWebSocketFactory(gateMs, timer, 4, onGateStart);
   const dialTimes: number[] = [];
-  client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    (url: string) => {
+  client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: (url: string) => {
       dialTimes.push(timer.now());
       return gatedFactory(url);
     },
     timer,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    () => manager,
-  );
+    serviceManagerFactory: () => manager,
+  });
   return { subject: client, dialTimes };
 }
 

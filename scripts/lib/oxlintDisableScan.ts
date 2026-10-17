@@ -9,11 +9,14 @@
 // literals, or on a later line of a block comment, is never a directive.
 //
 // Output is sorted "<count>\t<file>\t<key>" rows (the ratchet's row format), with
-// five key shapes: "oxlint-disable(<rule>)" for each -next-line directive,
+// six key shapes: "oxlint-disable(<rule>)" for each -next-line directive,
 // "oxlint-disable-line(<rule>)" for each -line directive,
 // "oxlint-disable-block(<rule>)" for an unbounded disable a later enable closes,
 // "oxlint-disable-file(<rule>)" for one that runs to the end of the file (separate
-// keys, so widening a suppression, or dropping its closing enable, is a new row), and
+// keys, so widening a suppression, or dropping its closing enable, is a new row),
+// "oxlint-disable-partial(*)" for a bare disable that only named enables re-enable
+// rules after (never fully closed, so not a block, but not a plain file row either:
+// deleting the named enable turns it into a new file row), and
 // "oxlint-disable-no-reason(<rule>)" for those without a `-- reason` suffix.
 // The `eslint-` spelling of each directive is counted identically (oxlint honours
 // it) and a leading `eslint/` is stripped from the rule. A directive naming
@@ -47,6 +50,13 @@ export interface Directive {
    * suppression to the end of the file) turns it into a new file-scope row.
    */
   closed?: string[];
+  /**
+   * For a wildcard (`*`) unbounded disable: a named enable re-enabled some rules but
+   * no bare enable has closed the wildcard itself. Keyed `oxlint-disable-partial(*)`,
+   * distinct from `-file(*)`, so deleting the named enable (which widens the
+   * suppression to those rules) is a new row.
+   */
+  partial?: boolean;
 }
 
 /** Rule list of an enable directive (`*` when bare), or null when the comment is not one. */
@@ -147,6 +157,14 @@ export function findDirectives(source: string, fileName = "input.tsx"): Directiv
     const enabled = parseEnable(body);
     if (enabled) {
       // A bare enable closes everything; a named one closes only those rules.
+      // A named enable cannot close an open wildcard, but it partly narrows it.
+      if (!enabled.includes("*")) {
+        open.forEach((o) => {
+          if (o.rule === "*") {
+            o.directive.partial = true;
+          }
+        });
+      }
       for (let i = open.length - 1; i >= 0; i--) {
         if (enabled.includes("*") || enabled.includes(open[i].rule)) {
           open[i].directive.closed!.push(open[i].rule);
@@ -166,7 +184,10 @@ function keyFor(d: Directive, rule: string): string {
   if (d.scope === "line") {
     return "oxlint-disable-line";
   }
-  return d.closed?.includes(rule) ? "oxlint-disable-block" : "oxlint-disable-file";
+  if (d.closed?.includes(rule)) {
+    return "oxlint-disable-block";
+  }
+  return rule === "*" && d.partial ? "oxlint-disable-partial" : "oxlint-disable-file";
 }
 
 export function countRows(file: string, source: string, counts: Map<string, number>): void {

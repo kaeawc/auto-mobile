@@ -358,6 +358,27 @@ describe("session broker proxy acquisition", () => {
     await drainMicrotasks(32);
   });
 
+  test("a release that never settles cannot hold acquisition past its deadline (#12985)", async () => {
+    const { ports, timer, hold } = stalledHoldRig();
+    ports.releaseSession = () => new Promise<never>(() => {});
+    const acquisition = track(acquireSessionThroughDaemon(config, ports));
+    await drainMicrotasks(32);
+
+    timer.advanceTime(config.preparationTimeoutMs! + 1);
+    await drainMicrotasks(32);
+    timer.advanceTime(1);
+    await drainMicrotasks(32);
+
+    expect(acquisition.result).toMatchObject({
+      outcome: "failed",
+      cleanupPending: true,
+      failure: { code: "timeout" },
+    });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    hold.resolve();
+    await drainMicrotasks(32);
+  });
+
   test("a hold that resolves after cancellation in the same turn is fenced (#12770)", async () => {
     const { ports, hold, releases } = stalledHoldRig();
     const controller = new AbortController();

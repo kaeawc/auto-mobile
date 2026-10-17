@@ -55,8 +55,6 @@ import {
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger, type Logger } from "../../../utils/logger";
 
-import { linkWindowRoots } from "../linkWindowRoots";
-
 import type { ScreenIdentity } from "../../../models/ObserveResult";
 
 import {
@@ -75,15 +73,12 @@ import {
   HighlightShape,
   toActionableError,
   ActionableError,
-  nodeAttributes,
 } from "../../../models";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
-import type { ProxySetupResult } from "../../../utils/interfaces/ProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
-import { fixedBackoff } from "../../../utils/Backoff";
 import {
   ForcedRestartBudget,
   type ForcedRestartSnapshot,
@@ -99,13 +94,17 @@ import {
 } from "../../../utils/ContentHashProvider";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
-import { appWindowsOnly } from "../hierarchyLayer";
-import { isDeepStrictEqual } from "node:util";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../../db/installedAppsCacheWriteCoordinator";
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
+import {
+  AndroidServiceRecovery,
+  OBSERVE_RECOVERY_WAIT_MS,
+  type AndroidServiceManagerFactory,
+} from "./AndroidServiceRecovery";
+import { AndroidHierarchyUpdateHandler } from "./AndroidHierarchyUpdateHandler";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import {
   WEBSOCKET_NOT_CONNECTED_MESSAGE,
@@ -152,8 +151,6 @@ import {
 import { FailureEventRepository } from "../../../db/failureEventRepository";
 import type { CrashEventSink } from "../../../utils/interfaces/CrashMonitor";
 import { serverConfig } from "../../../utils/ServerConfig";
-import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
-import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { getSdkFrameMetricsStore } from "../../performance/SdkFrameMetricsStore";
 import {
   AndroidAppEventRecorder,
@@ -248,7 +245,6 @@ import type {
   CertificatesDelegateContext,
   AccessibilityHierarchy,
   AccessibilityHierarchyResponse,
-  AccessibilityNode,
   CachedHierarchy,
   ScreenshotResult,
   A11ySwipeResult,
@@ -642,21 +638,10 @@ function portAllocationIdForClient(
   return transientObserver ? `${deviceId}:observer:${ids.next()}` : deviceId;
 }
 
-/**
- * Narrow Android manager seam for connection-failure escalation (issue #7532),
- * analogous to `IOSCtrlProxyClient`'s `serviceManagerFactory`. Exposes only what
- * recovery needs: the binding-health probe, the crashed/unbound rebind added by
- * #7470, a wait for an existing bind, and full setup for a service that is
- * missing or not installed at all. `AndroidCtrlProxyManager` implements all four.
- */
-export interface AndroidServiceRecoveryManager {
-  isAccessibilityServiceHealthy(): Promise<boolean>;
-  rebindIfUnhealthy?(): Promise<boolean>;
-  waitForAccessibilityServiceBinding?(): Promise<"already-bound" | "recovered" | "unhealthy">;
-  setup(force?: boolean, perf?: PerformanceTracker): Promise<ProxySetupResult>;
-}
-
-export type AndroidServiceManagerFactory = (device: BootedDevice) => AndroidServiceRecoveryManager;
+export type {
+  AndroidServiceRecoveryManager,
+  AndroidServiceManagerFactory,
+} from "./AndroidServiceRecovery";
 
 export interface AndroidCtrlProxyClientDeps {
   /** Creates the client's WebSocket transport. */
@@ -782,19 +767,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   /** A socket must survive this interval before it can rearm a restart. */
   private static readonly RESTART_REARM_STABILITY_MS = 2000;
   private restartRearmTimeout: NodeJS.Timeout | null = null;
-  private pendingRecoveryStability:
-    | {
-        token: number;
-        resolve: (stable: boolean) => void;
-        eligible: boolean;
-        stableSocket: WebSocket | null;
-      }
-    | undefined;
   /** One client exists per device; this budget gates both failure bursts and observe calls. */
   private readonly forcedRestartBudget: ForcedRestartBudget;
-  /** Set when recovery found the device absent; consumed by the next offline-to-online rearm. */
-  private deviceSeenAbsent = false;
-  public static readonly OBSERVE_RECOVERY_WAIT_MS = 10_000;
+  private serviceRecovery: AndroidServiceRecovery | undefined;
+  public static readonly OBSERVE_RECOVERY_WAIT_MS = OBSERVE_RECOVERY_WAIT_MS;
   private readonly serviceManagerFactory: AndroidServiceManagerFactory;
 
   // Delegate instances (lazy initialized)
@@ -896,7 +872,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Track foreground package for crash monitoring
   private lastForegroundPackage: string | null = null;
-  private lastLayoutTelemetryTimestamp = 0;
 
   private readonly crashEventSink: CrashEventSink;
   private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
@@ -1119,11 +1094,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   private rearmAfterDeviceOnline(): void {
-    if (!this.deviceSeenAbsent) {
-      return;
-    }
-    this.deviceSeenAbsent = false;
-    this.forcedRestartBudget.rearm("device back online");
+    this.getServiceRecovery().rearmAfterDeviceOnline();
   }
 
   /** Remove only the singleton captured before asynchronous incarnation cleanup began. */
@@ -1533,6 +1504,118 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   /** Keep mutable test seams and post-await state live without exposing connection lifecycle. */
+  private hierarchyUpdateHandler: AndroidHierarchyUpdateHandler | undefined;
+  private getHierarchyUpdateHandler(): AndroidHierarchyUpdateHandler {
+    if (!this.hierarchyUpdateHandler) {
+      const client = this;
+      this.hierarchyUpdateHandler = new AndroidHierarchyUpdateHandler({
+        get timer() {
+          return client.timer;
+        },
+        get deviceId() {
+          return client.device.deviceId;
+        },
+        get transientObserver() {
+          return client.transientObserver;
+        },
+        get hierarchy() {
+          return client.hierarchy;
+        },
+        get observerHierarchyRequestIds() {
+          return client.observerHierarchyRequestIds;
+        },
+        get hierarchyObservationStreamSuppressions() {
+          return client.hierarchyObservationStreamSuppressions;
+        },
+        get sdkNavigationAppIds() {
+          return client.sdkNavigationAppIds;
+        },
+        get cachedHierarchy() {
+          return client.cachedHierarchy;
+        },
+        set cachedHierarchy(value) {
+          client.cachedHierarchy = value;
+        },
+        get lastForegroundPackage() {
+          return client.lastForegroundPackage;
+        },
+        set lastForegroundPackage(value) {
+          client.lastForegroundPackage = value;
+        },
+        removeHierarchyObservationStreamSuppression: (requestId) =>
+          client.removeHierarchyObservationStreamSuppression(requestId),
+        updateCachedScreenDimensions: (hierarchy) => client.updateCachedScreenDimensions(hierarchy),
+        pushHierarchyToObservationStream: (hierarchy, frameContext) =>
+          client.pushHierarchyToObservationStream(hierarchy, frameContext),
+        startScreenshotBackoff: () => client.startScreenshotBackoff(),
+        getNavigationGraphManager: () => client.getNavigationGraphManager(),
+        ensureBuildContext: (packageName) => client.ensureBuildContext(packageName),
+        getHierarchyNavigationDetector: () => client.getHierarchyNavigationDetector(),
+      });
+    }
+    return this.hierarchyUpdateHandler;
+  }
+
+  private getServiceRecovery(): AndroidServiceRecovery {
+    if (!this.serviceRecovery) {
+      const client = this;
+      this.serviceRecovery = new AndroidServiceRecovery({
+        get adb() {
+          return client.adb;
+        },
+        get timer() {
+          return client.timer;
+        },
+        get deviceId() {
+          return client.device.deviceId;
+        },
+        get device() {
+          return client.device;
+        },
+        get closed() {
+          return client.closed;
+        },
+        get connectionGeneration() {
+          return client.connectionGeneration;
+        },
+        get consecutiveConnectionFailures() {
+          return client.consecutiveConnectionFailures;
+        },
+        set consecutiveConnectionFailures(value: number) {
+          client.consecutiveConnectionFailures = value;
+        },
+        get isRecoveringService() {
+          return client.isRecoveringService;
+        },
+        set isRecoveringService(value: boolean) {
+          client.isRecoveringService = value;
+        },
+        get recoveryPromise() {
+          return client.recoveryPromise;
+        },
+        set recoveryPromise(value: Promise<boolean> | null) {
+          client.recoveryPromise = value;
+        },
+        get forcedRestartBudget() {
+          return client.forcedRestartBudget;
+        },
+        get serviceManagerFactory() {
+          return client.serviceManagerFactory;
+        },
+        get restartRearmPending() {
+          return client.restartRearmTimeout !== null;
+        },
+        get socket() {
+          return client.ws;
+        },
+        isConnected: () => client.isConnected(),
+        resetConnectionBudget: () => client.resetConnectionBudget(),
+        connectBackgroundWebSocket: () => client.connectBackgroundWebSocket(),
+      });
+    }
+    return this.serviceRecovery;
+  }
+
   private getPortForwarder(): AndroidCtrlProxyPortForwarder {
     if (!this.portForwarder) {
       const client = this;
@@ -1979,19 +2062,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
     this.restartRearmTimeout = this.timer.setTimeout(() => {
       this.restartRearmTimeout = null;
-      if (!this.isConnected()) {
-        if (this.pendingRecoveryStability?.eligible) {
-          this.failPendingRecoveryStability("WebSocket closed before stable reconnect");
-        }
-        return;
-      }
-      const pending = this.pendingRecoveryStability;
-      if (pending) {
-        pending.stableSocket = this.ws;
-        this.completePendingRecoveryStability();
-      } else if (this.forcedRestartBudget.snapshot().state !== "suspended") {
-        this.forcedRestartBudget.recordSuccess();
-      }
+      this.getServiceRecovery().onStabilityTimerFired();
     }, AndroidCtrlProxyClient.RESTART_REARM_STABILITY_MS);
     this.syncNetworkStateToDevice();
     this.syncAccessibilityFlagsToDevice();
@@ -2109,16 +2180,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   public onConnectionClosed(): void {
+    const rearmTimerWasArmed = this.restartRearmTimeout !== null;
     if (this.restartRearmTimeout) {
       this.timer.clearTimeout(this.restartRearmTimeout);
       this.restartRearmTimeout = null;
-      if (this.pendingRecoveryStability?.eligible) {
-        this.failPendingRecoveryStability("WebSocket closed before stable reconnect");
-      }
     }
-    if (this.pendingRecoveryStability) {
-      this.pendingRecoveryStability.stableSocket = null;
-    }
+    this.getServiceRecovery().onSocketClosed(rearmTimerWasArmed);
     this.supportedCommands = null;
     this.rejectedCommands.clear();
     this.lateCancelledScreenshotRequestIds.clear();
@@ -2162,45 +2229,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.stopWorkProfileMonitor();
   }
 
-  private failPendingRecoveryStability(reason: string): void {
-    const pending = this.pendingRecoveryStability;
-    if (pending) {
-      this.pendingRecoveryStability = undefined;
-      this.forcedRestartBudget.recordFailure(reason, pending.token);
-      pending.resolve(false);
-    }
-  }
-
-  /**
-   * An absent device never exercised the runner, so its attempt is given back instead of burning
-   * a forced-restart slot (#11246); every other unrecovered outcome is a recorded failure.
-   */
-  private settleUnrecoveredAttempt(outcome: string, token: number): void {
-    if (!this.closed && outcome === "unavailable") {
-      this.releasePendingRecoveryStability(token);
-      return;
-    }
-    this.failPendingRecoveryStability(`service recovery ${outcome}`);
-    this.forcedRestartBudget.recordFailure(`service recovery ${outcome}`, token);
-  }
-
-  private releasePendingRecoveryStability(token: number): void {
-    const pending = this.pendingRecoveryStability;
-    if (pending?.token === token) {
-      this.pendingRecoveryStability = undefined;
-      pending.resolve(false);
-    }
-    this.forcedRestartBudget.releaseAttempt(token);
-  }
-
-  private completePendingRecoveryStability(): void {
-    const pending = this.pendingRecoveryStability;
-    if (pending?.eligible && pending.stableSocket === this.ws && this.isConnected()) {
-      this.pendingRecoveryStability = undefined;
-      pending.resolve(this.forcedRestartBudget.recordSuccess(pending.token));
-    }
-  }
-
   /** Every app id with cached or in-flight build-context state (#4984). */
   private knownBuildContextApps(): string[] {
     return Array.from(
@@ -2221,145 +2249,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   protected override onConnectionFailureThresholdReached(): void {
     if (!this.isRecoveringService) {
-      this.triggerServiceRecovery();
+      this.getServiceRecovery().trigger();
     }
-  }
-
-  /**
-   * Trigger CtrlProxy accessibility-service recovery through the manager.
-   * Called when repeated WebSocket connection failures indicate the service
-   * may be crashed, unbound, or missing (issue #7532). Guarded by
-   * `isRecoveringService` so a failure burst cannot start a second, overlapping
-   * recovery while one is already in flight.
-   */
-  private triggerServiceRecovery(): void {
-    if (this.isRecoveringService) {
-      return;
-    }
-    const token = this.forcedRestartBudget.tryBeginAttempt();
-    if (token === undefined) {
-      return;
-    }
-
-    this.isRecoveringService = true;
-    logger.info(
-      `[AndroidCtrlProxyClient] Triggering CtrlProxy recovery after ${this.consecutiveConnectionFailures} connection failures`,
-    );
-
-    // A background reconnect can stabilize while the async health probe is
-    // pending. Claim its stability signal with this recovery's token now.
-    const replaceStabilityWaiter = (): Promise<boolean> => {
-      this.pendingRecoveryStability?.resolve(false);
-      return new Promise<boolean>((resolve) => {
-        this.pendingRecoveryStability = { token, resolve, eligible: false, stableSocket: null };
-      });
-    };
-    let stableConnection = replaceStabilityWaiter();
-
-    const generation = this.connectionGeneration;
-    const recovery = this.recoverAccessibilityService(generation, () => {
-      stableConnection = replaceStabilityWaiter();
-    })
-      .then(async (outcome) => {
-        if (this.closed || outcome === "failed" || outcome === "unavailable") {
-          this.settleUnrecoveredAttempt(outcome, token);
-          return false;
-        }
-        // A repaired service may clear the foreground connection cooldown;
-        // the failure counter and restart budget reset only after reconnect.
-        if (outcome === "repaired") {
-          // Only an actual rebind/setup or a completed in-progress bind
-          // justifies resetting the foreground cooldown early — the service
-          // was demonstrably broken and is now fixed. When it was already
-          // healthy (#6260: WS refused for an unrelated reason), leave the
-          // connection budget alone so the cooldown still gates a background
-          // reconnect instead of hammering a socket unrelated to service health.
-          // resetConnectionBudget() (issue #7538) also clears the cooldown
-          // clock and un-pauses a paused background reconnect, not just the
-          // attempt counter.
-          this.resetConnectionBudget();
-        }
-        if (this.pendingRecoveryStability) {
-          this.pendingRecoveryStability.eligible = true;
-          this.completePendingRecoveryStability();
-        }
-        logger.info(
-          `[AndroidCtrlProxyClient] Recovery completed (${outcome}); reconnecting WebSocket`,
-        );
-        // Background reconnect respects the #7537 background-attempt cap
-        // rather than consuming the caller's foreground connect budget.
-        const connected =
-          outcome === "repaired"
-            ? await this.connectBackgroundWebSocketAfterRecovery(generation)
-            : await this.connectBackgroundWebSocket();
-        if (!connected) {
-          logger.warn(
-            `[AndroidCtrlProxyClient] WebSocket reconnect failed after CtrlProxy recovery`,
-          );
-        }
-        if (!connected || !this.isConnected()) {
-          this.failPendingRecoveryStability("WebSocket reconnect failed");
-          return false;
-        }
-        if (this.pendingRecoveryStability && !this.restartRearmTimeout) {
-          this.failPendingRecoveryStability("No stable WebSocket reconnect observed");
-        }
-        this.consecutiveConnectionFailures = 0;
-        return await stableConnection;
-      })
-      .catch((error) => {
-        this.failPendingRecoveryStability(String(error));
-        this.forcedRestartBudget.recordFailure(String(error), token);
-        logger.warn(`[AndroidCtrlProxyClient] CtrlProxy recovery failed: ${error}`);
-        return false;
-      })
-      .finally(() => {
-        // A superseded recovery must not clear a newer attempt's state.
-        if (this.recoveryPromise === recovery) {
-          this.isRecoveringService = false;
-          this.recoveryPromise = null;
-        }
-      });
-    this.recoveryPromise = recovery;
-  }
-
-  /** Retry the post-bind socket dial while the accessibility service finishes starting its server. */
-  private async connectBackgroundWebSocketAfterRecovery(generation: number): Promise<boolean> {
-    const startedAt = this.timer.now();
-    const backoff = fixedBackoff(100);
-    let attempt = 1;
-
-    while (
-      !this.closed &&
-      generation === this.connectionGeneration &&
-      this.timer.now() - startedAt < AndroidCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS
-    ) {
-      const connected = await this.connectBackgroundWebSocket();
-      if (connected) {
-        return (
-          !this.closed &&
-          generation === this.connectionGeneration &&
-          this.timer.now() - startedAt <= AndroidCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS
-        );
-      }
-
-      const remainingMs =
-        AndroidCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS - (this.timer.now() - startedAt);
-      if (this.closed || generation !== this.connectionGeneration || remainingMs <= 0) {
-        break;
-      }
-      await this.timer.sleep(Math.min(backoff.delayForAttempt(attempt), remainingMs));
-      attempt++;
-    }
-
-    return false;
   }
 
   /** Start a recovery for this observed transport failure if none is pending. */
   public ensureRecoveryStarted(): void {
-    if (!this.closed && this.autoReconnectEnabled && !this.recoveryPromise) {
-      this.triggerServiceRecovery();
-    }
+    this.getServiceRecovery().ensureStarted(this.autoReconnectEnabled);
   }
 
   /** Current forced-restart admission state, for typed observe/action failure reasons. */
@@ -2369,131 +2265,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   public isRecoveryInFlight(): boolean {
     return this.recoveryPromise !== null;
-  }
-
-  /**
-   * Check device presence, then the accessibility service's health. A healthy
-   * service is left untouched — no rebind, no setup — the caller only
-   * reconnects in the background without resetting the foreground cooldown
-   * (issue #6260). An unhealthy service is rebound per #7470 (force-stop,
-   * re-add, bounded health poll), falling back to a full `setup()` when the
-   * rebind alone does not restore health (e.g. CtrlProxy is missing from
-   * `enabled_accessibility_services` or not installed at all).
-   */
-  private async recoverAccessibilityService(
-    generation: number,
-    onEscalation: () => void,
-  ): Promise<"healthy" | "repaired" | "unavailable" | "failed"> {
-    if (this.closed) {
-      return "failed";
-    }
-    const present = await this.isDevicePresent();
-    if (generation !== this.connectionGeneration) {
-      return "failed";
-    }
-    if (!present) {
-      this.deviceSeenAbsent = true;
-      logger.info(
-        `[AndroidCtrlProxyClient] Device ${this.device.deviceId} is offline or missing; skipping recovery`,
-      );
-      return "unavailable";
-    }
-
-    const manager = this.serviceManagerFactory(this.device);
-    const healthy = await manager.isAccessibilityServiceHealthy();
-    if (generation !== this.connectionGeneration) {
-      return "failed";
-    }
-    if (healthy) {
-      logger.info(
-        `[AndroidCtrlProxyClient] Accessibility service already healthy; skipping rebind`,
-      );
-      return "healthy";
-    }
-
-    onEscalation();
-    logger.info(`[AndroidCtrlProxyClient] Accessibility service unhealthy; attempting rebind`);
-    const rebound = (await manager.rebindIfUnhealthy?.()) ?? false;
-    if (generation !== this.connectionGeneration) {
-      return "failed";
-    }
-    const rebindOutcome = await this.rebindRecoveryOutcome(manager, rebound);
-    if (generation !== this.connectionGeneration) {
-      return "failed";
-    }
-    if (rebindOutcome) {
-      return rebindOutcome;
-    }
-
-    onEscalation();
-    logger.info(`[AndroidCtrlProxyClient] Rebind did not restore health; running full setup`);
-    return this.setupRecoveryService(manager, generation);
-  }
-
-  private async rebindRecoveryOutcome(
-    manager: AndroidServiceRecoveryManager,
-    rebound: boolean,
-  ): Promise<"repaired" | "healthy" | null> {
-    if (rebound) {
-      return (await manager.isAccessibilityServiceHealthy()) ? "repaired" : null;
-    }
-    // A no-op rebind can mean the service was already binding. Let that bind
-    // finish before escalating to setup, which would force-stop it again.
-    const binding = await manager.waitForAccessibilityServiceBinding?.();
-    return binding === "recovered" ? "repaired" : binding === "already-bound" ? "healthy" : null;
-  }
-
-  private async setupRecoveryService(
-    manager: AndroidServiceRecoveryManager,
-    generation: number,
-  ): Promise<"repaired" | "failed"> {
-    const result = await manager.setup(true);
-    if (generation !== this.connectionGeneration) {
-      return "failed";
-    }
-    if (!result.success) {
-      logger.warn(
-        `[AndroidCtrlProxyClient] CtrlProxy setup failed during recovery: ${result.message}`,
-      );
-      return "failed";
-    }
-    const healthy = await manager.isAccessibilityServiceHealthy();
-    if (generation !== this.connectionGeneration) {
-      return "failed";
-    }
-    if (!healthy) {
-      logger.warn(`[AndroidCtrlProxyClient] Accessibility service remained unhealthy after setup`);
-      return "failed";
-    }
-    return "repaired";
-  }
-
-  /**
-   * Whether adb still reports this device as present and online. Recovery must
-   * not touch a stopped or disconnected device (issue #7532), mirroring the
-   * `bootedDeviceLister` check `IOSCtrlProxyClient.ensureConnected` runs before
-   * its own auto-setup.
-   */
-  private async isDevicePresent(): Promise<boolean> {
-    const getDeviceStates = this.adb.getDeviceStates?.bind(this.adb);
-    if (!getDeviceStates) {
-      // The executor cannot report raw device states; fail open rather than
-      // block recovery on a capability the executor doesn't provide.
-      return true;
-    }
-    try {
-      const states = await getDeviceStates();
-      const match = states.find((state) => state.deviceId === this.device.deviceId);
-      // "unauthorized" is not a state recovery can act on either — adb cannot
-      // run shell commands against it, so it is not meaningfully "present".
-      return match !== undefined && match.state !== "offline" && match.state !== "unauthorized";
-    } catch (error) {
-      // Diagnostic failure only: do not block recovery on it.
-      logger.warn(
-        `[AndroidCtrlProxyClient] Failed to check device state during recovery: ${error}`,
-      );
-      return true;
-    }
   }
 
   protected async setupBeforeConnect(perf: PerformanceTracker, signal: AbortSignal): Promise<void> {
@@ -4497,7 +4268,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.timer.clearTimeout(this.restartRearmTimeout);
       this.restartRearmTimeout = null;
     }
-    this.failPendingRecoveryStability("Client closed before stable reconnect");
+    this.getServiceRecovery().failPendingStability("Client closed before stable reconnect");
     try {
       // Stop work profile monitor if running
       this.stopWorkProfileMonitor();
@@ -4807,208 +4578,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     frameContext?: string,
     requestId?: string | null,
   ): void {
-    const now = this.timer.now();
-    logger.debug(
-      `[CTRL_PROXY] Received hierarchy update (updatedAt: ${data.updatedAt}, receivedAt: ${now})`,
-    );
-
-    const incomingHierarchy: CachedHierarchy = {
-      hierarchy: data,
-      receivedAt: now,
-      fresh: true,
-      requestId,
-      perfTiming,
-      frameContext,
-    };
-    // A must-deliver correlated frame can leave the runner after a newer coalesced push.
-    // Complete its own waiter, but do not regress the shared cache or observation stream.
-    const observerResponse = !!requestId && this.observerHierarchyRequestIds.has(requestId);
-    const isolatedObserverResponse =
-      observerResponse && this.observerHierarchyRequestIds.get(requestId!) === true;
-    this.hierarchy.resolvePendingHierarchy(requestId, incomingHierarchy);
-    // Consume correlated responses even when too old for the shared cache or observer-only.
-    let suppressObservationStreamPush =
-      !!requestId && this.removeHierarchyObservationStreamSuppression(requestId);
-    if (observerResponse) {
-      this.observerHierarchyRequestIds.delete(requestId);
-      if (
-        this.transientObserver ||
-        // Aggregate and explicit-panel observer frames cannot seed the owner's active frame.
-        isolatedObserverResponse ||
-        (this.cachedHierarchy !== null &&
-          isDeepStrictEqual(
-            {
-              hierarchy: data.hierarchy,
-              packageName: data.packageName,
-              windows: data.windows,
-              screenWidth: data.screenWidth,
-              screenHeight: data.screenHeight,
-              rotation: data.rotation,
-              displayId: data.displayId,
-            },
-            {
-              hierarchy: this.cachedHierarchy.hierarchy.hierarchy,
-              packageName: this.cachedHierarchy.hierarchy.packageName,
-              windows: this.cachedHierarchy.hierarchy.windows,
-              screenWidth: this.cachedHierarchy.hierarchy.screenWidth,
-              screenHeight: this.cachedHierarchy.hierarchy.screenHeight,
-              rotation: this.cachedHierarchy.hierarchy.rotation,
-              displayId: this.cachedHierarchy.hierarchy.displayId,
-            },
-          ))
-      ) {
-        return;
-      }
-    }
-    if (this.transientObserver) {
-      return;
-    }
-    if (this.cachedHierarchy && data.updatedAt < this.cachedHierarchy.hierarchy.updatedAt) {
-      return;
-    }
-
-    // Mark previous cache as stale
-    if (this.cachedHierarchy) {
-      this.cachedHierarchy.fresh = false;
-    }
-
-    // Update cache with fresh data
-    this.cachedHierarchy = incomingHierarchy;
-
-    // Update cached screen dimensions
-    this.updateCachedScreenDimensions(data);
-
-    // Old APKs have no echo capability advertisement. Until the first correlated frame on a
-    // fresh connection, an idless broadcast can still consume the oldest token (legacy behavior).
-    // Once ANY echoed id is seen, idless/foreign frames never consume another request's token.
-    // Keep legacy consumption after the cache/observer guards, exactly as the anonymous Set was.
-    if (!requestId && !this.hierarchy.hasSeenCorrelatedFrames()) {
-      const oldestId = this.hierarchyObservationStreamSuppressions.keys().next().value;
-      suppressObservationStreamPush =
-        oldestId !== undefined && this.removeHierarchyObservationStreamSuppression(oldestId);
-    }
-    if (!suppressObservationStreamPush) {
-      // Push to observation stream
-      this.pushHierarchyToObservationStream(data, frameContext);
-
-      // Start screenshot backoff
-      this.startScreenshotBackoff();
-    } else {
-      logger.debug(
-        "[CTRL_PROXY] Suppressed hierarchy observation stream push for explicit initial-frame request",
-      );
-    }
-
-    // Track foreground package for context and start performance monitoring
-    if (data.packageName && data.packageName !== this.lastForegroundPackage) {
-      this.lastForegroundPackage = data.packageName;
-      // Start performance monitoring for this device/package
-      const monitor = getPerformanceMonitor();
-      monitor.startMonitoring(this.device.deviceId, data.packageName);
-    }
-
-    // Record layout telemetry (throttled to max 1 per 500ms)
-    if (now - this.lastLayoutTelemetryTimestamp >= 500) {
-      this.lastLayoutTelemetryTimestamp = now;
-      const recorder = TelemetryRecorder.getInstance();
-      recorder.setContext(this.device.deviceId, null);
-      const screenName = data.foregroundActivity ?? data.packageName ?? null;
-      const windowCount = data.windows?.length ?? 0;
-      // Include a compact hierarchy tree (~2-5KB) with just the display properties.
-      // The full hierarchy (~10-50KB with bounds/states/extras) is available via
-      // the observation stream and would cause excessive traffic at 500ms intervals.
-      const compactHierarchy = data.hierarchy ? { node: compactifyNode(data.hierarchy) } : null;
-      recorder
-        .recordLayoutEvent({
-          timestamp: now,
-          applicationId: data.packageName ?? null,
-          subType: "hierarchy_change",
-          composableName: null,
-          composableId: null,
-          recompositionCount: null,
-          durationMs: null,
-          likelyCause: null,
-          detailsJson: JSON.stringify({
-            screenName,
-            windowCount,
-            foregroundActivity: data.foregroundActivity ?? null,
-            hierarchy: compactHierarchy,
-          }),
-          screenName,
-        })
-        .catch((error) => {
-          logger.warn(`[CTRL_PROXY] Layout telemetry failed: ${errorMessage(error)}`, error);
-        });
-    }
-
-    // Notify hierarchy navigation detector. Screen identity follows the app windows only
-    // (#9305): AutoMobile's own prototype is removed and the capture attributed to the app behind it,
-    // so showing, paging or dismissing a prototype records no navigation.
-    const appCapture = appWindowsOnly(data);
-    const navigationPackage = this.resolveHierarchyPackage(appCapture);
-    if (!appCapture.hierarchy) {
-      logger.warn("[CTRL_PROXY] Skipping navigation detection: hierarchy missing");
-    } else if (data.error) {
-      logger.warn(`[CTRL_PROXY] Skipping navigation detection due to error: ${data.error}`);
-    } else if (!this.shouldUseHierarchyNavigation(navigationPackage)) {
-      logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${navigationPackage}`);
-      // The app may be back in front without a navigation event (#10193). The signal names this
-      // device: on the shared global manager another device's tick must not switch the app.
-      if (navigationPackage) {
-        this.getNavigationGraphManager()
-          .recordAppForeground(navigationPackage, this.device.deviceId)
-          .catch((error) =>
-            logger.warn(`[CTRL_PROXY] SDK app foreground signal failed: ${errorMessage(error)}`),
-          );
-      }
-    } else {
-      // Resolve build/device provenance for hierarchy-driven reaches too (#4984):
-      // non-SDK apps never emit navigation_event, so this is the only path that gives
-      // them a real build key instead of the default/legacy one.
-      if (navigationPackage) {
-        this.ensureBuildContext(navigationPackage);
-      }
-      this.getHierarchyNavigationDetector().onHierarchyUpdate({
-        ...appCapture,
-        packageName: navigationPackage,
-      });
-    }
-  }
-
-  private resolveHierarchyPackage(data: AccessibilityHierarchy): string | undefined {
-    if (data.packageName?.trim()) {
-      return data.packageName.trim();
-    }
-    const windows = (linkWindowRoots(data.hierarchy, data.windows) ?? []).filter(
-      (window) =>
-        data.displayId === undefined ||
-        data.displayId === null ||
-        window.displayId === undefined ||
-        window.displayId === null ||
-        window.displayId === data.displayId,
-    );
-    // An IME can own focus above the app. Prefer a focused non-IME surface
-    // (including system dialogs), then the active/top application window.
-    const appWindows = windows.filter((entry) => entry.type === 1);
-    const window =
-      windows.find((entry) => entry.isFocused && entry.type !== 2) ??
-      appWindows.find((entry) => entry.isActive) ??
-      appWindows.sort((left, right) => (right.windowLayer ?? 0) - (left.windowLayer ?? 0))[0];
-    const attributes = window?.hierarchy ? nodeAttributes(window.hierarchy) : {};
-    // Do not borrow a different root's identity when the selected window is unknown.
-    const candidates = window
-      ? [window.packageName, attributes.packageName, attributes.package]
-      : [data.hierarchy?.packageName];
-    return candidates
-      .flatMap((value) => (typeof value === "string" ? [value.trim()] : []))
-      .find((value) => value.length > 0);
-  }
-
-  private shouldUseHierarchyNavigation(packageName?: string): boolean {
-    if (!packageName) {
-      return true;
-    }
-    return !this.sdkNavigationAppIds.has(packageName);
+    this.getHierarchyUpdateHandler().handle(data, perfTiming, frameContext, requestId);
   }
 
   private pushHierarchyToObservationStream(
@@ -5489,36 +5059,6 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private markInstalledAppsStale(reason: string): Promise<void> {
     return this.getAppEventRecorder().markInstalledAppsStale(reason);
   }
-}
-
-/**
- * Create a compact representation of an AccessibilityNode tree for telemetry.
- * Strips bounds, states, extras — keeps only className, resource-id, text,
- * content-desc, scrollable, and children. Typically ~2-5KB vs 10-50KB full.
- */
-function compactifyNode(node: AccessibilityNode): Record<string, unknown> {
-  const compact: Record<string, unknown> = {};
-  if (node.className) {
-    compact.className = node.className;
-  }
-  if (node["resource-id"]) {
-    compact["resource-id"] = node["resource-id"];
-  }
-  if (node.text) {
-    compact.text = node.text;
-  }
-  if (node["content-desc"]) {
-    compact["content-desc"] = node["content-desc"];
-  }
-  if (node.scrollable === "true") {
-    compact.scrollable = "true";
-  }
-
-  if (node.node) {
-    const children = Array.isArray(node.node) ? node.node : [node.node];
-    compact.node = children.map(compactifyNode);
-  }
-  return compact;
 }
 
 registerDeviceIncarnationListener({

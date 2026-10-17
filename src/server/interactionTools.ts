@@ -120,8 +120,6 @@ import {
   type TapOnElementResult,
   type TapOnSelectedElement,
 } from "../models";
-import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstalledApp";
-import { errorMessage } from "../utils/describeUnknownError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -136,11 +134,8 @@ import {
 } from "./observeTools";
 import { defaultTimer } from "../utils/SystemTimer";
 import { displayWaitInventory } from "../utils/deviceMatcher";
-import { logger } from "../utils/logger";
-import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
   withIsErrorOnFailure,
-  awaitWhileRequestIsLive,
   throwIfAborted,
   createJSONToolResponse,
   createStructuredToolResponse,
@@ -199,7 +194,7 @@ import type {
   ClipboardArgs,
 } from "./interactionToolTypes";
 
-import { createNotificationUIDetector } from "../features/systemTray/createNotificationUIDetector";
+import { SystemTray } from "../features/systemTray/SystemTray";
 
 import {
   SystemTrayObserver,
@@ -207,28 +202,7 @@ import {
   SystemTrayDependencies,
   setSystemTrayDependencies,
   resetSystemTrayDependencies,
-  getSystemTrayDependencies,
   waitForNotificationMatch,
-  clearMatchingSystemTrayNotifications,
-  clearIosSystemTrayNotifications,
-  listSystemTrayNotifications,
-  NotificationShadeNotOpenError,
-  readActiveNotificationKeysForApp,
-  resolveUniqueTrayAppLabel,
-  resolveSystemTrayAwaitTimeout,
-  ensureSystemTrayOpen,
-  ensureSystemTrayClosed,
-  captureSystemTrayTerminalEvidence,
-  observeSystemTrayAfterTap,
-  resolveNotificationTapElement,
-  resolveNotificationSwipeElement,
-  expandAndRematchIfCollapsed,
-  captureNotificationDismissBaseline,
-  verifyNotificationDismissed,
-  resolveNotificationGroupExpansionState,
-  isSwipeTargetIsolatedFromGroup,
-  tapElement,
-  swipeElement,
 } from "../features/systemTray/systemTrayHelpers";
 
 // Re-export types for backward compatibility
@@ -943,7 +917,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
           .enum(["left", "right", "top", "bottom"])
           .optional()
           .describe(
-            "Start at this screen (or display panel) edge and swipe inward; direction must point inward (left->right, right->left, top->down, bottom->up). Exclusive with container, lookFor, autoTarget=true. With Android gesture navigation a very-near-edge swipe may be taken as system back/home",
+            "Start at this screen (or display panel) edge and swipe inward; direction must point inward (left->right, right->left, top->down, bottom->up). Exclusive with container, lookFor, autoTarget=true. By default the start point is inset from the edge by the system bars/gesture insets (Android left/right: gesture inset plus edgeInset, e.g. x=88 for 78px + edgeInset 10), so the swipe stays in the app; pass includeSystemInsets:true to start at the physical screen edge (edgeInset px in), where a very-near-edge swipe may be taken as system back/home",
           ),
         edgeInset: z
           .number()
@@ -952,7 +926,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
           .max(EDGE_INSET_MAX)
           .optional()
           .describe(
-            `With fromEdge: how far inside the edge the touch starts, px (iOS points); default ${EDGE_INSET_DEFAULT} (iOS swipe-back needs the first ~20 pt)`,
+            `With fromEdge: how far inside the edge the touch starts, px (iOS points); default ${EDGE_INSET_DEFAULT} (iOS swipe-back needs the first ~20 pt). Measured from the content edge (after system insets) unless includeSystemInsets:true`,
           ),
         at: z
           .number()
@@ -2768,170 +2742,6 @@ export async function rotateHandler(
   }
 }
 
-// An empty list is only honest when every rendered row could be attributed;
-// otherwise say how many rows stayed unreadable so "0" is not mistaken for
-// "this app has no notifications" (#6875).
-function formatTrayListMessage(
-  appId: string,
-  result: { notifications: unknown[]; unattributedRows: number },
-): string {
-  const listed = `Listed ${result.notifications.length} notifications for ${appId}`;
-  if (result.unattributedRows === 0) {
-    return listed;
-  }
-  const rows = result.unattributedRows === 1 ? "row" : "rows";
-  return `${listed} (${result.unattributedRows} shade ${rows} carry no app header and could not be correlated to ${appId})`;
-}
-
-function formatClearAllResult(
-  appId: string | undefined,
-  swipeCount: number,
-  accounting:
-    | {
-        expectedKeys: readonly string[];
-        remainingKeys: readonly string[];
-      }
-    | undefined,
-): {
-  arrivedCount?: number;
-  dismissedCount: number;
-  expectedCount?: number;
-  message: string;
-  remainingCount?: number;
-  success: boolean;
-} {
-  if (!accounting) {
-    return {
-      message:
-        swipeCount > 0
-          ? `Cleared ${swipeCount} notification(s) for ${appId}`
-          : `No notifications found for ${appId}`,
-      dismissedCount: swipeCount,
-      success: true,
-    };
-  }
-  const expectedKeys = new Set(accounting.expectedKeys);
-  const remainingKeys = new Set(accounting.remainingKeys);
-  const expectedCount = expectedKeys.size;
-  const remainingCount = remainingKeys.size;
-  const dismissedCount = [...expectedKeys].filter((key) => !remainingKeys.has(key)).length;
-  const arrivedCount = [...remainingKeys].filter((key) => !expectedKeys.has(key)).length;
-  if (remainingCount === 0) {
-    return expectedCount === 0
-      ? {
-          dismissedCount,
-          expectedCount,
-          message: `No notifications found for ${appId}`,
-          remainingCount,
-          success: true,
-        }
-      : {
-          dismissedCount,
-          expectedCount,
-          message: `Cleared ${dismissedCount} notification(s) for ${appId}`,
-          remainingCount,
-          success: true,
-        };
-  }
-  return {
-    ...(arrivedCount === 0 ? {} : { arrivedCount }),
-    dismissedCount,
-    expectedCount,
-    message:
-      `Cleared ${dismissedCount} of ${expectedCount} notification(s) for ${appId}; ` +
-      `${remainingCount} remain after clearing.` +
-      (arrivedCount === 0 ? "" : ` ${arrivedCount} notification(s) arrived during the operation.`),
-    remainingCount,
-    success: false,
-  };
-}
-
-const readRequiredActiveNotificationKeys = async (
-  device: BootedDevice,
-  appId: string,
-  phase: "before" | "after",
-  signal?: AbortSignal,
-): Promise<string[]> => {
-  const keys = await readActiveNotificationKeysForApp(device, appId, signal);
-  if (keys === undefined) {
-    throw new ActionableError(
-      phase === "before"
-        ? `Could not verify how many notifications exist for ${appId}.`
-        : `Could not verify how many notifications remain for ${appId}.`,
-    );
-  }
-  return keys;
-};
-
-// Resolve the label used to attribute shade rows for a destructive clearAll.
-// A unique label is required (an ambiguous one could attribute another app's
-// row); resolveUniqueTrayAppLabel throws on ambiguity, which we treat as "no
-// attribution label" (null) so the header fallback fails closed rather than
-// swiping the wrong notification.
-const resolveClearAllAttributionLabel = async (
-  device: BootedDevice,
-  appId: string,
-  installedApps: string[],
-  signal?: AbortSignal,
-): Promise<string | null> => {
-  try {
-    return await resolveUniqueTrayAppLabel(device, appId, installedApps, signal);
-  } catch (error) {
-    if (!(error instanceof ActionableError)) {
-      throw error;
-    }
-    logger.debug(
-      `[systemTray] could not verify a unique label for clearAll attribution: ${error}`,
-      error,
-    );
-    return null;
-  }
-};
-
-const readCompleteTrayAppIds = async (
-  device: BootedDevice,
-  signal?: AbortSignal,
-): Promise<string[]> => {
-  const inventory = await getSystemTrayDependencies()
-    .appInventoryFactory(device)
-    .executeDetailedResult(signal);
-  if (!inventory.successful) {
-    throw new ActionableError(
-      "Cannot verify notification ownership because the installed-app inventory is incomplete.",
-    );
-  }
-  return [
-    ...new Set(
-      [...Object.values(inventory.apps.profiles).flat(), ...inventory.apps.system].map(
-        (app) => app.packageName,
-      ),
-    ),
-  ];
-};
-
-const readCompleteIosTrayAppIds = async (
-  device: BootedDevice,
-  signal?: AbortSignal,
-): Promise<string[]> => {
-  throwIfAborted(signal);
-  const inventory = await awaitWhileRequestIsLive(
-    Promise.resolve(
-      getSystemTrayDependencies().appInventoryFactory(device).executeIosDetailedResult?.(),
-    ),
-    signal,
-  );
-  throwIfAborted(signal);
-  if (!inventory?.successful) {
-    const reason = inventory?.error !== undefined ? ` ${errorMessage(inventory.error)}` : "";
-    throw new ActionableError(
-      `Cannot verify notification ownership because the installed apps could not be listed; the installed-app inventory is incomplete.${reason}`,
-    );
-  }
-  return inventory.apps
-    .map(getIosInstalledAppBundleId)
-    .filter((bundleId): bundleId is string => bundleId !== undefined);
-};
-
 // ============================================================================
 // Tool Registration
 // ============================================================================
@@ -3048,456 +2858,16 @@ export function registerInteractionTools() {
   // injectable factory) so a unit test can exercise the registered handler
   // wiring (#6152, #6163).
 
-  // System tray handler
+  // System tray handler: domain logic lives in features/systemTray/SystemTray.
   const systemTrayHandler = async (
     device: BootedDevice,
     args: SystemTrayArgs,
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
-    let restoreFailedClearAll: (() => Promise<void>) | undefined;
-    try {
-      throwIfAborted(signal);
-      const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
-
-      if (args.action === "open") {
-        const result = await ensureSystemTrayOpen(device, awaitTimeoutMs, progress, signal);
-        await captureSystemTrayTerminalEvidence(device, result.observation, signal);
-        const success = result.skipped || result.opened;
-        const response = createJSONToolResponse({
-          message: result.skipped
-            ? "System tray already open; no swipe needed"
-            : result.opened
-              ? "Opened system tray"
-              : "Failed to open system tray: the tray remained closed",
-          observation: result.observation,
-          success,
-          skipped: result.skipped,
-        });
-        return success ? response : { ...response, isError: true as const };
-      }
-
-      if (args.action === "close") {
-        const result = await ensureSystemTrayClosed(device, awaitTimeoutMs, progress, signal);
-        await captureSystemTrayTerminalEvidence(device, result.observation, signal);
-        const success = result.skipped || result.closed;
-        const response = createJSONToolResponse({
-          message: result.skipped
-            ? "System tray already closed; no collapse needed"
-            : result.closed
-              ? "Closed system tray (collapsed notification shade)"
-              : "Failed to close system tray: the tray remained open",
-          observation: result.observation,
-          success,
-          skipped: result.skipped,
-        });
-        return success ? response : { ...response, isError: true as const };
-      }
-
-      if (args.action === "list") {
-        if (device.platform !== "android") {
-          throw new ActionableError("systemTray list is supported only on Android.");
-        }
-        const appId = args.notification?.appId;
-        if (!appId) {
-          throw new ActionableError("list action requires notification.appId");
-        }
-        throwIfAborted(signal);
-        const appIds = await readCompleteTrayAppIds(device, signal);
-        throwIfAborted(signal);
-        if (!appIds.includes(appId)) {
-          throw new ActionableError(`App ${appId} is not installed.`);
-        }
-        const label = await resolveUniqueTrayAppLabel(device, appId, appIds, signal);
-        const result = await listSystemTrayNotifications(
-          device,
-          appId,
-          label,
-          awaitTimeoutMs,
-          progress,
-          signal,
-        );
-        await captureSystemTrayTerminalEvidence(device, result.observation, signal);
-        return createJSONToolResponse({
-          message: formatTrayListMessage(appId, result),
-          ...result,
-          success: true,
-        });
-      }
-
-      const notification = args.notification ?? {};
-      let appLabel: string | null = null;
-      let appMatchTexts: string[] = [];
-      let installedApps: string[] = [];
-
-      if (notification.appId) {
-        throwIfAborted(signal);
-        installedApps =
-          device.platform === "android"
-            ? await awaitWhileRequestIsLive(readCompleteTrayAppIds(device, signal), signal)
-            : await readCompleteIosTrayAppIds(device, signal);
-        if (!installedApps.includes(notification.appId)) {
-          throw new ActionableError(`App ${notification.appId} is not installed.`);
-        }
-
-        throwIfAborted(signal);
-        appLabel = await awaitWhileRequestIsLive(
-          getSystemTrayDependencies().appLabelResolver(device, notification.appId, signal),
-          signal,
-        );
-        appMatchTexts = [appLabel, notification.appId].filter(Boolean) as string[];
-      }
-
-      if (args.action === "find") {
-        const { observation, match } = await waitForNotificationMatch(
-          device,
-          notification,
-          appMatchTexts,
-          awaitTimeoutMs,
-          progress,
-          signal,
-        );
-
-        if (!match) {
-          throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
-        }
-
-        await captureSystemTrayTerminalEvidence(device, observation, signal);
-        return createJSONToolResponse({
-          message: "Found notification in system tray",
-          match: match.match.matches,
-          observation,
-          success: true,
-        });
-      }
-
-      if (args.action === "tap") {
-        const actionStartMs = getSystemTrayDependencies().timer.now();
-        const initialMatch = await waitForNotificationMatch(
-          device,
-          notification,
-          appMatchTexts,
-          awaitTimeoutMs,
-          progress,
-          signal,
-        );
-
-        if (!initialMatch.match) {
-          throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
-        }
-
-        const { observation: baseline, match } = await expandAndRematchIfCollapsed(
-          device,
-          notification,
-          appMatchTexts,
-          actionStartMs + awaitTimeoutMs,
-          progress,
-          { observation: initialMatch.observation, match: initialMatch.match, signal },
-        );
-
-        const tapMatch = resolveNotificationTapElement(match, notification);
-        if (!tapMatch) {
-          throw new ActionableError(
-            "No notification tap target was resolved within the matched notification.",
-          );
-        }
-
-        await tapElement(device, tapMatch.element, signal);
-        const { observation: nextObservation, settled } = await observeSystemTrayAfterTap(
-          device,
-          baseline,
-          signal,
-        );
-        await captureSystemTrayTerminalEvidence(device, nextObservation, signal);
-
-        return createJSONToolResponse({
-          message:
-            (notification.tapActionLabel
-              ? `Tapped notification action "${notification.tapActionLabel}"`
-              : "Tapped notification") +
-            (settled ? "" : "; effect not yet settled — re-observe before continuing"),
-          settled,
-          match: match.match.matches,
-          tapTarget: {
-            text: tapMatch.text,
-            matchType: tapMatch.matchType,
-            bounds: tapMatch.element.bounds,
-          },
-          observation: nextObservation,
-          success: true,
-        });
-      }
-
-      if (args.action === "dismiss") {
-        const actionStartMs = getSystemTrayDependencies().timer.now();
-        const initialMatch = await waitForNotificationMatch(
-          device,
-          notification,
-          appMatchTexts,
-          awaitTimeoutMs,
-          progress,
-          signal,
-        );
-
-        if (!initialMatch.match) {
-          throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
-        }
-
-        const { match, observation: swipeObservation } = await expandAndRematchIfCollapsed(
-          device,
-          notification,
-          appMatchTexts,
-          actionStartMs + awaitTimeoutMs,
-          progress,
-          { observation: initialMatch.observation, match: initialMatch.match, signal },
-        );
-        const groupExpansionState = match.candidate.groupNode
-          ? resolveNotificationGroupExpansionState(match.candidate.groupNode)
-          : null;
-        if (groupExpansionState === "unknown") {
-          throw new ActionableError(
-            "Could not determine whether the notification group is expanded or collapsed; " +
-              "refusing to swipe without expanding first.",
-          );
-        }
-        if (groupExpansionState === "collapsed") {
-          throw new ActionableError(
-            "Could not isolate the specific notification from its collapsed group; " +
-              "dismissing would clear the whole group instead of this notification.",
-          );
-        }
-
-        const swipeTarget = resolveNotificationSwipeElement(match, notification, appMatchTexts);
-        if (!swipeTarget) {
-          throw new ActionableError(
-            "No swipeable notification element was resolved within the matched notification.",
-          );
-        }
-        if (!isSwipeTargetIsolatedFromGroup(match, swipeTarget)) {
-          throw new ActionableError(
-            "Could not isolate the specific notification from its collapsed group; " +
-              "dismissing would clear the whole group instead of this notification.",
-          );
-        }
-
-        await swipeElement(device, swipeTarget, signal);
-        const { observeScreenFactory } = getSystemTrayDependencies();
-        const observeScreen = observeScreenFactory(device);
-        throwIfAborted(signal);
-        const nextObservation = await awaitWhileRequestIsLive(
-          observeScreen.execute({
-            skipScreenshot: true,
-            skipAccessibilityAudit: true,
-            skipPerformanceAudit: true,
-            signal,
-          }),
-          signal,
-        );
-        // #10010: only Android is verified here; the swipe itself says nothing
-        // about whether the row left the shade (ongoing rows snap back).
-        const verification =
-          device.platform === "android" && swipeObservation.viewHierarchy
-            ? await verifyNotificationDismissed(
-                device,
-                captureNotificationDismissBaseline(
-                  swipeObservation.viewHierarchy,
-                  match,
-                  notification,
-                  appMatchTexts,
-                ),
-                notification,
-                appMatchTexts,
-                nextObservation,
-                signal,
-              )
-            : undefined;
-        const finalObservation = verification?.observation ?? nextObservation;
-        await captureSystemTrayTerminalEvidence(device, finalObservation, signal);
-
-        if (verification?.outcome === "still-present") {
-          return {
-            ...createJSONToolResponse({
-              message: verification.nonClearable
-                ? "Could not dismiss notification: it is still in the system tray and appears to be " +
-                  "ongoing/non-clearable (its row exposes no dismiss action)."
-                : "Could not dismiss notification: it is still present in the system tray after the swipe.",
-              match: match.match.matches,
-              observation: finalObservation,
-              success: false,
-            }),
-            isError: true as const,
-          };
-        }
-
-        return createJSONToolResponse({
-          message: "Dismissed notification",
-          match: match.match.matches,
-          observation: finalObservation,
-          success: true,
-        });
-      }
-
-      if (args.action !== "clearAll") {
-        throw new ActionableError(`Unknown systemTray action: ${args.action}`);
-      }
-
-      const clearDetector =
-        device.platform === "android"
-          ? createNotificationUIDetector(device, getSystemTrayDependencies, signal)
-          : undefined;
-      if (clearDetector) {
-        const initialObservation = await awaitWhileRequestIsLive(
-          getSystemTrayDependencies()
-            .observeScreenFactory(device)
-            .execute({
-              skipScreenshot: true,
-              skipAccessibilityAudit: true,
-              skipPerformanceAudit: true,
-              minTimestamp: await clearDetector.getObservationTimestamp(),
-              signal,
-            }),
-          signal,
-        );
-        const initiallyOpen = clearDetector.isTrayOpen(initialObservation.viewHierarchy);
-        // Use statusbar commands directly: an unreadable hierarchy must not
-        // make ensureSystemTrayClosed skip the cleanup of an expanded shade.
-        restoreFailedClearAll = async () => {
-          // Mark cleanup done before starting it, including when it throws or times out.
-          restoreFailedClearAll = undefined;
-          // Cleanup must still run after request cancellation.
-          try {
-            const restoreDetector = createNotificationUIDetector(device, getSystemTrayDependencies);
-            await raceWithDeadline(
-              () => (initiallyOpen ? restoreDetector.expandTray() : restoreDetector.collapseTray()),
-              {
-                timer: getSystemTrayDependencies().timer,
-                timeoutMs: awaitTimeoutMs,
-                label: "Notification shade restoration",
-              },
-            );
-          } catch (restoreError) {
-            logger.warn(
-              `Failed to restore notification shade: ${errorMessage(restoreError)}`,
-              restoreError,
-            );
-          }
-        };
-      }
-
-      let expectedKeys: string[] | undefined;
-      let clearMatchTexts = appMatchTexts;
-      if (device.platform === "android" && notification.appId) {
-        const attributionLabel = await resolveClearAllAttributionLabel(
-          device,
-          notification.appId,
-          installedApps,
-          signal,
-        );
-        const listed = await listSystemTrayNotifications(
-          device,
-          notification.appId,
-          attributionLabel,
-          awaitTimeoutMs,
-          progress,
-          signal,
-        );
-        expectedKeys = await readRequiredActiveNotificationKeys(
-          device,
-          notification.appId,
-          "before",
-          signal,
-        );
-        // All correlated rows' content text lets the existing row matcher
-        // isolate them, whether ownership comes from a header or dumpsys.
-        clearMatchTexts = [
-          ...new Set([
-            ...appMatchTexts,
-            ...listed.notifications.flatMap((listedNotification) => listedNotification.texts),
-          ]),
-        ];
-      }
-      const drained =
-        device.platform === "android"
-          ? await clearMatchingSystemTrayNotifications(
-              device,
-              notification,
-              clearMatchTexts,
-              awaitTimeoutMs,
-              {
-                maxSwipes: expectedKeys?.length,
-                progress,
-                signal,
-              },
-            )
-          : await clearIosSystemTrayNotifications(device, notification, clearMatchTexts, {
-              progress,
-              signal,
-            });
-
-      const remainingKeys =
-        expectedKeys === undefined || !notification.appId
-          ? undefined
-          : await readRequiredActiveNotificationKeys(device, notification.appId, "after", signal);
-
-      const result = formatClearAllResult(
-        notification.appId,
-        drained.dismissedCount,
-        expectedKeys && remainingKeys ? { expectedKeys, remainingKeys } : undefined,
-      );
-      if (drained.stalled) {
-        // The app inventory is authoritative even if UI/text fallback still matches a row.
-        if (remainingKeys === undefined || remainingKeys.length > 0) {
-          result.success = false;
-        }
-        result.message =
-          expectedKeys === undefined
-            ? `Cleared ${drained.dismissedCount} matching notification(s).`
-            : result.message;
-        result.message += result.success
-          ? " Warning: a matching notification remains in the UI, but the app notification inventory is empty."
-          : " A matching notification remains; dismissal was not confirmed or the swipe limit or deadline was reached.";
-      }
-      if (!result.success && restoreFailedClearAll) {
-        await restoreFailedClearAll();
-      }
-
-      const { observeScreenFactory } = getSystemTrayDependencies();
-      const observeScreen = observeScreenFactory(device);
-      throwIfAborted(signal);
-      const nextObservation = await awaitWhileRequestIsLive(
-        observeScreen.execute({
-          skipScreenshot: true,
-          skipAccessibilityAudit: true,
-          skipPerformanceAudit: true,
-          signal,
-        }),
-        signal,
-      );
-      await captureSystemTrayTerminalEvidence(device, nextObservation, signal);
-
-      restoreFailedClearAll = undefined;
-      const response = createJSONToolResponse({
-        ...result,
-        observation: nextObservation,
-      });
-      return result.success ? response : { ...response, isError: true as const };
-    } catch (error) {
-      throwIfAborted(signal);
-      if (args.action === "clearAll" && error instanceof NotificationShadeNotOpenError) {
-        throw new ActionableError(
-          "Could not clear notifications: shade not readable (shade not detected open during list).",
-          { cause: error },
-        );
-      }
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      throw toActionableError(error, `systemTray failed`);
-    } finally {
-      if (restoreFailedClearAll) {
-        await restoreFailedClearAll();
-      }
-    }
+    const { payload, isError } = await new SystemTray(device, progress, signal).execute(args);
+    const response = createJSONToolResponse(payload);
+    return isError ? { ...response, isError: true as const } : response;
   };
 
   // swipeOn handler is defined at module scope (with an injectable SwipeOn

@@ -500,7 +500,7 @@ describe("session rotation restoration", () => {
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         await abandonedRelease(h);
-        h.manager.retireRotationRestoration(device.deviceId);
+        h.manager.retireRestorations(device.deviceId, "removal");
         h.adb.mismatch = false;
         await h.manager.createSession("next-session", device.deviceId, "android");
         expect(h.restored).toHaveLength(6);
@@ -817,7 +817,7 @@ describe("session rotation restoration", () => {
       };
       const mutation = h.rotate.execute("landscape");
       await started.promise;
-      h.manager.retireRotationRestoration(device.deviceId);
+      h.manager.retireRestorations(device.deviceId, "removal");
       h.adb.blockRead = undefined;
       finish.resolve();
       await expect(mutation).rejects.toThrow("removed");
@@ -888,7 +888,7 @@ describe("session rotation restoration", () => {
               : "shell settings put system user_rotation 1")
           ) {
             if (stage !== "catch rollback") {
-              h.manager.retireRotationRestoration(device.deviceId);
+              h.manager.retireRestorations(device.deviceId, "removal");
               writesAtRemoval = h.adb.writes().length;
             }
             if (stage === "final mismatch") {
@@ -903,7 +903,7 @@ describe("session rotation restoration", () => {
             command === "shell settings get system user_rotation" &&
             ++userReads === 2
           ) {
-            h.manager.retireRotationRestoration(device.deviceId);
+            h.manager.retireRestorations(device.deviceId, "removal");
             writesAtRemoval = h.adb.writes().length;
           }
           if (

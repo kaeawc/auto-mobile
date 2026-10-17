@@ -1,4 +1,5 @@
 import {
+  MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE,
   OBSERVE_RESULT_CACHE_TTL_MS,
   type ScreenshotStateStore,
 } from "../../src/features/observe/screenshot/ScreenshotStateRegistry";
@@ -12,28 +13,35 @@ interface FakeScreenshotState {
 }
 
 /**
- * Test fake for `ScreenshotStateStore`. Backed by a plain `Map`; no TTL
- * eviction so tests have full control. Use `setNow` to control the timestamp
- * recorded on `update`.
+ * Test fake for `ScreenshotStateStore`, held to the same behavioural contract as the
+ * production store (test/contracts/ScreenshotStateStoreContract.ts): timestamps come from the
+ * injected timer, state expires after the cache TTL, observation state is capped per device,
+ * and writes for an observation that was pending when its device was cleared are ignored.
+ * `setNow` overrides the timer for tests that script timestamps directly.
  */
 export class FakeScreenshotStateStore implements ScreenshotStateStore {
   private states: Map<string, FakeScreenshotState> = new Map();
   private observationStates: Map<string, Map<string, FakeScreenshotState>> = new Map();
   private pendingObservations: Set<string> = new Set();
   private pendingObservationWaiters: Map<string, Set<() => void>> = new Map();
-  private currentTime: number = 0;
+  private clearedObservations: Map<string, number> = new Map();
+  private nowOverride: number | undefined;
 
   constructor(private readonly timer: Timer) {}
 
   setNow(time: number): void {
-    this.currentTime = time;
+    this.nowOverride = time;
+  }
+
+  private now(): number {
+    return this.nowOverride ?? this.timer.now();
   }
 
   update(deviceId: string, path?: string, error?: string): void {
     this.states.set(deviceId, {
       path: path ?? null,
       error: error ?? null,
-      timestamp: this.currentTime,
+      timestamp: this.now(),
     });
   }
 
@@ -44,19 +52,30 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
     error?: string,
     imageSize?: { width: number; height: number },
   ): void {
+    if (this.isCleared(deviceId, observationId)) {
+      return;
+    }
     const states = this.observationStates.get(deviceId) ?? new Map<string, FakeScreenshotState>();
     states.delete(observationId);
     states.set(observationId, {
       path: path ?? null,
       error: error ?? null,
       ...(imageSize ? { imageSize } : {}),
-      timestamp: this.currentTime,
+      timestamp: this.now(),
     });
+    while (states.size > MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE) {
+      const oldest = states.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      states.delete(oldest);
+    }
     this.observationStates.set(deviceId, states);
     this.completeObservation(deviceId, observationId);
   }
 
   beginObservation(deviceId: string, observationId: string): void {
+    this.clearedObservations.delete(this.observationKey(deviceId, observationId));
     this.pendingObservations.add(this.observationKey(deviceId, observationId));
   }
 
@@ -91,7 +110,10 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
   }
 
   endObservation(deviceId: string, observationId: string, reason: string): void {
-    const existing = this.observationStates.get(deviceId)?.get(observationId);
+    if (this.isCleared(deviceId, observationId)) {
+      return;
+    }
+    const existing = this.findObservation(deviceId, observationId);
     // A late cancellation must not replace a real path or error recorded by another capture.
     if (!existing || (existing.path === null && existing.error === null)) {
       this.updateForObservation(deviceId, observationId, undefined, reason);
@@ -111,22 +133,22 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
   }
 
   getPathForObservation(deviceId: string, observationId: string): string | undefined {
-    return this.observationStates.get(deviceId)?.get(observationId)?.path ?? undefined;
+    return this.findObservation(deviceId, observationId)?.path ?? undefined;
   }
 
   getImageSizeForObservation(deviceId: string, observationId: string, path: string) {
-    const state = this.observationStates.get(deviceId)?.get(observationId);
+    const state = this.findObservation(deviceId, observationId);
     return state?.path === path ? state.imageSize : undefined;
   }
 
   getErrorForObservation(deviceId: string, observationId: string): string | undefined {
-    return this.observationStates.get(deviceId)?.get(observationId)?.error ?? undefined;
+    return this.findObservation(deviceId, observationId)?.error ?? undefined;
   }
 
   getReferencedScreenshotPaths(): readonly string[] {
     const paths = new Set<string>();
     for (const [deviceId, state] of this.states.entries()) {
-      if (this.currentTime - state.timestamp > OBSERVE_RESULT_CACHE_TTL_MS) {
+      if (this.now() - state.timestamp > OBSERVE_RESULT_CACHE_TTL_MS) {
         this.states.delete(deviceId);
       } else if (state.path) {
         paths.add(state.path);
@@ -134,7 +156,7 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
     }
     for (const [deviceId, states] of this.observationStates.entries()) {
       for (const [observationId, state] of states.entries()) {
-        if (this.currentTime - state.timestamp > OBSERVE_RESULT_CACHE_TTL_MS) {
+        if (this.now() - state.timestamp > OBSERVE_RESULT_CACHE_TTL_MS) {
           states.delete(observationId);
         } else if (state.path) {
           paths.add(state.path);
@@ -148,6 +170,11 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
   }
 
   clear(deviceId?: string): void {
+    for (const key of this.pendingObservations) {
+      if (!deviceId || key.startsWith(`${deviceId}\u0000`)) {
+        this.clearedObservations.set(key, this.now());
+      }
+    }
     if (deviceId) {
       this.states.delete(deviceId);
       this.observationStates.delete(deviceId);
@@ -198,12 +225,57 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
     waiters?.forEach((resolve) => resolve());
   }
 
+  private isExpired(state: FakeScreenshotState): boolean {
+    return this.now() - state.timestamp > OBSERVE_RESULT_CACHE_TTL_MS;
+  }
+
+  private isCleared(deviceId: string, observationId: string): boolean {
+    const key = this.observationKey(deviceId, observationId);
+    const clearedAt = this.clearedObservations.get(key);
+    if (clearedAt === undefined) {
+      return false;
+    }
+    if (this.now() - clearedAt > OBSERVE_RESULT_CACHE_TTL_MS) {
+      this.clearedObservations.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  private findObservation(
+    deviceId: string,
+    observationId: string,
+  ): FakeScreenshotState | undefined {
+    const states = this.observationStates.get(deviceId);
+    const state = states?.get(observationId);
+    if (!state) {
+      return undefined;
+    }
+    if (this.isExpired(state)) {
+      states?.delete(observationId);
+      if (states?.size === 0) {
+        this.observationStates.delete(deviceId);
+      }
+      return undefined;
+    }
+    return state;
+  }
+
   private findLatest(deviceId?: string): FakeScreenshotState | undefined {
     if (deviceId) {
-      return this.states.get(deviceId);
+      const state = this.states.get(deviceId);
+      if (state && this.isExpired(state)) {
+        this.states.delete(deviceId);
+        return undefined;
+      }
+      return state;
     }
     let mostRecent: FakeScreenshotState | undefined;
-    for (const state of this.states.values()) {
+    for (const [id, state] of [...this.states.entries()]) {
+      if (this.isExpired(state)) {
+        this.states.delete(id);
+        continue;
+      }
       if (!mostRecent || state.timestamp > mostRecent.timestamp) {
         mostRecent = state;
       }

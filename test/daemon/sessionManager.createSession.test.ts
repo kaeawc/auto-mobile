@@ -48,12 +48,9 @@ describe("SessionManager", () => {
     });
 
     test("should persist custom timeout on the session", async () => {
-      const session = await sessionManager.createSession(
-        "session-1",
-        "emulator-5554",
-        "android",
-        5000,
-      );
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 5000,
+      });
       expect(session.sessionTimeoutMs).toBe(5000);
       expect(session.expiresAt).toBe(fakeTimer.now() + 5000);
     });
@@ -68,13 +65,10 @@ describe("SessionManager", () => {
 
     test("should mark explicitly provided heartbeat timeout as custom", async () => {
       process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS = "15000";
-      const session = await sessionManager.createSession(
-        "session-1",
-        "emulator-5554",
-        "android",
-        30_000,
-        15_000,
-      );
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 30_000,
+        heartbeatTimeoutMs: 15_000,
+      });
 
       expect(session.heartbeatTimeoutMs).toBe(15_000);
       expect(session.heartbeatTimeoutSource).toBe("custom");

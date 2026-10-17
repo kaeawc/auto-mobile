@@ -40,7 +40,14 @@ export class DeviceStateRestoreQueue<S extends object> {
   readonly targets = new Map<string, Map<S, PendingRestore<S>>>();
   private readonly generations = new Map<string, number>();
 
-  constructor(readonly policy: RestoreQueuePolicy) {}
+  /**
+   * `onRetire` carries the kind's out-of-queue side effects (health markers, registries, abandoned
+   * slots); it runs first in {@link retire}, so every kind retires through one path.
+   */
+  constructor(
+    readonly policy: RestoreQueuePolicy,
+    private readonly onRetire: (deviceId: string) => void = () => {},
+  ) {}
 
   /** Bumped by every {@link retire}; a changed value means the device was removed. */
   generation(deviceId: string): number {
@@ -82,6 +89,7 @@ export class DeviceStateRestoreQueue<S extends object> {
 
   /** Removal retires in-memory ownership; no retries may target a replacement device. */
   retire(deviceId: string): void {
+    this.onRetire(deviceId);
     const targets = this.targets.get(deviceId);
     this.generations.set(deviceId, this.generation(deviceId) + 1);
     for (const target of targets?.values() ?? []) {

@@ -1,41 +1,32 @@
 import { z } from "zod/v4";
-import { ToolRegistry } from "./toolRegistry";
-import type { ProgressCallback } from "./toolRegistry";
-import { ActionableError, BootedDevice } from "../models";
+import { ActionableError } from "../models";
 import { createStructuredToolResponse } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { defineDeviceTool } from "./defineTool";
 import { SetAccessibilityFocus } from "../features/accessibility/SetAccessibilityFocus";
 import { accessibilityFocusResultSchema } from "./toolOutputSchemas";
 
-// #6712: `.strict()` so an undeclared caller argument is rejected instead of
-// silently deleted (the advertised schema already says additionalProperties:false).
-export const accessibilityFocusSchema = addDeviceTargetingToSchema(
-  z
-    .object({
-      action: z.enum(["set", "clear"]).optional().describe("set default or clear TalkBack focus"),
-      resourceId: z.string().optional().describe("Target resource ID"),
-      text: z.string().optional().describe("Target text"),
-      contentDesc: z
-        .string()
-        .optional()
-        .describe("Exact content-desc or accessible label; distinct from visible text"),
-    })
-    .strict(),
-);
+// `defineDeviceTool` applies `.strict()` (#6712) and device targeting, and infers the
+// handler's args from this schema.
+const accessibilityFocusInput = z.object({
+  action: z.enum(["set", "clear"]).optional().describe("set default or clear TalkBack focus"),
+  resourceId: z.string().optional().describe("Target resource ID"),
+  text: z.string().optional().describe("Target text"),
+  contentDesc: z
+    .string()
+    .optional()
+    .describe("Exact content-desc or accessible label; distinct from visible text"),
+});
 
-interface AccessibilityFocusArgs {
-  action?: "set" | "clear";
-  resourceId?: string;
-  text?: string;
-  contentDesc?: string;
-}
-
-export function registerAccessibilityFocusTools() {
-  const handler = async (
-    device: BootedDevice,
-    args: AccessibilityFocusArgs,
-    _progress?: ProgressCallback,
-  ) => {
+// Debug-only pending audit: this explicit cursor setter is not a typical UI
+// navigation/interaction tool because a human cannot directly command TalkBack
+// to focus an arbitrary node. Re-evaluate whether it should be removed, kept as
+// an internal debug primitive, or implemented through human-representative
+// TalkBack navigation gestures instead.
+const accessibilityFocusTool = defineDeviceTool({
+  name: "accessibilityFocus",
+  description: "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
+  input: accessibilityFocusInput,
+  handler: async (device, args) => {
     if (device.platform !== "android") {
       throw new ActionableError(
         "accessibilityFocus is only supported on Android (TalkBack). iOS VoiceOver focus is not yet implemented.",
@@ -61,18 +52,16 @@ export function registerAccessibilityFocusTools() {
       warning: result.warning,
       ...(result.alreadySatisfied ? { alreadySatisfied: true } : {}),
     });
-  };
+  },
+  options: {
+    defaultEnabled: false,
+    debugOnly: true,
+    outputSchema: accessibilityFocusResultSchema,
+  },
+});
 
-  // Debug-only pending audit: this explicit cursor setter is not a typical UI
-  // navigation/interaction tool because a human cannot directly command TalkBack
-  // to focus an arbitrary node. Re-evaluate whether it should be removed, kept as
-  // an internal debug primitive, or implemented through human-representative
-  // TalkBack navigation gestures instead.
-  ToolRegistry.registerDeviceAware(
-    "accessibilityFocus",
-    "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
-    accessibilityFocusSchema,
-    handler,
-    { defaultEnabled: false, debugOnly: true, outputSchema: accessibilityFocusResultSchema },
-  );
+export const accessibilityFocusSchema = accessibilityFocusTool.schema;
+
+export function registerAccessibilityFocusTools() {
+  accessibilityFocusTool.register();
 }

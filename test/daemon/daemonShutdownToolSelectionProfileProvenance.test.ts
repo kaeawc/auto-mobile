@@ -101,7 +101,10 @@ describe("Daemon shutdown drains an in-flight tool-selection-profile provenance 
 
   test("record()'s write-through commits before the database closes, in that order", async () => {
     const timer = new FakeTimer();
-    const daemon = new Daemon({}, new FakeInstalledAppsRepository(), timer);
+    const daemon = new Daemon(
+      {},
+      { installedAppsRepository: new FakeInstalledAppsRepository(), timer },
+    );
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
     const events: string[] = [];
     const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {

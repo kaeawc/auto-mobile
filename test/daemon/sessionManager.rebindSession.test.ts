@@ -319,7 +319,7 @@ describe("SessionManager", () => {
         secondary: "session-2",
       };
 
-      await manager.createSession("session-1", "emulator-old", "android", 1_000);
+      await manager.createSession("session-1", "emulator-old", "android", { timeoutMs: 1_000 });
       manager.setLastHierarchy("session-1", makeHierarchy("old"));
       manager.setKeepScreenAwake("session-1", { applied: true });
       repository.deferNextUpsert();
@@ -431,7 +431,7 @@ describe("SessionManager", () => {
         fakeBarrier: true,
       });
 
-      await manager.createSession("session-1", "emulator-old", "android", 1);
+      await manager.createSession("session-1", "emulator-old", "android", { timeoutMs: 1 });
       repository.deferNextUpsert();
       const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
       await repository.waitForUpsert();
@@ -451,7 +451,7 @@ describe("SessionManager", () => {
       const repository = new DeferredDeviceSessionPersistence();
       const manager = makeSessionManager({ timer: fakeTimer, persistence: repository });
 
-      await manager.createSession("session-1", "emulator-old", "android", 1);
+      await manager.createSession("session-1", "emulator-old", "android", { timeoutMs: 1 });
       repository.deferNextUpsert();
       const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
       await repository.waitForUpsert();

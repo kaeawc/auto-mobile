@@ -253,7 +253,7 @@ describe("SessionManager", () => {
         }),
       });
 
-      await manager.createSession("net-expiry", "emulator-5554", "android", 1);
+      await manager.createSession("net-expiry", "emulator-5554", "android", { timeoutMs: 1 });
       manager.setNetworkCondition("net-expiry", { initialProfile: "none" });
       fakeTimer.advanceTime(2);
 

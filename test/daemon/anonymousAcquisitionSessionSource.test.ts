@@ -20,17 +20,10 @@ describe("anonymous-acquisition creator kind (#11071)", () => {
     const persistence = new FakeDeviceSessionPersistence();
     const first = new SessionManager(timer, persistence);
     first.stopCleanupTimer();
-    const created = await first.createSession(
-      "cli-session",
-      "emulator-5554",
-      "android",
-      undefined,
-      undefined,
-      "Pixel_8_API_35",
-      undefined,
-      undefined,
-      source,
-    );
+    const created = await first.createSession("cli-session", "emulator-5554", "android", {
+      stableDeviceId: "Pixel_8_API_35",
+      persistenceSource: source,
+    });
     const createdIsAnonymous = isAnonymousAcquisitionSession(created);
     const persistedSource = (await persistence.getSession("cli-session"))?.source;
     await persistence.markReleased("cli-session", "expired", 1_000, "daemon-restart");
@@ -40,16 +33,13 @@ describe("anonymous-acquisition creator kind (#11071)", () => {
     restarted.stopCleanupTimer();
     const pool: SessionDeviceAssigner = {
       async assignDeviceToSession(id, _platform, target): Promise<string> {
-        const session = await restarted.createSession(
-          id,
-          "emulator-5554",
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await restarted.createSession(id, "emulator-5554", "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };

@@ -404,11 +404,13 @@ export function recoveringAssigner(
         sessionId,
         options.deviceId ?? "emulator-5554",
         "android",
-        target?.liveness?.sessionTimeoutMs,
-        target?.liveness?.heartbeatTimeoutMs,
-        target?.stableDeviceId,
-        target?.liveness,
-        target?.initialOwnership,
+        {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        },
       );
       return session.assignedDevice;
     },
@@ -499,16 +501,11 @@ export function createAwaitingOwnerSession(
   sessionId: string,
   deviceId = "emulator-5554",
 ): ReturnType<SessionManager["createSession"]> {
-  return manager.createSession(
-    sessionId,
-    deviceId,
-    "android",
-    60_000,
-    1_000,
-    undefined,
-    undefined,
-    "awaiting-owner",
-  );
+  return manager.createSession(sessionId, deviceId, "android", {
+    timeoutMs: 60_000,
+    heartbeatTimeoutMs: 1_000,
+    initialOwnership: "awaiting-owner",
+  });
 }
 
 /** A heartbeat monitor over `manager` that records the reason of every session it reaps. */

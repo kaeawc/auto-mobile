@@ -11,8 +11,9 @@
 # The rules gated here are the ones .oxlintrc.json sets to "warn" because they
 # carry pre-existing violations (complexity, max-depth, max-params,
 # max-lines-per-function,
-# auto-mobile/catch-convention, auto-mobile/no-unknown-cast, and the two
-# type-aware promise rules). Every OTHER rule is "error" in the config and is
+# auto-mobile/catch-convention, and the two type-aware promise rules, whose
+# baseline is currently zero but which stay here because the fast `oxlint` stage
+# does not run `--type-aware`). Every OTHER rule is "error" in the config and is
 # gated directly by `oxlint` (a non-zero exit), so it does not belong here. The
 # promise rules need type information, so this gate runs oxlint with
 # `--type-aware` (tsgolint) -- which is why the main `oxlint --fix` does not, and
@@ -60,8 +61,9 @@ fi
 
 # The oxlint rule codes gated by this ratchet (including max-params and
 # max-lines-per-function). Kept in lock-step with the "warn"
-# rules in .oxlintrc.json.
-RATCHET_CODES="eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) auto-mobile(catch-convention) auto-mobile(no-unknown-cast) auto-mobile(no-caught-error-interpolation) typescript(no-floating-promises) typescript(no-misused-promises)"
+# rules in .oxlintrc.json. The two typescript(no-*-promises) codes have a zero
+# baseline; they stay here because only this stage runs `--type-aware`.
+RATCHET_CODES="eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) auto-mobile(catch-convention) typescript(no-floating-promises) typescript(no-misused-promises)"
 
 # Emit the JSON report. OXLINT_JSON_CMD overrides the invocation -- used by the
 # BATS tests to inject a canned report. It is `eval`ed, so treat it as TRUSTED

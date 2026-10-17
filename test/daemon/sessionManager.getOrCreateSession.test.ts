@@ -126,13 +126,10 @@ describe("SessionManager", () => {
       // Resolving a session for a tool call must count as activity, otherwise an
       // actively-used autolock client (which sends no explicit heartbeats) would
       // be reaped mid-use.
-      const session1 = await sessionManager.createSession(
-        "session-1",
-        "emulator-5554",
-        "android",
-        60_000,
-        60_000,
-      );
+      const session1 = await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+      });
       const initialHeartbeat = session1.lastHeartbeat;
       fakeTimer.advanceTime(30_000);
 
@@ -143,7 +140,9 @@ describe("SessionManager", () => {
     });
 
     test("should preserve custom timeout when getting existing session", async () => {
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 5000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 5000,
+      });
       fakeTimer.advanceTime(4000);
 
       const session = await sessionManager.getOrCreateSession("session-1");
@@ -213,14 +212,9 @@ describe("SessionManager", () => {
       const devicePool: SessionDeviceAssigner = {
         async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
           recoveryTarget = target;
-          await restarted.createSession(
-            sessionId,
-            "emulator-5560",
-            "android",
-            undefined,
-            undefined,
-            target?.stableDeviceId,
-          );
+          await restarted.createSession(sessionId, "emulator-5560", "android", {
+            stableDeviceId: target?.stableDeviceId,
+          });
           return "emulator-5560";
         },
       };
@@ -383,14 +377,9 @@ describe("SessionManager", () => {
       const devicePool: SessionDeviceAssigner = {
         async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
           recoveryTarget = target;
-          await restarted.createSession(
-            sessionId,
-            persisted.device_id,
-            "android",
-            undefined,
-            undefined,
-            target?.stableDeviceId,
-          );
+          await restarted.createSession(sessionId, persisted.device_id, "android", {
+            stableDeviceId: target?.stableDeviceId,
+          });
           return persisted.device_id;
         },
       };
@@ -805,7 +794,9 @@ describe("SessionManager", () => {
             0 <= query.sessionClockStartedAtOrBefore),
       );
       sessionManager.onSessionRelease((sessionId) => released.push(sessionId));
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 1000,
+      });
       fakeTimer.advanceTime(1001);
 
       // Existing work keeps an expired session assigned, and a routing lookup with no
@@ -839,7 +830,7 @@ describe("SessionManager", () => {
       });
       const devicePool = replacingAssigner(manager);
 
-      const session = await manager.createSession("s1", "device-1", "android", 1);
+      const session = await manager.createSession("s1", "device-1", "android", { timeoutMs: 1 });
       manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
       await Promise.resolve();
       activity.length = 0;
@@ -885,7 +876,7 @@ describe("SessionManager", () => {
         keepScreenAwakeRestorer: keepAwake.restorer,
       });
 
-      const session = await manager.createSession("s1", "device-1", "android", 1);
+      const session = await manager.createSession("s1", "device-1", "android", { timeoutMs: 1 });
       manager.setKeepScreenAwake("s1", { applied: true, method: "svc", svcWasEnabled: false });
       fakeTimer.advanceTime(5 * 60 * 1000);
 
@@ -914,7 +905,7 @@ describe("SessionManager", () => {
       });
       const devicePool = replacingAssigner(manager);
 
-      await manager.createSession("s1", "device-1", "android", 1);
+      await manager.createSession("s1", "device-1", "android", { timeoutMs: 1 });
       fakeTimer.advanceTime(2);
       expect(manager.getSession("s1")).toBeNull();
       await persistenceStarted.promise;
@@ -939,12 +930,9 @@ describe("SessionManager", () => {
     });
 
     test("keeps a session when work began before its expiry deadline", async () => {
-      const session = await sessionManager.createSession(
-        "session-1",
-        "emulator-5554",
-        "android",
-        1000,
-      );
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 1000,
+      });
       fakeTimer.advanceTime(1001);
 
       const resolved = await sessionManager.getOrCreateSession("session-1", undefined, undefined, {
@@ -964,7 +952,9 @@ describe("SessionManager", () => {
           (query?.sessionClockStartedAtOrBefore === undefined ||
             0 <= query.sessionClockStartedAtOrBefore),
       );
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 1000,
+      });
       fakeTimer.advanceTime(1001);
 
       await expect(

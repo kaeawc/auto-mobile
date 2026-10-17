@@ -1,4 +1,9 @@
 import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
+import {
+  getAppPermissionsResultSchema,
+  inspectPackageSigningResultSchema,
+  listAppsResultSchema,
+} from "./appToolOutputSchemas";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import {
@@ -42,8 +47,6 @@ import {
   withIsErrorOnFailure,
   createJSONToolResponse,
   createStructuredToolResponse,
-  DefaultToolResponseFormatter,
-  ToolResponseFormatter,
 } from "../utils/toolUtils";
 import {
   addDeviceTargetingToSchema,
@@ -116,12 +119,10 @@ async function refreshInstalledAppResources(deviceId: string): Promise<void> {
 }
 
 export interface ListAppsToolDependencies {
-  toolResponseFormatter: ToolResponseFormatter;
   queryInstalledApps: typeof queryInstalledApps;
 }
 
 const createDefaultListAppsToolDependencies = (): ListAppsToolDependencies => ({
-  toolResponseFormatter: new DefaultToolResponseFormatter(),
   queryInstalledApps,
 });
 
@@ -967,7 +968,7 @@ export function describeListAppsResult(
 }
 
 const createListAppsHandler =
-  ({ toolResponseFormatter, queryInstalledApps: queryApps }: ListAppsToolDependencies) =>
+  ({ queryInstalledApps: queryApps }: ListAppsToolDependencies) =>
   async (device: BootedDevice, args: ListAppsArgs, _progress?: unknown, signal?: AbortSignal) => {
     try {
       signal?.throwIfAborted();
@@ -983,7 +984,7 @@ const createListAppsHandler =
       );
       signal?.throwIfAborted();
 
-      return toolResponseFormatter.createJSONToolResponse({
+      return createStructuredToolResponse({
         message: describeListAppsResult(device.deviceId, content),
         ...content,
       });
@@ -1503,7 +1504,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
       const inspection = await inspectPackageSigningToolDependencies
         .createInspectPackageSigning(device)
         .execute(args.appId, { userId: args.userId, signal });
-      return createJSONToolResponse({ ...inspection });
+      return createStructuredToolResponse({ ...inspection });
     } catch (error) {
       throw toActionableError(error, "Failed to inspect package signing");
     }
@@ -1515,7 +1516,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
       permissions: args.permissions,
     });
 
-    const response = createJSONToolResponse({
+    const response = createStructuredToolResponse({
       message: result.success
         ? `Read ${result.permissions.length} app permission state row(s) for ${args.appId}`
         : (result.error ?? `Failed to read app permission state for ${args.appId}`),
@@ -1611,7 +1612,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     getAppPermissionsSchema,
     getAppPermissionsHandler,
     // Reads only; read-only access never requires a session (#10965).
-    { defaultEnabled: false, deviceReadOnly: true },
+    { defaultEnabled: false, deviceReadOnly: true, outputSchema: getAppPermissionsResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1620,7 +1621,12 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
       "SHA-256 signing certificates (complete signer set, rotation history). Never cached.",
     inspectPackageSigningSchema,
     inspectPackageSigningHandler,
-    { defaultEnabled: false, deviceReadiness: "booted", deviceReadOnly: true },
+    {
+      defaultEnabled: false,
+      deviceReadiness: "booted",
+      deviceReadOnly: true,
+      outputSchema: inspectPackageSigningResultSchema,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1648,6 +1654,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
       deviceReadiness: "booted",
       // Reads only; a non-holder watches a held device through the read-only path (#10830).
       deviceReadOnly: true,
+      outputSchema: listAppsResultSchema,
     },
   );
 }

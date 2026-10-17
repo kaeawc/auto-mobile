@@ -973,14 +973,9 @@ test.each(["explicit-release", "heartbeat-timeout", "device-killed"])(
     const persistence = new FakeDeviceSessionPersistence();
     const manager = makeSessionManager({ persistence });
     manager.stopCleanupTimer();
-    const session = await manager.createSession(
-      "owned",
-      "emulator-5554",
-      "android",
-      undefined,
-      undefined,
-      "Pixel",
-    );
+    const session = await manager.createSession("owned", "emulator-5554", "android", {
+      stableDeviceId: "Pixel",
+    });
     await manager.releaseSession("owned", "device-restart:Pixel");
     expect(await manager.releaseSessionIfOwned("owned", session, "emulator-5554", reason)).toBe(
       "emulator-5554",

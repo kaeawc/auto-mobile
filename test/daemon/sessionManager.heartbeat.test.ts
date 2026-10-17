@@ -30,7 +30,9 @@ describe("SessionManager", () => {
 
   describe("recordHeartbeat", () => {
     test("releases a heartbeating session exactly at its idle deadline, with no suspect grace (#11107)", async () => {
-      await sessionManager.createSession("session-1", "emulator-5554", "android", 5000);
+      await sessionManager.createSession("session-1", "emulator-5554", "android", {
+        timeoutMs: 5000,
+      });
       fakeTimer.advanceTime(4000);
 
       // A heartbeat does not extend the idle deadline (#10656), and the suspect grace (#10051)
@@ -179,12 +181,9 @@ describe("SessionManager", () => {
       const write = spyOn(persistence, "recordActivity");
       const manager = makeSessionManager({ timer: fakeTimer, persistence, fakeBarrier: true });
       try {
-        const session = await manager.createSession(
-          "first-heartbeat",
-          "emulator-5554",
-          "android",
-          60_000,
-        );
+        const session = await manager.createSession("first-heartbeat", "emulator-5554", "android", {
+          timeoutMs: 60_000,
+        });
         write.mockImplementationOnce(async () => {
           throw new Error("one activity write failed");
         });

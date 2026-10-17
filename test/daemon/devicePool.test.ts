@@ -1,3 +1,4 @@
+import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -53,10 +54,7 @@ describe("DevicePool", () => {
       isRunning: false,
       deviceId: "emulator-5554",
     };
-    const internals = devicePool as unknown as {
-      recoveringAndroidImages: Map<string, DeviceInfo>;
-      recoveringAndroidDeviceIds: Set<string>;
-    };
+    const internals = recoveryInternals(devicePool);
     internals.recoveringAndroidImages.set(recoveringImage.name, recoveringImage);
     internals.recoveringAndroidDeviceIds.add("emulator-5556");
 
@@ -68,9 +66,10 @@ describe("DevicePool", () => {
 
   test("rejects an unpooled Unknown Android replacement whose serial is recovering", async () => {
     const recoveringImage: DeviceInfo = androidDeviceImage("Pixel_8_API_35", "emulator-5556");
-    (
-      devicePool as unknown as { recoveringAndroidImages: Map<string, DeviceInfo> }
-    ).recoveringAndroidImages.set(recoveringImage.name, recoveringImage);
+    recoveryInternals(devicePool).recoveringAndroidImages.set(
+      recoveringImage.name,
+      recoveringImage,
+    );
     const replacement: BootedDevice = {
       name: "Unknown (emulator-5556)",
       platform: "android",
@@ -91,9 +90,10 @@ describe("DevicePool", () => {
 
   test("accepts an unpooled resolved Android replacement with a recycled recovering serial", async () => {
     const recoveringImage: DeviceInfo = androidDeviceImage("Pixel_7", "emulator-5556");
-    (
-      devicePool as unknown as { recoveringAndroidImages: Map<string, DeviceInfo> }
-    ).recoveringAndroidImages.set(recoveringImage.name, recoveringImage);
+    recoveryInternals(devicePool).recoveringAndroidImages.set(
+      recoveringImage.name,
+      recoveringImage,
+    );
     const replacement: BootedDevice = {
       name: "Pixel_8",
       platform: "android",

@@ -178,8 +178,7 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
         sessionId,
         deviceId,
         sessionId === BOUND ? "ios" : "android",
-        60_000,
-        LEASE_MS,
+        { timeoutMs: 60_000, heartbeatTimeoutMs: LEASE_MS },
       );
     }
   }

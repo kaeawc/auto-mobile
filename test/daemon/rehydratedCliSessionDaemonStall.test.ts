@@ -44,40 +44,28 @@ describe("a rehydrated cli-idle session across a daemon stall", () => {
       cleanups.push(() => manager.stopCleanupTimer());
 
       // A one-shot CLI's session, rehydrated after a daemon restart and awaiting its owner.
-      await manager.createSession(
-        "rehydrated-cli",
-        "emulator-5554",
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        {
+      await manager.createSession("rehydrated-cli", "emulator-5554", "android", {
+        recoveredLiveness: {
           sessionTimeoutMs: CLI_IDLE_MS,
           heartbeatTimeoutMs: CLI_IDLE_MS,
           heartbeatTimeoutSource: "default",
           hasReceivedHeartbeat: true,
           livenessPolicy: "cli-idle",
         },
-        "awaiting-owner",
-      );
+        initialOwnership: "awaiting-owner",
+      });
       // Controls: a proxy's rehydrated session, and a CLI session this daemon created itself.
-      await manager.createSession(
-        "rehydrated-proxy",
-        "emulator-5556",
-        "android",
-        undefined,
-        undefined,
-        undefined,
-        {
+      await manager.createSession("rehydrated-proxy", "emulator-5556", "android", {
+        recoveredLiveness: {
           sessionTimeoutMs: 600_000,
           heartbeatTimeoutMs: DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
           heartbeatTimeoutSource: "default",
           hasReceivedHeartbeat: true,
           livenessPolicy: "heartbeat",
         },
-        "awaiting-owner",
-      );
-      await manager.createSession("live-cli", "emulator-5558", "android", 60_000);
+        initialOwnership: "awaiting-owner",
+      });
+      await manager.createSession("live-cli", "emulator-5558", "android", { timeoutMs: 60_000 });
       expect(manager.adoptCliLivenessPolicy("live-cli", CLI_IDLE_MS)).toBe(true);
 
       const reaped: string[] = [];
@@ -119,22 +107,16 @@ describe("a rehydrated cli-idle session across a daemon stall", () => {
       barrier: () => new FakeDbWriteBarrier(),
     });
     cleanups.push(() => manager.stopCleanupTimer());
-    await manager.createSession(
-      "rehydrated-cli",
-      "emulator-5554",
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      {
+    await manager.createSession("rehydrated-cli", "emulator-5554", "android", {
+      recoveredLiveness: {
         sessionTimeoutMs: CLI_IDLE_MS,
         heartbeatTimeoutMs: CLI_IDLE_MS,
         heartbeatTimeoutSource: "default",
         hasReceivedHeartbeat: true,
         livenessPolicy: "cli-idle",
       },
-      "awaiting-owner",
-    );
+      initialOwnership: "awaiting-owner",
+    });
     manager.startRehydratedOwnerWindows();
     const session = manager.getSession("rehydrated-cli")!;
     const windowStart = session.awaitingOwnerSince ?? Number.NaN;

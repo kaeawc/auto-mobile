@@ -120,7 +120,7 @@ describe("remaining session row writes (#11557)", () => {
     });
     warmManager.stopCleanupTimer();
     try {
-      await warmManager.createSession("warm-row-writes", DEVICE, "android", 60_000);
+      await warmManager.createSession("warm-row-writes", DEVICE, "android", { timeoutMs: 60_000 });
       await warmStore.markStaleActiveSessionsExpired("peer", warmTimer.now(), "daemon-restart");
       warmTimer.advanceTime(1);
       await warmManager.getOrCreateSession("warm-row-writes");
@@ -149,7 +149,7 @@ describe("remaining session row writes (#11557)", () => {
   });
 
   const row = () => store.getSession(SESSION);
-  const create = () => manager.createSession(SESSION, DEVICE, "android", 60_000);
+  const create = () => manager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
   async function sweep(): Promise<void> {
     await peer.markStaleActiveSessionsExpired(
       "daemon-peer",
@@ -167,7 +167,8 @@ describe("remaining session row writes (#11557)", () => {
   }
   const pool = (): SessionDeviceAssigner => ({
     async assignDeviceToSession(id) {
-      return (await manager.createSession(id, DEVICE, "android", 60_000)).assignedDevice;
+      return (await manager.createSession(id, DEVICE, "android", { timeoutMs: 60_000 }))
+        .assignedDevice;
     },
   });
   const reissue = () => manager.getOrCreateSession(SESSION, pool(), "android", undefined, true);
@@ -687,7 +688,7 @@ describe("remaining session row writes (#11557)", () => {
       }
       const assigner: SessionDeviceAssigner = {
         async assignDeviceToSession(id) {
-          const creating = manager.createSession(id, DEVICE, "android", 60_000);
+          const creating = manager.createSession(id, DEVICE, "android", { timeoutMs: 60_000 });
           if (!landed) {
             manager.stopAcceptingSessionCreations();
           }
@@ -720,7 +721,10 @@ describe("remaining session row writes (#11557)", () => {
   ] as const)(
     "a cancelled recovery terminalizes its %s row (upsert landed: %p)",
     async (reason, landed) => {
-      await manager.createSession(SESSION, DEVICE, "android", 60_000, undefined, "stable-row");
+      await manager.createSession(SESSION, DEVICE, "android", {
+        timeoutMs: 60_000,
+        stableDeviceId: "stable-row",
+      });
       await manager.releaseSession(SESSION, reason);
       announced.length = 0;
       const controller = new AbortController();
@@ -730,7 +734,7 @@ describe("remaining session row writes (#11557)", () => {
       }
       const assigner: SessionDeviceAssigner = {
         async assignDeviceToSession(id) {
-          const creating = manager.createSession(id, DEVICE, "android", 60_000);
+          const creating = manager.createSession(id, DEVICE, "android", { timeoutMs: 60_000 });
           if (!landed) {
             controller.abort(failure);
           }
@@ -756,12 +760,12 @@ describe("remaining session row writes (#11557)", () => {
       later.attachDaemonSessionId("daemon-later");
       later.attachLiveDaemonSessionIds(() => new Set(["daemon-later"]));
       try {
-        await expect(later.createSession(SESSION, DEVICE, "android", 60_000)).rejects.toMatchObject(
-          {
-            name: "TerminalSessionError",
-            release: expect.objectContaining({ releaseReason: "session-creation-cancelled" }),
-          },
-        );
+        await expect(
+          later.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 }),
+        ).rejects.toMatchObject({
+          name: "TerminalSessionError",
+          release: expect.objectContaining({ releaseReason: "session-creation-cancelled" }),
+        });
       } finally {
         later.stopCleanupTimer();
       }
@@ -771,7 +775,10 @@ describe("remaining session row writes (#11557)", () => {
   test.each([`device-restart:${DEVICE}`, "daemon-shutdown"])(
     "a failed recovery preserves its claimed %s release time",
     async (reason) => {
-      await manager.createSession(SESSION, DEVICE, "android", 60_000, undefined, "stable-row");
+      await manager.createSession(SESSION, DEVICE, "android", {
+        timeoutMs: 60_000,
+        stableDeviceId: "stable-row",
+      });
       await manager.releaseSession(SESSION, reason);
       const claimed = await row();
       timer.advanceTime(100);

@@ -29,6 +29,7 @@ test/daemon/rehydratedOwnerWindow.test.ts
 test/daemon/releasingSessionRequests.test.ts
 test/daemon/sessionHeartbeatExecutionVetoCeiling.test.ts
 test/daemon/sessionIdleWindowFromToolCallEnd.test.ts
+test/daemon/sessionLivenessLease.test.ts
 test/daemon/sessionManager.getOrCreateSession.test.ts
 test/daemon/sessionManager.heartbeat.test.ts
 test/daemon/sessionManager.rebindSession.test.ts

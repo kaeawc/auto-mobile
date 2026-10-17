@@ -175,6 +175,8 @@ internal fun PrototypeRuntimeContent(
         LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
         LocalPrototypeMotion provides motion,
+        LocalPrototypeSwipeCoordinator provides
+          (LocalPrototypeSwipeCoordinator.current ?: remember { SwipeCoordinator() }),
       ) {
         val traceSink = PrototypeTrace.sink
         val traceEnabled = traceSink.isEnabled()
@@ -507,6 +509,14 @@ private fun RenderPrototypeNodeContent(
   weightAxis: PrototypeWeightAxis? = null,
   windowRoot: Boolean = false,
 ) {
+  prototypeSwipeActions(node.source)?.let { swipe ->
+    // The row keeps its own layout modifier; the foreground renders as an ordinary node.
+    val plain = remember(node) { node.copy(source = prototypeWithoutSwipe(node.source)) }
+    PrototypeSwipeRow(node, swipe, interact, parentModifier) {
+      RenderPrototypeNodeContent(plain, interact, Modifier, weightAxis, windowRoot)
+    }
+    return
+  }
   val traceSink = PrototypeTrace.sink
   val traceEnabled = traceSink.isEnabled()
   if (traceEnabled) traceSink.begin(PrototypeTrace.NODE)
@@ -849,6 +859,10 @@ private fun RenderPrototypeTextField(
           onSend = submit,
           onGo = submit,
         )
+    val leadingIcon: (@Composable () -> Unit)? =
+      prototypeIcon(source.leadingIcon)?.let { icon ->
+        { Icon(icon, contentDescription = null) }
+      }
     val trailingIcon: (@Composable () -> Unit)? =
       source.trailingIcon?.let { action ->
         { PrototypeTextFieldTrailingIcon(node, action, interact) }
@@ -873,6 +887,7 @@ private fun RenderPrototypeTextField(
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
           keyboardActions = keyboardActions,
+          leadingIcon = leadingIcon,
           trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
         )
@@ -889,6 +904,7 @@ private fun RenderPrototypeTextField(
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
           keyboardActions = keyboardActions,
+          leadingIcon = leadingIcon,
           trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
           singleLine = !multiline,
@@ -910,6 +926,7 @@ private fun RenderPrototypeTextField(
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
           keyboardActions = keyboardActions,
+          leadingIcon = leadingIcon,
           trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
         )
@@ -926,6 +943,7 @@ private fun RenderPrototypeTextField(
           supportingText = supportingText,
           keyboardOptions = keyboardOptions,
           keyboardActions = keyboardActions,
+          leadingIcon = leadingIcon,
           trailingIcon = trailingIcon,
           visualTransformation = visualTransformation,
           singleLine = !multiline,

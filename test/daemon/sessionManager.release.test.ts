@@ -205,7 +205,7 @@ describe("SessionManager", () => {
         fakeBarrier: true,
       });
 
-      const session = await manager.createSession("s1", "device-1", "android", 1);
+      const session = await manager.createSession("s1", "device-1", "android", { timeoutMs: 1 });
       const setup = manager.trackSessionSetup(session, () => setupGate.promise);
       const release = manager.releaseSession("s1", "daemon-shutdown", { allowExpired: true });
 

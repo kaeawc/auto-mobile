@@ -1,5 +1,5 @@
 import { ActionableError } from "./ActionableError";
-import { errorMessage } from "../utils/describeUnknownError";
+import { errorMessage } from "./describeUnknownError";
 
 /** The gesture completed; only its post-action read failed. Never retry it blindly. */
 export class DispatchedObservationError extends ActionableError {

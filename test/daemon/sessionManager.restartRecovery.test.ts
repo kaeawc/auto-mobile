@@ -98,14 +98,9 @@ describe("SessionManager", () => {
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
         recoveryTarget = target;
-        await restarted.createSession(
-          sessionId,
-          "simulator-uuid",
-          "ios",
-          undefined,
-          undefined,
-          target?.stableDeviceId,
-        );
+        await restarted.createSession(sessionId, "simulator-uuid", "ios", {
+          stableDeviceId: target?.stableDeviceId,
+        });
         return "simulator-uuid";
       },
     };
@@ -166,14 +161,9 @@ describe("SessionManager", () => {
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
         recoveryTarget = target;
-        await restarted.createSession(
-          sessionId,
-          "emulator-5560",
-          "android",
-          undefined,
-          undefined,
-          target?.stableDeviceId,
-        );
+        await restarted.createSession(sessionId, "emulator-5560", "android", {
+          stableDeviceId: target?.stableDeviceId,
+        });
         return "emulator-5560";
       },
     };
@@ -321,16 +311,13 @@ describe("SessionManager", () => {
         if (hung.has(sessionId)) {
           return await new Promise<string>(() => {});
         }
-        const session = await restarted.createSession(
-          sessionId,
-          "emulator-5556",
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        const session = await restarted.createSession(sessionId, "emulator-5556", "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         return session.assignedDevice;
       },
     };
@@ -471,16 +458,13 @@ describe("SessionManager", () => {
     });
     const devicePool: SessionDeviceAssigner = {
       async assignDeviceToSession(sessionId, _platform, target): Promise<string> {
-        await restarted.createSession(
-          sessionId,
-          "emulator-5554",
-          "android",
-          target?.liveness?.sessionTimeoutMs,
-          target?.liveness?.heartbeatTimeoutMs,
-          target?.stableDeviceId,
-          target?.liveness,
-          target?.initialOwnership,
-        );
+        await restarted.createSession(sessionId, "emulator-5554", "android", {
+          timeoutMs: target?.liveness?.sessionTimeoutMs,
+          heartbeatTimeoutMs: target?.liveness?.heartbeatTimeoutMs,
+          stableDeviceId: target?.stableDeviceId,
+          recoveredLiveness: target?.liveness,
+          initialOwnership: target?.initialOwnership,
+        });
         sessionCreated.resolve();
         await finishRecovery.promise;
         return "emulator-5554";

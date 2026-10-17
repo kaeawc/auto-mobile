@@ -154,18 +154,7 @@ async function harness(
   const server = new FakeHttpServer();
   const daemon = new Daemon(
     { port, host: "127.0.0.1" },
-    undefined,
-    timer,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    () => server as unknown as HttpServer,
+    { timer, httpServerFactory: () => server as unknown as HttpServer },
   );
   const transport = new FakeTransport();
   const internals = daemon as unknown as DaemonHttpInternals;

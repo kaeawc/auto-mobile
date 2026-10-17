@@ -7,6 +7,7 @@ import { expect, describe, test, beforeAll, beforeEach, afterEach, spyOn } from 
 import { Explore } from "../../../src/features/navigation/Explore";
 import { BootedDevice, Element, ExecResult, ObserveResult } from "../../../src/models";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeDeviceSessionManager } from "../../fakes/FakeDeviceSessionManager";
@@ -2476,7 +2477,7 @@ describe("Explore", () => {
         // getActive + launcher resolution during home verification read through
         // this; report the launcher so verification passes.
         executeCommand: async () => launcherDumpsysResult(),
-      } as unknown as AdbClient;
+      } as AdbExecutor;
       const controller = new AbortController();
       explore = new Explore(device, adb, fakeTimer, fakeGraph);
       // No targetPackageName -> no relaunch; keep the test on the press dispatch.

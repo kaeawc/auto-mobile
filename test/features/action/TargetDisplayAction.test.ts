@@ -18,7 +18,6 @@ import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAndroidPhysicalDisplayIdResolver } from "../../fakes/FakeAndroidPhysicalDisplayIdResolver";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import type { SwipeOnOptions } from "../../../src/models/SwipeOnOptions";
 import { sessionRenderedObservation } from "../../../src/features/action/TargetDisplayAction";
@@ -295,11 +294,11 @@ describe("explicit action display", () => {
             : kind === "tapAt"
               ? new TapAtCoordinate(android, executor, deps)
               : kind === "swipeOn"
-                ? new SwipeOn(android, executor as unknown as AdbClient, {
+                ? new SwipeOn(android, executor, {
                     ...deps,
                     observeScreen: observe,
                   })
-                : new DragAndDrop(android, executor as unknown as AdbClient, timer, deps);
+                : new DragAndDrop(android, executor, timer, deps);
         action.observeScreen = observe;
         const client = AndroidCtrlProxyClient.getExistingInstance(android.deviceId)!;
         const invalidate = spyOn(client, "invalidateCache").mockImplementation(() => {
@@ -900,7 +899,7 @@ describe("explicit action display", () => {
     });
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
-    const action = new SwipeOn(android, executor as unknown as AdbClient, {
+    const action = new SwipeOn(android, executor, {
       timer: autoTimer(),
       observeScreen: observe,
       lastRenderedObservation: () => observation,
@@ -1682,11 +1681,11 @@ describe("CtrlProxy display-targeted action routing", () => {
           : kind === "tapAt"
             ? new TapAtCoordinate(android, executor, deps)
             : kind === "swipeOn"
-              ? new SwipeOn(android, executor as unknown as AdbClient, {
+              ? new SwipeOn(android, executor, {
                   ...deps,
                   observeScreen: observe,
                 })
-              : new DragAndDrop(android, executor as unknown as AdbClient, timer, deps);
+              : new DragAndDrop(android, executor, timer, deps);
       action.observeScreen = observe;
       const client = AndroidCtrlProxyClient.getExistingInstance(android.deviceId)!;
       const capability = spyOn(client, "supportsCommand").mockResolvedValue(true);
@@ -1844,7 +1843,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                 gesture === "longPressOn" ||
                 gesture === "doubleTapOn"
               ) {
-                const action = new TapOnElement(android, executor as unknown as AdbClient, deps);
+                const action = new TapOnElement(android, executor, deps);
                 action.observeScreen = observe;
                 result = await action.execute(
                   {
@@ -1860,7 +1859,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                   { signal: controller.signal },
                 );
               } else if (gesture === "swipe") {
-                const action = new SwipeOn(android, executor as unknown as AdbClient, {
+                const action = new SwipeOn(android, executor, {
                   ...deps,
                   observeScreen: observe,
                 });
@@ -1869,12 +1868,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                   { signal: controller.signal },
                 );
               } else if (gesture === "drag") {
-                const action = new DragAndDrop(
-                  android,
-                  executor as unknown as AdbClient,
-                  timer,
-                  deps,
-                );
+                const action = new DragAndDrop(android, executor, timer, deps);
                 action.observeScreen = observe;
                 result = await action.execute(
                   {
@@ -1885,7 +1879,7 @@ describe("CtrlProxy display-targeted action routing", () => {
                   { signal: controller.signal },
                 );
               } else {
-                const action = new PinchOn(android, executor as unknown as AdbClient, deps);
+                const action = new PinchOn(android, executor, deps);
                 action.observeScreen = observe;
                 Object.assign(action, {
                   observedInteraction: async (run: () => Promise<object>) => run(),
@@ -2033,14 +2027,14 @@ describe("display routing capability lookup fences", () => {
               { signal: controller.signal },
             );
           } else if (gesture === "tapOn") {
-            const action = new TapOnElement(android, executor as unknown as AdbClient, deps);
+            const action = new TapOnElement(android, executor, deps);
             action.observeScreen = observe;
             pending = action.execute(
               { text: "Settings", display: "external" },
               { signal: controller.signal },
             );
           } else if (gesture === "swipe") {
-            const action = new SwipeOn(android, executor as unknown as AdbClient, {
+            const action = new SwipeOn(android, executor, {
               ...deps,
               observeScreen: observe,
             });
@@ -2049,14 +2043,14 @@ describe("display routing capability lookup fences", () => {
               { signal: controller.signal },
             );
           } else if (gesture === "drag") {
-            const action = new DragAndDrop(android, executor as unknown as AdbClient, timer, deps);
+            const action = new DragAndDrop(android, executor, timer, deps);
             action.observeScreen = observe;
             pending = action.execute(
               { source: { text: "Settings" }, target: { text: "Settings" }, display: "external" },
               { signal: controller.signal },
             );
           } else {
-            const action = new PinchOn(android, executor as unknown as AdbClient, deps);
+            const action = new PinchOn(android, executor, deps);
             action.observeScreen = observe;
             pending = action.execute(
               { direction: "in", display: "external" },
@@ -2156,13 +2150,13 @@ describe("display gesture dispatch boundary race", () => {
             : kind === "tapAt" || kind === "defaultTapAt"
               ? new TapAtCoordinate(android, executor, deps)
               : kind === "swipe"
-                ? new SwipeOn(android, executor as unknown as AdbClient, {
+                ? new SwipeOn(android, executor, {
                     ...deps,
                     observeScreen: observe,
                   })
                 : kind === "drag"
-                  ? new DragAndDrop(android, executor as unknown as AdbClient, timer, deps)
-                  : new PinchOn(android, executor as unknown as AdbClient, deps);
+                  ? new DragAndDrop(android, executor, timer, deps)
+                  : new PinchOn(android, executor, deps);
         action.observeScreen = observe;
         const client = AndroidCtrlProxyClient.getExistingInstance(android.deviceId)!;
         const previousGestures = client["_gestures"];
@@ -2516,7 +2510,7 @@ describe("selected-display double tap delivery", () => {
           const action =
             kind === "tapOn"
               ? new TapOnElement(android, executor, deps)
-              : new TapAnyElement(android, executor as unknown as AdbClient, deps);
+              : new TapAnyElement(android, executor, deps);
           action.observeScreen = observe;
           if (failure === "abort before dispatch") {
             controller.abort(new Error(OPERATION_CANCELLED_MESSAGE));

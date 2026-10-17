@@ -1,6 +1,6 @@
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
   ActionableError,
@@ -74,7 +74,7 @@ export class HomeScreen extends BaseVisualChange {
 
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
     private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(device),
   ) {

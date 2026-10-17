@@ -1,13 +1,11 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { isRecoverableDaemonReleaseReason } from "../../src/db/deviceSessionRepository";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo, SomePlatform } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const IOS_SIMULATOR: BootedDevice = {
@@ -65,16 +63,12 @@ function createPool(
   continuityEnabled = true,
   onLoss = false,
 ): DevicePool {
-  return new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer: timer,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      deviceManager: manager,
-      retryExecutor: new DefaultRetryExecutor(timer),
-      recoveryPolicy: { onLoss, maxAttempts: 1 },
-      deviceSessionContinuityEnabled: continuityEnabled,
-    }),
-  );
+  return makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    recoveryPolicy: { onLoss, maxAttempts: 1 },
+    deviceSessionContinuityEnabled: continuityEnabled,
+  });
 }
 
 async function setupOwnedIOS(

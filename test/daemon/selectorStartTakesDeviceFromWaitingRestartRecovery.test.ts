@@ -1,13 +1,11 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
+import { type PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 // Hunt 2026-10-11, device-restart recovery, cell 2 (who can take the device during S's recovery
@@ -67,16 +65,12 @@ describe("a session waiting in flight for its restarting device", () => {
     const sessions = new SessionManager(timer, persistence);
     sessions.stopCleanupTimer();
     const manager = new FakeDeviceManager([], [SIMULATOR]);
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "daemon", {
-        timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        recoveryPolicy: { onLoss: false, maxAttempts: 1 },
-        deviceSessionContinuityEnabled: true,
-      }),
-    );
+    const pool = makePool(sessions, "daemon", {
+      timer,
+      deviceManager: manager,
+      recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+      deviceSessionContinuityEnabled: true,
+    });
     await pool.initializeWithDevices([SIMULATOR]);
     await pool.bindOrReuseDeviceSession(
       HOLDER,

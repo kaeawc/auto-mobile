@@ -1,13 +1,11 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // #11461 (restart ownership). "At the start of recovery the device of every persisted session is
 // reserved, so no other caller takes it while rows are recovered one by one"
@@ -63,14 +61,7 @@ describe("restart-recovery reservation vs. an autolock acquisition by another cl
     sessions.stopCleanupTimer();
     const manager = new FakeDeviceManager();
     manager.bootedDevices = [ios(SIM)];
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "reservation-autolock", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    pool = makePool(sessions, "reservation-autolock", { timer, deviceManager: manager });
     await pool.initializeWithDevices([ios(SIM)]);
     // Startup rehydration's first step: every persisted row's device is held for that row.
     await pool.reserveDevicesForRehydration([

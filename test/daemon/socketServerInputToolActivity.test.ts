@@ -1,9 +1,8 @@
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { executionTracker } from "../../src/server/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
@@ -14,6 +13,7 @@ import {
   createFakeDeviceManager,
   createFakeSession,
 } from "./helpers/inputSocketHarness";
+import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 /**
  * A desktop pane's taps, keys and swipes are the user using the device, so each completed
@@ -23,33 +23,6 @@ import {
  * owner's UUID; its end is what the daemon turns into `recordToolCallEnded`. A stream subscription
  * alone (passive viewing) starts no execution and must not count.
  */
-
-class FakeSocket extends EventEmitter {
-  destroyed = false;
-  writableLength = 0;
-  readonly responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  end(): this {
-    return this.destroy();
-  }
-  destroy(): this {
-    if (!this.destroyed) {
-      this.destroyed = true;
-      this.emit("close", false);
-    }
-    return this;
-  }
-  send(request: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(request)}\n`));
-  }
-}
 
 interface Internals {
   acceptingRequests: boolean;

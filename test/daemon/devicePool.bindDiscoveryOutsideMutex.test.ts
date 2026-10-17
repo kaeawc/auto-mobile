@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { MissingDeviceLiveness } from "../../src/daemon/missingDeviceLiveness";
@@ -9,13 +10,10 @@ import type {
   BootedDeviceDiscoveryOptions,
 } from "../../src/devices/deviceUtils";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Capture each observation before parking, so later discovery can proceed independently.
 class ParkingDiscovery extends FakeDeviceUtils {
@@ -106,21 +104,17 @@ async function setup(devices: BootedDevice[]) {
       devices.filter((d) => d.platform === platform),
     );
   }
-  pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "bind-discovery", {
-      timer,
-      deviceManager: manager,
-      missingDeviceLivenessFactory: (port) => {
-        liveness = new RecordingLiveness(port);
-        return liveness;
-      },
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      retryExecutor: new DefaultRetryExecutor(timer),
-      idGenerator: new FakeIdGenerator(),
-      deviceSessionRepository: { markAutolockSession: async () => {} },
-      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-    }),
-  );
+  pool = makePool(sessions, "bind-discovery", {
+    timer,
+    deviceManager: manager,
+    missingDeviceLivenessFactory: (port) => {
+      liveness = new RecordingLiveness(port);
+      return liveness;
+    },
+    idGenerator: new FakeIdGenerator(),
+    deviceSessionRepository: { markAutolockSession: async () => {} },
+    recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+  });
   await pool.initializeWithDevices(devices);
 }
 afterEach(() => {

@@ -1,6 +1,6 @@
+import { makePool } from "../helpers/makePool";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -14,12 +14,9 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Inventory contract: every surface reports the same holder for a device. The listDevices tool
 // names the session from the pool's own assignment (`pooled.sessionId`); the booted resource names
@@ -60,14 +57,7 @@ describe("session attribution on the tool and the resource", () => {
     manager.setBootedDevices("android", [android]);
     manager.setBootedDevices("ios", []);
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "hunt-session-parity", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    const pool = makePool(sessions, "hunt-session-parity", { timer, deviceManager: manager });
     await pool.initializeWithDevices([android]);
     await sessions.createSession("session-pointing-at-device", android.deviceId, "android");
     expect(pool.getDevice(android.deviceId)?.sessionId).toBeNull();

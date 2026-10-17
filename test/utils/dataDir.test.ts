@@ -17,6 +17,10 @@ import {
   TEMP_SUBDIRS,
 } from "../../src/utils/tempDir";
 
+// A cold Bun start in a fresh HOME/USERPROFILE outlived 5 s on loaded Windows runners
+// (SIGTERM via exitedDueToTimeout, empty stdout); the probe itself takes ~20 ms on Linux.
+const PROBE_TIMEOUT_MS = 30_000;
+
 describe("coordination defaults in a child Bun process", () => {
   const scratch = useScratchRoot("coordination-home-");
   let childHome: string;
@@ -59,12 +63,12 @@ console.log(JSON.stringify({ homedir: os.userInfo().homedir,
       env,
       stdout: "pipe",
       stderr: "pipe",
-      timeout: 5000,
+      timeout: PROBE_TIMEOUT_MS,
     });
     exitCode = result.exitCode;
     stderr = result.stderr.toString();
     child = parseProbeJson(result);
-  });
+  }, PROBE_TIMEOUT_MS + 5_000);
 
   test("both coordination roots follow the child's os.userInfo().homedir", () => {
     expect(stderr).toBe("");

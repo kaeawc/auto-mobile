@@ -1,15 +1,13 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
 import type { SomePlatform } from "../../src/models";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 
 // #11103: an incomplete booted-device listing (adb timeout) is not "nothing is
@@ -55,14 +53,7 @@ describe("device pool start on an incomplete booted-device scan", () => {
     manager = new FakeDeviceManager();
     manager.bootedDevices = [android("d1")];
     manager.deviceImages = [startableAvd];
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "incomplete-scan-test", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    pool = makePool(sessions, "incomplete-scan-test", { timer, deviceManager: manager });
     await pool.initializeWithDevices([android("d1")]);
     await pool.bindOrReuseDeviceSession("base", "d1", "android");
   });

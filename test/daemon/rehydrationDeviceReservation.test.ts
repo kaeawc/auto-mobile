@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
@@ -10,12 +11,9 @@ import {
 } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 
 // #11294: daemon restart recovery reserves each persisted row's device up front, so an allocation
@@ -84,15 +82,11 @@ describe("restart recovery device reservation: the pool (#11294)", () => {
 
   const setUp = async (devices: BootedDevice[], withBindings = false) => {
     manager.bootedDevices = devices;
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessions, "rehydration-reservation", {
-        timer,
-        deviceManager: manager,
-        retryExecutor: new DefaultRetryExecutor(timer),
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        ...(withBindings ? { bindingExclusion } : {}),
-      }),
-    );
+    pool = makePool(sessions, "rehydration-reservation", {
+      timer,
+      deviceManager: manager,
+      ...(withBindings ? { bindingExclusion } : {}),
+    });
     await pool.initializeWithDevices(devices);
   };
 

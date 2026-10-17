@@ -8,8 +8,6 @@ import android.annotation.TargetApi
 import android.app.Activity
 import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
-import android.content.BroadcastReceiver
-import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
@@ -44,17 +42,15 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.KeyboardProfil
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
-import dev.jasonpearson.automobile.ctrlproxy.models.FrameMetricsSnapshot
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.InteractionElement
 import dev.jasonpearson.automobile.ctrlproxy.models.InteractionEvent
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
-import dev.jasonpearson.automobile.ctrlproxy.models.RecompositionSnapshot
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemBarsInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
-import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
@@ -104,8 +100,6 @@ import dev.jasonpearson.automobile.protocol.CrashData
 import dev.jasonpearson.automobile.protocol.CrashEvent
 import dev.jasonpearson.automobile.protocol.DeviceInfo
 import dev.jasonpearson.automobile.protocol.ErrorResponse
-import dev.jasonpearson.automobile.protocol.FrameMetricsData
-import dev.jasonpearson.automobile.protocol.FrameMetricsEventResponse
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
 import dev.jasonpearson.automobile.protocol.KeyboardProfileBehaviorInfo
@@ -146,7 +140,6 @@ import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
 import dev.jasonpearson.automobile.protocol.SdkCrashEvent
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
-import dev.jasonpearson.automobile.protocol.SdkEventBatchBroadcastContract
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.protocol.SdkHandledExceptionEvent
 import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
@@ -204,7 +197,6 @@ import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
-import kotlinx.serialization.serializer
 
 /**
  * Prefer the first resource-id match kept by the extractor's offscreen rule, falling back to the
@@ -1421,6 +1413,117 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
+  private val storageController by lazy {
+    StorageController(
+      manager = { storageSubscriptionManager },
+      asyncActionRunner = asyncActionRunner,
+      resultBroadcaster = resultBroadcaster,
+      timeProvider = timeProvider,
+      jsonCompact = jsonCompact,
+      responseSender =
+        object : StorageController.ResponseSender {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcast(message: String) {
+            webSocketServer.broadcast(message)
+          }
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+        },
+    )
+  }
+  private val clipboardController by lazy {
+    ClipboardController(
+      clipboardManager = { clipboardManager },
+      activeWindowRoot = { rootInActiveWindow },
+      perfProvider = perfProvider,
+      timeProvider = timeProvider,
+      resultBroadcaster = resultBroadcaster,
+      responseSender =
+        object : ClipboardController.ResponseSender {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcastWithPerf(
+            type: String,
+            requestId: String?,
+            buildContent: JsonObjectBuilder.() -> Unit,
+          ) {
+            webSocketServer.broadcastWithPerf { perfTiming ->
+              webSocketFrameJson(
+                type,
+                requestId = requestId,
+                perfTiming = perfTiming,
+                buildContent = buildContent,
+              )
+            }
+          }
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+        },
+    )
+  }
+  private val focusController by lazy {
+    FocusController(
+      host =
+        object : FocusController.Host {
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) {
+            this@CtrlProxy.launchRequestScope(requestId, block)
+          }
+
+          override fun findAccessibilityFocusedNode() = findNodeInDisplayWindows {
+            it.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+          }
+
+          override fun extractFocusedElementInfo(node: AccessibilityNodeInfo) =
+            viewHierarchyExtractor.extractFocusedElementInfo(node)
+
+          override fun extractTraversalOrder(): TraversalOrderResult? {
+            val allWindows = windows
+            val rootNode = rootInActiveWindow
+            val screenDimensions = getScreenDimensions()
+            if (allWindows.isNullOrEmpty() && rootNode == null) return null
+            return if (!allWindows.isNullOrEmpty()) {
+              viewHierarchyExtractor.extractTraversalOrderFromAllWindows(
+                allWindows,
+                rootNode,
+                screenDimensions,
+              )
+            } else {
+              viewHierarchyExtractor.extractTraversalOrderFromActiveWindow(
+                rootNode,
+                screenDimensions,
+              )
+            }
+          }
+
+          override fun currentOverlayDrawer() =
+            if (::overlayDrawer.isInitialized) overlayDrawer else null
+        },
+      perfProvider = perfProvider,
+      timeProvider = timeProvider,
+      resultBroadcaster = resultBroadcaster,
+      jsonCompact = jsonCompact,
+      responseSender =
+        object : FocusController.ResponseSender {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcast(message: String) {
+            webSocketServer.broadcast(message)
+          }
+
+          override suspend fun broadcastWithPerf(
+            messageBuilder: (perfTiming: JsonElement?) -> String,
+          ) {
+            webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
+          }
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+        },
+    )
+  }
   @Volatile private var lastWindowClassName: String? = null
   /**
    * Changes immediately on a native UI event; capture and input share this device-owned context.
@@ -1511,396 +1614,104 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private var logEventBuffer: BoundedLogBuffer? = null
 
   private val commandReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null) {
-          Log.w(TAG, "no intent")
-          return
-        }
+    CommandReceiver(
+      serviceScope,
+      object : CommandHost {
+        override suspend fun handleCommand(intent: Intent) = this@CtrlProxy.handleCommand(intent)
 
-        Log.d(TAG, "Received broadcast: ${intent.action}")
-
-        serviceScope.launch {
-          try {
-            handleCommand(intent)
-          } catch (e: CancellationException) {
-            // Cooperative cancellation (service scope shutting down) must never become an error
-            // result — let it propagate so the coroutine unwinds cleanly. Mirrors the inner
-            // ACTION_EXTRACT_HIERARCHY rethrow (PR #3126), which would otherwise be re-swallowed
-            // here (issue #3130).
-            throw e
-          } catch (e: Exception) {
-            Log.e(TAG, "Error handling command: ${intent.action}", e)
-            sendResult(success = false, error = e.message)
-          }
-        }
-      }
-    }
+        override fun sendFailure(error: String?) = sendResult(success = false, error = error)
+      },
+    )
 
   private val navigationEventReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != AutoMobileSDK.ACTION_NAVIGATION_EVENT) {
-          return
-        }
-
-        try {
-          // Try type-safe deserialization first (new protocol)
-          val eventJson = intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)
-          if (eventJson != null) {
-            val event = SdkEventSerializer.navigationEventFromJson(eventJson)
-            if (event != null) {
-              Log.d(
-                TAG,
-                "Received navigation event (protocol): ${event.destination} from ${event.source} (app: ${event.applicationId})",
-              )
-              if (
-                !sdkEventBatchProcessor.enqueueNavigationEvent(
-                  destination = event.destination,
-                  source = event.source.name,
-                  arguments = event.arguments ?: emptyMap(),
-                  metadata = event.metadata ?: emptyMap(),
-                  applicationId = event.applicationId,
-                  timestamp = event.timestamp,
-                )
-              ) {
-                Log.w(TAG, "Dropping navigation event because the SDK event queue is full")
-              }
-              return
-            }
-          }
-
-          // Fallback to legacy extras for backward compatibility
-          val destination = intent.getStringExtra(AutoMobileSDK.EXTRA_DESTINATION) ?: return
-          val source = intent.getStringExtra(AutoMobileSDK.EXTRA_SOURCE) ?: return
-          val applicationId = intent.getStringExtra(AutoMobileSDK.EXTRA_APPLICATION_ID)
-
-          // Extract arguments (prefixed with "arg_")
-          val arguments = mutableMapOf<String, String>()
-          val metadata = mutableMapOf<String, String>()
-
-          intent.extras?.keySet()?.forEach { key ->
-            when {
-              key.startsWith("arg_") -> {
-                intent.getStringExtra(key)?.let { value ->
-                  arguments[key.removePrefix("arg_")] = value
-                }
-              }
-              key.startsWith("meta_") -> {
-                intent.getStringExtra(key)?.let { value ->
-                  metadata[key.removePrefix("meta_")] = value
-                }
-              }
-            }
-          }
-
-          Log.d(
-            TAG,
-            "Received navigation event (legacy): $destination from $source (app: $applicationId)",
-          )
-          if (
-            !sdkEventBatchProcessor.enqueueNavigationEvent(
-              destination = destination,
-              source = source,
-              arguments = arguments,
-              metadata = metadata,
-              applicationId = applicationId,
-              timestamp = System.currentTimeMillis(),
-            )
-          ) {
-            Log.w(TAG, "Dropping navigation event because the SDK event queue is full")
-          }
-        } catch (e: Exception) {
-          Log.e(TAG, "Error handling navigation event broadcast", e)
-        }
-      }
-    }
+    NavigationEventReceiver(
+      sdkEventBatchProcessor = { sdkEventBatchProcessor },
+      timeProvider = timeProvider,
+    )
 
   private val recompositionReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != AutoMobileSDK.ACTION_RECOMPOSITION_SNAPSHOT) {
-          return
-        }
-
-        val payload = intent.getStringExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_SNAPSHOT) ?: return
-        try {
-          val snapshot = jsonLenient.decodeFromString(serializer<RecompositionSnapshot>(), payload)
-          recompositionStore.updateSnapshot(snapshot)
-        } catch (e: Exception) {
-          Log.e(TAG, "Failed to parse recomposition snapshot", e)
-        }
-      }
-    }
+    RecompositionSnapshotReceiver(
+      jsonLenient = jsonLenient,
+      recompositionStore = recompositionStore,
+    )
 
   private val frameMetricsReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != AutoMobileSDK.ACTION_FRAME_METRICS_SNAPSHOT) {
-          return
-        }
-
-        val payload = intent.getStringExtra(AutoMobileSDK.EXTRA_FRAME_METRICS_SNAPSHOT) ?: return
-        try {
-          val snapshot = jsonLenient.decodeFromString(serializer<FrameMetricsSnapshot>(), payload)
-          frameMetricsStore.updateSnapshot(snapshot)
-          // Forward live so the host can feed real app-frame data into perfSnapshot.
-          if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-            val response =
-              FrameMetricsEventResponse(
-                timestamp = snapshot.timestamp,
-                frameMetrics =
-                  FrameMetricsData(
-                    applicationId = snapshot.applicationId,
-                    fps = snapshot.fps,
-                    frameTimeMs = snapshot.frameTimeMs,
-                    jankFrames = snapshot.jankFrames,
-                    totalFrames = snapshot.totalFrames,
-                  ),
-              )
-            serviceScope.launch { webSocketServer.broadcast(response) }
-          }
-        } catch (e: Exception) {
-          Log.e(TAG, "Failed to parse frame metrics snapshot", e)
-        }
-      }
-    }
+    FrameMetricsSnapshotReceiver(
+      jsonLenient = jsonLenient,
+      frameMetricsStore = frameMetricsStore,
+      scope = serviceScope,
+      isRunning = { ::webSocketServer.isInitialized && webSocketServer.isRunning() },
+      broadcast = { response -> webSocketServer.broadcast(response) },
+    )
 
   private val packageReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null) {
-          return
-        }
+    PackageEventReceiver(
+      serviceScope,
+      object : PackageEventHost {
+        override fun isSystemApp(packageName: String) = resolveSystemApp(packageName)
 
-        val action = intent.action ?: return
-        if (
-          action != Intent.ACTION_PACKAGE_ADDED &&
-            action != Intent.ACTION_PACKAGE_REMOVED &&
-            action != Intent.ACTION_PACKAGE_REPLACED
-        ) {
-          return
-        }
-
-        val packageName = intent.data?.schemeSpecificPart ?: return
-        val uid = intent.getIntExtra(Intent.EXTRA_UID, -1)
-        val userId = packageEventUserId(uid)
-        val isReplacing = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
-        // EXTRA_REMOVED_FOR_ALL_USERS may not be available in all SDK versions, use string
-        // literal
-        val removedForAllUsers =
-          intent.getBooleanExtra("android.intent.extra.REMOVED_FOR_ALL_USERS", false)
-
-        val eventAction =
-          when (action) {
-            Intent.ACTION_PACKAGE_ADDED -> if (isReplacing) "replaced" else "added"
-            Intent.ACTION_PACKAGE_REMOVED -> if (isReplacing) null else "removed"
-            Intent.ACTION_PACKAGE_REPLACED -> "replaced"
-            else -> null
-          } ?: return
-
-        val isSystem =
-          if (eventAction == "removed") {
-            null
-          } else {
-            resolveSystemApp(packageName)
+        override suspend fun onPackageEvent(event: PackageBroadcastEvent) =
+          with(event) {
+            broadcastPackageEvent(action, packageName, userId, uid, isSystem, removedForAllUsers)
           }
+      },
+    )
 
-        Log.d(
-          TAG,
-          "Package event: $eventAction $packageName (userId=$userId, removedForAllUsers=$removedForAllUsers)",
-        )
-
-        serviceScope.launch {
-          broadcastPackageEvent(
-            eventAction,
-            packageName,
-            userId,
-            uid.takeIf { it >= 0 },
-            isSystem,
-            removedForAllUsers,
+  private val failureReportHost =
+    object : FailureReportHost {
+      override suspend fun onHandledException(report: HandledExceptionReport) =
+        with(report) {
+          broadcastHandledExceptionEvent(
+            timestamp = timestamp,
+            exceptionClass = exceptionClass,
+            exceptionMessage = exceptionMessage,
+            stackTrace = stackTrace,
+            customMessage = customMessage,
+            currentScreen = currentScreen,
+            packageName = packageName,
+            appVersion = appVersion,
+            deviceModel = deviceModel,
+            deviceManufacturer = deviceManufacturer,
+            osVersion = osVersion,
+            sdkInt = sdkInt,
           )
         }
-      }
+
+      override suspend fun onCrash(report: CrashReport) =
+        with(report) {
+          broadcastCrashEvent(
+            timestamp = timestamp,
+            exceptionClass = exceptionClass,
+            exceptionMessage = exceptionMessage,
+            stackTrace = stackTrace,
+            threadName = threadName,
+            currentScreen = currentScreen,
+            packageName = packageName,
+            appVersion = appVersion,
+            deviceModel = deviceModel,
+            deviceManufacturer = deviceManufacturer,
+            osVersion = osVersion,
+            sdkInt = sdkInt,
+          )
+        }
     }
 
-  private val handledExceptionReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != AutoMobileFailures.ACTION_HANDLED_EXCEPTION) {
-          return
-        }
+  private val handledExceptionReceiver = HandledExceptionReceiver(serviceScope, failureReportHost)
 
-        try {
-          // Try type-safe deserialization first (new protocol)
-          val eventJson = intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)
-          if (eventJson != null) {
-            val event = SdkEventSerializer.handledExceptionEventFromJson(eventJson)
-            if (event != null) {
-              Log.d(
-                TAG,
-                "Received handled exception (protocol): ${event.exceptionClass} from ${event.applicationId}",
-              )
-
-              serviceScope.launch {
-                broadcastHandledExceptionEvent(
-                  timestamp = event.timestamp,
-                  exceptionClass = event.exceptionClass,
-                  exceptionMessage = event.exceptionMessage,
-                  stackTrace = event.stackTrace,
-                  customMessage = event.customMessage,
-                  currentScreen = event.currentScreen,
-                  packageName = event.applicationId ?: "unknown",
-                  appVersion = event.appVersion,
-                  deviceModel = event.deviceInfo?.model ?: "unknown",
-                  deviceManufacturer = event.deviceInfo?.manufacturer ?: "unknown",
-                  osVersion = event.deviceInfo?.osVersion ?: "unknown",
-                  sdkInt = event.deviceInfo?.sdkInt ?: 0,
-                )
-              }
-              return
-            }
-          }
-
-          // Fallback to legacy extras for backward compatibility
-          val timestamp = intent.getLongExtra(AutoMobileFailures.EXTRA_TIMESTAMP, 0L)
-          val exceptionClass =
-            intent.getStringExtra(AutoMobileFailures.EXTRA_EXCEPTION_CLASS) ?: return
-          val exceptionMessage = intent.getStringExtra(AutoMobileFailures.EXTRA_EXCEPTION_MESSAGE)
-          val stackTrace = intent.getStringExtra(AutoMobileFailures.EXTRA_STACK_TRACE) ?: return
-          val customMessage = intent.getStringExtra(AutoMobileFailures.EXTRA_CUSTOM_MESSAGE)
-          val currentScreen = intent.getStringExtra(AutoMobileFailures.EXTRA_CURRENT_SCREEN)
-          val packageName = intent.getStringExtra(AutoMobileFailures.EXTRA_PACKAGE_NAME) ?: return
-          val appVersion = intent.getStringExtra(AutoMobileFailures.EXTRA_APP_VERSION)
-          val deviceModel =
-            intent.getStringExtra(AutoMobileFailures.EXTRA_DEVICE_MODEL) ?: "unknown"
-          val deviceManufacturer =
-            intent.getStringExtra(AutoMobileFailures.EXTRA_DEVICE_MANUFACTURER) ?: "unknown"
-          val osVersion = intent.getStringExtra(AutoMobileFailures.EXTRA_OS_VERSION) ?: "unknown"
-          val sdkInt = intent.getIntExtra(AutoMobileFailures.EXTRA_SDK_INT, 0)
-
-          Log.d(TAG, "Received handled exception (legacy): $exceptionClass from $packageName")
-
-          serviceScope.launch {
-            broadcastHandledExceptionEvent(
-              timestamp = timestamp,
-              exceptionClass = exceptionClass,
-              exceptionMessage = exceptionMessage,
-              stackTrace = stackTrace,
-              customMessage = customMessage,
-              currentScreen = currentScreen,
-              packageName = packageName,
-              appVersion = appVersion,
-              deviceModel = deviceModel,
-              deviceManufacturer = deviceManufacturer,
-              osVersion = osVersion,
-              sdkInt = sdkInt,
-            )
-          }
-        } catch (e: Exception) {
-          Log.e(TAG, "Error handling handled exception broadcast", e)
-        }
-      }
-    }
-
-  private val crashReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != AutoMobileCrashes.ACTION_CRASH) {
-          return
-        }
-
-        try {
-          // Try type-safe deserialization first (new protocol)
-          val eventJson = intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)
-          if (eventJson != null) {
-            val event = SdkEventSerializer.crashEventFromJson(eventJson)
-            if (event != null) {
-              Log.d(
-                TAG,
-                "Received crash (protocol): ${event.exceptionClass} from ${event.applicationId}",
-              )
-
-              serviceScope.launch {
-                broadcastCrashEvent(
-                  timestamp = event.timestamp,
-                  exceptionClass = event.exceptionClass,
-                  exceptionMessage = event.exceptionMessage,
-                  stackTrace = event.stackTrace,
-                  threadName = event.threadName,
-                  currentScreen = event.currentScreen,
-                  packageName = event.applicationId ?: "unknown",
-                  appVersion = event.appVersion,
-                  deviceModel = event.deviceInfo?.model ?: "unknown",
-                  deviceManufacturer = event.deviceInfo?.manufacturer ?: "unknown",
-                  osVersion = event.deviceInfo?.osVersion ?: "unknown",
-                  sdkInt = event.deviceInfo?.sdkInt ?: 0,
-                )
-              }
-              return
-            }
-          }
-
-          // Fallback to legacy extras for backward compatibility
-          val timestamp = intent.getLongExtra(AutoMobileCrashes.EXTRA_TIMESTAMP, 0L)
-          val exceptionClass =
-            intent.getStringExtra(AutoMobileCrashes.EXTRA_EXCEPTION_CLASS) ?: return
-          val exceptionMessage = intent.getStringExtra(AutoMobileCrashes.EXTRA_EXCEPTION_MESSAGE)
-          val stackTrace = intent.getStringExtra(AutoMobileCrashes.EXTRA_STACK_TRACE) ?: return
-          val threadName = intent.getStringExtra(AutoMobileCrashes.EXTRA_THREAD_NAME) ?: "unknown"
-          val currentScreen = intent.getStringExtra(AutoMobileCrashes.EXTRA_CURRENT_SCREEN)
-          val packageName = intent.getStringExtra(AutoMobileCrashes.EXTRA_PACKAGE_NAME) ?: return
-          val appVersion = intent.getStringExtra(AutoMobileCrashes.EXTRA_APP_VERSION)
-          val deviceModel = intent.getStringExtra(AutoMobileCrashes.EXTRA_DEVICE_MODEL) ?: "unknown"
-          val deviceManufacturer =
-            intent.getStringExtra(AutoMobileCrashes.EXTRA_DEVICE_MANUFACTURER) ?: "unknown"
-          val osVersion = intent.getStringExtra(AutoMobileCrashes.EXTRA_OS_VERSION) ?: "unknown"
-          val sdkInt = intent.getIntExtra(AutoMobileCrashes.EXTRA_SDK_INT, 0)
-
-          Log.d(TAG, "Received crash (legacy): $exceptionClass from $packageName")
-
-          serviceScope.launch {
-            broadcastCrashEvent(
-              timestamp = timestamp,
-              exceptionClass = exceptionClass,
-              exceptionMessage = exceptionMessage,
-              stackTrace = stackTrace,
-              threadName = threadName,
-              currentScreen = currentScreen,
-              packageName = packageName,
-              appVersion = appVersion,
-              deviceModel = deviceModel,
-              deviceManufacturer = deviceManufacturer,
-              osVersion = osVersion,
-              sdkInt = sdkInt,
-            )
-          }
-        } catch (e: Exception) {
-          Log.e(TAG, "Error handling crash broadcast", e)
-        }
-      }
-    }
+  private val crashReceiver = CrashReceiver(serviceScope, failureReportHost)
 
   private val screenStateReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        refreshPrototypeWindow()
-        when (intent?.action) {
-          Intent.ACTION_SCREEN_ON -> {
-            Log.i(TAG, "Screen turned ON, triggering hierarchy extraction")
-            if (::hierarchyDebouncer.isInitialized) {
-              hierarchyDebouncer.extractNow()
-            }
-          }
-          Intent.ACTION_SCREEN_OFF -> {
-            Log.i(TAG, "Screen turned OFF, triggering hierarchy extraction")
-            if (::hierarchyDebouncer.isInitialized) {
-              hierarchyDebouncer.extractNow()
-            }
+    ScreenStateReceiver(
+      object : ScreenStateHost {
+        override fun refreshPrototypeWindow() = this@CtrlProxy.refreshPrototypeWindow()
+
+        override fun extractHierarchyNow() {
+          if (::hierarchyDebouncer.isInitialized) {
+            hierarchyDebouncer.extractNow()
           }
         }
-      }
-    }
+      },
+    )
 
   private val anrBroadcastHandler =
     SdkAnrBroadcastHandler(
@@ -1921,29 +1732,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
 
-  private val anrReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != AutoMobileAnr.ACTION_ANR) return
-        try {
-          val ordered = isOrderedBroadcast
-          val setBroadcastResult = this::setResultCode
-          anrBroadcastHandler.handle(
-            intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON),
-            object : SdkEventBatchBroadcastHandler.ResultSink {
-              override val isOrdered = ordered
-
-              override fun setResultCode(code: Int) {
-                setBroadcastResult(code)
-              }
-            },
-            deliveryId = intent.getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID),
-          )
-        } catch (e: Exception) {
-          Log.e(TAG, "Error handling ANR broadcast", e)
-        }
-      }
-    }
+  private val anrReceiver = AnrReceiver(anrBroadcastHandler)
 
   private val eventBatchBroadcastHandler =
     SdkEventBatchBroadcastHandler(
@@ -1960,32 +1749,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
 
-  private val eventBatchReceiver =
-    object : BroadcastReceiver() {
-      override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent == null || intent.action != SdkEventSerializer.ACTION_SDK_EVENT_BATCH) {
-          return
-        }
-
-        try {
-          val ordered = isOrderedBroadcast
-          val setBroadcastResult = this::setResultCode
-          eventBatchBroadcastHandler.handle(
-            intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON),
-            object : SdkEventBatchBroadcastHandler.ResultSink {
-              override val isOrdered = ordered
-
-              override fun setResultCode(code: Int) {
-                setBroadcastResult(code)
-              }
-            },
-            batchId = intent.getStringExtra(SdkEventBatchBroadcastContract.EXTRA_BATCH_ID),
-          )
-        } catch (e: Exception) {
-          Log.e(TAG, "Error handling event batch broadcast", e)
-        }
-      }
-    }
+  private val eventBatchReceiver = EventBatchReceiver(eventBatchBroadcastHandler)
 
   override fun onCreate() {
     super.onCreate()
@@ -2343,7 +2107,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               TAG,
               "Storage change: ${event.packageName}:${event.fileName} key=${event.key}",
             )
-            broadcastStorageChange(event)
+            storageController.broadcastStorageChange(event)
           }
           .launchIn(serviceScope)
 
@@ -3300,7 +3064,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ) = performAccessibilityLinkActivation(requestId, text, occurrence, selector)
 
   override suspend fun requestClipboard(requestId: String?, action: String, text: String?) =
-    performClipboard(requestId, action, text)
+    clipboardController.performClipboard(requestId, action, text)
 
   override suspend fun installCaCert(requestId: String?, certificate: String) =
     caCertificateController.performInstallCaCertificate(requestId, certificate)
@@ -3379,15 +3143,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     remainingMs: Long?,
   ) = broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAtEpochMs, remainingMs)
 
-  override suspend fun getCurrentFocus(requestId: String?) = handleGetCurrentFocus(requestId)
+  override suspend fun getCurrentFocus(requestId: String?) =
+    focusController.handleGetCurrentFocus(requestId)
 
-  override suspend fun getTraversalOrder(requestId: String?) = handleGetTraversalOrder(requestId)
+  override suspend fun getTraversalOrder(requestId: String?) =
+    focusController.handleGetTraversalOrder(requestId)
 
   override suspend fun addHighlight(
     requestId: String?,
     highlightId: String?,
     shape: HighlightShape?,
-  ) = handleAddHighlight(requestId, highlightId, shape)
+  ) = focusController.handleAddHighlight(requestId, highlightId, shape)
 
   override suspend fun showPrototype(
     requestId: String?,
@@ -3456,10 +3222,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   override suspend fun listPreferenceFiles(requestId: String?, packageName: String) =
-    handleListPreferenceFiles(requestId, packageName)
+    storageController.handleListPreferenceFiles(requestId, packageName)
 
   override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
-    handleGetPreferences(requestId, packageName, fileName)
+    storageController.handleGetPreferences(requestId, packageName, fileName)
 
   override suspend fun discoverKeystore(requestId: String?, packageName: String) {
     asyncActionRunner.launch(requestId, "discover_keystore") {
@@ -3501,30 +3267,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     requestId: String?,
     packageName: String,
     adapterName: String,
-  ) = handleListDataStores(requestId, packageName, adapterName)
+  ) = storageController.handleListDataStores(requestId, packageName, adapterName)
 
   override suspend fun getDataStore(
     requestId: String?,
     packageName: String,
     adapterName: String,
     storeName: String,
-  ) = handleGetDataStore(requestId, packageName, adapterName, storeName)
+  ) = storageController.handleGetDataStore(requestId, packageName, adapterName, storeName)
 
   override suspend fun subscribeStorage(requestId: String?, packageName: String, fileName: String) =
-    handleSubscribeStorage(requestId, packageName, fileName)
+    storageController.handleSubscribeStorage(requestId, packageName, fileName)
 
   override suspend fun unsubscribeStorage(
     requestId: String?,
     packageName: String,
     fileName: String,
-  ) = handleUnsubscribeStorage(requestId, packageName, fileName)
+  ) = storageController.handleUnsubscribeStorage(requestId, packageName, fileName)
 
   override suspend fun getPreference(
     requestId: String?,
     packageName: String,
     fileName: String,
     key: String,
-  ) = handleGetPreference(requestId, packageName, fileName, key)
+  ) = storageController.handleGetPreference(requestId, packageName, fileName, key)
 
   override suspend fun setPreference(
     requestId: String?,
@@ -3533,17 +3299,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     key: String,
     value: String?,
     type: String,
-  ) = handleSetPreference(requestId, packageName, fileName, key, value, type)
+  ) = storageController.handleSetPreference(requestId, packageName, fileName, key, value, type)
 
   override suspend fun removePreference(
     requestId: String?,
     packageName: String,
     fileName: String,
     key: String,
-  ) = handleRemovePreference(requestId, packageName, fileName, key)
+  ) = storageController.handleRemovePreference(requestId, packageName, fileName, key)
 
   override suspend fun clearPreferences(requestId: String?, packageName: String, fileName: String) =
-    handleClearPreferences(requestId, packageName, fileName)
+    storageController.handleClearPreferences(requestId, packageName, fileName)
 
   override suspend fun startRecording() {
     // Accepted for wire compatibility; currently has no effect on the device.
@@ -3668,11 +3434,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       sendOrderedBroadcast(
         intent,
         null,
-        object : BroadcastReceiver() {
-          override fun onReceive(context: Context?, intent: Intent?) {
-            replyNetworkMockRules(networkMockRulesResult(requestId, resultData))
-          }
-        },
+        NetworkMockRulesReplyReceiver(requestId, ::replyNetworkMockRules),
         null,
         Activity.RESULT_OK,
         null,
@@ -4125,7 +3887,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     try {
-      val timestamp = System.currentTimeMillis()
+      val timestamp = timeProvider.currentTimeMillis()
       val message =
         webSocketFrameJson("package_event", timestamp = timestamp) {
           put(
@@ -6713,226 +6475,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Perform clipboard operations using ClipboardManager and AccessibilityService. Supports copy,
-   * paste, clear, and get operations.
-   */
-  private suspend fun performClipboard(requestId: String?, action: String, text: String?) {
-    val startTime = System.currentTimeMillis()
-    Log.d(TAG, "performClipboard: action='$action'")
-    perfProvider.serial("performClipboard")
-
-    try {
-      perfProvider.startOperation("executeClipboardAction")
-
-      val (success, resultText, error) =
-        when (action) {
-          "copy" -> {
-            if (text == null || text.isEmpty()) {
-              Triple(false, null, "Text is required for copy action")
-            } else {
-              try {
-                val clip = ClipData.newPlainText("AutoMobile", text)
-                clipboardManager.setPrimaryClip(clip)
-                Log.d(TAG, "Clipboard copy successful (${text.length} chars)")
-                Triple(true, null, null)
-              } catch (e: CancellationException) {
-                throw e
-              } catch (e: Exception) {
-                Log.e(TAG, "Clipboard copy failed", e)
-                Triple(false, null, "Copy failed: ${e.message}")
-              }
-            }
-          }
-          "get" -> {
-            try {
-              val readResult =
-                CtrlProxyClipboard.readResultFromPrimaryClip(clipboardManager.primaryClip)
-              if (readResult.success) {
-                val clipText = readResult.text ?: ""
-                if (clipText.isEmpty()) {
-                  Log.d(TAG, "Clipboard is empty")
-                } else {
-                  Log.d(TAG, "Clipboard get successful (${clipText.length} chars)")
-                }
-                Triple(true, clipText, null)
-              } else {
-                val readError = readResult.error ?: "Clipboard read failed"
-                Log.w(TAG, readError)
-                Triple(false, null, readError)
-              }
-            } catch (e: CancellationException) {
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Clipboard get failed", e)
-              Triple(false, null, "Get failed: ${e.message}")
-            }
-          }
-          "clear" -> {
-            try {
-              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                clipboardManager.clearPrimaryClip()
-                Log.d(TAG, "Clipboard cleared using clearPrimaryClip()")
-              } else {
-                // Fallback for API < 28: set empty clip
-                val emptyClip = ClipData.newPlainText("", "")
-                clipboardManager.setPrimaryClip(emptyClip)
-                Log.d(TAG, "Clipboard cleared using empty clip (API < 28)")
-              }
-              Triple(true, null, null)
-            } catch (e: CancellationException) {
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Clipboard clear failed", e)
-              Triple(false, null, "Clear failed: ${e.message}")
-            }
-          }
-          "paste" -> {
-            try {
-              perfProvider.startOperation("findFocusedNode")
-              val focusedNode = findFocusedEditableNode(rootInActiveWindow)
-              perfProvider.endOperation("findFocusedNode")
-
-              if (focusedNode == null) {
-                Log.w(TAG, "No focused editable node found for paste")
-                Triple(
-                  false,
-                  null,
-                  "No focused input field found. Focus a text field before pasting.",
-                )
-              } else {
-                perfProvider.startOperation("performPaste")
-                val pasteSuccess =
-                  focusedNode.performAction(
-                    android.view.accessibility.AccessibilityNodeInfo.ACTION_PASTE,
-                  )
-                focusedNode.recycle()
-                perfProvider.endOperation("performPaste")
-
-                if (pasteSuccess) {
-                  Log.d(TAG, "Clipboard paste successful")
-                  Triple(true, null, null)
-                } else {
-                  Log.w(TAG, "Paste action returned false")
-                  Triple(false, null, "Paste action failed")
-                }
-              }
-            } catch (e: CancellationException) {
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Clipboard paste failed", e)
-              Triple(false, null, "Paste failed: ${e.message}")
-            }
-          }
-          else -> {
-            Log.w(TAG, "Unknown clipboard action: $action")
-            Triple(false, null, "Unknown action: $action")
-          }
-        }
-
-      perfProvider.endOperation("executeClipboardAction")
-      perfProvider.end()
-
-      Log.d(TAG, "Clipboard action completed: action=$action, success=$success")
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "Clipboard total time: ${totalTime}ms")
-
-      // Broadcast clipboard result
-      broadcastClipboardResult(requestId, action, success, resultText, error, totalTime)
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing clipboard operation", e)
-      broadcastClipboardResult(requestId, action, false, null, e.message, errorTime - startTime)
-    }
-  }
-
-  /** Find the next focusable node after the given node in document order. */
-  private fun findNextFocusableNode(
-    root: android.view.accessibility.AccessibilityNodeInfo?,
-    currentNode: android.view.accessibility.AccessibilityNodeInfo,
-  ): android.view.accessibility.AccessibilityNodeInfo? {
-    if (root == null) return null
-
-    // Collect all focusable editable nodes in document order
-    val focusableNodes = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
-    collectFocusableNodes(root, focusableNodes)
-
-    // Find current node's position and return the next one
-    var foundCurrent = false
-    for (node in focusableNodes) {
-      if (foundCurrent) {
-        // This is the next node - return it (don't recycle it)
-        // Recycle all remaining nodes
-        focusableNodes.forEach { n -> if (n != node) n.recycle() }
-        return node
-      }
-      if (isSameNode(node, currentNode)) {
-        foundCurrent = true
-      }
-    }
-
-    // If no next node found, recycle all collected nodes
-    focusableNodes.forEach { it.recycle() }
-    return null
-  }
-
-  /** Find the previous focusable node before the given node in document order. */
-  private fun findPreviousFocusableNode(
-    root: android.view.accessibility.AccessibilityNodeInfo?,
-    currentNode: android.view.accessibility.AccessibilityNodeInfo,
-  ): android.view.accessibility.AccessibilityNodeInfo? {
-    if (root == null) return null
-
-    // Collect all focusable editable nodes in document order
-    val focusableNodes = mutableListOf<android.view.accessibility.AccessibilityNodeInfo>()
-    collectFocusableNodes(root, focusableNodes)
-
-    // Find current node's position and return the previous one. Each copy is released exactly once.
-    return selectPreviousFocusable(focusableNodes) { isSameNode(it, currentNode) }
-  }
-
-  /** Collect all focusable and editable nodes in document order (pre-order traversal). */
-  private fun collectFocusableNodes(
-    node: android.view.accessibility.AccessibilityNodeInfo,
-    result: MutableList<android.view.accessibility.AccessibilityNodeInfo>,
-  ) {
-    // Approximate traversal must only include editors the user can reach.
-    if (
-      isImeFocusCandidate(
-        ImeFocusCandidate(node.isEditable, node.isFocusable, node.isVisibleToUser, node.isEnabled),
-      )
-    ) {
-      // Create a copy to add to our list (we'll recycle the originals as we traverse)
-      result.add(android.view.accessibility.AccessibilityNodeInfo.obtain(node))
-    }
-
-    // Traverse children in order
-    for (i in 0 until node.childCount) {
-      val child = node.getChild(i) ?: continue
-      collectFocusableNodes(child, result)
-      child.recycle()
-    }
-  }
-
-  /** Check if two AccessibilityNodeInfo objects refer to the same node. */
-  private fun isSameNode(
-    node1: android.view.accessibility.AccessibilityNodeInfo,
-    node2: android.view.accessibility.AccessibilityNodeInfo,
-  ): Boolean {
-    // Compare by bounds and text/id since we can't reliably compare node objects directly
-    val bounds1 = android.graphics.Rect()
-    val bounds2 = android.graphics.Rect()
-    node1.getBoundsInScreen(bounds1)
-    node2.getBoundsInScreen(bounds2)
-    return bounds1 == bounds2 &&
-      node1.viewIdResourceName == node2.viewIdResourceName &&
-      node1.text?.toString() == node2.text?.toString()
-  }
-
-  /**
    * Search the active window's root first, then the other windows the hierarchy extractor reports
    * for the active display (topmost first), for the first node [find] returns. The extractor's own
    * window enumeration is reused so node actions and focus read-back cannot disagree with
@@ -6951,114 +6493,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       Log.w(TAG, "Failed to enumerate display windows for node lookup", e)
       emptyList()
     }
-
-  private fun findNodeBySelector(
-    root: android.view.accessibility.AccessibilityNodeInfo?,
-    selector: NodeSelector,
-  ): android.view.accessibility.AccessibilityNodeInfo? {
-    if (root == null) return null
-
-    if (matchesSelector(root, selector)) {
-      return root
-    }
-
-    for (i in 0 until root.childCount) {
-      val child = root.getChild(i) ?: continue
-      val found = findNodeBySelector(child, selector)
-      if (found != null) {
-        if (found != child) {
-          child.recycle()
-        }
-        return found
-      }
-      child.recycle()
-    }
-
-    return null
-  }
-
-  private fun matchesSelector(
-    node: android.view.accessibility.AccessibilityNodeInfo,
-    selector: NodeSelector,
-  ): Boolean =
-    nodeSelectorMatches(
-      selector,
-      NodeSelectorFields(
-        resourceId = node.viewIdResourceName,
-        testTag = extractTestTag(node),
-        uniqueId = if (Build.VERSION.SDK_INT >= 33) node.uniqueId else null,
-        collectionRow = node.collectionItemInfo?.rowIndex,
-        collectionColumn = node.collectionItemInfo?.columnIndex,
-      ),
-    )
-
-  private fun extractTestTag(node: android.view.accessibility.AccessibilityNodeInfo): String? {
-    val extras = node.extras ?: return null
-    val candidates =
-      listOf(
-        "androidx.compose.ui.semantics.testTag",
-        "androidx.compose.ui.semantics.TestTag",
-        "androidx.compose.ui.testTag",
-        "testTag",
-        "test-tag",
-      )
-    for (key in candidates) {
-      val value = extras.get(key)?.toString()
-      if (!value.isNullOrBlank()) {
-        return value
-      }
-    }
-    return extras
-      .keySet()
-      .firstOrNull { it.contains("testtag", ignoreCase = true) }
-      ?.let { key ->
-        extras.get(key)?.toString()
-      }
-  }
-
-  /** Find the currently focused editable node. */
-  private fun findFocusedEditableNode(
-    root: android.view.accessibility.AccessibilityNodeInfo?,
-  ): android.view.accessibility.AccessibilityNodeInfo? {
-    if (root == null) return null
-
-    // First try to find the input-focused node
-    val focusedNode = root.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT)
-    if (focusedNode != null && focusedNode.isEditable) {
-      return focusedNode
-    }
-    focusedNode?.recycle()
-
-    // Fallback: search for any focused editable node in hierarchy
-    return findFocusedEditableInHierarchy(root)
-  }
-
-  /** Recursively search for a focused editable node in the hierarchy. */
-  private fun findFocusedEditableInHierarchy(
-    node: android.view.accessibility.AccessibilityNodeInfo?,
-  ): android.view.accessibility.AccessibilityNodeInfo? {
-    if (node == null) return null
-
-    // Check if this node is focused and editable
-    if (node.isFocused && node.isEditable) {
-      return node
-    }
-
-    // Search children
-    for (i in 0 until node.childCount) {
-      val child = node.getChild(i) ?: continue
-      val found = findFocusedEditableInHierarchy(child)
-      if (found != null) {
-        if (found != child) {
-          child.recycle()
-        }
-        return found
-      }
-      child.recycle()
-    }
-
-    return null
-  }
 
   /** Broadcast set text result to WebSocket clients */
   private suspend fun broadcastSetTextResult(
@@ -7312,38 +6746,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  /** Broadcast clipboard result to WebSocket clients */
-  private suspend fun broadcastClipboardResult(
-    requestId: String?,
-    action: String,
-    success: Boolean,
-    text: String?,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping clipboard result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "clipboard_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        webSocketFrameJson("clipboard_result", requestId = requestId, perfTiming = perfTiming) {
-          put("action", action)
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (text != null) {
-            put("text", text)
-          }
-          if (error != null) {
-            put("error", error)
-          }
-        }
-      }
-      Log.d(TAG, "Broadcasted clipboard result to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
   /** Broadcast permission result to WebSocket clients */
   private suspend fun broadcastPermissionResult(
     requestId: String?,
@@ -7591,7 +6993,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // Fall back to now because the legacy intent timestamp extra defaults to 0.
       val response =
         handledExceptionEventResponse(
-          timestamp = crashEventTimestamp(timestamp, System.currentTimeMillis()),
+          timestamp = crashEventTimestamp(timestamp, timeProvider.currentTimeMillis()),
           exceptionClass = exceptionClass,
           exceptionMessage = exceptionMessage,
           stackTrace = stackTrace,
@@ -7642,7 +7044,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // Fall back to now because the legacy intent timestamp extra defaults to 0.
       val response =
         crashEventResponse(
-          timestamp = crashEventTimestamp(timestamp, System.currentTimeMillis()),
+          timestamp = crashEventTimestamp(timestamp, timeProvider.currentTimeMillis()),
           exceptionClass = exceptionClass,
           exceptionMessage = exceptionMessage,
           stackTrace = stackTrace,
@@ -7795,774 +7197,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val result = permissionManager.getPermissionState(permission, requestPermission ?: true)
       val totalTime = System.currentTimeMillis() - startTime
       broadcastPermissionResult(requestId, result, totalTime)
-    }
-  }
-
-  /**
-   * Get the current accessibility focus element. Returns the element that currently has
-   * accessibility focus (TalkBack cursor position).
-   */
-  private fun handleGetCurrentFocus(requestId: String?) {
-    val startTime = System.currentTimeMillis()
-    Log.d(TAG, "handleGetCurrentFocus (requestId: $requestId)")
-    perfProvider.serial("getCurrentFocus")
-
-    try {
-      perfProvider.startOperation("findFocus")
-      val focusedNode = findNodeInDisplayWindows {
-        it.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
-      }
-      perfProvider.endOperation("findFocus")
-
-      if (focusedNode == null) {
-        perfProvider.end()
-        val totalTime = System.currentTimeMillis() - startTime
-        Log.d(TAG, "No accessibility focus found")
-        launchRequestScope(requestId) { broadcastCurrentFocusResult(requestId, null, totalTime) }
-        return
-      }
-
-      perfProvider.startOperation("extractFocusInfo")
-      // Extract focus element information
-      val focusedElement = viewHierarchyExtractor.extractFocusedElementInfo(focusedNode)
-      focusedNode.recycle()
-      perfProvider.endOperation("extractFocusInfo")
-      perfProvider.end()
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "Current focus extracted in ${totalTime}ms")
-
-      launchRequestScope(requestId) {
-        broadcastCurrentFocusResult(requestId, focusedElement, totalTime)
-      }
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error getting current focus", e)
-      launchRequestScope(requestId) {
-        broadcastCurrentFocusError(requestId, e.message, errorTime - startTime)
-      }
-    }
-  }
-
-  /**
-   * Get the traversal order of focusable elements. Returns an ordered list of all
-   * accessibility-focusable elements in TalkBack traversal order.
-   */
-  private fun handleGetTraversalOrder(requestId: String?) {
-    val startTime = System.currentTimeMillis()
-    Log.d(TAG, "handleGetTraversalOrder (requestId: $requestId)")
-    perfProvider.serial("getTraversalOrder")
-
-    try {
-      perfProvider.startOperation("extractTraversalOrder")
-      val allWindows = windows
-      val rootNode = rootInActiveWindow
-      val screenDimensions = getScreenDimensions()
-
-      if (allWindows.isNullOrEmpty() && rootNode == null) {
-        perfProvider.endOperation("extractTraversalOrder")
-        perfProvider.end()
-        val totalTime = System.currentTimeMillis() - startTime
-        Log.w(TAG, "No windows or root node available for traversal order extraction")
-        launchRequestScope(requestId) {
-          broadcastTraversalOrderError(requestId, "No windows available", totalTime)
-        }
-        return
-      }
-
-      // Extract traversal order using ViewHierarchyExtractor
-      val traversalResult =
-        if (!allWindows.isNullOrEmpty()) {
-          viewHierarchyExtractor.extractTraversalOrderFromAllWindows(
-            allWindows,
-            rootNode,
-            screenDimensions,
-          )
-        } else {
-          viewHierarchyExtractor.extractTraversalOrderFromActiveWindow(rootNode, screenDimensions)
-        }
-      perfProvider.endOperation("extractTraversalOrder")
-      perfProvider.end()
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(
-        TAG,
-        "Traversal order extracted: ${traversalResult.elements.size} elements in ${totalTime}ms",
-      )
-
-      launchRequestScope(requestId) {
-        broadcastTraversalOrderResult(requestId, traversalResult, totalTime)
-      }
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error getting traversal order", e)
-      launchRequestScope(requestId) {
-        broadcastTraversalOrderError(requestId, e.message, errorTime - startTime)
-      }
-    }
-  }
-
-  private fun handleAddHighlight(
-    requestId: String?,
-    highlightId: String?,
-    shape: HighlightShape?,
-  ) {
-    launchRequestScope(requestId) {
-      if (!::overlayDrawer.isInitialized) {
-        broadcastHighlightResponse(requestId, false, "Overlay drawer not initialized")
-        return@launchRequestScope
-      }
-
-      val result =
-        try {
-          withContext(Dispatchers.Main) { overlayDrawer.addHighlight(highlightId, shape) }
-        } catch (e: CancellationException) {
-          // Let cooperative cancellation unwind cleanly rather than reporting a failed highlight
-          // result (#3130).
-          throw e
-        } catch (e: Exception) {
-          HighlightOperationResult(false, e.message ?: "Failed to add highlight")
-        }
-
-      broadcastHighlightResponse(requestId, result.success, result.error)
-    }
-  }
-
-  private suspend fun broadcastHighlightResponse(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping highlight response broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "highlight_response") {
-      val errorJson = jsonCompact.encodeToString<String?>(error)
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"highlight_response","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          append(""","success":$success""")
-          append(""","error":$errorJson""")
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
-      }
-      Log.d(
-        TAG,
-        "Broadcasted highlight response to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  /** Broadcast current focus result to WebSocket clients */
-  private suspend fun broadcastCurrentFocusResult(
-    requestId: String?,
-    focusedElement: UIElementInfo?,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping current focus result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "current_focus_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"current_focus_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          append(""","totalTimeMs":$totalTimeMs""")
-          if (focusedElement != null) {
-            val elementJson =
-              jsonCompact.encodeToString(serializer<UIElementInfo>(), focusedElement)
-            append(""","focusedElement":$elementJson""")
-          } else {
-            append(""","focusedElement":null""")
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
-      }
-      Log.d(
-        TAG,
-        "Broadcasted current focus result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  /** Broadcast current focus error to WebSocket clients */
-  private suspend fun broadcastCurrentFocusError(
-    requestId: String?,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping current focus error broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "current_focus_error") {
-      webSocketServer.broadcast(currentFocusErrorFrame(requestId, error, totalTimeMs))
-      Log.d(
-        TAG,
-        "Broadcasted current focus error to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  /** Broadcast traversal order result to WebSocket clients */
-  private suspend fun broadcastTraversalOrderResult(
-    requestId: String?,
-    traversalResult: dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping traversal order result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "traversal_order_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"traversal_order_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          append(""","totalTimeMs":$totalTimeMs""")
-          val resultJson =
-            jsonCompact.encodeToString(
-              serializer<dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult>(),
-              traversalResult,
-            )
-          append(""","result":$resultJson""")
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
-      }
-      Log.d(
-        TAG,
-        "Broadcasted traversal order result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  /** Broadcast traversal order error to WebSocket clients */
-  private suspend fun broadcastTraversalOrderError(
-    requestId: String?,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping traversal order error broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "traversal_order_error") {
-      webSocketServer.broadcast(traversalOrderErrorFrame(requestId, error, totalTimeMs))
-      Log.d(
-        TAG,
-        "Broadcasted traversal order error to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  // ================= Storage Inspection Methods =================
-
-  private fun handleListPreferenceFiles(requestId: String?, packageName: String) {
-    Log.d(TAG, "handleListPreferenceFiles: requestId=$requestId, packageName=$packageName")
-    asyncActionRunner.launch(requestId, "list_preference_files") {
-      Log.d(TAG, "handleListPreferenceFiles: coroutine started, calling listPreferenceFiles")
-      val result = storageSubscriptionManager.listPreferenceFiles(packageName)
-      Log.d(TAG, "handleListPreferenceFiles: result=$result")
-      result.fold(
-        onSuccess = { files ->
-          Log.d(TAG, "handleListPreferenceFiles: success, files count=${files.size}")
-          broadcastPreferenceFilesResult(requestId, packageName, files, null)
-        },
-        onFailure = { error ->
-          Log.e(TAG, "handleListPreferenceFiles: failure, error=${error.message}", error)
-          broadcastPreferenceFilesResult(requestId, packageName, null, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleGetPreferences(requestId: String?, packageName: String, fileName: String) {
-    asyncActionRunner.launch(requestId, "get_preferences") {
-      val result = storageSubscriptionManager.getPreferences(packageName, fileName)
-      result.fold(
-        onSuccess = { entries ->
-          broadcastPreferencesResult(requestId, packageName, fileName, entries, null)
-        },
-        onFailure = { error ->
-          broadcastPreferencesResult(requestId, packageName, fileName, null, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleListDataStores(requestId: String?, packageName: String, adapterName: String) {
-    asyncActionRunner.launch(requestId, "list_data_stores") {
-      val result = storageSubscriptionManager.listDataStores(packageName, adapterName)
-      result.fold(
-        // DataStore descriptors reuse the SharedPreferences `preference_files` result envelope
-        // (StorageResponse.FileList); the awaiting TS client disambiguates by requestId.
-        onSuccess = { files ->
-          broadcastPreferenceFilesResult(requestId, packageName, files, null)
-        },
-        onFailure = { error ->
-          broadcastPreferenceFilesResult(requestId, packageName, null, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleGetDataStore(
-    requestId: String?,
-    packageName: String,
-    adapterName: String,
-    storeName: String,
-  ) {
-    asyncActionRunner.launch(requestId, "get_data_store") {
-      val result = storageSubscriptionManager.getDataStore(packageName, adapterName, storeName)
-      result.fold(
-        // Reuses the SharedPreferences `preferences` result envelope; storeName maps to fileName.
-        onSuccess = { entries ->
-          broadcastPreferencesResult(requestId, packageName, storeName, entries, null)
-        },
-        onFailure = { error ->
-          broadcastPreferencesResult(requestId, packageName, storeName, null, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleSubscribeStorage(requestId: String?, packageName: String, fileName: String) {
-    asyncActionRunner.launch(requestId, "subscribe_storage") {
-      val result = storageSubscriptionManager.subscribe(packageName, fileName)
-      result.fold(
-        onSuccess = { subscription ->
-          broadcastSubscribeStorageResult(
-            requestId,
-            packageName,
-            fileName,
-            subscription.subscriptionId,
-            null,
-          )
-        },
-        onFailure = { error ->
-          broadcastSubscribeStorageResult(requestId, packageName, fileName, null, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleUnsubscribeStorage(requestId: String?, packageName: String, fileName: String) {
-    asyncActionRunner.launch(requestId, "unsubscribe_storage") {
-      val success = storageSubscriptionManager.unsubscribe(packageName, fileName)
-      broadcastUnsubscribeStorageResult(requestId, packageName, fileName, success)
-    }
-  }
-
-  private fun handleGetPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-  ) {
-    asyncActionRunner.launch(requestId, "get_preference") {
-      val result = storageSubscriptionManager.getPreference(packageName, fileName, key)
-      result.fold(
-        onSuccess = { entry ->
-          broadcastGetPreferenceResult(requestId, packageName, fileName, key, entry, null)
-        },
-        onFailure = { error ->
-          broadcastGetPreferenceResult(requestId, packageName, fileName, key, null, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleSetPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
-  ) {
-    asyncActionRunner.launch(requestId, "set_preference") {
-      val result = storageSubscriptionManager.setPreference(packageName, fileName, key, value, type)
-      result.fold(
-        onSuccess = { broadcastSetPreferenceResult(requestId, packageName, fileName, key, null) },
-        onFailure = { error ->
-          broadcastSetPreferenceResult(requestId, packageName, fileName, key, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleRemovePreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-  ) {
-    asyncActionRunner.launch(requestId, "remove_preference") {
-      val result = storageSubscriptionManager.removePreference(packageName, fileName, key)
-      result.fold(
-        onSuccess = {
-          broadcastRemovePreferenceResult(requestId, packageName, fileName, key, null)
-        },
-        onFailure = { error ->
-          broadcastRemovePreferenceResult(requestId, packageName, fileName, key, error.message)
-        },
-      )
-    }
-  }
-
-  private fun handleClearPreferences(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-  ) {
-    asyncActionRunner.launch(requestId, "clear_preferences") {
-      val result = storageSubscriptionManager.clearPreferences(packageName, fileName)
-      result.fold(
-        onSuccess = { broadcastClearPreferencesResult(requestId, packageName, fileName, null) },
-        onFailure = { error ->
-          broadcastClearPreferencesResult(requestId, packageName, fileName, error.message)
-        },
-      )
-    }
-  }
-
-  private suspend fun broadcastPreferenceFilesResult(
-    requestId: String?,
-    packageName: String,
-    files: List<dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceFileInfo>?,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping preference files broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "preference_files") {
-      val message = buildString {
-        append("""{"type":"preference_files","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        if (files != null) {
-          append(""","success":true,"files":${jsonCompact.encodeToString(files)}""")
-        } else {
-          append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
-          )
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(TAG, "Broadcasted preference files to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
-  private suspend fun broadcastPreferencesResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    entries: List<dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceEntry>?,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping preferences broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "preferences") {
-      val message = buildString {
-        append("""{"type":"preferences","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        if (entries != null) {
-          append(""","success":true,"entries":${jsonCompact.encodeToString(entries)}""")
-        } else {
-          append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
-          )
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(TAG, "Broadcasted preferences to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
-  private suspend fun broadcastSubscribeStorageResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    subscriptionId: String?,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping subscribe storage broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "subscribe_storage_result") {
-      val message = buildString {
-        append("""{"type":"subscribe_storage_result","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        if (subscriptionId != null) {
-          append(
-            ""","success":true,"subscriptionId":${jsonCompact.encodeToString(subscriptionId)}""",
-          )
-        } else {
-          append(
-            ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""",
-          )
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted subscribe storage result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastUnsubscribeStorageResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    success: Boolean,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping unsubscribe storage broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "unsubscribe_storage_result") {
-      val message = buildString {
-        append("""{"type":"unsubscribe_storage_result","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","success":$success""")
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted unsubscribe storage result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastGetPreferenceResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    entry: dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceEntry?,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping get preference broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "get_preference_result") {
-      val message = buildString {
-        append("""{"type":"get_preference_result","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","key":${jsonCompact.encodeToString(key)}""")
-        if (error != null) {
-          append(""","success":false,"found":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else if (entry != null) {
-          append(""","success":true,"found":true""")
-          if (entry.value != null) {
-            append(""","value":${jsonCompact.encodeToString(entry.value)}""")
-          } else {
-            append(""","value":null""")
-          }
-          append(""","valueType":${jsonCompact.encodeToString(entry.type)}""")
-        } else {
-          append(""","success":true,"found":false""")
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted get preference result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastSetPreferenceResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping set preference broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "set_preference_result") {
-      val message = buildString {
-        append("""{"type":"set_preference_result","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","key":${jsonCompact.encodeToString(key)}""")
-        if (error != null) {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else {
-          append(""","success":true""")
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted set preference result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastRemovePreferenceResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping remove preference broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "remove_preference_result") {
-      val message = buildString {
-        append("""{"type":"remove_preference_result","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        append(""","key":${jsonCompact.encodeToString(key)}""")
-        if (error != null) {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else {
-          append(""","success":true""")
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted remove preference result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastClearPreferencesResult(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    error: String?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping clear preferences broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "clear_preferences_result") {
-      val message = buildString {
-        append("""{"type":"clear_preferences_result","timestamp":${System.currentTimeMillis()}""")
-        if (requestId != null) {
-          appendJsonStringField("requestId", requestId, jsonCompact)
-        }
-        append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
-        append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
-        if (error != null) {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error)}""")
-        } else {
-          append(""","success":true""")
-        }
-        append("}")
-      }
-      webSocketServer.broadcast(message)
-      Log.d(
-        TAG,
-        "Broadcasted clear preferences result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastStorageChange(
-    event: dev.jasonpearson.automobile.ctrlproxy.storage.PreferenceChangeEvent,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping storage change broadcast")
-      return
-    }
-
-    try {
-      // Build the wire payload via the extracted, unit-tested encoder. It emits the
-      // prior value so the TS telemetry ingest can skip its per-insert previous-value
-      // lookup (#3000), quoting it by its OWN type so a removed/type-changed STRING
-      // stays valid JSON. An absent prior value is emitted as JSON null.
-      val message =
-        dev.jasonpearson.automobile.ctrlproxy.storage.buildStorageChangedMessage(
-          event,
-          System.currentTimeMillis(),
-          jsonCompact,
-        )
-      webSocketServer.broadcast(message)
-      Log.d(TAG, "Broadcasted storage change to ${webSocketServer.getConnectionCount()} clients")
-    } catch (e: CancellationException) {
-      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting storage change", e)
     }
   }
 }

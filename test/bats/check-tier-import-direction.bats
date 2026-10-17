@@ -2,7 +2,7 @@
 # bats file_tags=serial
 # Fixtures and baselines are restored after every test; run serially with source scans.
 
-SCRIPT="scripts/check-tier-import-direction.sh"
+SCRIPT="scripts/check-tier-import-direction.ts"
 MODELS_FIXTURE="src/models/TierImportDirectionFixture.ts"
 FEATURES_FIXTURE="src/features/TierImportDirectionFixture.ts"
 BASELINE_DIR="scripts/import-direction-baselines"
@@ -19,7 +19,7 @@ teardown() {
 }
 
 @test "allows the current tier import baselines" {
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"models has no new upward imports"* ]]
@@ -31,7 +31,7 @@ teardown() {
     awk '{ printf "%s\r\n", $0 }' "$file" > "$BASELINE_DIR/$(basename "$file")"
   done
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 0 ]
 }
@@ -39,7 +39,7 @@ teardown() {
 @test "rejects a new models upward import" {
   printf '%s\n' 'import type { X } from "../daemon/somethingNew";' > "$MODELS_FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"src/models/TierImportDirectionFixture.ts -> src/daemon/somethingNew"* ]]
@@ -51,7 +51,7 @@ teardown() {
     'import { b } from "../daemon/daemonOk";' \
     > "$FEATURES_FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"src/server/serverNew"* ]]
@@ -60,16 +60,16 @@ teardown() {
 
 @test "update removes stale edges and refuses growth unless explicitly allowed" {
   printf '%s\n' 'src/models/Old.ts -> src/daemon/oldTarget' >> "$BASELINE_DIR/models.txt"
-  run bash "$SCRIPT" --update
+  run bun "$SCRIPT" --update
   [ "$status" -eq 0 ]
   ! grep -q 'src/models/Old.ts' "$BASELINE_DIR/models.txt"
 
   printf '%s\n' 'import { x } from "../daemon/somethingNew";' > "$MODELS_FIXTURE"
-  run bash "$SCRIPT" --update
+  run bun "$SCRIPT" --update
   [ "$status" -eq 1 ]
   ! grep -q 'TierImportDirectionFixture' "$BASELINE_DIR/models.txt"
 
-  run bash "$SCRIPT" --update --allow-grow
+  run bun "$SCRIPT" --update --allow-grow
   [ "$status" -eq 0 ]
   grep -q 'src/models/TierImportDirectionFixture.ts -> src/daemon/somethingNew' "$BASELINE_DIR/models.txt"
 }

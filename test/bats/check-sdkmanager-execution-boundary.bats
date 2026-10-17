@@ -5,7 +5,7 @@
 # serial-tagged files in a dedicated serial pass (scripts/ci/run-bats.sh);
 # the tag is enforced by test/scripts/batsSerialTags.test.ts.
 
-SCRIPT="scripts/check-sdkmanager-execution-boundary.sh"
+SCRIPT="scripts/check-sdkmanager-execution-boundary.ts"
 FIXTURE="src/utils/SdkManagerBoundaryFixture.ts"
 
 teardown() {
@@ -13,7 +13,7 @@ teardown() {
 }
 
 @test "allows SdkManagerClient to own sdkmanager execution" {
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production sdkmanager invocations"* ]]
@@ -22,7 +22,7 @@ teardown() {
 @test "rejects a direct sdkmanager spawn outside the owner" {
   printf '%s\n' 'import { spawn } from "node:child_process"; spawn("sdkmanager", ["--list"]);' > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"SdkManagerBoundaryFixture.ts"* ]]
@@ -31,7 +31,7 @@ teardown() {
 @test "rejects an aliased sdkmanager binary passed to a child-process launcher" {
   printf '%s\n' 'import { execFile } from "node:child_process"; const binary = "sdkmanager"; execFile(binary, ["--list"]);' > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"SdkManagerBoundaryFixture.ts"* ]]
@@ -40,7 +40,7 @@ teardown() {
 @test "rejects sdkmanager reached across functions via a parameter (issue #4341)" {
   printf '%s\n' 'import { execFile } from "node:child_process"; function run(bin) { execFile(bin, args); } run("sdkmanager");' > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"SdkManagerBoundaryFixture.ts"* ]]
@@ -56,7 +56,7 @@ class Tool {
 }
 EOF
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"SdkManagerBoundaryFixture.ts"* ]]
@@ -65,7 +65,7 @@ EOF
 @test "rejects a Bun.\$ tagged-template sdkmanager execution (issue #4341)" {
   printf '%s\n' 'await Bun.$`sdkmanager --list`;' > "$FIXTURE"
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"SdkManagerBoundaryFixture.ts"* ]]
@@ -81,7 +81,7 @@ class Tool {
 }
 EOF
 
-  run bash "$SCRIPT"
+  run bun "$SCRIPT"
 
   [ "$status" -eq 0 ]
   [[ "$output" == *"no direct production sdkmanager invocations"* ]]

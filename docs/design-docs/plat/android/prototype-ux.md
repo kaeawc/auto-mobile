@@ -1626,6 +1626,83 @@ ignored.
   address (or `via: "host"` while a host is attached) for prototypes meant to run unattended.
 - iOS simulators share the Mac's network, so nothing is reversed there.
 
+## Data, storage and network (#12531)
+
+The three features compose: a `request` writes its response into `/data`, data actions edit `/data`
+from a tap, and `storage` makes chosen `state` and `/data` values survive a re-show or relaunch.
+The detailed contracts are [Data actions](#data-actions-12519), [Storage](#storage-12522) and
+[Request action](#request-action-12523); this section is the one-page overview and the capability
+map.
+
+| Capability                    | Gates                                                     | Android CtrlProxy | iOS agent  |
+| ----------------------------- | --------------------------------------------------------- | ----------------- | ---------- |
+| `prototype_data_actions_v1`   | `setData`, `appendData`, `removeData`                     | Advertised        | Advertised |
+| `prototype_storage_v1`        | root `storage` block, `inspect` `storage`, `clearStorage` | Advertised        | Advertised |
+| `prototype_network_v1`        | the `request` action with `via: "host"`                   | Advertised        | Advertised |
+| `prototype_network_device_v1` | `request` with `via: "device"`                            | Advertised        | Advertised |
+
+A device without a capability is refused before uploads or show, with a message naming the
+capability. Device-side verification is the manual run in `skills/manual-test/prototype-acceptance.md`
+("Data, storage and network").
+
+**Data actions.** Each write is applied to the shown spec's `/data` with the host's own function,
+bumps the data revision, rebuilds the drawn tree (repeat rows included) and sends one `change` event
+named for the path. A refused write changes nothing and the rest of the action list still runs. Once
+the device has written a prototype's data, a host patch to `/data` needs `baseRevision`.
+
+**Storage precedence.** On a show of an id with a `storage` block: a changed `version` discards all
+stored values; otherwise a stored value replaces the spec's for each listed key, a stored key no longer
+listed is dropped, and a stored value that no longer fits (state type changed, data of another JSON
+kind, unwritable pointer) is dropped and the spec's value stands. Writes are debounced after every
+change (user edit, data action, request response) and flushed on dismiss. `clearStorage {id}` and
+`deleteSaved` wipe an id's values.
+
+**Request lifecycle.** `statusKey` moves `loading` then `success` or `error`; a 2xx body is written to
+`into` and `{status, headers, durationMs, error?}` to `<into>__meta`; a non-2xx status, transport
+failure or a body `/data` cannot hold leaves `into` alone and sets `meta.error`. The completion is
+atomic: if the body fits but no form of `__meta` fits beside it, nothing is written but the error
+metadata. A newer request to the same `into` cancels the older (latest wins), and dismissing the
+prototype cancels its requests. Each finished request is a `prototype_request` emit event.
+
+**The two transports.**
+
+- `via: "host"` (the default): the device sends a `prototype_request` frame and the host runs the
+  fetch, so `localhost` is the host machine and any URL the host can reach works. The host needs a
+  connection; with none the request fails with `network`. Closing the owning connection fails its
+  calls at once, and a cancelled call sends `prototype_request_cancel` so the host frees the slot.
+- `via: "device"`: the device runs the request itself. On Android `localhost` is the device, so the
+  host runs `adb reverse` for each loopback port it finds in the shown spec (see
+  [Loopback requests from the device](#loopback-requests-from-the-device-12530)); on an iOS
+  simulator `localhost` is the Mac, which shares its loopback, and nothing is reversed.
+
+**No allowlist.** A request may target any absolute `http` or `https` URL. There is deliberately no host
+allowlist: the prototype tool is an authoring aid the agent already drives with full device control, and
+a spec that can reach only some hosts would break prototypes of real API integrations.
+
+**Cleartext and transport security.** CtrlProxy declares `INTERNET` and a `network_security_config`
+with cleartext permitted, so `http://` works for `via: "device"` on Android. On iOS, `via: "device"`
+runs inside the target app and obeys its App Transport Security: `localhost` and IP addresses are
+exempt, other cleartext hosts fail with `network` and a message pointing to `via: "host"` or `https://`.
+`via: "host"` is not subject to ATS.
+
+**Saved prototypes.** A saved Android prototype (see
+[Saved prototypes on the Android home screen](#saved-prototypes-on-the-android-home-screen)) supports
+`request` actions with `via: "device"` (it still needs a reachable URL, since no host runs `adb reverse`
+when it launches alone). `via: "host"` has no host to run it there, so it fails with a typed `network`
+error naming `via: "host"`.
+
+**Limits.**
+
+| Limit                                        | Value                                                                                        |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `/data` write (after any action or response) | `MAX_PROTOTYPE_DATA_WRITE_BYTES`, 262144 bytes of data cost                                  |
+| Response body                                | `MAX_PROTOTYPE_RESPONSE_BYTES`, 262144 bytes, 2xx only (a non-2xx body is never read)        |
+| Request `timeoutMs`                          | 1 to 30000, default 10000                                                                    |
+| Requests in flight                           | 4 per device                                                                                 |
+| Header and query entries                     | 16 each, values up to 4096 characters                                                        |
+| Storage                                      | at most 64 keys, 262144 stored bytes per prototype id                                        |
+| Emit payload                                 | 4096 bytes; a larger `change` event drops its `value` and the host stops mirroring that spec |
+
 ## Anchors
 
 #9316 specifies semantics but not exact field names. These are the chosen strict

@@ -130,10 +130,12 @@ function makeRestore(
   biometricEnrollment: SessionDeviceStateRestoreOptions["biometricEnrollment"] = () => ({
     restore: async () => {},
   }),
+  overrides: Partial<SessionDeviceStateRestoreOptions> = {},
 ): SessionDeviceStateRestore {
   return new SessionDeviceStateRestore(host, {
     keepScreenAwake,
     biometricEnrollment,
+    networkCondition: () => ({ restore: async () => {} }),
     screenReader,
     screenReaderBackoff: backoff,
     rotation,
@@ -143,6 +145,7 @@ function makeRestore(
     iosAppNetworkRuleRestorer: restorer,
     defaultIosAppNetworkRuleRestorer: () => restorer,
     iosLease: { leaseMs: 30_000, renewIntervalMs: 10_000 },
+    ...overrides,
   });
 }
 
@@ -707,5 +710,107 @@ describe("biometric family", () => {
     gate.resolve();
     await pending;
     expect(h.restored).toEqual(["not_enrolled"]);
+  });
+});
+
+describe("network-condition family", () => {
+  async function createNetwork(
+    result: (call: number) => Promise<void>,
+    overrides: Partial<SessionDeviceStateRestoreOptions> = {},
+  ) {
+    const timer = new FakeTimer();
+    const host = new FakeHost(timer);
+    host.publishAll = true;
+    let calls = 0;
+    const restore = makeRestore(host, undefined, undefined, undefined, undefined, undefined, {
+      networkCondition: () => ({
+        restore: () => {
+          calls++;
+          return result(calls);
+        },
+      }),
+      ...overrides,
+    });
+    const factory = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
+    factory.stopCleanupTimer();
+    const session = await factory.createSession("s5", "emulator-5560", "android");
+    factory.setNetworkCondition("s5", { initialProfile: "none" });
+    return { timer, host, restore, session, calls: () => calls };
+  }
+
+  test("no baseline means no target", async () => {
+    const h = await createNetwork(async () => {});
+    delete h.session.cacheData.networkCondition;
+    expect(h.restore.networkConditionRestoreTarget(h.session)).toBeNull();
+    expect((await h.restore.restoreNetworkConditionBestEffort(h.session)).pending).toBeNull();
+    expect(h.calls()).toBe(0);
+  });
+
+  test("a successful restore clears the health marker", async () => {
+    const h = await createNetwork(async () => {});
+    expect((await h.restore.restoreNetworkConditionBestEffort(h.session)).pending).toBeNull();
+    expect(h.calls()).toBe(1);
+    expect(h.host.healthEvents).toContain("clear:emulator-5560:network-condition");
+  });
+
+  test("a failing restore retries twice, then hands the device to health recovery", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const h = await createNetwork(() => Promise.reject(new Error("console refused")));
+      const { pending } = await h.restore.restoreNetworkConditionBestEffort(h.session);
+      expect(pending).not.toBeNull();
+      for (let i = 0; i < 2; i++) {
+        await flush();
+        h.timer.advanceTime(250);
+      }
+      await pending;
+      expect(h.calls()).toBe(3);
+      expect(h.host.abandoned).toContain("emulator-5560:network-condition");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("an iOS app rule is reset through the rule restorer, not the device restorer", async () => {
+    const resets: Array<{ udid: string; revision: number }> = [];
+    const h = await createNetwork(async () => {}, {
+      iosAppNetworkRuleRestorer: {
+        reset: async (rule) => {
+          resets.push({ udid: rule.udid, revision: rule.revision });
+        },
+        renew: async () => "renewed",
+      },
+    });
+    h.session.cacheData.networkCondition = {
+      initialProfile: "none",
+      iosAppRule: { udid: "UDID-1", bundleId: "com.example", ownerGeneration: 1, lastRevision: 4 },
+    };
+    expect((await h.restore.restoreNetworkConditionBestEffort(h.session)).pending).toBeNull();
+    expect(h.calls()).toBe(0);
+    expect(resets).toEqual([{ udid: "UDID-1", revision: 5 }]);
+    expect(h.session.cacheData.networkCondition.iosAppRule?.lastRevision).toBe(5);
+  });
+
+  test("expiry restore clears the slot only after a definitive success", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      let cleared = 0;
+      const h = await createNetwork((call) =>
+        call === 1 ? Promise.reject(new Error("blip")) : Promise.resolve(),
+      );
+      const target = h.restore.networkConditionRestoreTarget(h.session)!;
+      const done = h.restore.restoreNetworkConditionOnExpiry(h.session, target, () => {
+        cleared++;
+      });
+      await flush();
+      h.timer.advanceTime(250);
+      await done;
+      expect(h.calls()).toBe(2);
+      expect(cleared).toBe(1);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

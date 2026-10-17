@@ -22,6 +22,7 @@ function create(options?: SessionManagerOptions): SessionManager {
 const OWNED_BY_STATE_RESTORE: Record<string, string> = {
   keepScreenAwakeRestorerFactory: "keepScreenAwakeRestorer",
   biometricEnrollmentRestorerFactory: "biometricEnrollmentRestorer",
+  networkConditionRestorerFactory: "networkConditionRestorer",
   screenReaderRestorerFactory: "screenReaderRestorer",
   screenReaderRestoreBackoff: "screenReaderRestoreBackoff",
   rotationRestoreBackoff: "rotationRestoreBackoff",

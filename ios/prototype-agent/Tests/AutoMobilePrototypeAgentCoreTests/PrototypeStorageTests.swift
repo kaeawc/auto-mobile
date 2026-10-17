@@ -453,7 +453,8 @@ final class PrototypeStorageTests: XCTestCase {
         try harness.tap("Dark")
         try harness.tap("Add")
         harness.clock.elapse()
-        XCTAssertEqual(harness.session.dataRevision, 1, "the write applied on screen")
+        // One device revision counter (#11675): the Dark tap took 1, the data write 2.
+        XCTAssertEqual(harness.session.dataRevision, 2, "the write applied on screen")
         XCTAssertEqual(harness.store.records["shop"], stored(1, ["state:dark": .bool(true)]))
         let report = try XCTUnwrap(harness.coordinator.report(id: "shop"))
         XCTAssertEqual(report.skippedKeys, ["data:/cart"])

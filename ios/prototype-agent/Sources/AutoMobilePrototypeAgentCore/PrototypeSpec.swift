@@ -75,6 +75,11 @@ enum JSONValue: Codable, Equatable, Sendable {
         if case let .string(value) = self { return value }
         return nil
     }
+
+    var objectFields: [String: JSONValue]? {
+        if case let .object(value) = self { return value }
+        return nil
+    }
 }
 
 struct PrototypeSpec: Decodable {
@@ -92,7 +97,7 @@ struct PrototypeSpec: Decodable {
     let root: PrototypeNode
     /// The authored `root` before data resolution and repeat expansion, kept so a device data write
     /// (#12519) can rebuild `root` from the changed data without the host re-sending the spec.
-    private let authoredRoot: JSONValue
+    let authoredRoot: JSONValue
 
     private enum CodingKeys: String, CodingKey {
         case id, window, state, data, theme, motion, root, storage
@@ -177,17 +182,33 @@ struct PrototypeSpec: Decodable {
     }
 
     private init(
-        replacing spec: PrototypeSpec, data: [String: JSONValue]?, root: PrototypeNode
+        replacing spec: PrototypeSpec, data: [String: JSONValue]?, root: PrototypeNode,
+        authoredRoot: JSONValue? = nil, state: [String: JSONValue]? = nil
     ) {
         id = spec.id
         window = spec.window
-        state = spec.state
+        self.state = state ?? spec.state
         self.data = data
         theme = spec.theme
         motion = spec.motion
         storage = spec.storage
         self.root = root
-        authoredRoot = spec.authoredRoot
+        self.authoredRoot = authoredRoot ?? spec.authoredRoot
+    }
+
+    /// This spec after a host patch (#11675): the authored root, data and state replaced, and the drawn
+    /// tree rebuilt and re-validated the way a show would. Id, window and theme are carried over, as
+    /// the patch grammar cannot address them. Throws what a show of the same content would.
+    func patched(
+        authoredRoot raw: JSONValue, data: [String: JSONValue]?, state: [String: JSONValue]?
+    )
+        throws -> PrototypeSpec
+    {
+        if let data { try PrototypeLimits.guardData(data) }
+        let rebuilt = try Self.buildRoot(raw, data: data, menuState: state ?? [:])
+        try PrototypeStacks.validate(root: rebuilt)
+        try PrototypeThemeModes.validate(placement: window.placement, root: rebuilt)
+        return PrototypeSpec(replacing: self, data: data, root: rebuilt, authoredRoot: raw, state: state)
     }
 
     /// This spec with `data` replaced and the drawn tree rebuilt from the authored one, so text

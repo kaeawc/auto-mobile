@@ -995,8 +995,8 @@ keep their meaning. Every visible page (including partly visible peek and fixed-
 
 Use `show` for a new screen or a window, theme or root change. Use `patch` for
 content (`/data`), state (`/state`) or one node by id (`replaceNode`) of the shown prototype. Android CtrlProxy advertises
-`prototype_patch_v1` and applies patches in place; iOS does not advertise it yet
-and requires the whole spec with `show`.
+`prototype_patch_v1` and applies patches in place; the iOS prototype agent advertises it too
+(a relaunched app loads the current agent), so an older agent still needs the whole spec with `show`.
 
 `{action:"patch", id, ops, baseRevision?}` sends a `patch_prototype` frame
 `{requestId, id, baseRevision?, ops}` only to a device advertising

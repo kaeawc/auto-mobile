@@ -148,6 +148,11 @@ class SavedPrototypeActivity : ComponentActivity() {
           true
         },
         storage = opened.session,
+        httpClients = SavedPrototypeActivityDependencies.httpClients(),
+        // Requests live and die with the activity: onDestroy cancels the scope and closes the
+        // runtime. A response lands between interactions, never in the middle of one.
+        requestScope = scope,
+        exclusively = { block -> interactions.withLock { block() } },
       )
   }
 

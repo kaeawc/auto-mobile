@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.content.Context
 import android.content.Intent
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.ui.node.RootForTest
@@ -11,20 +12,26 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
+import dev.jasonpearson.automobile.protocol.PrototypeAction
 import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeDismissAction
 import dev.jasonpearson.automobile.protocol.PrototypeEmitAction
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeEventKind
+import dev.jasonpearson.automobile.protocol.PrototypeRequestResponse
+import dev.jasonpearson.automobile.protocol.PrototypeRequests
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
 import dev.jasonpearson.automobile.protocol.PrototypeStorageBlock
 import dev.jasonpearson.automobile.protocol.PrototypeStoredValues
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -39,6 +46,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ActivityController
 
 @RunWith(RobolectricTestRunner::class)
@@ -394,5 +402,92 @@ class SavedPrototypeActivityTest {
       PrototypeStoredValues(1, mapOf("state:dark" to JsonPrimitive(true))),
       storage.stored("panel"),
     )
+  }
+
+  /** Records each request; answers at once, or waits until cancelled when [hold] is set. */
+  private class RecordingHttp(private val hold: Boolean = false) : PrototypeHttpClient {
+    val requests = mutableListOf<PrototypeHttpRequest>()
+    var cancelled = false
+
+    override suspend fun execute(request: PrototypeHttpRequest): PrototypeRequestResponse {
+      requests += request
+      if (!hold) return PrototypeRequestResponse.Received(200, emptyMap(), JsonPrimitive("ok"), 1)
+      try {
+        awaitCancellation()
+      } catch (error: CancellationException) {
+        cancelled = true
+        throw error
+      }
+    }
+  }
+
+  private fun savedRequestPrototype(via: String) {
+    val fixture =
+      savedPrototypeFixture(
+        actions =
+          listOf(
+            Json.decodeFromString(
+              PrototypeAction.serializer(),
+              """{"type":"request","url":"http://localhost:8080/x","via":"$via"}""",
+            ),
+          ),
+      )
+    store.stored["panel"] = fixture
+  }
+
+  private fun tapSaved(activity: SavedPrototypeActivity) = runBlocking {
+    val button = store.stored.getValue("panel").spec.root as PrototypeButtonNode
+    activity.interact(PrototypeInteraction.Tap(checkNotNull(button.onTap)))
+    shadowOf(Looper.getMainLooper()).idle()
+  }
+
+  private fun requestEvents() =
+    SavedPrototypeEvents.buffer.drain().filter { it.name == PrototypeRequests.EVENT_NAME }
+
+  @Test
+  fun `a device request from a saved prototype reaches the device client`() {
+    val device = RecordingHttp()
+    val host = RecordingHttp()
+    SavedPrototypeActivityDependencies.httpClients = { PrototypeHttpClients(host, device) }
+    savedRequestPrototype("device")
+
+    tapSaved(launch())
+
+    assertEquals(1, device.requests.size)
+    assertEquals(0, host.requests.size)
+    val event = requestEvents().single().payload!!.jsonObject
+    assertEquals("success", event.getValue("outcome").jsonPrimitive.content)
+  }
+
+  @Test
+  fun `a host request from a saved prototype fails with a typed network error`() {
+    savedRequestPrototype("host")
+
+    tapSaved(launch())
+
+    val error = requestEvents().single().payload!!.jsonObject.getValue("error").jsonObject
+    assertEquals("network", error.getValue("code").jsonPrimitive.content)
+    assertEquals(SAVED_PROTOTYPE_HOST_UNAVAILABLE, error.getValue("message").jsonPrimitive.content)
+  }
+
+  @Test
+  fun `destroying the activity cancels a request in flight`() {
+    val device = RecordingHttp(hold = true)
+    SavedPrototypeActivityDependencies.httpClients = { PrototypeHttpClients(device, device) }
+    savedRequestPrototype("device")
+    val controller =
+      Robolectric.buildActivity(
+          SavedPrototypeActivity::class.java,
+          SavedPrototypeLaunch.intent(context, "panel"),
+        )
+        .setup()
+    compose.waitForIdle()
+    tapSaved(controller.get())
+    assertEquals(1, device.requests.size)
+
+    controller.pause().stop().destroy()
+    shadowOf(Looper.getMainLooper()).idle()
+
+    assertTrue(device.cancelled)
   }
 }

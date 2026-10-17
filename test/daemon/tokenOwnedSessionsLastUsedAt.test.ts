@@ -22,7 +22,7 @@ describe("daemon/tokenOwnedSessions lastUsedAt", () => {
   test("is reported in wall-clock ms after a backward wall step", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    await sessionManager.createSession(SESSION, "emulator-5554", "android", 600_000);
+    await sessionManager.createSession(SESSION, "emulator-5554", "android", { timeoutMs: 600_000 });
     const state: DaemonStateAccess = {
       isInitialized: () => true,
       getSessionManager: () => sessionManager,

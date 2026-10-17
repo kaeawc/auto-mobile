@@ -1,14 +1,14 @@
-import { type DisplayInventoryClassification } from "../utils/deviceMatcher";
-import type { ConditionEvaluation } from "../features/observe/interfaces/WaitForCondition";
-import { waitCaptureUnavailableReason } from "../features/observe/ConditionPredicates";
-import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../models";
-import { scopeHierarchyToLayer } from "../features/observe/hierarchyLayer";
-import type { HierarchyLayer } from "../models/HierarchyLayer";
-import { type MatchMode, type ContainerFailure } from "../features/utility/ElementResolver";
-import { type ScreenSizeForOffscreenCheckOptions } from "../features/utility/ElementGeometry";
-import type { ConditionResolver } from "../features/observe/ConditionPredicates";
-import type { ObserveWaitForOptions, WaitForWithSettled } from "./observeWaitForSchemas";
-import { findWaitForElement, hasElementPredicate } from "./observeWaitElement";
+import { type DisplayInventoryClassification } from "../../../utils/deviceMatcher";
+import type { ConditionEvaluation } from "../interfaces/WaitForCondition";
+import { waitCaptureUnavailableReason } from "../ConditionPredicates";
+import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../../models";
+import { scopeHierarchyToLayer } from "../hierarchyLayer";
+import type { HierarchyLayer } from "../../../models/HierarchyLayer";
+import { type MatchMode, type ContainerFailure } from "../../utility/ElementResolver";
+import { type ScreenSizeForOffscreenCheckOptions } from "../../utility/ElementGeometry";
+import type { ConditionResolver } from "../ConditionPredicates";
+import type { ObserveWaitForOptions, WaitForWithSettled } from "./WaitForSchemas";
+import { findWaitForElement, hasElementPredicate } from "./WaitElement";
 
 export interface ObserveConditionEvaluation extends ConditionEvaluation {
   containerFailure?: ContainerFailure;

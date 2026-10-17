@@ -104,32 +104,23 @@ function harness(
   if (lockPath === "/isolated/lock") {
     timer.enableAutoAdvance();
   }
-  const manager = new DaemonManager(
-    () => client,
-    undefined,
+  const manager = new DaemonManager({
+    clientFactory: () => client,
     timer,
-    lockPath,
-    "/isolated/pid",
+    lockFilePath: lockPath,
+    pidFilePath: "/isolated/pid",
     socketPath,
-    {
+    processFinder: {
       findDaemonProcesses: () => [],
       isProcessRunning: (pid) => pid === process.pid || (owner.running && pid === owner.pid),
     },
-    undefined,
-    undefined,
-    undefined,
-    {
+    processSignaler: {
       kill: () => {
         throw new Error("must not signal");
       },
     },
-    undefined,
-    undefined,
-    "linux",
-    undefined,
-    undefined,
-    undefined,
-    {
+    platform: "linux",
+    identityRecoveryIO: {
       socketExists: () => true,
       readRecord: () => record,
       probe: async () => {
@@ -139,7 +130,7 @@ function harness(
         return owner;
       },
     },
-  );
+  });
   return {
     manager,
     timer,
@@ -224,22 +215,14 @@ describe("provider-owned identity recovery", () => {
     const dir = scratchDir("identity-win32-");
     const pidPath = join(dir, "daemon.pid");
     const controlPath = join(dir, "named-pipe");
-    const manager = new DaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      join(dir, "lock"),
-      pidPath,
-      controlPath,
-      { findDaemonProcesses: () => [], isProcessRunning: (pid) => pid === 123 },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      "win32",
-    );
+    const manager = new DaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: join(dir, "lock"),
+      pidFilePath: pidPath,
+      socketPath: controlPath,
+      processFinder: { findDaemonProcesses: () => [], isProcessRunning: (pid) => pid === 123 },
+      platform: "win32",
+    });
     const probe = spyOn((manager as any).identityRecoveryIO, "probe").mockRejectedValue(
       new Error("connect ECONNREFUSED"),
     );

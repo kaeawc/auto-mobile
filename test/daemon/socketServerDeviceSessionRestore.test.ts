@@ -165,7 +165,7 @@ async function boundRecoveryHarness() {
       close: async () => {},
     };
   };
-  await manager.createSession("bound", "emulator-5554", "android", undefined, undefined, "Pixel");
+  await manager.createSession("bound", "emulator-5554", "android", { stableDeviceId: "Pixel" });
   const call = (
     bound = true,
     sessionUuid = "bound",

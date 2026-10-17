@@ -73,25 +73,21 @@ function buildDaemon(overrides: {
     overrides.installedAppsRepository ?? new FakeInstalledAppsRepository();
   const daemon = new Daemon(
     {},
-    installedAppsRepository,
-    overrides.timer,
-    deviceSessionRepository,
-    new CountingIdGenerator("daemon-session"),
-    overrides.initializer,
-    overrides.tracker,
-    new DefaultDatabaseHealthProbe({ timer: overrides.timer }),
-    undefined,
-    process.env,
-    undefined,
-    // Never resolve the production default (real getDatabase()) — issue #3067.
-    new FakeToolSelectionProfileProvenanceLoader(),
-    undefined,
-    undefined,
-    undefined,
-    overrides.liveDaemonSessionIdProvider ?? {
-      collectLiveDaemonSessionIds: () => new Set(["live-peer-daemon"]),
+    {
+      installedAppsRepository,
+      timer: overrides.timer,
+      deviceSessionRepository,
+      idGenerator: new CountingIdGenerator("daemon-session"),
+      databaseInitializer: overrides.initializer,
+      startupFailureTracker: overrides.tracker,
+      databaseHealthProbe: new DefaultDatabaseHealthProbe({ timer: overrides.timer }),
+      recoveryPolicyEnvironment: process.env,
+      toolSelectionProfileProvenanceLoader: new FakeToolSelectionProfileProvenanceLoader(),
+      liveDaemonSessionIdProvider: overrides.liveDaemonSessionIdProvider ?? {
+        collectLiveDaemonSessionIds: () => new Set(["live-peer-daemon"]),
+      },
+      incumbentOwnerGuard: overrides.incumbentOwnerGuard,
     },
-    overrides.incumbentOwnerGuard,
   );
   return { daemon, deviceSessionRepository, installedAppsRepository };
 }

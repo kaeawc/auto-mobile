@@ -82,7 +82,7 @@
         "auto-mobile/no-inline-error-normalize": "error",
         "auto-mobile/no-raw-promise-race": "error",
         "auto-mobile/no-direct-bun-spawn": "error",
-        "auto-mobile/no-caught-error-interpolation": "warn",
+        "auto-mobile/no-caught-error-interpolation": "error",
 
         // Ratcheted rules with pre-existing baselined violations. oxlint has no
         // count-based bulk-suppressions file (ESLint's eslint-suppressions.json),
@@ -98,7 +98,7 @@
           { "max": 150, "skipBlankLines": true, "skipComments": true }
         ],
         "auto-mobile/catch-convention": "warn",
-        "auto-mobile/no-unknown-cast": "warn",
+        "auto-mobile/no-unknown-cast": "error",
         "typescript/no-floating-promises": "warn",
         "typescript/no-misused-promises": "warn",
         "auto-mobile/no-raw-env-number-parse": "error"

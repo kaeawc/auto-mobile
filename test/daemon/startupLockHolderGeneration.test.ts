@@ -29,27 +29,15 @@ describe("startup lock holder generation", () => {
     } else {
       probe.verdict = verdict;
     }
-    const manager = new SafeDaemonManager(
-      undefined,
-      undefined,
-      new FakeTimer(),
-      lockPath,
-      join(root, "pid"),
-      join(root, "socket"),
-      { findDaemonProcesses: () => [], isProcessRunning: () => true },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      "linux",
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      probe,
-    );
+    const manager = new SafeDaemonManager({
+      timer: new FakeTimer(),
+      lockFilePath: lockPath,
+      pidFilePath: join(root, "pid"),
+      socketPath: join(root, "socket"),
+      processFinder: { findDaemonProcesses: () => [], isProcessRunning: () => true },
+      platform: "linux",
+      lockOwnerGenerationProbe: probe,
+    });
     const body = formatLockContent(9999, "old-owner", "", generation || undefined);
     writeFileSync(lockPath, body);
     return { manager, reader: manager as unknown as HolderReader, lockPath, body, probe };

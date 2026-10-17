@@ -107,7 +107,11 @@ test.skipIf(process.platform === "win32")(
       });
       unlinkSync(pid); // The reproduction removes ONLY the isolated PID file.
       expect(existsSync(socket)).toBe(true);
-      const manager = new DaemonManager(undefined, undefined, undefined, lock, pid, socket);
+      const manager = new DaemonManager({
+        lockFilePath: lock,
+        pidFilePath: pid,
+        socketPath: socket,
+      });
       const recovered = await manager.status();
       expect(recovered.recovery).toEqual({ state: "repaired" });
       expect(JSON.parse(readFileSync(pid, "utf8"))).toEqual(before);

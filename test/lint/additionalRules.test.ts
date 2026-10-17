@@ -111,3 +111,32 @@ describe("auto-mobile/naming-convention", () => {
     ).toHaveLength(0);
   });
 });
+
+describe("auto-mobile/max-class-lines", () => {
+  const body = (lines: number) =>
+    Array.from({ length: lines }, (_, i) => `  m${i}() {}`).join("\n");
+  const klass = (lines: number) => `class Big {\n${body(lines)}\n}`;
+  const flagged = (code: string, max: number) =>
+    runRule(plugin.rules["max-class-lines"], code, "fixture.ts", [{ max }]).length;
+
+  test("flags a class declaration over the cap", () => {
+    expect(flagged(klass(6), 5)).toBe(1);
+  });
+  test("does not flag a class at the cap", () => {
+    // class line + 3 members + closing brace = 5 non-blank lines
+    expect(flagged(klass(3), 5)).toBe(0);
+  });
+  test("ignores blank lines", () => {
+    expect(flagged(`class Big {\n${body(3).split("\n").join("\n\n\n")}\n}`, 5)).toBe(0);
+  });
+  test("flags a class expression", () => {
+    expect(flagged(`const C = ${klass(6)};`, 5)).toBe(1);
+  });
+  test("counts each class separately", () => {
+    expect(flagged(`${klass(6)}\n${klass(2)}\n${klass(8)}`, 5)).toBe(2);
+  });
+  test("defaults to a 1000-line cap", () => {
+    expect(runRule(plugin.rules["max-class-lines"], klass(10)).length).toBe(0);
+    expect(runRule(plugin.rules["max-class-lines"], klass(1000)).length).toBe(1);
+  });
+});

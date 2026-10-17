@@ -304,6 +304,18 @@ if [[ "$BUILD_STATUS" -eq 0 ]]; then
         --extensions html \
         --root-dir "$SITE_STAGE/built" \
         "$SITE_STAGE/built"
+    # Same build, structural pass: no root-absolute or missing local asset URLs
+    # (a 404.html built without site_url once shipped unstyled). See
+    # scripts/docs/check-built-site.ts.
+    # bun is absent in the post-merge links job (the docs.yml PR job and Fast
+    # Validation both have it), so skip with a warning rather than fail there.
+    if command -v bun >/dev/null 2>&1; then
+        site_status=0
+        bun "$PROJECT_ROOT/scripts/docs/check-built-site.ts" "$SITE_STAGE/built" || site_status=2
+        record_status "$site_status"
+    else
+        print_warning "Skipping built-site reference check: bun not available"
+    fi
 elif [[ "$BUILD_STATUS" -eq 3 ]]; then
     if [[ "${LYCHEE_REQUIRE_SITE:-false}" == "true" ]]; then
         print_error "MkDocs is not available (need uv or mkdocs) and LYCHEE_REQUIRE_SITE=true"

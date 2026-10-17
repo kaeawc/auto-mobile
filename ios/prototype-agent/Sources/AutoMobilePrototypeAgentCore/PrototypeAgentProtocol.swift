@@ -19,6 +19,8 @@ enum PrototypeAgentProtocol {
         "put_prototype_asset",
         "remove_prototype_asset",
         "get_prototype_status",
+        patchRequest,
+        patchCapability,
         showInPlaceCapability,
         anchorCapability,
         hideForCaptureRequest,
@@ -150,6 +152,11 @@ enum PrototypeAgentProtocol {
     /// Wipes the values stored for `{id}`; the reply carries `cleared`, the number of keys removed. Listed
     /// beside `storageCapability` because the host checks request types against `capabilities`.
     static let clearStorageRequest = "clear_prototype_storage"
+    /// Atomic in-place `/data`, `/state` and `replaceNode` patches with revisions and state conflicts
+    /// (#11675). Same name as the CtrlProxy capability; the host sends `patch_prototype` only to an agent
+    /// that advertises it.
+    static let patchCapability = "prototype_patch_v1"
+    static let patchRequest = "patch_prototype"
     static let portEnvironmentKey = "AUTOMOBILE_PROTOTYPE_PORT"
     static let tokenEnvironmentKey = "AUTOMOBILE_PROTOTYPE_TOKEN"
     /// Shortest token the agent accepts, so a stray or empty value cannot open the server.

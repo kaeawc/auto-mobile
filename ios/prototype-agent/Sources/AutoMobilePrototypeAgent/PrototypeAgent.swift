@@ -532,6 +532,17 @@ final class PrototypeAgent: NSObject {
                 // The host can leave before this queued show runs; nothing would remove it later.
                 if connectedClients == 0 { model.hostDisconnected() }
                 result(true, extra: extra)
+            case PrototypeAgentProtocol.patchRequest:
+                // Edits the shown prototype in place (#11675); a refusal leaves it untouched.
+                guard let id = message["id"] as? String, !id.isEmpty, let ops = message["ops"] else {
+                    return result(false, "patch_prototype needs an id and ops")
+                }
+                let reply = try model.patch(
+                    id: id,
+                    baseRevision: (message["baseRevision"] as? NSNumber)?.intValue,
+                    ops: decode(JSONValue.self, ops)
+                ).reply
+                result(reply.success, reply.error, extra: reply.extra)
             // No update_prototype (#10550): a same-id show_prototype replaces the shown prototype.
             case "dismiss_prototype":
                 // Like Android's PrototypeController: an id that is not the shown prototype fails, and

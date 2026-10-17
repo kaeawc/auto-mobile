@@ -70,7 +70,17 @@ extension JSONValue {
 /// `PrototypeController`. Each mutation returns the events it produced, already sequenced.
 struct PrototypeSession {
     private(set) var spec: PrototypeSpec?
-    private(set) var state: [String: JSONValue] = [:]
+    private(set) var state: [String: JSONValue] = [:] {
+        didSet { if tracksStateRevisions { noteStateWrites(since: oldValue) } }
+    }
+
+    /// Off while a show or patch assigns `state` itself: neither is a device write (#11675).
+    private var tracksStateRevisions = true
+    /// The revision of the last device write (or accepted patch) to each state key since the show; a
+    /// patch built on an older `baseRevision` conflicts on those keys.
+    private var stateRevisions: [String: Int] = [:]
+    /// Bumped when the drawn tree is rebuilt (a data write or a patch), so the model replaces its spec.
+    private(set) var structureRevision = 0
     private(set) var pages: [String: Int] = [:]
     private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
     private var stackNodes: [String: PrototypeNode] = [:]
@@ -105,8 +115,9 @@ struct PrototypeSession {
         spec != nil
     }
 
-    /// The shown prototype's data revision: 0 until a device data action writes it, then one more
-    /// per write. Reported as `revision` in a data write's `change` event.
+    /// The shown prototype's device revision: 0 until a device data or state write or an accepted patch,
+    /// then one more per write. The same counter is reported as `revision` in a data write's `change`
+    /// event and in a patch result (#11675).
     var dataRevision: Int {
         spec.flatMap { revisions[$0.id] } ?? 0
     }
@@ -146,7 +157,10 @@ struct PrototypeSession {
         shownErrors = []
         // Stored values (#12526) arrive already applied by `PrototypeStorageCoordinator.prepare`, before
         // the first draw; restoring is not a change, so no event is emitted and no revision moves.
+        tracksStateRevisions = false
         state = restoredState ?? spec.state ?? [:]
+        tracksStateRevisions = true
+        stateRevisions = [:]
         self.spec = spec
         // The show result reports this mode, so the show itself is not a change.
         reportedDark = self.appearance?.dark
@@ -378,6 +392,7 @@ struct PrototypeSession {
             ))
         }
         self.spec = rebuilt
+        structureRevision += 1
         rebuildNavigation(for: rebuilt.root, keepingPages: pages, keepingStacks: stacks)
         let revision = dataRevision + 1
         revisions[rebuilt.id] = revision
@@ -388,6 +403,54 @@ struct PrototypeSession {
             payload["value"] = value
         }
         return .success(emit(kind: "change", name: path, payload: .object(payload)))
+    }
+
+    /// Allocates one revision for the state keys `old` and the current state disagree on.
+    private mutating func noteStateWrites(since old: [String: JSONValue]) {
+        guard let id = spec?.id else { return }
+        let changed = Set(old.keys).union(state.keys).filter { old[$0] != state[$0] }
+        guard !changed.isEmpty else { return }
+        let revision = (revisions[id] ?? 0) + 1
+        revisions[id] = revision
+        for key in changed {
+            stateRevisions[key] = revision
+        }
+    }
+
+    /// A host `patch_prototype` (#11675), mirroring Android's `PrototypeRuntime.patch`: state ops need a
+    /// `baseRevision` and conflict on a key the user changed since it; the ops apply completely or not
+    /// at all, and the result is validated like a show. An accepted patch is one new revision and one
+    /// `change` event for the state keys it moved; pages and stack paths survive, text drafts follow
+    /// the stored value. A refusal changes nothing.
+    mutating func patch(id: String, baseRevision: Int?, ops: JSONValue) -> (PrototypePatchOutcome, [PrototypeEvent]) {
+        guard let spec, spec.id == id else {
+            return (.rejected(message: "Unknown prototype id: \(id)", revision: nil), [])
+        }
+        let current = dataRevision
+        if let refusal = PrototypePatch.stateGuard(
+            ops: ops, baseRevision: baseRevision, revision: current, stateRevisions: stateRevisions, state: state
+        ) {
+            return (refusal, [])
+        }
+        let patched: PrototypeSpec
+        let newState: [String: JSONValue]
+        switch PrototypePatch.rebuild(spec, state: state, ops: ops, nonStateBytes: nonStateBytes) {
+        case let .success(result): (patched, newState) = result
+        case let .failure(refusal): return (.rejected(message: refusal.message, revision: current), [])
+        }
+        let changed = Set(state.keys).union(newState.keys).filter { state[$0] != newState[$0] }.sorted()
+        let revision = current + 1
+        revisions[id] = revision
+        tracksStateRevisions = false
+        state = newState
+        tracksStateRevisions = true
+        for key in changed {
+            stateRevisions[key] = revision
+        }
+        self.spec = patched
+        structureRevision += 1
+        rebuildNavigation(for: patched.root, keepingPages: pages, keepingStacks: stacks)
+        return (.applied(revision: revision), emitStateChange(changed.filter { newState[$0] != nil }))
     }
 
     /// A `setPage` action: `next`/`prev` step from the current page, a number jumps to it.

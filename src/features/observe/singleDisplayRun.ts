@@ -1,4 +1,5 @@
-import type { ObserveResult } from "../../models";
+import type { ObserveResult, ViewHierarchyResult } from "../../models";
+import type { ObservedAndroidDisplay } from "./ObservationDisplay";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { processTimingData } from "../../utils/PerformanceTracker";
 import { resolveScreenshotMode, type ScreenshotMode } from "./automaticScreenshotPolicy";
@@ -155,4 +156,30 @@ export function attachPerfTimings(result: ObserveResult, perf: PerformanceTracke
   if (processedTimings.truncated) {
     result.perfTimingTruncated = true;
   }
+}
+
+export interface SingleDisplayStageContext {
+  result: ObserveResult;
+}
+
+export interface SingleDisplayCaptureContext extends SingleDisplayStageContext {
+  options: ObserveScreenExecuteOptions | undefined;
+  queryOptions: ObserveScreenExecuteOptions["queryOptions"];
+  perf: PerformanceTracker;
+  skipWaitForFresh: boolean;
+  minTimestamp: number;
+  signal: AbortSignal | undefined;
+  skipBackStack: boolean;
+  observerMode: boolean;
+  preserveDisplayState: boolean;
+  capturedHierarchy: ViewHierarchyResult | undefined;
+  requestedDisplayId: number | undefined;
+  observedAndroid: ObservedAndroidDisplay | undefined;
+}
+
+export interface SingleDisplayReconciliationContext extends SingleDisplayStageContext {
+  observerMode: boolean;
+  preserveDisplayState: boolean;
+  explicitlyRouted: boolean;
+  recordProvenance: { revision: number; identityRevision: number };
 }

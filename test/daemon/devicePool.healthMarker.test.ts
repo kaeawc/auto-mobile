@@ -1,3 +1,4 @@
+import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
@@ -1267,12 +1268,7 @@ test("throwing incarnation listener warns and does not break initialization or r
 test("pool signals only a newly tracked spawned Android process", async () => {
   const started: string[] = [];
   const h = await harness(1, undefined, (id) => started.push(id));
-  const pool = h.pool as unknown as {
-    trackStartedDeviceProcess(
-      device: typeof device,
-      child: ChildProcess | undefined,
-    ): Promise<void>;
-  };
+  const pool = poolInternals(h.pool);
   await pool.trackStartedDeviceProcess(device, undefined);
   expect(started).toEqual([]);
   const child = new FakeChildProcess();
@@ -1358,9 +1354,7 @@ test("process-start listener deadline releases real pool tracking with quarantin
     commands++;
     await gate.promise;
   });
-  const pool = h.pool as unknown as {
-    trackStartedDeviceProcess(device: typeof device, child: ChildProcess): Promise<void>;
-  };
+  const pool = poolInternals(h.pool);
   let settled = false;
   const tracking = pool
     .trackStartedDeviceProcess(device, new FakeChildProcess() as unknown as ChildProcess)
@@ -1389,9 +1383,7 @@ test("a rejected process-start listener warns without failing real pool tracking
   const h = await harness(1, undefined, () => {
     throw failure;
   });
-  const pool = h.pool as unknown as {
-    trackStartedDeviceProcess(device: typeof device, child: ChildProcess): Promise<void>;
-  };
+  const pool = poolInternals(h.pool);
   const child = new FakeChildProcess() as unknown as ChildProcess;
   try {
     await expect(pool.trackStartedDeviceProcess(device, child)).resolves.toBeUndefined();

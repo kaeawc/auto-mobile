@@ -1,4 +1,4 @@
-import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
+import { poolInternals, recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { drainUntil, drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { beforeAll, expect, spyOn, test } from "bun:test";
@@ -2380,9 +2380,7 @@ test("active emulator loss adopts a new serial after its tracked process exits",
         throw new Error("An exited process must not be killed");
       },
     } as unknown as ChildProcess;
-    (
-      pool as unknown as { startedDeviceProcesses: Map<string, ChildProcess> }
-    ).startedDeviceProcesses.set(original.deviceId, exitedProcess);
+    poolInternals(pool).startedDeviceProcesses.set(original.deviceId, exitedProcess);
     const returned = { ...original, deviceId: "emulator-5556" };
     manager.bootedDevices = [returned];
     await expect(

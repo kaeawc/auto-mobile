@@ -21,7 +21,7 @@ import {
   type ObservationArtifactWriter,
   type ObservationBaselineStore,
 } from "../finalizeToolResponse";
-import { getStructuredField } from "../../utils/toolUtils";
+import { getStructuredField, observationOfPayload } from "../../utils/toolUtils";
 import { readToolEnvelopePayload } from "../toolEnvelopePayload";
 import { isMarkedToolFailure } from "../../utils/toolFailureSignal";
 import { narrowInternalToolEnvelope } from "../internalToolPayloads";
@@ -99,7 +99,7 @@ function getObservedHierarchy(
     return undefined;
   }
 
-  const observation = name === "observe" ? payload : payload.observation;
+  const observation = observationOfPayload(name, payload);
   if (!isRecord(observation) || !isViewHierarchyResult(observation.viewHierarchy)) {
     return undefined;
   }

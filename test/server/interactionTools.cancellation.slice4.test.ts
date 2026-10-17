@@ -72,14 +72,12 @@ const test = cancellationTests(() => {
 });
 
 function profileClient() {
-  const client = AndroidCtrlProxyClient.createForTesting(
-    android,
-    new FakeAdbExecutor(),
-    () => {
+  const client = AndroidCtrlProxyClient.createForTesting(android, new FakeAdbExecutor(), {
+    webSocketFactory: () => {
       throw new Error("Unexpected socket connection");
     },
-    new FakeTimer(),
-  );
+    timer: new FakeTimer(),
+  });
   const supports = spyOn(client, "supportsCommand").mockResolvedValue(true);
   const set = spyOn(client, "setKeyboardProfile").mockResolvedValue({
     success: true,

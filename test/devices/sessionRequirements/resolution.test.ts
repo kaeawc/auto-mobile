@@ -691,12 +691,12 @@ describe("Android catalog and default resolution", () => {
 });
 
 describe("Android system image selection", () => {
-  const image = (flavor: string, version = "16") => ({
-    systemImagePackage: `system-images;android-36;${flavor};arm64-v8a`,
+  const image = (flavor: string, version = "16", abi = "arm64-v8a") => ({
+    systemImagePackage: `system-images;android-36;${flavor};${abi}`,
     osVersion: version,
     versionPrecision: "major" as const,
     apiLevel: 36,
-    abi: "arm64-v8a",
+    abi,
     flavor,
     installed: true,
     metadataState: "current" as const,
@@ -704,8 +704,9 @@ describe("Android system image selection", () => {
   const resolveWith = (
     releases: ReturnType<typeof image>[],
     os: object = { kind: "major", major: 16 },
+    hostAbis?: string[],
   ) => {
-    const catalog = androidCatalog({ releases });
+    const catalog = androidCatalog({ releases, hostAbis });
     const defaults = androidDefaults();
     const normalized = normalizeAndroid(
       {
@@ -729,6 +730,25 @@ describe("Android system image selection", () => {
     }
   });
 
+  test("host ABI outranks flavor so an x86_64 host never picks an ARM image (#12984)", () => {
+    const releases = [
+      image("google_apis", "16", "arm64-v8a"),
+      image("default", "16", "x86_64"),
+      image("google_apis", "16", "x86_64"),
+    ];
+    for (const ordered of [releases, [...releases].reverse()]) {
+      const resolved = unwrap(resolveWith(ordered, undefined, ["x86_64", "x86"]));
+      expect(resolved.profile).toMatchObject({ abi: "x86_64", flavor: "google_apis" });
+    }
+    const onlyOtherFlavor = [
+      image("google_apis", "16", "arm64-v8a"),
+      image("default", "16", "x86_64"),
+    ];
+    expect(
+      unwrap(resolveWith(onlyOtherFlavor, undefined, ["x86_64", "x86"])).profile,
+    ).toMatchObject({ abi: "x86_64", flavor: "default" });
+  });
+
   test("falls back to package order when no google_apis image is installed", () => {
     const resolved = unwrap(resolveWith([image("google_apis_playstore"), image("default")]));
     expect(resolved.profile).toMatchObject({ flavor: "default" });
@@ -744,6 +764,30 @@ describe("Android system image selection", () => {
     );
     expect(missing.code).toBe("missing_installed_runtime");
     expect(missing.message).toContain("not recognized");
+  });
+
+  test("an installed iOS runtime with malformed version metadata stays catalog_metadata_invalid (#12799)", () => {
+    const defaults = iosDefaults();
+    const catalog = iosCatalog({
+      releases: iosCatalog().releases.map((release) => ({
+        ...release,
+        osVersion: undefined,
+        metadataState: "stale" as const,
+      })),
+    });
+    const normalized = normalizeIos(
+      {
+        schemaVersion: 1,
+        platform: "ios",
+        hardware: { kind: "archetype", archetype: "phone" },
+        os: { kind: "exact", version: "27" },
+      },
+      defaults,
+      catalog,
+    );
+    const error = unwrapError(resolveSessionDeviceProfile(normalized, defaults, catalog));
+    expect(error.code).toBe("catalog_metadata_invalid");
+    expect(error.message).not.toContain("Android");
   });
 
   test("an API level used as os names the release version in the error", () => {

@@ -103,6 +103,8 @@ import { AndroidActionDispatcher } from "./AndroidActionDispatcher";
 import { AndroidClientRequests } from "./AndroidClientRequests";
 import { AndroidBuildContextResolver } from "./AndroidBuildContextResolver";
 import { AndroidSdkScreenIdentityStore } from "./AndroidSdkScreenIdentityStore";
+import { AndroidInteractionTracker, MAX_CACHED_INTERACTIONS } from "./AndroidNavigationEvents";
+import { AndroidNavigationWriteQueue } from "./AndroidNavigationWriteQueue";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import { WEBSOCKET_NOT_CONNECTED_MESSAGE, type SendCommandOptions } from "../DeviceServiceUtils";
 import { combineWithAmbientAbort } from "../../../utils/AbortContext";
@@ -644,22 +646,6 @@ export interface AndroidCtrlProxyClientDeps {
   transientObserver?: boolean;
 }
 
-type AndroidCtrlProxyClientLegacyTestArgs = [
-  timer?: Timer,
-  installedAppsRepository?: InstalledAppsStore,
-  retryExecutor?: RetryExecutor,
-  crashEventSink?: CrashEventSink,
-  deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
-  sdkEventIngestor?: AndroidSdkEventIngestor,
-  loggerInstance?: Logger,
-  certificateFileSystem?: CertificateFileSystem,
-  screenshotBackoffScheduler?: ScreenshotBackoffScheduler,
-  ctrlProxyForwardLease?: CtrlProxyForwardLease,
-  serviceManagerFactory?: AndroidServiceManagerFactory,
-  idGenerator?: IdGenerator,
-  transientObserver?: boolean,
-];
-
 const defaultAndroidServiceManagerFactory: AndroidServiceManagerFactory = (device) =>
   AndroidCtrlProxyManager.getInstance(device);
 
@@ -755,27 +741,12 @@ export class AndroidCtrlProxyClient
   private _highlights: CtrlProxyHighlights | null = null;
   private _packages: CtrlProxyPackages | null = null;
 
-  // Interaction listeners
-  private interactionListeners: Set<(event: InteractionEvent) => void> = new Set();
-  private static readonly INTERACTION_NAVIGATION_WINDOW_MS = 5_000;
-  private static readonly MAX_CACHED_INTERACTIONS = 100;
-  // Recent interactions keyed by the app package reported on the wire.
-  private lastInteractionByApp: Map<
-    string,
-    {
-      type: string;
-      elementText?: string;
-      elementResourceId?: string;
-      timestamp: number | undefined;
-      receivedAtMs: number;
-    }
-  > = new Map();
+  private readonly interactionTracker = new AndroidInteractionTracker(this.timer);
   private installedAppsRepository: InstalledAppsStore | null = null;
 
   // Hierarchy navigation detector
   private sdkNavigationAppIds: Set<string> = new Set();
   private readonly sdkScreenIdentityStore = new AndroidSdkScreenIdentityStore(this.timer);
-  private navigationWriteTail: Promise<void> = Promise.resolve();
 
   // Screen geometry derived from hierarchies, carrying whether the daemon has actually seen a
   // hierarchy with that geometry (issue #3348). See TrackedScreenGeometry.
@@ -1687,70 +1658,14 @@ export class AndroidCtrlProxyClient
     logger.info("[CTRL_PROXY] Reset all singleton instances and port allocations");
   }
 
-  /**
-   * Create instance for testing with custom WebSocket factory
-   */
+  /** Create an instance for testing with injectable dependencies. */
   public static createForTesting(
     device: BootedDevice,
     adb: AdbExecutor,
-    deps?: AndroidCtrlProxyClientDeps & { screenshotBackoffScheduler?: ScreenshotBackoffScheduler },
-  ): AndroidCtrlProxyClient;
-  /** @deprecated Pass an AndroidCtrlProxyClientDeps object instead of positional dependencies. */
-  public static createForTesting(
-    device: BootedDevice,
-    adb: AdbExecutor,
-    webSocketFactory: WebSocketFactory,
-    ...args: AndroidCtrlProxyClientLegacyTestArgs
-  ): AndroidCtrlProxyClient;
-  public static createForTesting(
-    device: BootedDevice,
-    adb: AdbExecutor,
-    depsOrWebSocketFactory?:
-      | (AndroidCtrlProxyClientDeps & { screenshotBackoffScheduler?: ScreenshotBackoffScheduler })
-      | WebSocketFactory,
-    ...args: AndroidCtrlProxyClientLegacyTestArgs
-  ): AndroidCtrlProxyClient {
-    const [
-      timer,
-      installedAppsRepository,
-      retryExecutor,
-      crashEventSink,
-      deviceConnectionLostNotifier,
-      sdkEventIngestor,
-      loggerInstance,
-      certificateFileSystem,
-      screenshotBackoffScheduler,
-      ctrlProxyForwardLease,
-      serviceManagerFactory,
-      idGenerator,
-      transientObserver = false,
-    ] = args;
-    // Positional form: a factory, or an explicit `undefined` factory followed by later positional
-    // arguments such as the timer. Anything else is the deps bag.
-    const isPositional =
-      typeof depsOrWebSocketFactory === "function" ||
-      (depsOrWebSocketFactory === undefined && args.length > 0);
-    const deps: AndroidCtrlProxyClientDeps & {
+    deps: AndroidCtrlProxyClientDeps & {
       screenshotBackoffScheduler?: ScreenshotBackoffScheduler;
-    } = isPositional
-      ? {
-          webSocketFactory:
-            typeof depsOrWebSocketFactory === "function" ? depsOrWebSocketFactory : undefined,
-          timer,
-          installedAppsRepository,
-          retryExecutor,
-          crashEventSink,
-          deviceConnectionLostNotifier,
-          sdkEventIngestor,
-          logger: loggerInstance,
-          certificateFileSystem,
-          screenshotBackoffScheduler,
-          ctrlProxyForwardLease,
-          serviceManagerFactory,
-          idGenerator,
-          transientObserver,
-        }
-      : (depsOrWebSocketFactory ?? {});
+    } = {},
+  ): AndroidCtrlProxyClient {
     const client = new AndroidCtrlProxyClient(device, adb, {
       ...deps,
       ctrlProxyForwardLease: deps.ctrlProxyForwardLease ?? new NoOpCtrlProxyForwardLease(),
@@ -2812,10 +2727,7 @@ export class AndroidCtrlProxyClient
   // ===========================================================================
 
   onInteraction(listener: (event: InteractionEvent) => void): () => void {
-    this.interactionListeners.add(listener);
-    return () => {
-      this.interactionListeners.delete(listener);
-    };
+    return this.interactionTracker.onInteraction(listener);
   }
 
   /** Send start_recording for wire compatibility; currently has no effect on the device. */
@@ -3153,7 +3065,7 @@ export class AndroidCtrlProxyClient
           return client.storage;
         },
         get maxCachedInteractions() {
-          return AndroidCtrlProxyClient.MAX_CACHED_INTERACTIONS;
+          return MAX_CACHED_INTERACTIONS;
         },
         refreshObservationStreamHierarchyCadence: (...args) =>
           client.refreshObservationStreamHierarchyCadence(...args),
@@ -3187,46 +3099,31 @@ export class AndroidCtrlProxyClient
     return this.getInboundMessageRouter().webSocketMessageHandlers;
   }
 
+  private get lastInteractionByApp() {
+    return this.interactionTracker.lastInteractionByApp;
+  }
+
   private pruneStaleInteractions(now: number): void {
-    for (const [applicationId, interaction] of this.lastInteractionByApp) {
-      if (
-        now < interaction.receivedAtMs ||
-        now - interaction.receivedAtMs > AndroidCtrlProxyClient.INTERACTION_NAVIGATION_WINDOW_MS
-      ) {
-        this.lastInteractionByApp.delete(applicationId);
-      }
-    }
+    this.interactionTracker.pruneStaleInteractions(now);
   }
 
   private attachRecentInteraction(event: NavigationEvent): void {
-    const hostNow = this.timer.now();
-    this.pruneStaleInteractions(hostNow);
-    const interaction = event.applicationId
-      ? this.lastInteractionByApp.get(event.applicationId)
-      : undefined;
-    if (!interaction) {
-      return;
-    }
-    const receivedAgeMs = hostNow - interaction.receivedAtMs;
-    if (
-      receivedAgeMs < 0 ||
-      receivedAgeMs > AndroidCtrlProxyClient.INTERACTION_NAVIGATION_WINDOW_MS
-    ) {
-      return;
-    }
-    if (
-      typeof event.timestamp === "number" &&
-      typeof interaction.timestamp === "number" &&
-      event.timestamp < interaction.timestamp
-    ) {
-      return;
-    }
-    event.triggeringInteraction = {
-      type: interaction.type,
-      elementText: interaction.elementText,
-      elementResourceId: interaction.elementResourceId,
-    };
+    this.interactionTracker.attachRecentInteraction(event);
   }
+
+  private notifyInteractionListeners(event: InteractionEvent): void {
+    this.interactionTracker.notifyInteractionListeners(event);
+  }
+
+  private navigationWriteQueueInstance: AndroidNavigationWriteQueue | undefined;
+  private enqueueNavigationGraphWrite(received: NavigationEvent): Promise<void> {
+    this.navigationWriteQueueInstance ??= new AndroidNavigationWriteQueue({
+      deviceId: this.device.deviceId,
+      getNavigationGraphManager: () => this.getNavigationGraphManager(),
+    });
+    return this.navigationWriteQueueInstance.enqueue(received);
+  }
+
   private handleWebSocketMessage(data: WebSocket.Data): Promise<void> {
     return this.getInboundMessageRouter().handleWebSocketMessage(data);
   }
@@ -3421,16 +3318,6 @@ export class AndroidCtrlProxyClient
     scheduler.startBackoffSequence();
   }
 
-  private notifyInteractionListeners(event: InteractionEvent): void {
-    for (const listener of this.interactionListeners) {
-      try {
-        listener(event);
-      } catch (error) {
-        logger.warn(`[CTRL_PROXY] Interaction listener error: ${error}`);
-      }
-    }
-  }
-
   private getInstalledAppsRepository(): InstalledAppsStore {
     if (!this.installedAppsRepository) {
       this.installedAppsRepository = new InstalledAppsRepository();
@@ -3471,21 +3358,6 @@ export class AndroidCtrlProxyClient
 
   private handlePackageEvent(event: PackageEvent, timestamp?: number): Promise<void> {
     return this.getAppEventRecorder().handlePackageEvent(event, timestamp);
-  }
-
-  private enqueueNavigationGraphWrite(received: NavigationEvent): Promise<void> {
-    const navigationGraphManager = this.getNavigationGraphManager();
-    // Stamp the device that received the event: the manager's telemetry must not read the
-    // recorder's ambient context, which another device's client may have set (#10195).
-    const event: NavigationEvent = { ...received, deviceId: this.device.deviceId };
-    const navWrite = this.navigationWriteTail.then(
-      () => navigationGraphManager.recordNavigationEvent(event),
-      () => navigationGraphManager.recordNavigationEvent(event),
-    );
-    // A failed event remains observable to its handler, but cannot permanently block later
-    // navigation frames from reaching the graph.
-    this.navigationWriteTail = navWrite.catch(() => undefined);
-    return navWrite;
   }
 
   private handleHandledExceptionEvent(event: HandledExceptionEvent): Promise<void> {

@@ -245,24 +245,18 @@ describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", (
       const h = harness(true, true, true, true, (device, adb) => {
         const timer = new FakeTimer();
         timer.enableAutoAdvance();
-        realClient = AndroidCtrlProxyClient.createForTesting(
-          device,
-          adb,
-          socketFactory,
+        realClient = AndroidCtrlProxyClient.createForTesting(device, adb, {
+          webSocketFactory: socketFactory,
           timer,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          { tryAcquire: () => true, release: () => {}, ownsForward: () => false },
-          () => {
+          ctrlProxyForwardLease: {
+            tryAcquire: () => true,
+            release: () => {},
+            ownsForward: () => false,
+          },
+          serviceManagerFactory: () => {
             throw new Error("service recovery must not run");
           },
-        );
+        });
         realClient.forwardClientProbe = { findClientPids: async () => [4242] };
         realClient.forwardClientProcessIsRunning = () => true;
         AndroidCtrlProxyManager.setForeignForwardEvidenceForTesting(

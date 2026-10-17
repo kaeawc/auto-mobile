@@ -287,12 +287,10 @@ test("Android transient uses its own forward and leaves the disconnected singlet
     platform: "android" as const,
   };
   const adb = new FakeAdbExecutor();
-  const existing = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    createInstantFailureWebSocketFactory(new FakeTimer()),
-    new FakeTimer(),
-  );
+  const existing = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: createInstantFailureWebSocketFactory(new FakeTimer()),
+    timer: new FakeTimer(),
+  });
   AndroidCtrlProxyClient.registerForTesting(existing, device.deviceId);
   const ownerPort = PortManager.getPort(device.deviceId)!;
   let holders = 0;
@@ -373,12 +371,10 @@ test.each(["android", "ios"] as const)(
     const device = { deviceId: `${platform}-pending-owner`, name: platform, platform };
     const client =
       platform === "android"
-        ? AndroidCtrlProxyClient.createForTesting(
-            device,
-            new FakeAdbExecutor(),
-            createSuccessWebSocketFactory(timer),
+        ? AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+            webSocketFactory: createSuccessWebSocketFactory(timer),
             timer,
-          )
+          })
         : IOSCtrlProxyClient.createForTesting(
             device,
             8765,
@@ -433,8 +429,10 @@ test("Android observer change replaces the displaced owner push", async () => {
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "android-observer", name: "Android", platform: "android" },
     new FakeAdbExecutor(),
-    createSuccessWebSocketFactory(timer),
-    timer,
+    {
+      webSocketFactory: createSuccessWebSocketFactory(timer),
+      timer,
+    },
   );
   const navigation = spyOn(client, "getHierarchyNavigationDetector");
   let frames = 0;
@@ -505,8 +503,10 @@ test("Android real client routes a changed correlated observer frame through the
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "android-real-observer", name: "Android", platform: "android" },
     new FakeAdbExecutor(),
-    sockets.factory,
-    timer,
+    {
+      webSocketFactory: sockets.factory,
+      timer,
+    },
   );
   const push = spyOn(client, "pushHierarchyToObservationStream");
   try {
@@ -573,8 +573,10 @@ test("Android real client keeps an identical observer frame private", async () =
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "android-identical-observer", name: "Android", platform: "android" },
     new FakeAdbExecutor(),
-    sockets.factory,
-    timer,
+    {
+      webSocketFactory: sockets.factory,
+      timer,
+    },
   );
   const push = spyOn(client, "pushHierarchyToObservationStream");
   try {
@@ -657,8 +659,10 @@ test("Android uncorrelated push stays with owner and observer times out", async 
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "android-uncorrelated", name: "Android", platform: "android" },
     new FakeAdbExecutor(),
-    sockets.factory,
-    timer,
+    {
+      webSocketFactory: sockets.factory,
+      timer,
+    },
   );
   try {
     expect(await client.ensureConnected()).toBe(true);
@@ -700,12 +704,10 @@ test.each(["android", "ios"] as const)(
     const device = { deviceId: `${platform}-observer-error`, name: platform, platform };
     const client =
       platform === "android"
-        ? AndroidCtrlProxyClient.createForTesting(
-            device,
-            new FakeAdbExecutor(),
-            sockets.factory,
+        ? AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+            webSocketFactory: sockets.factory,
             timer,
-          )
+          })
         : IOSCtrlProxyClient.createForTesting(device, 8765, sockets.factory, timer);
     try {
       expect(await client.ensureConnected()).toBe(true);
@@ -739,12 +741,10 @@ test.each(["android", "ios"] as const)(
     const device = { deviceId: `${platform}-owner-deadline`, name: platform, platform };
     const client =
       platform === "android"
-        ? AndroidCtrlProxyClient.createForTesting(
-            device,
-            new FakeAdbExecutor(),
-            createSuccessWebSocketFactory(timer),
+        ? AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+            webSocketFactory: createSuccessWebSocketFactory(timer),
             timer,
-          )
+          })
         : IOSCtrlProxyClient.createForTesting(
             device,
             8765,
@@ -785,12 +785,10 @@ test.each(["android", "ios"] as const)(
     const device = { deviceId: `${platform}-owner-disconnect`, name: platform, platform };
     const client =
       platform === "android"
-        ? AndroidCtrlProxyClient.createForTesting(
-            device,
-            new FakeAdbExecutor(),
-            sockets.factory,
+        ? AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+            webSocketFactory: sockets.factory,
             timer,
-          )
+          })
         : IOSCtrlProxyClient.createForTesting(device, 8765, sockets.factory, timer);
     try {
       expect(await client.ensureConnected()).toBe(true);
@@ -835,30 +833,18 @@ test.each(["android", "ios"] as const)(
     const adb = new FakeAdbExecutor();
     const client =
       platform === "android"
-        ? AndroidCtrlProxyClient.createForTesting(
-            device,
-            adb,
-            createInstantFailureWebSocketFactory(timer),
+        ? AndroidCtrlProxyClient.createForTesting(device, adb, {
+            webSocketFactory: createInstantFailureWebSocketFactory(timer),
             timer,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            () => ({
+            serviceManagerFactory: () => ({
               isAccessibilityServiceHealthy: async () => false,
               setup: async () => {
                 setupCalls++;
                 return { success: false, message: "blocked" };
               },
             }),
-            undefined,
-            true,
-          )
+            transientObserver: true,
+          })
         : IOSCtrlProxyClient.createForTesting(
             device,
             8765,
@@ -936,7 +922,10 @@ test("Android observer JPEG screenshot uses ADB while the real owner client stay
     trim: () => base64.trim(),
     includes: (part) => base64.includes(part),
   });
-  const client = AndroidCtrlProxyClient.createForTesting(device, adb, sockets.factory, timer);
+  const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: sockets.factory,
+    timer,
+  });
   const screenshotRequest = spyOn(client, "requestScreenshot");
   const writer = new FakeScreenshotFileWriter();
   try {
@@ -1250,8 +1239,10 @@ test("Android observer preservation policies use separate flights and isolate on
   const client = AndroidCtrlProxyClient.createForTesting(
     { deviceId: "android-observer-policies", name: "Android", platform: "android" },
     new FakeAdbExecutor(),
-    sockets.factory,
-    timer,
+    {
+      webSocketFactory: sockets.factory,
+      timer,
+    },
   );
   const push = spyOn(client, "pushHierarchyToObservationStream");
   try {

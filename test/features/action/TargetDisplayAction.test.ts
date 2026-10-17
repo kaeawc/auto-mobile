@@ -2348,12 +2348,10 @@ describe("post-action screenshot resolved display", () => {
         const wireTimer = new FakeTimer();
         const socket = new FakeWebSocket("ws://fake", "none", 0, wireTimer);
         socket.readyState = WebSocketState.OPEN;
-        const client = AndroidCtrlProxyClient.createForTesting(
-          android,
-          executor,
-          () => socket as WebSocket,
-          wireTimer,
-        );
+        const client = AndroidCtrlProxyClient.createForTesting(android, executor, {
+          webSocketFactory: () => socket as WebSocket,
+          timer: wireTimer,
+        });
         client["ws"] = socket as WebSocket;
         client["connectWebSocket"] = async () => true;
         client["screenshotBackoffScheduler"] = new FakeScreenshotBackoffScheduler();

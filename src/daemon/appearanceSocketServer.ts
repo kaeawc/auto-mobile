@@ -12,7 +12,7 @@ import {
   resolveAppearanceMode,
   updateAppearanceConfig,
 } from "../server/appearanceManager";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import {
   DEFAULT_APPEARANCE_APPLY_DEADLINE_MS,
@@ -79,7 +79,7 @@ const defaultDeviceSource: AppearanceDeviceSource = {
         platform: device.platform,
       }));
   },
-  getCurrentDevice: () => DeviceSessionManager.getInstance().getCurrentDevice(),
+  getCurrentDevice: () => DeviceReadiness.getInstance().getCurrentDevice(),
   getSessionForDevice: (deviceId) => {
     const daemonState = DaemonState.getInstance();
     return daemonState.isInitialized()

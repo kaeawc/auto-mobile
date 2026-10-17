@@ -363,7 +363,10 @@ describe("prototype saved actions", () => {
       error: savedPrototypeErrorMessages.not_found,
     });
   });
-  const CLEAR = "shell cmd shortcut clear-shortcuts dev.jasonpearson.automobile.ctrlproxy";
+  const CURRENT_USER = "shell am get-current-user";
+  const clearFor = (userId: number) =>
+    `shell cmd shortcut clear-shortcuts --user ${userId} dev.jasonpearson.automobile.ctrlproxy`;
+  const CLEAR = clearFor(0);
   test("deleteSaved without removeIcon never runs adb", async () => {
     const output = await call({ action: "deleteSaved", id: "demo" });
     expect(output.warning).toContain("disabled home-screen icon may remain");
@@ -375,7 +378,14 @@ describe("prototype saved actions", () => {
     expect(output).toMatchObject({ success: true });
     expect(output.warning).toContain("Cleared");
     expect(proxy.deleteRequests).toEqual(["demo"]);
-    expect(adb.getExecutedCommands()).toEqual([CLEAR]);
+    expect(adb.getExecutedCommands()).toEqual([CURRENT_USER, CLEAR]);
+  });
+  test("removeIcon clears the active work profile's shortcuts, not user 0's", async () => {
+    proxy.setListSavedResult({ success: true, savedPrototypes: [] });
+    adb.setCommandResponse(CURRENT_USER, { stdout: "10\n", stderr: "" });
+    const output = await call({ action: "deleteSaved", id: "demo", removeIcon: true });
+    expect(output.warning).toContain("Cleared");
+    expect(adb.getExecutedCommands()).toEqual([CURRENT_USER, clearFor(10)]);
   });
   test("removeIcon leaves the icon while other prototypes remain", async () => {
     proxy.setListSavedResult({

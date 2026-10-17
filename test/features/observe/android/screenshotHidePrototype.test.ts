@@ -28,20 +28,11 @@ function clientWithCapturedFrames(supportedCommands?: readonly string[]) {
   const timer = new FakeTimer();
   const adb = new FakeAdbExecutor();
   AndroidCtrlProxyClient.resetInstances();
-  const client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    (url) => new FakeWebSocket(url, "none", 0, timer) as unknown as WebSocket,
+  const client = AndroidCtrlProxyClient.createForTesting(device, adb, {
+    webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer) as unknown as WebSocket,
     timer,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    new FakeScreenshotBackoffScheduler(),
-  );
+    screenshotBackoffScheduler: new FakeScreenshotBackoffScheduler(),
+  });
   const frames: Record<string, unknown>[] = [];
   client["ws"] = {
     readyState: WebSocket.OPEN,

@@ -94,10 +94,13 @@ function makeRestore(
   screenReader: SessionDeviceStateRestoreOptions["screenReader"] = () => ({
     restore: async () => {},
   }),
+  rotation: SessionDeviceStateRestoreOptions["rotation"] = () => ({ restore: async () => {} }),
 ): SessionDeviceStateRestore {
   return new SessionDeviceStateRestore(host, {
     screenReader,
     screenReaderBackoff: backoff,
+    rotation,
+    rotationBackoff: backoff,
     iosAppNetworkRuleRestorer: restorer,
     defaultIosAppNetworkRuleRestorer: () => restorer,
     iosLease: { leaseMs: 30_000, renewIntervalMs: 10_000 },
@@ -381,5 +384,52 @@ describe("SessionDeviceStateRestore iOS app rule lease (#10264)", () => {
     timer.advanceTime(1000);
     host.expiries[0]!.clearIfOwned();
     expect(restore.activeIosAppNetworkLease("s1")).toBeUndefined();
+  });
+});
+
+describe("rotation family", () => {
+  async function createRotation(rotationResult: (call: number) => Promise<void>) {
+    const timer = new FakeTimer();
+    const host = new FakeHost(timer);
+    host.publishAll = true;
+    let calls = 0;
+    const restore = makeRestore(host, undefined, () => ({
+      restore: () => {
+        calls++;
+        return rotationResult(calls);
+      },
+    }));
+    const factory = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
+      barrier: () => new FakeDbWriteBarrier(),
+    });
+    factory.stopCleanupTimer();
+    const session = await factory.createSession("s2", "emulator-5556", "android");
+    factory.setRotation(session, { accelerometerRotation: 1, userRotation: 0 });
+    return { restore, session, calls: () => calls };
+  }
+
+  test("a successful rotation restore clears the slot", async () => {
+    const h = await createRotation(async () => {});
+    const { pending } = await h.restore.getPendingRotationRestoration(h.session, null);
+    expect(pending).toBeNull();
+    expect(h.calls()).toBe(1);
+    expect(h.session.cacheData.rotation).toBeUndefined();
+  });
+
+  test("a window-manager-managed failure abandons without retrying and keeps the baseline until the queue retires", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const managed = Object.assign(new Error("managed"), { details: { retryable: false } });
+      const h = await createRotation(() => Promise.reject(managed));
+      const baseline = h.session.cacheData.rotation;
+      const { pending } = await h.restore.getPendingRotationRestoration(h.session, null);
+      await pending;
+      expect(h.calls()).toBe(1);
+      expect(h.restore.abandonedRotations.get("emulator-5556")).toBe(baseline);
+      h.restore.rotationRestores.retire("emulator-5556");
+      expect(h.restore.abandonedRotations.has("emulator-5556")).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

@@ -7,6 +7,7 @@ import type {
 } from "../features/networkFilter/IosAppNetworkRuleClient";
 import { MAX_NETWORK_CONDITION_TTL_SECONDS } from "../features/utility/DeviceState";
 import type { BackoffPolicy } from "../utils/Backoff";
+import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
@@ -25,7 +26,15 @@ import {
   type IosAppNetworkLeaseOptions,
   type IosAppNetworkRuleRestorer,
 } from "./iosAppNetworkLease";
-import type { ScreenReaderRestorer, ScreenReaderSessionState, Session } from "./sessionManager";
+import {
+  NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+  type RotationRestorer,
+  type RotationSessionState,
+  type ScreenReaderRestorer,
+  type ScreenReaderSessionState,
+  type Session,
+} from "./sessionManager";
+import { RotationSettingManagedError } from "../models/RotationSettingManagedError";
 
 /**
  * Each screen-reader restore attempt is a full TalkBack/VoiceOver toggle (it can
@@ -33,6 +42,37 @@ import type { ScreenReaderRestorer, ScreenReaderSessionState, Session } from "./
  * retried a small bounded number of times, with `Backoff` delays, never forever.
  */
 const SCREEN_READER_RESTORE_RETRY_ATTEMPTS = 2;
+
+/**
+ * Rotation restore retries are bounded too. A fold/unfold between the session's
+ * rotation and its release can leave the recorded settings unverifiable (the
+ * window manager owns the new panel's rotation), so an unbounded retry kept the
+ * device quarantined forever. After the cap the device leaves quarantine.
+ */
+const ROTATION_RESTORE_RETRY_ATTEMPTS = 5;
+/**
+ * A restore the window manager owns (a foldable re-applying rotation per device state)
+ * can never verify by rewriting the setting, so it ends the retry loop immediately.
+ */
+function isNonRetryableRotationRestoreError(error: unknown): boolean {
+  if (error instanceof RotationSettingManagedError) {
+    return true;
+  }
+  const details: unknown =
+    typeof error === "object" && error !== null && "details" in error ? error.details : undefined;
+  return (
+    typeof details === "object" &&
+    details !== null &&
+    "retryable" in details &&
+    details.retryable === false
+  );
+}
+const rotationRestorePolicy: RestoreQueuePolicy = {
+  kind: "rotation",
+  retiredOnIncarnationBump: false,
+  setupHandoff: "track-eagerly",
+  removedDuringSetupMessage: "Cannot change rotation: device was removed during session setup.",
+};
 
 const screenReaderRestorePolicy: RestoreQueuePolicy = {
   kind: "screen-reader",
@@ -92,6 +132,8 @@ export interface SessionDeviceStateRestoreHost {
 export interface SessionDeviceStateRestoreOptions {
   screenReader: (device: BootedDevice) => ScreenReaderRestorer;
   screenReaderBackoff: BackoffPolicy;
+  rotation: (device: BootedDevice) => RotationRestorer;
+  rotationBackoff: BackoffPolicy;
   /** Injected iOS per-app rule restorer; else `defaultIosAppNetworkRuleRestorer()`. */
   iosAppNetworkRuleRestorer?: IosAppNetworkRuleRestorer;
   defaultIosAppNetworkRuleRestorer: () => IosAppNetworkRuleRestorer;
@@ -134,6 +176,18 @@ export class SessionDeviceStateRestore {
   private readonly screenReaderMutationQueues = new Map<string, Promise<unknown>>();
   private readonly screenReaderRestorer: (device: BootedDevice) => ScreenReaderRestorer;
   private readonly screenReaderRestoreBackoff: BackoffPolicy;
+  private readonly rotationMutationQueues = new Map<string, Promise<unknown>>();
+  /** Rotation settings a device still holds after release cleanup gave up on them (#10714). */
+  readonly abandonedRotations = new Map<string, RotationSessionState>();
+  private readonly abandonedRotationRetries = new Map<string, Promise<void>>();
+  readonly rotationRestores = new DeviceStateRestoreQueue<RotationSessionState>(
+    rotationRestorePolicy,
+    (deviceId) => {
+      this.abandonedRotations.delete(deviceId);
+    },
+  );
+  private readonly rotationRestoreBackoff: BackoffPolicy;
+  private readonly rotationRestorer: (device: BootedDevice) => RotationRestorer;
   private injectedIosAppNetworkRuleRestorer?: IosAppNetworkRuleRestorer;
   private readonly defaultIosAppNetworkRuleRestorer: () => IosAppNetworkRuleRestorer;
   /**
@@ -180,6 +234,8 @@ export class SessionDeviceStateRestore {
   ) {
     this.screenReaderRestorer = options.screenReader;
     this.screenReaderRestoreBackoff = options.screenReaderBackoff;
+    this.rotationRestorer = options.rotation;
+    this.rotationRestoreBackoff = options.rotationBackoff;
     this.injectedIosAppNetworkRuleRestorer = options.iosAppNetworkRuleRestorer;
     this.defaultIosAppNetworkRuleRestorer = options.defaultIosAppNetworkRuleRestorer;
     this.iosAppNetworkLeases = new IosAppNetworkLeases(
@@ -230,6 +286,60 @@ export class SessionDeviceStateRestore {
         error,
       ),
   };
+
+  private readonly rotationKind: RestoreKindSpec<RotationSessionState> = {
+    queue: this.rotationRestores,
+    name: "Rotation",
+    timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+    mapStartError: (error) => toActionableError(error, "Rotation restoration failed"),
+    prepare: (deviceId, target) => this.prepareRotationRestore(deviceId, target),
+  };
+  private readonly rotationRetry: BoundedRetrySpec<RotationSessionState> = {
+    attempts: ROTATION_RESTORE_RETRY_ATTEMPTS,
+    delayForAttempt: (attempt) => this.rotationRestoreBackoff.delayForAttempt(attempt),
+    isNonRetryable: isNonRetryableRotationRestoreError,
+    logFirstFailure: (deviceId, error) =>
+      logger.warn(`Failed to restore rotation on ${deviceId}: ${errorMessage(error)}`),
+    logRetryFailure: (deviceId, attempt, error) =>
+      logger.warn(
+        `Rotation restore retry ${attempt}/${ROTATION_RESTORE_RETRY_ATTEMPTS} failed on ${deviceId}; ` +
+          `device remains quarantined: ${errorMessage(error)}`,
+      ),
+    abandon: (deviceId, target, lastError, when) =>
+      this.abandonRotationRestore(deviceId, target, lastError, when),
+  };
+  private readonly abandonedRotationRestore: AbandonedRestoreSpec<RotationSessionState> = {
+    memory: this.abandonedRotations,
+    inFlight: this.abandonedRotationRetries,
+    timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+    label: "Abandoned rotation restoration",
+    restore: (deviceId, state, signal) =>
+      this.rotationRestorer({ name: deviceId, deviceId, platform: "android" }).restore(
+        state,
+        signal,
+      ),
+    restored: (deviceId, state) => {
+      this.forgetAbandonedRestore(this.abandonedRotations, deviceId, state);
+      logger.info(`Restored rotation settings on ${deviceId} on its next natural attempt`);
+    },
+    failed: (deviceId, state, error) => {
+      if (isNonRetryableRotationRestoreError(error)) {
+        this.forgetAbandonedRestore(this.abandonedRotations, deviceId, state);
+        logger.warn(
+          `Rotation settings on ${deviceId} cannot be restored (window manager owns rotation); ` +
+            `dropping the abandoned restore: ${errorMessage(error)}`,
+        );
+        return;
+      }
+      logger.warn(
+        `Rotation settings on ${deviceId} are still not restored; ` +
+          `will try again at the next session start or release: ${errorMessage(error)}`,
+      );
+    },
+  };
+  runRotationMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+    return runDeviceStateMutationExclusive(this.rotationMutationQueues, sessionId, fn);
+  }
 
   runScreenReaderMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
     return runDeviceStateMutationExclusive(this.screenReaderMutationQueues, sessionId, fn);
@@ -1017,5 +1127,111 @@ export class SessionDeviceStateRestore {
     }
     this.networkConditionExpiryTimers.clear();
     this.iosAppNetworkLeases.stopAll();
+  }
+
+  /** Sequence restoration after any still-draining setup; deduplicate by owned slot. */
+  async getPendingRotationRestoration(
+    session: Session,
+    pendingSetups: Promise<void> | null,
+  ): Promise<{ pending: Promise<void> | null }> {
+    return this.getPendingRestoration(
+      this.rotationRestores,
+      "rotation",
+      session,
+      pendingSetups,
+      (deviceId, target) => this.startRotationRestoration(deviceId, target),
+      (next, setups) => this.getPendingRotationRestoration(next, setups),
+    );
+  }
+
+  private startRotationRestoration(
+    deviceId: string,
+    target: PendingRestore<RotationSessionState>,
+  ): Promise<{ pending: Promise<void> | null }> {
+    return this.startRestoration(this.rotationKind, deviceId, target);
+  }
+
+  private prepareRotationRestore(
+    deviceId: string,
+    target: PendingRestore<RotationSessionState>,
+  ): RestoreRun {
+    const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
+    const generation = this.host.restoreGeneration(deviceId);
+    const restore = () =>
+      this.host.dispatchDeviceRestore(
+        deviceId,
+        async (fenceSignal, identitySignal, acknowledge) => {
+          const dispatchSignal = AbortSignal.any([target.controller.signal, fenceSignal]);
+          target.controller.signal.throwIfAborted();
+          identitySignal.throwIfAborted();
+          await this.rotationRestorer(device).restore(target.state, dispatchSignal);
+          acknowledge();
+          target.controller.signal.throwIfAborted();
+          target.clear();
+          this.forgetFencedRestore(this.rotationRestores.targets, deviceId, target);
+        },
+        generation,
+        5,
+      );
+    return {
+      restore,
+      quarantined: (outcome, error) =>
+        logger.warn(
+          `Rotation restore ${outcome}; quarantining ${device.deviceId}: ${errorMessage(error)}`,
+        ),
+      retry: (restoration) =>
+        this.retryRestoreBounded(this.rotationRetry, device.deviceId, target, restoration, restore),
+    };
+  }
+
+  /** Release the device from quarantine once the bounded rotation retries are spent. */
+  private abandonRotationRestore(
+    deviceId: string,
+    target: PendingRestore<RotationSessionState>,
+    lastError: unknown,
+    when: string,
+  ): void {
+    if (target.removed) {
+      return;
+    }
+    const { userRotation, accelerometerRotation, deviceStateRotationLock } = target.state;
+    const lock =
+      deviceStateRotationLock === undefined
+        ? ""
+        : `, device_state_rotation_lock=${deviceStateRotationLock}`;
+    logger.warn(
+      `Gave up restoring rotation settings on ${deviceId} ${when} ` +
+        `(user_rotation=${userRotation ?? "unchanged"}, accelerometer_rotation=${accelerometerRotation ?? "unchanged"}${lock} ` +
+        `not confirmed: ${errorMessage(lastError)}); releasing the device from cleanup. ` +
+        `A fold or display change during the session can make the recorded settings unverifiable. ` +
+        `Will try once more at the next session start or release on this device.`,
+    );
+    // An older abandoned baseline is the truer original; keep it over a newer session's.
+    if (!this.abandonedRotations.has(deviceId)) {
+      this.abandonedRotations.set(deviceId, target.state);
+    }
+    target.clear();
+    this.forgetFencedRestore(this.rotationRestores.targets, deviceId, target);
+  }
+
+  retryAbandonedRotationAfter(deviceId: string, own: Promise<void> | null): Promise<void> {
+    return this.retryAbandonedAfter(own, () => this.retryAbandonedRotationRestore(deviceId));
+  }
+
+  /**
+   * A transient failure keeps the record for the next start or release. A window-manager-managed
+   * outcome is definitively unrecoverable, so the record is dropped.
+   */
+  retryAbandonedRotationRestore(deviceId: string): Promise<void> {
+    return this.retryAbandonedRestore(this.abandonedRotationRestore, deviceId);
+  }
+
+  trackRotationSessionSetup(
+    session: Session,
+    createSetup: (assertCurrentDevice: () => void) => Promise<void>,
+  ): Promise<void> {
+    return this.trackRestoreSetup(this.rotationRestores, "rotation", session, createSetup, () =>
+      this.getPendingRotationRestoration(session, null),
+    );
   }
 }

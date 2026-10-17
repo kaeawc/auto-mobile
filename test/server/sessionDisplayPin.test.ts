@@ -622,6 +622,7 @@ for (const name of [
   "tapOn",
   "swipeOn",
   "tapAt",
+  "swipeAt",
   "pinchOn",
   "dragAndDrop",
   "sendKeys",

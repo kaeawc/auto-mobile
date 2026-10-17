@@ -382,9 +382,9 @@ export interface PooledDevice {
   id: string; // Device ID (e.g., "emulator-5554")
   name: string; // Device name (e.g., "Pixel 7")
   platform: Platform; // Device platform
-  sessionId: string | null; // Session currently using it, null if idle
-  status: BindingStatus; // Binding state
-  health?: DeviceHealth; // Absent means healthy
+  readonly sessionId: string | null; // Session currently using it, null if idle
+  readonly status: BindingStatus; // Binding state
+  readonly health?: DeviceHealth; // Absent means healthy
   lastUsedAt: number; // Last usage timestamp
   assignmentCount: number; // How many times assigned
   errorCount: number; // Consecutive errors
@@ -2010,6 +2010,7 @@ export class DevicePool {
       getTimer: () => this.timer,
       getDeviceManager: () => this.deviceManager,
       getDevices: () => this.devices,
+      addPooledDevice: (device) => this.devices.set(device.id, device),
       withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getCriteriaMatcher: () => this.criteriaMatcher,
       identityEvidenceForBootedDevice: (device) =>

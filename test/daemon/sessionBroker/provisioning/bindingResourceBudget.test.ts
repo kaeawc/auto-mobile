@@ -193,9 +193,9 @@ describe("binding total-resource budget", () => {
   }
 
   test.each(["amslot-", "ambroker-"])(
-    "%s leftover image at cap one only charges broker orphans",
+    "%s running leftover at cap one only charges broker orphans",
     async (prefix) => {
-      inventory.devices = [{ platform: "android", name: `${prefix}leftover`, isRunning: false }];
+      inventory.devices = [{ platform: "android", name: `${prefix}leftover`, isRunning: true }];
       const entry = await creation("ambroker-new");
       expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
         kind: prefix === "amslot-" ? "admitted" : "exhausted",
@@ -207,6 +207,42 @@ describe("binding total-resource budget", () => {
       });
     },
   );
+
+  test.each(["amslot-", "ambroker-"])(
+    "%s powered-off unbound leftover does not consume the cap (#13017)",
+    async (prefix) => {
+      inventory.devices = [
+        { platform: "android", name: `${prefix}stale`, isRunning: false },
+        {
+          platform: "ios",
+          name: `${prefix}stale-sim`,
+          isRunning: false,
+          isRunningStateKnown: true,
+        },
+      ];
+      const entry = await creation("ambroker-new");
+      expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+        kind: "admitted",
+        usage: { total: 1, orphaned: 0, preparing: 1 },
+      });
+    },
+  );
+
+  test("a leftover with unknown power state still counts as an orphan", async () => {
+    inventory.devices = [
+      {
+        platform: "android",
+        name: "ambroker-unsure",
+        isRunning: false,
+        isRunningStateKnown: false,
+      },
+    ];
+    const entry = await creation("ambroker-new");
+    expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+      kind: "exhausted",
+      usage: { orphaned: 1 },
+    });
+  });
 
   test("legacy images named by registry commitments still consume the cap", async () => {
     await assignBindingDevice(registry, "android", "amslot-kept", "old");

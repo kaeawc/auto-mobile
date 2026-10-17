@@ -629,12 +629,12 @@ export class DragAndDrop extends BaseVisualChange {
       );
     }
     if (target.elementId) {
-      return this.selector.selectByResourceId(viewHierarchy, target.elementId, selectionOptions)
+      return this.selector.select(viewHierarchy, { elementId: target.elementId }, selectionOptions)
         .element;
     }
-    const selection = this.selector.selectByText(
+    const selection = this.selector.select(
       viewHierarchy,
-      target.text ?? "",
+      { text: target.text ?? "" },
       selectionOptions,
     );
     return selection.matchedElement ?? selection.element;

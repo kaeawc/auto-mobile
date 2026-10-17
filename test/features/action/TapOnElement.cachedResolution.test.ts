@@ -653,6 +653,24 @@ describe("TalkBack focus verification authority", () => {
     expect(authority).toBe(fresh.viewHierarchy);
     expect(h.points).toEqual([{ x: 150, y: 350 }]);
   });
+
+  test("a focus request reports the tap it performed and leaves the caller's options untouched", async () => {
+    const input = {
+      ...row("Search", 300),
+      class: "android.widget.EditText",
+      editable: true,
+      focused: false,
+    };
+    const h = harness(page([input], "Old"), page([input], "Current"));
+    h.strategy.setAccessibilityServiceEnabled(true);
+    h.tap.refreshViewHierarchy = async () => page([input], "Current").viewHierarchy!;
+    h.tap["verifyFocusedInputTarget"] = () => true;
+    const options = { text: "Search", action: "focus", retryIfNoChange: false } as const;
+    const result = await h.tap.execute(options);
+    expect(result.success).toBe(true);
+    expect(result.action).toBe("tap");
+    expect(options.action).toBe("focus");
+  });
 });
 
 describe("tapAny TalkBack retry freshness", () => {

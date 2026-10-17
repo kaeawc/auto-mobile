@@ -5,10 +5,7 @@ import {
   isProvidedReadTargetNotFound,
 } from "../../devices/runningReadTarget";
 import { AmbiguousDeviceTargetError } from "../ambiguousDeviceTargetRefusal";
-import {
-  type ConnectedPlatformScan,
-  type DeviceReadyOptions,
-} from "../../devices/DeviceSessionManager";
+import { type ConnectedPlatformScan, type DeviceReadyOptions } from "../../devices/DeviceReadiness";
 import { ActionableError, BootedDevice, SomePlatform, type DeviceInfo } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";

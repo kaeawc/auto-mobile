@@ -25,7 +25,7 @@ import type { Socket } from "node:net";
 import { logger } from "../utils/logger";
 import { toActionableError } from "../models/ActionableError";
 import { ActionableError } from "../models";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+import { DeviceReadiness } from "../devices/DeviceReadiness";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { createH264CaptureSource } from "../features/webrtc/h264CaptureSourceFactory";
 import { ScreenRecordingPermissionError } from "../features/webrtc/IosH264Source";
@@ -1856,7 +1856,7 @@ async function defaultResolveDevice(
   platform?: "android" | "ios",
 ): Promise<BootedDevice> {
   return resolveVideoStreamDevice(
-    DeviceSessionManager.getInstance().getPlatformDeviceManager(),
+    DeviceReadiness.getInstance().getPlatformDeviceManager(),
     deviceId,
     platform,
   );

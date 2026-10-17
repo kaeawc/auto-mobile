@@ -34,7 +34,7 @@ export function selectIosStartupWarmupDevices(
   return eligible.filter((device) => !skipped.includes(device));
 }
 
-/** Options the startup path passes to `DeviceSessionManager.verifyIosDevice`. */
+/** Options the startup path passes to `DeviceReadiness.verifyIosDevice`. */
 export interface IosStartupVerifyOptions {
   /** Startup never downloads: it only warms the cached runner (#7032). */
   skipCtrlProxyDownload: true;
@@ -48,7 +48,7 @@ export interface IosStartupVerifyOptions {
 /**
  * Narrow seams for {@link initializeIosCtrlProxyAtStartup}, so the daemon's
  * startup iOS init is testable with a FakeTimer and fakes instead of a real
- * `DeviceSessionManager` singleton and the static runner prefetch.
+ * `DeviceReadiness` singleton and the static runner prefetch.
  */
 export interface IosStartupInitDependencies {
   timer: Timer;

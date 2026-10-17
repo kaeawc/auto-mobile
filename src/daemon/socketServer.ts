@@ -57,6 +57,7 @@ import { logger } from "../utils/logger";
 import type { RefusedOwnedSessionRestore } from "./devicePool";
 import { GestureOwnershipRegistry } from "./gestureOwnership";
 import { resolveMcpRequestTimeoutMsOnce, ProgressExtendableDeadline } from "./mcpRequestTimeout";
+import { createRequestContext, type RequestContext } from "./requestContext";
 import { McpOverloadError, McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -1623,15 +1624,14 @@ export class UnixSocketServer {
         DAEMON_CANCEL_REQUEST_METHOD,
         DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
       ].includes(request.method);
+      const context = createRequestContext(request, sessionId, receivedAtMs);
       const tracked: PendingSocketRequest = {
         id: request.id,
         sessionId,
         socket,
         admitted: controlFrame,
         terminal: false,
-        idleDeadline: controlFrame
-          ? undefined
-          : new ProgressExtendableDeadline(receivedAtMs, resolveMcpRequestTimeoutMsOnce(request)),
+        idleDeadline: controlFrame ? undefined : context.deadline,
       };
       pending = tracked;
       this.pendingSocketRequests.add(tracked);
@@ -1663,6 +1663,7 @@ export class UnixSocketServer {
           tracked.admitted = true;
           tracked.idleDeadline = controlFrame ? undefined : deadline;
         },
+        context,
       );
       if (response) {
         writeAnswer(response);
@@ -2111,6 +2112,7 @@ export class UnixSocketServer {
     request: DaemonRequest,
     receivedAtMs: number = this.timer.now(),
     onAdmitted?: (deadline: ProgressExtendableDeadline) => void,
+    context: RequestContext = createRequestContext(request, sessionId, receivedAtMs),
   ): Promise<DaemonResponse | undefined> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -2169,13 +2171,9 @@ export class UnixSocketServer {
       return this.cancelSocketRequest(session, request);
     }
 
-    const totalTimeoutMs = resolveMcpRequestTimeoutMsOnce(request);
-    // Mutable: extended by progress notifications for this specific request
-    // (see ProgressExtendableDeadline) -- untouched for a request that never
-    // emits progress, which keeps its exact original deadline.
-    const deadline = new ProgressExtendableDeadline(receivedAtMs, totalTimeoutMs);
+    const { totalTimeoutMs, deadline } = context;
     let activeRequestSignal: AbortSignal | undefined;
-    const cancellation = this.registerRequestCancellation(session, request.id);
+    const cancellation = this.registerRequestCancellation(session, context);
 
     const admissionCancellation = this.socketAdmissionCancellation(
       request,
@@ -2568,9 +2566,8 @@ export class UnixSocketServer {
    */
   private registerRequestCancellation(
     session: SessionContext,
-    requestId: string,
+    { id: requestId, cancellation: controller }: RequestContext,
   ): { signal: AbortSignal; dispose: () => void } {
-    const controller = new AbortController();
     session.requestCancellations.set(requestId, controller);
     return {
       signal: controller.signal,

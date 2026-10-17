@@ -27,6 +27,9 @@ interface PageSpec {
   path: string;
   // HTTP status expected for the document itself.
   status: number;
+  // When set, the document is a dead URL that must redirect to this site path
+  // (relative to the base path) and land on a rendered page there.
+  redirectsTo?: string;
 }
 
 const PAGES: PageSpec[] = [
@@ -34,8 +37,8 @@ const PAGES: PageSpec[] = [
   { path: "tools/", status: 200 },
   { path: "using/agent-examples/", status: 200 },
   { path: "design-docs/plat/android/prototype-ux/", status: 200 },
-  // GitHub Pages renders 404.html for a dead link; it must be styled too.
-  { path: "using/this-page-does-not-exist/", status: 404 },
+  // GitHub Pages serves 404.html for a dead link; it redirects to the home page.
+  { path: "using/this-page-does-not-exist/", status: 404, redirectsTo: "" },
 ];
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -164,6 +167,8 @@ const PAGE_PROBE = `(() => {
     headerHeight: rect && rect.height,
     bodyFont: getComputedStyle(document.body).fontFamily,
     hasContent: document.querySelector(".md-content") !== null,
+    isNotFoundPage: document.getElementById("home-link") !== null,
+    finalUrl: location.href,
     sheets,
   };
 })()`;
@@ -174,6 +179,8 @@ interface ProbeResult {
   headerHeight: number | null;
   bodyFont: string;
   hasContent: boolean;
+  isNotFoundPage: boolean;
+  finalUrl: string;
   sheets: Array<{ href: string; parsed: boolean }>;
 }
 
@@ -202,6 +209,33 @@ export function probeProblems(probe: ProbeResult): string[] {
     problems.push(`stylesheet ${sheet.href} did not load`);
   }
   return problems;
+}
+
+// A dead URL must end on the home page (final URL == base, not the 404 page).
+export function redirectProblems(probe: ProbeResult, expectedUrl: string): string[] {
+  const problems: string[] = [];
+  if (probe.finalUrl !== expectedUrl) {
+    problems.push(`redirected to ${probe.finalUrl}, expected ${expectedUrl}`);
+  }
+  if (probe.isNotFoundPage) {
+    problems.push("still showing the 404 page after the redirect");
+  }
+  return problems;
+}
+
+async function waitForUrl(cdp: Cdp, sessionId: string, expectedUrl: string): Promise<void> {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    const { result } = await cdp.send<{ result: { value: string } }>(
+      "Runtime.evaluate",
+      { expression: "location.href + '|' + document.readyState", returnByValue: true },
+      sessionId,
+    );
+    if (result.value === `${expectedUrl}|complete`) {
+      return;
+    }
+    await Bun.sleep(100);
+  }
 }
 
 async function checkPage(
@@ -246,12 +280,20 @@ async function checkPage(
   });
   await cdp.send("Page.navigate", { url: documentUrl }, sessionId);
   await Promise.race([loaded, Bun.sleep(15_000)]);
+  const expectedUrl =
+    spec.redirectsTo === undefined ? undefined : `${origin}${basePath}${spec.redirectsTo}`;
+  if (expectedUrl) {
+    await waitForUrl(cdp, sessionId, expectedUrl);
+  }
   const evaluation = await cdp.send<{ result: { value: ProbeResult } }>(
     "Runtime.evaluate",
     { expression: PAGE_PROBE, returnByValue: true },
     sessionId,
   );
   problems.push(...probeProblems(evaluation.result.value));
+  if (expectedUrl) {
+    problems.push(...redirectProblems(evaluation.result.value, expectedUrl));
+  }
   if (screenshotDir) {
     const shot = await cdp.send<{ data: string }>(
       "Page.captureScreenshot",

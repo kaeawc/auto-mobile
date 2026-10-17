@@ -25,7 +25,7 @@ export interface ShutdownDeviceReservation {
 export interface DeviceShutdownReservationsPoolPort {
   getDevices(): ReadonlyMap<string, PooledDevice>;
   withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
-  getIntentionalShutdowns(): Map<string, number>;
+  getIntentionalShutdowns(): ReadonlyMap<string, number>;
   assertReadinessReservationOwner(device: PooledDevice, client: AutolockClient | undefined): void;
   assertRuntimeIdentity(
     device: PooledDevice,

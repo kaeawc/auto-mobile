@@ -154,7 +154,7 @@ describe("host total-resource limit wiring", () => {
     const limits = { totalDeviceCap: 1 };
     const h = wiring({ limit: () => limits.totalDeviceCap });
     h.inventory.devices = [
-      { platform: "android", name: "ambroker-orphan-0-g1-nonce", isRunning: false },
+      { platform: "android", name: "ambroker-orphan-0-g1-nonce", isRunning: true },
     ];
     expect(selectAdmission({ activeOrAcquiringSessions: 0, resources: [] }, limits)).toEqual({
       kind: "create",

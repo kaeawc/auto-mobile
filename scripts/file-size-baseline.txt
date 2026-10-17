@@ -35,7 +35,7 @@
 1528	src/features/action/InstallApp.ts
 2253	src/features/action/LaunchApp.ts
 2030	src/features/action/Rotate.ts
-1891	src/features/action/SetUIState.ts
+1915	src/features/action/SetUIState.ts
 1887	src/features/action/TapAnyElement.ts
 1424	src/features/action/TapAtCoordinate.ts
 4585	src/features/action/TapOnElement.ts
@@ -62,8 +62,8 @@
 1223	src/features/preferences/AppPreferences.ts
 1296	src/features/prototype/prototypeSpec.ts
 1246	src/features/prototype/prototypeValidation.ts
-2878	src/features/systemTray/systemTrayHelpers.ts
-1684	src/features/utility/DeepLinkManager.ts
+2886	src/features/systemTray/systemTrayHelpers.ts
+1689	src/features/utility/DeepLinkManager.ts
 1399	src/features/utility/ElementResolver.ts
 1712	src/features/video/FfmpegVideoProcessingBackend.ts
 1163	src/features/video/IosPhysicalVideoCaptureBackend.ts

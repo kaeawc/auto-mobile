@@ -41,10 +41,13 @@ function makeProxy(structured: boolean): Classifier {
   proxy["structuredToolErrorCodes"] = structured;
   return {
     structuredToolErrorCodes: structured,
-    isPreDispatchDaemonSessionError: (error) => proxy["isPreDispatchDaemonSessionError"](error),
-    isUnknownToolError: (error) => proxy["isUnknownToolError"](error),
-    isRecoverableUnknownToolError: (error) => proxy["isRecoverableUnknownToolError"](error),
-    isRecoverableDaemonSessionError: (error) => proxy["isRecoverableDaemonSessionError"](error),
+    isPreDispatchDaemonSessionError: (error) =>
+      proxy["errorClassifier"].isPreDispatchDaemonSessionError(error),
+    isUnknownToolError: (error) => proxy["errorClassifier"].isUnknownToolError(error),
+    isRecoverableUnknownToolError: (error) =>
+      proxy["errorClassifier"].isRecoverableUnknownToolError(error),
+    isRecoverableDaemonSessionError: (error) =>
+      proxy["errorClassifier"].isRecoverableDaemonSessionError(error),
     frontendRegistersTool: (name) => proxy["frontendRegistersTool"](name),
   };
 }

@@ -35,6 +35,7 @@
 #   <count>  <file>  oxlint-disable(<rule>)            every -next-line directive, per rule
 #   <count>  <file>  oxlint-disable-line(<rule>)       every -line directive, per rule
 #   <count>  <file>  oxlint-disable-block(<rule>)      every unbounded directive a later enable closes
+#   <count>  <file>  oxlint-disable-partial(*)         a bare unbounded disable only named enables partly re-enable
 #   <count>  <file>  oxlint-disable-file(<rule>)       every unbounded directive left open to end of file
 #   <count>  <file>  oxlint-disable-no-reason(<rule>)  those lacking a `-- reason`
 # A new suppression therefore fails like a new violation and needs --allow-grow,

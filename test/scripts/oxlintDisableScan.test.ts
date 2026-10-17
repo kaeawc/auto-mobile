@@ -116,6 +116,33 @@ describe("oxlintDisableScan", () => {
     ]);
   });
 
+  test("a bare disable that named enables partly close is keyed apart from a lone bare disable", () => {
+    const keys = (src: string) => {
+      const counts = new Map<string, number>();
+      countRows("src/a.ts", src, counts);
+      return [...counts.keys()].filter((k) => !k.includes("no-reason"));
+    };
+    const narrowed = keys("/* oxlint-disable -- r */\nfoo();\n/* oxlint-enable max-params */\n");
+    const widened = keys("/* oxlint-disable -- r */\nfoo();\n");
+    expect(narrowed).toEqual(["src/a.ts\toxlint-disable-partial(*)"]);
+    expect(widened).toEqual(["src/a.ts\toxlint-disable-file(*)"]);
+    // Dropping the named enable yields a key the narrowed set lacks, so the ratchet fails.
+    expect(widened.filter((k) => !narrowed.includes(k))).toEqual([
+      "src/a.ts\toxlint-disable-file(*)",
+    ]);
+    // A later bare enable still closes the wildcard as a block.
+    expect(
+      keys("/* oxlint-disable -- r */\n/* oxlint-enable max-params */\n/* oxlint-enable */\n"),
+    ).toEqual(["src/a.ts\toxlint-disable-block(*)"]);
+    expect(keys("/* oxlint-disable -- r */\nfoo();\n/* oxlint-enable */\n")).toEqual([
+      "src/a.ts\toxlint-disable-block(*)",
+    ]);
+    // A named disable is unaffected by an unrelated named enable.
+    expect(keys("/* oxlint-disable a -- r */\n/* oxlint-enable b */\n")).toEqual([
+      "src/a.ts\toxlint-disable-file(a)",
+    ]);
+  });
+
   test("-line and -next-line get distinct keys, so swapping one for the other is a new row", () => {
     const keys = (src: string) => {
       const counts = new Map<string, number>();

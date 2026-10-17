@@ -93,7 +93,7 @@ import { VoiceOverSwipeExecutor } from "./VoiceOverSwipeExecutor";
 import { ScrollUntilVisible, type ScrollUntilVisibleStrategy } from "./ScrollUntilVisible";
 import { buildContainerFromElement, isTruthyFlag } from "../../utility/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
-import { edgeSwipeCoordinates, validateEdgeSwipeOptions } from "./edgeSwipe";
+import { edgeSwipeCoordinates, validateResolvedEdgeSwipe } from "./edgeSwipe";
 import {
   effectiveSwipeInsets,
   insetSwipeBounds,
@@ -1111,7 +1111,7 @@ export class SwipeOn extends BaseVisualChange {
         }
         const validationError =
           validateSwipeTimingOptions(options, this.getDuration(options)) ??
-          validateEdgeSwipeOptions(options);
+          validateResolvedEdgeSwipe(options);
         if (validationError) {
           throw new ActionableError(validationError);
         }
@@ -1519,10 +1519,7 @@ export class SwipeOn extends BaseVisualChange {
 
     return (
       validateSwipeTimingOptions(options, this.getDuration(options)) ??
-      validateEdgeSwipeOptions({
-        ...options,
-        direction: resolveSwipeDirection(options).direction ?? options.direction,
-      })
+      validateResolvedEdgeSwipe(options)
     );
   }
 

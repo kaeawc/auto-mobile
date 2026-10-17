@@ -9,7 +9,7 @@
 6025	src/daemon/daemonMcpProxy.ts
 1730	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
-8458	src/daemon/devicePool.ts
+8441	src/daemon/devicePool.ts
 1011	src/daemon/deviceRuntimeIdentity.ts
 4159	src/daemon/manager.ts
 1566	src/daemon/sessionBroker/provisioning/executionRelease.ts
@@ -38,7 +38,7 @@
 1915	src/features/action/SetUIState.ts
 1887	src/features/action/TapAnyElement.ts
 1424	src/features/action/TapAtCoordinate.ts
-4582	src/features/action/TapOnElement.ts
+4312	src/features/action/TapOnElement.ts
 1040	src/features/action/sendkeys/DefaultSendKeysCommandExecutor.ts
 1420	src/features/action/swipeon/ScrollUntilVisible.ts
 1833	src/features/action/swipeon/SwipeOn.ts

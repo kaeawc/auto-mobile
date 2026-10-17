@@ -8,6 +8,7 @@ import {
   createDeviceSnapshotConfigRepository,
   createVideoRecordingConfigRepository,
 } from "../../src/db/keyedJsonConfigRepository";
+import { InstalledAppsRepository } from "../../src/db/installedAppsRepository";
 import { VideoRecordingRepository } from "../../src/db/videoRecordingRepository";
 import { SqliteFeatureFlagRepository } from "../../src/features/featureFlags/FeatureFlagRepository";
 import { SqliteSessionToolSelectionRepository } from "../../src/features/toolSelection/SqliteSessionToolSelectionRepository";
@@ -15,6 +16,7 @@ import { createTestDatabase } from "../db/testDbHelper";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
 import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { FakeAppearanceConfigRepository } from "../fakes/FakeAppearanceConfigRepository";
 import { FakeToolSelectionRepository } from "../fakes/FakeToolSelectionRepository";
@@ -22,6 +24,7 @@ import {
   runConfigRepositoryContract,
   runKeyedConfigRepositoryContract,
 } from "./ConfigRepositoryContract";
+import { runInstalledAppsStoreContract } from "./InstalledAppsStoreContract";
 import { runVideoRecordingRepositoryContract } from "./VideoRecordingRepositoryContract";
 import { runFeatureFlagRepositoryContract } from "./FeatureFlagRepositoryContract";
 import { runSessionToolSelectionRepositoryContract } from "./SessionToolSelectionRepositoryContract";
@@ -147,3 +150,11 @@ for (const [name, make] of [
   runConfigRepositoryContract(name, make, appearanceConfigs);
   runKeyedConfigRepositoryContract(name, make, appearanceConfigs.first);
 }
+
+runInstalledAppsStoreContract("FakeInstalledAppsRepository", async () => ({
+  repository: new FakeInstalledAppsRepository(),
+}));
+runInstalledAppsStoreContract("InstalledAppsRepository (SQLite)", async () => {
+  const db = await createTestDatabase();
+  return { repository: new InstalledAppsRepository(db), dispose: () => db.destroy() };
+});

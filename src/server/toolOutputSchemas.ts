@@ -1441,8 +1441,18 @@ export const observeDiffSchema = z
       .describe(
         "Same name/meaning as a full observation's `accessibilityAuditSkipped` (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
       ),
-    added: z.array(observeDiffNodeSchema),
-    removed: z.array(observeDiffNodeSchema),
+    added: z
+      .array(observeDiffNodeSchema)
+      .optional()
+      .describe(
+        "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
+      ),
+    removed: z
+      .array(observeDiffNodeSchema)
+      .optional()
+      .describe(
+        "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
+      ),
     changed: z.array(observeDiffNodeChangeSchema),
     fields: z.record(z.string(), layoutWarningsDiffFieldSchema).optional(),
   })

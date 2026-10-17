@@ -5332,6 +5332,7 @@
                   "const": "settled_capture_adopted"
                 },
                 "added": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -5354,6 +5355,7 @@
                   }
                 },
                 "removed": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -5825,16 +5827,7 @@
                   }
                 }
               },
-              "required": [
-                "isDiff",
-                "observationId",
-                "deviceId",
-                "display",
-                "skeleton",
-                "added",
-                "removed",
-                "changed"
-              ],
+              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
               "additionalProperties": {}
             },
             {
@@ -16989,6 +16982,7 @@
                   "const": "settled_capture_adopted"
                 },
                 "added": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -17011,6 +17005,7 @@
                   }
                 },
                 "removed": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -17482,16 +17477,7 @@
                   }
                 }
               },
-              "required": [
-                "isDiff",
-                "observationId",
-                "deviceId",
-                "display",
-                "skeleton",
-                "added",
-                "removed",
-                "changed"
-              ],
+              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
               "additionalProperties": {}
             },
             {
@@ -28103,6 +28089,7 @@
                   "const": "settled_capture_adopted"
                 },
                 "added": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -28125,6 +28112,7 @@
                   }
                 },
                 "removed": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -28596,16 +28584,7 @@
                   }
                 }
               },
-              "required": [
-                "isDiff",
-                "observationId",
-                "deviceId",
-                "display",
-                "skeleton",
-                "added",
-                "removed",
-                "changed"
-              ],
+              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
               "additionalProperties": {}
             },
             {
@@ -36059,6 +36038,7 @@
                   "const": "settled_capture_adopted"
                 },
                 "added": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -36081,6 +36061,7 @@
                   }
                 },
                 "removed": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -36552,16 +36533,7 @@
                   }
                 }
               },
-              "required": [
-                "isDiff",
-                "observationId",
-                "deviceId",
-                "display",
-                "skeleton",
-                "added",
-                "removed",
-                "changed"
-              ],
+              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
               "additionalProperties": {}
             },
             {
@@ -39805,6 +39777,7 @@
                   "const": "settled_capture_adopted"
                 },
                 "added": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -39827,6 +39800,7 @@
                   }
                 },
                 "removed": {
+                  "description": "Absent on action-observation diffs: the diff's `skeleton` already lists every actionable node on the current screen (#11637).",
                   "type": "array",
                   "items": {
                     "type": "object",
@@ -40298,16 +40272,7 @@
                   }
                 }
               },
-              "required": [
-                "isDiff",
-                "observationId",
-                "deviceId",
-                "display",
-                "skeleton",
-                "added",
-                "removed",
-                "changed"
-              ],
+              "required": ["isDiff", "observationId", "deviceId", "display", "skeleton", "changed"],
               "additionalProperties": {}
             },
             {

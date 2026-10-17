@@ -2179,9 +2179,9 @@ describe("finalizeToolResponse", () => {
             affordances: ["input"],
           },
         ]);
-        expect(observation.added.some((entry: any) => entry.attributes.text === "Q")).toBe(
-          project === "full",
-        );
+        // Diffs carry no added/removed lists beside their skeleton (#11637 item 2).
+        expect(observation.added).toBeUndefined();
+        expect(observation.removed).toBeUndefined();
         expect(JSON.parse(result.content[0].text).observation.keyboard).toEqual(
           observation.keyboard,
         );
@@ -2876,7 +2876,7 @@ describe("finalizeToolResponse", () => {
       expect(JSON.stringify(next)).toBe(before);
     });
 
-    test("skeleton diffs carry tuple-shaped bounds in compact added rows", () => {
+    test("skeleton diffs drop added/removed instead of carrying node rows (#11637)", () => {
       // The diff runs on the sanitized (always-compacted) observation, so a node
       // surfaced in the diff carries the tuple bounds, not the object shape.
       const { store } = makeStore();
@@ -2916,12 +2916,8 @@ describe("finalizeToolResponse", () => {
 
       const obsSc = structuredPayload(finalized).observation;
       expect(obsSc.isDiff).toBe(true);
-      expect(obsSc.added).toHaveLength(1);
-      expect(obsSc.added[0].attributes).toEqual({
-        elementId: "com.example:id/added",
-        affordances: ["tap"],
-        bounds: [5, 6, 7, 8],
-      });
+      expect(obsSc.added).toBeUndefined();
+      expect(obsSc.removed).toBeUndefined();
       expectObservationDiff(finalized, { mode: "diff", reason: "diff_emitted" });
     });
     test("skeleton action diffs stay compact while full projection preserves raw warning and node shapes", () => {
@@ -3000,12 +2996,8 @@ describe("finalizeToolResponse", () => {
       ).toBeLessThan(8 * 1024);
       expect(skeletonObservation.skeleton).toBeDefined();
       expect(skeletonObservation.fields?.layoutWarnings).toBeUndefined();
-      expect(skeletonObservation.added[0].attributes).toEqual({
-        elementId: "com.example:id/result_0",
-        label: "Search result 0",
-        affordances: ["tap", "long-press"],
-        bounds: [0, 100, 1080, 136],
-      });
+      expect(skeletonObservation.added).toBeUndefined();
+      expect(skeletonObservation.removed).toBeUndefined();
 
       const { store: fullStore } = makeStore();
       finalizeToolResponse(createStructuredToolResponse(baseline), {
@@ -3028,7 +3020,7 @@ describe("finalizeToolResponse", () => {
       expect(fullObservation.fields.layoutWarnings.from.warnings[0].element.bounds).toEqual([
         0, 0, 20, 20,
       ]);
-      expect(fullObservation.added[0].attributes.actions).toEqual(["click", "long_click"]);
+      expect(fullObservation.added).toBeUndefined();
     });
   });
 
@@ -3207,7 +3199,7 @@ describe("finalizeToolResponse", () => {
       expect(writer.writes[0].data).toMatchObject({ isDiff: true });
       expect(writer.writes[0].payload).toBe("ObserveDiff");
       expect(writer.writes[0].data).toMatchObject({
-        added: [{ attributes: { bounds: [5, 6, 7, 8] } }],
+        changed: expect.any(Array),
         skeleton: expect.anything(),
         freshness: next.freshness,
       });
@@ -3261,8 +3253,6 @@ describe("finalizeToolResponse", () => {
       expect(observation.freshness).toEqual(next.freshness);
       expect(writer.writes[0].data).toMatchObject({
         isDiff: true,
-        added: expect.any(Array),
-        removed: expect.any(Array),
         changed: expect.any(Array),
       });
     });

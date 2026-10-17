@@ -74,6 +74,7 @@ object ValidTools {
         "sqlQuery",
         "putAppFile",
         "swipeOn",
+        "swipeAt",
         "systemTray",
         "tapOn",
         "deleteDevice",

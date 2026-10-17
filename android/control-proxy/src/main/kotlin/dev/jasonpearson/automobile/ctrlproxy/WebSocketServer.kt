@@ -378,6 +378,7 @@ class WebSocketServer(
     // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
     add("prototype_text_field_options_v1")
     add("prototype_gestures_v1")
+    add("prototype_swipe_actions_v1")
     add("prototype_text_field_actions_v1")
     add("prototype_carousel_v1")
     add("prototype_text_field_leading_icon_v1")

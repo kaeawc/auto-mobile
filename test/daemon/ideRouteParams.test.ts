@@ -19,6 +19,7 @@ const golden = JSON.parse(
   readFileSync(join(import.meta.dir, "../fixtures/ide-route-params/golden.json"), "utf8"),
 ) as Golden[];
 const cases = ideRouteParamCases();
+const ENGINE_TYPE_ERROR = /is not an object \(evaluating /;
 
 describe("ide/* route params handling", () => {
   test("the goldens cover exactly the case matrix", () => {
@@ -37,10 +38,22 @@ describe("ide/* route params handling", () => {
     }
   });
 
+  test("only the nullish-params cases ever surfaced the engine TypeError", () => {
+    const engine = golden.filter((entry) => ENGINE_TYPE_ERROR.test(entry.outcome));
+    expect(engine).toHaveLength(12);
+    expect(engine.every((entry) => /^params (undefined|null)$/.test(entry.label))).toBe(true);
+  });
+
   test.each(cases.map((entry, index) => [`${entry.route} ${entry.label}`, index] as const))(
     "%s",
     async (_name, index) => {
-      expect(await runIdeParamCase(cases[index])).toBe(golden[index].outcome);
+      const { route, outcome } = golden[index];
+      // The one deliberate difference: nullish params used to surface the engine's TypeError
+      // (not a contract); they now get the route's own refusal, exactly as an empty object does.
+      const expected = ENGINE_TYPE_ERROR.test(outcome)
+        ? golden.find((entry) => entry.route === route && entry.label === "empty object")!.outcome
+        : outcome;
+      expect(await runIdeParamCase(cases[index])).toBe(expected);
     },
   );
 });

@@ -763,6 +763,35 @@ export function isTokenOwnedOrClaimPending(session: {
   return session.livenessOwnerToken !== undefined || !!session.livenessOwnershipClaims?.size;
 }
 
+/** What a heartbeat for a session the daemon no longer holds resolves to. */
+export type HeartbeatMiss =
+  | { kind: "observer" }
+  | { kind: "notFound"; recordedReason: string | undefined };
+
+/**
+ * The one rule both heartbeat routes (socket and HTTP) apply to an unknown, released or releasing
+ * session id (#11819): a token-bearing owner's heartbeat is still credited to the release in
+ * flight, a live observer session is acknowledged, and anything else is not found, with the
+ * recorded release reason when the daemon knows why. Order matters: credit, observer, lookup.
+ */
+export async function resolveHeartbeatMiss(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  observers: Pick<ObserverSessionStore, "heartbeat"> | undefined,
+  sessionId: string,
+  creditOwnerToken: string | undefined,
+): Promise<HeartbeatMiss> {
+  if (creditOwnerToken !== undefined) {
+    manager.creditOwnerHeartbeatDuringRelease?.(sessionId, creditOwnerToken);
+  }
+  if (observers?.heartbeat(sessionId)) {
+    return { kind: "observer" };
+  }
+  return {
+    kind: "notFound",
+    recordedReason: await lookupReleasedSessionReason(manager, sessionId),
+  };
+}
+
 /**
  * Session-not-found answer. A session the daemon knows it released also says why
  * (`releaseReason`, #10730; `idle: true` for an idle-window release, #10832) so a client can tell
@@ -774,7 +803,18 @@ async function sessionNotFoundResult(
   sessionId: string,
   daemonInstance?: string,
 ): Promise<DaemonMethodResult> {
-  const releaseReason = await lookupReleasedSessionReason(manager, sessionId);
+  return notFoundResult(
+    sessionId,
+    await lookupReleasedSessionReason(manager, sessionId),
+    daemonInstance,
+  );
+}
+
+function notFoundResult(
+  sessionId: string,
+  releaseReason: string | undefined,
+  daemonInstance?: string,
+): DaemonMethodResult {
   return {
     success: false,
     error: `Session not found: ${sessionId}`,
@@ -837,16 +877,18 @@ async function handleHeartbeat(
   const manager = state.getSessionManager();
   const session = sessionForIngress(manager, sessionId);
   if (!session || isSessionReleasing(manager, sessionId, session)) {
-    if (typeof heartbeatParams?.livenessOwnerToken === "string") {
-      manager.creditOwnerHeartbeatDuringRelease?.(sessionId, heartbeatParams.livenessOwnerToken);
-    }
-    if (
-      typeof sessionId === "string" &&
-      state.getObserverSessionRegistry?.()?.heartbeat(sessionId)
-    ) {
+    const miss = await resolveHeartbeatMiss(
+      manager,
+      state.getObserverSessionRegistry?.(),
+      sessionId,
+      typeof heartbeatParams?.livenessOwnerToken === "string"
+        ? heartbeatParams.livenessOwnerToken
+        : undefined,
+    );
+    if (miss.kind === "observer") {
       return { success: true, result: { sessionId } };
     }
-    return sessionNotFoundResult(manager, sessionId, ackReport.daemonInstance);
+    return notFoundResult(sessionId, miss.recordedReason, ackReport.daemonInstance);
   }
   const keeperRefusal = refuseCliKeeperOnProxySession(heartbeatParams?.livenessOwnerKind, session);
   if (keeperRefusal) {

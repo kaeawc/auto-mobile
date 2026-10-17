@@ -2,7 +2,6 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { CaptureSnapshot } from "../../../src/features/action/CaptureSnapshot";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { SettingsNamespace } from "../../../src/features/observe/android";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -54,7 +53,7 @@ describe("CaptureSnapshot settings characterization", () => {
       );
       const capture = new CaptureSnapshot(
         { deviceId: "settings-fake", name: "Fake", platform: "android" },
-        { create: () => adb as unknown as AdbClient },
+        { create: () => adb },
         undefined,
         new FakeTimer(),
       );

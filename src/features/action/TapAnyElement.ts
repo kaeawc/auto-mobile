@@ -74,7 +74,7 @@ import {
   TapOnElementResult,
   ViewHierarchyResult,
 } from "../../models";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import {
   visibleTapBounds,
@@ -436,7 +436,7 @@ export class TapAnyElement extends BaseVisualChange {
 
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     options: TapAnyElementDependencies = {},
   ) {
     super(device, adb, options.timer, options.renderedDisplayRevision, options);

@@ -16,7 +16,7 @@ export class HandleIntentChooser extends BaseVisualChange {
   /**
    * Create an TerminateApp instance
    * @param device - Optional device
-   * @param adb - Optional AdbClient instance for testing
+   * @param adb - Optional AdbExecutor instance for testing
    */
   constructor(
     device: BootedDevice,

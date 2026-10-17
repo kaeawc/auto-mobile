@@ -288,3 +288,35 @@ write_src() { # <name> <lines...>
   OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
   [ "$status" -eq 1 ]
 }
+
+@test "narrowing a baselined bare disable through partial to block passes without --allow-grow" {
+  write_src a.ts '/* eslint-disable -- reason */' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable-file(*)')" "$OXLINT_BASELINE"
+  write_src a.ts '/* eslint-disable -- reason */' 'export const x = 1;' '/* eslint-enable max-params */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable-partial(*)')" "$OXLINT_BASELINE"
+  write_src a.ts '/* eslint-disable -- reason */' 'export const x = 1;' '/* eslint-enable max-params */' '/* eslint-enable */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT" --update
+  [ "$status" -eq 0 ]
+  grep -qxF "$(printf '1\tsrc/a.ts\toxlint-disable-block(*)')" "$OXLINT_BASELINE"
+}
+
+@test "dropping the named enable of a baselined partial bare disable fails" {
+  write_src a.ts '/* eslint-disable -- reason */' 'export const x = 1;' '/* eslint-enable max-params */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  write_src a.ts '/* eslint-disable -- reason */' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in src/a.ts  oxlint-disable-file(*)"* ]]
+}
+
+@test "one freed file-wide count covers only one narrower row" {
+  write_src a.ts '/* eslint-disable -- reason */' 'export const x = 1;'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" bash "$SCRIPT" --update
+  write_src a.ts '/* eslint-disable -- reason */' '/* eslint-enable max-params */' '/* eslint-disable -- reason */' '/* eslint-enable */'
+  OXLINT_JSON_CMD="$FIXTURE_JSON" run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"1 new in src/a.ts  oxlint-disable-"* ]]
+}

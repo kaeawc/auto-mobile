@@ -256,13 +256,15 @@ describe("NavigationGraphManager", () => {
 
     test("should handle event with missing timestamp by using timer fallback", async () => {
       // Simulate WebSocket message where timestamp is on the outer message, not the event
-      const event = {
-        destination: "HomeScreen",
-        source: "COMPOSE_NAVIGATION",
-        arguments: {},
-        metadata: {},
-        sequenceNumber: 0,
-      } as unknown as NavigationEvent;
+      const event: NavigationEvent = JSON.parse(
+        JSON.stringify({
+          destination: "HomeScreen",
+          source: "COMPOSE_NAVIGATION",
+          arguments: {},
+          metadata: {},
+          sequenceNumber: 0,
+        }),
+      );
       // event.timestamp is undefined, simulating the real WebSocket scenario
 
       await manager.recordNavigationEvent(event);

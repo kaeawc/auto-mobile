@@ -180,9 +180,7 @@ export class UIStateExtractor {
   /**
    * Find text in child nodes (for Compose layouts where text is nested).
    */
-  private findTextInChildren(
-    node: Record<string, any> | Record<string, any>[],
-  ): string | undefined {
+  findTextInChildren(node: Record<string, any> | Record<string, any>[]): string | undefined {
     if (Array.isArray(node)) {
       for (const child of node) {
         const attrs = this.parser.extractNodeProperties(child);

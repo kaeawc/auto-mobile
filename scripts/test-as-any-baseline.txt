@@ -101,7 +101,6 @@
 4	test/features/failures/FailureRecorder.test.ts
 9	test/features/memory/MemoryAudit.test.ts
 24	test/features/navigation/ExploreElementScoring.test.ts
-2	test/features/navigation/navigateToInternalNoDiffE2E.test.ts
 1	test/features/observe/EdgeMatchIndex.test.ts
 2	test/features/observe/GetAppMetadata.test.ts
 2	test/features/observe/IdentifyMediaViews.test.ts
@@ -137,8 +136,6 @@
 2	test/features/performance/PerformanceAudit.test.ts
 2	test/features/performance/PerformanceAudit.ttff.test.ts
 5	test/features/performance/TouchLatencyTracker.test.ts
-1	test/features/systemTray/systemTray.test.ts
-2	test/features/systemTray/systemTrayList.test.ts
 3	test/features/telemetry/TelemetryRecorder.test.ts
 11	test/features/utility/DeepLinkManager.test.ts
 5	test/features/utility/ElementParser.test.ts

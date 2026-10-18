@@ -11,8 +11,13 @@ import {
 import type { ViewHierarchyResult } from "../../../src/models";
 
 /** Build a ViewHierarchyResult wrapping an arbitrary hierarchy shape. */
+function captureWith(fields: Record<string, unknown>): ViewHierarchyResult {
+  // Deliberately malformed shapes that the static model forbids; JSON.parse yields an untyped base.
+  return Object.assign(JSON.parse("{}"), fields);
+}
+
 function viewHierarchy(hierarchy: unknown): ViewHierarchyResult {
-  return { hierarchy } as unknown as ViewHierarchyResult;
+  return captureWith({ hierarchy });
 }
 
 describe("getNodeProperties", () => {
@@ -169,12 +174,12 @@ it.each([
 it("enumerates separate notification windows topmost first without repeated root identity", () => {
   const app = { text: "App" };
   const tray = { "resource-id": "com.android.systemui:id/notification_panel" };
-  const capture = {
+  const capture = captureWith({
     hierarchy: { node: [app, tray] },
     windows: [
       { windowLayer: 4, hierarchy: { node: tray } },
       { windowLayer: 1, hierarchy: { node: app } },
     ],
-  } as unknown as ViewHierarchyResult;
+  });
   expect(getHierarchyRoots(capture)).toEqual([tray, app]);
 });

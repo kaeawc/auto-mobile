@@ -1,14 +1,19 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DefaultUIStateSetup,
+  createDefaultObserveScreen,
   type ObserveScreenLike,
 } from "../../../src/features/navigation/DefaultUIStateSetup";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { BootedDevice } from "../../../src/models";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
+import type { UIState } from "../../../src/utils/interfaces/NavigationGraph";
+import {
+  createHierarchyForTest,
+  createObserveResultForTest,
+} from "../observe/observeScreenTestBuilders";
 import type { NavigationEdge } from "../../../src/features/navigation/NavigationGraphManager";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
@@ -37,14 +42,22 @@ const device: BootedDevice = {
 // A destination gives UIStateExtractor useful state without adding any modals.
 // A featureless root alone would make the extractor return undefined.
 const emptyModalHierarchy = (): ObserveResult =>
-  ({
-    viewHierarchy: {
+  createObserveResultForTest({
+    viewHierarchy: createHierarchyForTest({
       hierarchy: {
         class: "android.widget.FrameLayout",
         "resource-id": "navigation.HomeDestination",
       },
-    },
-  }) as unknown as ObserveResult;
+    }),
+  });
+
+const edgeWithUiState = (uiState: UIState): NavigationEdge => ({
+  from: "A",
+  to: "B",
+  timestamp: 0,
+  edgeType: "unknown",
+  uiState,
+});
 
 const emptyModalObserve = (): ObserveScreenLike => ({ execute: async () => emptyModalHierarchy() });
 
@@ -102,11 +115,11 @@ describe("DefaultUIStateSetup alignment order", () => {
 
 // A flat sheet node with an explicit window ID uses the real extractor path.
 const bottomSheetHierarchy = (windowId: number): ObserveResult =>
-  ({
-    viewHierarchy: {
+  createObserveResultForTest({
+    viewHierarchy: createHierarchyForTest({
       hierarchy: { class: "BottomSheetDialog", "window-id": String(windowId) },
-    },
-  }) as unknown as ObserveResult;
+    }),
+  });
 
 const fakeAdbBySetup = new WeakMap<DefaultUIStateSetup, FakeAdbClient>();
 
@@ -135,23 +148,21 @@ describe("DefaultUIStateSetup", () => {
   // swallowed by getCurrentUIState's catch, and silently skip required UI setup.
   test("default observe provider builds a RealObserveScreen bound to the injected device and adb", () => {
     const fakeAdb = new FakeAdbClient();
-    const timer = new FakeTimer();
-    const setup = new DefaultUIStateSetup(device, fakeAdb, undefined, timer);
-    const provider = (setup as unknown as { observeScreenProvider: () => ObserveScreenLike })
-      .observeScreenProvider;
+    const bindings: Array<{ device: BootedDevice; adb: unknown }> = [];
 
-    let observeScreen: ObserveScreenLike | undefined;
-    expect(() => {
-      observeScreen = provider();
-    }).not.toThrow();
+    const observeScreen = createDefaultObserveScreen(device, fakeAdb, (boundDevice, factory) => {
+      bindings.push({ device: boundDevice, adb: factory.create() });
+      return { execute: async () => createObserveResultForTest({ viewHierarchy: undefined }) };
+    });
 
-    // Assert the concrete type and its binding rather than merely "has an execute
-    // method" (a bare stub would pass that). The default provider must wire the
-    // injected device and the resolved AdbClient into the real observe path.
-    expect(observeScreen).toBeInstanceOf(RealObserveScreen);
-    const internals = observeScreen as unknown as { device: BootedDevice; adb: AdbClient };
-    expect(internals.device).toBe(device);
-    expect(internals.adb).toBe(fakeAdb);
+    expect(typeof observeScreen.execute).toBe("function");
+    expect(bindings).toHaveLength(1);
+    expect(bindings[0].device).toBe(device);
+    expect(bindings[0].adb).toBe(fakeAdb);
+
+    // The default construction path must not throw (the #2754 factory regression).
+    expect(() => createDefaultObserveScreen(device, fakeAdb)).not.toThrow();
+    expect(createDefaultObserveScreen(device, fakeAdb)).toBeInstanceOf(RealObserveScreen);
   });
 
   test("setupUIState consults the observe provider when the edge requires UI state", async () => {
@@ -161,13 +172,14 @@ describe("DefaultUIStateSetup", () => {
       // No viewHierarchy => getCurrentUIState returns undefined and setup proceeds
       // without taps. The point is that the provider was reached, i.e. observation
       // was not silently skipped by a construction failure.
-      return { execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult };
+      return { execute: async () => createObserveResultForTest({ viewHierarchy: undefined }) };
     };
 
     const setup = makeSetup(provider);
-    const edge = {
-      uiState: { modalStack: [{ type: "dialog" }] },
-    } as unknown as NavigationEdge;
+    const edge = edgeWithUiState({
+      selectedElements: [],
+      modalStack: [{ type: "dialog", layer: 1 }],
+    });
 
     const actions = await setup.setupUIState(edge, "android");
 
@@ -179,10 +191,10 @@ describe("DefaultUIStateSetup", () => {
     let calls = 0;
     const setup = makeSetup(() => {
       calls++;
-      return { execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult };
+      return { execute: async () => createObserveResultForTest({ viewHierarchy: undefined }) };
     });
 
-    const edge = { uiState: {} } as unknown as NavigationEdge;
+    const edge = edgeWithUiState({ selectedElements: [] });
     const actions = await setup.setupUIState(edge, "android");
 
     expect(actions).toEqual([]);
@@ -513,7 +525,7 @@ describe("DefaultUIStateSetup", () => {
                   throw new Error("Observation unavailable");
                 }
                 if (observation === "null hierarchy") {
-                  return { viewHierarchy: null } as unknown as ObserveResult;
+                  return createObserveResultForTest({ viewHierarchy: undefined });
                 }
                 return observation === "healthy" ? emptyModalHierarchy() : bottomSheetHierarchy(42);
               },
@@ -559,7 +571,7 @@ describe("DefaultUIStateSetup", () => {
           execute: async () => {
             observeCalls++;
             return observeCalls === 1
-              ? ({ viewHierarchy: null } as unknown as ObserveResult)
+              ? createObserveResultForTest({ viewHierarchy: undefined })
               : emptyModalHierarchy();
           },
         }));
@@ -611,7 +623,7 @@ describe("DefaultUIStateSetup", () => {
       let dismissedAfterTap = false;
 
       const setup = makeSetup(() => ({
-        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+        execute: async () => createObserveResultForTest({ viewHierarchy: undefined }),
       }));
       // getCurrentUIState drives isModalConfirmedDismissed: report the modal gone as
       // soon as any candidate has been tapped.
@@ -637,7 +649,7 @@ describe("DefaultUIStateSetup", () => {
       let dismissed = false;
 
       const setup = makeSetup(() => ({
-        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+        execute: async () => createObserveResultForTest({ viewHierarchy: undefined }),
       }));
       setup.getCurrentUIState = async () => ({
         selectedElements: [],
@@ -665,7 +677,7 @@ describe("DefaultUIStateSetup", () => {
       const tappedTexts: string[] = [];
 
       const setup = makeSetup(() => ({
-        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+        execute: async () => createObserveResultForTest({ viewHierarchy: undefined }),
       }));
       // Modal never leaves the stack, regardless of what was tapped.
       setup.getCurrentUIState = async () => ({ selectedElements: [], modalStack: [dialog] });
@@ -686,7 +698,7 @@ describe("DefaultUIStateSetup", () => {
       let dismissed = false;
 
       const setup = makeSetup(() => ({
-        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+        execute: async () => createObserveResultForTest({ viewHierarchy: undefined }),
       }));
       setup.getCurrentUIState = async () => ({
         selectedElements: [],
@@ -732,7 +744,7 @@ describe("DefaultUIStateSetup", () => {
       // Real getCurrentUIState runs: every observation returns a null
       // hierarchy, so isModalConfirmedDismissed can never confirm the modal is gone.
       const setup = makeSetup(() => ({
-        execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
+        execute: async () => createObserveResultForTest({ viewHierarchy: undefined }),
       }));
 
       ToolRegistry.register("tapOn", "tapOn", {}, async (args: any) => {

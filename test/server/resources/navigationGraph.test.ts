@@ -172,7 +172,7 @@ describe("MCP Navigation Graph Resource", () => {
     };
     const sessionGraph = NavigationGraphManager.createForTesting(
       new NavigationRepository(sessionDb),
-      new TestCoverageRepository(undefined, sessionDb),
+      new TestCoverageRepository(sessionDb),
       undefined,
       sessionId,
     );

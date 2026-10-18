@@ -36,7 +36,7 @@ describe("NavigationGraphManager navigation write ordering", () => {
     repository = new NavigationRepository(harness.db);
     manager = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       new FakeTimer(),
     );
     await manager.setCurrentApp(appId);
@@ -530,7 +530,7 @@ describe("NavigationGraphManager navigation write ordering", () => {
     const timer = new FakeTimer();
     const bounded = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       timer,
       undefined,
       50,
@@ -572,7 +572,7 @@ describe("NavigationGraphManager navigation write ordering", () => {
     const timer = new FakeTimer();
     const bounded = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       timer,
       undefined,
       50,
@@ -614,7 +614,7 @@ describe("NavigationGraphManager navigation write ordering", () => {
     const timer = new FakeTimer();
     const bounded = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       timer,
       undefined,
       50,

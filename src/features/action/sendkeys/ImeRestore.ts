@@ -15,7 +15,7 @@ import {
   pinnedUser,
 } from "../AndroidImeCatalog";
 import { quarantineAndroidIme, type AndroidImeRecoverySnapshot } from "../androidImeLock";
-import { ImeRestorationError } from "./ImeSpan";
+import { ImeRestorationError } from "./ImeRestorationError";
 export interface SendKeysImeRecoverySnapshot extends AndroidImeRecoverySnapshot {
   /** Verify the captured user's state even if the foreground user has since changed. */
   userId?: number;

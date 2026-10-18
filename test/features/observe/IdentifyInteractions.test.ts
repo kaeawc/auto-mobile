@@ -4,28 +4,38 @@ import { describe, expect, test } from "bun:test";
 import { IdentifyInteractions } from "../../../src/features/observe/IdentifyInteractions";
 import { swipeOnSchema, tapOnSchema } from "../../../src/server/interactionTools";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
+import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 import type { NavigationEdge } from "../../../src/utils/interfaces/NavigationGraph";
 import type { Element } from "../../../src/models";
+
+/** A complete observation around the given hierarchy, at the screen size the classifier reads. */
+function observationWith(viewHierarchy: ViewHierarchyResult | undefined): ObserveResult {
+  return {
+    observationId: "identify-interactions-test",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    updatedAt: 1,
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+    viewHierarchy,
+  };
+}
 
 // Build a minimal Android view hierarchy whose child nodes are the interaction
 // candidates. Each entry becomes a `$`-attributed node with bounds so the
 // element finder and geometry accept it.
 function hierarchyOf(nodes: Array<Record<string, unknown>>): ObserveResult {
   const bounds = (i: number) => ({ left: 10, top: 10 + i * 60, right: 110, bottom: 60 + i * 60 });
-  return {
-    viewHierarchy: {
-      hierarchy: {
-        node: {
-          $: {
-            class: "android.widget.FrameLayout",
-            bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
-          },
-          node: nodes.map((attrs, i) => ({ $: { bounds: bounds(i), ...attrs } })),
+  return observationWith({
+    hierarchy: {
+      node: {
+        $: {
+          class: "android.widget.FrameLayout",
+          bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
         },
+        node: nodes.map((attrs, i) => ({ $: { bounds: bounds(i), ...attrs } })),
       },
     },
-    screenSize: { width: 1080, height: 1920 },
-  } as unknown as ObserveResult;
+  });
 }
 
 const classifier = new IdentifyInteractions();
@@ -210,7 +220,7 @@ describe("IdentifyInteractions scoring characterization", () => {
 describe("IdentifyInteractions", () => {
   test("returns an error when no observation is available", () => {
     const result = classifier.analyze(
-      { screenSize: { width: 1080, height: 1920 } } as unknown as ObserveResult,
+      observationWith(undefined),
       { platform: "android" },
       "HomeScreen",
       [],

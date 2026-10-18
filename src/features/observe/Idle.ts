@@ -27,6 +27,12 @@ export class Idle {
   private adb: AdbExecutor;
   private timer: Timer;
 
+  /** Typed unit-test view of the launcher classification, which has no public entry point. */
+  readonly testHooks = {
+    isSystemLauncher: (packageName: string | null | undefined): boolean =>
+      this.isSystemLauncher(packageName),
+  };
+
   /**
    * Create an Idle instance
    * @param device - Device to run ADB commands against
@@ -46,7 +52,7 @@ export class Idle {
    * @param packageName - Package name to check
    * @returns True if this is likely a system package
    */
-  private isSystemLauncher(packageName: string | null): boolean {
+  private isSystemLauncher(packageName: string | null | undefined): boolean {
     // Handle null, undefined, or empty package names
     if (!packageName) {
       return false;

@@ -18,6 +18,9 @@ import {
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { FakePrototypeViewerAttacher } from "../fakes/FakePrototypeViewerAttacher";
 import { createAppToolsHarness } from "../helpers/appToolsHarness";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const appTools = createAppToolsHarness();
 

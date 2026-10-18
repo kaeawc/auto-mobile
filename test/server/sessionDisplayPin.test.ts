@@ -49,6 +49,9 @@ import { CachingDisplayInventoryProvider } from "../../src/devices/DisplayInvent
 import { FakeDisplayInventorySource } from "../fakes/FakeDisplayInventoryProvider";
 import type { BootedDevice } from "../../src/models";
 import { settleEmbeddedObservationInResponse } from "../../src/server/embeddedObservationSettle";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const interactionDeps: InteractionToolDependencies = {};
 const device: BootedDevice = {

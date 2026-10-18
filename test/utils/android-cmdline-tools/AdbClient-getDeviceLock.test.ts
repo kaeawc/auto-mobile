@@ -48,7 +48,7 @@ function makeClient(policyStdout: string | { throws: true }): AdbClient {
     }
     return Promise.resolve(execResult(""));
   };
-  return new AdbClient(null, mockExec, null as any);
+  return new AdbClient(null, mockExec, null);
 }
 
 describe("AdbClient.getDeviceLock", () => {

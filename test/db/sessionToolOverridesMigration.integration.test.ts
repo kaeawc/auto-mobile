@@ -4,6 +4,7 @@ import { Kysely, sql } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { up } from "../../src/db/migrations/2026_08_22_001_session_tool_overrides";
 import { up as defaultExistingDeleteDeviceDisabled } from "../../src/db/migrations/2026_08_23_001_default_existing_delete_device_disabled";
+import { looseKyselyTables } from "../helpers/looseKyselyTables";
 
 describe("session tool overrides migration", () => {
   let db: Kysely<unknown>;
@@ -26,8 +27,8 @@ describe("session tool overrides migration", () => {
   });
 
   test("expands persisted group choices into exact-tool rows and drops the old table", async () => {
-    await db
-      .insertInto("session_tool_capabilities" as any)
+    await looseKyselyTables(db)
+      .insertInto("session_tool_capabilities")
       .values([
         {
           session_uuid: "session-1",
@@ -52,8 +53,8 @@ describe("session tool overrides migration", () => {
 
     await up(db);
 
-    const rows = await db
-      .selectFrom("session_tool_overrides" as any)
+    const rows = await looseKyselyTables(db)
+      .selectFrom("session_tool_overrides")
       .select(["tool_name", "enabled"])
       .where("session_uuid", "=", "session-1")
       .orderBy("tool_name")
@@ -78,8 +79,8 @@ describe("session tool overrides migration", () => {
   });
 
   test("keeps deleteDevice disabled for existing device-control profiles", async () => {
-    await db
-      .insertInto("session_tool_capabilities" as any)
+    await looseKyselyTables(db)
+      .insertInto("session_tool_capabilities")
       .values({
         session_uuid: "session-1",
         capability: "device-control",
@@ -91,8 +92,8 @@ describe("session tool overrides migration", () => {
     await up(db);
     await defaultExistingDeleteDeviceDisabled(db);
 
-    const rows = await db
-      .selectFrom("session_tool_overrides" as any)
+    const rows = await looseKyselyTables(db)
+      .selectFrom("session_tool_overrides")
       .select(["tool_name", "enabled", "updated_at"])
       .where("session_uuid", "=", "session-1")
       .orderBy("tool_name")

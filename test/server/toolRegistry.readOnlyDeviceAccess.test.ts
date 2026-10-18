@@ -71,6 +71,9 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { getAbortSignal } from "../../src/utils/AbortContext";
 import { createAppToolsHarness } from "../helpers/appToolsHarness";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const appTools = createAppToolsHarness();
 

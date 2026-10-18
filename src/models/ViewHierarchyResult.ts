@@ -176,6 +176,12 @@ export type Hierarchy = {
   unavailableReason?: HierarchyUnavailableReason;
   unavailableDetail?: string;
   node?: ViewHierarchyNode;
+  /** Raw (unconverted) iOS XCTest root: `XCUIElementTypeApplication`, carried without `node`. */
+  type?: string;
+  /** Raw iOS XCTest element kind of the root, e.g. `application`. */
+  elementType?: string;
+  /** Raw iOS root bundle identifier; present without `node` on unconverted captures. */
+  bundleId?: string;
   /** iOS root XCTestNode bounds (points): {left, top, right, bottom} */
   bounds?: { left?: number; top?: number; right: number; bottom: number };
   /**
@@ -281,6 +287,11 @@ export type ViewHierarchyNode = {
   occludedByViewId?: string;
   "test-tag"?: string;
   "view-id"?: string;
+  /** Flat Android attributes real dumps put on the node itself (see {@link NodeAttributes}). */
+  "resource-id"?: string;
+  "content-desc"?: string;
+  clickable?: boolean | string;
+  checked?: boolean | string;
   extras?: Record<string, string>;
 };
 
@@ -292,4 +303,17 @@ export function nodeAttributes(node: { $?: NodeAttributes }): NodeAttributes {
 /** Direct bounds take precedence when a converter also carries bounds in `$`. */
 export function nodeBounds(node: ViewHierarchyNode): unknown {
   return node.bounds ?? nodeAttributes(node)["bounds"];
+}
+
+function isPlainObject(value: unknown): value is object {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Shallow wire-boundary check for a capture arriving as untyped JSON: it has an object
+ * `hierarchy`. Deeper node shapes (array roots, array bounds from older runners) are
+ * tolerated downstream by `ElementParser`, so they are deliberately not validated here.
+ */
+export function isViewHierarchyResult(value: unknown): value is ViewHierarchyResult {
+  return isPlainObject(value) && "hierarchy" in value && isPlainObject(value.hierarchy);
 }

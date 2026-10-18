@@ -5,6 +5,9 @@ import { SearchableHierarchy } from "../../src/features/utility/SearchableNode";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, HighlightShape, ViewHierarchyResult } from "../../src/models";
 import { innerBounds, nestedClickableHierarchy } from "../fixtures/nestedClickableHierarchy";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("Highlight Tools Registration", () => {
   beforeEach(() => {

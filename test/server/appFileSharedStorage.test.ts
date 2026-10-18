@@ -9,6 +9,9 @@ import { createSharedStorageServiceForTesting } from "../../src/server/sharedSto
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
   name: "Pixel",

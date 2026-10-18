@@ -19,8 +19,7 @@ import {
 import { deriveAndroidScreenIdentity } from "../android/AndroidScreenIdentity";
 import { displayTransitions } from "../DisplayTransition";
 import { resolveTargetDisplay } from "../DisplaySelection";
-import type { HierarchyCollector } from "./HierarchyCollector";
-import type { DeviceStateCollector } from "./DeviceStateCollector";
+import type { DeviceStateCollectorPort, HierarchyCollectorPort } from "./collectorPorts";
 
 export interface PlatformCollectionContext {
   result: ObserveResult;
@@ -45,8 +44,8 @@ export interface AndroidObservationCollector {
 }
 
 export interface AndroidObservationCollectorDeps {
-  hierarchyCollector: () => HierarchyCollector;
-  deviceStateCollector: () => DeviceStateCollector;
+  hierarchyCollector: () => HierarchyCollectorPort;
+  deviceStateCollector: () => DeviceStateCollectorPort;
   viewHierarchy: () => ViewHierarchyInterface;
   device: () => BootedDevice;
 }

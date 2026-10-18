@@ -47,6 +47,8 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import type { BootedDevice } from "../../src/models";
+import type { DaemonRequest } from "../../src/daemon/types";
+import { isRecord } from "../../src/server/pipeline/isRecord";
 
 const devices: BootedDevice[] = [
   { name: "Pixel", deviceId: "emulator-5554", platform: "android" },
@@ -195,9 +197,14 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   const acquisitionOwners: Array<string | undefined> = [];
   let socketSessionId = "client";
   const dispatch = async (name: string, args: Record<string, unknown>) => {
-    const request = { id: "routing", method: "tools/call", params: { name, arguments: args } };
-    await (socket as any).restoreSelectorSessions(args, socketSessionId);
-    const route = (socket as any).getMcpForwardRoute(request, socketSessionId);
+    const request: DaemonRequest = {
+      id: "routing",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name, arguments: args },
+    };
+    await socket["restoreSelectorSessions"](args, socketSessionId);
+    const route = await socket["getMcpForwardRoute"](request, socketSessionId);
     routes.push(route.clientKey);
     let fixture = fixtures.get(route.clientKey);
     if (!fixture) {
@@ -280,9 +287,12 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
         },
       );
     }
-    const forwarded = (socket as any).withSocketSessionAutolockKey(args, socketSessionId, 10000);
-    const result = await fixture.client.callTool({ name, arguments: forwarded });
-    (socket as any).recordBoundMcpClientKey(request, socketSessionId, route, true, result);
+    const forwarded = socket["withSocketSessionAutolockKey"](args, socketSessionId, 10000);
+    const result = await fixture.client.callTool({
+      name,
+      arguments: isRecord(forwarded) ? forwarded : args,
+    });
+    socket["recordBoundMcpClientKey"](request, socketSessionId, route, true, result);
     return result;
   };
   const daemon = new FakeDaemonManager();

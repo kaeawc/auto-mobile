@@ -10,11 +10,11 @@ import type {
 } from "../../src/server/registryHost";
 
 /**
- * Stored handlers are called by tests with hand-built requests, so the stored
- * shape is deliberately loose. Method syntax keeps the parameter bivariant, which
- * lets each typed registry handler be stored without a cast.
+ * Method syntax keeps the parameters bivariant, so each typed registry handler
+ * is accepted here without a cast; tests then call the stored wrapper with
+ * hand-built requests.
  */
-type StoredHandler = {
+type LooseHandler = {
   call(request: unknown, extra?: unknown): unknown;
 }["call"];
 
@@ -23,7 +23,10 @@ export class FakeUnderlyingServer
   implements Pick<Server, "notification">, RegistryUnderlyingServer
 {
   readonly notifications: Array<{ method: string; params?: unknown }> = [];
-  readonly handlersBySchema = new Map<unknown, StoredHandler>();
+  readonly handlersBySchema = new Map<
+    unknown,
+    (request: unknown, extra?: unknown) => Promise<unknown>
+  >();
   shouldThrow = false;
   notificationStarted?: () => void;
   notificationGate?: Promise<void>;
@@ -35,9 +38,9 @@ export class FakeUnderlyingServer
       request: RequestTypeMap[M],
       ctx: ServerContext,
     ) => HandlerResultTypeMap[M] | Promise<HandlerResultTypeMap[M]>,
-  ): void;
-  setRequestHandler(method: string, handler: StoredHandler): void {
-    this.handlersBySchema.set(method, handler);
+  ): void {
+    const loose: LooseHandler = handler;
+    this.handlersBySchema.set(method, async (request, extra) => loose(request, extra));
   }
 
   async notification(payload: Parameters<Server["notification"]>[0]): Promise<void> {

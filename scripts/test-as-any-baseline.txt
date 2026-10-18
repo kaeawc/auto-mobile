@@ -166,9 +166,6 @@
 10	test/server/flattenTopLevelUnion.test.ts
 7	test/server/highlightTools.test.ts
 1	test/server/interactionTools.clipboard.test.ts
-2	test/server/openLinkWaitFor.test.ts
-4	test/server/sessionPlatformRouting.daemon.integration.test.ts
-2	test/server/unissuedSessionBoundConnection.integration.test.ts
 2	test/utils/DeviceSessionManager.test.ts
 1	test/utils/android-cmdline-tools/AdbClient-getDeviceLock.test.ts
 17	test/utils/android-cmdline-tools/AndroidEmulatorClient-corruptImage.test.ts

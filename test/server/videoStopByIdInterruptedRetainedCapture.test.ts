@@ -132,11 +132,6 @@ afterEach(() => {
   }
 });
 
-interface DisconnectRecordingStopSurface {
-  stoppingRecordings: Set<string>;
-  stopRecordingAfterDeviceDisconnect(recordingId: string, deviceId: string): Promise<boolean>;
-}
-
 async function disconnectRetainingCapture(): Promise<string> {
   const active = await startVideoRecording({ device, ownerSessionUuid: OWNER });
   const realStop = backend.stop.bind(backend);
@@ -150,14 +145,11 @@ async function disconnectRetainingCapture(): Promise<string> {
       }),
   );
   const daemon: Daemon = Object.create(Daemon.prototype);
-  const harness = Object.assign(daemon, {
-    timer,
-    stoppingRecordings: new Set<string>(),
-  }) as unknown as DisconnectRecordingStopSurface;
+  Object.assign(daemon, { timer, stoppingRecordings: new Set<string>() });
   expect(
-    await harness.stopRecordingAfterDeviceDisconnect(active.recordingId, device.deviceId),
+    await daemon["stopRecordingAfterDeviceDisconnect"](active.recordingId, device.deviceId),
   ).toBe(true);
-  expect(harness.stoppingRecordings.size).toBe(0);
+  expect(daemon["stoppingRecordings"].size).toBe(0);
   expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
   expect((await repository.getRecording(active.recordingId))?.status).toBe("interrupted");
   return active.recordingId;

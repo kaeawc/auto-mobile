@@ -1,4 +1,3 @@
-import type { McpServer } from "@modelcontextprotocol/server";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
@@ -312,7 +311,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     expect(content.uri).toBe(canonicalUri);
 
     const server = new FakeMcpServer();
-    ResourceRegistry.registerWithServer(server as unknown as McpServer);
+    ResourceRegistry.registerWithServer(server);
     try {
       const subscribeHandler = server.server.handlersBySchema.get("resources/subscribe");
       expect(subscribeHandler).toBeDefined();

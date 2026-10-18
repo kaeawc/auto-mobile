@@ -46,6 +46,10 @@ function createTap(
     shouldRunPreTapStability: () => false,
     settlesPostTapEffects: true,
     rethrowsKeyboardOcclusion: true,
+    warnsOnDisabledTarget: true,
+    settlesFocusChangeAfterTap: false,
+    checksRefreshedDisplay: true,
+    promotesTapTargetToAncestor: true,
     applyRefreshedObservationRotation: () => {},
   };
   (tap as any).executeAndroidTap = async () => {

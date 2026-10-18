@@ -127,6 +127,10 @@ async function runEnsureChecked(
       shouldRunPreTapStability: () => false,
       settlesPostTapEffects: true,
       rethrowsKeyboardOcclusion: true,
+      warnsOnDisabledTarget: true,
+      settlesFocusChangeAfterTap: false,
+      checksRefreshedDisplay: true,
+      promotesTapTargetToAncestor: true,
       applyRefreshedObservationRotation: () => {},
       clipNavigationTapBounds: (...args: Parameters<IosTapStrategy["clipNavigationTapBounds"]>) =>
         new IosTapStrategy({ ...device, platform }).clipNavigationTapBounds(...args),

@@ -705,6 +705,10 @@ describe("explicit action display", () => {
           shouldRunPreTapStability: () => false,
           settlesPostTapEffects: true,
           rethrowsKeyboardOcclusion: true,
+          warnsOnDisabledTarget: true,
+          settlesFocusChangeAfterTap: false,
+          checksRefreshedDisplay: true,
+          promotesTapTargetToAncestor: true,
           applyRefreshedObservationRotation: () => {},
         } as never,
       });

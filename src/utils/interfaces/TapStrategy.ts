@@ -70,6 +70,18 @@ export interface TapStrategy {
    */
   readonly settlesPostTapEffects: boolean;
 
+  /** Whether tapping a disabled element adds a "may have no effect" warning (Android only). */
+  readonly warnsOnDisabledTarget: boolean;
+
+  /** Whether a failed post-tap focus check is re-polled until focus settles (iOS only). */
+  readonly settlesFocusChangeAfterTap: boolean;
+
+  /** Whether a freshly captured hierarchy is checked for a display change (Android only). */
+  readonly checksRefreshedDisplay: boolean;
+
+  /** Whether a matched element may be promoted to its clickable ancestor (Android only). */
+  readonly promotesTapTargetToAncestor: boolean;
+
   /** Whether a keyboard occlusion during a focus tap is rethrown for IME recovery (Android only). */
   readonly rethrowsKeyboardOcclusion: boolean;
 

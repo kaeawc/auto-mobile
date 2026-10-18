@@ -71,6 +71,10 @@ async function focusOnIos(
     shouldRunPreTapStability: () => false,
     settlesPostTapEffects: false,
     rethrowsKeyboardOcclusion: false,
+    warnsOnDisabledTarget: false,
+    settlesFocusChangeAfterTap: true,
+    checksRefreshedDisplay: false,
+    promotesTapTargetToAncestor: false,
     applyRefreshedObservationRotation: (...args) =>
       iosClip.applyRefreshedObservationRotation(...args),
     retryTapIfNoChange: false,

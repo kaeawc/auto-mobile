@@ -92,6 +92,10 @@ async function runTap() {
       shouldRunPreTapStability: () => false,
       settlesPostTapEffects: true,
       rethrowsKeyboardOcclusion: true,
+      warnsOnDisabledTarget: true,
+      settlesFocusChangeAfterTap: false,
+      checksRefreshedDisplay: true,
+      promotesTapTargetToAncestor: true,
       applyRefreshedObservationRotation: () => {},
     },
     executeAndroidTap: async () => {

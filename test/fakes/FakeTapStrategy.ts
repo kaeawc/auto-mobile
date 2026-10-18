@@ -18,6 +18,10 @@ export class FakeTapStrategy implements TapStrategy {
   retryTapIfNoChange: boolean = false;
   settlesPostTapEffects: boolean;
   rethrowsKeyboardOcclusion: boolean;
+  warnsOnDisabledTarget: boolean;
+  settlesFocusChangeAfterTap: boolean;
+  checksRefreshedDisplay: boolean;
+  promotesTapTargetToAncestor: boolean;
 
   private readonly iosClip = new IosTapStrategy({
     name: "fake",
@@ -33,6 +37,10 @@ export class FakeTapStrategy implements TapStrategy {
   constructor(private readonly platform: "android" | "ios" = "android") {
     this.settlesPostTapEffects = platform === "android";
     this.rethrowsKeyboardOcclusion = platform === "android";
+    this.warnsOnDisabledTarget = platform === "android";
+    this.settlesFocusChangeAfterTap = platform === "ios";
+    this.checksRefreshedDisplay = platform === "android";
+    this.promotesTapTargetToAncestor = platform === "android";
   }
 
   setAccessibilityServiceEnabled(enabled: boolean): void {

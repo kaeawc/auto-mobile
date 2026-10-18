@@ -55,6 +55,10 @@ export class AndroidTapStrategy implements TapStrategy {
 
   readonly settlesPostTapEffects = true;
   readonly rethrowsKeyboardOcclusion = true;
+  readonly warnsOnDisabledTarget = true;
+  readonly settlesFocusChangeAfterTap = false;
+  readonly checksRefreshedDisplay = true;
+  readonly promotesTapTargetToAncestor = true;
 
   applyRefreshedObservationRotation(): void {
     // Android observations carry no hierarchy-derived rotation to restamp.

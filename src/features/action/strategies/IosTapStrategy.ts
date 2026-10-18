@@ -28,6 +28,10 @@ export class IosTapStrategy implements TapStrategy {
   readonly retryTapIfNoChange = false;
   readonly settlesPostTapEffects = false;
   readonly rethrowsKeyboardOcclusion = false;
+  readonly warnsOnDisabledTarget = false;
+  readonly settlesFocusChangeAfterTap = true;
+  readonly checksRefreshedDisplay = false;
+  readonly promotesTapTargetToAncestor = false;
 
   constructor(
     private readonly device: BootedDevice,

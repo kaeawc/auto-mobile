@@ -230,11 +230,11 @@ export { tapFocusFailure, tapResolvedLayer, type TapOnFocusResult } from "./tapR
 export type { TapFocusFailure };
 
 function appendDisabledElementWarning(
-  platform: string,
+  strategy: Pick<TapStrategy, "warnsOnDisabledTarget">,
   element: Element,
   warnings: string[],
 ): void {
-  if (platform === "android" && isFalsy(element.enabled)) {
+  if (strategy.warnsOnDisabledTarget && isFalsy(element.enabled)) {
     warnings.push("The matched element is disabled; the tap may have no effect.");
   }
 }
@@ -905,7 +905,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return true;
     }
     const initial = result.observation;
-    if (this.device.platform !== "ios" || !initial) {
+    if (!this.strategy.settlesFocusChangeAfterTap || !initial) {
       return false;
     }
     const deadline = this.timer.now() + IOS_FOCUS_SETTLE_TIMEOUT_MS;
@@ -980,7 +980,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       logger.warn(`[TapOnElement] Fresh capture failed: ${errorMessage(error)}`);
       return null;
     }
-    if (isUsableScreenSize(screenSize) && this.device.platform === "android") {
+    if (isUsableScreenSize(screenSize) && this.strategy.checksRefreshedDisplay) {
       await this.checkRefreshedDisplay(captured, screenSize, observedGeneration, signal);
     }
     return captured;
@@ -1554,7 +1554,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
     const requireResourceId =
       typeof targetOptions === "boolean" ? targetOptions : targetOptions.requireResourceId;
-    if (!viewHierarchy || this.device.platform !== "android") {
+    if (!viewHierarchy || !this.strategy.promotesTapTargetToAncestor) {
       return { element, usedParent: false };
     }
     const nodes = new SearchableHierarchy().project(viewHierarchy);
@@ -1925,7 +1925,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               return ensureCheckedResult;
             }
           }
-          appendDisabledElementWarning(this.device.platform, tapElement, activationWarnings);
+          appendDisabledElementWarning(this.strategy, tapElement, activationWarnings);
           this.logClickableParentSelection(usedParent);
           const { tapPoint, warning: tapPointWarning } = this.tapPoints.planVisibleTapPoint({
             options: tapOptions,

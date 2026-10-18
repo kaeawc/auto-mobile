@@ -1,4 +1,4 @@
-import { getRemovedToolHint } from "../models/removedTools";
+import { getRemovedToolHint } from "../server/removedTools";
 
 export function formatDaemonToolError(
   toolName: string,

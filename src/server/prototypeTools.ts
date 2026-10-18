@@ -165,7 +165,7 @@ import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/too
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { deleteInternalToolParams } from "../daemon/constants";
-import { getRemovedToolActionHint } from "../models/removedTools";
+import { getRemovedToolActionHint } from "./removedTools";
 import {
   nodePrototypeAssetFileReader,
   preparePrototypeAssets,

@@ -1,3 +1,7 @@
+import type {
+  DeviceDiscoveryError,
+  DeviceDiscoveryErrorCode,
+} from "../models/DeviceDiscoveryError";
 import type { EmulatorProcessStopper } from "../utils/android-cmdline-tools/EmulatorProcessStop";
 import {
   AdbCommandTimeoutError,
@@ -70,14 +74,7 @@ export function assertAndroidImageRunningStateKnown(image: DeviceInfo): void {
   }
 }
 
-export type DeviceDiscoveryErrorCode = "unavailable" | "failed" | "timeout";
-
-export interface DeviceDiscoveryError {
-  code: DeviceDiscoveryErrorCode;
-  message: string;
-  retryable?: boolean;
-  retryAfterMs?: number;
-}
+export type { DeviceDiscoveryError, DeviceDiscoveryErrorCode };
 
 /**
  * Result of a discovery sweep that distinguishes per-platform success.

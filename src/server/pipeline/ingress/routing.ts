@@ -4,7 +4,7 @@ import {
   resolveToolSelectionBaseSessionUuid,
   type ToolSelectionSessionManager,
 } from "../../../features/toolSelection/selectionSessionResolver";
-import { getRemovedToolHint } from "../../../models/removedTools";
+import { getRemovedToolHint } from "../../removedTools";
 import { assertBrokerConnectionPlainToolCall } from "../../brokerConnectionToolGate";
 import { SessionOutsideBoundSessionError } from "../../deviceOutsideBoundSessionRefusal";
 import { isDeviceInventoryTool } from "../../../daemon/daemonMcpProxy";

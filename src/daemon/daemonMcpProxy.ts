@@ -95,7 +95,7 @@ import { anyDeviceReadOnlyArgShapeMatches } from "../server/deviceReadOnlyArgSha
 import { SessionOutsideBoundSessionError } from "../server/deviceOutsideBoundSessionRefusal";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolListPoller } from "./proxy/ToolListPoller";
-import { getRemovedToolHint } from "../models/removedTools";
+import { getRemovedToolHint } from "../server/removedTools";
 import {
   DaemonBoundSessionLostError,
   DaemonClient,

@@ -11,7 +11,7 @@ import {
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerPlanTools } from "../../src/server/planTools";
-import { getRemovedToolHint } from "../../src/models/removedTools";
+import { getRemovedToolHint } from "../../src/server/removedTools";
 import {
   getToolCallRecorder,
   resetToolCallRecordingState,

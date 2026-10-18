@@ -6,7 +6,7 @@ import type {
   ConfiguredImage,
 } from "../models/deviceDescription";
 import { formFactorFrom } from "../models/formFactor";
-import { iosSimulatorCapabilityInventory } from "../models/virtualDeviceCapabilities";
+import { iosSimulatorCapabilityInventory } from "./virtualDeviceCapabilities";
 import type { StableConfiguredDeviceImage } from "./configuredDeviceInventory";
 
 interface AndroidProvenance {

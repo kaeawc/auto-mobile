@@ -12,7 +12,7 @@ import {
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import { ActionableError } from "../models";
 import { DeviceAlreadyRunningError } from "../models/DeviceAlreadyRunningError";
-import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
+import { isEmulatorLaunchCancelledError } from "../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import type {
   DeviceMatchCriteria,
   FormFactor,

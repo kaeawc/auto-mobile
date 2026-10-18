@@ -19,8 +19,6 @@ const LINT_READ_FILES = {
   "scripts/file-size-baseline.txt": "file-size-baseline.sh",
   "scripts/utils-import-direction-baseline.txt":
     "check-utils-import-direction.ts via check-boundaries.sh",
-  "scripts/import-direction-baselines/models.txt":
-    "check-tier-import-direction.ts via check-boundaries.sh",
   "scripts/import-direction-baselines/db.txt":
     "check-tier-import-direction.ts via check-boundaries.sh",
   "scripts/import-direction-baselines/devices.txt":

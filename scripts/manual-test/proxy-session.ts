@@ -23,8 +23,8 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import {
   SESSION_CONFIG_FLAG,
   SESSION_EXPERIMENTAL_CAPABILITY,
@@ -1299,7 +1299,7 @@ export function createProxySessionDeps(): ProxySessionDeps {
         capabilities: () => client.getServerCapabilities() as Record<string, unknown> | undefined,
         serverInfo: () => client.getServerVersion(),
         callTool: (name, args, timeout) =>
-          client.callTool({ name, arguments: args }, undefined, requestOptions(timeout)),
+          client.callTool({ name, arguments: args }, requestOptions(timeout)),
         readResource: (uri, timeout) => client.readResource({ uri }, requestOptions(timeout)),
         listTools: (timeout) => client.listTools(undefined, requestOptions(timeout)),
         listResources: (timeout) => client.listResources(undefined, requestOptions(timeout)),

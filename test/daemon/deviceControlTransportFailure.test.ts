@@ -1,7 +1,7 @@
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { ErrorCode, McpError } from "../../src/server/mcpError";
 import { describe, expect, test } from "bun:test";
 import { createServer } from "node:net";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import {
   isDeviceControlTransportRequest,
   isReplaySafeAfterResponseClosure,

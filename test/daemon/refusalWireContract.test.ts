@@ -1,3 +1,5 @@
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import { Server } from "@modelcontextprotocol/server";
 import * as prototypeHidden from "../../src/features/prototype/prototypeHidden";
 import * as prototypeSuspended from "../../src/features/prototype/prototypeSuspended";
 import { isTypedToolRefusal } from "../../src/server/shapeToolCallError";
@@ -5,8 +7,6 @@ import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { parseSync, Visitor, type ClassDeclaration, type ClassExpression } from "oxc-parser";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -631,7 +631,7 @@ beforeAll(async () => {
   } finally {
     registration.mockRestore();
   }
-  const handler = registrations.find(([schema]) => schema === CallToolRequestSchema)?.[1];
+  const handler = registrations.findLast(([schema]) => schema === "tools/call")?.[1];
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
     if (!handler) {
@@ -656,14 +656,7 @@ beforeAll(async () => {
           builder: "createProxyMcpServer tools/call via resolveCallToolErrorResult",
           payload: await handler(
             { method: "tools/call", params: { name: "tapOn" } },
-            {
-              signal: new AbortController().signal,
-              requestId: 1,
-              sendNotification: async () => {},
-              sendRequest: async () => {
-                throw new Error("Unexpected request");
-              },
-            },
+            fakeServerContext({ signal: new AbortController().signal, id: 1 }),
           ),
         });
       } finally {
@@ -704,14 +697,7 @@ beforeAll(async () => {
           method: "tools/call",
           params: { name: "observe", arguments: { deviceId: "emulator-5554" } },
         },
-        {
-          signal: new AbortController().signal,
-          requestId: 1,
-          sendNotification: async () => {},
-          sendRequest: async () => {
-            throw new Error("Unexpected request");
-          },
-        },
+        fakeServerContext({ signal: new AbortController().signal, id: 1 }),
       );
       expect(lossClient.callToolCalls).toHaveLength(1);
       ownedSurfaceFixtures.push({

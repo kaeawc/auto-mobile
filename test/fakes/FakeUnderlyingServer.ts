@@ -1,5 +1,3 @@
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
-
 /** Request/notification surface used by resource registry tests. */
 export class FakeUnderlyingServer implements Pick<Server, "notification"> {
   readonly notifications: Array<{ method: string; params?: unknown }> = [];
@@ -28,3 +26,4 @@ export class FakeUnderlyingServer implements Pick<Server, "notification"> {
     await this.notificationGate;
   }
 }
+import type { Server } from "@modelcontextprotocol/server";

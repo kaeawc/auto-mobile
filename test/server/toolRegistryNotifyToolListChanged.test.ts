@@ -1,6 +1,6 @@
+import type { McpServer } from "@modelcontextprotocol/server";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
 

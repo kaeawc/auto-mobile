@@ -35,6 +35,7 @@ const EXCLUDED_FILES = new Set([
   "release/ios-simulator-continuity.md",
   "design-docs/plat/ios/xctestrunner/ci-integration.md",
   "decisions/ios-user-files-provider.md",
+  "decisions/mcp-sdk-v2-split-packages.md",
   "decisions/prototype-request-retrofit.md",
 ]);
 // Copied files mirror root documents (lychee/deploy copy CHANGELOG.md into

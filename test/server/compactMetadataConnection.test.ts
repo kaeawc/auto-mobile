@@ -1,7 +1,7 @@
+import { Client } from "../helpers/v1ViewMcpClient";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod/v4";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";

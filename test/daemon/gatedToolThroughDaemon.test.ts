@@ -1,9 +1,9 @@
+import type { Client } from "@modelcontextprotocol/client";
+import { ErrorCode, McpError } from "../../src/server/mcpError";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import toolDefinitionsJson from "../../schemas/tool-definitions.json";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";

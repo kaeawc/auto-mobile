@@ -1,8 +1,7 @@
+import type { McpServer } from "@modelcontextprotocol/server";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { invokeResourceTemplate } from "../helpers/invokeResourceTemplate";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
   notifyDatabaseChanged,
   registerDatabaseResources,
@@ -315,7 +314,7 @@ describe("table-data resource template optional pagination (issue #6133)", () =>
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server as unknown as McpServer);
     try {
-      const subscribeHandler = server.server.handlersBySchema.get(SubscribeRequestSchema);
+      const subscribeHandler = server.server.handlersBySchema.get("resources/subscribe");
       expect(subscribeHandler).toBeDefined();
       // Client subscribes to the exact URI it was handed back.
       await subscribeHandler!({ params: { uri: content.uri } });

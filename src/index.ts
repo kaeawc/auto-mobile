@@ -137,7 +137,7 @@ async function main() {
     process.exit(await runIosNetworkFilterCommand(rawArgs.slice(networkFilterIndex + 1)));
   }
 
-  const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
+  const { createStdioServerTransport } = await import("./server/stdioServerTransport");
   const { OutputGatedTransport } = await import("./server/outputGatedTransport");
   const { createMcpServer, registerMcpTools } = await import("./server");
   const { createDaemonMcpProxy, createProxyMcpServer } = await import("./server/proxyServer");
@@ -754,7 +754,7 @@ async function main() {
       }
 
       // Run as MCP server with STDIO transport.
-      const stdioTransport = new OutputGatedTransport(new StdioServerTransport());
+      const stdioTransport = new OutputGatedTransport(createStdioServerTransport());
       // Detect when the MCP client disconnects (stdin closes / stdout writes fail).
       // This uses the shared lifecycle handler so resources close before exit.
       const { MAX_CALLER_MCP_REQUEST_TIMEOUT_MS } = await import("./daemon/mcpRequestTimeout");

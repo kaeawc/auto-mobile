@@ -1,5 +1,5 @@
 import type { DaemonRequest } from "./types";
-import { McpError } from "@modelcontextprotocol/sdk/types.js";
+import { ProtocolError } from "@modelcontextprotocol/server";
 import { getToolTransportRecovery } from "../server/toolTransportRecovery";
 
 export const DEVICE_CONTROL_TRANSPORT_FAILURE_CODE = "device_control_transport_failure";
@@ -160,7 +160,7 @@ export function sanitizeDeviceControlTransportFailure(
 }
 
 export function isLoopbackTransportFailure(error: unknown): boolean {
-  return !(error instanceof McpError) && error instanceof LoopbackMcpConnectionError;
+  return !(error instanceof ProtocolError) && error instanceof LoopbackMcpConnectionError;
 }
 
 export function isDeviceControlTransportRequest(request: DaemonRequest): boolean {

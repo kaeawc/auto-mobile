@@ -1,6 +1,7 @@
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { McpError } from "../../src/server/mcpError";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { registerAppFileResources } from "../../src/server/appFileResources";
 import { registerAppResources } from "../../src/server/appResources";
 import { registerBootedDeviceResources } from "../../src/server/bootedDeviceResources";
@@ -174,11 +175,11 @@ describe("every registered resource template tolerates a malformed percent-escap
   test("the read handler never surfaces a URIError either", async () => {
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
-    const readHandler = server.server.handlersBySchema.get(ReadResourceRequestSchema);
+    const readHandler = server.server.handlersBySchema.get("resources/read");
     expect(readHandler).toBeDefined();
 
     for (const { uri } of reads) {
-      const outcome = await readHandler!({ params: { uri } }, {}).then(
+      const outcome = await readHandler!({ params: { uri } }, fakeServerContext()).then(
         () => undefined,
         (error: unknown) => error,
       );
@@ -204,10 +205,10 @@ describe("registry maps a contract parser's malformed-segment error to invalid p
     );
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
-    const readHandler = server.server.handlersBySchema.get(ReadResourceRequestSchema)!;
+    const readHandler = server.server.handlersBySchema.get("resources/read")!;
     const uri = "automobile:test/contract/%E0%A4%A";
 
-    const error = await readHandler({ params: { uri } }, {}).then(
+    const error = await readHandler({ params: { uri } }, fakeServerContext()).then(
       () => undefined,
       (caught: unknown) => caught,
     );
@@ -235,9 +236,12 @@ describe("registry backstop for a handler that decodes a capture unguarded (#101
     );
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
-    const readHandler = server.server.handlersBySchema.get(ReadResourceRequestSchema)!;
+    const readHandler = server.server.handlersBySchema.get("resources/read")!;
 
-    const error = await readHandler({ params: { uri: "automobile:test/unguarded/a%" } }, {}).then(
+    const error = await readHandler(
+      { params: { uri: "automobile:test/unguarded/a%" } },
+      fakeServerContext(),
+    ).then(
       () => undefined,
       (caught: unknown) => caught,
     );
@@ -262,9 +266,12 @@ describe("registry backstop for a handler that decodes a capture unguarded (#101
     );
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
-    const readHandler = server.server.handlersBySchema.get(ReadResourceRequestSchema)!;
+    const readHandler = server.server.handlersBySchema.get("resources/read")!;
 
-    const error = await readHandler({ params: { uri: "automobile:test/failing/a" } }, {}).then(
+    const error = await readHandler(
+      { params: { uri: "automobile:test/failing/a" } },
+      fakeServerContext(),
+    ).then(
       () => undefined,
       (caught: unknown) => caught,
     );

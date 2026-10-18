@@ -1,11 +1,7 @@
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  ReadResourceRequestSchema,
-  SubscribeRequestSchema,
-  UnsubscribeRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
 import {
   notifyInstalledAppResourceListChanged,
   syncInstalledAppResourceRegistry,
@@ -34,13 +30,13 @@ function methodsSent(server: FakeMcpServer): string[] {
 }
 
 async function subscribe(server: FakeMcpServer, uri: string): Promise<void> {
-  const handler = server.server.handlersBySchema.get(SubscribeRequestSchema);
+  const handler = server.server.handlersBySchema.get("resources/subscribe");
   expect(handler).toBeDefined();
   await handler!({ params: { uri } });
 }
 
 async function unsubscribe(server: FakeMcpServer, uri: string): Promise<void> {
-  const handler = server.server.handlersBySchema.get(UnsubscribeRequestSchema);
+  const handler = server.server.handlersBySchema.get("resources/unsubscribe");
   expect(handler).toBeDefined();
   await handler!({ params: { uri } });
 }
@@ -324,7 +320,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
       async () => ({ uri: "automobile:test/updated-resource", text: "x" }),
     );
     // Subscribe the same way a client would: through the registered handler.
-    const subscribeHandler = first.server.handlersBySchema.get(SubscribeRequestSchema);
+    const subscribeHandler = first.server.handlersBySchema.get("resources/subscribe");
     expect(subscribeHandler).toBeDefined();
     await subscribeHandler!({ params: { uri: "automobile:test/updated-resource" } });
 
@@ -335,7 +331,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
       expect(methodsSent(second)).toEqual([]);
     } finally {
       ResourceRegistry.unregister("automobile:test/updated-resource");
-      const unsubscribeHandler = first.server.handlersBySchema.get(UnsubscribeRequestSchema);
+      const unsubscribeHandler = first.server.handlersBySchema.get("resources/unsubscribe");
       await unsubscribeHandler?.({ params: { uri: "automobile:test/updated-resource" } });
     }
   });
@@ -672,11 +668,11 @@ describe("ResourceRegistry URI-template matching", () => {
       signal,
     }));
 
-    const readHandler = server.server.handlersBySchema.get(ReadResourceRequestSchema);
+    const readHandler = server.server.handlersBySchema.get("resources/read");
     expect(readHandler).toBeDefined();
     const response = (await readHandler!(
       { params: { uri: "automobile:test/one" } },
-      { signal: controller.signal },
+      fakeServerContext({ signal: controller.signal }),
     )) as {
       contents: Array<{ text?: string }>;
     };
@@ -747,7 +743,7 @@ describe("ResourceRegistry URI-template matching", () => {
     );
     ResourceRegistry.registerWithServer(server as unknown as McpServer);
 
-    const readHandler = server.server.handlersBySchema.get(ReadResourceRequestSchema);
+    const readHandler = server.server.handlersBySchema.get("resources/read");
     const requestedUri = "automobile:test?second=two&first=one";
     const response = (await readHandler!({ params: { uri: requestedUri } })) as {
       contents: Array<{ uri: string }>;

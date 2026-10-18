@@ -45,7 +45,7 @@ describe("RestoreSnapshot", () => {
 
     // Create fakes
     fakeAdb = new FakeAdbClient();
-    fakeAdbFactory = { create: () => fakeAdb as any };
+    fakeAdbFactory = { create: () => fakeAdb };
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     emulatorReadinessCalls = [];
@@ -820,7 +820,7 @@ describe("RestoreSnapshot (iOS failure reporting)", () => {
       undefined,
       undefined,
       store,
-      simctl as any,
+      simctl,
       undefined,
       operations,
     );
@@ -949,7 +949,7 @@ describe("RestoreSnapshot (iOS)", () => {
       undefined,
       new FakeTimer(),
       store,
-      simctl as any,
+      simctl,
       undefined,
       operations,
     );

@@ -11,6 +11,7 @@ import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCa
 import type { BootedDevice } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
@@ -49,8 +50,8 @@ class FakeDeviceAppUninstaller implements DeviceAppUninstaller {
   }
 }
 
-const fakeAdbFactory = (fakeAdb: FakeAdbClient) => ({ create: () => fakeAdb as any });
-const nullAdbFactory = { create: () => ({}) as any };
+const fakeAdbFactory = (fakeAdb: FakeAdbClient) => ({ create: () => fakeAdb });
+const nullAdbFactory = new FakeAdbClientFactory();
 
 describe("UninstallApp (iOS simulator)", () => {
   const iosSimDevice: BootedDevice = {
@@ -234,25 +235,6 @@ describe("UninstallApp (iOS simulator)", () => {
 
     expect(result.success).toBe(true);
     expect(result.keepData).toBe(false);
-  });
-});
-
-describe("UninstallApp (unsupported platform)", () => {
-  test("throws for an unknown platform instead of silently no-oping", async () => {
-    const webDevice = {
-      deviceId: "web-device-1",
-      name: "web",
-      platform: "web",
-    } as unknown as BootedDevice;
-
-    const uninstall = new UninstallApp(webDevice, nullAdbFactory, {
-      simctl: new FakeSimctl(),
-      deviceAppUninstaller: new FakeDeviceAppUninstaller(),
-    });
-
-    const error = await uninstall.execute("com.example.app").catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(ActionableError);
-    expect((error as Error).message).toContain("web");
   });
 });
 

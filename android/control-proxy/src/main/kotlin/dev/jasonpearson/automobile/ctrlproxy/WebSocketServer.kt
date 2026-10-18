@@ -836,6 +836,15 @@ class WebSocketServer(
   }
 
   /**
+   * Typed counterpart of [broadcastWithPerfSync]: flushes accumulated perf data, builds the typed
+   * response around it, and routes it exactly as [broadcast] does. The response carries the perf
+   * snapshot as compact JSON text, which the protocol serializer embeds as an object on the wire.
+   */
+  suspend fun broadcastTypedWithPerf(buildResponse: (perfTiming: String?) -> WebSocketResponse) {
+    broadcast(buildResponse(perfProvider.flush()?.toString()))
+  }
+
+  /**
    * Enqueue a message for each client in broadcast order. Each client writes its own queue in
    * order, so a slow socket cannot hold up later broadcasts to other clients.
    *

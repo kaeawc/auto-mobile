@@ -560,46 +560,6 @@ public final class NWConnectionNetworkCaptureAdapter: Sendable
   public func didCancel(requestId: String)
 
 // Network/NetworkMockRuleStore.swift
-public enum NetworkFaultTransport: String, Codable, Equatable, Sendable
-  case urlSession
-  case webSocket
-  case nwConnection
-  case webView
-public enum NetworkFaultAction: String, Codable, Equatable, Sendable
-  case response
-  case status
-  case error
-  case latency
-  case bandwidth
-  case dropBytes
-  case closeConnection
-  case rejectFrame
-public struct NetworkFaultRuleDTO: Codable, Equatable, Sendable
-  public let faultId: String
-  public let transport: NetworkFaultTransport?
-  public let host: String?
-  public let port: Int?
-  public let scheme: String?
-  public let path: String?
-  public let method: String?
-  public let headers: [String: String]?
-  public let origin: String?
-  public let connectionId: String?
-  public let sessionId: String?
-  public let action: NetworkFaultAction
-  public let statusCode: Int?
-  public let responseHeaders: [String: String]?
-  public let responseBody: String?
-  public let contentType: String?
-  public let errorType: String?
-  public let delayMs: Int?
-  public let bandwidthBytesPerSecond: Int?
-  public let dropBytes: Int?
-  public let limit: Int?
-  public let expiresAtEpochMs: Int64?
-  public let scope: String?
-  public let dryRun: Bool
-  public init( faultId: String, transport: NetworkFaultTransport?, host: String?, port: Int?, scheme: String?, path: String?, method: String?, headers: [String: String]?, origin: String?, connectionId: String?, sessionId: String?, action: NetworkFaultAction, statusCode: Int?, responseHeaders: [String: String]?, responseBody: String?, contentType: String?, errorType: String?, delayMs: Int?, bandwidthBytesPerSecond: Int?, dropBytes: Int?, limit: Int?, expiresAtEpochMs: Int64?, scope: String?, dryRun: Bool )
 public final class NetworkMockRuleStore: Sendable
 public struct FaultDecision: Equatable, Sendable
   public let faultId: String
@@ -883,10 +843,6 @@ public struct StorageInspectionConfiguration: Sendable
   public var maxBytes: Int
   public var allowMutations: Bool
   public init( allowedDatabasePaths: Set<String> = [], registeredAppGroupSuites: Set<String> = [], coreDataStores: [CoreDataStoreRegistration] = [], sensitiveKeys: Set<String> = [], maxRows: Int = 500, maxBytes: Int = 512 * 1024, allowMutations: Bool = false )
-public struct StorageDiagnostic: Sendable, Codable, Equatable
-  public let code: String
-  public let message: String
-  public init(code: String, message: String)
 
 // Storage/UserDefaultsInspector.swift
 public final class UserDefaultsInspector: @unchecked Sendable
@@ -1024,3 +980,200 @@ public final class AutoMobileWebViewBridge: NSObject, WKScriptMessageHandler, WK
   public func webView(_ webView: WKWebView, didFail _: WKNavigation!, withError error: Error)
   public func webView(_ webView: WKWebView, didCommit _: WKNavigation!)
   public func webViewWebContentProcessDidTerminate(_ webView: WKWebView)
+
+// sdk-wire/NetworkWireModels.swift
+public struct NetworkMockRuleDTO: Codable, Sendable, Equatable
+  public let mockId: String
+  public let host: String
+  public let path: String
+  public let method: String
+  public let limit: Int?
+  public let remaining: Int?
+  public let statusCode: Int
+  public let responseHeaders: [String: String]
+  public let responseBody: String
+  public let contentType: String
+  public init( mockId: String, host: String, path: String, method: String, limit: Int?, remaining: Int?, statusCode: Int, responseHeaders: [String: String], responseBody: String, contentType: String )
+public struct RejectedMockRule: Codable, Equatable, Sendable
+  public let mockId: String
+  public let reason: String
+  public init(mockId: String, reason: String)
+public struct NetworkErrorSimulationDTO: Codable, Sendable, Equatable
+  public let enabled: Bool
+  public let errorType: String?
+  public let limit: Int?
+  public let expiresAtEpochMs: Int64?
+  public let remainingMs: Int64?
+  public init( enabled: Bool, errorType: String?, limit: Int?, expiresAtEpochMs: Int64?, remainingMs: Int64? = nil )
+public enum NetworkFaultTransport: String, Codable, Equatable, Sendable
+  case urlSession
+  case webSocket
+  case nwConnection
+  case webView
+public enum NetworkFaultAction: String, Codable, Equatable, Sendable
+  case response
+  case status
+  case error
+  case latency
+  case bandwidth
+  case dropBytes
+  case closeConnection
+  case rejectFrame
+public struct NetworkFaultRuleDTO: Codable, Equatable, Sendable
+  public let faultId: String
+  public let transport: NetworkFaultTransport?
+  public let host: String?
+  public let port: Int?
+  public let scheme: String?
+  public let path: String?
+  public let method: String?
+  public let headers: [String: String]?
+  public let origin: String?
+  public let connectionId: String?
+  public let sessionId: String?
+  public let action: NetworkFaultAction
+  public let statusCode: Int?
+  public let responseHeaders: [String: String]?
+  public let responseBody: String?
+  public let contentType: String?
+  public let errorType: String?
+  public let delayMs: Int?
+  public let bandwidthBytesPerSecond: Int?
+  public let dropBytes: Int?
+  public let limit: Int?
+  public let expiresAtEpochMs: Int64?
+  public let scope: String?
+  public let dryRun: Bool
+  public init( faultId: String, transport: NetworkFaultTransport?, host: String?, port: Int?, scheme: String?, path: String?, method: String?, headers: [String: String]?, origin: String?, connectionId: String?, sessionId: String?, action: NetworkFaultAction, statusCode: Int?, responseHeaders: [String: String]?, responseBody: String?, contentType: String?, errorType: String?, delayMs: Int?, bandwidthBytesPerSecond: Int?, dropBytes: Int?, limit: Int?, expiresAtEpochMs: Int64?, scope: String?, dryRun: Bool )
+public struct SetMockRulesBody: Codable, Sendable
+  public let rules: [NetworkMockRuleDTO]
+  public init(rules: [NetworkMockRuleDTO])
+public struct SetNetworkFaultRulesBody: Codable, Sendable
+  public let rules: [NetworkFaultRuleDTO]
+  public init(rules: [NetworkFaultRuleDTO])
+public struct SetMockRulesReply: Codable, Sendable
+  public let rejected: [RejectedMockRule]?
+  public init(rejected: [RejectedMockRule]?)
+
+// sdk-wire/SdkBounds.swift
+public enum BoundsArithmetic
+  public static func signedDifference(_ end: Int, _ start: Int) -> Int
+public struct SdkBounds: Codable, Sendable, Hashable
+  public let left: Int
+  public let top: Int
+  public let right: Int
+  public let bottom: Int
+  public init(left: Int, top: Int, right: Int, bottom: Int)
+  public var width: Int
+  public var height: Int
+
+// sdk-wire/SdkChromeModels.swift
+public struct SdkEdgeInsets: Codable, Sendable
+  public let top: Double
+  public let right: Double
+  public let bottom: Double
+  public let left: Double
+  public init(top: Double, right: Double, bottom: Double, left: Double)
+public struct SdkDisplayCutoutInfo: Codable, Sendable
+  public let classification: String
+  public let bounds: [SdkBounds]?
+  public static let unknown = SdkDisplayCutoutInfo(classification: "unknown")
+  public init(classification: String, bounds: [SdkBounds]? = nil)
+public struct SdkSystemChrome: Codable, Sendable
+  public let visibility: String
+  public let statusBar: String
+  public let homeIndicatorAutoHideRequested: Bool?
+  public let source: String
+  public init( visibility: String, statusBar: String, homeIndicatorAutoHideRequested: Bool? = nil, source: String )
+public struct SdkGestureInfo: Codable, Sendable
+  public let type: String
+  public let isEnabled: Bool
+  public init(type: String, isEnabled: Bool)
+
+// sdk-wire/SdkRoute.swift
+public enum SdkRoute: String, CaseIterable, Sendable
+  case cachedHierarchy = "/hierarchy"
+  case freshHierarchy = "/hierarchy/fresh"
+  case health = "/health"
+  case networkMock = "/network/mock"
+  case networkErrorSimulation = "/network/error-simulation"
+  case networkFaultRules = "/network/fault-rules"
+  case magicTap = "/accessibility/magic-tap"
+  case highlight = "/highlight"
+  case dbExecute = "/db/execute"
+  case dbList = "/db/list"
+  case dbCapabilities = "/db/capabilities"
+  case dbTables = "/db/tables"
+  case dbTableData = "/db/table-data"
+  case dbTableStructure = "/db/table-structure"
+  case preferences = "/preferences"
+  case trigger = "/trigger"
+  public var path: String
+  public var method: String
+
+// sdk-wire/SdkSemanticLink.swift
+public struct SdkSemanticLink: Codable, Sendable, Equatable
+  public let text: String
+  public let occurrence: Int
+  public let start: Int?
+  public let end: Int?
+  public let centerX: Double?
+  public let centerY: Double?
+  public init( text: String, occurrence: Int, start: Int? = nil, end: Int? = nil, centerX: Double? = nil, centerY: Double? = nil )
+
+// sdk-wire/SdkSimulatorPort.swift
+public enum SdkSimulatorPort
+  public static let rangeStart: UInt16 = 40000
+  public static let rangeSize = 1000
+  public static let probeCount = 8
+  public static func simulatorPort(udid: String, attempt: Int = 0) -> UInt16
+
+// sdk-wire/SdkViewHierarchy.swift
+public struct SdkViewHierarchy: Codable, Sendable
+  public let timestamp: Int64
+  public let bundleId: String?
+  public let screenScale: Float
+  public let screenWidth: Int
+  public let screenHeight: Int
+  public let safeAreaInsets: SdkEdgeInsets?
+  public let displayCutoutInfo: SdkDisplayCutoutInfo?
+  public let systemChrome: SdkSystemChrome?
+  public let root: SdkViewNode?
+  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), bundleId: String? = nil, screenScale: Float, screenWidth: Int, screenHeight: Int, safeAreaInsets: SdkEdgeInsets? = nil, displayCutoutInfo: SdkDisplayCutoutInfo? = nil, systemChrome: SdkSystemChrome? = nil, root: SdkViewNode? )
+
+// sdk-wire/SdkViewNode.swift
+public struct SdkViewNode: Codable, Sendable
+  public let className: String
+  public let bounds: SdkBounds
+  public let accessibilityLabel: String?
+  public let accessibilityIdentifier: String?
+  public let isAccessibilityElement: Bool
+  public let isAccessibilityFocused: Bool
+  public let accessibilityElementsHidden: Bool
+  public let accessibilityTraits: [String]
+  public let accessibilityCustomActions: [String]
+  public let gestureRecognizers: [SdkGestureInfo]
+  public let alpha: Float
+  public let backgroundColor: String?
+  public let cornerRadius: Float
+  public let borderColor: String?
+  public let borderWidth: Float
+  public let isLayerNode: Bool
+  public let isHidden: Bool
+  public let isUserInteractionEnabled: Bool
+  public let hasTapTarget: Bool
+  public let isOccluded: Bool
+  public let semanticLinks: [SdkSemanticLink]?
+  public let children: [SdkViewNode]?
+  public init( className: String, bounds: SdkBounds, accessibilityLabel: String? = nil, accessibilityIdentifier: String? = nil, isAccessibilityElement: Bool = false, isAccessibilityFocused: Bool = false, accessibilityElementsHidden: Bool = false, accessibilityTraits: [String] = [], accessibilityCustomActions: [String] = [], gestureRecognizers: [SdkGestureInfo] = [], alpha: Float = 1.0, backgroundColor: String? = nil, cornerRadius: Float = 0, borderColor: String? = nil, borderWidth: Float = 0, isLayerNode: Bool = false, isHidden: Bool = false, isUserInteractionEnabled: Bool = true, hasTapTarget: Bool = false, isOccluded: Bool = false, semanticLinks: [SdkSemanticLink]? = nil, children: [SdkViewNode]? = nil )
+  public init(from decoder: Decoder) throws
+
+// sdk-wire/StorageWireModels.swift
+public struct StorageDiagnostic: Sendable, Codable, Equatable
+  public let code: String
+  public let message: String
+  public init(code: String, message: String)
+public struct SdkDatabaseErrorPayload: Codable, Equatable, Sendable
+  public let error: String
+  public let diagnostic: StorageDiagnostic?
+  public init(error: String, diagnostic: StorageDiagnostic? = nil)

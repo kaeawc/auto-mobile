@@ -638,6 +638,7 @@ export class SwipeOn extends BaseVisualChange {
       {
         displayFence: { assertCurrent: target.assertCurrent },
         duration,
+        durationExplicit: explicitDuration(options),
         scrollMode: options.scrollMode,
       },
       undefined,

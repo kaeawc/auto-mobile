@@ -3,13 +3,14 @@ import {
   MAX_FILTERED_CHILDREN_PER_NODE,
   ViewHierarchy,
 } from "../../../src/features/observe/ViewHierarchy";
+import type { BootedDevice } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
-const device = {
+const device: BootedDevice = {
   name: "test-device",
   platform: "android",
   deviceId: "emulator-5554",
-} as any;
+};
 
 describe("ViewHierarchy filtering", () => {
   test.each(["unique-id", "container-title"])("preserves nodes carrying only %s", (key) => {

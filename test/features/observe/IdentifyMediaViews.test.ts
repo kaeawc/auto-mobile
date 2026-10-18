@@ -48,7 +48,7 @@ function buildHierarchy(
         $: { class: "root", bounds: { left: 0, top: 0, right: 1080, bottom: 1920 } },
         bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
         node: children,
-      } as any,
+      },
     },
   };
 }
@@ -209,7 +209,7 @@ describe("IdentifyMediaViews", () => {
               bounds: { left: 0, top: 100, right: 100, bottom: 200 },
             },
           ],
-        } as any,
+        },
       },
     };
     const result = classifier.classify(h, "ios");

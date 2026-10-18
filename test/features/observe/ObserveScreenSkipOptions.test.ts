@@ -23,22 +23,13 @@ import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { resetScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
-import type { HierarchyCollector } from "../../../src/features/observe/collectors/HierarchyCollector";
-import type { DeviceStateCollector } from "../../../src/features/observe/collectors/DeviceStateCollector";
-import type { PerformanceAuditor } from "../../../src/features/observe/audits/PerformanceAuditor";
-import type { AccessibilityAuditor } from "../../../src/features/observe/audits/AccessibilityAuditor";
+import type { HierarchyCollectorPort } from "../../../src/features/observe/collectors/collectorPorts";
 import type { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-
-class NoOpAuditor implements Pick<
-  PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector,
-  "run"
-> {
-  async run(): Promise<void> {}
-}
+import { noopObserveAudits } from "../../fakes/noopObserveAudits";
 
 const device: BootedDevice = {
   deviceId: "test-device",
@@ -50,7 +41,7 @@ function createObserveScreen(
   foregroundActivity: string | null = "com.example/.MainActivity",
   hierarchyCapture?: HierarchyCapture,
   hierarchyFailure?: ActionableError,
-  hierarchyCollector?: HierarchyCollector,
+  hierarchyCollector?: HierarchyCollectorPort,
   realEvidence = false,
 ) {
   const fakeTimer = new FakeTimer();
@@ -71,15 +62,9 @@ function createObserveScreen(
         : { stat: async () => ({ isFile: () => true, size: 1, mtimeMs: fakeTimer.now() }) },
       screenshotRecorder: fakeScreenshotRecorder,
       hierarchyCollector:
-        hierarchyCollector ??
-        (new FakeHierarchyCollector(
-          foregroundActivity,
-          hierarchyFailure,
-        ) as unknown as HierarchyCollector),
-      deviceStateCollector: fakeDeviceStateCollector as unknown as DeviceStateCollector,
-      performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
-      accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
-      accessibilityStateDetector: new NoOpAuditor() as unknown as AccessibilityStateDetector,
+        hierarchyCollector ?? new FakeHierarchyCollector(foregroundActivity, hierarchyFailure),
+      deviceStateCollector: fakeDeviceStateCollector,
+      ...noopObserveAudits(),
     },
     fakeTimer,
   );
@@ -470,10 +455,8 @@ test("freshness capture failure reaches hierarchy collection and reports viewHie
       cacheStore: new FakeObserveCacheStore(timer),
       screenshotStateStore: screenshotState,
       screenshotRecorder: new FakeScreenshotRecorder(),
-      deviceStateCollector: new FakeDeviceStateCollector() as unknown as DeviceStateCollector,
-      performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
-      accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
-      accessibilityStateDetector: new NoOpAuditor() as unknown as AccessibilityStateDetector,
+      deviceStateCollector: new FakeDeviceStateCollector(),
+      ...noopObserveAudits(),
       onAvailabilityLost: (reason) => lost.push(reason),
     },
     timer,
@@ -647,7 +630,7 @@ test("explicit capture freshness also controls the hierarchy collector fallback 
       },
     },
     undefined,
-    collector as unknown as HierarchyCollector,
+    collector,
   );
 
   await observeScreen.execute({ freshness: "fresh", skipScreenshot: true });

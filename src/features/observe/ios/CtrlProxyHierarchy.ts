@@ -37,7 +37,7 @@ import {
 } from "../hierarchyReadArgs";
 
 /** Converted node format — `$` carries standard attributes, `extras` carries SDK walker data. */
-interface ConvertedNode {
+export interface ConvertedNode {
   $: Record<string, unknown>;
   extras?: Record<string, string>;
   node?: ConvertedNode[];
@@ -55,11 +55,14 @@ export const IOS_HIERARCHY_REQUEST_TIMEOUT_MS = 15000;
 
 type HierarchyRequestFailure = { reason: IosHierarchyUnavailableReason; detail?: string };
 
-/**
- * Delegate class for handling hierarchy operations.
- */
+/** Delegate class for handling hierarchy operations. */
 export class CtrlProxyHierarchy {
   private readonly context: HierarchyDelegateContext;
+
+  /** Typed unit-test view of the node filter. */
+  readonly testHooks = {
+    filterHierarchyNode: (node: ConvertedNode) => this.filterHierarchyNode(node, true),
+  };
 
   // Track the last known foreground app to detect stale cache from a different app
   private lastKnownPackageName: string | null = null;
@@ -1095,9 +1098,7 @@ export class CtrlProxyHierarchy {
     return isContainerClass && hasChildren;
   }
 
-  /**
-   * Clean node attributes by removing false booleans and empty values
-   */
+  /** Clean node attributes by removing false booleans and empty values */
   private cleanAttributes(attrs: Record<string, unknown>): Record<string, unknown> {
     const cleaned: Record<string, unknown> = {};
     const booleanFields = [

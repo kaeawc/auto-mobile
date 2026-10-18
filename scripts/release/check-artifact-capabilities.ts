@@ -33,6 +33,7 @@ import {
   parseIosRunnerAdvertised,
   parseManifest,
   parsePrototypeAgentAdvertised,
+  recordRelease,
 } from "./lib/artifact-capabilities";
 
 const REPO_ROOT = path.resolve(import.meta.dir, "../..");
@@ -81,8 +82,7 @@ function record(version: string, ref: string): void {
     });
     advertised[artifact] = ADVERTISED_PARSERS[artifact](source);
   }
-  const manifest = readManifest();
-  manifest.releases = { [version]: advertised, ...manifest.releases };
+  const manifest = recordRelease(readManifest(), version, advertised);
   writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
   process.stdout.write(`Recorded ${version} capabilities from ${ref}\n`);
 }

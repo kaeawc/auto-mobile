@@ -310,6 +310,8 @@ export interface AndroidEmulatorClientOptions {
   execAsync?: ((file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>) | null;
   /** Spawn function (for testing) */
   spawnFn?: SpawnFn | null;
+  /** Resolves the emulator binary path (for testing; defaults to filesystem/shell detection) */
+  locateEmulatorPath?: () => Promise<string>;
   /** Timer for delays */
   timer?: Timer;
   /** Factory for creating AdbClient instances (for testing) */
@@ -368,6 +370,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>;
   private spawnFn: SpawnFn;
   private emulatorPath: string;
+  private readonly locateEmulatorPath: () => Promise<string>;
   private timer: Timer;
   private adbFactory: AdbClientFactory;
   private avdConfigReader: AvdConfigReader;
@@ -399,6 +402,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     const {
       execAsync: execAsyncFn = null,
       spawnFn = null,
+      locateEmulatorPath: locateEmulatorPathFn = locateEmulatorPath,
       timer,
       adbFactory,
       avdConfigReader,
@@ -419,6 +423,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     this.execAsync = resolveEmulatorExecAsync(execAsyncFn);
     this.spawnFn =
       spawnFn || ((file, args, options) => emulatorHostProcessExecutor.spawn(file, args, options));
+    this.locateEmulatorPath = locateEmulatorPathFn;
     this.timer = timer;
     this.adbFactory = adbFactory;
     this.avdConfigReader = avdConfigReader ?? new FileAvdConfigReader();
@@ -481,7 +486,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     this.emulatorPath = getFallbackEmulatorPath();
   }
 
-  private wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void> {
+  wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void> {
     return this.readinessPoller.wakeAndUnlock(device, signal);
   }
 
@@ -600,7 +605,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    * Ensure emulator path is properly detected and cached
    */
   private async ensureEmulatorPath(): Promise<string> {
-    this.emulatorPath = await locateEmulatorPath();
+    this.emulatorPath = await this.locateEmulatorPath();
     return this.emulatorPath;
   }
 

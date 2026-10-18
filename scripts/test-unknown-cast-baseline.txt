@@ -171,7 +171,6 @@
 1	test/features/action/RecentApps.test.ts
 2	test/features/action/SelectAllText.test.ts
 1	test/features/action/StructuralGestureSequences.test.ts
-1	test/features/action/TapOnElement.effectBasisFallthrough.test.ts
 1	test/features/action/TapOnElement.ensureChecked.test.ts
 1	test/features/action/TapOnElement.ensureCheckedClockSkew.test.ts
 2	test/features/action/TapOnElement.extendedSelectors.test.ts

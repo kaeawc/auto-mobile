@@ -133,7 +133,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     },
 
     // --- Routed through the funnel ------------------------------------------
-    "src/daemon/daemon.ts": {
+    "src/daemon/deviceLossDiscovery.ts": {
       calls: 1,
       reason:
         "Disconnect monitor joins the observation to getAllDevices() by serial; reconciles first.",
@@ -309,7 +309,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   beforeAll(() => {
     discoveryCallCounts();
     const routed = [
-      "src/daemon/daemon.ts",
+      "src/daemon/deviceLossDiscovery.ts",
       "src/daemon/socketServer.ts",
       "src/server/bootedDeviceResources.ts",
       "src/features/deviceLifecycle/deviceLifecycleCore.ts",

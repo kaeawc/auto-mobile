@@ -36,7 +36,7 @@ import { inferIosFormFactor, isIosSimulatorUdid } from "./iosDeviceType";
 import { iosVersionStringFromRuntimeId } from "./iosVersion";
 import { getAbortSignal, runWithAbortSignal } from "../AbortContext";
 import { Mutex } from "async-mutex";
-import { iosSimulatorCapabilityInventory } from "../../models/virtualDeviceCapabilities";
+import { iosSimulatorCapabilityInventory } from "../virtualDeviceCapabilities";
 import { compareSimctlVersions, parseSimctlVersion } from "./simctlVersion";
 import { compareStrictNumericVersions } from "../deviceMatcher";
 import { defaultIdGenerator, type IdGenerator } from "../IdGenerator";

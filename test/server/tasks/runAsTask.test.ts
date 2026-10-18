@@ -125,4 +125,16 @@ describe("runAsTask (#4668)", () => {
     expect(toJsonRpcError(new Error("boom"))).toEqual({ code: -32603, message: "boom" });
     expect(toJsonRpcError("nope")).toEqual({ code: -32603, message: "Internal error" });
   });
+
+  test("a completion the store rejects still leaves the task terminal through the fallback fail (#13143)", async () => {
+    const manager = new FakeTaskManager();
+    manager.store.settleFailures = 1;
+    const handle = await runAsTask(
+      { declared: true, ownerKey: "k", taskManager: manager, toolName: "t" },
+      async () => OK,
+    );
+    const record = await settled(manager, "taskId" in handle ? handle.taskId : "");
+    expect(record.status).toBe("failed");
+    expect(String(record.error?.message)).toContain("SQLITE_BUSY");
+  });
 });

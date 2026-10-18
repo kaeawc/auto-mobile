@@ -2196,6 +2196,23 @@ describe("DaemonManager status", () => {
   });
 });
 
+// A live-but-useless daemon client: every reachability probe is refused.
+const refusingClientFactory = (): DaemonClientLike => ({
+  async connect() {
+    throw new Error("connection refused");
+  },
+  async close() {},
+  async callTool() {
+    return {};
+  },
+  async readResource() {
+    return {};
+  },
+  async callDaemonMethod() {
+    return {};
+  },
+});
+
 class FakeDaemonClient implements DaemonClientLike {
   readonly readResourceCalls: string[] = [];
   readonly callToolCalls: Array<{ toolName: string; params: Record<string, any> }> = [];
@@ -3757,21 +3774,7 @@ describe("Daemon manager process detection", () => {
 
     try {
       const manager = new TestDaemonManager({
-        clientFactory: () => ({
-          async connect() {
-            throw new Error("connection refused");
-          },
-          async close() {},
-          async callTool() {
-            return {};
-          },
-          async readResource() {
-            return {};
-          },
-          async callDaemonMethod() {
-            return {};
-          },
-        }),
+        clientFactory: refusingClientFactory,
         timer,
         lockFilePath: join(directory, "daemon.lock"),
         pidFilePath: join(directory, "daemon.pid"),
@@ -3968,21 +3971,7 @@ describe("Daemon manager process detection", () => {
 
     try {
       const manager = new TestDaemonManager({
-        clientFactory: () => ({
-          async connect() {
-            throw new Error("connection refused");
-          },
-          async close() {},
-          async callTool() {
-            return {};
-          },
-          async readResource() {
-            return {};
-          },
-          async callDaemonMethod() {
-            return {};
-          },
-        }),
+        clientFactory: refusingClientFactory,
         timer,
         lockFilePath: join(directory, "daemon.lock"),
         pidFilePath: join(directory, "daemon.pid"),
@@ -4221,21 +4210,7 @@ describe("Daemon manager process detection", () => {
 
     try {
       const manager = new TestDaemonManager({
-        clientFactory: () => ({
-          async connect() {
-            throw new Error("connection refused");
-          },
-          async close() {},
-          async callTool() {
-            return {};
-          },
-          async readResource() {
-            return {};
-          },
-          async callDaemonMethod() {
-            return {};
-          },
-        }),
+        clientFactory: refusingClientFactory,
         timer: fakeTimer,
         lockFilePath: join(dir, "daemon.lock"),
         pidFilePath,
@@ -4292,23 +4267,7 @@ describe("Daemon manager process detection", () => {
 
     try {
       const manager = new TestDaemonManager({
-        clientFactory: () => ({
-          // A live-but-useless daemon: every reachability probe is refused, so it
-          // never becomes reachable and the start must give up at the budget.
-          async connect() {
-            throw new Error("connection refused");
-          },
-          async close() {},
-          async callTool() {
-            return {};
-          },
-          async readResource() {
-            return {};
-          },
-          async callDaemonMethod() {
-            return {};
-          },
-        }),
+        clientFactory: refusingClientFactory,
         timer: fakeTimer,
         lockFilePath: join(dir, "daemon.lock"),
         pidFilePath,
@@ -4374,21 +4333,7 @@ describe("Daemon manager process detection", () => {
 
     try {
       const manager = new ContentionDaemonManager({
-        clientFactory: () => ({
-          async connect() {
-            throw new Error("connection refused");
-          },
-          async close() {},
-          async callTool() {
-            return {};
-          },
-          async readResource() {
-            return {};
-          },
-          async callDaemonMethod() {
-            return {};
-          },
-        }),
+        clientFactory: refusingClientFactory,
         timer: fakeTimer,
         lockFilePath: lockPath,
         pidFilePath: join(dir, "daemon.pid"),
@@ -4450,21 +4395,7 @@ describe("Daemon manager process detection", () => {
 
     try {
       const manager = new ContentionDaemonManager({
-        clientFactory: () => ({
-          async connect() {
-            throw new Error("connection refused");
-          },
-          async close() {},
-          async callTool() {
-            return {};
-          },
-          async readResource() {
-            return {};
-          },
-          async callDaemonMethod() {
-            return {};
-          },
-        }),
+        clientFactory: refusingClientFactory,
         timer: fakeTimer,
         lockFilePath: lockPath,
         pidFilePath: join(dir, "daemon.pid"),
@@ -4730,22 +4661,8 @@ describe("Daemon manager process detection", () => {
 
     try {
       const manager = new RunningDaemonManager({
-        clientFactory: () => ({
-          async connect() {
-            // Never accepts within the probe budget — models a slow first accept.
-            throw new Error("connection refused");
-          },
-          async close() {},
-          async callTool() {
-            return {};
-          },
-          async readResource() {
-            return {};
-          },
-          async callDaemonMethod() {
-            return {};
-          },
-        }),
+        // Never accepts within the probe budget — models a slow first accept.
+        clientFactory: refusingClientFactory,
         timer: fakeTimer,
         lockFilePath: join(dir, "daemon.lock"),
         pidFilePath: join(dir, "daemon.pid"),
@@ -4808,21 +4725,7 @@ describe("Daemon manager process detection", () => {
 
     try {
       const manager = new HandoffDaemonManager({
-        clientFactory: () => ({
-          async connect() {
-            throw new Error("connection refused");
-          },
-          async close() {},
-          async callTool() {
-            return {};
-          },
-          async readResource() {
-            return {};
-          },
-          async callDaemonMethod() {
-            return {};
-          },
-        }),
+        clientFactory: refusingClientFactory,
         timer: fakeTimer,
         lockFilePath: lockPath,
         pidFilePath: join(dir, "daemon.pid"),
@@ -4890,21 +4793,7 @@ describe("Daemon manager process detection", () => {
 
     try {
       const manager = new ChurnDaemonManager({
-        clientFactory: () => ({
-          async connect() {
-            throw new Error("connection refused");
-          },
-          async close() {},
-          async callTool() {
-            return {};
-          },
-          async readResource() {
-            return {};
-          },
-          async callDaemonMethod() {
-            return {};
-          },
-        }),
+        clientFactory: refusingClientFactory,
         timer: fakeTimer,
         lockFilePath: lockPath,
         pidFilePath: join(dir, "daemon.pid"),

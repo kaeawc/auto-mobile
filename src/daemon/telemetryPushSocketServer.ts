@@ -16,7 +16,10 @@ import { getOsEvents } from "../db/osEventRepository";
 import { getNavigationEvents } from "../db/navigationEventRepository";
 import { getStorageEvents } from "../db/storageEventRepository";
 import { getLayoutEvents } from "../db/layoutEventRepository";
-import { getDatabase } from "../db/database";
+import {
+  getFailureBackfillRows,
+  getNavigationNodesByScreenNames,
+} from "../db/telemetryBackfillRepository";
 import { TELEMETRY_PUSH_SOCKET_CONFIG } from "./daemonFiles";
 import { truncateBodyText, boundStructuredField } from "../utils/truncateBodyText";
 import { buildNavigationNodeScreenshotUri } from "../utils/navigationResourceUri";
@@ -350,13 +353,8 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     const screenshotUris: Map<string, string> = new Map();
     if (rows.length > 0) {
       try {
-        const db = getDatabase();
         const destinations = [...new Set(rows.map((r) => r.destination))];
-        const nodes = await db
-          .selectFrom("navigation_nodes")
-          .select(["id", "screen_name", "app_id"])
-          .where("screen_name", "in", destinations)
-          .execute();
+        const nodes = await getNavigationNodesByScreenNames(destinations);
         for (const node of nodes) {
           const key = `${node.app_id}:${node.screen_name}`;
           // Scope by the node's app_id (already selected) so a telemetry client
@@ -391,43 +389,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       return;
     }
     try {
-      const db = getDatabase();
-      let q = db
-        .selectFrom("failure_occurrences")
-        .innerJoin("failure_groups", "failure_groups.id", "failure_occurrences.group_id")
-        .select([
-          "failure_occurrences.id as occurrenceId",
-          "failure_occurrences.group_id as groupId",
-          "failure_occurrences.timestamp",
-          "failure_occurrences.device_id as deviceId",
-          // Selected so the crash/ANR/tool-failure backfill can report the
-          // originating session like every sibling projection does (#4209).
-          // Without it `r.sessionId` is a type error AND always undefined at
-          // runtime, so these events shipped with `sessionId: null` and were
-          // invisible to session-filtered subscribers.
-          "failure_occurrences.session_id as sessionId",
-          "failure_occurrences.screen_at_failure as screen",
-          "failure_groups.type",
-          "failure_groups.severity",
-          "failure_groups.title",
-          "failure_groups.stack_trace_json",
-        ])
-        .where("failure_groups.type", "=", failureType);
-
-      // Always filter by device — never send failures with empty/null device_id
-      if (deviceId) {
-        q = q.where("failure_occurrences.device_id", "=", deviceId);
-      } else {
-        // Even without a device filter, exclude failures with no device_id
-        q = q
-          .where("failure_occurrences.device_id", "is not", null)
-          .where("failure_occurrences.device_id", "!=", "");
-      }
-      if (sessionId) {
-        q = q.where("failure_occurrences.session_id", "=", sessionId);
-      }
-
-      const rows = await q.orderBy("failure_occurrences.timestamp", "desc").limit(limit).execute();
+      const rows = await getFailureBackfillRows({ failureType, deviceId, sessionId, limit });
 
       for (const r of rows) {
         const { exceptionType, stackTrace } = this.parseFailureStackTrace(r.stack_trace_json);

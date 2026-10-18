@@ -67,6 +67,11 @@ export interface StatelessMcpRequestScope {
   readonly requestScopeId: string;
   /** The caller's session key: the header, else the in-band `__mcpSessionId` argument. */
   readonly requestMcpSessionId: string | undefined;
+  /**
+   * Who owns the request's MCP tasks (#4668), when not its session key: a control-socket forward
+   * from the stdio proxy names the proxy. The HTTP endpoint never sets it.
+   */
+  readonly taskOwnerKey?: string;
 }
 
 export interface StatelessMcpHttpEndpointDeps<

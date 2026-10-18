@@ -38,9 +38,10 @@ type InitializeHandler = (request: InitializeRequest) => Promise<InitializeResul
  * Our servers speak the 2025-era wire (`initialize`), where `server/discover` does not exist,
  * so the extension is advertised on the `initialize` result, and only to a client whose
  * `initialize` declared it (in `capabilities.extensions` or the per-request `_meta`
- * capabilities). A client that does not declare it sees the `initialize` result unchanged.
+ * capabilities). A client that does not declare it sees the `initialize` result unchanged. The
+ * stdio proxy installs it too, because it relays the extension to the daemon.
  */
-function advertiseOnDeclaringInitialize(inner: Server): void {
+export function advertiseTasksOnDeclaringInitialize(inner: Server): void {
   const initialize: InitializeHandler = inner["_oninitialize"].bind(inner);
   inner.setRequestHandler("initialize", async (request, ctx) => {
     const result = await initialize(request);
@@ -82,7 +83,7 @@ function ownerKeyOf(deps: TasksProtocolDeps): string {
  */
 export function installTasksProtocol(server: McpServer, deps: TasksProtocolDeps): void {
   const inner = server.server;
-  advertiseOnDeclaringInitialize(inner);
+  advertiseTasksOnDeclaringInitialize(inner);
   inner.setRequestHandler("tasks/get", { params: taskIdParams }, async (params, ctx) => {
     requireDeclared(ctx);
     const record = await deps.taskManager.get(ownerKeyOf(deps), params.taskId);

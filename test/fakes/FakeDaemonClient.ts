@@ -1,4 +1,9 @@
-import type { DaemonClientLike, DaemonMethodCallOptions } from "../../src/daemon/client";
+import type {
+  DaemonClientLike,
+  DaemonMethodCallOptions,
+  DaemonToolCallOptions,
+} from "../../src/daemon/client";
+import type { TaskRelayFrame, TaskRelayMethod } from "../../src/server/tasks/taskRelay";
 import { DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
 import type { DaemonNotification } from "../../src/daemon/types";
@@ -36,6 +41,15 @@ export interface FakeDaemonClientOptions {
   // session-scoped discovery request is in flight (issue #4655).
   /** A returned value (other than undefined) is the method's result. */
   onCallDaemonMethod?: (method: string, params: Record<string, any>) => unknown;
+  /**
+   * Answers a relayed `tasks/*` request (#4668); it may throw to simulate the daemon's error or a
+   * lost connection. Without it a relay is forwarded to `daemon`, else answered `{}`.
+   */
+  onRelayTaskMethod?: (
+    method: TaskRelayMethod,
+    params: Record<string, unknown>,
+    tasks: TaskRelayFrame,
+  ) => unknown;
 }
 
 export class FakeDaemonClient implements DaemonClientLike {
@@ -58,6 +72,14 @@ export class FakeDaemonClient implements DaemonClientLike {
     params: Record<string, any>,
   ) => void | Promise<void>;
   private readonly onCallDaemonMethod?: (method: string, params: Record<string, any>) => unknown;
+  private readonly onRelayTaskMethod?: FakeDaemonClientOptions["onRelayTaskMethod"];
+  /** Each `callTool`'s options, `undefined` when the call passed none. */
+  readonly callToolOptions: Array<DaemonToolCallOptions | undefined> = [];
+  readonly relayTaskCalls: Array<{
+    method: TaskRelayMethod;
+    params: Record<string, unknown>;
+    tasks: TaskRelayFrame;
+  }> = [];
   private readonly notificationHandlers = new Set<(notification: DaemonNotification) => void>();
   private readonly connectionClosedHandlers = new Set<() => void>();
   subscribeToNotificationsCalls = 0;
@@ -74,6 +96,7 @@ export class FakeDaemonClient implements DaemonClientLike {
     this.daemonMethodResults = options.daemonMethodResults ?? new Map();
     this.onCallTool = options.onCallTool;
     this.onCallDaemonMethod = options.onCallDaemonMethod;
+    this.onRelayTaskMethod = options.onRelayTaskMethod;
   }
 
   async connect(): Promise<void> {
@@ -115,9 +138,11 @@ export class FakeDaemonClient implements DaemonClientLike {
     progressToken?: string | number,
     onRequestId?: (requestId: string) => void,
     signal?: AbortSignal,
+    options?: DaemonToolCallOptions,
   ): Promise<any> {
     signal?.throwIfAborted();
     this.callToolSignals.push(signal);
+    this.callToolOptions.push(options);
     const requestId = this.requestIdGenerator.next();
     this.callToolRequestIds.push(requestId);
     onRequestId?.(requestId);
@@ -132,7 +157,26 @@ export class FakeDaemonClient implements DaemonClientLike {
     if (perToolResult !== undefined || this.scriptedToolResult || !this.daemon) {
       return perToolResult ?? this.toolResult;
     }
-    return await this.daemon.callTool(toolName, params, progressToken, undefined, signal);
+    return options
+      ? await this.daemon.callTool(toolName, params, progressToken, undefined, signal, options)
+      : await this.daemon.callTool(toolName, params, progressToken, undefined, signal);
+  }
+
+  async relayTaskMethod(
+    method: TaskRelayMethod,
+    params: Record<string, unknown>,
+    tasks: TaskRelayFrame,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<any> {
+    options.signal?.throwIfAborted();
+    this.relayTaskCalls.push({ method, params, tasks });
+    if (this.onRelayTaskMethod) {
+      return await this.onRelayTaskMethod(method, params, tasks);
+    }
+    if (this.daemon?.relayTaskMethod) {
+      return await this.daemon.relayTaskMethod(method, params, tasks, options);
+    }
+    return {};
   }
 
   async readResource(

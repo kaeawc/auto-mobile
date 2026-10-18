@@ -82,13 +82,12 @@ describe("Highlight Tools Registration", () => {
         requestHierarchySync: async () => ({ hierarchy }),
         convertToViewHierarchyResult: () => hierarchy,
       }),
-      highlightClientFactory: () =>
-        ({
-          addHighlight: async (_id, shape) => {
-            shapes.push(shape);
-            return { success: true };
-          },
-        }) as any,
+      highlightClientFactory: () => ({
+        addHighlight: async (_id, shape) => {
+          shapes.push(shape);
+          return { success: true };
+        },
+      }),
     });
     const tool = ToolRegistry.getTool("highlight")!;
     const response = await tool.deviceAwareHandler!(
@@ -251,13 +250,12 @@ describe("Highlight Tools Registration", () => {
     const addCalls: Array<{ id: string; shape: HighlightShape; platform: string }> = [];
     registerHighlightTools({
       generateHighlightId: () => "highlight-ios-shape",
-      highlightClientFactory: () =>
-        ({
-          addHighlight: async (id, shape, options) => {
-            addCalls.push({ id, shape, platform: options.platform });
-            return { success: true };
-          },
-        }) as any,
+      highlightClientFactory: () => ({
+        addHighlight: async (id, shape, options) => {
+          addCalls.push({ id, shape, platform: options.platform });
+          return { success: true };
+        },
+      }),
     });
 
     const tool = ToolRegistry.getTool("highlight");
@@ -312,13 +310,12 @@ describe("Highlight Tools Registration", () => {
         requestHierarchySync: async () => ({ hierarchy }),
         convertToViewHierarchyResult: () => hierarchy as ViewHierarchyResult,
       }),
-      highlightClientFactory: () =>
-        ({
-          addHighlight: async () => {
-            highlighted = true;
-            return { success: true };
-          },
-        }) as any,
+      highlightClientFactory: () => ({
+        addHighlight: async () => {
+          highlighted = true;
+          return { success: true };
+        },
+      }),
     });
     const tool = ToolRegistry.getTool("highlight")!;
     const response = await tool.deviceAwareHandler!(
@@ -355,13 +352,12 @@ describe("Highlight Tools Registration", () => {
           ).SearchableHierarchy().project(hierarchy),
         }),
       }),
-      highlightClientFactory: () =>
-        ({
-          addHighlight: async (_id, value) => {
-            shape = value;
-            return { success: true };
-          },
-        }) as any,
+      highlightClientFactory: () => ({
+        addHighlight: async (_id, value) => {
+          shape = value;
+          return { success: true };
+        },
+      }),
     });
     const tool = ToolRegistry.getTool("highlight")!;
     const response = await tool.deviceAwareHandler!(
@@ -397,13 +393,12 @@ describe("Highlight Tools Registration", () => {
         requestHierarchySync: async () => ({ hierarchy }),
         convertToViewHierarchyResult: (source) => source as ViewHierarchyResult,
       }),
-      highlightClientFactory: () =>
-        ({
-          addHighlight: async (_id, shape) => {
-            addCalls.push({ shape });
-            return { success: true };
-          },
-        }) as any,
+      highlightClientFactory: () => ({
+        addHighlight: async (_id, shape) => {
+          addCalls.push({ shape });
+          return { success: true };
+        },
+      }),
     });
 
     const tool = ToolRegistry.getTool("highlight");
@@ -459,13 +454,12 @@ describe("Highlight Tools Registration", () => {
         requestHierarchySync: async () => ({ hierarchy }),
         convertToViewHierarchyResult: (source) => source as ViewHierarchyResult,
       }),
-      highlightClientFactory: () =>
-        ({
-          addHighlight: async (_id, shape) => {
-            addCalls.push({ shape });
-            return { success: true };
-          },
-        }) as any,
+      highlightClientFactory: () => ({
+        addHighlight: async (_id, shape) => {
+          addCalls.push({ shape });
+          return { success: true };
+        },
+      }),
     });
 
     const tool = ToolRegistry.getTool("highlight");
@@ -509,13 +503,12 @@ describe("Highlight Tools Registration", () => {
         requestHierarchySync: async () => ({ hierarchy }),
         convertToViewHierarchyResult: (source) => source as ViewHierarchyResult,
       }),
-      highlightClientFactory: () =>
-        ({
-          addHighlight: async (_id, shape) => {
-            addCalls.push({ shape });
-            return { success: true };
-          },
-        }) as any,
+      highlightClientFactory: () => ({
+        addHighlight: async (_id, shape) => {
+          addCalls.push({ shape });
+          return { success: true };
+        },
+      }),
     });
 
     const tool = ToolRegistry.getTool("highlight");

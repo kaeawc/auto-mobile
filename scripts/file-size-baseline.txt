@@ -72,7 +72,7 @@
 1431	src/server/appResources.ts
 1508	src/server/appTools.ts
 1985	src/server/bootedDeviceResources.ts
-2426	src/server/deviceSnapshotManager.ts
+2428	src/server/deviceSnapshotManager.ts
 2530	src/server/deviceToolsProvisioning.ts
 1269	src/server/deviceToolsShutdown.ts
 1273	src/server/deviceToolsStartDevice.ts

@@ -1,6 +1,6 @@
+import { Client } from "../helpers/v1ViewMcpClient";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { DaemonClient, DaemonShuttingDownError } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { McpOverloadError } from "../../src/daemon/McpTimeoutError";

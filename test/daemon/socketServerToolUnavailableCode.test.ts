@@ -1,5 +1,5 @@
+import { McpError } from "../../src/server/mcpError";
 import { expect, test } from "bun:test";
-import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { DAEMON_TOOL_UNAVAILABLE_CODE } from "../../src/daemon/types";
 

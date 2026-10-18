@@ -1,4 +1,4 @@
-import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { specTypeSchemas } from "@modelcontextprotocol/server";
 import { recordObservationRead } from "../../src/features/observe/observationReadScope";
 import { z } from "zod/v4";
 import { FakeTapStrategy } from "../fakes/FakeTapStrategy";
@@ -40,6 +40,15 @@ import type {
 import { tapOnResultSchema } from "../../src/server/toolOutputSchemas";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { TapOnCall } from "../../src/features/action/ActionCall";
+
+/** Validates a value as a spec `CallToolResult`, as the v1 SDK's `CallToolResultSchema.parse` did. */
+function parseCallToolResult(value: unknown) {
+  const result = specTypeSchemas.CallToolResult["~standard"].validate(value);
+  if (result.issues) {
+    throw new Error(`Invalid CallToolResult: ${JSON.stringify(result.issues)}`);
+  }
+  return result.value;
+}
 
 const test = warmedTests(() => {
   resetTapAtElementFactory();
@@ -289,9 +298,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
     setTapOnElementFactory(() => ({ execute: async () => result }));
     const response = await tapOnHandler(fakeDevice, args);
 
-    expect(CallToolResultSchema.parse(response).structuredContent).toEqual(
-      response.structuredContent,
-    );
+    expect(parseCallToolResult(response).structuredContent).toEqual(response.structuredContent);
     expect(
       Reflect.ownKeys(response.structuredContent).every((key) => typeof key === "string"),
     ).toBe(true);

@@ -1,6 +1,7 @@
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { McpError } from "../../src/server/mcpError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { registerFailuresResources } from "../../src/server/failuresResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { FakeFailureAnalyticsRepository } from "../fakes/FakeFailureAnalyticsRepository";
@@ -36,7 +37,7 @@ describe("failures timeline query vs the malformed-URI backstop (#10117 + #10119
     );
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
-    const handler = server.server.handlersBySchema.get(ReadResourceRequestSchema);
+    const handler = server.server.handlersBySchema.get("resources/read");
     if (!handler) {
       throw new Error("read handler not registered");
     }
@@ -49,7 +50,7 @@ describe("failures timeline query vs the malformed-URI backstop (#10117 + #10119
   });
 
   async function readTimeline(uri: string): Promise<{ error?: string; dateRange?: string }> {
-    const result = (await readHandler({ params: { uri } }, {})) as {
+    const result = (await readHandler({ params: { uri } }, fakeServerContext())) as {
       contents: Array<{ text?: string }>;
     };
     return JSON.parse(result.contents[0]?.text ?? "{}") as { error?: string; dateRange?: string };
@@ -91,7 +92,7 @@ describe("failures timeline query vs the malformed-URI backstop (#10117 + #10119
   test("a malformed query escape does not surface as an McpError", async () => {
     const outcome = await readHandler(
       { params: { uri: "automobile:failures/timeline?dateRange=bad%zz" } },
-      {},
+      fakeServerContext(),
     ).then(
       (value) => ({ value }),
       (error: unknown) => ({ error }),
@@ -110,7 +111,10 @@ describe("failures timeline query vs the malformed-URI backstop (#10117 + #10119
   });
 
   test("the registry backstop still turns a URIError into invalid-params next to the timeline", async () => {
-    const error = await readHandler({ params: { uri: "automobile:test/unguarded/a%" } }, {}).then(
+    const error = await readHandler(
+      { params: { uri: "automobile:test/unguarded/a%" } },
+      fakeServerContext(),
+    ).then(
       () => undefined,
       (caught: unknown) => caught,
     );

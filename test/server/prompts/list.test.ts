@@ -108,12 +108,9 @@ describe("MCP Prompts List", () => {
     };
 
     // Mock the handler to return our test prompt on the existing server
-    server.server.setRequestHandler(
-      require("@modelcontextprotocol/sdk/types.js").ListPromptsRequestSchema,
-      async () => ({
-        prompts: [testPrompt],
-      }),
-    );
+    server.server.setRequestHandler("prompts/list", async () => ({
+      prompts: [testPrompt],
+    }));
 
     // Send prompts/list request
     const result = await client.request(

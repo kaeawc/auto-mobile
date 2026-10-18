@@ -72,7 +72,7 @@ describe("a client that dies mid-request is seen as disconnected (#11058)", () =
     );
     server.mcpClientFactory = async () => ({
       listTools: async () => ({ tools: [] }),
-      callTool: (_params: unknown, _schema: unknown, options?: { signal?: AbortSignal }) =>
+      callTool: (_params: unknown, options?: { signal?: AbortSignal }) =>
         new Promise((resolve, reject) => {
           const signal = options?.signal;
           calls.push({ signal, settle: resolve });

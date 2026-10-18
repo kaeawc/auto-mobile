@@ -1,6 +1,5 @@
+import type { McpServer } from "@modelcontextprotocol/server";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
@@ -8,7 +7,7 @@ import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
 const URI = "automobile:devices/booted";
 
 async function subscribe(server: FakeMcpServer, uri: string): Promise<void> {
-  await server.server.handlersBySchema.get(SubscribeRequestSchema)!({ params: { uri } });
+  await server.server.handlersBySchema.get("resources/subscribe")!({ params: { uri } });
 }
 
 function methods(server: FakeMcpServer): string[] {

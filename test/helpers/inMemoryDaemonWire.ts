@@ -1,11 +1,11 @@
+import type { Client } from "@modelcontextprotocol/client";
+import { ErrorCode, McpError } from "../../src/server/mcpError";
 import { createTestUnixSocketServer } from "./createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import type { Socket } from "node:net";
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
@@ -463,7 +463,6 @@ export function loopbackMcpClientFactory(
     ({
       callTool: async (
         params: { name: string; arguments?: Record<string, unknown> },
-        _resultSchema?: unknown,
         options?: { signal?: AbortSignal; timeout?: number },
       ) => {
         const args = { ...params.arguments };

@@ -1,8 +1,8 @@
+import type { Client } from "@modelcontextprotocol/client";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";

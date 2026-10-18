@@ -680,7 +680,7 @@ Use a separate non-broker private batch for these plain-proxy tests: their
 Use `scripts/manual-test/python/` to retain every request and full response while
 reproducing #11951 (stdio close) and #11950 (multiline typing). This tooling uses
 the official Python `mcp` SDK, locked to 2.3.0. The existing TypeScript
-`proxy-session.ts` and `@modelcontextprotocol/sdk` cannot reproduce Python/anyio
+`proxy-session.ts` and `@modelcontextprotocol/client` cannot reproduce Python/anyio
 close-path errors; Python's standard library has no MCP client. The official SDK
 is the thing under test. Tests use `unittest`, as the existing repository Python
 tests do, rather than adding pytest. The only third-party imports are `mcp` and

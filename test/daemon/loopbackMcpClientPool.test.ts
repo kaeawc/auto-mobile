@@ -1,5 +1,5 @@
+import { Client } from "../helpers/v1ViewMcpClient";
 import { describe, expect, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   MCP_CLIENT_IDLE_CLOSE_MS,
   clearPooledIdleTimer,

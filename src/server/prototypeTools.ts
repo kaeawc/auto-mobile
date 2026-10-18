@@ -19,7 +19,7 @@ import { recordPrototypeTextShow } from "../features/prototype/prototypeTextTarg
 import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
 import { z } from "zod/v4";
 import { z as specZ, type ZodTypeAny } from "zod";
-import { toJsonSchemaCompat } from "@modelcontextprotocol/sdk/server/zod-json-schema-compat.js";
+import { zodToJsonSchema } from "zod-to-json-schema";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streamDeviceLifecycleEvents";
 import * as requestWiring from "../features/prototype/prototypeRequestWiring";
@@ -190,13 +190,12 @@ import {
   MAX_PROTOTYPE_ASSET_ID_LENGTH,
 } from "../features/prototype/prototypeAssets";
 
-// The settled spec is Zod 3; registry/device targeting use Zod 4. The installed
-// MCP SDK converts the original schema, avoiding a second authored spec schema.
-// The SDK union of Zod 3/4 schemas exceeds TS instantiation depth; this call accepts only Zod 3.
-// oxlint-disable-next-line auto-mobile/no-unknown-cast -- Narrow the SDK converter at the Zod 3/4 boundary.
-const convertSpec = toJsonSchemaCompat as unknown as (
-  schema: ZodTypeAny,
-) => Record<string, unknown>;
+// The settled spec is Zod 3; registry/device targeting use Zod 4. It is converted with
+// the same `zod-to-json-schema` options the v1 MCP SDK's `toJsonSchemaCompat` applied to a
+// Zod 3 schema, so the advertised schema is unchanged by the SDK v2 migration (#4678) and
+// no second spec schema is authored.
+const convertSpec = (schema: ZodTypeAny): Record<string, unknown> =>
+  zodToJsonSchema(schema, { strictUnions: true, pipeStrategy: "input" });
 const advertisedSpec = convertSpec(prototypeSpecSchema);
 /**
  * The contract and validator reject `theme: {}` and `theme.colors: {}`, but a Zod refinement has no

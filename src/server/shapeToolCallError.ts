@@ -6,7 +6,7 @@ import {
 import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
 import { ActionableError } from "../models/ActionableError";
 import { TextIndeterminateError } from "../features/action/textTransportTimeout";
-import { McpError } from "@modelcontextprotocol/sdk/types.js";
+import { McpError } from "./mcpError";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { DaemonDisconnectError } from "../daemon/DaemonDisconnectError";
@@ -65,6 +65,7 @@ export interface ToolCallErrorContext {
 }
 
 interface ToolCallErrorResult {
+  [key: string]: unknown;
   content: [{ type: "text"; text: string }];
   isError: true;
 }

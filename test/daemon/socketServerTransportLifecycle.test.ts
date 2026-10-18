@@ -1,3 +1,4 @@
+import { type Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import {
   ResourceUpdatedBroadcaster,
@@ -8,8 +9,6 @@ import type { Socket } from "node:net";
 import * as net from "node:net";
 import * as securePermissions from "../../src/utils/filesystem/securePermissions";
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import type { DaemonRequest, DaemonResponse, DaemonNotification } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";

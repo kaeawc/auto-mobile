@@ -9,7 +9,7 @@ import {
   setToolTransportRecovery,
   type ToolTransportRecovery,
 } from "./toolTransportRecovery";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { ActionableError, BootedDevice } from "../models";

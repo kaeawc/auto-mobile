@@ -1,3 +1,5 @@
+import { fakeServerContext } from "../../helpers/fakeServerContext";
+import type { McpServer } from "@modelcontextprotocol/server";
 import {
   afterAll,
   afterEach,
@@ -8,11 +10,6 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  ReadResourceRequestSchema,
-  SubscribeRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { NavigationRepository } from "../../../src/db/navigationRepository";
@@ -68,7 +65,7 @@ async function connect(context: ResourceReadContext): Promise<FakeMcpServer> {
   const server = new FakeMcpServer();
   ResourceRegistry.registerWithServer(server as unknown as McpServer, () => context);
   for (const uri of [graphUri, "automobile:navigation/history", "automobile:navigation/apps"]) {
-    await server.server.handlersBySchema.get(SubscribeRequestSchema)!({ params: { uri } });
+    await server.server.handlersBySchema.get("resources/subscribe")!({ params: { uri } });
   }
   return server;
 }
@@ -165,9 +162,9 @@ describe("navigation resource session resolution", () => {
 
   test("registry forwards the connection binding to the graph handler", async () => {
     const server = await connect({ sessionUuid: "B" });
-    const result = (await server.server.handlersBySchema.get(ReadResourceRequestSchema)!(
+    const result = (await server.server.handlersBySchema.get("resources/read")!(
       { params: { uri: graphUri } },
-      { signal: new AbortController().signal },
+      fakeServerContext({ signal: new AbortController().signal }),
     )) as { contents: ResourceContent[] };
     expect(JSON.parse(result.contents[0]!.text!).currentScreen).toBe("HomeB");
   });

@@ -160,7 +160,6 @@ import {
   getActiveDeviceSelectionFromResult,
   isDeviceSessionAcquisitionTool,
   isDeviceBindingTool,
-  readDeviceCleanupInProgressRefusal,
   readTerminalSessionRefusal,
 } from "../server/deviceSessionResult";
 import { routedSessionUuidFromResult } from "../server/routedSessionMeta";
@@ -182,6 +181,7 @@ import {
   type ToolCallForwardMode,
   type ToolCallForwarderPort,
 } from "./proxy/ToolCallForwarder";
+import { DeviceCleanupWait, DEVICE_CLEANUP_WAIT_BUDGET_MS } from "./proxy/DeviceCleanupWait";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { type SessionReleaseSnapshot } from "./sessionManager";
@@ -189,9 +189,7 @@ import { type SessionReleaseSnapshot } from "./sessionManager";
 const { DaemonPreflightConnectionError, HeldSessionNotFoundError } = daemonInternalErrors;
 
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { exponentialBackoff, normalizeBackoff, type BackoffInput } from "../utils/Backoff";
-import { DEVICE_CLEANUP_IN_PROGRESS_CODE } from "./deviceAcquisitionRefusals";
-import { readToolEnvelopePayload } from "../server/toolEnvelopePayload";
+import type { BackoffInput } from "../utils/Backoff";
 import {
   type BuildIdentity,
   buildIdentitiesMatch,
@@ -540,23 +538,7 @@ export interface ProxiedResourceTemplate {
  * - Forwarding MCP resource requests to the daemon
  * - Caching tool/resource definitions from daemon
  */
-/**
- * Longest a bind waits out a `device_cleanup_in_progress` refusal: the recording-finalize cap
- * (about 120 s, #10957) plus slack for the restores around it. Shared with the JUnit runner and
- * XCTestRunner through `finalizeWait.waitBudgetMs` in `test/fixtures/refusal-wire-hints/hints.json`
- * (#11360): change them together.
- */
-export const DEVICE_CLEANUP_WAIT_BUDGET_MS = 150_000;
-
-/** Short growing polls notice early cleanup; its remaining-cap hint is an upper bound (#11900). */
-const DEVICE_CLEANUP_BACKOFF = exponentialBackoff({
-  initialDelayMs: 250,
-  multiplier: 2,
-  maxDelayMs: 5_000,
-});
-
-/** A hint or backoff near zero must not busy-poll the daemon (#11900). */
-const DEVICE_CLEANUP_POLL_FLOOR_MS = 50;
+export { DEVICE_CLEANUP_WAIT_BUDGET_MS };
 
 export interface DaemonMcpProxyCloseOptions {
   /**
@@ -2537,7 +2519,22 @@ export class DaemonMcpProxy {
       tasks,
     });
     if (isDeviceBindingTool(name)) {
-      first = await this.waitOutDeviceCleanup(first, name, args, progressToken, onProgress, signal);
+      first = await new DeviceCleanupWait({
+        timer: this.timer,
+        budgetMs: this.config.cleanupWaitBudgetMs,
+        backoff: this.config.cleanupWaitBackoff,
+      }).waitOut(
+        first,
+        name,
+        {
+          isClosing: () => this.closing,
+          reforward: () =>
+            this.forwardToolCall(name, args, progressToken, onProgress, signal, {
+              allowSuspectRetry: false,
+            }),
+        },
+        signal,
+      );
     }
     const refusal = first.retryableSuspectRefusal;
     if (!refusal || !(await this.awaitSuspectSessionRecovery(refusal, signal))) {
@@ -2621,77 +2618,6 @@ export class DaemonMcpProxy {
       `Tool ${name} cannot acquire a generic device on a session-broker connection. ` +
         `Use the exact bound session ${this.brokerSessions.result.sessionUuid ?? "reported by initialize"}.`,
     );
-  }
-
-  /**
-   * A bind refused as `device_cleanup_in_progress` never reached a device, so it is forwarded
-   * again on short growing polls while the previous session's cleanup settles (#11900). The wait is
-   * bounded by the cleanup budget; when it runs out the last refusal is returned unchanged.
-   */
-  private async waitOutDeviceCleanup(
-    first: ForwardedToolCall,
-    name: string,
-    args: Record<string, unknown>,
-    progressToken: string | number | undefined,
-    onProgress: DaemonProxyProgressCallback | undefined,
-    signal: AbortSignal | undefined,
-  ): Promise<ForwardedToolCall> {
-    const budgetMs = this.config.cleanupWaitBudgetMs ?? DEVICE_CLEANUP_WAIT_BUDGET_MS;
-    const deadline = this.timer.now() + budgetMs;
-    const backoff = normalizeBackoff(this.config.cleanupWaitBackoff ?? DEVICE_CLEANUP_BACKOFF);
-    let current = first;
-    for (let attempt = 1; !this.closing; attempt++) {
-      const refusal = readDeviceCleanupInProgressRefusal(current.result);
-      const remaining = deadline - this.timer.now();
-      if (!refusal || remaining <= 0) {
-        return current;
-      }
-      const backoffMs = backoff.delayForAttempt(attempt);
-      const hintMs = refusal.retryAfterMs;
-      const cleanupCap =
-        readToolEnvelopePayload(current.result)?.payload.code === DEVICE_CLEANUP_IN_PROGRESS_CODE;
-      const stepMs = Math.max(
-        DEVICE_CLEANUP_POLL_FLOOR_MS,
-        hintMs !== undefined && hintMs > 0
-          ? cleanupCap
-            ? Math.min(hintMs, backoffMs)
-            : Math.max(hintMs, backoffMs)
-          : backoffMs,
-      );
-      const delayMs = Math.floor(Math.min(remaining, stepMs));
-      if (delayMs <= 0) {
-        return current;
-      }
-      logger.info(
-        `[DaemonMcpProxy] ${name} refused while the device finishes its previous session's cleanup; re-checking in ${delayMs}ms`,
-      );
-      await this.waitForCleanupPoll(delayMs, signal);
-      current = await this.forwardToolCall(name, args, progressToken, onProgress, signal, {
-        allowSuspectRetry: false,
-      });
-    }
-    return current;
-  }
-
-  /** Keep the poll timeout cancellable; raceWithDeadline owns and removes the abort listener. */
-  private async waitForCleanupPoll(
-    delayMs: number,
-    signal: AbortSignal | undefined,
-  ): Promise<void> {
-    let handle: NodeJS.Timeout | undefined;
-    try {
-      await raceWithDeadline(
-        () =>
-          new Promise<void>((resolve) => {
-            handle = this.timer.setTimeout(resolve, delayMs);
-          }),
-        { timer: this.timer, signal, label: "Device cleanup wait" },
-      );
-    } finally {
-      if (handle !== undefined) {
-        this.timer.clearTimeout(handle);
-      }
-    }
   }
 
   /**

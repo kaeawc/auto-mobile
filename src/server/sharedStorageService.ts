@@ -35,7 +35,7 @@ import {
   normalizeSharedStorageNamespace,
   normalizeSharedStorageRelativePath,
   type SharedStorageFileInput,
-  type StageSharedStorageArgs,
+  type StageSharedStorageInput,
   type StageSharedStorageResult,
   type StagedSharedStorageFile,
 } from "./sharedStorageContract";
@@ -86,7 +86,7 @@ export interface SharedStorageUserResolver {
   resolve(request?: UserTargetRequest): Promise<ResolvedUserTarget>;
 }
 
-export interface StageSharedStorageRequest extends Omit<StageSharedStorageArgs, "device"> {
+export interface StageSharedStorageRequest extends Omit<StageSharedStorageInput, "device"> {
   device: BootedDevice;
   explicitUserId?: number;
   signal?: AbortSignal;

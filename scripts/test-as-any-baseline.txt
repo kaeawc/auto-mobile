@@ -153,7 +153,6 @@
 5	test/features/utility/ElementParser.test.ts
 2	test/features/utility/GetDeepLinks.test.ts
 19	test/features/utility/PostNotification.test.ts
-1	test/features/utility/PostNotificationIos.test.ts
 3	test/features/utility/SystemConfigurationAdapter.test.ts
 1	test/features/utility/SystemConfigurationManager.test.ts
 50	test/features/video/FfmpegVideoProcessingBackend.test.ts

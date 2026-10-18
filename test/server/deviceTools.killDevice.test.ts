@@ -3737,10 +3737,7 @@ describe("killDevice handler", () => {
           },
         }) as never,
     );
-    (IOSCtrlProxyClient as unknown as { instances: Map<string, IOSCtrlProxyClient> }).instances.set(
-      device.deviceId,
-      client,
-    );
+    IOSCtrlProxyClient.registerForTesting(client, device.deviceId);
     const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
       stop: async () => {},
     } as never);

@@ -181,6 +181,15 @@ error rather than a silent truncation. `gh api --paginate` over workflow runs is
 deliberately avoided — it hangs and returns nothing; pages are requested
 explicitly with a cap.
 
+## Stateless Endpoint Benchmark
+
+Time per-request latency of the daemon's stateless MCP HTTP endpoint (#13068) over real
+loopback HTTP, with a fake device discovery so no device or resident daemon is touched:
+
+```bash
+bun scripts/benchmark-stateless-endpoint.ts --iterations 200 --warmup 30 --max-p50-ms 6
+```
+
 ## Startup Benchmark
 
 Measure MCP server and daemon startup time (cold/warm) with optional baseline comparison:

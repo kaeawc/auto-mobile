@@ -5,10 +5,9 @@ import { errorMessage } from "../describeUnknownError";
 import { ActionableError, type BootedDevice } from "../../models";
 import type { Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
-import { DeviceLockStore } from "../../devices/DeviceLockStore";
 import { AdbClient } from "./AdbClient";
 import type { AdbClientFactory } from "./AdbClientFactory";
-import { AndroidWakeAndUnlock } from "./AndroidWakeAndUnlock";
+import { DefaultEmulatorBootUnlock, type EmulatorBootUnlock } from "./EmulatorBootUnlock";
 import {
   READINESS_NAME_TIMEOUT_MS,
   type AndroidDeviceInventoryScanner,
@@ -38,8 +37,6 @@ export const MIN_EMULATOR_POLLING_INTERVAL_MS = 100;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const MAX_POLLING_SLEEP_CHUNK_MS = 500;
 const READINESS_PROBE_TIMEOUT_MS = 10_000;
-const PRIMARY_USER_UNLOCK_WAIT_MS = 5_000;
-const PRIMARY_USER_UNLOCK_POLL_INTERVAL_MS = 250;
 
 export interface OfflineTracker {
   deviceId: string | null;
@@ -166,7 +163,19 @@ export interface EmulatorReadinessPoller {
 }
 
 export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
-  constructor(private readonly host: EmulatorReadinessHost) {}
+  private readonly bootUnlock: EmulatorBootUnlock;
+
+  constructor(
+    private readonly host: EmulatorReadinessHost,
+    bootUnlock?: EmulatorBootUnlock,
+  ) {
+    this.bootUnlock =
+      bootUnlock ??
+      new DefaultEmulatorBootUnlock({
+        timer: () => this.host.timer(),
+        adbFactory: () => this.host.adbFactory(),
+      });
+  }
 
   private get timer(): Timer {
     return this.host.timer();
@@ -952,72 +961,7 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     perf.endOperation("wakeAndUnlock");
   }
 
-  /**
-   * Wake up the emulator and dismiss the lock screen after boot.
-   * This ensures the device is immediately usable for automation.
-   *
-   * Delegates to the shared {@link AndroidWakeAndUnlock} implementation so boot uses the same
-   * path as the `wakeAndUnlock` tool: a swipe lock is dismissed, and a secure
-   * lock is unlocked with the PIN remembered for the device this session (if
-   * any). A secure device with no remembered PIN is left locked — non-fatal, the
-   * device is still ready and the user can unlock it with the tool (#4360).
-   * @param device - The booted device to wake and unlock
-   */
-  async wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void> {
-    try {
-      const wakeAndUnlock = new AndroidWakeAndUnlock(device, this.adbFactory, {
-        timer: this.timer,
-        credentialStore: new DeviceLockStore(),
-      });
-      const result = await wakeAndUnlock.execute(undefined, signal);
-      await this.waitForPrimaryUserUnlock(device, signal);
-      if (!result.unlocked && result.secure) {
-        logger.info(
-          `[WakeAndUnlock] Device ${device.deviceId} is secure-locked and no PIN is remembered; ` +
-            "leaving it locked. Unlock it once with the wakeAndUnlock tool (passing a pin) to remember it.",
-        );
-      } else {
-        logger.info(
-          `[WakeAndUnlock] Device ${device.deviceId} wake/unlock: ${JSON.stringify(result)}`,
-        );
-      }
-    } catch (error) {
-      throwIfReadinessAborted(signal);
-      // Log but don't fail - the device is still ready, just might need manual interaction.
-      // A secure lock with no remembered PIN throws ActionableError here; that is expected.
-      logger.warn(`[WakeAndUnlock] Failed to wake/unlock device ${device.deviceId}: ${error}`);
-    }
-  }
-
-  private async waitForPrimaryUserUnlock(
-    device: BootedDevice,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const adb = this.adbFactory.create(device);
-    let elapsedMs = 0;
-    try {
-      while (elapsedMs < PRIMARY_USER_UNLOCK_WAIT_MS) {
-        throwIfReadinessAborted(signal);
-        const users = await adb.listUsers(signal);
-        const primaryUser = users.find(
-          (user) => user.profileType === "primary" || user.userId === 0,
-        );
-        if (primaryUser?.startState !== "RUNNING_LOCKED") {
-          return;
-        }
-        await this.timer.sleep(PRIMARY_USER_UNLOCK_POLL_INTERVAL_MS);
-        elapsedMs += PRIMARY_USER_UNLOCK_POLL_INTERVAL_MS;
-      }
-      logger.warn(
-        `[WakeAndUnlock] Primary user on ${device.deviceId} is still RUNNING_LOCKED after ` +
-          `${PRIMARY_USER_UNLOCK_WAIT_MS}ms; CtrlProxy cannot bind until the device unlocks.`,
-      );
-    } catch (error) {
-      // User-state inspection is supplementary; preserve the completed unlock result if unavailable.
-      throwIfReadinessAborted(signal);
-      logger.debug(
-        `[WakeAndUnlock] Could not confirm primary-user unlock state for ${device.deviceId}: ${error}`,
-      );
-    }
+  wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void> {
+    return this.bootUnlock.wakeAndUnlock(device, signal);
   }
 }

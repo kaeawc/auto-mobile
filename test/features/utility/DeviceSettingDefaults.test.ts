@@ -5,9 +5,11 @@ import {
   createDeviceSettingDefaultsAcquisitionReset,
   createDeviceSettingDefaultsIdentityListener,
   PENDING_RESET_WAIT_MS,
-  type DeviceSettingKey,
-  type DeviceSettingValues,
 } from "../../../src/features/utility/DeviceSettingDefaults";
+import type {
+  DeviceSettingKey,
+  DeviceSettingValues,
+} from "../../../src/models/DeviceSettingDefaults";
 import {
   FakeDeviceSettingDefaultsPersistence as FakePersistence,
   FakeDeviceSettings,

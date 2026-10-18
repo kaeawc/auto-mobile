@@ -7,6 +7,8 @@ import {
   type ChooserAppMetadata,
   type ChooserActivityLabelResult,
 } from "../../../src/features/utility/DeepLinkManager";
+import type { ViewHierarchyResult } from "../../../src/models";
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -22,13 +24,12 @@ const metadata = (
     typeof activityLabel === "string"
       ? { kind: "literal", label: activityLabel }
       : (activityLabel ?? { kind: "none" }),
-  getFreshHierarchy: async (_device, _factory, minTimestamp) =>
-    ({
-      ...hierarchy(nodes, listId),
-      packageName: minTimestamp > 101 ? target : packageName,
-      updatedAt: Math.max(101, minTimestamp),
-      hierarchy: minTimestamp > 101 ? { node: {} } : hierarchy(nodes, listId).hierarchy,
-    }) as any,
+  getFreshHierarchy: async (_device, _factory, minTimestamp) => ({
+    ...hierarchy(nodes, listId),
+    packageName: minTimestamp > 101 ? target : packageName,
+    updatedAt: Math.max(101, minTimestamp),
+    hierarchy: minTimestamp > 101 ? { node: {} } : hierarchy(nodes, listId).hierarchy,
+  }),
 });
 
 const target = "com.example.app";
@@ -96,7 +97,7 @@ describe("ADB activity-label lookup", () => {
         "      ApplicationInfo:",
         "      labelRes=0x7f010001 nonLocalizedLabel=Chrome Activity icon=0x7f090311\n      ApplicationInfo:",
       );
-    adb.setCommandResponse("query-activities", { stdout: labeledQuery, stderr: "" } as any);
+    adb.setCommandResponse("query-activities", createExecResult(labeledQuery, ""));
 
     expect(
       await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
@@ -109,10 +110,7 @@ describe("ADB activity-label lookup", () => {
     expect(chromeQueryActivities).toContain(
       "        labelRes=0x7f1402c9 nonLocalizedLabel=null icon=0x7f090311 banner=0x0",
     );
-    adb.setCommandResponse("query-activities", {
-      stdout: chromeQueryActivities,
-      stderr: "",
-    } as any);
+    adb.setCommandResponse("query-activities", createExecResult(chromeQueryActivities, ""));
 
     expect(
       await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
@@ -128,7 +126,7 @@ describe("ADB activity-label lookup", () => {
       "      ApplicationInfo:",
       "      labelRes=0x7f010001 nonLocalizedLabel=Open in Browser icon=0x7f090311\n      ApplicationInfo:",
     );
-    adb.setCommandResponse("query-activities", { stdout: labeledQuery, stderr: "" } as any);
+    adb.setCommandResponse("query-activities", createExecResult(labeledQuery, ""));
 
     expect(
       await resolveChooserActivityLabel(adb, "com.android.chrome", "example://item?q='x'&v=$HOME"),
@@ -151,7 +149,7 @@ describe("ADB activity-label lookup", () => {
       .replace("IntentDispatcher", "OtherDispatcher")
       .replace("Open in Browser", "Open in Other");
     const twoActivities = `2 activities found:\n${firstActivity}${secondActivity}`;
-    adb.setCommandResponse("query-activities", { stdout: twoActivities, stderr: "" } as any);
+    adb.setCommandResponse("query-activities", createExecResult(twoActivities, ""));
 
     expect(
       await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
@@ -165,7 +163,7 @@ describe("ADB activity-label lookup", () => {
       "nonLocalizedLabel=null icon=0x7f090311",
       "nonLocalizedLabel=Application Only icon=0x7f090311",
     );
-    adb.setCommandResponse("query-activities", { stdout: appLabeledQuery, stderr: "" } as any);
+    adb.setCommandResponse("query-activities", createExecResult(appLabeledQuery, ""));
 
     expect(
       await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
@@ -178,7 +176,7 @@ describe("ADB activity-label lookup", () => {
       "      ApplicationInfo:",
       "      labelRes=0x7f010001 nonLocalizedLabel=null icon=0x7f090311\n      ApplicationInfo:",
     );
-    adb.setCommandResponse("query-activities", { stdout: resourceLabeledQuery, stderr: "" } as any);
+    adb.setCommandResponse("query-activities", createExecResult(resourceLabeledQuery, ""));
 
     expect(
       await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
@@ -196,7 +194,7 @@ describe("ADB activity-label lookup", () => {
         "      ApplicationInfo:",
         "      labelRes=0x7f010001 nonLocalizedLabel=Chrome Activity icon=0x7f090311\n      ApplicationInfo:",
       );
-    adb.setCommandResponse("query-activities", { stdout: query, stderr: "" } as any);
+    adb.setCommandResponse("query-activities", createExecResult(query, ""));
 
     expect(
       await resolveChooserActivityLabel(adb, "com.android.chrome", "https://example.com"),
@@ -215,15 +213,29 @@ const row = (packageName: string, top: number) => ({
     },
   ],
 });
-const hierarchy = (nodes: unknown[], listId = "android:id/resolver_list") => ({
-  updatedAt: 100,
-  hierarchy: {
-    node: {
-      class: "com.android.internal.app.ChooserActivity",
-      node: [{ "resource-id": listId, node: nodes }],
+// Chooser fixtures carry raw Android attributes (class, resource-id, clickable) that the
+// ViewHierarchyNode model does not name, so raw trees are narrowed in this one place.
+const chooserTree = (raw: {
+  updatedAt?: number;
+  hierarchy: object;
+  packageName?: string;
+}): ViewHierarchyResult => raw as ViewHierarchyResult;
+const hierarchy = (
+  nodes: unknown[],
+  listId = "android:id/resolver_list",
+  listBounds?: { left: number; top: number; right: number; bottom: number },
+): ViewHierarchyResult =>
+  chooserTree({
+    updatedAt: 100,
+    hierarchy: {
+      node: {
+        class: "com.android.internal.app.ChooserActivity",
+        node: [
+          { "resource-id": listId, ...(listBounds ? { bounds: listBounds } : {}), node: nodes },
+        ],
+      },
     },
-  },
-});
+  });
 
 async function choose(
   nodes: unknown[],
@@ -243,12 +255,7 @@ async function choose(
     undefined,
     metadata(label, nodes, undefined, listId, activityLabel),
   );
-  const result = await manager.handleIntentChooser(
-    hierarchy(nodes, listId) as any,
-    "custom",
-    target,
-    url,
-  );
+  const result = await manager.handleIntentChooser(hierarchy(nodes, listId), "custom", target, url);
   return { result, commands: adb.getExecutedCommands() };
 }
 
@@ -273,8 +280,12 @@ describe("custom intent chooser exact package selection", () => {
   test("rejects an exact package repeated on a later chooser page", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDeviceTimestampMs(1000);
-    const first = hierarchy([row(target, 0)]);
-    (first.hierarchy.node.node[0] as any).bounds = { left: 0, top: 0, right: 100, bottom: 200 };
+    const first = hierarchy([row(target, 0)], undefined, {
+      left: 0,
+      top: 0,
+      right: 100,
+      bottom: 200,
+    });
     const later = hierarchy([row(target, 0), row("com.other.app", 100)]);
     const manager = new DeepLinkManager(
       { platform: "android", deviceId: "fake", name: "fake" },
@@ -285,10 +296,10 @@ describe("custom intent chooser exact package selection", () => {
       undefined,
       {
         getLabel: async () => null,
-        getFreshHierarchy: async () => ({ ...later, updatedAt: 101 }) as any,
+        getFreshHierarchy: async () => ({ ...later, updatedAt: 101 }),
       },
     );
-    const result = await manager.handleIntentChooser(first as any, "custom", target);
+    const result = await manager.handleIntentChooser(first, "custom", target);
     expect(result.error).toContain("Ambiguous chooser rows");
     expect(
       adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
@@ -297,21 +308,22 @@ describe("custom intent chooser exact package selection", () => {
   test("restores an earlier unique row after scanning later pages", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDeviceTimestampMs(1000);
-    const makePage = (items: unknown[], updatedAt: number) => ({
-      updatedAt,
-      hierarchy: {
-        node: {
-          class: "com.android.internal.app.ChooserActivity",
-          node: [
-            {
-              "resource-id": "android:id/resolver_list",
-              bounds: { left: 0, top: 0, right: 100, bottom: 200 },
-              node: items,
-            },
-          ],
+    const makePage = (items: unknown[], updatedAt: number) =>
+      chooserTree({
+        updatedAt,
+        hierarchy: {
+          node: {
+            class: "com.android.internal.app.ChooserActivity",
+            node: [
+              {
+                "resource-id": "android:id/resolver_list",
+                bounds: { left: 0, top: 0, right: 100, bottom: 200 },
+                node: items,
+              },
+            ],
+          },
         },
-      },
-    });
+      });
     const first = makePage([row(target, 0)], 100);
     const second = makePage([row("com.other.app", 100)], 101);
     let captures = 0;
@@ -324,11 +336,13 @@ describe("custom intent chooser exact package selection", () => {
       undefined,
       {
         getLabel: async () => null,
-        getFreshHierarchy: async (_device, _factory, floor) =>
-          ({ ...(++captures <= 3 ? second : first), updatedAt: floor }) as any,
+        getFreshHierarchy: async (_device, _factory, floor) => ({
+          ...(++captures <= 3 ? second : first),
+          updatedAt: floor,
+        }),
       },
     );
-    const result = await manager.handleIntentChooser(first as any, "custom", target);
+    const result = await manager.handleIntentChooser(first, "custom", target);
     expect(result.success).toBe(true);
     expect(adb.getExecutedCommands()).toEqual([
       "shell input swipe 50 150 50 50 350",
@@ -407,7 +421,7 @@ describe("custom intent chooser label fallback", () => {
       "      ApplicationInfo:",
       "      labelRes=0x7f010001 nonLocalizedLabel=null icon=0x7f090311\n      ApplicationInfo:",
     );
-    adb.setCommandResponse("query-activities", { stdout: query, stderr: "" } as any);
+    adb.setCommandResponse("query-activities", createExecResult(query, ""));
     const rows = [labelRow("Application Name", 100)];
     const manager = new DeepLinkManager(
       { platform: "android", deviceId: "fake", name: "fake" },
@@ -423,7 +437,7 @@ describe("custom intent chooser label fallback", () => {
       },
     );
     const result = await manager.handleIntentChooser(
-      hierarchy(rows) as any,
+      hierarchy(rows),
       "custom",
       "com.android.chrome",
       "example://item",
@@ -459,11 +473,11 @@ describe("custom intent chooser label fallback", () => {
         getLabel: async () => "Example",
         getFreshHierarchy: async () => {
           captures += 1;
-          return { ...chooser, updatedAt: 101 } as any;
+          return { ...chooser, updatedAt: 101 };
         },
       },
     );
-    const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+    const result = await manager.handleIntentChooser(chooser, "custom", target);
     expect(result.success).toBe(false);
     expect(result.error).toContain("Unverified chooser selection");
     expect(result.packageVerified).toBe(false);
@@ -488,15 +502,13 @@ describe("custom intent chooser label fallback", () => {
         getLabel: async () => "Example",
         getFreshHierarchy: async (_device, _factory, floor) => {
           floors.push(floor);
-          return (
-            floor === 101
-              ? { ...chooser, updatedAt: 101 }
-              : { hierarchy: { node: {} }, packageName: target, updatedAt: 2000 }
-          ) as any;
+          return floor === 101
+            ? { ...chooser, updatedAt: 101 }
+            : { hierarchy: { node: {} }, packageName: target, updatedAt: 2000 };
         },
       },
     );
-    const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+    const result = await manager.handleIntentChooser(chooser, "custom", target);
     expect(result.success).toBe(true);
     expect(result.packageVerified).toBe(false);
     // Expose the raw second; only the internal polling floor advances to 2000.
@@ -518,19 +530,19 @@ describe("custom intent chooser label fallback", () => {
       {
         getLabel: async () => "Shared",
         getFreshHierarchy: async (_device, _factory, floor) =>
-          (floor <= 101
+          floor <= 101
             ? { ...hierarchy([labelRow("Shared", 100)]), updatedAt: 101 }
             : {
                 ...hierarchy([]),
                 hierarchy: { node: {} },
                 packageName: "com.other.app",
                 updatedAt: floor,
-              }) as any,
+              },
       },
       timer,
     );
     const result = await manager.handleIntentChooser(
-      hierarchy([labelRow("Shared", 100)]) as any,
+      hierarchy([labelRow("Shared", 100)]),
       "custom",
       target,
     );
@@ -549,21 +561,22 @@ describe("custom intent chooser label fallback", () => {
   test("scrolls and recaptures bounded chooser pages before declaring a label-only row missing", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDeviceTimestampMs(1000);
-    const page = (nodes: unknown[], updatedAt: number) => ({
-      updatedAt,
-      hierarchy: {
-        node: {
-          class: "com.android.internal.app.ChooserActivity",
-          node: [
-            {
-              "resource-id": "android:id/resolver_list",
-              bounds: { left: 0, top: 0, right: 100, bottom: 200 },
-              node: nodes,
-            },
-          ],
+    const page = (nodes: unknown[], updatedAt: number) =>
+      chooserTree({
+        updatedAt,
+        hierarchy: {
+          node: {
+            class: "com.android.internal.app.ChooserActivity",
+            node: [
+              {
+                "resource-id": "android:id/resolver_list",
+                bounds: { left: 0, top: 0, right: 100, bottom: 200 },
+                node: nodes,
+              },
+            ],
+          },
         },
-      },
-    });
+      });
     const first = page([labelRow("Example Beta", 100)], 100);
     const second = page([labelRow("Example", 100)], 102);
     const manager = new DeepLinkManager(
@@ -576,12 +589,12 @@ describe("custom intent chooser label fallback", () => {
       {
         getLabel: async () => "Example",
         getFreshHierarchy: async (_device, _factory, minTimestamp) =>
-          (minTimestamp >= 1000
+          minTimestamp >= 1000
             ? { ...second, hierarchy: { node: {} }, packageName: target, updatedAt: minTimestamp }
-            : { ...(minTimestamp <= 101 ? first : second), updatedAt: minTimestamp }) as any,
+            : { ...(minTimestamp <= 101 ? first : second), updatedAt: minTimestamp },
       },
     );
-    const result = await manager.handleIntentChooser(first as any, "custom", target);
+    const result = await manager.handleIntentChooser(first, "custom", target);
     expect(adb.getExecutedCommands()).toEqual([
       "shell input swipe 50 150 50 50 350",
       "shell input swipe 50 150 50 50 350",
@@ -603,7 +616,7 @@ describe("custom intent chooser label fallback", () => {
       metadata("Example", [labelRow("Example", 200), labelRow("Example Beta", 0)]),
     );
     const result = await manager.handleIntentChooser(
-      hierarchy([labelRow("Example", 100), labelRow("Example Beta", 0)]) as any,
+      hierarchy([labelRow("Example", 100), labelRow("Example Beta", 0)]),
       "custom",
       target,
     );
@@ -624,12 +637,12 @@ describe("custom intent chooser label fallback", () => {
         getLabel: async () => "Example",
         getFreshHierarchy: async (_device, _factory, minTimestamp) => {
           requestedTimestamp = minTimestamp;
-          return hierarchy([labelRow("Example", 100)]) as any;
+          return hierarchy([labelRow("Example", 100)]);
         },
       },
     );
     const result = await manager.handleIntentChooser(
-      hierarchy([labelRow("Example", 100)]) as any,
+      hierarchy([labelRow("Example", 100)]),
       "custom",
       target,
     );
@@ -640,7 +653,7 @@ describe("custom intent chooser label fallback", () => {
   test("ignores an action button named like the requested app", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDeviceTimestampMs(1000);
-    const fresh = {
+    const fresh = chooserTree({
       updatedAt: 101,
       hierarchy: {
         node: {
@@ -655,7 +668,7 @@ describe("custom intent chooser label fallback", () => {
           ],
         },
       },
-    };
+    });
     const manager = new DeepLinkManager(
       { platform: "android", deviceId: "fake", name: "fake" },
       adb,
@@ -666,13 +679,11 @@ describe("custom intent chooser label fallback", () => {
       {
         getLabel: async () => "Always",
         getFreshHierarchy: async (_device, _factory, floor) =>
-          (floor > 101
-            ? { hierarchy: { node: {} }, packageName: target, updatedAt: floor }
-            : fresh) as any,
+          floor > 101 ? { hierarchy: { node: {} }, packageName: target, updatedAt: floor } : fresh,
       },
     );
     const result = await manager.handleIntentChooser(
-      hierarchy([labelRow("Always", 100)]) as any,
+      hierarchy([labelRow("Always", 100)]),
       "custom",
       target,
     );
@@ -724,7 +735,7 @@ test("rejects ambiguity across hierarchy roots", async () => {
   const adb = new FakeAdbExecutor();
   const manager = new DeepLinkManager({ platform: "android", deviceId: "fake", name: "fake" }, adb);
   const result = await manager.handleIntentChooser(
-    {
+    chooserTree({
       updatedAt: 100,
       hierarchy: {
         node: [
@@ -735,7 +746,7 @@ test("rejects ambiguity across hierarchy roots", async () => {
           { node: [{ "resource-id": "android:id/chooser_list", node: [row(target, 100)] }] },
         ],
       },
-    } as any,
+    }),
     "custom",
     target,
   );
@@ -755,7 +766,7 @@ test("ignores exact package metadata outside the chooser app list", async () => 
     metadata("Example", [row(target, 100)]),
   );
   const result = await manager.handleIntentChooser(
-    {
+    chooserTree({
       ...hierarchy([row(target, 100)]),
       hierarchy: {
         node: [
@@ -763,7 +774,7 @@ test("ignores exact package metadata outside the chooser app list", async () => 
           { "resource-id": "android:id/resolver_list", node: [row(target, 100)] },
         ],
       },
-    } as any,
+    }),
     "custom",
     target,
   );
@@ -816,7 +827,7 @@ test("excludes a captured OEM chooser host from represented app metadata", async
     ),
   );
   const result = await manager.handleIntentChooser(
-    {
+    chooserTree({
       updatedAt: 100,
       hierarchy: {
         node: {
@@ -834,7 +845,7 @@ test("excludes a captured OEM chooser host from represented app metadata", async
         },
       },
       packageName: host,
-    } as any,
+    }),
     "custom",
     target,
   );
@@ -842,21 +853,22 @@ test("excludes a captured OEM chooser host from represented app metadata", async
   expect(adb.getExecutedCommands()).toEqual(["shell input tap 50 120"]);
 });
 
-const chooserPage = (nodes: unknown[], updatedAt: number) => ({
-  updatedAt,
-  hierarchy: {
-    node: {
-      class: "com.android.internal.app.ChooserActivity",
-      node: [
-        {
-          "resource-id": "android:id/resolver_list",
-          bounds: { left: 0, top: 0, right: 100, bottom: 200 },
-          node: nodes,
-        },
-      ],
+const chooserPage = (nodes: unknown[], updatedAt: number) =>
+  chooserTree({
+    updatedAt,
+    hierarchy: {
+      node: {
+        class: "com.android.internal.app.ChooserActivity",
+        node: [
+          {
+            "resource-id": "android:id/resolver_list",
+            bounds: { left: 0, top: 0, right: 100, bottom: 200 },
+            node: nodes,
+          },
+        ],
+      },
     },
-  },
-});
+  });
 
 test("retries a fresh chooser and intermediate screen until the target app launches", async () => {
   const adb = new FakeAdbExecutor();
@@ -877,20 +889,20 @@ test("retries a fresh chooser and intermediate screen until the target app launc
       getFreshHierarchy: async (_device, _factory, floor) => {
         floors.push(floor);
         if (floor < 1000) {
-          return { ...chooser, updatedAt: floor } as any;
+          return { ...chooser, updatedAt: floor };
         }
         if (floor === 1000) {
-          return { ...chooser, updatedAt: 1000 } as any;
+          return { ...chooser, updatedAt: 1000 };
         }
         if (floor === 1001) {
-          return { hierarchy: { node: {} }, packageName: "com.loading", updatedAt: 1001 } as any;
+          return { hierarchy: { node: {} }, packageName: "com.loading", updatedAt: 1001 };
         }
-        return { hierarchy: { node: {} }, packageName: target, updatedAt: floor } as any;
+        return { hierarchy: { node: {} }, packageName: target, updatedAt: floor };
       },
     },
     timer,
   );
-  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(true);
   expect(floors).toEqual([101, 102, 1000, 1001, 1002]);
   expect(timer.getSleepHistory()).toEqual([50, 50]);
@@ -914,12 +926,12 @@ test("bounds post-tap polling and returns the typed unverified failure", async (
       getLabel: async () => "Example",
       getFreshHierarchy: async (_device, _factory, floor) => {
         floors.push(floor);
-        return { ...chooser, updatedAt: floor } as any;
+        return { ...chooser, updatedAt: floor };
       },
     },
     timer,
   );
-  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(false);
   expect(result.error).toContain("Unverified chooser selection");
   expect(result.tappedAt).toBe(1000);
@@ -945,19 +957,19 @@ test("bounds a slow post-tap hierarchy read by the remaining verification budget
       getLabel: async () => "Example",
       getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
         if (floor < 1000) {
-          return { ...chooser, updatedAt: floor } as any;
+          return { ...chooser, updatedAt: floor };
         }
         readBudgets.push(timeoutMs ?? 0);
         if (readBudgets.length === 1) {
-          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor } as any;
+          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor };
         }
         await timer.sleep(Math.min(11_000, timeoutMs ?? 11_000));
-        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor } as any;
+        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor };
       },
     },
     timer,
   );
-  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(false);
   expect(result.error).toContain("Unverified chooser selection");
   expect(result.packageVerified).toBe(false);
@@ -984,16 +996,16 @@ test("accepts a confirming hierarchy read that completes at the verification dea
       getLabel: async () => "Example",
       getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
         if (floor < 1000) {
-          return { ...chooser, updatedAt: floor } as any;
+          return { ...chooser, updatedAt: floor };
         }
         readBudgets.push(timeoutMs ?? 0);
         await timer.sleep(timeoutMs ?? 0);
-        return { hierarchy: { node: {} }, packageName: target, updatedAt: floor } as any;
+        return { hierarchy: { node: {} }, packageName: target, updatedAt: floor };
       },
     },
     timer,
   );
-  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(true);
   expect(result.packageVerified).toBe(false);
   expect(readBudgets).toEqual([200]);
@@ -1017,7 +1029,7 @@ test("returns the typed verification failure when a bounded hierarchy read rejec
       getLabel: async () => "Example",
       getFreshHierarchy: async (_device, _factory, floor, timeoutMs) => {
         if (floor < 1000) {
-          return { ...chooser, updatedAt: floor } as any;
+          return { ...chooser, updatedAt: floor };
         }
         await timer.sleep(timeoutMs ?? 11_000);
         throw new Error("capture timed out");
@@ -1025,7 +1037,7 @@ test("returns the typed verification failure when a bounded hierarchy read rejec
     },
     timer,
   );
-  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(false);
   expect(result.error).toContain("Unverified chooser selection");
   expect(result.packageVerified).toBe(false);
@@ -1053,17 +1065,17 @@ test("accepts a fresh target capture within the tap's device-second", async () =
       getFreshHierarchy: async (_device, _factory, floor) => {
         floors.push(floor);
         if (floor < 2000) {
-          return { ...chooser, updatedAt: floor } as any;
+          return { ...chooser, updatedAt: floor };
         }
         postTapReads += 1;
         return postTapReads === 1
-          ? ({ ...chooser, updatedAt: 1000 } as any)
-          : ({ hierarchy: { node: {} }, packageName: target, updatedAt: 1000 } as any);
+          ? { ...chooser, updatedAt: 1000 }
+          : { hierarchy: { node: {} }, packageName: target, updatedAt: 1000 };
       },
     },
     timer,
   );
-  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(true);
   // openLink compares against this raw second, not the internal 2000ms floor.
   expect(result.tappedAt).toBe(1000);
@@ -1092,21 +1104,21 @@ test("rejects an out-of-order target capture after a newer device-seconds observ
       getFreshHierarchy: async (_device, _factory, floor) => {
         floors.push(floor);
         if (floor < 2000) {
-          return { ...chooser, updatedAt: floor } as any;
+          return { ...chooser, updatedAt: floor };
         }
         postTapReads += 1;
         if (postTapReads === 1) {
-          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 } as any;
+          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 };
         }
         if (postTapReads === 2) {
-          return { hierarchy: { node: {} }, packageName: target, updatedAt: 1600 } as any;
+          return { hierarchy: { node: {} }, packageName: target, updatedAt: 1600 };
         }
-        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 } as any;
+        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 };
       },
     },
     timer,
   );
-  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(false);
   expect(result.packageVerified).toBe(false);
   expect(result.error).toContain("Unverified chooser selection");
@@ -1135,21 +1147,21 @@ test("rejects a millisecond-clock target capture older than the moving floor", a
       getFreshHierarchy: async (_device, _factory, floor) => {
         floors.push(floor);
         if (floor < 1000) {
-          return { ...chooser, updatedAt: floor } as any;
+          return { ...chooser, updatedAt: floor };
         }
         postTapReads += 1;
         if (postTapReads === 1) {
-          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 } as any;
+          return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: 2500 };
         }
         if (postTapReads === 2) {
-          return { hierarchy: { node: {} }, packageName: target, updatedAt: 1600 } as any;
+          return { hierarchy: { node: {} }, packageName: target, updatedAt: 1600 };
         }
-        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor } as any;
+        return { hierarchy: { node: {} }, packageName: "com.other.app", updatedAt: floor };
       },
     },
     timer,
   );
-  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(false);
   expect(result.packageVerified).toBe(false);
   expect(result.error).toContain("Unverified chooser selection");
@@ -1172,8 +1184,8 @@ test("accepts a target app screen containing chooser button text and IDs", async
       getLabel: async () => "Example",
       getFreshHierarchy: async (_device, _factory, floor) =>
         floor < 1000
-          ? ({ ...chooser, updatedAt: floor } as any)
-          : ({
+          ? { ...chooser, updatedAt: floor }
+          : chooserTree({
               hierarchy: {
                 node: {
                   node: [
@@ -1185,10 +1197,10 @@ test("accepts a target app screen containing chooser button text and IDs", async
               },
               packageName: target,
               updatedAt: floor,
-            } as any),
+            }),
     },
   );
-  const result = await manager.handleIntentChooser(chooser as any, "custom", target);
+  const result = await manager.handleIntentChooser(chooser, "custom", target);
   expect(result.success).toBe(true);
   expect(result.packageVerified).toBe(false);
 });
@@ -1211,11 +1223,10 @@ test("deduplicates a stable chooser row visible in overlapping captures", async 
     undefined,
     {
       getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) =>
-        ({ ...second, updatedAt: floor }) as any,
+      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
     },
   );
-  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  const result = await manager.handleIntentChooser(first, "custom", target);
   expect(result.success).toBe(true);
   expect(adb.getExecutedCommands().at(-1)).toBe("shell input tap 50 60");
 });
@@ -1249,11 +1260,10 @@ test("deduplicates a clamped chooser scroll using another row's observed displac
     undefined,
     {
       getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) =>
-        ({ ...second, updatedAt: floor }) as any,
+      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
     },
   );
-  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  const result = await manager.handleIntentChooser(first, "custom", target);
   expect(result.success).toBe(true);
   expect(adb.getExecutedCommands()[0]).toBe("shell input swipe 50 150 50 50 350");
   expect(adb.getExecutedCommands().at(-1)).toBe("shell input tap 50 120");
@@ -1290,13 +1300,12 @@ test("keeps a repeated chooser target ambiguous when anchor deltas disagree", as
     undefined,
     {
       getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) =>
-        ({ ...second, updatedAt: floor }) as any,
+      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
     },
   );
-  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  const result = await manager.handleIntentChooser(first, "custom", target);
   expect(
-    manager["getObservedChooserDisplacement"](first as any, second as any, "s2-bbbbbbbbbbbbbbbb"),
+    manager["getObservedChooserDisplacement"](first, second, "s2-bbbbbbbbbbbbbbbb"),
   ).toBeUndefined();
   expect(result.error).toContain("Ambiguous chooser rows");
   expect(
@@ -1333,10 +1342,8 @@ test("excludes duplicate chooser anchor IDs from displacement evidence", () => {
     const before = makePage(beforeTops, 140, 100);
     const after = makePage(afterTops, 100, 101);
     const duplicated = beforeTops.length > 1 ? before : after;
-    expect(manager["getChooserAnchorRows"](duplicated as any).has(anchorId)).toBe(false);
-    expect(
-      manager["getObservedChooserDisplacement"](before as any, after as any, targetId),
-    ).toBeUndefined();
+    expect(manager["getChooserAnchorRows"](duplicated).has(anchorId)).toBe(false);
+    expect(manager["getObservedChooserDisplacement"](before, after, targetId)).toBeUndefined();
   }
 });
 
@@ -1365,14 +1372,11 @@ test("rejects opposite-direction chooser anchors as scroll evidence", async () =
     undefined,
     {
       getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) =>
-        ({ ...second, updatedAt: floor }) as any,
+      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
     },
   );
-  expect(
-    manager["getObservedChooserDisplacement"](first as any, second as any, targetId),
-  ).toBeUndefined();
-  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  expect(manager["getObservedChooserDisplacement"](first, second, targetId)).toBeUndefined();
+  const result = await manager.handleIntentChooser(first, "custom", target);
   expect(result.error).toContain("Ambiguous chooser rows");
   expect(adb.getExecutedCommands()[0]).toBe("shell input swipe 50 150 50 50 350");
   expect(
@@ -1397,11 +1401,10 @@ test("keeps a repeated stable target ambiguous without overlapping anchor rows",
     undefined,
     {
       getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) =>
-        ({ ...second, updatedAt: floor }) as any,
+      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
     },
   );
-  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  const result = await manager.handleIntentChooser(first, "custom", target);
   expect(result.error).toContain("Ambiguous chooser rows");
   expect(
     adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
@@ -1434,14 +1437,13 @@ test("keeps a repeated stable target ambiguous when only its clickable child ove
     undefined,
     {
       getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) =>
-        ({ ...second, updatedAt: floor }) as any,
+      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
     },
   );
-  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  const result = await manager.handleIntentChooser(first, "custom", target);
   expect(result.error).toContain("Ambiguous chooser rows");
   expect(
-    manager["getObservedChooserDisplacement"](first as any, second as any, "s2-bbbbbbbbbbbbbbbb"),
+    manager["getObservedChooserDisplacement"](first, second, "s2-bbbbbbbbbbbbbbbb"),
   ).toBeUndefined();
   expect(
     adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
@@ -1476,11 +1478,11 @@ test("rejects identical stable label rows separated by chooser pages without tap
             .length,
           pages.length - 1,
         );
-        return { ...pages[page], updatedAt: floor } as any;
+        return { ...pages[page], updatedAt: floor };
       },
     },
   );
-  const result = await manager.handleIntentChooser(pages[0] as any, "custom", target);
+  const result = await manager.handleIntentChooser(pages[0], "custom", target);
   expect(result.error).toContain("Ambiguous chooser rows");
   expect(
     adb.getExecutedCommands().filter((command) => command.startsWith("shell input tap")),
@@ -1505,11 +1507,10 @@ test("keeps resource-backed row IDs ambiguous across pages", async () => {
     undefined,
     {
       getLabel: async () => null,
-      getFreshHierarchy: async (_device, _factory, floor) =>
-        ({ ...second, updatedAt: floor }) as any,
+      getFreshHierarchy: async (_device, _factory, floor) => ({ ...second, updatedAt: floor }),
     },
   );
-  const result = await manager.handleIntentChooser(first as any, "custom", target);
+  const result = await manager.handleIntentChooser(first, "custom", target);
   expect(result.error).toContain("Ambiguous chooser rows");
   expect(adb.getExecutedCommands().some((command) => command.startsWith("shell input tap"))).toBe(
     false,
@@ -1534,13 +1535,13 @@ test("uses the label refresh timestamp as the post-swipe freshness floor", async
       getFreshHierarchy: async (_device, _factory, floor) => {
         floors.push(floor);
         if (floor >= 1000) {
-          return { hierarchy: { node: {} }, packageName: target, updatedAt: floor } as any;
+          return { hierarchy: { node: {} }, packageName: target, updatedAt: floor };
         }
-        return { ...chooser, updatedAt: floor === 101 ? 101 : floor } as any;
+        return { ...chooser, updatedAt: floor === 101 ? 101 : floor };
       },
     },
   );
-  await manager.handleIntentChooser(chooser as any, "custom", target);
+  await manager.handleIntentChooser(chooser, "custom", target);
   expect(floors.slice(0, 2)).toEqual([101, 102]);
 });
 
@@ -1573,11 +1574,11 @@ test("restores a clipped middle-page row by rematching each reverse viewport", a
         if (swipeCount > viewport) {
           viewport = swipeCount;
         }
-        return { ...pages[viewport], updatedAt: floor } as any;
+        return { ...pages[viewport], updatedAt: floor };
       },
     },
   );
-  const result = await manager.handleIntentChooser(pages[0] as any, "custom", target);
+  const result = await manager.handleIntentChooser(pages[0], "custom", target);
   expect(result.success).toBe(true);
   expect(
     adb.getExecutedCommands().filter((command) => command.startsWith("shell input swipe")).length,

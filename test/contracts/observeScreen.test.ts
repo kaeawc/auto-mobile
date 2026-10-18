@@ -1,8 +1,9 @@
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { resetObserveCacheStore } from "../../src/features/observe/cache/ObserveCacheRegistry";
-import type { ObserveResult } from "../../src/models";
+import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -27,11 +28,14 @@ runObserveScreenContract("FakeObserveScreen", () => {
 runObserveScreenContract("RealObserveScreen (fake hierarchy, cache store, timer)", () => {
   const timer = new FakeTimer();
   const hierarchy = new FakeViewHierarchy();
+  // observerMode reads through HierarchyCapture; serve it the same presented hierarchy.
+  let presented: ViewHierarchyResult = { hierarchy: {} };
   const screen = new RealObserveScreen(
     { deviceId: "contract-device", name: "Contract", platform: "android" },
     new FakeAdbClientFactory(new FakeAdbExecutor()),
     {
       viewHierarchy: hierarchy,
+      hierarchyCapture: new FakeHierarchyCapture(() => presented),
       cacheStore: new FakeObserveCacheStore(timer),
       performanceAuditor: { run: async () => undefined } as never,
       accessibilityAuditor: { run: async () => undefined } as never,
@@ -42,6 +46,15 @@ runObserveScreenContract("RealObserveScreen (fake hierarchy, cache store, timer)
   return {
     screen,
     present: (marker) => {
+      presented = {
+        updatedAt: marker,
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+            node: [{ text: "Ready", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+          },
+        },
+      } as ViewHierarchyResult;
       hierarchy.configureHierarchy({
         updatedAt: marker,
         screenWidth: 1080,

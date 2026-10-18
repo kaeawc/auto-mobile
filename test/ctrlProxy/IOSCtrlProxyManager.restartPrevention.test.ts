@@ -900,8 +900,8 @@ describe("IOSCtrlProxyManager restart prevention", function () {
               process: new FakeChildProcess(fakeTimer) as unknown as ChildProcess,
             });
             fakeExecutor.setNextSpawnProcess(iproxy);
-            tunnel(manager)["iproxyProcessId"] = iproxy.pid!;
-            tunnel(manager)["iproxyProcess"] = fakeExecutor.spawn("iproxy", []);
+            tunnel(manager).setStateForTesting({ processId: iproxy.pid! });
+            tunnel(manager).setStateForTesting({ process: fakeExecutor.spawn("iproxy", []) });
           },
           waitForHealthEndpoint: async (start) => {
             healthPollingEntered.resolve();
@@ -1456,8 +1456,8 @@ describe("IOSCtrlProxyManager restart prevention", function () {
         await manager.startIproxyTunnel();
 
         // Simulate iproxy process dying between monitor ticks (clears tracking state)
-        tunnel(manager)["iproxyProcessId"] = null;
-        tunnel(manager)["iproxyProcess"] = null;
+        tunnel(manager).setStateForTesting({ processId: null });
+        tunnel(manager).setStateForTesting({ process: null });
 
         fakeExecutor.setNextSpawnProcess(fakeProcess2);
 

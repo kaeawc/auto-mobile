@@ -1008,12 +1008,10 @@ function installProbeInventory(column: (typeof probeColumns)[number]): void {
       "",
     ),
   );
-  const client = new AndroidEmulatorClient(
-    null,
-    null,
-    current.timer,
-    new FakeAdbClientFactory(current.adb),
-  );
+  const client = new AndroidEmulatorClient({
+    timer: current.timer,
+    adbFactory: new FakeAdbClientFactory(current.adb),
+  });
   const inventory = new MultiPlatformDeviceManager(
     current.adb,
     current.simctl,

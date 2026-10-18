@@ -1,3 +1,5 @@
+import type { z, ZodType } from "zod/v4";
+import { erased, eraseDeviceAware, erasePlain } from "./toolRegistryErasure";
 import type { DeviceReadOnlyArgShape } from "./deviceReadOnlyArgShapes";
 import {
   runWithPostActionCaptureScope,
@@ -9,7 +11,7 @@ import {
   setToolTransportRecovery,
   type ToolTransportRecovery,
 } from "./toolTransportRecovery";
-import { McpServer } from "@modelcontextprotocol/server";
+import { McpServer, type StandardSchemaWithJSON } from "@modelcontextprotocol/server";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { ActionableError, BootedDevice } from "../models";
@@ -266,13 +268,14 @@ export class ToolRegistryClass {
   }
 
   // Register a new tool
-  register(
+  register<S extends ZodType>(
     name: string,
     description: string,
-    schema: any,
-    handler: ToolHandler,
-    options: PlainToolOptions = {},
+    inSchema: S,
+    inHandler: ToolHandler<z.output<S>>,
+    inOptions: PlainToolOptions<z.output<S>> = {},
   ): void {
+    const { schema, handler, options } = erasePlain(inSchema, inHandler, inOptions);
     this.invalidateToolDefinitionSchemaCache();
     if (this === ToolRegistry) {
       setToolTransportRecovery(name, options.transportRecovery);
@@ -339,13 +342,14 @@ export class ToolRegistryClass {
   }
 
   // Register a device-aware tool
-  registerDeviceAware(
+  registerDeviceAware<S extends ZodType>(
     name: string,
     description: string,
-    schema: any,
-    handler: DeviceAwareToolHandler,
-    options: DeviceAwareToolOptions = {},
+    inSchema: S,
+    inHandler: DeviceAwareToolHandler<z.output<S>>,
+    inOptions: DeviceAwareToolOptions<z.output<S>> = {},
   ): void {
+    const { schema, handler, options } = eraseDeviceAware(inSchema, inHandler, inOptions);
     const pinnedHandler = sessionDisplayPinnedHandler({ name, schema, handler });
     const traits = pickToolTraits(options);
     // Device-aware tools may reconnect before dispatch. Replaying an ambiguous
@@ -400,7 +404,7 @@ export class ToolRegistryClass {
           captures(async () => {
             let succeeded = false;
             try {
-              let response: any | undefined;
+              let response: unknown;
               if (!resolvedTarget.shouldResolveDevice) {
                 if (!options.nonDeviceHandler) {
                   throw new ActionableError(`Tool ${name} requires a device.`);
@@ -616,7 +620,7 @@ export class ToolRegistryClass {
     progress?: ProgressCallback,
     signal?: AbortSignal,
     options: InternalToolCallOptions = {},
-  ): Promise<any> {
+  ): Promise<unknown> {
     const resolved =
       typeof tool === "string"
         ? options.forPlan
@@ -705,7 +709,7 @@ export class ToolRegistryClass {
     progress: ProgressCallback | undefined,
     signal: AbortSignal | undefined,
     targetDevice: BootedDevice | undefined,
-  ): Promise<any> {
+  ): Promise<unknown> {
     if (targetDevice && tool.deviceAwareHandler) {
       const pinnedHandler = sessionDisplayPinnedHandler({
         name: tool.name,
@@ -784,7 +788,7 @@ export class ToolRegistryClass {
         tool.name,
         {
           description: tool.description,
-          inputSchema: tool.schema,
+          inputSchema: erased<StandardSchemaWithJSON>(tool.schema),
           ...(process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true" && {
             _meta: { "anthropic/alwaysLoad": true },
           }),
@@ -1111,15 +1115,6 @@ export class ToolRegistryClass {
 
   private invalidateToolDefinitionSchemaCache(): void {
     this.toolDefinitionSchemaCache.clear();
-  }
-
-  // Get a map of all schema
-  getSchemaMap(): Record<string, any> {
-    const schemaMap: Record<string, any> = {};
-    this.getAllTools().forEach((tool) => {
-      schemaMap[tool.name] = tool.schema;
-    });
-    return schemaMap;
   }
 
   // Get the device session manager

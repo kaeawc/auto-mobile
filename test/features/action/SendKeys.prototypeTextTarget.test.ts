@@ -29,13 +29,13 @@ import { FakePrototypeAgentClient } from "../../fakes/FakePrototypeAgentClient";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  setSendKeysFactory,
-  resetSendKeysFactory,
 } from "../../../src/server/interactionTools";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
 
+const interactionDeps: InteractionToolDependencies = {};
 isolateToolRegistry();
 const textSpec = prototypeSpecSchema.parse({
   id: "panel",
@@ -218,10 +218,10 @@ function iosReader(values: unknown[] = ["Rb one"], before: unknown = "before") {
 
 // Warm imported IME catalog/ICU paths outside the per-test 15ms budget.
 beforeAll(async () => {
-  registerInteractionTools();
+  registerInteractionTools(interactionDeps);
   await harness("android").run();
 });
-afterEach(() => resetSendKeysFactory());
+afterEach(() => delete interactionDeps.sendKeysFactory);
 
 test("Android prototype never compares the focused app field behind it", async () => {
   const h = harness("android");
@@ -532,7 +532,7 @@ for (const platform of ["android", "ios"] as const) {
         : spyOn(IOSCtrlProxyClient.prototype, "getSupportedCommands").mockResolvedValue([
             "request_press_key",
           ]);
-    setSendKeysFactory(() => h.action);
+    interactionDeps.sendKeysFactory = () => h.action;
     try {
       const response = await ToolRegistry.getTool("sendKeys")!.deviceAwareHandler!(
         platform === "android" ? android : ios,

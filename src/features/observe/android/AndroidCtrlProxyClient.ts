@@ -74,9 +74,22 @@ import {
 } from "../../../models";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
+import {
+  type DeviceClientRegistry,
+  MapDeviceClientRegistry,
+} from "../../../ctrlProxy/deviceClientRegistry";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
+import {
+  forwardLeaseActivity,
+  heldForwardLeaseDeviceIds,
+  releaseForwardLeasesForShutdown,
+  releaseIdleForwardLease,
+  type ForwardLeaseActivity,
+  type ForwardLeaseClient,
+  type ForwardLeaseClientRegistry,
+} from "./CtrlProxyForwardLeaseRegistry";
 import {
   ForcedRestartBudget,
   type ForcedRestartSnapshot,
@@ -667,9 +680,9 @@ export class AndroidCtrlProxyClient
   private readonly portAllocationId: string;
 
   // Singleton instances per device
-  private static instances: Map<string, AndroidCtrlProxyClient> = new Map();
+  public static readonly registry: DeviceClientRegistry<AndroidCtrlProxyClient> =
+    new MapDeviceClientRegistry<AndroidCtrlProxyClient>();
   private static readonly activeObservers = new Set<AndroidCtrlProxyClient>();
-  private static readonly retiredDeviceIds = new Set<string>();
 
   // Build/device provenance (#4984): lazily-built content-hash provider (cached by
   // (deviceId, packageId, versionCode)), the resolved build context per app (kept on
@@ -898,19 +911,17 @@ export class AndroidCtrlProxyClient
     requireBootedDevice(device, "AndroidCtrlProxyClient.getInstance");
     daemonDeviceAdmissionGate.assertDeviceActionable(device.deviceId, CTRL_PROXY_CLIENT_PURPOSE);
     const deviceId = device.deviceId;
-    if (AndroidCtrlProxyClient.retiredDeviceIds.has(deviceId)) {
-      const existing = AndroidCtrlProxyClient.instances.get(deviceId);
-      if (existing) {
-        return existing;
-      }
-      const retired = new AndroidCtrlProxyClient(device, adbFactory.create(device));
-      retired.closed = true;
-      retired.autoReconnectEnabled = false;
-      AndroidCtrlProxyClient.instances.set(deviceId, retired);
-      return retired;
+    const registry = AndroidCtrlProxyClient.registry;
+    if (registry.isRetired(deviceId)) {
+      return registry.get(deviceId, () => {
+        const retired = new AndroidCtrlProxyClient(device, adbFactory.create(device));
+        retired.closed = true;
+        retired.autoReconnectEnabled = false;
+        return retired;
+      });
     }
     const currentToken = AndroidCtrlProxyClient.currentIncarnationToken(deviceId);
-    const existing = AndroidCtrlProxyClient.instances.get(deviceId);
+    const existing = registry.peek(deviceId);
     if (
       existing?.incarnationToken !== undefined &&
       currentToken !== undefined &&
@@ -928,25 +939,21 @@ export class AndroidCtrlProxyClient
     } else if (existing && existing.incarnationToken === undefined) {
       existing.incarnationToken = currentToken;
     }
-    if (!AndroidCtrlProxyClient.instances.has(deviceId)) {
+    return registry.get(deviceId, () => {
       logger.debug(`[CTRL_PROXY] Creating singleton for device: ${deviceId}`);
-      AndroidCtrlProxyClient.instances.set(
-        deviceId,
-        new AndroidCtrlProxyClient(device, adbFactory.create(device)),
-      );
-    }
-    return AndroidCtrlProxyClient.instances.get(deviceId)!;
+      return new AndroidCtrlProxyClient(device, adbFactory.create(device));
+    });
   }
 
   private static currentIncarnationToken(deviceId: string): string | undefined {
     // A retired client serves no runtime; preserve its inert resolution path.
-    return AndroidCtrlProxyClient.retiredDeviceIds.has(deviceId)
+    return AndroidCtrlProxyClient.registry.isRetired(deviceId)
       ? undefined
       : deviceIncarnationToken(deviceId);
   }
 
   public static getExistingInstance(deviceId: string): AndroidCtrlProxyClient | null {
-    return AndroidCtrlProxyClient.instances.get(deviceId) ?? null;
+    return AndroidCtrlProxyClient.registry.peek(deviceId) ?? null;
   }
 
   /** A one-read client; never registers as an owner or recovers the service. */
@@ -968,7 +975,8 @@ export class AndroidCtrlProxyClient
 
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   public static registerForTesting(client: AndroidCtrlProxyClient, deviceId: string): void {
-    AndroidCtrlProxyClient.instances.set(deviceId, client);
+    AndroidCtrlProxyClient.registry.invalidate(deviceId);
+    AndroidCtrlProxyClient.registry.get(deviceId, () => client);
   }
 
   /**
@@ -980,7 +988,7 @@ export class AndroidCtrlProxyClient
    */
   public static clearInstanceRegistryForTesting(): void {
     resetForeignCtrlProxyForwardEvidenceForTesting();
-    AndroidCtrlProxyClient.instances.clear();
+    AndroidCtrlProxyClient.registry.closeAll();
   }
 
   /**
@@ -991,12 +999,12 @@ export class AndroidCtrlProxyClient
    * `getInstance` build a fresh, auto-reconnect-enabled client.
    */
   public static removeInstance(deviceId: string): void {
-    AndroidCtrlProxyClient.instances.delete(deviceId);
+    AndroidCtrlProxyClient.registry.invalidate(deviceId);
   }
 
   public static retireForShutdown(deviceId: string): void {
-    AndroidCtrlProxyClient.retiredDeviceIds.add(deviceId);
-    const client = AndroidCtrlProxyClient.instances.get(deviceId);
+    AndroidCtrlProxyClient.registry.retire(deviceId);
+    const client = AndroidCtrlProxyClient.registry.peek(deviceId);
     if (client) {
       client.closed = true;
       client.autoReconnectEnabled = false;
@@ -1005,17 +1013,17 @@ export class AndroidCtrlProxyClient
 
   public static resumeAfterDeviceStart(deviceId: string): void {
     // An explicit startDevice/setup is a fresh start for forced-restart admission (#11246).
-    AndroidCtrlProxyClient.instances
-      .get(deviceId)
-      ?.forcedRestartBudget.rearm("explicit device start");
-    if (AndroidCtrlProxyClient.retiredDeviceIds.delete(deviceId)) {
-      AndroidCtrlProxyClient.instances.delete(deviceId);
+    const registry = AndroidCtrlProxyClient.registry;
+    registry.peek(deviceId)?.forcedRestartBudget.rearm("explicit device start");
+    if (registry.isRetired(deviceId)) {
+      registry.resume(deviceId);
+      registry.invalidate(deviceId);
     }
   }
 
   /** The device re-entered the ready state; rearm only if recovery saw it absent (#11246). */
   public static noteDeviceOnline(deviceId: string): void {
-    AndroidCtrlProxyClient.instances.get(deviceId)?.rearmAfterDeviceOnline();
+    AndroidCtrlProxyClient.registry.peek(deviceId)?.rearmAfterDeviceOnline();
   }
 
   private rearmAfterDeviceOnline(): void {
@@ -1024,9 +1032,7 @@ export class AndroidCtrlProxyClient
 
   /** Remove only the singleton captured before asynchronous incarnation cleanup began. */
   public static removeInstanceIfCurrent(deviceId: string, instance: AndroidCtrlProxyClient): void {
-    if (AndroidCtrlProxyClient.getExistingInstance(deviceId) === instance) {
-      AndroidCtrlProxyClient.removeInstance(deviceId);
-    }
+    AndroidCtrlProxyClient.registry.invalidate(deviceId, instance);
   }
 
   /** Close the old guest connection and remove its serial singleton. */
@@ -1075,107 +1081,70 @@ export class AndroidCtrlProxyClient
 
   /** Devices whose singleton client holds the cross-process forwarding lease. */
   public static getForwardLeaseHeldDeviceIds(): string[] {
-    return [...AndroidCtrlProxyClient.instances.entries()]
-      .filter(([, client]) => client.ctrlProxyForwardLease.isHeld?.() === true)
-      .map(([deviceId]) => deviceId);
+    return heldForwardLeaseDeviceIds(AndroidCtrlProxyClient.forwardLeaseRegistry());
   }
 
-  /**
-   * CtrlProxy use of a device by this process (#10497): requests in flight
-   * through its singleton and any detached observer, and time since the last
-   * request or since the lease was taken, whichever is later. `null` when
-   * this process neither holds the lease nor has used the device.
-   */
+  /** CtrlProxy use of a device by this process (#10497); see {@link forwardLeaseActivity}. */
   public static getForwardLeaseActivity(
     deviceId: string,
     timer: Timer = defaultTimer,
-  ): { inFlightRequests: number; idleForMs: number | null } {
-    const clients = [
-      AndroidCtrlProxyClient.instances.get(deviceId),
-      ...[...AndroidCtrlProxyClient.activeObservers].filter(
-        (observer) => observer.device.deviceId === deviceId,
-      ),
-    ].filter((client): client is AndroidCtrlProxyClient => client !== undefined);
-    const activities = clients.map((client) => client.getRequestActivity());
-    const observers = clients.length - (AndroidCtrlProxyClient.instances.has(deviceId) ? 1 : 0);
-    const lastTimes = [
-      ...activities.map((activity) => activity.lastActivityAt),
-      AndroidCtrlProxyClient.instances.get(deviceId)?.ctrlProxyForwardLease.getAcquiredAt?.(),
-    ].filter((time): time is number => time !== undefined);
+  ): ForwardLeaseActivity {
+    return forwardLeaseActivity(AndroidCtrlProxyClient.forwardLeaseRegistry(), deviceId, timer);
+  }
+
+  /** Give up an idle device's forwarding lease (issue #10497). */
+  public static releaseIdleForwardLease(deviceId: string): Promise<void> {
+    return releaseIdleForwardLease(AndroidCtrlProxyClient.forwardLeaseRegistry(), deviceId);
+  }
+
+  /** Graceful daemon stop: close every client and release its forwarding lease, bounded. */
+  public static releaseForwardLeasesForShutdown(timer: Timer, timeoutMs: number): Promise<void> {
+    return releaseForwardLeasesForShutdown(
+      AndroidCtrlProxyClient.forwardLeaseRegistry(),
+      timer,
+      timeoutMs,
+    );
+  }
+
+  /** Lease-bookkeeping view over the static client registry (registry stays here). */
+  private static forwardLeaseRegistry(): ForwardLeaseClientRegistry {
     return {
-      // A live detached observer is a read in progress even between its requests.
-      inFlightRequests:
-        activities.reduce((sum, activity) => sum + activity.inFlightRequests, 0) +
-        observers +
-        clients.reduce((sum, client) => sum + client.readinessHolds, 0),
-      idleForMs: lastTimes.length === 0 ? null : Math.max(0, timer.now() - Math.max(...lastTimes)),
+      singletonEntries: () =>
+        AndroidCtrlProxyClient.registry
+          .entries()
+          .map(([deviceId, client]) => [deviceId, client.asForwardLeaseClient()]),
+      singleton: (deviceId) =>
+        AndroidCtrlProxyClient.registry.peek(deviceId)?.asForwardLeaseClient(),
+      observers: () =>
+        [...AndroidCtrlProxyClient.activeObservers].map((c) => c.asForwardLeaseClient()),
+      evictSingleton: (deviceId) => {
+        const client = AndroidCtrlProxyClient.getExistingInstance(deviceId);
+        if (!client) {
+          return null;
+        }
+        AndroidCtrlProxyClient.removeInstanceIfCurrent(deviceId, client);
+        return client.asForwardLeaseClient();
+      },
+      clearSingletons: () => {
+        AndroidCtrlProxyClient.registry.closeAll();
+      },
     };
   }
 
-  /**
-   * Give up an idle device's forwarding lease (issue #10497): evict the
-   * singleton first so a new call builds a fresh client that re-acquires the
-   * lease, then close the old one, which removes its forward and releases it.
-   */
-  public static async releaseIdleForwardLease(deviceId: string): Promise<void> {
-    const client = AndroidCtrlProxyClient.getExistingInstance(deviceId);
-    if (!client) {
-      return;
-    }
-    AndroidCtrlProxyClient.removeInstanceIfCurrent(deviceId, client);
-    await client.close();
-  }
-
-  /**
-   * Graceful daemon stop: close every client this process holds (removing the
-   * forwards it recorded, never unrecorded ones) and release its forwarding
-   * leases, so the next daemon need not reclaim them. Bounded by `timeoutMs`:
-   * a hung adb must not block shutdown, so on timeout the leases are released
-   * anyway while the recorded forward stays on disk for the next daemon.
-   */
-  public static async releaseForwardLeasesForShutdown(
-    timer: Timer,
-    timeoutMs: number,
-  ): Promise<void> {
-    const clients = new Set<AndroidCtrlProxyClient>([
-      ...AndroidCtrlProxyClient.instances.values(),
-      ...AndroidCtrlProxyClient.activeObservers,
-    ]);
-    if (clients.size === 0) {
-      return;
-    }
-    AndroidCtrlProxyClient.instances.clear();
-    const closes = [...clients].map((client) =>
-      client.close().catch((error) => {
-        logger.warn(
-          `[CTRL_PROXY] Failed to close CtrlProxy client for ${client.device.deviceId} during shutdown: ${errorMessage(error)}`,
-          error,
-        );
-      }),
-    );
-    const timedOut = Symbol("ctrlproxy shutdown release timeout");
-    try {
-      await raceWithDeadline(Promise.all(closes), {
-        timer,
-        timeoutMs,
-        label: "CtrlProxy forward lease shutdown release",
-        timeoutError: () => timedOut,
-      });
-    } catch (error) {
-      if (error !== timedOut) {
-        throw error;
-      }
-      logger.warn(
-        `[CTRL_PROXY] Timed out after ${timeoutMs}ms removing CtrlProxy forwards during shutdown; ` +
-          `releasing forwarding leases anyway`,
-      );
-      for (const client of clients) {
-        // A close still stuck on adb must not later remove a forward that a
-        // successor daemon creates on the freed lease and port (#10690).
+  private asForwardLeaseClient(): ForwardLeaseClient {
+    const client = this;
+    return {
+      deviceId: client.device.deviceId,
+      forwardLease: client.ctrlProxyForwardLease,
+      get readinessHolds() {
+        return client.readinessHolds;
+      },
+      getRequestActivity: () => client.getRequestActivity(),
+      close: () => client.close(),
+      markForwardLeaseForceReleased: () => {
         client.forwardLeaseForceReleased = true;
-        client.ctrlProxyForwardLease.release();
-      }
-    }
+      },
+    };
   }
 
   /**
@@ -1183,9 +1152,7 @@ export class AndroidCtrlProxyClient
    * held so a replacement client cannot share an ADB forward with late cleanup.
    */
   public invalidateForShutdownRecovery(): void {
-    if (AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId) === this) {
-      AndroidCtrlProxyClient.removeInstance(this.device.deviceId);
-    }
+    AndroidCtrlProxyClient.registry.invalidate(this.device.deviceId, this);
     PortManager.releaseIfAllocated(this.portAllocationId, this.localPort);
     PortManager.holdForCleanup(this.localPort);
     this.cleanupHeldPort = this.localPort;
@@ -1594,7 +1561,7 @@ export class AndroidCtrlProxyClient
         getLiveLocalPorts: () =>
           new Set(
             [
-              ...AndroidCtrlProxyClient.instances.values(),
+              ...AndroidCtrlProxyClient.registry.entries().map(([, client]) => client),
               ...AndroidCtrlProxyClient.activeObservers,
             ]
               .filter((other) => other.device.deviceId === this.device.deviceId && !other.closed)
@@ -1632,16 +1599,15 @@ export class AndroidCtrlProxyClient
    */
   public static resetInstances(): void {
     resetForeignCtrlProxyForwardEvidenceForTesting();
-    for (const instance of AndroidCtrlProxyClient.instances.values()) {
+    for (const instance of AndroidCtrlProxyClient.registry.closeAll()) {
       instance.close().catch((error) => {
         const logger = instance.loggerInstance;
         // The local alias keeps the injected logger visible to the catch-convention lint rule.
         logger.warn(`[CTRL_PROXY] Instance reset cleanup failed: ${errorMessage(error)}`, error);
       });
     }
-    AndroidCtrlProxyClient.instances.clear();
     AndroidCtrlProxyClient.activeObservers.clear();
-    AndroidCtrlProxyClient.retiredDeviceIds.clear();
+    AndroidCtrlProxyClient.registry.clearRetired();
     PortManager.reset();
     logger.info("[CTRL_PROXY] Reset all singleton instances and port allocations");
   }

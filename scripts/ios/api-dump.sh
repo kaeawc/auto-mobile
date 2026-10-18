@@ -502,6 +502,15 @@ if [[ -z "${AUTOMOBILE_IOS_API_SOURCES:-}" ]]; then
     echo "error: SDK wire sources not found at $WIRE_SOURCES" >&2
     exit 1
   fi
+  # The wire declarations only count as SDK API while the SDK re-exports them.
+  # With a plain import, SDK-only clients lose these types but the dump stays
+  # identical, so assert the re-export instead of appending unconditionally.
+  if ! grep -rqE '^[[:space:]]*@_exported[[:space:]]+import[[:space:]]+AutoMobileSdkWire[[:space:]]*(//.*)?$' \
+    --include='*.swift' "$SDK_SOURCES"; then
+    echo "error: $SDK_SOURCES no longer contains '@_exported import AutoMobileSdkWire'." >&2
+    echo "The SDK's public API includes the wire product only through that re-export." >&2
+    exit 1
+  fi
   output="$(printf '%s\n\n' "$output"; generate_api "$WIRE_SOURCES" 'sdk-wire/')"
 fi
 

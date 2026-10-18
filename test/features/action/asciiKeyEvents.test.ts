@@ -153,6 +153,15 @@ describe("buildAndroidInputTextPlan", () => {
     expect(plan.commands.length).toBe(2);
   });
 
+  test("keeps one space with the next letter after a whole chunk of spaces", () => {
+    const size = ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS;
+    const plan = buildAndroidInputTextPlan(" ".repeat(size) + "b", 30);
+    expect(plan.commands).toEqual([
+      buildAndroidInputTextCommand(" ".repeat(size - 1)),
+      buildAndroidInputTextCommand(" b"),
+    ]);
+  });
+
   test("chunks at 32 characters on API 31+ and when the level is unknown", () => {
     for (const apiLevel of [31, 36, null]) {
       expect(buildAndroidInputTextPlan(text, apiLevel)).toEqual({

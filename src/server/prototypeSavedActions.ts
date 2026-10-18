@@ -54,7 +54,7 @@ export interface PrototypeSavedOutput {
   warning?: string;
   uploadedAssets?: UploadedPrototypeAsset[];
 }
-export interface PrototypeSavedArgs {
+export interface PrototypeSavedInput {
   action: PrototypeSavedAction;
   spec?: PrototypeSpec;
   label?: string;
@@ -124,7 +124,7 @@ const requestTypes: Record<PrototypeSavedAction, string> = {
   deleteSaved: "delete_saved_prototype",
 };
 export function savedPrototypeSuccess(
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
   result: PrototypeResult,
 ): PrototypeSavedOutput {
   if (args.action === "listSaved") {
@@ -166,14 +166,14 @@ function savedPrototypeRequestFailure(
   };
 }
 function savedPrototypeResult(
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
   result: PrototypeResult,
 ): PrototypeSavedOutput {
   return result.success ? savedPrototypeSuccess(args, result) : savedPrototypeFailure(result);
 }
 export async function performPrototypeSavedAction(
   deps: PrototypeSavedDependencies,
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
 ): Promise<PrototypeSavedOutput> {
   try {
     if (!(await deps.client.supportsCommand(PROTOTYPE_SAVED_CAPABILITY))) {
@@ -205,7 +205,7 @@ export async function performPrototypeSavedAction(
 
 async function saveAndroidPrototype(
   deps: PrototypeSavedDependencies,
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
 ): Promise<PrototypeSavedOutput> {
   const staged = await deps.stageAssets();
   deps.signal?.throwIfAborted();
@@ -247,7 +247,7 @@ async function saveAndroidPrototype(
  */
 async function pinSavedPrototype(
   deps: PrototypeSavedDependencies,
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
   id: string,
 ): Promise<Partial<PrototypeSavedOutput>> {
   let reply: PrototypeResult;
@@ -393,7 +393,7 @@ export function createPrototypeSavedPlatformDispatch(dependencies: IosSavedDepen
   const backend = () => (installer ??= createDefaultIosPrototypeInstaller());
   return (
     device: BootedDevice,
-    args: Omit<PrototypeSavedArgs, "action"> & { action: string },
+    args: Omit<PrototypeSavedInput, "action"> & { action: string },
     signal: AbortSignal | undefined,
     platformError: () =>
       | (Pick<ActionableError, "message"> & { errorCode?: PrototypeSavedErrorCode })
@@ -429,7 +429,7 @@ function savedElementAnchorFailure(): PrototypeSavedOutput {
 async function saveIosPrototype(
   backend: () => IosSavedPrototypeInstaller,
   udid: string,
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
   readers: IosSavedDependencies,
   signal?: AbortSignal,
 ): Promise<PrototypeSavedOutput> {
@@ -494,7 +494,7 @@ async function saveIosPrototype(
 async function performIosSavedAction(
   backend: () => IosSavedPrototypeInstaller,
   device: BootedDevice,
-  args: PrototypeSavedArgs,
+  args: PrototypeSavedInput,
   readers: IosSavedDependencies,
   signal?: AbortSignal,
 ): Promise<PrototypeSavedOutput> {
@@ -551,7 +551,7 @@ async function performIosSavedAction(
 
 /** Dispatches saved actions without adding decisions to the shared tool handler. */
 export function dispatchPrototypeSavedAction<T>(
-  args: Omit<PrototypeSavedArgs, "action"> & {
+  args: Omit<PrototypeSavedInput, "action"> & {
     action: PrototypeSavedAction | "show" | "patch" | "dismiss";
   },
   dependencies: () => PrototypeSavedDependencies,

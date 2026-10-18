@@ -6,9 +6,8 @@ import {
   type ToolRegistryCollaborators,
 } from "../../src/server/toolRegistry";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  resetHitTestDeviceReadFactory,
-  setHitTestDeviceReadFactory,
 } from "../../src/server/interactionTools";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
@@ -35,6 +34,7 @@ import {
   runWithToolSelectionContext,
 } from "../../src/features/toolSelection/toolSelectionContext";
 
+const interactionDeps: InteractionToolDependencies = {};
 /**
  * A device another live session holds runs device-aware tools only for its holder, as `input/*`
  * already enforces (#10698). An end-to-end run found `rotate` sent with the desktop observer's
@@ -132,7 +132,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     await sessionManager.createSession(agent, held.deviceId, "android");
     sessionManager.setDeviceReadiness(agent, "automationReady");
 
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     registerObserveTools({
       deviceReadAccess: { listBooted: async () => [held, free], isAuthorized: () => true },
       // Watching a held device runs observe's own read-only capture, not the audit runner.
@@ -251,18 +251,18 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     ["identifyInteractions", {}],
   ] as Array<[string, Record<string, unknown>]>) {
     test(`a sessionless ${name} on a held device watches it without readiness (#10965)`, async () => {
-      setHitTestDeviceReadFactory((device) => ({
+      interactionDeps.hitTestDeviceReadFactory = (device) => ({
         executeDeviceRead: async () => {
           ran.push({ name: "hitTest", deviceId: device.deviceId });
           return loadAndroidHomeObserve().observe;
         },
-      }));
+      });
       setDebugModeEnabled(true); // identifyInteractions is debugOnly
       try {
         await call(name, { ...args, platform: "android", deviceId: held.deviceId });
       } finally {
         setDebugModeEnabled(false);
-        resetHitTestDeviceReadFactory();
+        delete interactionDeps.hitTestDeviceReadFactory;
       }
       expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
       expect(devices.getSetCurrentDeviceCalls()).toEqual([]);

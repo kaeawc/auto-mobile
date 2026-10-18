@@ -34,7 +34,7 @@ Nothing in this note was run on a device.
 `willContinue`; newer API levels add continuation helpers. It has no tool-type,
 pressure, tilt or button parameters. Injected events reach apps as
 `TOOL_TYPE_UNKNOWN` (the platform builds the events; code evidence in the policy
-file above). A Path carries no z axis, so pressure is not representable. Display
+file above). A Path carries no z-axis, so pressure is not representable. Display
 targeting (`setDisplayId`) is the only per-gesture routing option. Conclusion: a
 stylus route cannot go through CtrlProxy accessibility dispatch. [doc + code]
 
@@ -180,11 +180,13 @@ Open it from Home > Demos > Pointer Probe, or with
 (the app must be onboarded and logged in). A custom View receives every `MotionEvent` through
 `onTouchEvent`, `onHoverEvent` and `onGenericMotionEvent` and logs one line per event: the callback
 (`touch`/`hover`/`generic`), action (DOWN/MOVE/UP, HOVER_ENTER/MOVE/EXIT, ...), `deviceId`,
-`source` names, `buttonState` names, and per pointer `toolType`, `getPressure()`, `AXIS_TILT`,
+`source` names, `buttonState` names, and per-pointer `toolType`, `getPressure()`, `AXIS_TILT`,
 `AXIS_ORIENTATION` and x/y. The newest 20 lines are Text nodes tagged `pointer_probe_event_0`
 (newest) to `pointer_probe_event_19`; `pointer_probe_count` holds the running total and
-`pointer_probe_clear` empties the log, so `observe` can read results after an injection. Device
-results are still to be collected.
+`pointer_probe_clear` empties the log, so `observe` can read results after an injection. A hover
+event that reaches both the View and the Compose hover fallback is logged once; the two copies are
+matched by `deviceId`, action and event time, since they arrive in different coordinate spaces.
+Device results are still to be collected.
 
 1. `adb shell dumpsys input` on an API 34+ AVD and a physical pen device: list
    devices, sources and motion ranges (emulator stylus capability).
@@ -208,9 +210,8 @@ results are still to be collected.
 
 ## Proposed follow-up issues
 
-1. **Android pointer-injection probe app and experiments.** Build a Playground
-   screen logging tool type, source, pressure, tilt, buttons and hover for every
-   MotionEvent; run experiments 1-3, 5 and 6 and record results in this note.
+1. **Android pointer-injection experiments.** Using the Pointer Probe screen
+   above (#13096), run experiments 1-3, 5 and 6 and record results in this note.
 2. **Android instrumentation injection route (`UiAutomation.injectInputEvent`).**
    Prototype a shell-identity injector (instrumentation APK or `app_process`
    dex) supporting tool type, pressure, tilt, buttons and hover; measure startup

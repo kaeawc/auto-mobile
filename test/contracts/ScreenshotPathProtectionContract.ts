@@ -47,8 +47,9 @@ export function runScreenshotPathProtectionContract(
   // The real implementation reads its inventory through async stores before the write starts.
   // Polls by turning the event loop, bounded by wall-clock time rather than a turn count: the real
   // store awaits process-wide caches before a write starts, which a loaded shard can slow past
-  // any fixed number of turns. Throws instead of returning so a stall cannot pass as ordering.
-  const UNTIL_DEADLINE_MS = 5_000;
+  // any fixed number of turns. Throws instead of returning so a stall cannot pass as ordering;
+  // the deadline stays well under bun's 5 s per-test timeout so this diagnostic is what surfaces.
+  const UNTIL_DEADLINE_MS = 2_000;
   const until = async (condition: () => boolean): Promise<void> => {
     const deadline = performance.now() + UNTIL_DEADLINE_MS;
     while (!condition()) {

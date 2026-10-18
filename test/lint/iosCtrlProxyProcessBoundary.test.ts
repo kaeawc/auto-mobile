@@ -5,12 +5,12 @@ import { join } from "node:path";
 import {
   findViolationsInSource,
   repositoryPath,
-} from "../../scripts/check-ios-ctrl-proxy-process-boundary";
+} from "../../scripts/lib/iosCtrlProxyProcessBoundary";
 
 const ROOT = join(import.meta.dir, "..", "..");
 const MANAGER = "src/ctrlProxy/IOSCtrlProxyManager.ts";
 const OWNER = "src/ctrlProxy/ios/IosCtrlProxyProcessClient.ts";
-const CHECK = "scripts/check-ios-ctrl-proxy-process-boundary.ts";
+const CHECK = "scripts/lib/iosCtrlProxyProcessBoundary.ts";
 
 const PROCESS_TOOLING = /processExecutor\.exec\(\s*["'`](?:ps|pgrep|kill)/;
 const PGREP_OWNERSHIP = /executeCommand\(\s*"pgrep"/;

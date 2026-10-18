@@ -22,7 +22,7 @@ teardown() {
   run bash -c 'cd "$1" && bun scripts/check-boundary-row.ts nope diff.patch' _ "$repo_dir"
 
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage: check-boundary-row.ts <security|simctl|xcodebuild|plutil|ffmpeg|simulator-tcc-sqlite|android-emulator>"* ]]
+  [[ "$output" == *"usage: check-boundary-row.ts <security|simctl|xcodebuild|plutil|ffmpeg|simulator-tcc-sqlite|android-emulator|ios-ctrl-proxy-process|app-bundle-metadata|child-process-import>"* ]]
 }
 
 @test "reports a violation with the row's failure header and exit 1" {
@@ -62,4 +62,14 @@ teardown() {
   run bash -c 'cd "$1" && bun scripts/check-boundary-row.ts security' _ "$repo_dir"
 
   [ "$status" -eq 2 ]
+}
+
+@test "child-process-import reports bare positions and exits 1" {
+  printf '%s\n' 'import { execFile } from "child_process";' > "$repo_dir/src/utils/bad.ts"
+
+  run bash -c 'cd "$1" && bun scripts/check-boundary-row.ts child-process-import' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"error: child_process imports are restricted to the reviewed allowlist:"* ]]
+  [[ "$output" == *"src/utils/bad.ts:1:1"* ]]
 }

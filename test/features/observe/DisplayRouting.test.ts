@@ -4,10 +4,8 @@ import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
-import {
-  AndroidDisplayReadError,
-  ObservedAndroidDisplayCache,
-} from "../../../src/features/observe/ObservationDisplay";
+import { AndroidDisplayReadError } from "../../../src/features/observe/AndroidDisplayReadError";
+import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { BootedDevice, ObservationInsets, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";

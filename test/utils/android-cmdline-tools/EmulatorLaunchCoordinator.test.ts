@@ -3,7 +3,7 @@ import type { ChildProcess } from "node:child_process";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import type { BootAdmission } from "../../../src/models/BootAdmission";
-import { EmulatorLaunchCancelledError } from "../../../src/models/EmulatorLaunchCancelledError";
+import { EmulatorLaunchCancelledError } from "../../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import {
   DefaultEmulatorLaunchCoordinator,

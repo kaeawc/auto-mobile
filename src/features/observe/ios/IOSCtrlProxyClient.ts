@@ -21,7 +21,7 @@ import { requestSdkTrigger, type SdkTriggerRequest } from "./CtrlProxySdkTrigger
 import { decodeSdkEventBatches, type DecodedSdkEvent } from "./decodeSdkEventBatches";
 import WebSocket from "ws";
 import { ActionableError } from "../../../models/ActionableError";
-import { IosRunnerBusyError, IosRunnerStalledError } from "./runnerErrorCodes";
+import { iosRunnerRefusalError } from "./IosRunnerStalledError";
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { logger } from "../../../utils/logger";
 import type { TimedOutRequest } from "../../../utils/RequestManager";
@@ -3496,9 +3496,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         // runner lifecycle. Normal hierarchy observation owns bounded recovery.
         this.requestManager.reject(
           decoded.requestId,
-          decoded.runnerStalled
-            ? new IosRunnerStalledError(decoded.errorMessage)
-            : new IosRunnerBusyError(decoded.errorMessage),
+          iosRunnerRefusalError(decoded.errorMessage, decoded.runnerStalled),
         );
         return true;
       }

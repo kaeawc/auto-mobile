@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { SessionToolSelectionRepository } from "../../src/features/toolSelection/SessionToolSelectionService";
+import type { SessionToolSelectionRepository } from "../../src/db/sessionToolSelectionRepository";
 
 export interface SessionToolSelectionRepositoryHandle {
   repository: SessionToolSelectionRepository;

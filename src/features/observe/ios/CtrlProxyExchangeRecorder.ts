@@ -18,12 +18,11 @@
  * password field or cannot be resolved (fail-safe).
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import path from "node:path";
 import type WebSocket from "ws";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { WebSocketFactory } from "../DeviceServiceClient";
+import { DirectoryExchangeSink } from "./DirectoryExchangeSink";
 
 export const IOS_CTRL_PROXY_RECORD_DIR_ENV = "AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR";
 
@@ -38,20 +37,6 @@ const TEXT_INPUT_REQUEST_TYPES: ReadonlySet<string> = new Set([
 /** Where recorded exchanges go. The file implementation is the only production sink. */
 export interface ExchangeSink {
   write(fileName: string, contents: string): void;
-}
-
-export class DirectoryExchangeSink implements ExchangeSink {
-  private created = false;
-
-  constructor(private readonly directory: string) {}
-
-  write(fileName: string, contents: string): void {
-    if (!this.created) {
-      mkdirSync(this.directory, { recursive: true });
-      this.created = true;
-    }
-    writeFileSync(path.join(this.directory, fileName), contents);
-  }
 }
 
 type JsonObject = Record<string, unknown>;

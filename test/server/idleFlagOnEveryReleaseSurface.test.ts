@@ -188,7 +188,7 @@ const surfaces: Surface[] = [
   },
   {
     name: "session released push",
-    builders: ["src/daemon/socketServer.ts#UnixSocketServer.broadcastSessionReleased"],
+    builders: ["src/daemon/socketServer/notificationFanOut.ts#broadcastSessionReleased"],
     reasonKey: "reason",
     holder: (reason) => {
       let frame: DaemonNotification | undefined;

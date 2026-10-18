@@ -11,13 +11,15 @@ import {
 const SOURCE_ROOT = "src";
 
 /** Every `.ts` file under `directory`, as sorted forward-slash repo paths. */
-function sourceFiles(directory: string): string[] {
+function sourceFiles(directory: string, extensions: readonly string[]): string[] {
   return sortedReaddirEntriesSync(directory).flatMap((entry) => {
     const path = `${directory}/${entry.name}`;
     if (entry.isDirectory()) {
-      return sourceFiles(path);
+      return sourceFiles(path, extensions);
     }
-    return entry.isFile() && entry.name.endsWith(".ts") ? [path] : [];
+    return entry.isFile() && extensions.some((extension) => entry.name.endsWith(extension))
+      ? [path]
+      : [];
   });
 }
 
@@ -48,7 +50,10 @@ export function runBoundaryRowCli(rowId: string | undefined, diffPath?: string):
   }
   const changed: ChangedFile[] =
     row.scope === "tree"
-      ? sourceFiles(SOURCE_ROOT).map((path) => ({ path, addedLines: new Set<number>() }))
+      ? sourceFiles(SOURCE_ROOT, row.extensions ?? [".ts"]).map((path) => ({
+          path,
+          addedLines: new Set<number>(),
+        }))
       : parseUnifiedDiff(readFileSync(diffPath!, "utf8"));
   const result = renderBoundaryResult(row, scanBoundary(row, changed, { readSource }));
   process.stdout.write(result.stdout);

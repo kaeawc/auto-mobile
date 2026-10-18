@@ -101,11 +101,7 @@ import {
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
 } from "./constants";
-import {
-  isHostInventoryCall,
-  resolveSocketAdmissionLane,
-  SocketRequestAdmissionQueue,
-} from "./socketRequestAdmission";
+import { resolveSocketAdmissionLane, SocketRequestAdmissionQueue } from "./socketRequestAdmission";
 import {
   daemonShuttingDownFailure,
   daemonShuttingDownFrameFields,
@@ -277,6 +273,19 @@ import {
 } from "./socketServer/forwardSessionKey";
 import { runKeyedSerial, type McpForwardChainWait } from "./socketServer/keyedSerialQueue";
 import {
+  MAX_MCP_FORWARD_REROUTES,
+  McpForwardRouter,
+  acquisitionMcpForwardRoute,
+  isNonBlankSessionUuid,
+  readSessionUuid,
+  readToolSelectionProfileUuid,
+  sessionScopedForwardRoute,
+  sharedMcpForwardRoute,
+  toolSelectionProfileScopedForwardRoute,
+  type McpForwardRoute,
+} from "./socketServer/McpForwardRouter";
+export { MAX_MCP_FORWARD_REROUTES };
+import {
   PendingRequestTracker,
   type PendingSocketRequest,
 } from "./socketServer/PendingRequestTracker";
@@ -290,12 +299,6 @@ import { createDaemonMcpDispatcher, type InProcessMcpDispatcher } from "./inProc
 export { mcpRequestFailureDetails };
 
 export const MCP_FORWARD_START_HEADROOM_MS = 100;
-/**
- * How many times one forward may follow its route to a different execution key before it
- * fails. Each hop releases the previous key first, so this only bounds route churn; it is
- * not what prevents the crossed-route deadlock (issue #6388).
- */
-export const MAX_MCP_FORWARD_REROUTES = 3;
 const MCP_OVERLOAD_RETRY_AFTER_MS = 250;
 
 function socketRequestId(parsed: unknown): string | null {
@@ -345,12 +348,6 @@ function snapshotDaemonOptions(options: DaemonOptions | undefined): DaemonOption
   return structuredClone(options ?? {});
 }
 
-const DEVICE_ACQUISITION_TOOL_NAMES = new Set([
-  "getAndroid",
-  "getApple",
-  "startDevice",
-  "provisionDevice",
-]);
 /** Keep shutdown bounded if a request handler ignores its disconnected peer. */
 const DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS = 1_000;
 /** Keep shutdown bounded if a client cannot flush a release notification. */
@@ -593,11 +590,6 @@ interface BoundMcpClient {
   requiresLiveDaemonSession: boolean;
 }
 
-/** One keyed attempt either ran the forward or found its route moved to another key. */
-type McpForwardAttempt<T> =
-  | { kind: "done"; value: T }
-  | { kind: "reroute"; route: McpForwardRoute };
-
 /** Recovery lookup is optional only for older socket-state fakes. */
 interface SocketDaemonStateAccess extends DaemonStateAccess {
   getSessionManager(): ReturnType<DaemonStateAccess["getSessionManager"]> & {
@@ -628,27 +620,8 @@ export type DeviceReadToolCallClassifier = (toolName: string, args: unknown) => 
 const registeredDeviceReadClassifier: DeviceReadToolCallClassifier = (toolName, args) =>
   ToolRegistry.getRegisteredTool(toolName)?.isDeviceReadOnlyCall?.(args) === true;
 
-/**
- * Suffix of a device's read lane (#10969). A watcher's read of a device another session holds
- * runs on the read path, which has no device side effects there, so it never queues behind the
- * holder's control calls on `device:<id>`. Reads still serialize among themselves.
- */
-const MCP_FORWARD_READ_LANE_SUFFIX = ":read";
-const MCP_FORWARD_DEVICE_KEY_PREFIX = "device:";
-
 /** How long a closed socket's late executions may still write bindings that are then forgotten. */
 const LATE_BINDING_FORGET_WINDOW_MS = 15 * 60 * 1000;
-
-interface McpForwardRoute {
-  /** Serializes work that targets the same physical device or session. */
-  executionKey: string;
-  /** Owns the loopback MCP transport and its session-local tool-selection profile. */
-  clientKey: string;
-  /** Replayed when this transport needs to establish a fresh MCP session. */
-  sessionUuid?: string;
-  toolSelectionProfileUuid?: string;
-  releasedSessionUuid?: string;
-}
 
 interface McpForwardContext {
   request: DaemonRequest;
@@ -666,9 +639,6 @@ interface McpForwardContext {
    */
   deadline: ProgressExtendableDeadline;
 }
-
-const isNonBlankSessionUuid = (value: unknown): value is string =>
-  typeof value === "string" && value.trim().length > 0;
 
 /** One device-mutating `ide/*` route in flight; its ownership gate hands it the execution. */
 interface IdeMutationCall {
@@ -845,16 +815,6 @@ export interface SocketFrameTraceEvent {
   writableLengthAfterWrite?: number;
   writableLengthInCallback?: number;
   hadError?: boolean;
-}
-
-interface ProfileReaffirmForwardRouteOptions {
-  args: unknown;
-  socketSessionId: string;
-  toolName: unknown;
-  sessionUuid: string;
-  toolSelectionProfileUuid: string | undefined;
-  scopedKey: string | undefined;
-  boundRoute: McpForwardRoute | undefined;
 }
 
 interface AndroidAppendTextOptions {
@@ -2532,176 +2492,108 @@ export class UnixSocketServer {
     );
   }
 
-  /**
-   * Run `fn` holding the execution key of the request's current route. When the route moves
-   * to another key while the request waits, the held key is RELEASED before the new one is
-   * acquired: holding one key while waiting on another deadlocks two requests whose routes
-   * cross, or one request whose route flips back to a key it still holds (issue #6388).
-   */
-  private async runMcpForwardForCurrentRoute<T>(
+  private readonly mcpForwardRouter = new McpForwardRouter({
+    withAdmittedBoundSession: (args, forward, socketSessionId) =>
+      this.withAdmittedBoundSession(args, forward, socketSessionId),
+    boundClientRoute: (socketSessionId, recoverable) =>
+      this.getBoundMcpClientRoute(socketSessionId, recoverable),
+    requestArgumentScopeKey: (args) => this.getRequestArgumentScopeKey(args),
+    implicitAutolockScopeKey: (mcpSessionId, args) =>
+      this.getImplicitAutolockScopeKey(mcpSessionId, args),
+    implicitAutolockSession: (mcpSessionId, args) =>
+      this.resolveImplicitAutolockSession(mcpSessionId, args),
+    resolveDeviceLabelSession: (base, label) => this.resolveDeviceLabelSession(base, label),
+    hasActiveSession: (sessionUuid) => this.hasActiveDaemonSession(sessionUuid),
+    deviceHolderSession: (deviceId) => this.getDeviceHolderSession(deviceId),
+    toolSelectionBaseSession: (sessionUuid) =>
+      resolveToolSelectionBaseSessionUuid(sessionUuid, this.daemonState.getSessionManager()),
+    ownedDeviceSessionForMcpSession: (mcpSessionId, deviceId) =>
+      this.daemonState
+        .getDevicePool()
+        .resolveOwnedDeviceSessionForMcpSession?.(mcpSessionId, deviceId),
+    isDeviceReadCall: (toolName, args) => this.deviceReadToolCallClassifier(toolName, args),
+    admissionArgs: (request) => this.boundSessionAdmissionArgs(request),
+    runKeyed: (executionKey, fn, idleCloseKey, chainWait) =>
+      this.runKeyedMcpForward(executionKey, fn, idleCloseKey, chainWait),
+  });
+
+  private getMcpForwardRoute(
+    request: DaemonRequest,
+    socketSessionId: string,
+  ): McpForwardRoute | Promise<McpForwardRoute> {
+    return this.mcpForwardRouter.resolve(request, socketSessionId);
+  }
+
+  private getToolsCallForwardRoute(
+    args: unknown,
+    socketSessionId: string,
+    toolName?: unknown,
+  ): McpForwardRoute | Promise<McpForwardRoute> {
+    return this.mcpForwardRouter.resolveToolsCall(args, socketSessionId, toolName);
+  }
+
+  private runMcpForwardForCurrentRoute<T>(
     initialRoute: McpForwardRoute,
     request: DaemonRequest,
     socketSessionId: string,
     fn: (route: McpForwardRoute) => Promise<T>,
     chainWait?: McpForwardChainWait,
   ): Promise<T> {
-    const visitedKeys = [initialRoute.executionKey];
-    let route = initialRoute;
-    for (;;) {
-      const admittedRoute = route;
-      const attempt = await this.runKeyedMcpForward(
-        admittedRoute.executionKey,
-        () => this.runMcpForwardAttempt(admittedRoute, request, socketSessionId, fn),
-        undefined,
-        chainWait,
-      );
-      if (attempt.kind === "done") {
-        return attempt.value;
-      }
-      route = attempt.route;
-      visitedKeys.push(route.executionKey);
-      if (visitedKeys.length > MAX_MCP_FORWARD_REROUTES + 1) {
-        throw new ActionableError(
-          `MCP request ${request.id} was re-routed more than ${MAX_MCP_FORWARD_REROUTES} times while waiting to run ` +
-            `(execution keys: ${visitedKeys.join(" -> ")}). The target device or session kept changing; retry once it is stable.`,
-        );
-      }
-      logger.debug(
-        `[McpForward] rekey requestId=${request.id} initialExecutionKey=${admittedRoute.executionKey} currentExecutionKey=${route.executionKey}`,
-      );
-    }
-  }
-
-  private async runMcpForwardAttempt<T>(
-    initialRoute: McpForwardRoute,
-    request: DaemonRequest,
-    socketSessionId: string,
-    fn: (route: McpForwardRoute) => Promise<T>,
-  ): Promise<McpForwardAttempt<T>> {
-    const routeOrPending = this.getMcpForwardRoute(request, socketSessionId);
-    const currentRoute = routeOrPending instanceof Promise ? await routeOrPending : routeOrPending;
-    if (currentRoute.executionKey !== initialRoute.executionKey) {
-      return { kind: "reroute", route: currentRoute };
-    }
-    // The execution target is unchanged, so this request keeps the client and
-    // session it was admitted with. Re-resolving may replace a session-specific
-    // clientKey with the shared unbound client (e.g. a mid-flight disconnect
-    // cleared the binding before this recompute) under the same executionKey;
-    // that would run the admitted tool with no tool-selection profile. Only the
-    // execution target may be re-resolved, never the admitted client/session
-    // (issue #4610).
-    //
-    // Exception: when the admitted route was seeded for a specific daemon
-    // session and that session was RELEASED while this request waited in the
-    // queue, invoking the stale session-scoped client would re-seed the released
-    // UUID and RESURRECT the session (getOrCreateSession recreates it and
-    // reacquires a device the caller never asked for). A mid-flight socket
-    // disconnect, by contrast, leaves the daemon session live — so the daemon
-    // session still being active is exactly what distinguishes a disconnect
-    // (keep the admitted client, preserving the tool-selection profile above) from a
-    // real release (re-resolve to the current, unseeded route). Only re-resolve
-    // when the recompute actually points somewhere else (issue #4610).
-    if (
-      initialRoute.sessionUuid !== undefined &&
-      currentRoute.clientKey !== initialRoute.clientKey &&
-      !this.hasActiveDaemonSession(initialRoute.sessionUuid)
-    ) {
-      logger.debug(
-        `[McpForward] released-session re-resolve requestId=${request.id} releasedSession=${initialRoute.sessionUuid} clientKey=${initialRoute.clientKey} -> ${currentRoute.clientKey}`,
-      );
-      return {
-        kind: "done",
-        value: await fn(currentRoute),
-      };
-    }
-    return {
-      kind: "done",
-      value: await fn(initialRoute),
-    };
-  }
-
-  private getMcpForwardRoute(
-    request: DaemonRequest,
-    socketSessionId: string,
-  ): McpForwardRoute | Promise<McpForwardRoute> {
-    if (request.method === "tools/call") {
-      const route = this.getToolsCallForwardRoute(
-        request.params?.arguments,
-        socketSessionId,
-        request.params?.name,
-      );
-      const toLane = (resolved: McpForwardRoute) =>
-        this.withDeviceReadLane(resolved, request, socketSessionId);
-      return route instanceof Promise ? route.then(toLane) : toLane(route);
-    }
-
-    return this.withAdmittedBoundSession(
-      this.boundSessionAdmissionArgs(request),
-      (recoverableSessionUuid) =>
-        this.getAdmittedMcpForwardRoute(request, socketSessionId, recoverableSessionUuid),
+    return this.mcpForwardRouter.runForCurrentRoute(
+      initialRoute,
+      request,
+      socketSessionId,
+      fn,
+      chainWait,
     );
   }
 
-  /**
-   * Move a watcher's read of a held device onto the device's read lane (#10969). Control calls,
-   * the holder's own calls (by session, device label, autolock or the acquiring connection) and
-   * reads of a free device, which may run readiness, stay on the control lane. Re-resolved before
-   * the forward runs, so an acquisition or release while queued moves the call between lanes.
-   */
-  private withDeviceReadLane(
-    route: McpForwardRoute,
-    request: DaemonRequest,
+  private sharedMcpForwardRoute(key: string): McpForwardRoute {
+    return sharedMcpForwardRoute(key);
+  }
+
+  private acquisitionMcpForwardRoute(
     socketSessionId: string,
+    toolName: string,
+    toolSelectionProfileUuid: string | undefined,
   ): McpForwardRoute {
-    const toolName = request.params?.name;
-    const args = request.params?.arguments;
-    if (
-      !route.executionKey.startsWith(MCP_FORWARD_DEVICE_KEY_PREFIX) ||
-      typeof toolName !== "string" ||
-      !this.isDeviceReadToolCall(toolName, args)
-    ) {
-      return route;
-    }
-    const deviceId = route.executionKey.slice(MCP_FORWARD_DEVICE_KEY_PREFIX.length);
-    const holder = this.getDeviceHolderSession(deviceId);
-    if (!holder) {
-      return route;
-    }
-    const sessionManager = this.daemonState.getSessionManager();
-    const base = (sessionUuid: string | undefined) =>
-      sessionUuid ? resolveToolSelectionBaseSessionUuid(sessionUuid, sessionManager) : undefined;
-    const holderBase = base(holder);
-    const callerSessions = [
-      route.sessionUuid,
-      this.getSessionUuid(args),
-      this.getDeviceLabelSession(args),
-      this.resolveImplicitAutolockSession(socketSessionId, args),
-      this.daemonState
-        .getDevicePool()
-        .resolveOwnedDeviceSessionForMcpSession?.(socketSessionId, deviceId),
-    ];
-    if (callerSessions.some((sessionUuid) => base(sessionUuid) === holderBase)) {
-      return route;
-    }
-    return { ...route, executionKey: `${route.executionKey}${MCP_FORWARD_READ_LANE_SUFFIX}` };
+    return acquisitionMcpForwardRoute(socketSessionId, toolName, toolSelectionProfileUuid);
   }
 
-  private getDeviceLabelSession(args: unknown): string | undefined {
-    const baseSessionUuid = this.getSessionUuid(args);
-    const record = args as Record<string, unknown> | undefined;
-    return baseSessionUuid && typeof record?.device === "string" && record.device.length > 0
-      ? this.resolveDeviceLabelSession(baseSessionUuid, record.device)
-      : undefined;
+  private sessionScopedForwardRoute(
+    socketSessionId: string,
+    sessionUuid: string,
+    scopedKey: string | undefined,
+    toolSelectionProfileUuid?: string,
+    releasedSessionUuid?: string,
+  ): McpForwardRoute {
+    return sessionScopedForwardRoute(
+      socketSessionId,
+      sessionUuid,
+      scopedKey,
+      toolSelectionProfileUuid,
+      releasedSessionUuid,
+    );
   }
 
-  private isDeviceReadToolCall(toolName: string, args: unknown): boolean {
-    try {
-      return this.deviceReadToolCallClassifier(toolName, args);
-    } catch (error) {
-      // An argument set the classifier cannot read is not proven a read: keep the control lane.
-      logger.debug(`[McpForward] read classification failed for ${toolName}: ${error}`);
-      return false;
-    }
+  private toolSelectionProfileScopedForwardRoute(
+    socketSessionId: string,
+    toolSelectionProfileUuid: string,
+    scopedKey: string | undefined,
+  ): McpForwardRoute {
+    return toolSelectionProfileScopedForwardRoute(
+      socketSessionId,
+      toolSelectionProfileUuid,
+      scopedKey,
+    );
+  }
+
+  private getSessionUuid(args: unknown): string | undefined {
+    return readSessionUuid(args);
+  }
+
+  private getToolSelectionProfileUuid(params: unknown): string | undefined {
+    return readToolSelectionProfileUuid(params);
   }
 
   /** The session holding a device: its live owner, or its autolock holder. */
@@ -2720,129 +2612,6 @@ export class UnixSocketServer {
       logger.debug(`[McpForward] holder lookup failed for ${deviceId}: ${error}`);
       return undefined;
     }
-  }
-
-  private getAdmittedMcpForwardRoute(
-    request: DaemonRequest,
-    socketSessionId: string,
-    recoverableSessionUuid?: string,
-  ): McpForwardRoute {
-    const boundRoute = this.getBoundMcpClientRoute(socketSessionId, recoverableSessionUuid);
-    if (
-      request.method === "tools/list" ||
-      request.method === "resources/list" ||
-      request.method === "resources/list-templates"
-    ) {
-      return this.getDiscoveryForwardRoute(request, socketSessionId, boundRoute);
-    }
-
-    if (request.method === "ide/getNavigationGraph") {
-      return this.getNavigationGraphForwardRoute(request, socketSessionId, boundRoute);
-    }
-
-    if (request.method === "resources/read") {
-      return this.getResourceReadForwardRoute(request, socketSessionId);
-    }
-
-    return this.sharedMcpForwardRoute(`method:${request.method}`);
-  }
-
-  private getDiscoveryForwardRoute(
-    request: DaemonRequest,
-    socketSessionId: string,
-    boundRoute: McpForwardRoute | undefined,
-  ): McpForwardRoute {
-    if (request.method === "tools/list") {
-      // A reconnected restricted discovery re-sends `{sessionUuid}` (see
-      // daemonMcpProxy.listTools). A fresh socket has no boundRoute, so without
-      // honoring the request's session the shared UNSEEDED client would return the
-      // full, unfiltered tool list. Route to the session-scoped client so the
-      // seeded loopback transport advertises the session-scoped list, completing
-      // the proxy-side reconnect seeding (issue #4610).
-      const listSessionUuid = this.getSessionUuid(request.params);
-      const toolSelectionProfileUuid = this.getToolSelectionProfileUuid(request.params);
-      if (listSessionUuid) {
-        return this.sessionScopedForwardRoute(
-          socketSessionId,
-          listSessionUuid,
-          undefined,
-          toolSelectionProfileUuid,
-        );
-      }
-      if (toolSelectionProfileUuid) {
-        return this.toolSelectionProfileScopedForwardRoute(
-          socketSessionId,
-          toolSelectionProfileUuid,
-          undefined,
-        );
-      }
-      return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
-    }
-
-    const sessionUuid = this.getSessionUuid(request.params);
-    const toolSelectionProfileUuid = this.getToolSelectionProfileUuid(request.params);
-    if (sessionUuid) {
-      return this.sessionScopedForwardRoute(
-        socketSessionId,
-        sessionUuid,
-        undefined,
-        toolSelectionProfileUuid,
-      );
-    }
-    if (toolSelectionProfileUuid) {
-      return this.toolSelectionProfileScopedForwardRoute(
-        socketSessionId,
-        toolSelectionProfileUuid,
-        undefined,
-      );
-    }
-    return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
-  }
-
-  private getNavigationGraphForwardRoute(
-    request: DaemonRequest,
-    socketSessionId: string,
-    boundRoute: McpForwardRoute | undefined,
-  ): McpForwardRoute {
-    const sessionUuid = this.getSessionUuid(request.params);
-    const executionKey = this.getRequestArgumentScopeKey(request.params);
-    if (sessionUuid) {
-      // An explicit read session routes to its OWN session-specific client so a
-      // cross-session IDE read never repurposes the socket's bound transport. If
-      // it reused the bound client, the loopback SessionToolBinding would be
-      // rebound to this UUID while recordBoundMcpClientKey early-returns for
-      // non-tools/call methods, leaving the daemon route labeled the bound
-      // session and the transport filtering by a different profile (issue #4610).
-      return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, executionKey);
-    }
-    if (executionKey) {
-      return boundRoute
-        ? { ...boundRoute, executionKey }
-        : this.sharedMcpForwardRoute(executionKey);
-    }
-    return boundRoute ?? this.sharedMcpForwardRoute(`method:${request.method}`);
-  }
-
-  private getResourceReadForwardRoute(
-    request: DaemonRequest,
-    socketSessionId: string,
-  ): McpForwardRoute {
-    const sessionUuid = this.getSessionUuid(request.params);
-    if (sessionUuid) {
-      const releasedSessionUuid =
-        request.params?.[DAEMON_RELEASED_SESSION_PARAM] === sessionUuid ? sessionUuid : undefined;
-      return this.sessionScopedForwardRoute(
-        socketSessionId,
-        sessionUuid,
-        undefined,
-        undefined,
-        releasedSessionUuid === sessionUuid ? releasedSessionUuid : undefined,
-      );
-    }
-    const uri = request.params?.uri;
-    return this.sharedMcpForwardRoute(
-      typeof uri === "string" ? `resource:${uri}` : "resource:unknown",
-    );
   }
 
   private beginMcpSessionOwnerCall(
@@ -2973,278 +2742,6 @@ export class UnixSocketServer {
     if (this.daemonState.isInitialized()) {
       this.daemonState.getDevicePool().releaseMcpSessionBindings?.(socketSessionId);
     }
-  }
-
-  private getToolsCallForwardRoute(
-    args: unknown,
-    socketSessionId: string,
-    toolName?: unknown,
-  ): McpForwardRoute | Promise<McpForwardRoute> {
-    return this.withAdmittedBoundSession(
-      args,
-      (recoverableSessionUuid) =>
-        this.getAdmittedToolsCallForwardRoute(
-          args,
-          socketSessionId,
-          toolName,
-          recoverableSessionUuid,
-        ),
-      socketSessionId,
-    );
-  }
-
-  private getAdmittedToolsCallForwardRoute(
-    args: unknown,
-    socketSessionId: string,
-    toolName?: unknown,
-    recoverableSessionUuid?: string,
-  ): McpForwardRoute {
-    const scopedKey = this.getRequestArgumentScopeKey(args);
-    const boundRoute = this.getBoundMcpClientRoute(socketSessionId, recoverableSessionUuid);
-    const sessionUuid = this.getSessionUuid(args);
-    const toolSelectionProfileUuid =
-      this.getToolSelectionProfileUuid(args) ?? boundRoute?.toolSelectionProfileUuid;
-    if (this.isUnboundDeviceAcquisitionTool(toolName, sessionUuid)) {
-      // Acquisition can mint a second device session on an already-bound
-      // daemon socket. Keep each platform/tool on its own loopback client without
-      // a device-session binding;
-      // reusing the first acquired session's bound transport makes the second
-      // acquisition and later selector routing disagree about ownership.
-      return this.acquisitionMcpForwardRoute(socketSessionId, toolName, toolSelectionProfileUuid);
-    }
-    if (this.hasImplicitDeviceSelector(args)) {
-      return this.selectorMcpForwardRoute(
-        socketSessionId,
-        args,
-        scopedKey,
-        toolSelectionProfileUuid,
-      );
-    }
-
-    if (sessionUuid) {
-      return (
-        this.profileReaffirmForwardRoute({
-          args,
-          socketSessionId,
-          toolName,
-          sessionUuid,
-          toolSelectionProfileUuid,
-          scopedKey,
-          boundRoute,
-        }) ??
-        this.sessionScopedForwardRoute(
-          socketSessionId,
-          sessionUuid,
-          scopedKey,
-          toolSelectionProfileUuid,
-        )
-      );
-    }
-    if (toolSelectionProfileUuid) {
-      return this.toolSelectionProfileScopedForwardRoute(
-        socketSessionId,
-        toolSelectionProfileUuid,
-        scopedKey,
-      );
-    }
-
-    if (scopedKey) {
-      if (boundRoute) {
-        return { ...boundRoute, executionKey: scopedKey };
-      }
-      return this.sharedMcpForwardRoute(scopedKey);
-    }
-
-    if (boundRoute) {
-      return this.hostInventoryOrBoundRoute(boundRoute, toolName, args);
-    }
-
-    const implicitAutolockKey = this.getImplicitAutolockScopeKey(socketSessionId, args);
-    if (implicitAutolockKey) {
-      return this.sharedMcpForwardRoute(implicitAutolockKey);
-    }
-
-    // The daemon injects __mcpSessionId before forwarding. Use the socket session as the
-    // pre-forward key so separate daemon clients can autolock and run independently.
-    return this.sharedMcpForwardRoute(`socket:${socketSessionId}`);
-  }
-
-  private hostInventoryOrBoundRoute(
-    boundRoute: McpForwardRoute,
-    toolName: unknown,
-    args: unknown,
-  ): McpForwardRoute {
-    return isHostInventoryCall(toolName, args)
-      ? { ...boundRoute, executionKey: "host:inventory" }
-      : boundRoute;
-  }
-
-  private isUnboundDeviceAcquisitionTool(
-    toolName: unknown,
-    sessionUuid: string | undefined,
-  ): toolName is string {
-    return (
-      typeof toolName === "string" && DEVICE_ACQUISITION_TOOL_NAMES.has(toolName) && !sessionUuid
-    );
-  }
-
-  /**
-   * A `setToolEnabled` reaffirming the connection's own profile names no device
-   * route of its own. Seeding a loopback with the profile as its DEVICE binding
-   * made the update's label readback enumerate the profile (nothing) instead of
-   * the device session this socket acquired, so carry that acquired route
-   * through: the one the proxy sent alongside, else the one this socket is
-   * already bound to (#7005). Undefined for every other explicit-session call.
-   */
-  private profileReaffirmForwardRoute(
-    options: ProfileReaffirmForwardRouteOptions,
-  ): McpForwardRoute | undefined {
-    const {
-      args,
-      socketSessionId,
-      toolName,
-      sessionUuid,
-      toolSelectionProfileUuid,
-      scopedKey,
-      boundRoute,
-    } = options;
-    if (toolName !== SET_TOOL_ENABLED_TOOL_NAME || sessionUuid !== toolSelectionProfileUuid) {
-      return undefined;
-    }
-    const acquiredDeviceSessionUuid =
-      this.getAcquiredDeviceSessionUuid(args, sessionUuid) ?? boundRoute?.sessionUuid;
-    if (!acquiredDeviceSessionUuid || !this.hasActiveDaemonSession(acquiredDeviceSessionUuid)) {
-      return undefined;
-    }
-    return this.sessionScopedForwardRoute(
-      socketSessionId,
-      acquiredDeviceSessionUuid,
-      scopedKey,
-      toolSelectionProfileUuid,
-    );
-  }
-
-  /**
-   * The acquired device session the proxy carries alongside a profile-addressed
-   * call (see `DaemonMcpProxy.withAcquiredDeviceRoute`). When the marker merely
-   * echoes the explicit session it is the ordinary bound-session replay tag, not
-   * a separate route.
-   */
-  private getAcquiredDeviceSessionUuid(args: unknown, sessionUuid: string): string | undefined {
-    if (!args || typeof args !== "object" || Array.isArray(args)) {
-      return undefined;
-    }
-    const carried = (args as Record<string, unknown>)[DAEMON_BOUND_SESSION_PARAM];
-    return isNonBlankSessionUuid(carried) && carried !== sessionUuid ? carried : undefined;
-  }
-
-  private selectorMcpForwardRoute(
-    socketSessionId: string,
-    args: unknown,
-    scopedKey: string | undefined,
-    profileUuid: string | undefined,
-  ): McpForwardRoute {
-    const key =
-      scopedKey ??
-      this.getImplicitAutolockScopeKey(socketSessionId, args) ??
-      `socket:${socketSessionId}`;
-    return profileUuid
-      ? this.toolSelectionProfileScopedForwardRoute(socketSessionId, profileUuid, key)
-      : this.sharedMcpForwardRoute(key);
-  }
-
-  private hasImplicitDeviceSelector(args: unknown): boolean {
-    if (!args || typeof args !== "object" || Array.isArray(args)) {
-      return false;
-    }
-    const record = args as Record<string, unknown>;
-    if (record.device) {
-      return false;
-    }
-    const sessionUuid = this.getSessionUuid(args);
-    if (sessionUuid) {
-      return false;
-    }
-    return (
-      record.platform === "android" ||
-      record.platform === "ios" ||
-      typeof record.deviceId === "string"
-    );
-  }
-
-  private sharedMcpForwardRoute(key: string): McpForwardRoute {
-    return { executionKey: key, clientKey: key };
-  }
-
-  private acquisitionMcpForwardRoute(
-    socketSessionId: string,
-    toolName: string,
-    toolSelectionProfileUuid: string | undefined,
-  ): McpForwardRoute {
-    const key = `socket:${socketSessionId}:acquisition:${toolName}`;
-    return {
-      executionKey: key,
-      clientKey: toolSelectionProfileUuid
-        ? `${key}:tool-selection:${toolSelectionProfileUuid}`
-        : key,
-      toolSelectionProfileUuid,
-    };
-  }
-
-  private sessionMcpClientKey(
-    socketSessionId: string,
-    sessionUuid: string,
-    toolSelectionProfileUuid?: string,
-    releasedSessionUuid?: string,
-  ): string {
-    const profileSuffix = toolSelectionProfileUuid
-      ? `:tool-selection:${toolSelectionProfileUuid}`
-      : "";
-    const releaseSuffix = releasedSessionUuid ? ":released-resource" : "";
-    return `socket:${socketSessionId}:session:${sessionUuid}${profileSuffix}${releaseSuffix}`;
-  }
-
-  private toolSelectionProfileMcpClientKey(
-    socketSessionId: string,
-    toolSelectionProfileUuid: string,
-  ): string {
-    return `socket:${socketSessionId}:tool-selection:${toolSelectionProfileUuid}`;
-  }
-
-  // Route an explicit-session request (tools/call or an IDE read) to its OWN
-  // session-specific loopback client so it never repurposes the socket's bound
-  // transport to a different session (issue #4610).
-  private sessionScopedForwardRoute(
-    socketSessionId: string,
-    sessionUuid: string,
-    scopedKey: string | undefined,
-    toolSelectionProfileUuid?: string,
-    releasedSessionUuid?: string,
-  ): McpForwardRoute {
-    return {
-      executionKey: scopedKey ?? `session:${sessionUuid}`,
-      clientKey: this.sessionMcpClientKey(
-        socketSessionId,
-        sessionUuid,
-        toolSelectionProfileUuid,
-        releasedSessionUuid,
-      ),
-      sessionUuid,
-      toolSelectionProfileUuid,
-      releasedSessionUuid,
-    };
-  }
-
-  private toolSelectionProfileScopedForwardRoute(
-    socketSessionId: string,
-    toolSelectionProfileUuid: string,
-    scopedKey: string | undefined,
-  ): McpForwardRoute {
-    return {
-      executionKey: scopedKey ?? `tool-selection:${toolSelectionProfileUuid}`,
-      clientKey: this.toolSelectionProfileMcpClientKey(socketSessionId, toolSelectionProfileUuid),
-      toolSelectionProfileUuid,
-    };
   }
 
   private recordBoundMcpClientKey(
@@ -3441,14 +2938,6 @@ export class UnixSocketServer {
     return undefined;
   }
 
-  private getToolSelectionProfileUuid(params: unknown): string | undefined {
-    if (!params || typeof params !== "object" || Array.isArray(params)) {
-      return undefined;
-    }
-    const value = (params as Record<string, unknown>)[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
-    return isNonBlankSessionUuid(value) ? value : undefined;
-  }
-
   private getGeneratedToolSelectionProfileUuid(
     request: DaemonRequest,
     response: unknown,
@@ -3583,14 +3072,6 @@ export class UnixSocketServer {
         reason: "session-not-found",
       });
     }
-  }
-
-  private getSessionUuid(args: unknown): string | undefined {
-    if (!args || typeof args !== "object" || Array.isArray(args)) {
-      return undefined;
-    }
-    const sessionUuid = (args as Record<string, unknown>).sessionUuid;
-    return isNonBlankSessionUuid(sessionUuid) ? sessionUuid : undefined;
   }
 
   private isReleasedBoundSession(args: unknown, socketSessionId?: string): boolean {

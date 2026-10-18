@@ -74,6 +74,11 @@ class SessionReleaseBroadcasterClass {
     }
   }
 
+  /** Test-only: the subscribed listeners, so a suite can prove it leaked none. */
+  listenersForTesting(): SessionReleaseListener[] {
+    return [...this.listeners];
+  }
+
   /** Test-only: drop all listeners so suites sharing the singleton stay hermetic. */
   clearForTesting(): void {
     this.listeners.clear();

@@ -9,7 +9,7 @@ isolateToolRegistry();
 
 /** Names of the registered tools declaring `recordsNavigation`, sorted. */
 function navigationRecordingTools(): string[] {
-  return [...ToolRegistry["tools"].values()]
+  return ToolRegistry.getEveryRegisteredTool()
     .filter((tool) => tool.recordsNavigation === true)
     .map((tool) => tool.name)
     .sort();

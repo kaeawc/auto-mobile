@@ -273,8 +273,14 @@ export class FakeObserveScreen implements ObserveScreen {
     }
 
     const observation = this.getNextObserveResult();
-    // The real ObserveScreen caches every execute() that does not opt out with skipCache.
-    if (!options?.skipCache) {
+    // Mirrors the real shouldCacheSingleDisplay(): observer-mode, recomposition-skipping and
+    // skipCache reads do not cache, and hierarchyOnly returns before any cache write.
+    if (
+      !options?.skipCache &&
+      !options?.observerMode &&
+      !options?.skipRecompositionTracking &&
+      !options?.hierarchyOnly
+    ) {
       this.lastCachedObservation = observation;
     }
     return recordObservationRead(observation);
@@ -383,6 +389,8 @@ export class FakeObserveScreen implements ObserveScreen {
     if (error) {
       throw error;
     }
+    // The real class stores the selected poll result, which is what a cache read then replays.
+    this.lastCachedObservation = observation;
   }
 
   /** Options passed to each `execute()` call, in order. */

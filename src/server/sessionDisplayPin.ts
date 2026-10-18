@@ -4,7 +4,7 @@ import {
 } from "../devices/DisplayInventoryProvider";
 import { logger } from "../utils/logger";
 import type { BootedDevice } from "../models";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import {
   readableDisplayInventory,
   resolveTargetDisplay,
@@ -60,9 +60,10 @@ export async function prepareSessionDisplayPin(input: {
   return validateDisplayPin(inventory, input.display);
 }
 
-function pinStore(): SessionDisplayPinStore | undefined {
-  const daemon = DaemonState.getInstance();
-  return daemon.isInitialized() ? daemon.getSessionManager() : undefined;
+function pinStore(
+  daemon: DaemonContext = defaultDaemonContext,
+): SessionDisplayPinStore | undefined {
+  return daemon.sessionManager();
 }
 
 function stampDisplay(value: unknown): unknown {

@@ -14,7 +14,11 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { registerObserveTools } from "../../src/server/observeTools";
-import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
+import {
+  ToolRegistry,
+  type AuditRunnerInput,
+  type ToolRegistryCollaborators,
+} from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -38,7 +42,7 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
   let ran: Array<{ name: string; deviceId: string }>;
   let foreignOwners: Map<string, number>;
   let forwardVerdict: ForeignCtrlProxyForwardVerdict;
-  let originals: Array<[string, unknown]>;
+  let originals: ToolRegistryCollaborators;
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
   let readinessRequests: number;
@@ -86,12 +90,14 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
       readinessRequests++;
       return await ensureDeviceReady(...args);
     };
-    originals = (
-      ["deviceSessionManager", "toolCallRepository", "navigationToolCallRecorder"] as const
-    ).map((key) => [key, Reflect.get(ToolRegistry, key)]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", devices);
-    Reflect.set(ToolRegistry, "toolCallRepository", { async recordToolCall(): Promise<void> {} });
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", { record: () => undefined });
+    originals = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    });
+    ToolRegistry.setCollaboratorsForTesting({
+      navigationToolCallRecorder: { record: () => undefined },
+    });
 
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -149,9 +155,7 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
 
   afterEach(() => {
     restorePipeline();
-    for (const [key, value] of originals) {
-      Reflect.set(ToolRegistry, key, value);
-    }
+    ToolRegistry.setCollaboratorsForTesting(originals);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();

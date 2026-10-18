@@ -2,6 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>UnsafeCallOnNullableType:LoginScreen.kt:loginError!!</ID>
+    <ID>EmptyFunctionBlock:TestPlanDocumentListenerTest.kt:TestPlanDocumentListenerTest.FakeDocument${}</ID>
   </CurrentIssues>
 </SmellBaseline>

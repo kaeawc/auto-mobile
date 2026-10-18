@@ -1,0 +1,91 @@
+{
+  "scenario": "stateless-handshake",
+  "description": "initialize, notifications/initialized, ping and prompts/list as the desktop McpHttpClient sends them, answered by the real Daemon streamable-HTTP handler. The mcp-session-id response header and the body framing (JSON vs event stream) are not recorded: the client echoes the header only when present and decodes either framing.",
+  "exchanges": [
+    {
+      "label": "initialize",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "desktop-handshake-1",
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-11-25",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "auto-mobile-desktop",
+            "version": "0.0.0-fixture"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "message": {
+          "result": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {
+              "resources": {
+                "subscribe": true,
+                "listChanged": true
+              },
+              "tools": {
+                "listChanged": true
+              },
+              "prompts": {}
+            },
+            "serverInfo": {
+              "name": "AutoMobile",
+              "version": "<server-version>"
+            }
+          },
+          "jsonrpc": "2.0",
+          "id": "desktop-handshake-1"
+        }
+      }
+    },
+    {
+      "label": "initialized",
+      "request": {
+        "jsonrpc": "2.0",
+        "method": "notifications/initialized"
+      },
+      "response": {
+        "status": 202,
+        "message": null
+      }
+    },
+    {
+      "label": "ping",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "desktop-handshake-2",
+        "method": "ping"
+      },
+      "response": {
+        "status": 200,
+        "message": {
+          "result": {},
+          "jsonrpc": "2.0",
+          "id": "desktop-handshake-2"
+        }
+      }
+    },
+    {
+      "label": "prompts-list",
+      "request": {
+        "jsonrpc": "2.0",
+        "id": "desktop-handshake-3",
+        "method": "prompts/list"
+      },
+      "response": {
+        "status": 200,
+        "message": {
+          "result": {
+            "prompts": []
+          },
+          "jsonrpc": "2.0",
+          "id": "desktop-handshake-3"
+        }
+      }
+    }
+  ]
+}

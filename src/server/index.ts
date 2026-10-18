@@ -161,6 +161,30 @@ export function registerMcpTools(daemonMode: boolean): void {
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));
 }
 
+let lastResourceRegistration:
+  | { iosDependencies: IosDoctorDependencies; clearEpoch: number }
+  | undefined;
+
+/**
+ * Register every resource once per process (#13068). The registry is keyed by URI, so
+ * re-registering is redundant, and registering app resources starts a booted-device
+ * discovery (adb + simctl), which every stateless request (#4678) used to pay. Device
+ * inventory changes resync app resources through the device lifecycle instead.
+ */
+function registerAllResourcesOnce(iosDependencies: IosDoctorDependencies): void {
+  if (
+    lastResourceRegistration?.iosDependencies === iosDependencies &&
+    lastResourceRegistration.clearEpoch === ResourceRegistry.clearEpochForRegistration
+  ) {
+    return;
+  }
+  registerAllResources(iosDependencies);
+  lastResourceRegistration = {
+    iosDependencies,
+    clearEpoch: ResourceRegistry.clearEpochForRegistration,
+  };
+}
+
 function registerAllResources(iosDependencies: IosDoctorDependencies): void {
   registerObservationResources();
   registerToolOutputResources();
@@ -248,7 +272,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   // Register all resources
   startupBenchmark.startPhase("resourceRegistration");
-  registerAllResources(iosDependencies);
+  registerAllResourcesOnce(iosDependencies);
   startupBenchmark.endPhase("resourceRegistration");
 
   // Create a new MCP server

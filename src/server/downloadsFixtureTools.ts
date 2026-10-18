@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { ToolRegistry, type ProgressCallback } from "./toolRegistry";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { ActionableError } from "../models";
@@ -39,6 +40,7 @@ export function registerDownloadsFixtureTools(
       );
     },
     {
+      ...PLAN_RELEVANT,
       defaultEnabled: false,
       stagesFiles: true,
       shouldEnsureDevice: () => false,

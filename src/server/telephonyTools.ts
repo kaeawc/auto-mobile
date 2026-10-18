@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { z } from "zod/v4";
 import { Telephony } from "../features/action/Telephony";
 import { ActionableError, BootedDevice } from "../models";
@@ -74,7 +75,7 @@ const phoneCallTool = defineDeviceTool({
     "Simulate a phone call: Android emulator gsm commands, or CallKit via the app's AutoMobile iOS SDK.",
   input: phoneCallInput,
   handler: phoneCallHandler,
-  options: { defaultEnabled: false },
+  options: { ...PLAN_RELEVANT, defaultEnabled: false },
 });
 
 const sendSmsTool = defineDeviceTool({
@@ -83,7 +84,7 @@ const sendSmsTool = defineDeviceTool({
     "Send simulated incoming SMS: Android emulator, or a notification via the app's AutoMobile iOS SDK.",
   input: sendSmsInput,
   handler: sendSmsHandler,
-  options: { defaultEnabled: false },
+  options: { ...PLAN_RELEVANT, defaultEnabled: false },
 });
 
 export const phoneCallSchema = phoneCallTool.schema;

@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
@@ -93,7 +94,7 @@ export function registerPreferenceTools(deps: Partial<PreferenceToolsDependencie
       const result = await appPreferencesFactory(device).setPreference(args);
       return createJSONToolResponse(result);
     },
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false },
   );
 }
 

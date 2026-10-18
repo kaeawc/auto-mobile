@@ -71,7 +71,7 @@
 1005	src/features/webrtc/WebRtcPublisher.ts
 2370	src/server/appFileService.ts
 1431	src/server/appResources.ts
-1535	src/server/appTools.ts
+1519	src/server/appTools.ts
 1985	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
 2530	src/server/deviceToolsProvisioning.ts
@@ -79,14 +79,14 @@
 1273	src/server/deviceToolsStartDevice.ts
 1186	src/server/executionTracker.ts
 1630	src/server/finalizeToolResponse.ts
-3082	src/server/interactionTools.ts
+3084	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts
 2851	src/server/prototypeTools.ts
 1894	src/server/toolOutputSchemas.ts
 1135	src/server/toolRegistry.ts
-1043	src/server/utilityTools.ts
+1035	src/server/utilityTools.ts
 2185	src/server/videoRecordingManager.ts
-1459	src/server/videoRecordingTools.ts
+1435	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts
 1839	src/utils/android-cmdline-tools/AdbClient.ts
 1415	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts

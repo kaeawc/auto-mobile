@@ -1,5 +1,5 @@
 import { defineDeviceTool } from "./defineTool";
-import { SKELETON_OBSERVATION } from "./toolRegistryTypes";
+import { PLAN_RELEVANT, PLAN_SKELETON } from "./toolRegistryTypes";
 import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
 import {
   getAppPermissionsResultSchema,
@@ -1559,7 +1559,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
       defaultEnabled: true,
       transportRecovery: "connect",
       outputSchema: launchAppResultSchema,
-      ...SKELETON_OBSERVATION,
+      ...PLAN_SKELETON,
     },
   );
 
@@ -1572,7 +1572,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
       defaultEnabled: true,
       outputSchema: terminateAppResultSchema,
       stopsApp: true,
-      ...SKELETON_OBSERVATION,
+      ...PLAN_SKELETON,
     },
   );
 
@@ -1581,7 +1581,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Intentionally crash a running app through the platform crash path",
     crashAppSchema,
     crashAppHandler,
-    { defaultEnabled: true, outputSchema: crashAppResultSchema, stopsApp: true },
+    { ...PLAN_RELEVANT, defaultEnabled: true, outputSchema: crashAppResultSchema, stopsApp: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1589,7 +1589,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "State-preserving background-process kill for saved-state restoration tests.",
     appLifecycleSchema,
     appLifecycleHandler,
-    { defaultEnabled: true, outputSchema: appLifecycleResultSchema },
+    { ...PLAN_RELEVANT, defaultEnabled: true, outputSchema: appLifecycleResultSchema },
   );
 
   installAppTool.register(ToolRegistry, installAppHandler);
@@ -1607,7 +1607,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "userId grant/revoke; device-wide reset ['all']; no POST_NOTIFICATIONS.",
     setAppPermissionsSchema,
     setAppPermissionsHandler,
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1638,7 +1638,7 @@ export function registerAppTools(dependencies: AppToolsDependencies = {}) {
     "Reset an app's Keychain/Keystore state (scoped by appId). iOS Simulator resets the WHOLE device Keychain regardless of appId; physical iOS (#5188) and Android (#5190) not yet supported. Requires confirm:true.",
     resetKeychainSchema,
     resetKeychainHandler,
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false },
   );
 
   listAppsTool.register(ToolRegistry, listAppsHandler);

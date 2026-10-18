@@ -9,73 +9,14 @@ import { isInternalStepParam } from "../../constants/internalStepParams";
 export interface RecorderToolTraits {
   /** Writes caller-supplied files, from a host `sourcePath` or inline content. */
   stagesFiles?: boolean;
+  /** A successful call is recorded as a plan step (declared on the tool, #11825). */
+  planRelevant?: boolean;
 }
 
-/**
- * MCP tool names whose successful calls are recorded as plan steps.
- *
- * The registry carries no per-tool "mutates the device" flag (`planExecutable`
- * only widens which gated tools a plan may run), so this list is hand-kept.
- * Infrastructure tools (device management, recording meta-tools, read-only
- * queries) are excluded. `test/features/record/ToolCallRecorderCoverage.test.ts`
- * requires every tool in `schemas/tool-definitions.json` to be listed here or
- * excluded there with a reason, so a new action tool cannot be silently left
- * out of the exported plan (#9928).
- */
-export const PLAN_RELEVANT_TOOLS = new Set([
-  // App lifecycle
-  "launchApp",
-  "terminateApp",
-  "crashApp",
-  "appLifecycle",
-  // Observation
-  "observe",
-  // Interaction
-  "tapOn",
-  "tapAny",
-  "tapAt",
-  "swipeOn",
-  "swipeAt",
-  "sendKeys",
-  "pressButton",
-  "dragAndDrop",
-  "dragPath",
-  "pinchOn",
-  "multiTouch",
-  "selectAllText",
-  "clipboard",
-  "keyboard",
-  // Navigation and system UI
-  "homeScreen",
-  "recentApps",
-  "openLink",
-  "systemTray",
-  "wakeAndUnlock",
-  // Device state and orientation
-  "rotate",
-  "shake",
-  "setPosture",
-  "setDeviceState",
-  "displayConfig",
-  "changeLocalization",
-  "setAppPermissions",
-  "postNotification",
-  // Form filling
-  "setUIState",
-  // Telephony, biometrics and accessibility services (#9966)
-  "accessibility",
-  "biometricAuth",
-  "phoneCall",
-  "sendSms",
-  // App state and fixtures (#9966). The file-staging tools are recorded only
-  // when every file carries inline content; see referencesHostFile.
-  "setNotificationPolicy",
-  "setPreference",
-  "resetKeychain",
-  "resetAppLogs",
-  "putAppFile",
-  "stageSessionDownloads",
-]);
+/** Whether the tool declares the `planRelevant` trait, so its successful calls are plan steps. */
+function isPlanRelevant(traits: RecorderToolTraits | undefined): boolean {
+  return traits?.planRelevant === true;
+}
 
 /**
  * Params that reference observation state which cannot outlive the recording
@@ -270,7 +211,7 @@ export class ToolCallRecorder {
     if (!this.recording) {
       return;
     }
-    if (!PLAN_RELEVANT_TOOLS.has(toolName)) {
+    if (!isPlanRelevant(traits)) {
       return;
     }
 

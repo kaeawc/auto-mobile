@@ -1,5 +1,5 @@
 import { defineDeviceTool } from "./defineTool";
-import { SKELETON_OBSERVATION } from "./toolRegistryTypes";
+import { PLAN_RELEVANT, PLAN_SKELETON } from "./toolRegistryTypes";
 import { resolveTransportDeadlineMs } from "./formTools";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
@@ -2696,7 +2696,7 @@ const defaultWakeAndUnlockFactory: NonNullable<
 
 /** UI interactions that may cause in-app navigation (the navigation recorder records them). */
 const NAV = { recordsNavigation: true } as const;
-const NAV_SKELETON = { ...NAV, ...SKELETON_OBSERVATION } as const;
+const NAV_PLAN_SKELETON = { ...NAV, ...PLAN_SKELETON } as const;
 
 export const pressButtonTool = defineDeviceTool({
   name: "pressButton",
@@ -2707,7 +2707,7 @@ export const pressButtonTool = defineDeviceTool({
     outputSchema: pressButtonResultSchema,
     defaultEnabled: true,
     supportsProgress: true,
-    ...NAV_SKELETON,
+    ...NAV_PLAN_SKELETON,
   },
 });
 
@@ -2718,7 +2718,7 @@ export const wakeAndUnlockTool = defineDeviceTool({
   description:
     "Wake a device and unlock its keyguard. Android: swipe lock or secure PIN via `pin`; iOS: wake + swipe-dismiss (pin ignored).",
   input: wakeAndUnlockInput,
-  options: { outputSchema: wakeAndUnlockResultSchema, defaultEnabled: true },
+  options: { ...PLAN_RELEVANT, outputSchema: wakeAndUnlockResultSchema, defaultEnabled: true },
 });
 
 export const wakeAndUnlockSchema = wakeAndUnlockTool.schema;
@@ -2727,7 +2727,7 @@ export const recentAppsTool = defineDeviceTool({
   name: "recentApps",
   description: "Open recent apps",
   input: recentAppsInput,
-  options: { defaultEnabled: true, supportsProgress: true, ...SKELETON_OBSERVATION },
+  options: { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON },
 });
 
 export const recentAppsSchema = recentAppsTool.schema;
@@ -2736,7 +2736,7 @@ const homeScreenTool = defineDeviceTool({
   name: "homeScreen",
   description: "Go to home screen",
   input: homeScreenInput,
-  options: { defaultEnabled: true, supportsProgress: true, ...SKELETON_OBSERVATION },
+  options: { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON },
 });
 
 export const homeScreenSchema = homeScreenTool.schema;
@@ -2745,7 +2745,7 @@ export const selectAllTextTool = defineDeviceTool({
   name: "selectAllText",
   description: "Select all text in focused input",
   input: selectAllTextInput,
-  options: { defaultEnabled: false, supportsProgress: true, ...SKELETON_OBSERVATION },
+  options: { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
 });
 
 export const selectAllTextSchema = selectAllTextTool.schema;
@@ -2754,7 +2754,7 @@ export const shakeTool = defineDeviceTool({
   name: "shake",
   description: "Shake device; iOS Simulator only.",
   input: shakeInput,
-  options: { defaultEnabled: false, supportsProgress: true, ...SKELETON_OBSERVATION },
+  options: { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
 });
 
 export const shakeSchema = shakeTool.schema;
@@ -2767,7 +2767,7 @@ export const rotateTool = defineDeviceTool({
     defaultEnabled: false,
     supportsProgress: true,
     outputSchema: rotateResultSchema,
-    ...SKELETON_OBSERVATION,
+    ...PLAN_SKELETON,
   },
 });
 
@@ -2779,6 +2779,7 @@ export const keyboardTool = defineDeviceTool({
     "Open, close, detect, list/select installed Android IMEs, or switch the AutoMobile typing profile",
   input: keyboardInput,
   options: {
+    ...PLAN_RELEVANT,
     defaultEnabled: true,
     outputSchema: keyboardResultSchema,
     // detect, listImes and listProfiles change no UI: reads (#10965). The rest are control.
@@ -3139,7 +3140,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "System tray actions for notifications (open/close/list/find/tap/dismiss/clearAll)",
     systemTraySchema,
     systemTrayHandler,
-    { defaultEnabled: false, supportsProgress: true, ...SKELETON_OBSERVATION },
+    { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3151,7 +3152,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
       defaultEnabled: true,
       supportsProgress: true,
       outputSchema: sendKeysResultSchema,
-      ...NAV_SKELETON,
+      ...NAV_PLAN_SKELETON,
     },
   );
 
@@ -3165,7 +3166,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     {
       defaultEnabled: false,
       outputSchema: openLinkResultSchema,
-      ...SKELETON_OBSERVATION,
+      ...PLAN_SKELETON,
     },
   );
 
@@ -3178,7 +3179,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
       defaultEnabled: true,
       supportsProgress: true,
       outputSchema: tapOnResultSchema,
-      ...NAV_SKELETON,
+      ...NAV_PLAN_SKELETON,
     },
   );
 
@@ -3187,7 +3188,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Tap, long press, or double tap at screen coordinates in native, normalized, or percent units.",
     tapAtSchema,
     (device, args, progress, signal) => tapAtHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true, ...SKELETON_OBSERVATION },
+    { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3195,7 +3196,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Drag a finger along a polyline with segment timing, an initial hold and a release hold (Android and iOS).",
     dragPathSchema,
     dragPathHandler,
-    { defaultEnabled: false, supportsProgress: true, ...SKELETON_OBSERVATION },
+    { defaultEnabled: false, supportsProgress: true, ...PLAN_SKELETON },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3213,7 +3214,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Tap any clickable element; scope with container or scrollableContainer.",
     tapAnySchema,
     (device, args, progress, signal) => tapAnyHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true, ...SKELETON_OBSERVATION },
+    { defaultEnabled: true, supportsProgress: true, ...PLAN_SKELETON },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3221,7 +3222,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Drag and drop element",
     dragAndDropSchema,
     (device, args, progress, signal) => dragAndDropHandler(device, args, progress, signal, deps),
-    { defaultEnabled: false, supportsProgress: true, ...NAV_SKELETON },
+    { defaultEnabled: false, supportsProgress: true, ...NAV_PLAN_SKELETON },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3229,7 +3230,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Swipe/scroll on screen or elements",
     swipeOnSchema,
     (device, args, progress, signal) => swipeOnHandler(device, args, progress, signal, deps),
-    { defaultEnabled: true, supportsProgress: true, ...NAV_SKELETON },
+    { defaultEnabled: true, supportsProgress: true, ...NAV_PLAN_SKELETON },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3240,7 +3241,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     {
       defaultEnabled: false,
       supportsProgress: true,
-      ...NAV_SKELETON,
+      ...NAV_PLAN_SKELETON,
     },
   );
 
@@ -3262,7 +3263,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     "Set Android device posture or iPhone Duo simulator posture, with an optional Resizable Android display preset. Specify exactly one of posture or hingeAngle (finite degrees, 0-180 inclusive). Hinge angle is BEST EFFORT, emulator/simulator only, without displayPreset; unsupported returns status: unsupported with a reason and no state change. Android console support is detected at call time; iOS requires a runner advertising set_hinge_angle (#8547). Angle results echo hingeAngle and device posture read-back, or unknown with postureReason. Android strictly parses emu sensor get hinge-angle0 output as hinge-angle0 = <n>; iOS uses the runner angle. Both report observedHingeAngle when available and warn without failing when the resulting angle is unavailable or differs by more than 1 degree.",
     setPostureSchema,
     (device, args, progress, signal) => setPostureHandler(device, args, progress, signal, deps),
-    { defaultEnabled: false, outputSchema: setPostureResultSchema },
+    { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setPostureResultSchema },
   );
 
   // Register the clipboard tool
@@ -3273,6 +3274,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
     clipboardHandler,
     // get changes no UI: a read (#10965). copy, paste and clear are control.
     {
+      ...PLAN_RELEVANT,
       defaultEnabled: false,
       deviceReadOnly: (args: ClipboardArgs) => args.action === "get",
       deviceReadOnlyArgs: [{ argument: "action", values: ["get"] }],

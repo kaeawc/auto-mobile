@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { readObservationForInteractions } from "./identifyInteractionsObservation";
 import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -503,6 +504,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     observeSchema,
     observeHandler,
     {
+      ...PLAN_RELEVANT,
       defaultEnabled: true,
       // Watching is allowed on any device, whichever session holds it (#10730).
       deviceReadOnly: true,

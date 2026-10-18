@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { ToolRegistry } from "./toolRegistry";
 import { resetAppLogsSchema, type ResetAppLogsArgs } from "./sessionLogContract";
 import { getSessionLogService, type SessionLogService } from "./sessionLogService";
@@ -22,6 +23,6 @@ export function registerSessionLogTools(
       });
       return createJSONToolResponse(result);
     },
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false },
   );
 }

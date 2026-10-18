@@ -1,3 +1,4 @@
+import { SKELETON_OBSERVATION } from "../../src/server/toolRegistryTypes";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
@@ -151,6 +152,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       }),
       async () =>
         createStructuredToolResponse({ success: true, observation: lowConfidenceObserve(true) }),
+      SKELETON_OBSERVATION,
     );
   }
 

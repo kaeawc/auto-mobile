@@ -152,10 +152,23 @@ export interface ToolTraits {
   defaultsToSkeletonObservation?: boolean;
   /** Writes caller-supplied files, from a host `sourcePath` or inline content (recorder skips host paths). */
   stagesFiles?: boolean;
+  /**
+   * A successful call changes device or app state a plan can replay, so the recorder keeps it as a
+   * step. Infrastructure tools (device management, recording meta-tools, read-only queries) leave it
+   * unset; `test/features/record/ToolCallRecorderCoverage.test.ts` requires every registered tool
+   * to declare it or be excluded there with a reason (#9928).
+   */
+  planRelevant?: boolean;
 }
 
 /** Spread into the options of a tool that declares {@link ToolTraits.defaultsToSkeletonObservation}. */
 export const SKELETON_OBSERVATION = { defaultsToSkeletonObservation: true } as const;
+
+/** Spread into the options of a tool that declares {@link ToolTraits.planRelevant}. */
+export const PLAN_RELEVANT = { planRelevant: true } as const;
+
+/** Both {@link PLAN_RELEVANT} and {@link SKELETON_OBSERVATION}, for the many tools that declare the pair. */
+export const PLAN_SKELETON = { ...PLAN_RELEVANT, ...SKELETON_OBSERVATION } as const;
 
 /** Just the trait fields of a registration's options, for the registered tool and the recorder. */
 export function pickToolTraits(options: ToolTraits): ToolTraits {
@@ -166,6 +179,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     loudArtifactWrites,
     defaultsToSkeletonObservation,
     stagesFiles,
+    planRelevant,
   } = options;
   return {
     stopsApp,
@@ -174,6 +188,7 @@ export function pickToolTraits(options: ToolTraits): ToolTraits {
     loudArtifactWrites,
     defaultsToSkeletonObservation,
     stagesFiles,
+    planRelevant,
   };
 }
 

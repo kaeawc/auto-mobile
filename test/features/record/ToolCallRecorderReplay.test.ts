@@ -1,3 +1,4 @@
+import { recordPlanCall } from "../../helpers/recordPlanCall";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import * as yaml from "js-yaml";
 import { ResetKeychain } from "../../../src/features/action/ResetKeychain";
@@ -64,7 +65,7 @@ function registerResetKeychain(simctl: FakeSimctl): void {
 function recordResetKeychain(): Plan {
   const timer = new FakeTimer();
   startToolCallRecording({ timer });
-  getToolCallRecorder()!.record("resetKeychain", {
+  recordPlanCall(getToolCallRecorder()!, "resetKeychain", {
     appId: "com.example.app",
     confirm: true,
     deviceId: SIMULATOR.deviceId,
@@ -122,7 +123,10 @@ describe("resetKeychain replay of a recorded plan (#10052)", () => {
   test("the export tells the user the confirmation was withheld", () => {
     const timer = new FakeTimer();
     startToolCallRecording({ timer });
-    getToolCallRecorder()!.record("resetKeychain", { appId: "com.example.app", confirm: true });
+    recordPlanCall(getToolCallRecorder()!, "resetKeychain", {
+      appId: "com.example.app",
+      confirm: true,
+    });
     const result = stopToolCallRecording({ timer });
 
     expect(result.warnings).toEqual([
@@ -136,8 +140,9 @@ describe("recording export warnings (#10052)", () => {
     const timer = new FakeTimer();
     startToolCallRecording({ timer });
     const recorder = getToolCallRecorder()!;
-    recorder.record("launchApp", { appId: "com.example.app" });
-    recorder.record(
+    recordPlanCall(recorder, "launchApp", { appId: "com.example.app" });
+    recordPlanCall(
+      recorder,
       "putAppFile",
       {
         target: { domain: "media_library" },
@@ -158,14 +163,15 @@ describe("recording export warnings (#10052)", () => {
   test("a recording with no skipped calls has an empty warnings list", () => {
     const timer = new FakeTimer();
     startToolCallRecording({ timer });
-    getToolCallRecorder()!.record("launchApp", { appId: "com.example.app" });
+    recordPlanCall(getToolCallRecorder()!, "launchApp", { appId: "com.example.app" });
     expect(stopToolCallRecording({ timer }).warnings).toEqual([]);
   });
 
   test("an all-skipped recording reports the skipped calls instead of the generic error", () => {
     const timer = new FakeTimer();
     startToolCallRecording({ timer });
-    getToolCallRecorder()!.record(
+    recordPlanCall(
+      getToolCallRecorder()!,
       "stageSessionDownloads",
       {
         directory: "fixtures",
@@ -191,7 +197,8 @@ describe("recorded param size cap (#10052)", () => {
   test("a param over the cap is skipped with a warning that names the param", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();
-    recorder.record(
+    recordPlanCall(
+      recorder,
       "putAppFile",
       {
         target: { domain: "app_containers", appId: "com.example", container: "documents" },
@@ -212,7 +219,7 @@ describe("recorded param size cap (#10052)", () => {
   test("a param just under the cap is still recorded", () => {
     const recorder = new ToolCallRecorder();
     recorder.start();
-    recorder.record("sendKeys", { text: "A".repeat(MAX_RECORDED_PARAM_BYTES - 10) });
+    recordPlanCall(recorder, "sendKeys", { text: "A".repeat(MAX_RECORDED_PARAM_BYTES - 10) });
     const { steps, warnings } = recorder.stopWithWarnings();
 
     expect(steps).toHaveLength(1);
@@ -229,7 +236,7 @@ test.each([
   const warning = spyOn(logger, "warn");
   try {
     recorder.start();
-    recorder.record("tapAt", {
+    recordPlanCall(recorder, "tapAt", {
       ...params,
       sessionUuid: "recording-session",
       snapshotId: "ephemeral",

@@ -1,3 +1,4 @@
+import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -238,7 +239,7 @@ export function registerNotificationTools(deps: NotificationToolDependencies = {
     "Post notification via Android SDK hooks or iOS Simulator simctl push.",
     postNotificationSchema,
     createPostNotificationHandler(deps),
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -255,6 +256,6 @@ export function registerNotificationTools(deps: NotificationToolDependencies = {
     "Set app notification/DND policy state",
     setNotificationPolicySchema,
     setNotificationPolicyHandler,
-    { defaultEnabled: false },
+    { ...PLAN_RELEVANT, defaultEnabled: false },
   );
 }

@@ -617,13 +617,12 @@ export class CtrlProxyHierarchy {
 
     const message = this.hierarchyRequestMessage(requestId, disableAllFiltering, requestOptions);
 
-    const ws = this.context.getWebSocket();
     try {
       // The request can be cancelled between connection setup and dispatch.
       // Rejecting the registered request first keeps that cancellation from
       // leaking a pending RequestManager entry.
       throwIfAborted(signal);
-      this.sendHierarchyRequest(ws, requestId, message);
+      this.sendHierarchyRequest(requestId, message);
 
       const result = await promise;
       // A response that races with cancellation must not be accepted. The
@@ -747,7 +746,8 @@ export class CtrlProxyHierarchy {
     });
   }
 
-  private sendHierarchyRequest(ws: WebSocket | null, requestId: string, payload: string): void {
+  private sendHierarchyRequest(requestId: string, payload: string): void {
+    const ws = this.context.getWebSocket();
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       this.context.requestManager.reject(
         requestId,

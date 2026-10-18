@@ -44,7 +44,7 @@ describe("Android file-pull screenshots", function () {
       { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
     await expect(
-      (screenshot as any).captureScreenshotFilePull("/screenshots/quiet-failure.png", {
+      screenshot["captureScreenshotFilePull"]("/screenshots/quiet-failure.png", {
         format: "png",
       }),
     ).rejects.toThrow("Screencap failed");
@@ -74,9 +74,9 @@ describe("Android file-pull screenshots", function () {
     const firstPath = path.join(localDir, "first.png");
     const secondPath = path.join(localDir, "second.png");
     fileSystem.setBinaryFile(`${firstPath}.temp`, pngBytes);
-    await (screenshot as any).captureScreenshotFilePull(firstPath, { format: "png" });
+    await screenshot["captureScreenshotFilePull"](firstPath, { format: "png" });
     fileSystem.setBinaryFile(`${secondPath}.temp`, pngBytes);
-    await (screenshot as any).captureScreenshotFilePull(secondPath, { format: "png" });
+    await screenshot["captureScreenshotFilePull"](secondPath, { format: "png" });
     const commands = fakeAdb.getExecutedCommands();
     const screencaps = commands.filter((command) => command.includes("screencap -p"));
     const removals = commands.filter((command) => command.startsWith("shell rm -f "));
@@ -119,11 +119,7 @@ describe("Android file-pull screenshots", function () {
     );
     fileSystem.setBinaryFile(`${finalPath}.temp`, pngBytes);
     await expect(
-      (screenshot as any).captureScreenshotFilePull(
-        finalPath,
-        { format: "png" },
-        controller.signal,
-      ),
+      screenshot["captureScreenshotFilePull"](finalPath, { format: "png" }, controller.signal),
     ).resolves.toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
     expect(fileSystem.existsSync(finalPath)).toBe(false);
     expect(fileSystem.existsSync(`${finalPath}.temp`)).toBe(false);
@@ -152,7 +148,7 @@ describe("Android file-pull screenshots", function () {
     const finalPath = path.join(localDir, "malicious.png");
     const tempFile = `/sdcard/screenshot_${screenshotTempIdToken("../evil id; rm -rf /")}.png`;
     fileSystem.setBinaryFile(`${finalPath}.temp`, pngBytes);
-    await (screenshot as any).captureScreenshotFilePull(finalPath, { format: "png" });
+    await screenshot["captureScreenshotFilePull"](finalPath, { format: "png" });
     const commands = fakeAdb.getExecutedCommands();
     expect(commands).toContain(
       `shell "screencap -p ${shellQuote(tempFile)} ; echo AM_SCREENCAP_RC:$?"`,
@@ -177,11 +173,11 @@ describe("Android file-pull screenshots", function () {
       undefined,
       { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
-    const first = (screenshot as any).sanitizeDeviceTempId("a_b");
-    const second = (screenshot as any).sanitizeDeviceTempId("ab");
+    const first = screenshot["sanitizeDeviceTempId"]("a_b");
+    const second = screenshot["sanitizeDeviceTempId"]("ab");
     expect(first.startsWith("ab-")).toBe(true);
     expect(second.startsWith("ab-")).toBe(true);
     expect(first).not.toBe(second);
-    expect((screenshot as any).sanitizeDeviceTempId(";../")).toBe(screenshotTempIdToken(";../"));
+    expect(screenshot["sanitizeDeviceTempId"](";../")).toBe(screenshotTempIdToken(";../"));
   });
 });

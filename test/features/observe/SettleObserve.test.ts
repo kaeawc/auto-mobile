@@ -4,6 +4,8 @@ import type { ObserveResult } from "../../../src/models/ObserveResult";
 import { RealSettleObserve } from "../../../src/features/observe/SettleObserve";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { rootNodeField } from "./observeRootNodeProbe";
+import { createHierarchyForTest, type TestHierarchyNode } from "./observeScreenTestBuilders";
 
 /**
  * Unit tests for `RealSettleObserve` (issue #4389).
@@ -16,30 +18,30 @@ import { FakeTimer } from "../../fakes/FakeTimer";
  */
 
 /** Build a minimal ObserveResult around a single root node (+ optional overrides). */
-function obs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): ObserveResult {
+function obs(node: TestHierarchyNode, extra?: Partial<ObserveResult>): ObserveResult {
   return {
     updatedAt: 1,
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     activeWindow: { appId: "com.example", activityName: ".MainActivity", layoutSeqSum: 1 },
-    viewHierarchy: {
+    viewHierarchy: createHierarchyForTest({
       packageName: "com.example",
-      hierarchy: { node: node as any },
+      hierarchy: { node },
       updatedAt: typeof extra?.updatedAt === "number" ? extra.updatedAt : 1,
-    },
+    }),
     ...extra,
   } as ObserveResult;
 }
 
 /** iOS-shaped observation (no gfxinfo/wakefulness signal), for the cross-platform case. */
-function iosObs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): ObserveResult {
+function iosObs(node: TestHierarchyNode, extra?: Partial<ObserveResult>): ObserveResult {
   return obs(node, {
     activeWindow: { appId: "com.apple.mobilesafari", activityName: "", layoutSeqSum: 1 },
-    viewHierarchy: {
+    viewHierarchy: createHierarchyForTest({
       packageName: "com.apple.mobilesafari",
-      hierarchy: { node: node as any },
+      hierarchy: { node },
       updatedAt: typeof extra?.updatedAt === "number" ? extra.updatedAt : 1,
-    },
+    }),
     screenIdentity: {
       platform: "ios",
       source: "heuristic",
@@ -144,7 +146,7 @@ describe("RealSettleObserve", () => {
     expect(result.settled).toBe(true);
     expect(result.polls).toBe(3);
     // Final snapshot only — the "loading" transition never surfaces.
-    expect((result.observation.viewHierarchy!.hierarchy.node as any).text).toBe("done");
+    expect(rootNodeField(result.observation, "text")).toBe("done");
     expect(result.observation.updatedAt).toBe(30);
   });
 
@@ -160,7 +162,7 @@ describe("RealSettleObserve", () => {
         "resource-id": "x",
         bounds: { left: 0, top: 0, right: 10, bottom: 10 },
         text: "hi",
-        extras: "traversalIndex=1",
+        extras: { traversalIndex: "1" },
       },
       { updatedAt: 10 },
     );
@@ -169,7 +171,7 @@ describe("RealSettleObserve", () => {
         "resource-id": "x",
         bounds: { left: 0, top: 0, right: 10, bottom: 10 },
         text: "hi",
-        extras: "traversalIndex=2",
+        extras: { traversalIndex: "2" },
       },
       { updatedAt: 20 },
     );
@@ -305,9 +307,7 @@ describe("RealSettleObserve", () => {
     expect(result.settled).toBe(false);
     expect(result.waitMs).toBeGreaterThanOrEqual(500);
     // The last snapshot is still returned so the caller always has something.
-    expect((result.observation.viewHierarchy!.hierarchy.node as any).text).toBe(
-      `frame-${result.polls - 1}`,
-    );
+    expect(rootNodeField(result.observation, "text")).toBe(`frame-${result.polls - 1}`);
   });
 
   test("works on iOS-shaped observations with no gfxinfo/wakefulness signal", async () => {

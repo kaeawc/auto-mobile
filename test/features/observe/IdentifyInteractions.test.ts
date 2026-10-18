@@ -6,14 +6,15 @@ import { swipeOnSchema, tapOnSchema } from "../../../src/server/interactionTools
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import type { NavigationEdge } from "../../../src/utils/interfaces/NavigationGraph";
 import type { Element } from "../../../src/models";
+import { createHierarchyForTest, createObserveResultForTest } from "./observeScreenTestBuilders";
 
 // Build a minimal Android view hierarchy whose child nodes are the interaction
 // candidates. Each entry becomes a `$`-attributed node with bounds so the
 // element finder and geometry accept it.
 function hierarchyOf(nodes: Array<Record<string, unknown>>): ObserveResult {
   const bounds = (i: number) => ({ left: 10, top: 10 + i * 60, right: 110, bottom: 60 + i * 60 });
-  return {
-    viewHierarchy: {
+  const observation = {
+    viewHierarchy: createHierarchyForTest({
       hierarchy: {
         node: {
           $: {
@@ -23,9 +24,11 @@ function hierarchyOf(nodes: Array<Record<string, unknown>>): ObserveResult {
           node: nodes.map((attrs, i) => ({ $: { bounds: bounds(i), ...attrs } })),
         },
       },
-    },
+    }),
     screenSize: { width: 1080, height: 1920 },
-  } as unknown as ObserveResult;
+  };
+  // Deliberately partial observation: only the fields the classifier reads.
+  return createObserveResultForTest(observation);
 }
 
 const classifier = new IdentifyInteractions();
@@ -209,8 +212,12 @@ describe("IdentifyInteractions scoring characterization", () => {
 
 describe("IdentifyInteractions", () => {
   test("returns an error when no observation is available", () => {
+    const withoutHierarchy = {
+      viewHierarchy: undefined,
+      screenSize: { width: 1080, height: 1920 },
+    };
     const result = classifier.analyze(
-      { screenSize: { width: 1080, height: 1920 } } as unknown as ObserveResult,
+      createObserveResultForTest(withoutHierarchy),
       { platform: "android" },
       "HomeScreen",
       [],

@@ -233,10 +233,10 @@ describe("TakeScreenshot iOS cancellation", function () {
         writer,
       );
       let streamPushes = 0;
-      (screenshot as any).pushScreenshotToStream = () => {
+      screenshot["pushScreenshotToStream"] = () => {
         streamPushes++;
       };
-      const result = await (screenshot as any).captureiOSScreenshot(
+      const result = await screenshot["captureiOSScreenshot"](
         path.join(os.tmpdir(), "ios-pre-cancel.png"),
         { format: "png" },
         controller.signal,

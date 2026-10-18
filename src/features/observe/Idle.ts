@@ -46,7 +46,7 @@ export class Idle {
    * @param packageName - Package name to check
    * @returns True if this is likely a system package
    */
-  private isSystemLauncher(packageName: string | null): boolean {
+  private isSystemLauncher(packageName: string | null | undefined): boolean {
     // Handle null, undefined, or empty package names
     if (!packageName) {
       return false;

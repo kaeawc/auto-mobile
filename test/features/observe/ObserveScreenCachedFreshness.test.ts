@@ -17,7 +17,6 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
-import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 
 const device: BootedDevice = { deviceId: "cached-freshness", name: "Device", platform: "android" };
@@ -78,10 +77,7 @@ function panelSetup(singleDisplay = false) {
   for (const displayId of [0, 2]) {
     adb.setForegroundApp({ packageName: "com.example", userId: 0 }, { displayId });
   }
-  AndroidCtrlProxyClient.registerForTesting(
-    new FakeCtrlProxy() as unknown as AndroidCtrlProxyClient,
-    device.deviceId,
-  );
+  AndroidCtrlProxyClient.getInstance(target, new FakeAdbClientFactory(adb));
   adb.setCommandResponse("cmd display get-displays", {
     stdout:
       'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 300}\nDisplay id 2: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 150}',

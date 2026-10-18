@@ -1,13 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { RealSettleObserve } from "../../../src/features/observe/SettleObserve";
 import type { HierarchyCapture } from "../../../src/features/observe/HierarchyCapture";
-import type { HierarchyCollector } from "../../../src/features/observe/collectors/HierarchyCollector";
 import { DeviceStateCollector } from "../../../src/features/observe/collectors/DeviceStateCollector";
-import type { PerformanceAuditor } from "../../../src/features/observe/audits/PerformanceAuditor";
-import type { AccessibilityAuditor } from "../../../src/features/observe/audits/AccessibilityAuditor";
-import type { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { resetScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import { FakeHierarchyCollector } from "../../fakes/FakeHierarchyCollector";
@@ -22,10 +18,11 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { FakeTimer } from "../../fakes/FakeTimer";
-
-class NoOpAuditor {
-  async run(): Promise<void> {}
-}
+import {
+  hierarchyCollectorFromSeam,
+  deviceStateCollectorFromSeam,
+} from "../../helpers/observeCollectorSeams";
+import { noopObserveAudits } from "../../fakes/noopObserveAudits";
 
 function createHarness(
   options: {
@@ -66,11 +63,14 @@ function createHarness(
   };
   const iosHierarchy = Object.assign(hierarchy, {
     reconcileScreenDimensions(
-      result: ViewHierarchyResult,
-      size: { width: number; height: number },
-    ): void {
-      result.screenWidth = size.width;
-      result.screenHeight = size.height;
+      result: ObserveResult["viewHierarchy"],
+      size: { width: number; height: number } | null,
+    ): ObserveResult["viewHierarchy"] {
+      if (result && typeof result !== "string" && size) {
+        result.screenWidth = size.width;
+        result.screenHeight = size.height;
+      }
+      return result;
     },
   });
   const state = new FakeDeviceStateCollector();
@@ -113,14 +113,12 @@ function createHarness(
     {
       viewHierarchy,
       hierarchyCapture: options.hierarchyCapture,
-      hierarchyCollector: iosHierarchy as unknown as HierarchyCollector,
-      deviceStateCollector: state as unknown as DeviceStateCollector,
+      hierarchyCollector: hierarchyCollectorFromSeam(iosHierarchy),
+      deviceStateCollector: deviceStateCollectorFromSeam(state),
       cacheStore: cache,
       screenshotStateStore: new FakeScreenshotStateStore(timer),
       screenshotRecorder: new FakeScreenshotRecorder(),
-      performanceAuditor: new NoOpAuditor() as PerformanceAuditor,
-      accessibilityAuditor: new NoOpAuditor() as AccessibilityAuditor,
-      accessibilityStateDetector: new NoOpAuditor() as AccessibilityStateDetector,
+      ...noopObserveAudits(),
     },
     timer,
   );

@@ -16,6 +16,7 @@ import type {
   GestureTimingResult,
   ActionTimingResult,
   DelegateContext,
+  SocketLike,
 } from "./shared/types";
 
 // =============================================================================
@@ -379,7 +380,7 @@ function registerCommandAbort<T>(
 }
 
 function commitCommand<T>(
-  ws: WebSocket,
+  ws: SocketLike,
   msg: string,
   options: SendCommandOptions<T>,
   requestId: string,

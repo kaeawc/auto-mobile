@@ -83,6 +83,9 @@ export interface ActionTimingResult extends BaseResult {
 // Delegate Context
 // =============================================================================
 
+/** The socket surface delegates use: readiness checks and sending frames. */
+export type SocketLike = Pick<WebSocket, "readyState" | "send">;
+
 /**
  * Base context interface that all delegates receive.
  * Provides access to shared state and functionality from the main client.
@@ -100,7 +103,7 @@ export interface DelegateContext {
    */
   wireDeadlineParams?(messageType: string, timeoutMs: number): Record<string, unknown>;
   /** Get the current WebSocket connection (may be null if not connected) */
-  getWebSocket(): WebSocket | null;
+  getWebSocket(): SocketLike | null;
   /** RequestManager for correlating requests and responses */
   requestManager: RequestManager;
   /** Timer for setTimeout/setInterval operations */

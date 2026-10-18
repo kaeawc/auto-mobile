@@ -6,6 +6,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
+import { createHierarchyForTest } from "./observeScreenTestBuilders";
 
 /**
  * Regression coverage for cross-platform contamination: ObserveScreen.execute()
@@ -28,7 +29,7 @@ describe("ObserveScreen.execute cross-platform hierarchy rejection", () => {
   // connection that hands an Android device the other platform's data.
   const iosHierarchyCollector = () => ({
     collect: async (result: ObserveResult) => {
-      result.viewHierarchy = {
+      result.viewHierarchy = createHierarchyForTest({
         hierarchy: {
           node: {
             $: { class: "UIWindow", bounds: { left: 0, top: 0, right: 390, bottom: 844 } },
@@ -48,7 +49,7 @@ describe("ObserveScreen.execute cross-platform hierarchy rejection", () => {
         screenHeight: 844,
         wakefulness: "Awake",
         packageName: "com.apple.springboard",
-      } as unknown as ObserveResult["viewHierarchy"];
+      });
       result.focusedElement = { text: "Stale iOS field" } as never;
       result.intentChooserDetected = true;
     },

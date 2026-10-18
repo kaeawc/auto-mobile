@@ -34,6 +34,8 @@ import type {
   HierarchySyncDiagnostics,
   ObserverHierarchyRequestOptions,
 } from "./types";
+import type { SocketLike } from "../shared/types";
+import { isDispatchSocketValid } from "./dispatchSocket";
 import { createTimestampedId } from "../../../utils/IdGenerator";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 import { applyStableViewIdRewrites, assignStableViewIds } from "./StableNodeIdentity";
@@ -244,15 +246,6 @@ export class CtrlProxyHierarchy {
         request.allowStaleResponse,
         request.observerMode,
       )
-    );
-  }
-
-  private isDispatchSocketValid(dispatchSocket?: WebSocket | null): boolean {
-    return (
-      dispatchSocket === undefined ||
-      (!!dispatchSocket &&
-        dispatchSocket.readyState === WebSocket.OPEN &&
-        this.context.getWebSocket() === dispatchSocket)
     );
   }
 
@@ -1528,7 +1521,7 @@ export class CtrlProxyHierarchy {
     signal?: AbortSignal,
     requestId?: string,
     options: {
-      dispatchSocket?: WebSocket | null;
+      dispatchSocket?: SocketLike | null;
       allowStaleResponse: boolean;
       observerMode?: boolean;
       displayId?: number;
@@ -1541,7 +1534,7 @@ export class CtrlProxyHierarchy {
     const diagnostics = options.diagnostics ?? {};
     const combinedSignal = combineWithAmbientAbort(signal);
     // Reject dispatch on a socket that closed or was replaced during ADB fallback.
-    if (!this.isDispatchSocketValid(dispatchSocket)) {
+    if (!isDispatchSocketValid(dispatchSocket, () => this.context.getWebSocket())) {
       diagnostics.failureReason = "CtrlProxy WebSocket closed or changed before hierarchy wait";
       return null;
     }

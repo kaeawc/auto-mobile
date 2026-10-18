@@ -16,13 +16,12 @@ function createFakeContext(overrides?: Partial<DelegateContext>): {
   let cancelCount = 0;
   const sent: string[] = [];
   const context: DelegateContext = {
-    getWebSocket: () =>
-      ({
-        send: (data: string) => {
-          sent.push(data);
-        },
-        readyState: 1,
-      }) as any,
+    getWebSocket: () => ({
+      send: (data: string) => {
+        sent.push(data);
+      },
+      readyState: 1,
+    }),
     requestManager: new RequestManager(timer),
     timer,
     ensureConnected: async () => true,

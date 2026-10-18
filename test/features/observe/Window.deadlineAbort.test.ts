@@ -8,6 +8,7 @@ import {
 } from "../../../src/features/observe/Window";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { PressButton } from "../../../src/features/action/PressButton";
 import { ExecResult } from "../../../src/models/ExecResult";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
@@ -21,13 +22,17 @@ import type { Timer } from "../../../src/utils/SystemTimer";
  * timeout, without depending on wall-clock elapsement inside the fake adb.
  */
 function scriptedClock(nowValues: number[]): Timer {
+  // A real handle that is cleared before it can fire, standing in for scheduled work.
+  const handles = new FakeTimer();
+  const inertHandle = handles.setTimeout(() => {}, 0);
+  handles.clearTimeout(inertHandle);
   let index = 0;
   return {
     now: () => nowValues[Math.min(index++, nowValues.length - 1)],
     async sleep(): Promise<void> {},
-    setTimeout: () => 0 as unknown as NodeJS.Timeout,
+    setTimeout: () => inertHandle,
     clearTimeout: () => {},
-    setInterval: () => 0 as unknown as NodeJS.Timeout,
+    setInterval: () => inertHandle,
     clearInterval: () => {},
   };
 }
@@ -228,14 +233,10 @@ describe("BaseVisualChange forwards its clock into the internal Window (#6289)",
       platform: "android",
     };
 
-    // PressButton is a concrete BaseVisualChange; pass a factory + the clock and
+    // PressButton is a concrete BaseVisualChange; pass the adb executor + the clock and
     // reach the Window it constructed internally (not a replaced fake).
-    const pressButton = new PressButton(
-      device,
-      new FakeAdbClientFactory(fakeAdb) as unknown as null,
-      clock,
-    );
-    const internalWindow = (pressButton as unknown as { window: Window }).window;
+    const pressButton = new PressButton(device, fakeAdb, clock);
+    const internalWindow = pressButton.window;
     await internalWindow.clearCache();
 
     await internalWindow.getActive(true, undefined, { timeoutMs: 1000 });

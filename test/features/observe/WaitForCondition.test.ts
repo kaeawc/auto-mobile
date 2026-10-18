@@ -7,6 +7,7 @@ import { appear, disappear } from "../../../src/features/observe/ConditionPredic
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { createHierarchyForTest, type TestHierarchyNode } from "./observeScreenTestBuilders";
 
 /**
  * Unit tests for `RealWaitForCondition` (issue #4389).
@@ -18,32 +19,37 @@ import { FakeTimer } from "../../fakes/FakeTimer";
  * with no device or DB.
  */
 
-function obs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): ObserveResult {
+function obs(node: TestHierarchyNode, extra?: Partial<ObserveResult>): ObserveResult {
   return {
     updatedAt: 1,
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     activeWindow: { appId: "com.example", activityName: ".MainActivity", layoutSeqSum: 1 },
-    viewHierarchy: {
+    viewHierarchy: createHierarchyForTest({
       packageName: "com.example",
-      hierarchy: { node: node as any },
+      hierarchy: { node },
       // The poll loop's device-clock freshness floor (#6284) reads the
       // hierarchy-owned `updatedAt`, never the (possibly host-created) top-level
       // one. Mirror the caller's device timestamp here so observations are
       // admissible, matching the shared helper in SettleObserve.test.ts.
       updatedAt: typeof extra?.updatedAt === "number" ? extra.updatedAt : 1,
-    },
+    }),
     ...extra,
   } as ObserveResult;
 }
 
 /** A root node wrapping the given children (each must carry bounds to parse). */
-function root(children: Record<string, unknown>[]): Record<string, unknown> {
+function root(children: TestHierarchyNode[]): TestHierarchyNode {
   return {
     "resource-id": "root",
     bounds: { left: 0, top: 0, right: 100, bottom: 100 },
     node: children,
   };
+}
+
+/** Fixture root nodes carry bounds, so the root doubles as the matched element. */
+function rootElement(observation: ObserveResult): Element {
+  return observation.viewHierarchy?.hierarchy?.node as Element;
 }
 
 describe("RealWaitForCondition", () => {
@@ -116,14 +122,12 @@ describe("RealWaitForCondition", () => {
     ]);
 
     const predicate: ConditionPredicate = (observation) => {
-      const node = observation.viewHierarchy?.hierarchy?.node as
-        | Record<string, unknown>
-        | undefined;
-      return node?.text === "ready"
+      const node = rootElement(observation);
+      return node.text === "ready"
         ? {
             matched: true,
-            matchedElement: node as unknown as Element,
-            candidates: [node as unknown as Element],
+            matchedElement: node,
+            candidates: [node],
           }
         : { matched: false, candidates: [] };
     };
@@ -157,8 +161,7 @@ describe("RealWaitForCondition", () => {
 
     // Never matches, but always reports the current node as a near-match.
     const predicate: ConditionPredicate = (observation) => {
-      const node = observation.viewHierarchy?.hierarchy?.node as unknown as Element;
-      return { matched: false, candidates: [node] };
+      return { matched: false, candidates: [rootElement(observation)] };
     };
 
     const waitFor = new RealWaitForCondition(fake, timer);
@@ -195,11 +198,9 @@ describe("RealWaitForCondition", () => {
       ),
     ]);
     const predicate: ConditionPredicate = (observation) => {
-      const node = observation.viewHierarchy?.hierarchy?.node as
-        | Record<string, unknown>
-        | undefined;
-      return node?.text === "match"
-        ? { matched: true, matchedElement: node as unknown as Element }
+      const node = rootElement(observation);
+      return node.text === "match"
+        ? { matched: true, matchedElement: node }
         : { matched: false, candidates: [] };
     };
 

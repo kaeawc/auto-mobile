@@ -115,7 +115,7 @@ describe("pickScreenshotMetadata", () => {
   });
 
   test("drops keys not part of the screenshot-metadata contract", () => {
-    const withExtra = { screenshotFormat: "png", unrelated: "x" } as unknown as ScreenshotMetadata;
+    const withExtra = { screenshotFormat: "png" as const, unrelated: "x" };
     const picked = pickScreenshotMetadata(withExtra);
     expect(picked).toEqual({ screenshotFormat: "png" });
     expect("unrelated" in picked).toBe(false);

@@ -16,7 +16,8 @@ const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platfor
 
 /** The captured Playground design-system screen (MainActivity, no app pane title). */
 function capturedHierarchy(): ViewHierarchyResult {
-  const observation = structuredClone(playgroundCapture) as unknown as ObserveResult;
+  // JSON.parse yields an untyped value: the capture is the wire form of ObserveResult.
+  const observation: ObserveResult = JSON.parse(JSON.stringify(playgroundCapture));
   return { ...observation.viewHierarchy!, packageName: PLAYGROUND };
 }
 

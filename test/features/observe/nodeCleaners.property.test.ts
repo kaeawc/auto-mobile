@@ -104,13 +104,7 @@ function generatedAttrs(random: Random): Record<string, unknown> {
 }
 
 const viewCleaner = Object.create(ViewHierarchy.prototype) as ViewHierarchy;
-const ctrlCleaner = new CtrlProxyHierarchy({} as never) as unknown as {
-  cleanAttributes(attrs: Record<string, unknown>): Record<string, unknown>;
-  filterHierarchyNode(
-    node: { $: Record<string, unknown>; node?: { $: Record<string, unknown> }[] },
-    isRoot?: boolean,
-  ): { $: Record<string, unknown> } | null;
-};
+const ctrlCleaner = new CtrlProxyHierarchy({} as never);
 
 function cleanAndroidNode(attrs: Record<string, unknown>): Record<string, unknown> {
   return viewCleaner.cleanNodeProperties({ $: { ...attrs } });
@@ -121,11 +115,11 @@ function trimOutputNode(attrs: Record<string, unknown>): Record<string, unknown>
     { viewHierarchy: { hierarchy: { node: { ...attrs } } } } as never,
     { dropElements: false, project: "full" },
   );
-  return result.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+  return result.viewHierarchy!.hierarchy!.node!;
 }
 
 function cleanCtrlProxyNode(attrs: Record<string, unknown>): Record<string, unknown> {
-  return ctrlCleaner.filterHierarchyNode({ $: { ...attrs } }, true)?.$ ?? {};
+  return ctrlCleaner["filterHierarchyNode"]({ $: { ...attrs } }, true)?.$ ?? {};
 }
 
 function cleanIosNode(attrs: Record<string, unknown>): Record<string, unknown> {

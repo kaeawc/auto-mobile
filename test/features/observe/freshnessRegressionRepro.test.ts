@@ -46,27 +46,22 @@ import { CtrlProxyHierarchy } from "../../../src/features/observe/ios/CtrlProxyH
 import { RequestManager } from "../../../src/utils/RequestManager";
 import type { HierarchyCollector } from "../../../src/features/observe/collectors/HierarchyCollector";
 import type { DeviceStateCollector } from "../../../src/features/observe/collectors/DeviceStateCollector";
-import type { PerformanceAuditor } from "../../../src/features/observe/audits/PerformanceAuditor";
-import type { AccessibilityAuditor } from "../../../src/features/observe/audits/AccessibilityAuditor";
-import type { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
 import type { HierarchyPlatformValidator } from "../../../src/features/observe/HierarchyPlatformValidator";
-import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import type {
   CtrlProxyCachedHierarchy,
   HierarchyDelegateContext,
   XCTestHierarchy,
 } from "../../../src/features/observe/ios/types";
+import {
+  hierarchyCollectorFromSeam,
+  deviceStateCollectorFromSeam,
+} from "../../helpers/observeCollectorSeams";
+import { noopObserveAudits } from "../../fakes/noopObserveAudits";
 
 // ---------------------------------------------------------------------------
 // Shared no-op fakes so `execute()` completes without touching a real device.
 // ---------------------------------------------------------------------------
-
-class NoOpAuditor implements Pick<
-  PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector,
-  "run"
-> {
-  async run(): Promise<void> {}
-}
 
 class FakeDeviceStateCollector implements Pick<
   DeviceStateCollector,
@@ -101,18 +96,22 @@ class ScriptedHierarchyCollector implements Pick<
     },
   ) {}
   async collect(result: ObserveResult): Promise<void> {
+    // The fixtures deliberately carry hierarchies outside the model (`{ text }`, `{ error }`),
+    // so the scripted capture is asserted to the result type in this one place.
     result.viewHierarchy = {
       screenWidth: 1080,
       screenHeight: 1920,
       wakefulness: "Awake",
       ...this.viewHierarchy,
-    } as any;
+    } as ViewHierarchyResult;
   }
   async collectRaw(): Promise<void> {}
   extractScreenSize(): { width: number; height: number } | null {
     return { width: 1080, height: 1920 };
   }
-  reconcileScreenDimensions(viewHierarchy: unknown): unknown {
+  reconcileScreenDimensions(
+    viewHierarchy: ObserveResult["viewHierarchy"],
+  ): ObserveResult["viewHierarchy"] {
     return viewHierarchy;
   }
 }
@@ -131,13 +130,9 @@ function createObserveScreen(
       cacheStore: new FakeObserveCacheStore(fakeTimer),
       screenshotStateStore: new FakeScreenshotStateStore(fakeTimer),
       screenshotRecorder: new FakeScreenshotRecorder(),
-      hierarchyCollector: new ScriptedHierarchyCollector(
-        viewHierarchy,
-      ) as unknown as HierarchyCollector,
-      deviceStateCollector: new FakeDeviceStateCollector() as unknown as DeviceStateCollector,
-      performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
-      accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
-      accessibilityStateDetector: new NoOpAuditor() as unknown as AccessibilityStateDetector,
+      hierarchyCollector: hierarchyCollectorFromSeam(new ScriptedHierarchyCollector(viewHierarchy)),
+      deviceStateCollector: deviceStateCollectorFromSeam(new FakeDeviceStateCollector()),
+      ...noopObserveAudits(),
       platformValidator,
     },
     fakeTimer,

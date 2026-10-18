@@ -31,6 +31,8 @@ import { PinnedDisplayUnavailableError } from "../../../src/models/PinnedDisplay
 import { logger } from "../../../src/utils/logger";
 import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { createExecResult } from "../../../src/utils/execResult";
+import type { AdbCommandRunner } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
@@ -575,9 +577,9 @@ describe("observation display stamp", () => {
         if (index === 1) {
           throw new Error("lookup failed");
         }
-        return { stdout: outputs[index] ?? "", stderr: "" };
+        return createExecResult(outputs[index] ?? "", "");
       },
-    } as unknown as FakeAdbExecutor;
+    } satisfies AdbCommandRunner;
     const cache = new ObservedAndroidDisplayCache(timer);
     try {
       const first = await cache.resolve(device, adb);

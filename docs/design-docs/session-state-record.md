@@ -577,6 +577,10 @@ terminal retry scheduling and the non-terminal snapshot map. Production uses the
 `noteRelease`, `noteLive`, `canIssueRelease`, `scheduleRetry`, drain-write tracking, and the
 non-terminal map. In production `pending(uuid)` means only "retry owed".
 
+W3 (first slice) moved the create/rebind upsert, activity and ownership statements behind `SessionRowWriter.upsertLive`, `recordLiveActivity` and `replaceLiveOwnership`: pass-through, same promises and await sequence, no new serialization; the superseded-row fields and `OwedSupersededRowReassert` remain until a later slice.
+
+W3 (second slice) moved the superseded-row state into the writer: `SessionRowWriter.superseded` (`src/daemon/supersededRowReasserts.ts`) now holds the remembered superseded reasons, release-reason predecessors, refused release writes, the pending-rewrite counts and reasons being rewritten, the rows under pending non-terminal releases, and the owed rewrites (`OwedSupersededRowReassert`) with their backoff, timers and drain attempt, keyed off the writer's drain flag (the manager's `releaseDrainStarted` is gone). Row policy stays with the manager as per-entry callbacks (`retry`, `retryDuringDrain`), so every read, statement and await keeps its order; the rewrite chain itself is deleted in W5.
+
 The per-UUID desire/settled/drain engine in `sessionRowWriter.ts` is exercised by tests; production
 first-attempt writes do not yet use it and stay manager-side until W3/W4. The owner decision that
 a past-deadline write frees its slot is implemented in that engine. Production has no per-UUID

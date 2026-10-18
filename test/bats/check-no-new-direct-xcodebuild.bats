@@ -5,9 +5,11 @@ setup_file() {
   state_file="${TMPDIR:-/tmp}/auto-mobile-xcodebuild-bats-fixture"
   mkdir -p "$repo_dir/scripts/lib" "$repo_dir/src/utils/ios-cmdline-tools"
   cp "$BATS_TEST_DIRNAME/../../scripts/check-no-new-direct-xcodebuild.sh" "$repo_dir/scripts/"
-  cp "$BATS_TEST_DIRNAME/../../scripts/check-no-new-direct-xcodebuild.ts" "$repo_dir/scripts/"
-  cp "$BATS_TEST_DIRNAME/../../scripts/lib/executionBoundaryAst.ts" "$repo_dir/scripts/lib/"
   cp "$BATS_TEST_DIRNAME/../../scripts/lib/vcs-diff.sh" "$repo_dir/scripts/lib/"
+  cp "$BATS_TEST_DIRNAME/../../scripts/check-boundary-row.ts" "$repo_dir/scripts/"
+  cp "$BATS_TEST_DIRNAME/../../scripts/lib/boundary-row.sh" "$BATS_TEST_DIRNAME"/../../scripts/lib/*.ts "$repo_dir/scripts/lib/"
+  mkdir -p "$repo_dir/src/utils"
+  cp "$BATS_TEST_DIRNAME/../../src/utils/io.ts" "$repo_dir/src/utils/"
   ln -s "$BATS_TEST_DIRNAME/../../node_modules" "$repo_dir/node_modules"
   touch "$repo_dir/src/utils/ios-cmdline-tools/XcodebuildClient.ts"
   git -C "$repo_dir" init -q

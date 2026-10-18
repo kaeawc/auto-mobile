@@ -149,7 +149,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
       release_reason: null,
     });
     expect(store.failReleaseWrites).toBe(1);
-    expect(manager["refusedReleaseWrites"].has(snapshot)).toBe(true);
+    expect(manager["rowWriter"].superseded.wasRefused(snapshot)).toBe(true);
     expect(journal.loadUnconfirmed()).toEqual([]);
     expect(manager.getSession(SESSION)).toBeNull();
   });
@@ -186,7 +186,7 @@ describe("terminal release waits for its own row statement settlement (#12547)",
     await settleMicrotasks();
     // A pending write belonging to the replacement must not stall the old release's refusal.
     expect(refusalReads()).toBe(1);
-    expect(manager["refusedReleaseWrites"].has(snapshot)).toBe(true);
+    expect(manager["rowWriter"].superseded.wasRefused(snapshot)).toBe(true);
     expect(await store.getSession(SESSION)).toMatchObject({
       status: "active",
       stable_identity_generation: generation,

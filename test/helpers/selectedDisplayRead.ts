@@ -62,6 +62,7 @@ export function selectedHierarchy(): ViewHierarchyResult {
     screenHeight: 200,
     frameContext: "second-capture",
     captureSequence: 2,
+    updatedAt: 10,
     fresh: true,
   };
 }

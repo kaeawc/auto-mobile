@@ -12,6 +12,19 @@ import {
 } from "../../../src/features/video/VideoRecorderService";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeVideoCaptureBackend } from "../../fakes/FakeVideoCaptureBackend";
+
+/**
+ * The service tests mostly exercise deviceless recordings; the fake (like every real backend)
+ * rejects a start with no device, so supply a stand-in the service itself never sees.
+ */
+class ServiceTestBackend extends FakeVideoCaptureBackend {
+  override async start(config: Parameters<FakeVideoCaptureBackend["start"]>[0]) {
+    return super.start({
+      ...config,
+      device: config.device ?? { deviceId: "service-test", platform: "android", name: "Android" },
+    });
+  }
+}
 import { FakeSecurePermissions } from "../../fakes/FakeSecurePermissions";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ActionableError, toActionableError } from "../../../src/models";
@@ -111,7 +124,7 @@ describe("parseVideoRecordingConfig", () => {
 
   test("passes the minimum throughput cap to the capture backend", async () => {
     const timer = new FakeTimer();
-    const backend = new FakeVideoCaptureBackend();
+    const backend = new ServiceTestBackend();
     const service = new VideoRecorderService({
       backend,
       archiveRoot: path.join(os.tmpdir(), "video-throughput-cap"),
@@ -141,13 +154,13 @@ describe("parseVideoRecordingConfig", () => {
 });
 
 describe("VideoRecorderService", () => {
-  let backend: FakeVideoCaptureBackend;
+  let backend: ServiceTestBackend;
   let service: VideoRecorderService;
   let archiveRoot: string;
   let securePermissions: FakeSecurePermissions;
 
   beforeEach(async () => {
-    backend = new FakeVideoCaptureBackend();
+    backend = new ServiceTestBackend();
     archiveRoot = path.join(
       os.tmpdir(),
       `video-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -283,6 +296,7 @@ describe("VideoRecorderService", () => {
         outputPath: config.outputPath,
         startedAt: config.startedAt,
       };
+      backend.startResults.push(retainedHandle);
       throw new VideoCaptureStartCleanupError("startup cleanup timed out", retainedHandle);
     };
 
@@ -385,11 +399,13 @@ describe("VideoRecorderService", () => {
       await fsPromises.writeFile(config.outputPath, "partial capture");
       markBackendStarted?.();
       await allowStartupFailure;
-      throw new VideoCaptureStartCleanupError("startup cleanup timed out", {
+      const cleanupHandle = {
         recordingId: config.recordingId,
         outputPath: config.outputPath,
         startedAt: config.startedAt,
-      });
+      };
+      backend.startResults.push(cleanupHandle);
+      throw new VideoCaptureStartCleanupError("startup cleanup timed out", cleanupHandle);
     };
 
     const starting = service.startRecording();

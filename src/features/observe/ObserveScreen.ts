@@ -1,3 +1,4 @@
+import { AllDisplaysObservation } from "./AllDisplaysObservation";
 import { SingleDisplayCaptureStage } from "./SingleDisplayCaptureStage";
 import { SingleDisplayReconcileStage } from "./SingleDisplayReconcileStage";
 import {
@@ -99,14 +100,8 @@ import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
 import { ObservedAndroidDisplayCache, observedIosDisplay } from "./ObservationDisplay";
 import { displayTransitions } from "./DisplayTransition";
 import { selectedDisplayPin } from "./SessionDisplayContext";
-import {
-  assertAllDisplayObserveSupported,
-  DisplaySelectionError,
-  resolveTargetDisplay,
-} from "./DisplaySelection";
-import type { DisplayObservation } from "../../models/ObserveResult";
+import { resolveTargetDisplay } from "./DisplaySelection";
 export { resolveMissingForegroundWindow } from "./observationVerdict";
-import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { ScreenshotEvidenceFiles } from "./screenshot/observationScreenshotEvidence";
 
 /**
@@ -169,6 +164,7 @@ export class RealObserveScreen implements ObserveScreen {
   private readonly windowIdentity: WindowIdentityFreshnessResolver;
   private platformValidator: HierarchyPlatformValidator;
   private safeAreaAuditor: SafeAreaAuditor;
+  private allDisplays!: AllDisplaysObservation;
   private captureStage!: SingleDisplayCaptureStage;
   private reconcileStage!: SingleDisplayReconcileStage;
   private enrichStage!: SingleDisplayEnrichStage;
@@ -361,6 +357,15 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   private createStages(): void {
+    this.allDisplays = new AllDisplaysObservation({
+      device: () => this.device,
+      timer: () => this.timer,
+      pathProtection: () => this.pathProtection,
+      executeSingleDisplay: (options) => this.executeSingleDisplay(options),
+      captureDeviceReadScreenshot: (...args) => this.captureDeviceReadScreenshot(...args),
+      createCriticalFallback: (error) => this.createCriticalFallback(error),
+      createBaseResult: () => this.createBaseResult(),
+    });
     this.captureStage = new SingleDisplayCaptureStage({
       device: () => this.device,
       timer: () => this.timer,
@@ -427,7 +432,7 @@ export class RealObserveScreen implements ObserveScreen {
   ): Promise<ObserveResult> {
     const { requireFreshScreenshot = false, timeoutMs } = options;
     if (this.requestedDisplay === "all") {
-      return this.executeAllDisplays({
+      return this.allDisplays.execute({
         observerMode: true,
         skipCache: true,
         skipRecompositionTracking: true,
@@ -590,154 +595,9 @@ export class RealObserveScreen implements ObserveScreen {
    */
   async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
     if ((options?.display ?? this.requestedDisplay) === "all") {
-      return this.executeAllDisplays(options);
+      return this.allDisplays.execute(options);
     }
     return this.executeSingleDisplay(options);
-  }
-
-  private async executeAllDisplays(
-    options?: ObserveScreenExecuteOptions & { deviceReadScreenshot?: ScreenshotEncodingOptions },
-  ): Promise<ObserveResult> {
-    const deviceReadScreenshot = options?.deviceReadScreenshot;
-    assertAllDisplayObserveSupported(this.device.platform);
-    // Reuse the existing hierarchy-capture budget; one deadline covers every panel.
-    const deadline = this.timer.now() + (options?.timeoutMs ?? 15000);
-    const active = await this.readAggregatePanel("active", {
-      options,
-      deadline,
-      deviceReadScreenshot,
-    });
-    const panels = this.device.displays?.panels;
-    if (!panels?.length) {
-      // Discovery omits single-screen inventory: retain exactly the ordinary result.
-      return active;
-    }
-    const activePanelKey = panels.some((panel) => panel.key === active.display.key)
-      ? active.display.key
-      : resolveTargetDisplay(this.device.displays, "active", {
-          focusedPanelKey: displayTransitions.observedPanel(this.device.deviceId)?.key,
-        }).key;
-    const displays: DisplayObservation[] = [];
-    for (const panel of panels) {
-      const observation =
-        panel.key === activePanelKey
-          ? active
-          : await this.readAggregatePanel(panel.key, {
-              options: {
-                ...options,
-                // Extra screenshots would overwrite shared screenshot state. Only the
-                // normal active capture supplies a path; extras are hierarchy reads.
-                skipScreenshot: true,
-                skipPerformanceAudit: true,
-                skipAccessibilityAudit: true,
-                skipRecompositionTracking: true,
-              },
-              deadline,
-            });
-      const {
-        display,
-        screenSize,
-        viewHierarchy,
-        elements,
-        screenshotPath,
-        screenshotExpiresAt,
-        systemInsets,
-        insets,
-        activeWindow,
-      } = observation;
-      displays.push({
-        display: { ...display, key: panel.key, role: panel.role },
-        screenSize,
-        viewHierarchy,
-        elements,
-        screenshotPath,
-        screenshotExpiresAt,
-        systemInsets,
-        insets,
-        activeWindow,
-        freshness:
-          observation.freshness ?? computeFreshness({ now: this.timer.now(), unavailable: true }),
-      });
-    }
-    const result = { ...active, displays };
-    await publishScreenshotPaths(result, this.pathProtection);
-    return result;
-  }
-
-  private async readAggregatePanel(
-    display: string,
-    request: {
-      options?: ObserveScreenExecuteOptions;
-      deadline: number;
-      deviceReadScreenshot?: ScreenshotEncodingOptions;
-    },
-  ): Promise<ObserveResult> {
-    const { options, deadline, deviceReadScreenshot } = request;
-    const remaining = Math.max(0, deadline - this.timer.now());
-    const controller = new AbortController();
-    const callerSignal = options?.signal;
-    const signal = callerSignal
-      ? AbortSignal.any([callerSignal, controller.signal])
-      : controller.signal;
-    let timedOut = remaining === 0;
-    try {
-      callerSignal?.throwIfAborted();
-      if (timedOut) {
-        throw new DisplaySelectionError("Observe deadline reached; retry this panel separately.");
-      }
-      return await raceWithDeadline(
-        async () => {
-          const result = await this.executeSingleDisplay({
-            ...options,
-            display,
-            signal,
-            timeoutMs: remaining,
-            skipCache: true,
-            preserveDisplayState: true,
-          });
-          if (deviceReadScreenshot !== undefined) {
-            await this.captureDeviceReadScreenshot(result, signal, deviceReadScreenshot, {
-              display,
-            });
-          }
-          return result;
-        },
-        {
-          timer: this.timer,
-          timeoutMs: remaining,
-          signal: callerSignal,
-          label: `Observe display ${display}`,
-          onTimeout: () => {
-            timedOut = true;
-            controller.abort();
-          },
-        },
-      );
-    } catch (error) {
-      callerSignal?.throwIfAborted();
-      logger.warn(`[ObserveScreen] Display ${display} unavailable: ${describeError(error)}`, error);
-      if (display === "active" && !timedOut) {
-        return this.createCriticalFallback(error);
-      }
-      const result = this.createBaseResult();
-      const panel = resolveTargetDisplay(this.device.displays, display, {
-        focusedPanelKey: displayTransitions.observedPanel(this.device.deviceId)?.key,
-      });
-      result.display = {
-        ...result.display,
-        key: panel.key,
-        role: panel.role,
-        generation: displayTransitions.identityRevision(this.device.deviceId),
-      };
-      result.screenSize = { ...panel.sizePx, units: "physical-pixels" };
-      result.freshness = computeFreshness({
-        now: this.timer.now(),
-        unavailable: true,
-        unavailableReason: timedOut ? "request_timed_out" : "unknown",
-        unavailableDetail: describeError(error),
-      });
-      return result;
-    }
   }
 
   private async executeSingleDisplay(

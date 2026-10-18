@@ -78,6 +78,15 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/Perfo
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import {
+  forwardLeaseActivity,
+  heldForwardLeaseDeviceIds,
+  releaseForwardLeasesForShutdown,
+  releaseIdleForwardLease,
+  type ForwardLeaseActivity,
+  type ForwardLeaseClient,
+  type ForwardLeaseClientRegistry,
+} from "./CtrlProxyForwardLeaseRegistry";
+import {
   ForcedRestartBudget,
   type ForcedRestartSnapshot,
 } from "../../../ctrlProxy/ForcedRestartBudget";
@@ -1075,107 +1084,69 @@ export class AndroidCtrlProxyClient
 
   /** Devices whose singleton client holds the cross-process forwarding lease. */
   public static getForwardLeaseHeldDeviceIds(): string[] {
-    return [...AndroidCtrlProxyClient.instances.entries()]
-      .filter(([, client]) => client.ctrlProxyForwardLease.isHeld?.() === true)
-      .map(([deviceId]) => deviceId);
+    return heldForwardLeaseDeviceIds(AndroidCtrlProxyClient.forwardLeaseRegistry());
   }
 
-  /**
-   * CtrlProxy use of a device by this process (#10497): requests in flight
-   * through its singleton and any detached observer, and time since the last
-   * request or since the lease was taken, whichever is later. `null` when
-   * this process neither holds the lease nor has used the device.
-   */
+  /** CtrlProxy use of a device by this process (#10497); see {@link forwardLeaseActivity}. */
   public static getForwardLeaseActivity(
     deviceId: string,
     timer: Timer = defaultTimer,
-  ): { inFlightRequests: number; idleForMs: number | null } {
-    const clients = [
-      AndroidCtrlProxyClient.instances.get(deviceId),
-      ...[...AndroidCtrlProxyClient.activeObservers].filter(
-        (observer) => observer.device.deviceId === deviceId,
-      ),
-    ].filter((client): client is AndroidCtrlProxyClient => client !== undefined);
-    const activities = clients.map((client) => client.getRequestActivity());
-    const observers = clients.length - (AndroidCtrlProxyClient.instances.has(deviceId) ? 1 : 0);
-    const lastTimes = [
-      ...activities.map((activity) => activity.lastActivityAt),
-      AndroidCtrlProxyClient.instances.get(deviceId)?.ctrlProxyForwardLease.getAcquiredAt?.(),
-    ].filter((time): time is number => time !== undefined);
+  ): ForwardLeaseActivity {
+    return forwardLeaseActivity(AndroidCtrlProxyClient.forwardLeaseRegistry(), deviceId, timer);
+  }
+
+  /** Give up an idle device's forwarding lease (issue #10497). */
+  public static releaseIdleForwardLease(deviceId: string): Promise<void> {
+    return releaseIdleForwardLease(AndroidCtrlProxyClient.forwardLeaseRegistry(), deviceId);
+  }
+
+  /** Graceful daemon stop: close every client and release its forwarding lease, bounded. */
+  public static releaseForwardLeasesForShutdown(timer: Timer, timeoutMs: number): Promise<void> {
+    return releaseForwardLeasesForShutdown(
+      AndroidCtrlProxyClient.forwardLeaseRegistry(),
+      timer,
+      timeoutMs,
+    );
+  }
+
+  /** Lease-bookkeeping view over the static client registry (instances map stays here). */
+  private static forwardLeaseRegistry(): ForwardLeaseClientRegistry {
     return {
-      // A live detached observer is a read in progress even between its requests.
-      inFlightRequests:
-        activities.reduce((sum, activity) => sum + activity.inFlightRequests, 0) +
-        observers +
-        clients.reduce((sum, client) => sum + client.readinessHolds, 0),
-      idleForMs: lastTimes.length === 0 ? null : Math.max(0, timer.now() - Math.max(...lastTimes)),
+      singletonEntries: () =>
+        [...AndroidCtrlProxyClient.instances.entries()].map(([deviceId, client]) => [
+          deviceId,
+          client.asForwardLeaseClient(),
+        ]),
+      singleton: (deviceId) =>
+        AndroidCtrlProxyClient.instances.get(deviceId)?.asForwardLeaseClient(),
+      observers: () =>
+        [...AndroidCtrlProxyClient.activeObservers].map((c) => c.asForwardLeaseClient()),
+      evictSingleton: (deviceId) => {
+        const client = AndroidCtrlProxyClient.getExistingInstance(deviceId);
+        if (!client) {
+          return null;
+        }
+        AndroidCtrlProxyClient.removeInstanceIfCurrent(deviceId, client);
+        return client.asForwardLeaseClient();
+      },
+      clearSingletons: () => AndroidCtrlProxyClient.instances.clear(),
     };
   }
 
-  /**
-   * Give up an idle device's forwarding lease (issue #10497): evict the
-   * singleton first so a new call builds a fresh client that re-acquires the
-   * lease, then close the old one, which removes its forward and releases it.
-   */
-  public static async releaseIdleForwardLease(deviceId: string): Promise<void> {
-    const client = AndroidCtrlProxyClient.getExistingInstance(deviceId);
-    if (!client) {
-      return;
-    }
-    AndroidCtrlProxyClient.removeInstanceIfCurrent(deviceId, client);
-    await client.close();
-  }
-
-  /**
-   * Graceful daemon stop: close every client this process holds (removing the
-   * forwards it recorded, never unrecorded ones) and release its forwarding
-   * leases, so the next daemon need not reclaim them. Bounded by `timeoutMs`:
-   * a hung adb must not block shutdown, so on timeout the leases are released
-   * anyway while the recorded forward stays on disk for the next daemon.
-   */
-  public static async releaseForwardLeasesForShutdown(
-    timer: Timer,
-    timeoutMs: number,
-  ): Promise<void> {
-    const clients = new Set<AndroidCtrlProxyClient>([
-      ...AndroidCtrlProxyClient.instances.values(),
-      ...AndroidCtrlProxyClient.activeObservers,
-    ]);
-    if (clients.size === 0) {
-      return;
-    }
-    AndroidCtrlProxyClient.instances.clear();
-    const closes = [...clients].map((client) =>
-      client.close().catch((error) => {
-        logger.warn(
-          `[CTRL_PROXY] Failed to close CtrlProxy client for ${client.device.deviceId} during shutdown: ${errorMessage(error)}`,
-          error,
-        );
-      }),
-    );
-    const timedOut = Symbol("ctrlproxy shutdown release timeout");
-    try {
-      await raceWithDeadline(Promise.all(closes), {
-        timer,
-        timeoutMs,
-        label: "CtrlProxy forward lease shutdown release",
-        timeoutError: () => timedOut,
-      });
-    } catch (error) {
-      if (error !== timedOut) {
-        throw error;
-      }
-      logger.warn(
-        `[CTRL_PROXY] Timed out after ${timeoutMs}ms removing CtrlProxy forwards during shutdown; ` +
-          `releasing forwarding leases anyway`,
-      );
-      for (const client of clients) {
-        // A close still stuck on adb must not later remove a forward that a
-        // successor daemon creates on the freed lease and port (#10690).
+  private asForwardLeaseClient(): ForwardLeaseClient {
+    const client = this;
+    return {
+      deviceId: client.device.deviceId,
+      forwardLease: client.ctrlProxyForwardLease,
+      get readinessHolds() {
+        return client.readinessHolds;
+      },
+      getRequestActivity: () => client.getRequestActivity(),
+      close: () => client.close(),
+      markForwardLeaseForceReleased: () => {
         client.forwardLeaseForceReleased = true;
-        client.ctrlProxyForwardLease.release();
-      }
-    }
+      },
+    };
   }
 
   /**

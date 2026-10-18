@@ -3,7 +3,6 @@ import { withJsonSchemaOverride } from "./toolSchemaHelpers";
 import {
   normalizeSharedStorageNamespace,
   sharedStorageFileSchema,
-  type SharedStorageFileInput,
   type StagedSharedStorageFile,
 } from "./sharedStorageContract";
 
@@ -14,13 +13,7 @@ import {
  * access when that session is missing or no longer owns a device, exactly like
  * the session-log family (#7006).
  */
-export interface StageSessionDownloadsArgs {
-  sessionUuid: string;
-  directory: string;
-  reset?: boolean;
-  indexMedia?: boolean;
-  files: SharedStorageFileInput[];
-}
+export type StageSessionDownloadsArgs = z.output<typeof stageSessionDownloadsSchema>;
 
 /** A refusal the client sees before any device is touched. */
 export type StageSessionDownloadsRefusalCode = "SESSION_NOT_BOUND" | "SESSION_NOT_ACTIVE";

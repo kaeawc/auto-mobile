@@ -24,7 +24,7 @@ describe("DefaultAfterToolCallHandler cancelled-call baseline (#10081)", () => {
 
   let baselines: Map<string, ObserveResult>;
   let snapshots: Map<string, Record<string, unknown>>;
-  let originalManager: unknown;
+  let originalManager: ReturnType<DaemonState["setSessionManagerForTesting"]>;
   let originalDiff: boolean;
   let originalCompact: boolean;
   let initialized: ReturnType<typeof spyOn>;
@@ -69,8 +69,7 @@ describe("DefaultAfterToolCallHandler cancelled-call baseline (#10081)", () => {
     baselines = new Map();
     snapshots = new Map();
     const daemon = DaemonState.getInstance();
-    originalManager = Reflect.get(daemon, "sessionManager");
-    Reflect.set(daemon, "sessionManager", {
+    originalManager = daemon.setSessionManagerForTesting({
       getLastRenderedObservation: (uuid: string) => baselines.get(uuid),
       setLastRenderedObservation: (uuid: string, observation: ObserveResult) => {
         baselines.set(uuid, observation);
@@ -90,7 +89,7 @@ describe("DefaultAfterToolCallHandler cancelled-call baseline (#10081)", () => {
 
   afterEach(() => {
     initialized.mockRestore();
-    Reflect.set(DaemonState.getInstance(), "sessionManager", originalManager);
+    DaemonState.getInstance().setSessionManagerForTesting(originalManager);
     serverConfig.setActionsDiffObserveEnabled(originalDiff);
     serverConfig.setActionsCompactMetadataEnabled(originalCompact);
   });

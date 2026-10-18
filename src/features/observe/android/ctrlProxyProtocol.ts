@@ -1103,8 +1103,7 @@ export const ANDROID_CAPABILITY_REQUEST_TYPES = [
 
 /**
  * Advertised only by a CtrlProxy that attaches `show_prototype` to the requested `displayId`. An
- * older device would ignore the unknown field and show the prototype on the default display.
- * v2, not v1: pre-#13148 APKs advertised v1 on API 30/31 (#13164).
+ * older device would ignore the unknown field and show the prototype on the default display. v2: v1 APKs lack the API 32 floor.
  */
 export const PROTOTYPE_DISPLAY_CAPABILITY = "prototype_display_id_v2";
 

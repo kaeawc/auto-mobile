@@ -311,7 +311,6 @@
 5	test/server/databaseResourcesPagination.test.ts
 2	test/server/derivedLabelSessionRestoreOwnership.test.ts
 1	test/server/deviceDescription.test.ts
-2	test/server/deviceSnapshotManagerCharacterization.test.ts
 1	test/server/deviceSnapshotVmReclaim.test.ts
 1	test/server/deviceTools.acquisitionWaitDeadlines.test.ts
 4	test/server/deviceTools.bootRollbackSparesHeldDevice.test.ts

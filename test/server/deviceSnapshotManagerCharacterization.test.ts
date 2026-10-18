@@ -7,8 +7,6 @@ import {
   resetDeviceSnapshotManagerDependencies,
   setDeviceSnapshotManagerDependencies,
 } from "../../src/server/deviceSnapshotManager";
-import type { DeviceSnapshotRepository } from "../../src/db/deviceSnapshotRepository";
-import type { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
@@ -25,8 +23,8 @@ beforeEach(async () => {
   avd = new FakeAvdSnapshotService();
   const timer = new FakeTimer();
   await setDeviceSnapshotManagerDependencies({
-    snapshotRepository: repository as unknown as DeviceSnapshotRepository,
-    snapshotStore: store as unknown as DeviceSnapshotStore,
+    snapshotRepository: repository,
+    snapshotStore: store,
     configRepository: new FakeDeviceSnapshotConfigRepository(),
     avdSnapshots: avd,
     timer,

@@ -3,6 +3,7 @@ import type { DevicePool } from "./devicePool";
 import type { SessionManager } from "./sessionManager";
 import type { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import type { BrokerConnectionScopes } from "./sessionBroker/connectionScope";
+import type { ObserverSessionStore } from "./observerSessionRegistry";
 
 /** The per-session rendered-display reads action code takes from the daemon's SessionManager. */
 export type RenderedDisplaySessionReads = Pick<
@@ -20,6 +21,7 @@ export type DevicePoolReads = Pick<
   | "isShutdownReserved"
   | "isSessionOwnedByOtherConnection"
   | "isSessionOwnedByConnection"
+  | "waitForEmulatorLossIncident"
   | "resolveAutolockSessionForMcpSession"
   | "resolveOwnedDeviceSessionForMcpSession"
   | "assertSessionReadyForAutomation"
@@ -75,6 +77,9 @@ export type DevicePoolWrites = Pick<
   | "attachAutolockSessionToMcpSession"
   | "attachExplicitSessionUuidCall"
   | "beginMcpBind"
+  | "reserveRestartRecoveryReadiness"
+  | "reserveDeviceForReadiness"
+  | "reconcileDiscoveryObservation"
 >;
 
 /**
@@ -108,6 +113,8 @@ export interface DaemonContext {
   devicePoolWrites(): DevicePoolWrites | undefined;
   /** Socket sessions bound to broker bindings, or undefined when the daemon is not initialized. */
   brokerConnectionScopes(): Pick<BrokerConnectionScopes, "get" | "forGrantedSession"> | undefined;
+  /** The observer-session store, or undefined when the daemon is not initialized or has none. */
+  observerSessionRegistry(): ObserverSessionStore | undefined;
   /** Device-session identity lookups, or undefined when the daemon is not initialized. */
   deviceSessionRegistry(): Pick<DeviceSessionRegistry, "getByDeviceId"> | undefined;
 }
@@ -135,5 +142,6 @@ export const defaultDaemonContext: DaemonContext = {
   devicePool: () => initializedDaemon()?.getDevicePool(),
   devicePoolWrites: () => initializedDaemon()?.getDevicePool(),
   brokerConnectionScopes: () => initializedDaemon()?.getBrokerConnectionScopes(),
+  observerSessionRegistry: () => initializedDaemon()?.getObserverSessionRegistry(),
   deviceSessionRegistry: () => initializedDaemon()?.getDeviceSessionRegistry(),
 };

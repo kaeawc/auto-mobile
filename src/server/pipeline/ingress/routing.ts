@@ -1,5 +1,4 @@
 import { brokerConnectionPlatformRefusal } from "../../../daemon/sessionBroker/connectionScope";
-import { DaemonState } from "../../../daemon/daemonState";
 import {
   defaultDaemonContext,
   type DaemonContext,
@@ -149,11 +148,9 @@ function admittedSessionDevice(id: string) {
 function routeViaBinding(scope: RoutingScope, rawArgs: Record<string, unknown>): DeviceRouting {
   const { name, tool, toolParams, sessionId, daemonMode, sessionToolBinding } = scope;
   const requestMcpSessionId = scope.context.requestMcpSessionId;
-  const daemonState = DaemonState.getInstance();
-  const managedBinding =
-    daemonMode && daemonState.isInitialized()
-      ? daemonState.getBrokerConnectionScopes().get(requestMcpSessionId)
-      : undefined;
+  const managedBinding = daemonMode
+    ? defaultDaemonContext.brokerConnectionScopes()?.get(requestMcpSessionId)
+    : undefined;
   const refusal = brokerConnectionPlatformRefusal({
     binding:
       !rawArgs.deviceId && !rawArgs.device && !rawArgs.sessionUuid ? managedBinding : undefined,

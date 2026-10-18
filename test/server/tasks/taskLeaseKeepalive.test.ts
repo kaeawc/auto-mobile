@@ -18,13 +18,25 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 const HOLD = { taskId: "task-1", ownerKey: "key-a", sessionUuid: "session-1" };
 const HEARTBEAT_TIMEOUT_MS = 1_000;
 
+/** Like the session manager, `peekSession` returns the same object for one session incarnation. */
 class RecordingSessions implements TaskLeaseSessions {
-  readonly live = new Set<string>(["session-1"]);
+  private readonly sessions = new Map<string, { readonly heartbeatTimeoutMs: number }>();
   readonly heartbeats: string[] = [];
   heartbeatTimeoutMs = HEARTBEAT_TIMEOUT_MS;
 
+  constructor() {
+    this.live.add("session-1");
+  }
+
+  readonly live = {
+    add: (sessionId: string) => {
+      this.sessions.set(sessionId, { heartbeatTimeoutMs: this.heartbeatTimeoutMs });
+    },
+    delete: (sessionId: string) => this.sessions.delete(sessionId),
+  };
+
   peekSession(sessionId: string) {
-    return this.live.has(sessionId) ? { heartbeatTimeoutMs: this.heartbeatTimeoutMs } : null;
+    return this.sessions.get(sessionId) ?? null;
   }
 
   recordHeartbeat(sessionId: string): void {
@@ -69,6 +81,19 @@ describe("HeartbeatTaskLeaseKeepalive", () => {
     keepalive.hold(HOLD);
     sessions.live.delete("session-1");
     timer.advanceTime(HEARTBEAT_TIMEOUT_MS);
+    expect(sessions.heartbeats).toEqual(["session-1"]);
+    expect(keepalive.heldCount).toBe(0);
+  });
+
+  test("a session released and recreated under the same uuid is not renewed by the old hold (#13143)", () => {
+    const timer = new FakeTimer();
+    const sessions = new RecordingSessions();
+    const keepalive = new HeartbeatTaskLeaseKeepalive({ sessions: () => sessions, timer });
+
+    keepalive.hold(HOLD);
+    sessions.live.delete("session-1");
+    sessions.live.add("session-1");
+    timer.advanceTime(HEARTBEAT_TIMEOUT_MS * 3);
     expect(sessions.heartbeats).toEqual(["session-1"]);
     expect(keepalive.heldCount).toBe(0);
   });

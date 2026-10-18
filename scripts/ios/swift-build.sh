@@ -61,6 +61,7 @@ MACOS_PACKAGES=(
 
 # iOS + macOS packages (have both platform support)
 IOS_MACOS_PACKAGES=(
+    "sdk-wire"
     "auto-mobile-sdk"
     "control-proxy"
     "XCTestRunner"

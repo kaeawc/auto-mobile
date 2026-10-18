@@ -1,33 +1,11 @@
 #if DEBUG && !os(watchOS)
+    import AutoMobileSdkWire
     import Foundation
     import Network
 
     enum SdkRouteTable {
-        enum Route: String, CaseIterable, Sendable {
-            case cachedHierarchy = "/hierarchy"
-            case freshHierarchy = "/hierarchy/fresh"
-            case health = "/health"
-            case networkMock = "/network/mock"
-            case networkErrorSimulation = "/network/error-simulation"
-            case networkFaultRules = "/network/fault-rules"
-            case magicTap = "/accessibility/magic-tap"
-            case highlight = "/highlight"
-            case dbExecute = "/db/execute"
-            case dbList = "/db/list"
-            case dbCapabilities = "/db/capabilities"
-            case dbTables = "/db/tables"
-            case dbTableData = "/db/table-data"
-            case dbTableStructure = "/db/table-structure"
-            case preferences = "/preferences"
-            case trigger = "/trigger"
-
-            var method: String {
-                switch self {
-                case .cachedHierarchy, .freshHierarchy, .health: return "GET"
-                default: return "POST"
-                }
-            }
-        }
+        /// The route set is shared with the runner (`AutoMobileSdkWire`).
+        typealias Route = SdkRoute
 
         enum RouteMatch: Equatable, Sendable {
             case matched(Route)

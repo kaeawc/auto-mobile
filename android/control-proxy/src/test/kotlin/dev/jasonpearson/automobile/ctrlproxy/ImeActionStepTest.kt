@@ -1,7 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.view.inputmethod.EditorInfo
-import dev.jasonpearson.automobile.ctrlproxy.CtrlProxy.ImeActionStep
+import dev.jasonpearson.automobile.ctrlproxy.TextInputController.ImeActionStep
 import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.ImeConnection
 import org.junit.Assert.assertEquals

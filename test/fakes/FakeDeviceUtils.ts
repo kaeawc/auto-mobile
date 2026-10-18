@@ -228,18 +228,38 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     }
 
     if (platform === "either") {
-      const androidDevices = this.deviceImages.get("android") || [];
+      const androidDevices = this.withRunningOverlay(
+        "android",
+        this.deviceImages.get("android") || [],
+      );
       const iosDevices = this.deviceImages.get("ios") || [];
       return [...androidDevices, ...iosDevices];
     }
 
-    return this.deviceImages.get(platform) || [];
+    return this.withRunningOverlay(platform, this.deviceImages.get(platform) || []);
+  }
+
+  /**
+   * Android AVD listings report every image as stopped; the real manager overlays the booted
+   * emulators so an image is running exactly when an emulator with its name is booted. iOS images
+   * carry their own state from simctl, so they pass through.
+   */
+  private withRunningOverlay(platform: Platform, images: DeviceInfo[]): DeviceInfo[] {
+    if (platform !== "android") {
+      return images;
+    }
+    const bootedNames = new Set((this.bootedDevices.get("android") ?? []).map((d) => d.name));
+    // A row a test configured as running stays running (the direct way to script a stale or
+    // racing listing); booting its emulator additionally flips a stopped row to running.
+    return images.map((image) =>
+      image.isRunning || !bootedNames.has(image.name) ? image : { ...image, isRunning: true },
+    );
   }
 
   async isDeviceImageRunning(device: DeviceInfo): Promise<boolean> {
     const identifier = device.deviceId ?? device.name;
     this.executedOperations.push(`isDeviceImageRunning:${identifier}`);
-    return this.runningDeviceNames.has(identifier) || this.runningDeviceNames.has(device.name);
+    return this.runningDeviceNames.has(identifier);
   }
 
   async getBootedDevices(platform: SomePlatform): Promise<BootedDevice[]> {
@@ -383,7 +403,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       succeededPlatforms.add(p);
     }
     return {
-      devices,
+      devices: options.presentationOrder === "reverse" ? devices.toReversed() : devices,
       succeededPlatforms,
       discoveryErrors,
       ...(Object.keys(sourceErrors).length > 0 ? { sourceErrors } : {}),

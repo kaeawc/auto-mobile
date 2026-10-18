@@ -1,5 +1,3 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   handleDaemonRequest,
@@ -9,12 +7,16 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DaemonResponse } from "../../src/daemon/types";
-import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { androidDevice, createFakeDaemonState } from "./helpers/inputSocketHarness";
+import { androidDevice } from "./helpers/inputSocketHarness";
+import {
+  createIdeMutationServer,
+  stubAndroidCtrlProxyManager,
+  useBootedAndroidDevice,
+} from "./helpers/ideMutationServerHarness";
 import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 /**
@@ -26,12 +28,6 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * one; only the device client is a fake.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-
 const SESSION = "ide-mutation-session";
 const OWNER_TOKEN = "harness-a";
 const DEVICE = androidDevice.deviceId;
@@ -41,7 +37,8 @@ describe("mutating ide/* frames against a session that may not take a control ca
   let timer: FakeTimer;
   let sessionManager: SessionManager;
   let socket: FakeSocket;
-  let internals: Internals;
+  let server: ReturnType<typeof createIdeMutationServer>;
+  let restoreCtrlProxyManager: () => void = () => {};
   let writes: string[];
 
   function stateFor(): DaemonStateAccess {
@@ -49,6 +46,7 @@ describe("mutating ide/* frames against a session that may not take a control ca
       isInitialized: () => true,
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({
+        releaseDevice: async () => {},
         refreshDevices: async () => 0,
         getStats: () => ({ total: 1, idle: 0, assigned: 1, error: 0 }),
       }),
@@ -81,7 +79,7 @@ describe("mutating ide/* frames against a session that may not take a control ca
     for (let i = 0; i < 6; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    await Promise.all([...internals.activeRequestHandlers]);
+    await server.settleActiveHandlers();
     return socket.responses.find((frame) => frame.id === "frame");
   }
 
@@ -104,13 +102,7 @@ describe("mutating ide/* frames against a session that may not take a control ca
     await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: 60_000 });
     await heartbeat(true);
 
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: async () => [androidDevice],
-      getBootedDevicesDetailed: async () => ({
-        devices: [androidDevice],
-        succeededPlatforms: new Set(["android", "ios"]),
-      }),
-    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    useBootedAndroidDevice(androidDevice);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
       setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
         if (typeof args[5] === "object") {
@@ -133,37 +125,17 @@ describe("mutating ide/* frames against a session that may not take a control ca
         writes.push("clearPreferenceStore");
       },
     }));
-    spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
-      () =>
-        ({
-          ensureCompatibleVersion: async () => {
-            writes.push("ensureCompatibleVersion");
-            return { status: "compatible" };
-          },
-        }) as unknown as AndroidCtrlProxyManager,
-    );
-    const fakePool = createFakeDaemonState().getDevicePool();
-    const server = createTestUnixSocketServer(
-      "unused",
-      {
-        isInitialized: () => true,
-        getSessionManager: () => sessionManager,
-        getDevicePool: () => fakePool,
-      } as unknown as DaemonStateAccess,
-      new FakeTimer(),
-      null,
-      // The storage tools are enabled, so the frame reaches the ownership gate.
-      { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
-    );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+    restoreCtrlProxyManager = stubAndroidCtrlProxyManager(androidDevice, async () => {
+      writes.push("ensureCompatibleVersion");
+    });
+    server = createIdeMutationServer(sessionManager);
     socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
+    server.connect(socket);
   }
 
   function tearDown(): void {
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
-    spyOn(AndroidCtrlProxyManager, "getInstance").mockRestore();
+    restoreCtrlProxyManager();
     PlatformDeviceManagerFactory.reset();
     socket.destroy();
     sessionManager.stopCleanupTimer();

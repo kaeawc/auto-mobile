@@ -1,5 +1,5 @@
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
-import type { ChildProcess, SpawnOptions } from "node:child_process";
+import type { SpawnOptions } from "node:child_process";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -11,8 +11,9 @@ import type {
   DaemonProcessRecord,
   DaemonProcessSignaler,
 } from "../../src/daemon/processTable";
+import type { DaemonOptions } from "../../src/daemon/types";
 import { readPidFileDataSync } from "../../src/daemon/daemonFiles";
-import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { FakeDaemonProcess } from "../fakes/FakeDaemonProcess";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // Keep ownership probes fake: these tests exercise PID records in isolated temp
@@ -31,6 +32,11 @@ class DaemonManager extends SafeDaemonManager {
     });
   }
 }
+
+const NO_DAEMON_PROCESSES: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+  findDaemonProcesses: () => [],
+  isProcessRunning: () => false,
+};
 
 class MutableDaemonProcesses implements DaemonProcessFinder, DaemonProcessLivenessChecker {
   constructor(
@@ -70,9 +76,9 @@ class SequencedDaemonProcesses implements DaemonProcessFinder, DaemonProcessLive
 class CapturingDaemonSpawner implements DaemonProcessSpawner {
   readonly calls: Array<{ command: string; args: string[]; options: SpawnOptions }> = [];
 
-  spawn(command: string, args: string[], options: SpawnOptions): ChildProcess {
+  spawn(command: string, args: string[], options: SpawnOptions): FakeDaemonProcess {
     this.calls.push({ command, args: [...args], options });
-    return new FakeChildProcess() as unknown as ChildProcess;
+    return new FakeDaemonProcess();
   }
 }
 
@@ -915,10 +921,7 @@ describe("DaemonManager control-state recovery", () => {
       lockFilePath: lock,
       pidFilePath: pid,
       socketPath: socket,
-      processFinder: {
-        findDaemonProcesses: () => [],
-        isProcessRunning: () => false,
-      },
+      processFinder: NO_DAEMON_PROCESSES,
       processSpawner: spawner,
       launchCommandResolver: () => ({ command: "auto-mobile", args: ["--daemon-mode"] }),
       portAvailabilityChecker: {
@@ -943,22 +946,23 @@ describe("DaemonManager control-state recovery", () => {
     const scanTimeouts: Array<number | undefined> = [];
     const portProbeTimeouts: Array<number | undefined> = [];
     let scans = 0;
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: (timeoutMs) => {
+        scanTimeouts.push(timeoutMs);
+        scans++;
+        if (scans === 2) {
+          timer.advanceTime(10);
+        }
+        return [];
+      },
+      isProcessRunning: () => false,
+    };
     const manager = new DaemonManager({
       timer,
       lockFilePath: lock,
       pidFilePath: pid,
       socketPath: socket,
-      processFinder: {
-        findDaemonProcesses: (timeoutMs) => {
-          scanTimeouts.push(timeoutMs);
-          scans++;
-          if (scans === 2) {
-            timer.advanceTime(10);
-          }
-          return [];
-        },
-        isProcessRunning: () => false,
-      },
+      processFinder,
       portAvailabilityChecker: {
         isPortFree: async (_port, _host, timeoutMs) => {
           portProbeTimeouts.push(timeoutMs);
@@ -1000,20 +1004,10 @@ describe("DaemonManager control-state recovery", () => {
       lockFilePath: lock,
       pidFilePath: pid,
       socketPath: socket,
-      processFinder: {
-        findDaemonProcesses: () => [],
-        isProcessRunning: () => false,
-      },
+      processFinder: NO_DAEMON_PROCESSES,
     });
 
-    const recoveryOptions = await (
-      manager as unknown as {
-        recoveryOptions(
-          status: { running: boolean },
-          options: Record<string, unknown>,
-        ): Promise<unknown>;
-      }
-    ).recoveryOptions(
+    const recoveryOptions = await manager.getInternalsForTesting().recoveryOptions(
       { running: false },
       {
         debug: false,
@@ -1040,20 +1034,10 @@ describe("DaemonManager control-state recovery", () => {
       lockFilePath: lock,
       pidFilePath: pid,
       socketPath: socket,
-      processFinder: {
-        findDaemonProcesses: () => [],
-        isProcessRunning: () => false,
-      },
+      processFinder: NO_DAEMON_PROCESSES,
     });
 
-    const recoveryOptions = await (
-      manager as unknown as {
-        recoveryOptions(
-          status: { running: boolean; options: Record<string, unknown> },
-          options: Record<string, unknown>,
-        ): Promise<unknown>;
-      }
-    ).recoveryOptions(
+    const recoveryOptions = await manager.getInternalsForTesting().recoveryOptions(
       {
         running: false,
         options: {
@@ -1074,10 +1058,10 @@ describe("DaemonManager control-state recovery", () => {
     });
   });
 
-  test.each([
+  test.each<[string, DaemonOptions, DaemonOptions, string[], string[]]>([
     ["enabled", { disabledTools: ["foo"] }, { enabledTools: ["foo"] }, ["foo"], []],
     ["disabled", { enabledTools: ["foo"] }, { disabledTools: ["foo"] }, [], ["foo"]],
-  ] as const)(
+  ])(
     "recovery tool request wins conflicts with recorded %sTools",
     async (_requestedMode, recordedOptions, requestedOptions, enabledTools, disabledTools) => {
       const { lock, pid, socket } = paths();
@@ -1086,19 +1070,11 @@ describe("DaemonManager control-state recovery", () => {
         lockFilePath: lock,
         pidFilePath: pid,
         socketPath: socket,
-        processFinder: {
-          findDaemonProcesses: () => [],
-          isProcessRunning: () => false,
-        },
+        processFinder: NO_DAEMON_PROCESSES,
       });
-      const recoveryOptions = await (
-        manager as unknown as {
-          recoveryOptions(
-            status: { running: boolean; options: Record<string, unknown> },
-            options: Record<string, unknown>,
-          ): Promise<Record<string, unknown>>;
-        }
-      ).recoveryOptions({ running: false, options: recordedOptions }, requestedOptions);
+      const recoveryOptions = await manager
+        .getInternalsForTesting()
+        .recoveryOptions({ running: false, options: recordedOptions }, requestedOptions);
 
       expect(recoveryOptions.enabledTools ?? []).toEqual(enabledTools);
       expect(recoveryOptions.disabledTools ?? []).toEqual(disabledTools);

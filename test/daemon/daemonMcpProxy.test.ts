@@ -4776,10 +4776,10 @@ describe("DaemonMcpProxy", () => {
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a" });
         await proxy.callTool("observe", {
-          sessionUuid: null as unknown as string,
+          sessionUuid: null,
         });
         await proxy.callTool("observe", {
-          sessionUuid: 42 as unknown as string,
+          sessionUuid: 42,
         });
 
         expect(client.callToolCalls).toEqual([
@@ -7673,11 +7673,7 @@ describe("DaemonMcpProxy", () => {
     const releaseMapSizes = (
       proxy: DaemonMcpProxy,
     ): { epochs: number; reasons: number; references: number } => {
-      const internals = proxy as unknown as {
-        releasedSessionEpochs: Map<string, number>;
-        releasedSessionReasons: Map<string, string>;
-        activeReleaseEpochReferences: Map<string, number>;
-      };
+      const internals = proxy.getInternalsForTesting().releaseLedger;
       return {
         epochs: internals.releasedSessionEpochs.size,
         reasons: internals.releasedSessionReasons.size,
@@ -7723,11 +7719,7 @@ describe("DaemonMcpProxy", () => {
         autoStartDaemon: false,
       });
 
-      const internals = proxy as unknown as {
-        releasedSessionEpochs: Map<string, number>;
-        releasedSessionReasons: Map<string, string>;
-        activeReleaseEpochReferences: Map<string, number>;
-      };
+      const internals = proxy.getInternalsForTesting().releaseLedger;
       // Simulate a record that outlived its in-flight reference (e.g. a future
       // regression in the retain/release pairing). close() must still drain it so
       // the maps cannot accumulate across the proxy's lifetime.

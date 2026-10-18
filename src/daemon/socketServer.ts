@@ -47,7 +47,6 @@ import { unlink } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
-import type { Client } from "@modelcontextprotocol/client";
 import { dropToolCallRecording } from "../server/toolCallRecordingManager";
 import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
 import {} from "../server/toolUnavailableError";
@@ -271,6 +270,7 @@ import {
   currentForwardSessionKey,
   currentForwardTaskOwnerKey,
   FORWARD_KEY_IDLE_MS,
+  type ForwardMcpClient,
   type McpClientFactory,
   runWithForwardSessionKey,
 } from "./socketServer/forwardSessionKey";
@@ -906,7 +906,7 @@ export class UnixSocketServer {
   private server: NetServer | null = null;
   private serverClosePromise: Promise<void> | null = null;
   private closing = false;
-  private acceptingRequests = false;
+  protected acceptingRequests = false;
   /** Largest inbound frame a control-socket peer may send; tests lower it. */
   private readonly maxInboundFrameBytes = CONTROL_SOCKET_MAX_FRAME_BYTES;
   private lifecycleGeneration = 0;
@@ -919,7 +919,7 @@ export class UnixSocketServer {
   /** Per-socket outbound byte bound and stall watchdog (issue #10176). */
   private readonly controlConnections = new WeakMap<Socket, ControlConnection>();
   /** Request handlers that can continue after their client socket is destroyed. */
-  private activeRequestHandlers: Set<Promise<void>> = new Set();
+  protected activeRequestHandlers: Set<Promise<void>> = new Set();
   /** Parsed requests awaiting their one terminal response to flush, including queued requests. */
   private pendingSocketRequests = new PendingRequestTracker();
   /** Socket sessions that opted in to server-pushed notifications. */
@@ -1291,7 +1291,7 @@ export class UnixSocketServer {
   /**
    * Handle a new client connection
    */
-  private handleConnection(socket: Socket): void {
+  protected handleConnection(socket: Socket): void {
     if (!this.acceptingRequests) {
       // An accept callback can already be queued when quiesce closes the
       // listener. End that late connection before it can bind or issue work.
@@ -6783,7 +6783,7 @@ export class UnixSocketServer {
   }
 
   private async handleIdeRequest(
-    mcpClient: Client,
+    mcpClient: ForwardMcpClient,
     request: DaemonRequest,
     timeoutMs: number,
     socketSessionId: string,
@@ -7078,7 +7078,7 @@ export class UnixSocketServer {
     boundSessionUuid?: string,
     toolSelectionProfileUuid?: string,
     releasedSessionUuid?: string,
-  ): Promise<Client> {
+  ): Promise<ForwardMcpClient> {
     return await this.mcpDispatcher.connect({
       boundSessionUuid,
       toolSelectionProfileUuid,

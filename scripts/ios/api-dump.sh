@@ -9,6 +9,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SDK_SOURCES="${AUTOMOBILE_IOS_API_SOURCES:-$REPO_ROOT/ios/auto-mobile-sdk/Sources/AutoMobileSDK}"
+WIRE_SOURCES="$REPO_ROOT/ios/sdk-wire/Sources/AutoMobileSdkWire"
 API_FILE="${AUTOMOBILE_IOS_API_FILE:-$REPO_ROOT/ios/auto-mobile-sdk/api/auto-mobile-sdk.api}"
 
 if [[ ! -d "$SDK_SOURCES" ]]; then
@@ -192,6 +193,7 @@ scan_scope_code() {
 
 # Build the API dump from Swift source files.
 generate_api() {
+  local sources="$1" header_prefix="${2:-}"
   local current_file=""
   local paren_delta=0 stripped_signature=""
   local accessor_list_valid=false accessor_text=""
@@ -201,7 +203,7 @@ generate_api() {
   local public_types=" " swift_files
   # Files are sorted by relative path in C-locale byte order. Declarations
   # within each file stay in source order, under a '// <relpath>' header.
-  swift_files="$(find "$SDK_SOURCES" -name "*.swift" -not -name "PrivacyInfo*" | LC_ALL=C sort)"
+  swift_files="$(find "$sources" -name "*.swift" -not -name "PrivacyInfo*" | LC_ALL=C sort)"
 
   # First pass: collect only public/open top-level type names module-wide.
   # Reuse lexical handling so comments, strings and nested types cannot add
@@ -247,7 +249,7 @@ generate_api() {
 
   while IFS= read -r swift_file; do
     [[ -n "$swift_file" ]] || continue
-    local rel_path="${swift_file#"$SDK_SOURCES/"}"
+    local rel_path="$header_prefix${swift_file#"$sources/"}"
     local collecting_multiline=false
     local collecting_case=false
     local multiline_buffer=""
@@ -492,7 +494,16 @@ generate_api() {
   done <<< "$swift_files"
 }
 
-output="$(generate_api)"
+output="$(generate_api "$SDK_SOURCES")"
+# An explicit source override is a complete, isolated source tree (used by BATS).
+# The SDK re-exports the public wire product, so its declarations are SDK API.
+if [[ -z "${AUTOMOBILE_IOS_API_SOURCES:-}" ]]; then
+  if [[ ! -d "$WIRE_SOURCES" ]]; then
+    echo "error: SDK wire sources not found at $WIRE_SOURCES" >&2
+    exit 1
+  fi
+  output="$(printf '%s\n\n' "$output"; generate_api "$WIRE_SOURCES" 'sdk-wire/')"
+fi
 
 if [[ "${1:-}" == "--check" ]]; then
   if [[ ! -f "$API_FILE" ]]; then

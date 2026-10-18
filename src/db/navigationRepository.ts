@@ -25,7 +25,7 @@ import type {
   NewNavigationSuggestionObservation,
 } from "./types";
 import { logger } from "../utils/logger";
-import { storedEdgeActionKey } from "../features/navigation/edgeReplayKey";
+import { storedEdgeActionKey } from "./edgeReplayKey";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { nowIso } from "./nowIso";
 

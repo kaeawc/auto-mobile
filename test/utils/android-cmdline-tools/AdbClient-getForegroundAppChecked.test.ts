@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { resolveExecuteCommandOptions } from "../../../src/utils/android-cmdline-tools/executeCommandArgs";
 import type { ExecResult } from "../../../src/models";
 
 const captured = readFileSync(
@@ -40,18 +39,9 @@ class StubAdbClient extends AdbClient {
   }
   override async executeCommand(
     _command: string,
-    timeoutMsOrOptions?: number | AdbExecuteOptions,
-    ...rest: [
-      maxBuffer?: number,
-      noRetry?: boolean,
-      signal?: AbortSignal,
-      waitForProcessSettlementAfterAbort?: boolean,
-    ]
+    options: AdbExecuteOptions = {},
   ): Promise<ExecResult> {
-    const { timeoutMs: timeout, signal } = resolveExecuteCommandOptions(
-      timeoutMsOrOptions,
-      ...rest,
-    );
+    const { timeoutMs: timeout, signal } = options;
     this.calls.push({ timeout, signal });
     return result(await this.read(signal));
   }

@@ -464,6 +464,11 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "Retained screenshot file-protection expiry in a tool response, not a session clock.",
   },
+  "src/server/snapshotOfToolOutputSchemas.ts <module>": {
+    writes: 1,
+    reason:
+      "Output-schema field declaration (zod) for the retained-screenshot expiry, not a clock value.",
+  },
   "src/server/toolOutputSchemas.ts <module>": {
     writes: 2,
     reason: "Output-schema field declarations (zod), not clock values.",

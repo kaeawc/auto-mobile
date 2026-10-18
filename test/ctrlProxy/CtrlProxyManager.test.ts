@@ -2597,13 +2597,10 @@ describe("CtrlProxyManager", function () {
       // Create AdbClient with custom executor that throws on install, wrap in factory
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const localAdbClient = new AdbClient(
-        testDevice,
-        localExecAsync,
-        null,
-        new DefaultRetryExecutor(timer),
+      const localAdbClient = new AdbClient(testDevice, localExecAsync, {
+        retryExecutor: new DefaultRetryExecutor(timer),
         timer,
-      );
+      });
       const localFactory: AdbClientFactory = { create: () => localAdbClient };
 
       AndroidCtrlProxyManager.resetInstances();
@@ -2969,13 +2966,10 @@ describe("CtrlProxyManager", function () {
       // Create AdbClient with custom executor, wrap in factory
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const localAdbClient = new AdbClient(
-        testDevice,
-        localExecAsync,
-        null,
-        new DefaultRetryExecutor(timer),
+      const localAdbClient = new AdbClient(testDevice, localExecAsync, {
+        retryExecutor: new DefaultRetryExecutor(timer),
         timer,
-      );
+      });
       const localFactory: AdbClientFactory = { create: () => localAdbClient };
 
       AndroidCtrlProxyManager.resetInstances();

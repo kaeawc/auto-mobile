@@ -122,14 +122,12 @@ describe("NavigateTo replay through navigation recording", () => {
     await tap(demosArgs);
     const before = await repository.getStats(APP);
     const traversalCount = (await repository.getEdges(APP)).length;
-    const navigation = new NavigateTo(
-      device,
-      new FakeAdbClientFactory(),
-      { setupUIState: async () => [], setupScrollPosition: async () => null },
-      { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
-      manager,
+    const navigation = new NavigateTo(device, new FakeAdbClientFactory(), {
+      uiStateSetup: { setupUIState: async () => [], setupScrollPosition: async () => null },
+      screenWaiter: { waitForScreen: async (screen) => manager.getCurrentScreen() === screen },
+      navigationManager: manager,
       timer,
-    );
+    });
 
     const result = await navigation.execute({ targetScreen: "HomeDestination" });
 

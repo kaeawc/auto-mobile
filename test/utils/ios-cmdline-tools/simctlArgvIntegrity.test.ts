@@ -278,11 +278,13 @@ describe("custom simctl device set (#6900)", () => {
             calls.push({ file, args });
             return createExecResult("", "");
           },
-          new FakeTimer(),
-          "darwin",
-          (file, args) => {
-            calls.push({ file, args });
-            return child;
+          {
+            timer: new FakeTimer(),
+            platform: "darwin",
+            spawnProcess: (file, args) => {
+              calls.push({ file, args });
+              return child;
+            },
           },
         );
         await client.executeCommand("list devices --json");

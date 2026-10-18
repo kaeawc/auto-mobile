@@ -312,12 +312,14 @@ test("openLink accepts a device-seconds chooser capture in the tap's coarse seco
       },
     },
   };
-  const manager = new DeepLinkManager(device, adb, null, null, undefined, undefined, {
-    getLabel: async () => "Example",
-    getFreshHierarchy: async (_device, _factory, floor) =>
-      (floor < 2000
-        ? { ...chooser, updatedAt: floor }
-        : { hierarchy: { node: {} }, packageName: "com.example.app", updatedAt: 1000 }) as any,
+  const manager = new DeepLinkManager(device, adb, {
+    chooserMetadata: {
+      getLabel: async () => "Example",
+      getFreshHierarchy: async (_device, _factory, floor) =>
+        (floor < 2000
+          ? { ...chooser, updatedAt: floor }
+          : { hierarchy: { node: {} }, packageName: "com.example.app", updatedAt: 1000 }) as any,
+    },
   });
   const selection = await manager.handleIntentChooser(chooser as any, "custom", "com.example.app");
   expect(selection.success).toBe(true);

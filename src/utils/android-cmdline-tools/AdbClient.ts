@@ -2,6 +2,11 @@ import {
   getNativeHelperRegistry,
   type NativeHelperTracker,
 } from "../nativeHelpers/NativeHelperRegistry";
+import {
+  DEFAULT_ADB_COMMAND_TIMEOUT_MS,
+  resolveAdbClientSettings,
+  type AdbClientDependencies,
+} from "./AdbClientDependencies";
 import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import { parseAdbDevicesList } from "./parseAdbDevicesList";
 import { parseDumpsysUsers, parsePmListUsers } from "./parseAndroidUsers";
@@ -52,11 +57,8 @@ import {
   isAdbTransportRestartCommand,
   type AdbTransportRestartRegistry,
 } from "./AdbTransportRestartRegistry";
-import { DefaultSystemDetection, type SystemDetection } from "../system/SystemDetection";
-import {
-  defaultDiscoveryObservationSequence,
-  type DiscoveryObservationSequence,
-} from "../DiscoveryObservationSequence";
+import type { SystemDetection } from "../system/SystemDetection";
+import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequence";
 import { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
 import { AdbUnavailableError } from "./AdbUnavailableError";
 export { AdbCommandTimeoutError } from "./AdbCommandTimeoutError";
@@ -210,9 +212,16 @@ export class AdbClient implements AdbExecutor {
   private apiLevelCache: number | null | undefined;
   private readonly retryExecutor: RetryExecutor;
   private readonly timer: Timer;
+  private readonly systemDetectionFactory: () => SystemDetection;
+  private readonly observationSequence: DiscoveryObservationSequence;
+  private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry | undefined;
+  private readonly defaultTimeoutMs: number;
+  private readonly transportRouting: AndroidTransportRouting | undefined;
+  private readonly transportRestartRegistry: AdbTransportRestartRegistry | undefined;
+  private readonly nativeHelperRegistry: NativeHelperTracker | undefined;
 
   static readonly DEVICE_LIST_TIMEOUT_MS = 10_000;
-  private static readonly DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
+  private static readonly DEFAULT_COMMAND_TIMEOUT_MS = DEFAULT_ADB_COMMAND_TIMEOUT_MS;
   private static readonly MAX_ADB_RETRIES = 3;
   private static readonly ADB_RETRY_BACKOFF = sequenceBackoff([200, 500, 1000]);
   private static readonly MAX_MACOS_MISSING_ADB_PROBES = 3;
@@ -223,15 +232,7 @@ export class AdbClient implements AdbExecutor {
    * Create an AdbClient instance
    * @param device - Optional device
    * @param execAsyncFn - promisified exec function (for testing)
-   * @param spawnFn - spawn function (for testing)
-   * @param retryExecutor - retry executor for command retries (for testing)
-   * @param timer - Timer for delays and time tracking
-   * @param observationSequence - Monotonic discovery ordering source
-   * @param consoleBusyRegistry - Shared console-exclusive operation state
-   * @param defaultTimeoutMs - Per-command budget when no timeout is supplied
-   * @param hostProcessExecutor - Host process executor for cancellable commands
-   * @param transportRouting - Per-pool alias routing for the target serial
-   * @param transportRestartRegistry - Marks serials whose adbd this client restarts
+   * @param dependencies - optional collaborators (spawn, retry, timer, registries); see {@link AdbClientDependencies}
    */
   constructor(
     device: BootedDevice | null = null,
@@ -239,19 +240,26 @@ export class AdbClient implements AdbExecutor {
       | ((command: string, maxBuffer?: number) => Promise<ExecResult>)
       | ExecFileAsync
       | null = null,
-    spawnFn: SpawnFn | null = null,
-    retryExecutor: RetryExecutor = defaultRetryExecutor,
-    timer: Timer = defaultTimer,
-    private readonly systemDetectionFactory: () => SystemDetection = () =>
-      new DefaultSystemDetection(),
-    private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
-    private readonly consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
-    private readonly defaultTimeoutMs: number = AdbClient.DEFAULT_COMMAND_TIMEOUT_MS,
-    hostProcessExecutor: HostProcessExecutor = adbHostProcessExecutor,
-    private readonly transportRouting?: AndroidTransportRouting,
-    private readonly transportRestartRegistry?: AdbTransportRestartRegistry,
-    private readonly nativeHelperRegistry?: NativeHelperTracker,
+    dependencies: AdbClientDependencies = {},
   ) {
+    const {
+      spawnFn = null,
+      retryExecutor = defaultRetryExecutor,
+      timer = defaultTimer,
+      consoleBusyRegistry,
+      hostProcessExecutor = adbHostProcessExecutor,
+      transportRouting,
+      transportRestartRegistry,
+      nativeHelperRegistry,
+    } = dependencies;
+    const settings = resolveAdbClientSettings(dependencies);
+    this.systemDetectionFactory = settings.systemDetectionFactory;
+    this.observationSequence = settings.observationSequence;
+    this.consoleBusyRegistry = consoleBusyRegistry;
+    this.defaultTimeoutMs = settings.defaultTimeoutMs;
+    this.transportRouting = transportRouting;
+    this.transportRestartRegistry = transportRestartRegistry;
+    this.nativeHelperRegistry = nativeHelperRegistry;
     this.device = device;
     this.hostProcessExecutor = hostProcessExecutor;
     // Test mode if: custom execAsync provided OR global test mode flag is set

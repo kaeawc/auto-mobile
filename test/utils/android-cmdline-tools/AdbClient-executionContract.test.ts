@@ -32,10 +32,10 @@ function ok(stdout: string): ExecResult {
   };
 }
 
-function autoRetrySeam(): [DefaultRetryExecutor, FakeTimer] {
+function autoRetrySeam(): { retryExecutor: DefaultRetryExecutor; timer: FakeTimer } {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  return [new DefaultRetryExecutor(timer), timer];
+  return { retryExecutor: new DefaultRetryExecutor(timer), timer };
 }
 
 describe("AdbClient constructor test execution selection", () => {
@@ -50,9 +50,9 @@ describe("AdbClient constructor test execution selection", () => {
           process.env.AUTOMOBILE_TEST_MODE = value;
         }
         const expected = value !== undefined && value !== "" && value !== "false" && value !== "0";
-        const client = new AdbClient(null, null, null, ...autoRetrySeam());
+        const client = new AdbClient(null, null, autoRetrySeam());
         expect(Reflect.get(client, "isTestMode")).toBe(expected);
-        const injected = new AdbClient(null, async () => ok("injected"), null, ...autoRetrySeam());
+        const injected = new AdbClient(null, async () => ok("injected"), autoRetrySeam());
         expect(Reflect.get(injected, "isTestMode")).toBe(true);
       } finally {
         if (previous === undefined) {
@@ -68,7 +68,7 @@ describe("AdbClient constructor test execution selection", () => {
     const previous = process.env.AUTOMOBILE_TEST_MODE;
     try {
       process.env.AUTOMOBILE_TEST_MODE = "true";
-      const client = new AdbClient(null, null, null, ...autoRetrySeam());
+      const client = new AdbClient(null, null, autoRetrySeam());
       const result = await client.execAsync("unused", []);
       expect(result.stdout).toBe("");
       expect(result.stderr).toBe("");
@@ -94,8 +94,7 @@ describe("AdbClient retry contract", () => {
         events.push("dispatch");
         return ok("");
       },
-      null,
-      ...autoRetrySeam(),
+      autoRetrySeam(),
     );
     const internals = client as unknown as {
       getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
@@ -124,8 +123,7 @@ describe("AdbClient retry contract", () => {
         dispatches += 1;
         return ok("");
       },
-      null,
-      ...autoRetrySeam(),
+      autoRetrySeam(),
     );
 
     await expect(
@@ -148,8 +146,7 @@ describe("AdbClient retry contract", () => {
         calls += 1;
         throw new Error("error: unauthorized");
       },
-      null,
-      ...autoRetrySeam(),
+      autoRetrySeam(),
     );
 
     await expect(client.executeCommand("shell dumpsys window")).rejects.toThrow("unauthorized");
@@ -168,8 +165,7 @@ describe("AdbClient retry contract", () => {
           stdout: "app reported status offline",
         });
       },
-      null,
-      ...autoRetrySeam(),
+      autoRetrySeam(),
     );
 
     await expect(client.executeCommand("shell dumpsys window")).rejects.toThrow("offline");
@@ -188,8 +184,7 @@ describe("AdbClient retry contract", () => {
         calls += 1;
         throw new Error(message);
       },
-      null,
-      ...autoRetrySeam(),
+      autoRetrySeam(),
     );
 
     await expect(client.executeCommand("install app.apk")).rejects.toThrow(message);
@@ -205,7 +200,7 @@ describe("AdbClient retry contract", () => {
       }
       return Promise.resolve(ok("recovered"));
     };
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
 
     const result = await client.executeCommand("shell echo hi");
 
@@ -219,7 +214,7 @@ describe("AdbClient retry contract", () => {
       calls += 1;
       return Promise.reject(new Error("adb transient blip"));
     };
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
 
     await expect(client.executeCommand("shell echo hi")).rejects.toThrow("adb transient blip");
     // MAX_ADB_RETRIES = 3, so the initial attempt plus 3 retries == 4 executions.
@@ -234,7 +229,10 @@ describe("AdbClient retry contract", () => {
       calls += 1;
       return Promise.reject(new Error("error: device offline"));
     };
-    const client = new AdbClient(DEVICE, exec, null, new DefaultRetryExecutor(timer), timer);
+    const client = new AdbClient(DEVICE, exec, {
+      retryExecutor: new DefaultRetryExecutor(timer),
+      timer,
+    });
 
     await expect(client.executeCommand("shell echo hi")).rejects.toThrow("offline");
     expect(calls).toBe(4);
@@ -252,8 +250,7 @@ describe("AdbClient retry contract", () => {
           calls += 1;
           throw new Error("error: device offline");
         },
-        null,
-        ...autoRetrySeam(),
+        autoRetrySeam(),
       );
 
       await expect(client.executeCommand(command)).rejects.toThrow("offline");
@@ -444,8 +441,7 @@ describe("AdbClient retry contract", () => {
           calls += 1;
           throw new Error("error: device offline");
         },
-        null,
-        ...autoRetrySeam(),
+        autoRetrySeam(),
       );
 
       await expect(client.executeCommand(command)).rejects.toThrow("offline");
@@ -463,9 +459,7 @@ describe("AdbClient retry contract", () => {
         calls += 1;
         throw new Error("error: closed");
       },
-      null,
-      new DefaultRetryExecutor(timer),
-      timer,
+      { retryExecutor: new DefaultRetryExecutor(timer), timer },
     );
 
     await expect(
@@ -485,9 +479,7 @@ describe("AdbClient retry contract", () => {
         calls += 1;
         throw new Error("error: closed");
       },
-      null,
-      new DefaultRetryExecutor(timer),
-      timer,
+      { retryExecutor: new DefaultRetryExecutor(timer), timer },
     );
 
     await expect(
@@ -511,9 +503,7 @@ describe("AdbClient retry contract", () => {
         }
         return ok("recovered");
       },
-      null,
-      new DefaultRetryExecutor(timer),
-      timer,
+      { retryExecutor: new DefaultRetryExecutor(timer), timer },
     );
 
     expect((await client.executeCommand("shell echo hi")).stdout).toBe("recovered");
@@ -531,9 +521,7 @@ describe("AdbClient retry contract", () => {
         dispatches += 1;
         throw new Error("unknown command");
       },
-      null,
-      new DefaultRetryExecutor(timer),
-      timer,
+      { retryExecutor: new DefaultRetryExecutor(timer), timer },
     );
 
     await expect(client.executeCommand("shell echo hi")).rejects.toThrow("unknown command");
@@ -551,9 +539,7 @@ describe("AdbClient retry contract", () => {
         dispatches += 1;
         throw new AdbCommandTimeoutError("Command timed out after 5000ms: adb shell getprop");
       },
-      null,
-      new DefaultRetryExecutor(timer),
-      timer,
+      { retryExecutor: new DefaultRetryExecutor(timer), timer },
     );
 
     await expect(client.executeCommand("shell getprop")).rejects.toThrow(
@@ -573,8 +559,7 @@ describe("AdbClient retry contract", () => {
         dispatches += 1;
         throw new Error("error: device offline");
       },
-      null,
-      ...autoRetrySeam(),
+      autoRetrySeam(),
     );
 
     await expect(client.executeCommand("shell input tap 10 20")).rejects.toThrow("offline");
@@ -598,8 +583,7 @@ describe("AdbClient retry contract", () => {
         calls += 1;
         throw new Error("error: closed");
       },
-      null,
-      ...autoRetrySeam(),
+      autoRetrySeam(),
     );
 
     await expect(client.executeCommand(command)).rejects.toThrow("error: closed");
@@ -614,8 +598,7 @@ describe("AdbClient retry contract", () => {
         calls += 1;
         throw new Error("error: closed");
       },
-      null,
-      ...autoRetrySeam(),
+      autoRetrySeam(),
     );
 
     await expect(client.executeCommand("shell monkey -p 'com.example' --user 0 1")).rejects.toThrow(
@@ -634,8 +617,7 @@ describe("AdbClient retry contract", () => {
         calls += 1;
         throw wrapCommandError(new Error("error: closed"), { command: "adb", args: [command] });
       },
-      null,
-      ...autoRetrySeam(),
+      autoRetrySeam(),
     );
 
     await expect(client.executeCommand(command)).rejects.toThrow("error: closed");
@@ -650,8 +632,7 @@ describe("AdbClient retry contract", () => {
         calls += 1;
         throw new Error("protocol fault");
       },
-      null,
-      ...autoRetrySeam(),
+      autoRetrySeam(),
     );
 
     await expect(client.execute(["shell", "input", "tap", "10", "20"])).rejects.toThrow(
@@ -673,8 +654,7 @@ describe("AdbClient retry contract", () => {
           }
           return ok("recovered");
         },
-        null,
-        ...autoRetrySeam(),
+        autoRetrySeam(),
       );
 
       const result = await client.executeCommand("shell input tap 10 20");
@@ -694,8 +674,7 @@ describe("AdbClient retry contract", () => {
         }
         return ok("1");
       },
-      null,
-      ...autoRetrySeam(),
+      autoRetrySeam(),
     );
 
     const result = await client.executeCommand("shell getprop sys.boot_completed");
@@ -711,8 +690,7 @@ describe("AdbClient retry contract", () => {
         calls += 1;
         throw new Error("cannot connect to daemon: device not found");
       },
-      null,
-      ...autoRetrySeam(),
+      autoRetrySeam(),
     );
 
     await expect(client.executeCommand("shell input tap 10 20")).rejects.toThrow(
@@ -735,11 +713,7 @@ describe("AdbClient missing-device notifications", () => {
         dispatched.resolve();
         return await rejection.promise;
       },
-      null,
-      ...autoRetrySeam(),
-      undefined,
-      undefined,
-      busyRegistry,
+      { ...autoRetrySeam(), consoleBusyRegistry: busyRegistry },
     );
 
     try {
@@ -757,11 +731,7 @@ describe("AdbClient missing-device notifications", () => {
         async () => {
           throw new Error("adb: device 'emulator-5554' not found");
         },
-        null,
-        ...autoRetrySeam(),
-        undefined,
-        undefined,
-        busyRegistry,
+        { ...autoRetrySeam(), consoleBusyRegistry: busyRegistry },
       );
       await expect(
         idleClient.executeCommand("shell getprop sys.boot_completed", { noRetry: true }),
@@ -781,11 +751,7 @@ describe("AdbClient missing-device notifications", () => {
       async () => {
         throw new Error("adb: device 'emulator-5554' not found");
       },
-      null,
-      ...autoRetrySeam(),
-      undefined,
-      undefined,
-      busyRegistry,
+      { ...autoRetrySeam(), consoleBusyRegistry: busyRegistry },
     );
 
     try {
@@ -809,11 +775,7 @@ describe("AdbClient missing-device notifications", () => {
       async () => {
         throw new Error("adb: device 'emulator-5554' not found");
       },
-      null,
-      ...autoRetrySeam(),
-      undefined,
-      undefined,
-      busyRegistry,
+      { ...autoRetrySeam(), consoleBusyRegistry: busyRegistry },
     );
 
     try {
@@ -838,11 +800,7 @@ describe("AdbClient missing-device notifications", () => {
         dispatched.resolve();
         return await rejection.promise;
       },
-      null,
-      ...autoRetrySeam(),
-      undefined,
-      undefined,
-      busyRegistry,
+      { ...autoRetrySeam(), consoleBusyRegistry: busyRegistry },
     );
 
     try {
@@ -868,7 +826,7 @@ describe("AdbClient abort-reason preservation", () => {
   test("preserves a device-disconnected abort reason", async () => {
     const controller = new AbortController();
     controller.abort(new Error("device-disconnected:emulator-5554"));
-    const client = new AdbClient(DEVICE, alwaysThrows, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, alwaysThrows, autoRetrySeam());
 
     await expect(
       client.executeCommand("shell echo hi", { noRetry: true, signal: controller.signal }),
@@ -878,7 +836,7 @@ describe("AdbClient abort-reason preservation", () => {
   test("falls back to the generic cancellation message for a non-disconnect reason", async () => {
     const controller = new AbortController();
     controller.abort(new Error("some unrelated reason"));
-    const client = new AdbClient(DEVICE, alwaysThrows, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, alwaysThrows, autoRetrySeam());
 
     await expect(
       client.executeCommand("shell echo hi", { noRetry: true, signal: controller.signal }),
@@ -888,7 +846,7 @@ describe("AdbClient abort-reason preservation", () => {
   test("uses the generic cancellation message when aborted without a reason", async () => {
     const controller = new AbortController();
     controller.abort();
-    const client = new AdbClient(DEVICE, alwaysThrows, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, alwaysThrows, autoRetrySeam());
 
     await expect(
       client.executeCommand("shell echo hi", { noRetry: true, signal: controller.signal }),
@@ -907,7 +865,7 @@ describe("AdbClient.getAndroidApiLevel caching", () => {
       }
       return Promise.resolve(ok("34"));
     };
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
 
     expect(await client.getAndroidApiLevel()).toBe(34);
     expect(await client.getAndroidApiLevel()).toBe(34);
@@ -923,7 +881,7 @@ describe("AdbClient.getAndroidApiLevel caching", () => {
       }
       return Promise.resolve(ok(""));
     };
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
 
     expect(await client.getAndroidApiLevel()).toBeNull();
     expect(await client.getAndroidApiLevel()).toBeNull();
@@ -939,7 +897,7 @@ describe("AdbClient.getAndroidApiLevel caching", () => {
       }
       return Promise.resolve(ok("30"));
     };
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
 
     expect(await client.getAndroidApiLevel()).toBe(30);
     client.setDevice({ ...DEVICE, deviceId: "emulator-5556" });
@@ -956,7 +914,7 @@ describe("AdbClient.getDeviceTimestampMs three-tier fallback", () => {
       }
       return Promise.resolve(ok(""));
     };
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
 
     expect(await client.getDeviceTimestampMs()).toBe(1700000000123);
     expect(await client.getDeviceTimestampMsWithSource()).toEqual({
@@ -975,7 +933,7 @@ describe("AdbClient.getDeviceTimestampMs three-tier fallback", () => {
       }
       return Promise.resolve(ok(""));
     };
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
 
     expect(await client.getDeviceTimestampMs()).toBe(1700000000000);
     expect(await client.getDeviceTimestampMsWithSource()).toEqual({
@@ -994,7 +952,7 @@ describe("AdbClient.getDeviceTimestampMs three-tier fallback", () => {
       }
       return Promise.resolve(ok(""));
     };
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
 
     // The *1000 scaling is the whole point of the seconds tier.
     expect(await client.getDeviceTimestampMs()).toBe(1700000000000);
@@ -1012,7 +970,10 @@ describe("AdbClient.getDeviceTimestampMs three-tier fallback", () => {
       }
       return Promise.resolve(ok(""));
     };
-    const client = new AdbClient(DEVICE, exec, null, new DefaultRetryExecutor(timer), timer);
+    const client = new AdbClient(DEVICE, exec, {
+      retryExecutor: new DefaultRetryExecutor(timer),
+      timer,
+    });
 
     expect(await client.getDeviceTimestampMsWithSource()).toEqual({
       timestampMs: 1_650_000_000_000,
@@ -1025,7 +986,10 @@ describe("AdbClient.getDeviceTimestampMs three-tier fallback", () => {
     timer.setCurrentTime(1_650_000_000_000);
     const exec = (): Promise<ExecResult> => Promise.reject(new Error("device offline"));
     timer.enableAutoAdvance();
-    const client = new AdbClient(DEVICE, exec, null, new DefaultRetryExecutor(timer), timer);
+    const client = new AdbClient(DEVICE, exec, {
+      retryExecutor: new DefaultRetryExecutor(timer),
+      timer,
+    });
 
     expect(await client.getDeviceTimestampMs()).toBe(1_650_000_000_000);
     expect(await client.getDeviceTimestampMsWithSource()).toEqual({
@@ -1062,14 +1026,14 @@ describe("AdbClient argv construction (parseCommandArgs)", () => {
     { command: "install '/tmp/my \"app.apk'", expected: ["install", '/tmp/my "app.apk'] },
   ])("preserves tolerant tokenization for $command", async ({ command, expected }) => {
     const { argvs, exec } = recorder();
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
     await client.executeCommand(command);
     expect(argvs).toEqual([["-s", "emulator-5554", ...expected]]);
   });
 
   test("preserves platform-specific escapes and drops a trailing escape only on POSIX", async () => {
     const { argvs, exec } = recorder();
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
     await client.executeCommand("push local\\.txt /sdcard/remote.txt\\");
     await client.executeCommand("push 'local\\.txt' /sdcard/remote.txt");
     expect(argvs).toEqual([
@@ -1086,7 +1050,7 @@ describe("AdbClient argv construction (parseCommandArgs)", () => {
 
   test("prefixes the target serial with -s and keeps a quoted shell command as one argument", async () => {
     const { argvs, exec } = recorder();
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
 
     await client.executeCommand('shell "pm list packages | grep foo"');
 
@@ -1095,7 +1059,7 @@ describe("AdbClient argv construction (parseCommandArgs)", () => {
 
   test("keeps a single-quoted shell payload intact including the pipe", async () => {
     const { argvs, exec } = recorder();
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
 
     await client.executeCommand("shell 'echo a | cat'");
 
@@ -1104,7 +1068,7 @@ describe("AdbClient argv construction (parseCommandArgs)", () => {
 
   test("preserves spaces inside a double-quoted argument for a non-shell command", async () => {
     const { argvs, exec } = recorder();
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
 
     await client.executeCommand('install "/tmp/my app.apk"');
 
@@ -1113,7 +1077,7 @@ describe("AdbClient argv construction (parseCommandArgs)", () => {
 
   test("splits an unquoted command into separate argv tokens", async () => {
     const { argvs, exec } = recorder();
-    const client = new AdbClient(DEVICE, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(DEVICE, exec, autoRetrySeam());
 
     await client.executeCommand("push local.txt /sdcard/remote.txt");
 
@@ -1122,7 +1086,7 @@ describe("AdbClient argv construction (parseCommandArgs)", () => {
 
   test("omits the -s prefix when no device is targeted", async () => {
     const { argvs, exec } = recorder();
-    const client = new AdbClient(null, exec, null, ...autoRetrySeam());
+    const client = new AdbClient(null, exec, autoRetrySeam());
 
     await client.executeCommand("devices");
 
@@ -1146,15 +1110,11 @@ describe("AdbClient alias missing-device attribution", () => {
           expect(args.slice(0, 2)).toEqual(["-s", "localhost:5555"]);
           throw new Error("adb: device 'localhost:5555' not found");
         },
-        null,
-        new DefaultRetryExecutor(timer),
-        timer,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { resolveTransport: () => "localhost:5555" },
+        {
+          retryExecutor: new DefaultRetryExecutor(timer),
+          timer,
+          transportRouting: { resolveTransport: () => "localhost:5555" },
+        },
       );
       try {
         await expect(
@@ -1192,7 +1152,7 @@ describe("AdbClient logLabel redaction", () => {
         spyOn(logger, level).mockImplementation(() => {}),
       );
       try {
-        const client = new AdbClient(DEVICE, failingExec, null, ...autoRetrySeam());
+        const client = new AdbClient(DEVICE, failingExec, autoRetrySeam());
         const error = await client
           .execute(["shell", secret], { noRetry, logLabel: "<password key event>" })
           .then(

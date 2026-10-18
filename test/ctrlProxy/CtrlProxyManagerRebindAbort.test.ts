@@ -76,7 +76,10 @@ function createHarness(handler: Handler = () => undefined) {
     }
     return execResult("");
   };
-  const adb = new AdbClient(testDevice, exec, null, new DefaultRetryExecutor(timer), timer);
+  const adb = new AdbClient(testDevice, exec, {
+    retryExecutor: new DefaultRetryExecutor(timer),
+    timer,
+  });
   const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, timer);
   return { manager, executed, timer };
 }

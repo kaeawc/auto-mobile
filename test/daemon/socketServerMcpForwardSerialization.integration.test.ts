@@ -436,9 +436,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
           }
           return adbDeviceListResult("emulator-5556");
         },
-        null,
-        undefined,
-        inventoryTimer,
+        { timer: inventoryTimer },
       );
       const emulator = {
         getBootedDevicesChecked: async (

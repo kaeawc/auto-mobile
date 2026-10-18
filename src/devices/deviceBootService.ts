@@ -1606,27 +1606,25 @@ export class DeviceBootService {
     try {
       await this.reportProgress(context, progress, 60, "Device started, waiting for readiness...");
       const ready = await this.runPhase(context, "waiting for device boot readiness", () =>
-        waitForDeviceReadyOrCancel(
-          this.dependencies.deviceManager,
-          image,
-          handle,
-          this.remaining(context, "waiting for device boot readiness"),
-          context.signal,
-          this.timer,
-          async () => {
+        waitForDeviceReadyOrCancel(this.dependencies.deviceManager, image, handle, {
+          timeoutMs: this.remaining(context, "waiting for device boot readiness"),
+          signal: context.signal,
+          timer: this.timer,
+          cancelOwnedBoot: async () => {
             await awaitCleanup();
           },
-          () => this.timeoutError(context, "waiting for device boot readiness"),
+          createTimeoutError: () => this.timeoutError(context, "waiting for device boot readiness"),
           // A freshly-provisioned Android AVD's first boot is a genuine cold
           // boot; opt it into bounded ADB-offline recovery (#7054). Fresh state
           // arrives either from this call site (`provisioned`) or from the
           // request when a just-created device is booted by serial through
           // `bootKnownDevice` (`context.freshProvision`). A cold boot of a
           // pre-existing AVD keeps the wait-out behavior, as does any iOS boot.
-          image.platform === "android" && (provisioned || context.freshProvision === true)
-            ? { freshProvision: true }
-            : undefined,
-        ),
+          readinessOptions:
+            image.platform === "android" && (provisioned || context.freshProvision === true)
+              ? { freshProvision: true }
+              : undefined,
+        }),
       );
       await this.reportProgress(context, progress, 100, "Device is ready for use");
       return {

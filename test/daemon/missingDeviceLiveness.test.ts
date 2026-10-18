@@ -177,8 +177,8 @@ describe("MissingDeviceLiveness", () => {
         includes: (searchString: string) => stdout.includes(searchString),
       };
     };
-    const livenessAdb = new AdbClient(null, exec, null, undefined, h.timer);
-    const normalAdb = new AdbClient(null, exec, null, undefined, h.timer);
+    const livenessAdb = new AdbClient(null, exec, { timer: h.timer });
+    const normalAdb = new AdbClient(null, exec, { timer: h.timer });
     h.port.getDeviceManager = () =>
       ({
         getBootedDevicesDetailed: async (_platform, options) => {

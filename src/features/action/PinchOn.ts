@@ -304,8 +304,7 @@ export class PinchOn extends BaseVisualChange {
         searchCriteria,
         this.visionConfig,
         finalErrorMessage,
-        undefined,
-        this.visionAnalyzer,
+        { visionAnalyzer: this.visionAnalyzer },
       );
     }
 

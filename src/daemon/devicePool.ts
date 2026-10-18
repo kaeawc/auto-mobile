@@ -1756,15 +1756,12 @@ export class DevicePool {
         timer,
         cancelOwnedBoot,
       ) =>
-        waitForDeviceReadyOrCancel(
-          this.deviceManager,
-          device,
-          childProcess,
+        waitForDeviceReadyOrCancel(this.deviceManager, device, childProcess, {
           timeoutMs,
           signal,
           timer,
           cancelOwnedBoot,
-        ),
+        }),
     });
   }
 

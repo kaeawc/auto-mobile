@@ -194,18 +194,11 @@ describe("InputText.execute", () => {
           child,
           result: childResult.promise,
         });
-        const adb = new AdbClient(
-          androidDevice,
-          null,
-          null,
-          new DefaultRetryExecutor(fakeTimer),
-          fakeTimer,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          host,
-        );
+        const adb = new AdbClient(androidDevice, null, {
+          retryExecutor: new DefaultRetryExecutor(fakeTimer),
+          timer: fakeTimer,
+          hostProcessExecutor: host,
+        });
         // Exercise real cancellation/settlement without SDK lookup or a real process.
         const internals = adb as unknown as {
           isTestMode: boolean;

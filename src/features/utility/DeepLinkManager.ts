@@ -1,4 +1,5 @@
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
+import type { DeepLinkManagerDependencies } from "./DeepLinkManagerDependencies";
 import { getAbortSignal } from "../../utils/AbortContext";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -288,6 +289,9 @@ export class DeepLinkManager implements DeepLinkManager {
   private simctl: Pick<SimCtlClient, "executeCommandArgs">;
   private hostExec: HostExec;
   private plist: PlistReader;
+  private readonly chooserMetadata: ChooserAppMetadata | undefined;
+  private readonly timer: Timer;
+  private readonly chooserSignal: AbortSignal | undefined;
   private appBundleMetadata: AppBundleMetadata;
 
   private configureAdb(
@@ -312,23 +316,19 @@ export class DeepLinkManager implements DeepLinkManager {
   constructor(
     device: BootedDevice | null = null,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
-    simctl: Pick<SimCtlClient, "executeCommandArgs"> | null = null,
-    hostExec: HostExec | null = null,
-    plist: PlistReader = new PlistClient(),
-    appBundleMetadata: AppBundleMetadata = new AppBundleMetadataClient(),
-    private readonly chooserMetadata?: ChooserAppMetadata,
-    private readonly timer: Timer = defaultTimer,
-    // HandleIntentChooser creates a manager per execution; never share a request signal across calls.
-    private readonly chooserSignal?: AbortSignal,
+    dependencies: DeepLinkManagerDependencies = {},
   ) {
+    this.chooserMetadata = dependencies.chooserMetadata;
+    this.timer = dependencies.timer ?? defaultTimer;
+    this.chooserSignal = dependencies.chooserSignal;
     const adb = this.configureAdb(device, adbFactoryOrExecutor);
     this.adbFactory = adb.factory;
     this.adbUtils = adb.executor;
     this.device = device;
-    this.simctl = simctl ?? new SimCtlClient(device);
-    this.hostExec = hostExec ?? defaultHostExec;
-    this.plist = plist;
-    this.appBundleMetadata = appBundleMetadata;
+    this.simctl = dependencies.simctl ?? new SimCtlClient(device);
+    this.hostExec = dependencies.hostExec ?? defaultHostExec;
+    this.plist = dependencies.plist ?? new PlistClient();
+    this.appBundleMetadata = dependencies.appBundleMetadata ?? new AppBundleMetadataClient();
     this.parser = new DefaultElementParser();
     this.geometry = new DefaultElementGeometry();
   }

@@ -656,9 +656,7 @@ test("passes the dumpsys bound through fake exec and parses input_method above 1
       dumpsysReads += 1;
       return createExecResult(stdout, "");
     },
-    null,
-    new DefaultRetryExecutor(timer),
-    timer,
+    { retryExecutor: new DefaultRetryExecutor(timer), timer },
   );
   expect(
     await new AndroidImeCatalog(adb, "large-ime-dump", pinnedUser(0)).readSubtype(primaryIme),

@@ -2232,16 +2232,17 @@ export class DeviceReadiness implements DeviceReadiness {
           this.deviceUtils,
           deviceImage,
           childProcess,
-          undefined,
-          signal,
-          this.runnerReadinessTimer,
-          processTracker
-            ? async () =>
-                await waitForExit(processTracker.process, processTracker.exitPromise, {
-                  signal: "SIGTERM",
-                  timer: this.runnerReadinessTimer,
-                })
-            : undefined,
+          {
+            signal,
+            timer: this.runnerReadinessTimer,
+            cancelOwnedBoot: processTracker
+              ? async () =>
+                  await waitForExit(processTracker.process, processTracker.exitPromise, {
+                    signal: "SIGTERM",
+                    timer: this.runnerReadinessTimer,
+                  })
+              : undefined,
+          },
         );
         perf.endOperation("waitForReady");
 

@@ -34,17 +34,7 @@ describe("SimCtlClient.getBootedSimulatorsChecked observation stamps", () => {
       }
       return createExecResult("", "");
     };
-    const simctl = new Simctl(
-      null,
-      exec,
-      timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      sequence,
-    );
+    const simctl = new Simctl(null, exec, { timer, observationSequence: sequence });
 
     const [cold] = await simctl.getBootedSimulatorsChecked();
     // Unrelated evidence observed after the listing advances the sequence.

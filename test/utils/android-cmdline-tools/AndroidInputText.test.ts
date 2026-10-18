@@ -488,9 +488,7 @@ describe("tracked Android input text", () => {
           cmd: args.join(" "),
         });
       },
-      null,
-      defaultRetryExecutor,
-      timer,
+      { retryExecutor: defaultRetryExecutor, timer },
     );
     try {
       const result = await executeAndroidInputText(

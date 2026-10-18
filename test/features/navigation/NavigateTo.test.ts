@@ -110,14 +110,12 @@ describe("NavigateTo", () => {
           await fakeGraph.recordNavigationEvent({ destination, timestamp });
         }
         navigationMap.set("Settings", "SettingsScreen");
-        navigateTo = new NavigateTo(
-          device,
-          fakeAdbFactory,
-          { setupUIState: async () => [], setupScrollPosition: async () => null },
-          { waitForScreen: async () => true },
-          fakeGraph,
-          new FakeTimer(),
-        );
+        navigateTo = new NavigateTo(device, fakeAdbFactory, {
+          uiStateSetup: { setupUIState: async () => [], setupScrollPosition: async () => null },
+          screenWaiter: { waitForScreen: async () => true },
+          navigationManager: fakeGraph,
+          timer: new FakeTimer(),
+        });
         const call = spyOn(ToolRegistry, "callInternal");
         try {
           const result = await navigateTo.execute({
@@ -151,7 +149,7 @@ describe("NavigateTo", () => {
     }
 
     test("creates the default UI-state setup after resolving an options session", async () => {
-      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
+      navigateTo = new NavigateTo(device, fakeAdbFactory, { navigationManager: fakeGraph });
 
       await navigateTo.execute({
         targetScreen: "HomeScreen",
@@ -169,7 +167,7 @@ describe("NavigateTo", () => {
 
     test("should return error when no current screen", async () => {
       // Inject fakeGraph via constructor
-      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
+      navigateTo = new NavigateTo(device, fakeAdbFactory, { navigationManager: fakeGraph });
 
       const result = await navigateTo.execute({
         targetScreen: "TargetScreen",
@@ -192,7 +190,7 @@ describe("NavigateTo", () => {
       });
 
       // Inject fakeGraph via constructor
-      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
+      navigateTo = new NavigateTo(device, fakeAdbFactory, { navigationManager: fakeGraph });
 
       const result = await navigateTo.execute({
         targetScreen: "HomeScreen",
@@ -215,7 +213,7 @@ describe("NavigateTo", () => {
       });
 
       // Inject fakeGraph via constructor
-      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
+      navigateTo = new NavigateTo(device, fakeAdbFactory, { navigationManager: fakeGraph });
 
       const result = await navigateTo.execute({
         targetScreen: "UnknownScreen",
@@ -266,7 +264,7 @@ describe("NavigateTo", () => {
       });
 
       // Inject fakeGraph via constructor
-      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
+      navigateTo = new NavigateTo(device, fakeAdbFactory, { navigationManager: fakeGraph });
 
       await navigateTo.execute({
         targetScreen: "SettingsScreen",
@@ -312,7 +310,7 @@ describe("NavigateTo", () => {
       });
 
       // Inject fakeGraph via constructor
-      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
+      navigateTo = new NavigateTo(device, fakeAdbFactory, { navigationManager: fakeGraph });
 
       const result = await navigateTo.execute({
         targetScreen: "ProfileScreen",
@@ -358,7 +356,7 @@ describe("NavigateTo", () => {
       });
 
       // Inject fakeGraph via constructor
-      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
+      navigateTo = new NavigateTo(device, fakeAdbFactory, { navigationManager: fakeGraph });
 
       await navigateTo.execute(
         { targetScreen: "Screen2", platform: "android" },
@@ -384,7 +382,7 @@ describe("NavigateTo", () => {
       });
 
       // Inject fakeGraph via constructor
-      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
+      navigateTo = new NavigateTo(device, fakeAdbFactory, { navigationManager: fakeGraph });
 
       const result = await navigateTo.execute({
         targetScreen: "HomeScreen",
@@ -431,7 +429,11 @@ describe("NavigateTo", () => {
       };
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
-      navigateTo = new NavigateTo(device, fakeAdbFactory, null, screenWaiter, fakeGraph, fakeTimer);
+      navigateTo = new NavigateTo(device, fakeAdbFactory, {
+        screenWaiter,
+        navigationManager: fakeGraph,
+        timer: fakeTimer,
+      });
 
       try {
         const result = await navigateTo.execute({
@@ -492,14 +494,11 @@ describe("NavigateTo", () => {
       };
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
-      navigateTo = new NavigateTo(
-        iOSDevice,
-        fakeAdbFactory,
-        null,
+      navigateTo = new NavigateTo(iOSDevice, fakeAdbFactory, {
         screenWaiter,
-        fakeGraph,
-        fakeTimer,
-      );
+        navigationManager: fakeGraph,
+        timer: fakeTimer,
+      });
 
       const result = await navigateTo.execute({ targetScreen: "HomeScreen", platform: "ios" });
 
@@ -546,15 +545,12 @@ describe("NavigateTo", () => {
         success: false,
         error: "back unavailable",
       }));
-      navigateTo = new NavigateTo(
-        iOSDevice,
-        fakeAdbFactory,
-        null,
-        {
+      navigateTo = new NavigateTo(iOSDevice, fakeAdbFactory, {
+        screenWaiter: {
           waitForScreen: async () => true,
         },
-        fakeGraph,
-      );
+        navigationManager: fakeGraph,
+      });
 
       const result = await navigateTo.execute({ targetScreen: "HomeScreen", platform: "ios" });
 
@@ -608,17 +604,13 @@ describe("NavigateTo", () => {
     test("reports failure and current screen when the final edge is not reached", async () => {
       setPath([toolEdge("HomeScreen", "TargetScreen")]);
       const progressMessages: string[] = [];
-      navigateTo = new NavigateTo(
-        device,
-        fakeAdbFactory,
-        { setupUIState: async () => [], setupScrollPosition: async () => null },
-        { waitForScreen: async () => false },
-        fakeGraph,
-        new FakeTimer(),
-        undefined,
-        undefined,
-        () => ({ execute: async () => ({}) }),
-      );
+      navigateTo = new NavigateTo(device, fakeAdbFactory, {
+        uiStateSetup: { setupUIState: async () => [], setupScrollPosition: async () => null },
+        screenWaiter: { waitForScreen: async () => false },
+        navigationManager: fakeGraph,
+        timer: new FakeTimer(),
+        foregroundObserverProvider: () => ({ execute: async () => ({}) }),
+      });
 
       const result = await navigateTo.execute(
         { targetScreen: "TargetScreen", platform: "android" },
@@ -644,17 +636,12 @@ describe("NavigateTo", () => {
       const realSleepSpy = spyOn(defaultTimer, "sleep").mockImplementation(async () => {
         throw new Error("Unexpected real timer sleep");
       });
-      navigateTo = new NavigateTo(
-        device,
-        fakeAdbFactory,
-        { setupUIState: async () => [], setupScrollPosition: async () => null },
-        null,
-        fakeGraph,
+      navigateTo = new NavigateTo(device, fakeAdbFactory, {
+        uiStateSetup: { setupUIState: async () => [], setupScrollPosition: async () => null },
+        navigationManager: fakeGraph,
         timer,
-        undefined,
-        undefined,
-        () => ({ execute: async () => ({}) }),
-      );
+        foregroundObserverProvider: () => ({ execute: async () => ({}) }),
+      });
       let settled = false;
       const execution = navigateTo
         .execute({ targetScreen: "TargetScreen", platform: "android" })
@@ -691,14 +678,12 @@ describe("NavigateTo", () => {
       "does not claim arrival when the path does not end at the requested target: %j",
       async ({ path }) => {
         setPath(path);
-        navigateTo = new NavigateTo(
-          device,
-          fakeAdbFactory,
-          { setupUIState: async () => [], setupScrollPosition: async () => null },
-          { waitForScreen: async () => true },
-          fakeGraph,
-          new FakeTimer(),
-        );
+        navigateTo = new NavigateTo(device, fakeAdbFactory, {
+          uiStateSetup: { setupUIState: async () => [], setupScrollPosition: async () => null },
+          screenWaiter: { waitForScreen: async () => true },
+          navigationManager: fakeGraph,
+          timer: new FakeTimer(),
+        });
 
         const result = await navigateTo.execute({
           targetScreen: "TargetScreen",
@@ -717,11 +702,9 @@ describe("NavigateTo", () => {
         toolEdge("IntermediateScreen", "TargetScreen"),
       ]);
       const waitedScreens: string[] = [];
-      navigateTo = new NavigateTo(
-        device,
-        fakeAdbFactory,
-        { setupUIState: async () => [], setupScrollPosition: async () => null },
-        {
+      navigateTo = new NavigateTo(device, fakeAdbFactory, {
+        uiStateSetup: { setupUIState: async () => [], setupScrollPosition: async () => null },
+        screenWaiter: {
           waitForScreen: async (screen) => {
             waitedScreens.push(screen);
             if (screen === "TargetScreen") {
@@ -731,12 +714,10 @@ describe("NavigateTo", () => {
             return false;
           },
         },
-        fakeGraph,
-        new FakeTimer(),
-        undefined,
-        undefined,
-        () => ({ execute: async () => ({}) }),
-      );
+        navigationManager: fakeGraph,
+        timer: new FakeTimer(),
+        foregroundObserverProvider: () => ({ execute: async () => ({}) }),
+      });
 
       const result = await navigateTo.execute({
         targetScreen: "TargetScreen",
@@ -771,7 +752,7 @@ describe("NavigateTo", () => {
 
       // startTime = 0, first in-loop check = 40_000 (> MAX_TIMEOUT_MS 30_000).
       const timer = new ScriptedTimer([0, 40_000]);
-      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph, timer);
+      navigateTo = new NavigateTo(device, fakeAdbFactory, { navigationManager: fakeGraph, timer });
 
       const result = await navigateTo.execute({
         targetScreen: "TargetScreen",
@@ -813,17 +794,12 @@ describe("NavigateTo", () => {
 
       // startTime = 0, in-loop timeout check = 100 (no timeout), catch durationMs = 31_000.
       const timer = new ScriptedTimer([0, 100, 31_000]);
-      navigateTo = new NavigateTo(
-        device,
-        fakeAdbFactory,
-        throwingUiStateSetup,
-        null,
-        fakeGraph,
+      navigateTo = new NavigateTo(device, fakeAdbFactory, {
+        uiStateSetup: throwingUiStateSetup,
+        navigationManager: fakeGraph,
         timer,
-        undefined,
-        undefined,
-        () => ({ execute: async () => ({}) }),
-      );
+        foregroundObserverProvider: () => ({ execute: async () => ({}) }),
+      });
 
       const result = await navigateTo.execute({
         targetScreen: "TargetScreen",
@@ -861,17 +837,12 @@ describe("NavigateTo", () => {
       });
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      navigateTo = new NavigateTo(
-        device,
-        fakeAdbFactory,
-        null,
-        { waitForScreen: async () => true },
-        fakeGraph,
+      navigateTo = new NavigateTo(device, fakeAdbFactory, {
+        screenWaiter: { waitForScreen: async () => true },
+        navigationManager: fakeGraph,
         timer,
-        undefined,
-        undefined,
-        () => ({ execute: async () => ({}) }),
-      );
+        foregroundObserverProvider: () => ({ execute: async () => ({}) }),
+      });
 
       const result = await navigateTo.execute({
         targetScreen: "TargetScreen",
@@ -905,7 +876,11 @@ describe("NavigateTo", () => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       ToolRegistry.register("pressButton", "Fake back tool", {}, async () => ({ success: true }));
-      navigateTo = new NavigateTo(device, fakeAdbFactory, null, screenWaiter, fakeGraph, timer);
+      navigateTo = new NavigateTo(device, fakeAdbFactory, {
+        screenWaiter,
+        navigationManager: fakeGraph,
+        timer,
+      });
 
       const result = await navigateTo.execute({
         targetScreen: "TargetScreen",
@@ -968,7 +943,7 @@ describe("NavigateTo", () => {
       });
 
       // Inject fakeGraph via constructor
-      navigateTo = new NavigateTo(device, fakeAdbFactory, null, null, fakeGraph);
+      navigateTo = new NavigateTo(device, fakeAdbFactory, { navigationManager: fakeGraph });
 
       await navigateTo.execute({
         targetScreen: "AdvancedScreen",

@@ -14,18 +14,11 @@ export class DefaultAdbClientFactory implements AdbClientFactory {
   constructor(private readonly transportRouting?: AndroidTransportRouting) {}
 
   create(device?: BootedDevice | null, retryExecutor?: RetryExecutor): AdbExecutor {
-    return new AdbClient(
-      device ?? null,
-      null,
-      null,
+    return new AdbClient(device ?? null, null, {
       retryExecutor,
-      undefined,
-      undefined,
-      undefined,
-      defaultEmulatorConsoleBusyRegistry,
-      undefined,
-      undefined,
-      this.transportRouting ?? daemonDeviceAdmissionGate.getAndroidTransportRouting?.(),
-    );
+      consoleBusyRegistry: defaultEmulatorConsoleBusyRegistry,
+      transportRouting:
+        this.transportRouting ?? daemonDeviceAdmissionGate.getAndroidTransportRouting?.(),
+    });
   }
 }

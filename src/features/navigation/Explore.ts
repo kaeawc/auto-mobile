@@ -448,10 +448,8 @@ export class Explore extends BaseVisualChange {
         markEdgeTraversed(
           this.graphTraversalState,
           edge,
-          null,
-          false,
+          { actualTo: null, success: false, error: "Back press failed" },
           this.timer,
-          "Back press failed",
         );
       }
       return false;
@@ -510,7 +508,6 @@ export class Explore extends BaseVisualChange {
       this.device,
       this.adb,
       this.elementParser,
-      (p) => this.handleDeadEnd(p, undefined, signal),
       progress,
       this.blockerHandlerDeps(),
     );
@@ -1010,10 +1007,8 @@ export class Explore extends BaseVisualChange {
         markEdgeTraversed(
           state,
           targetEdge,
-          null,
-          false,
+          { actualTo: null, success: false, error: "Element not found on screen" },
           this.timer,
-          "Element not found on screen",
         );
         return null;
       }

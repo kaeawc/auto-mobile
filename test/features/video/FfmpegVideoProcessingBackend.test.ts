@@ -85,13 +85,11 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
 
   beforeEach(function () {
     probeCalls = 0;
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      undefined,
-      availableFfmpegClient(() => {
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      ffmpegClient: availableFfmpegClient(() => {
         probeCalls += 1;
       }),
-    );
+    });
 
     mockDevice = {
       platform: "android",
@@ -123,21 +121,15 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       const removed: string[] = [];
-      backend = new FfmpegVideoProcessingBackend(
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
+      backend = new FfmpegVideoProcessingBackend(undefined, {
         timer,
-        {
+        captureFileRemover: {
           remove: async (filePath) => {
             removed.push(filePath);
           },
         },
-        undefined,
-        { size: async () => size },
-      );
+        recordingFileProbe: { size: async () => size },
+      });
       const captureTracker = createProcessTracker();
       captureTracker.process.exitCode = 0;
       captureTracker.exitState.exitCode = 0;
@@ -188,20 +180,15 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
           throw cause;
         },
       };
-      backend = new FfmpegVideoProcessingBackend(
-        undefined,
-        undefined,
-        undefined,
-        undefined,
+      backend = new FfmpegVideoProcessingBackend(undefined, {
         codecProbe,
         timer,
-        {
+        captureFileRemover: {
           remove: async (filePath) => {
             removed.push(filePath);
           },
         },
-        undefined,
-        {
+        recordingFileProbe: {
           size: async (filePath) => {
             if (failure === "file probe" && filePath === rawPath) {
               throw new Error("stat failed");
@@ -209,7 +196,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
             return 4096;
           },
         },
-      );
+      });
       const captureTracker = createProcessTracker();
       captureTracker.process.exitCode = 0;
       captureTracker.exitPromise = Promise.resolve();
@@ -274,25 +261,22 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       removed.push(String(filePath));
     });
     try {
-      backend = new FfmpegVideoProcessingBackend(
-        undefined,
-        undefined,
+      backend = new FfmpegVideoProcessingBackend(undefined, {
         ffmpegClient,
-        () => "linux",
-        {
+        platformProvider: () => "linux",
+        codecProbe: {
           codec: async () => {
             throw cause;
           },
         },
         timer,
-        {
+        captureFileRemover: {
           remove: async (filePath) => {
             removed.push(filePath);
           },
         },
-        undefined,
-        { size: async () => 4096 },
-      );
+        recordingFileProbe: { size: async () => 4096 },
+      });
       const captureTracker = createProcessTracker();
       captureTracker.process.exitCode = 0;
       captureTracker.exitPromise = Promise.resolve();
@@ -328,19 +312,14 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const removed: string[] = [];
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
       timer,
-      {
+      captureFileRemover: {
         remove: async (filePath) => {
           removed.push(filePath);
         },
       },
-    );
+    });
     const error = await backend
       .stop({
         recordingId: mockConfig.recordingId,
@@ -362,14 +341,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
   test("terminal post-processing failure with no capture path has no raw file to keep", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      timer,
-    );
+    backend = new FfmpegVideoProcessingBackend(undefined, { timer });
     const captureTracker = createProcessTracker();
     captureTracker.process.exitCode = 0;
     captureTracker.exitPromise = Promise.resolve();
@@ -409,14 +381,11 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         return child;
       },
     } as SimCtl;
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
-      availableFfmpegClient(),
-      undefined,
-      undefined,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
       timer,
-    );
+    });
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-recording-udid" };
 
     const handle = await backend.start(mockConfig);
@@ -494,21 +463,17 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         throw new Error("not used");
       },
     } satisfies FfmpegClient;
-    const recorder = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
-      ffmpeg,
-      undefined,
-      undefined,
+    const recorder = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: ffmpeg,
       timer,
-      undefined,
-      async () => {
+      liveScreenPixels: async () => {
         if (probeFails) {
           throw new Error("hierarchy unavailable");
         }
         return live;
       },
-    );
+    });
     await recorder.start({
       ...mockConfig,
       device: { ...mockDevice, platform: "ios", deviceId: "duo-udid" },
@@ -575,14 +540,11 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       },
     } as unknown as SimCtl;
 
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
-      availableFfmpegClient(),
-      undefined,
-      undefined,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
       timer,
-    );
+    });
     backend.iosRecordingStartTimeoutMs = 25;
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-retry-udid" };
 
@@ -650,15 +612,12 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       },
     };
 
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
-      availableFfmpegClient(),
-      undefined,
-      undefined,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
       timer,
-      remover,
-    );
+      captureFileRemover: remover,
+    });
     backend.iosRecordingStartTimeoutMs = 25;
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-stale-capture-udid" };
 
@@ -712,15 +671,12 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       remove: async () => {},
     };
 
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
-      availableFfmpegClient(),
-      undefined,
-      undefined,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
       timer,
-      remover,
-    );
+      captureFileRemover: remover,
+    });
     backend.iosRecordingStartTimeoutMs = 25;
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-unique-path-udid" };
 
@@ -748,7 +704,10 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         return child;
       },
     } as unknown as SimCtl;
-    backend = new FfmpegVideoProcessingBackend(undefined, () => simctl, availableFfmpegClient());
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
+    });
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-abort-udid" };
     mockConfig.abortSignal = controller.signal;
 
@@ -773,11 +732,9 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       },
     } as unknown as AdbExecutor;
     const controller = new AbortController();
-    backend = new FfmpegVideoProcessingBackend(
-      new FakeAdbClientFactory(adb),
-      undefined,
-      availableFfmpegClient(),
-    );
+    backend = new FfmpegVideoProcessingBackend(new FakeAdbClientFactory(adb), {
+      ffmpegClient: availableFfmpegClient(),
+    });
     mockConfig.device = { ...mockDevice, platform: "android", deviceId: "android-abort-serial" };
     mockConfig.abortSignal = controller.signal;
 
@@ -803,14 +760,11 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       executeCommandArgs: async () => diagnosticsExecResult("iPhone 17 Pro (udid) (Shutdown)"),
     } as unknown as SimCtl;
 
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
-      availableFfmpegClient(),
-      undefined,
-      undefined,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
       timer,
-    );
+    });
     backend.iosRecordingStartTimeoutMs = 25;
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-wedge-udid" };
 
@@ -869,14 +823,11 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       executeCommandArgs: async () => diagnosticsExecResult("iPhone 17 Pro (udid) (Booted)"),
     } as unknown as SimCtl;
 
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
-      availableFfmpegClient(),
-      undefined,
-      undefined,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
       timer,
-    );
+    });
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-loaded-host-udid" };
 
     const handle = await backend.start(mockConfig);
@@ -899,14 +850,11 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       },
     } as unknown as SimCtl;
 
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
-      availableFfmpegClient(),
-      undefined,
-      undefined,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
       timer,
-    );
+    });
     backend.iosRecordingStartTimeoutMs = 25;
     backend.iosRecordingStartMaxAttempts = 1;
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-slow-probe-udid" };
@@ -950,14 +898,11 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         });
       },
     } as unknown as SimCtl;
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
-      availableFfmpegClient(),
-      undefined,
-      undefined,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
       timer,
-    );
+    });
     backend.iosRecordingStartTimeoutMs = 25;
     backend.iosRecordingStartMaxAttempts = 1;
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-diagnostic-abort-udid" };
@@ -985,14 +930,11 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       },
     } as unknown as SimCtl;
 
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
-      availableFfmpegClient(),
-      undefined,
-      undefined,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
       timer,
-    );
+    });
     backend.iosRecordingStartTimeoutMs = 25;
     backend.iosRecordingStartMaxAttempts = 1;
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-missing-udid" };
@@ -1022,14 +964,11 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       },
     } as unknown as SimCtl;
 
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
-      availableFfmpegClient(),
-      undefined,
-      undefined,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
       timer,
-    );
+    });
     backend.iosRecordingStartTimeoutMs = 2000;
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-probe-budget-udid" };
 
@@ -1068,14 +1007,11 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       startCommandArgs: async () => child,
       executeCommandArgs: async () => diagnosticsExecResult("Booted"),
     } as unknown as SimCtl;
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
-      availableFfmpegClient(),
-      undefined,
-      undefined,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
       timer,
-    );
+    });
     backend.iosRecordingStartMaxAttempts = 1;
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-slow-udid" };
 
@@ -1123,14 +1059,11 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       startCommandArgs: async () => child,
       executeCommandArgs: async () => diagnosticsExecResult("Booted"),
     } as unknown as SimCtl;
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
-      availableFfmpegClient(),
-      undefined,
-      undefined,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
+      ffmpegClient: availableFfmpegClient(),
       timer,
-    );
+    });
     backend.iosRecordingStartMaxAttempts = 1;
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-unreaped-udid" };
 
@@ -1162,14 +1095,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         probeSignal?.addEventListener("abort", abort, { once: true });
       });
     });
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      undefined,
-      ffmpegClient,
-      undefined,
-      undefined,
-      timer,
-    );
+    backend = new FfmpegVideoProcessingBackend(undefined, { ffmpegClient, timer });
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-probe-udid" };
 
     const starting = backend.start(mockConfig);
@@ -1207,14 +1133,11 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       },
     } as unknown as SimCtl;
     const ffmpegClient = probeOnlyFfmpegClient(async () => ({ version: "7.1", encoders: [] }));
-    backend = new FfmpegVideoProcessingBackend(
-      undefined,
-      () => simctl,
+    backend = new FfmpegVideoProcessingBackend(undefined, {
+      simctlFactory: () => simctl,
       ffmpegClient,
-      undefined,
-      undefined,
       timer,
-    );
+    });
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-simctl-udid" };
 
     const starting = backend.start(mockConfig);
@@ -1236,12 +1159,10 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       probeCalls++;
       return { version: "7.1", encoders: ["h264_videotoolbox"] };
     });
-    const scoped = new FfmpegVideoProcessingBackend(
-      undefined,
-      undefined,
+    const scoped = new FfmpegVideoProcessingBackend(undefined, {
       ffmpegClient,
-      () => "darwin",
-    );
+      platformProvider: () => "darwin",
+    });
 
     await scoped.ensureFfmpegAvailable();
     await scoped.detectHardwareAccel();
@@ -1255,14 +1176,12 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     // stubbed in beforeEach to advertise all three hardware encoders, so each
     // platform selects its own preferred encoder.
     function backendForPlatform(os: NodeJS.Platform): FfmpegVideoProcessingBackend {
-      return new FfmpegVideoProcessingBackend(
-        undefined,
-        undefined,
-        availableFfmpegClient(() => {
+      return new FfmpegVideoProcessingBackend(undefined, {
+        ffmpegClient: availableFfmpegClient(() => {
           probeCalls += 1;
         }),
-        () => os,
-      );
+        platformProvider: () => os,
+      });
     }
 
     test.each([
@@ -1552,14 +1471,12 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
 
   describe("Encoder Listing", function () {
     test("should list available encoders", async function () {
-      const darwin = new FfmpegVideoProcessingBackend(
-        undefined,
-        undefined,
-        availableFfmpegClient(() => {
+      const darwin = new FfmpegVideoProcessingBackend(undefined, {
+        ffmpegClient: availableFfmpegClient(() => {
           probeCalls += 1;
         }),
-        () => "darwin",
-      );
+        platformProvider: () => "darwin",
+      });
       const hwAccel = await darwin.detectHardwareAccel();
       expect(hwAccel.available).toBe(true);
       expect(probeCalls).toBe(1);

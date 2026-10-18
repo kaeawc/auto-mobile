@@ -1,4 +1,8 @@
 import { buildSimctlArgs } from "./simctlArgs";
+import {
+  resolveSimCtlObservationSequence,
+  type SimCtlClientDependencies,
+} from "./SimCtlClientDependencies";
 import { parseSimctlDeviceList } from "./simctlDeviceList";
 import { parseSimctlRuntimes } from "./simctlRuntimes";
 import { detectImageMimeType } from "../screenshot/imageHeaderDimensions";
@@ -22,10 +26,7 @@ import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } fro
 import { DeviceAlreadyRunningError } from "../../models/DeviceAlreadyRunningError";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
-import {
-  defaultDiscoveryObservationSequence,
-  type DiscoveryObservationSequence,
-} from "../DiscoveryObservationSequence";
+import type { DiscoveryObservationSequence } from "../DiscoveryObservationSequence";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import {
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
@@ -705,6 +706,8 @@ export class SimCtlClient implements SimCtl {
   ) => Promise<ExecResult>;
   private timer: Timer;
   private platform: NodeJS.Platform;
+  private readonly plist: PlistReader;
+  private readonly observationSequence: DiscoveryObservationSequence;
   private readonly spawnProcess: (
     command: string,
     args: string[],
@@ -768,7 +771,7 @@ export class SimCtlClient implements SimCtl {
    * Create an IosUtils instance
    * @param device - Optional device
    * @param execAsyncFn - promisified exec function (for testing)
-   * @param timer - Timer for delays and time tracking
+   * @param dependencies - optional collaborators; see {@link SimCtlClientDependencies}
    */
   constructor(
     device: BootedDevice | null = null,
@@ -781,21 +784,20 @@ export class SimCtlClient implements SimCtl {
           env?: NodeJS.ProcessEnv,
         ) => Promise<ExecResult>)
       | null = null,
-    timer: Timer = defaultTimer,
-    platform: NodeJS.Platform = process.platform,
-    spawnProcess: (
-      command: string,
-      args: string[],
-      options?: SpawnOptions,
-    ) => ChildProcess = defaultSpawnProcess,
-    fileSystem: SimCtlFileSystem = defaultSimCtlFileSystem,
-    bootOptions: SimCtlBootOptions = DEFAULT_SIMCTL_BOOT_OPTIONS,
-    private readonly plist: PlistReader = new PlistClient(),
-    private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
-    deviceTypeProfiles?: SimulatorDeviceTypeProfileSource,
-    simulatorAppPresenter?: SimulatorAppPresenter,
-    idGenerator?: IdGenerator,
+    dependencies: SimCtlClientDependencies = {},
   ) {
+    const {
+      timer = defaultTimer,
+      platform = process.platform,
+      spawnProcess = defaultSpawnProcess,
+      fileSystem = defaultSimCtlFileSystem,
+      bootOptions = DEFAULT_SIMCTL_BOOT_OPTIONS,
+      deviceTypeProfiles,
+      simulatorAppPresenter,
+      idGenerator,
+    } = dependencies;
+    this.plist = dependencies.plist ?? new PlistClient();
+    this.observationSequence = resolveSimCtlObservationSequence(dependencies);
     this.device = device;
     this.execAsync = execAsyncFn || execAsync;
     this.timer = timer;

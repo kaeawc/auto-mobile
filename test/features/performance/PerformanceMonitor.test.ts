@@ -164,16 +164,12 @@ describe("PerformanceMonitor", () => {
   it("fences an in-flight device generation and clears retained restore state", () => {
     const buffer = new PerfWindowBuffer();
     const frames = new SdkFrameMetricsStore();
-    monitor = new PerformanceMonitor(
-      fakeTimer,
-      fakeAdbFactory,
+    monitor = new PerformanceMonitor(fakeTimer, {
+      adbClientFactory: fakeAdbFactory,
       serverGetter,
-      undefined,
-      undefined,
-      undefined,
-      buffer,
-      frames,
-    );
+      perfWindowBuffer: buffer,
+      frameMetricsStore: frames,
+    });
     monitor.startMonitoring("emulator-5554", "com.example.app");
     buffer.record("emulator-5554", {
       t: 100,
@@ -202,14 +198,20 @@ describe("PerformanceMonitor", () => {
 
   describe("start() and stop()", () => {
     it("should start the monitoring interval", () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
 
       expect(fakeTimer.getPendingIntervalCount()).toBe(1);
     });
 
     it("should not start multiple intervals if called twice", () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.start();
 
@@ -217,7 +219,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should stop the monitoring interval", () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.stop();
 
@@ -225,7 +230,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should clear monitored devices on stop", () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.startMonitoring("device-1", "com.example.app");
       expect(monitor.getMonitoredDeviceCount()).toBe(1);
 
@@ -236,7 +244,10 @@ describe("PerformanceMonitor", () => {
 
   describe("startMonitoring() and stopMonitoring()", () => {
     it("should add device to monitored set", () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.startMonitoring("device-1", "com.example.app");
 
       expect(monitor.isMonitoring("device-1")).toBe(true);
@@ -244,7 +255,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should update package name for existing device", () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.startMonitoring("device-1", "com.example.app1");
       monitor.startMonitoring("device-1", "com.example.app2");
 
@@ -253,7 +267,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should remove device from monitored set", () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.startMonitoring("device-1", "com.example.app");
       monitor.stopMonitoring("device-1");
 
@@ -262,14 +279,20 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should handle stopping non-monitored device", () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.stopMonitoring("non-existent");
 
       expect(monitor.getMonitoredDeviceCount()).toBe(0);
     });
 
     it("should support multiple devices", () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.startMonitoring("device-1", "com.example.app1");
       monitor.startMonitoring("device-2", "com.example.app2");
 
@@ -282,7 +305,10 @@ describe("PerformanceMonitor", () => {
   describe("tick behavior", () => {
     it("should not push data when no server is available", async () => {
       const nullServerGetter = () => null;
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, nullServerGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter: nullServerGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -292,7 +318,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should not push data when no devices are monitored", async () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
 
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
@@ -301,7 +330,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should push data every tick interval", async () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -319,7 +351,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should include correct device and package info in pushed data", async () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("test-device", "com.example.app");
 
@@ -332,7 +367,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("drops an overlapping tick while a prior tick is still in flight", async () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -352,11 +390,10 @@ describe("PerformanceMonitor", () => {
 
     it("aborts and drains device sampling before a foreground operation starts", async () => {
       const abortableAdb = new AbortableSamplingAdbClient();
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        new FakeAdbClientFactory(abortableAdb),
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: new FakeAdbClientFactory(abortableAdb),
         serverGetter,
-      );
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
       fakeTimer.advanceTime(PerformanceMonitor.TICK_INTERVAL_MS);
@@ -387,7 +424,10 @@ describe("PerformanceMonitor", () => {
 
   describe("tiered metric collection", () => {
     it("should collect fast metrics (gfxinfo) every tick", async () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -403,7 +443,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("bounds every Android background sampling command", async () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -419,7 +462,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should collect CPU metrics only at medium intervals", async () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -459,7 +505,10 @@ describe("PerformanceMonitor", () => {
         "1002.00 801.00\n",
       ]);
 
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -482,7 +531,10 @@ describe("PerformanceMonitor", () => {
         "1002.00 801.00\n",
       ]);
 
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -497,7 +549,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should collect memory metrics only at slow intervals", async () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -520,7 +575,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should use cached values for medium/slow metrics between intervals", async () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -539,7 +597,10 @@ describe("PerformanceMonitor", () => {
   describe("metric parsing", () => {
     it("should parse FPS from frame time", async () => {
       // 8.5ms frame time = ~117 fps, capped at 60
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -553,7 +614,10 @@ describe("PerformanceMonitor", () => {
     it("should calculate jank frames as sum of per-interval counters", async () => {
       // With reset flag, each sample returns only jank since last reset
       // Jank is the sum of all three indicators per interval
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -582,7 +646,10 @@ describe("PerformanceMonitor", () => {
 
     it("should parse memory in MB", async () => {
       // TOTAL PSS: 102400 KB = 100 MB
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -598,7 +665,10 @@ describe("PerformanceMonitor", () => {
         "No data available",
       );
 
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -623,7 +693,10 @@ describe("PerformanceMonitor", () => {
         `,
       );
 
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -638,7 +711,10 @@ describe("PerformanceMonitor", () => {
     it("should handle missing PID gracefully", async () => {
       fakeAdbClient.setCommandResult("shell pidof 'com.example.app'", "");
 
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -654,7 +730,10 @@ describe("PerformanceMonitor", () => {
         new Error("ADB connection failed"),
       );
 
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -668,7 +747,10 @@ describe("PerformanceMonitor", () => {
 
   describe("health calculation", () => {
     it("should include health status in pushed data", async () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -680,7 +762,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should include thresholds in pushed data", async () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -722,7 +807,10 @@ describe("PerformanceMonitor", () => {
         "TOTAL PSS: 60000",
       );
 
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.app1");
       monitor.startMonitoring("device-2", "com.app2");
@@ -745,15 +833,11 @@ describe("PerformanceMonitor", () => {
   describe("windowed buffer tap", () => {
     it("records each Android sample into the injected PerfWindowBuffer", async () => {
       const buffer = new PerfWindowBuffer();
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        undefined,
-        buffer,
-      );
+        perfWindowBuffer: buffer,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -781,15 +865,11 @@ describe("PerformanceMonitor", () => {
 
     it("primes gfxinfo while preserving non-gfx metrics from the first tick", async () => {
       const buffer = new PerfWindowBuffer();
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        undefined,
-        buffer,
-      );
+        perfWindowBuffer: buffer,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -811,15 +891,11 @@ describe("PerformanceMonitor", () => {
 
     it("primes the first gfxinfo sample without recording cumulative frame metrics", async () => {
       const buffer = new PerfWindowBuffer();
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        undefined,
-        buffer,
-      );
+        perfWindowBuffer: buffer,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -839,15 +915,11 @@ describe("PerformanceMonitor", () => {
       const buffer = new PerfWindowBuffer();
       const gfxinfoCommand = "shell dumpsys gfxinfo 'com.example.app' reset";
       fakeAdbClient.setCommandError(gfxinfoCommand, new Error("temporary ADB failure"));
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        undefined,
-        buffer,
-      );
+        perfWindowBuffer: buffer,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -877,15 +949,11 @@ describe("PerformanceMonitor", () => {
           Frame deadline missed: 3
         `,
       );
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        undefined,
-        buffer,
-      );
+        perfWindowBuffer: buffer,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 2);
@@ -912,7 +980,10 @@ describe("PerformanceMonitor", () => {
           Frame deadline missed: 3
         `,
       );
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
@@ -922,7 +993,10 @@ describe("PerformanceMonitor", () => {
 
     it("falls back to summing causes when no aggregate Janky frames line exists", async () => {
       // Default fixture has the three cause counters (2+1+3) and no aggregate.
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
@@ -932,15 +1006,11 @@ describe("PerformanceMonitor", () => {
 
     it("clears the buffer when the monitored package changes", async () => {
       const buffer = new PerfWindowBuffer();
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        undefined,
-        buffer,
-      );
+        perfWindowBuffer: buffer,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 2);
@@ -956,15 +1026,11 @@ describe("PerformanceMonitor", () => {
 
     it("clears the buffer when monitoring stops", async () => {
       const buffer = new PerfWindowBuffer();
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        undefined,
-        buffer,
-      );
+        perfWindowBuffer: buffer,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 2);
@@ -987,16 +1053,12 @@ describe("PerformanceMonitor", () => {
         jankFrames: 3,
         receivedAt: 0,
       });
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        undefined,
-        buffer,
-        sdkStore,
-      );
+        perfWindowBuffer: buffer,
+        frameMetricsStore: sdkStore,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -1018,16 +1080,12 @@ describe("PerformanceMonitor", () => {
         jankFrames: 3,
         receivedAt: -3000,
       });
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        undefined,
-        buffer,
-        sdkStore,
-      );
+        perfWindowBuffer: buffer,
+        frameMetricsStore: sdkStore,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -1040,16 +1098,12 @@ describe("PerformanceMonitor", () => {
     it("re-primes the first dumpsys sample after an SDK interval", async () => {
       const buffer = new PerfWindowBuffer();
       const sdkStore = new SdkFrameMetricsStore();
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        undefined,
-        buffer,
-        sdkStore,
-      );
+        perfWindowBuffer: buffer,
+        frameMetricsStore: sdkStore,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -1077,15 +1131,11 @@ describe("PerformanceMonitor", () => {
       const buffer = new PerfWindowBuffer();
       const gfxCommand = "shell dumpsys gfxinfo 'com.example.app' reset";
       fakeAdbClient.setCommandError(gfxCommand, new Error("ADB connection failed"));
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        undefined,
-        buffer,
-      );
+        perfWindowBuffer: buffer,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -1122,15 +1172,11 @@ describe("PerformanceMonitor", () => {
         { stdout: "Total frames rendered: 0\n" },
         { stdout: "Total frames rendered: 0\n" },
       ]);
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        undefined,
-        buffer,
-      );
+        perfWindowBuffer: buffer,
+      });
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 5);
@@ -1332,13 +1378,12 @@ root       1  0.0  0.0   407056   1632   ??  Ss   Mon09AM   0:01.23 /sbin/launch
 ${iosSimPsLine({ pid: 12345, cpu: 15.5, rssKb: 89012, deviceId: "ios-device-1", bundleId: "com.example.iosapp" })}`,
     });
 
-    monitor = new PerformanceMonitor(
-      fakeTimer,
-      fakeAdbFactory,
+    monitor = new PerformanceMonitor(fakeTimer, {
+      adbClientFactory: fakeAdbFactory,
       serverGetter,
-      fakeSimCtlFactory,
-      fakeExec,
-    );
+      simCtlClientFactory: fakeSimCtlFactory,
+      execFileAsync: fakeExec,
+    });
     monitor.start();
     monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
 
@@ -1358,13 +1403,12 @@ ${iosSimPsLine({ pid: 12345, cpu: 15.5, rssKb: 89012, deviceId: "ios-device-1", 
 ${iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", bundleId: "com.example.iosapp" })}`,
     });
 
-    monitor = new PerformanceMonitor(
-      fakeTimer,
-      fakeAdbFactory,
+    monitor = new PerformanceMonitor(fakeTimer, {
+      adbClientFactory: fakeAdbFactory,
       serverGetter,
-      fakeSimCtlFactory,
-      fakeExec,
-    );
+      simCtlClientFactory: fakeSimCtlFactory,
+      execFileAsync: fakeExec,
+    });
     monitor.start();
     monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
 
@@ -1388,13 +1432,12 @@ ${iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", 
       }),
     });
 
-    monitor = new PerformanceMonitor(
-      fakeTimer,
-      fakeAdbFactory,
+    monitor = new PerformanceMonitor(fakeTimer, {
+      adbClientFactory: fakeAdbFactory,
       serverGetter,
-      fakeSimCtlFactory,
-      fakeExec,
-    );
+      simCtlClientFactory: fakeSimCtlFactory,
+      execFileAsync: fakeExec,
+    });
     monitor.start();
     monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
 
@@ -1430,16 +1473,14 @@ ${iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", 
           },
         );
       }
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        fakeSimCtlFactory,
-        fakeExec,
-        undefined,
-        buffer,
-        store,
-      );
+        simCtlClientFactory: fakeSimCtlFactory,
+        execFileAsync: fakeExec,
+        perfWindowBuffer: buffer,
+        frameMetricsStore: store,
+      });
       monitor.start();
       monitor.startMonitoring(deviceId, bundleId, "ios");
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
@@ -1462,13 +1503,12 @@ ${iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", 
 root       1  0.0  0.0   407056   1632   ??  Ss   Mon09AM   0:01.23 /sbin/launchd`,
     });
 
-    monitor = new PerformanceMonitor(
-      fakeTimer,
-      fakeAdbFactory,
+    monitor = new PerformanceMonitor(fakeTimer, {
+      adbClientFactory: fakeAdbFactory,
       serverGetter,
-      fakeSimCtlFactory,
-      fakeExec,
-    );
+      simCtlClientFactory: fakeSimCtlFactory,
+      execFileAsync: fakeExec,
+    });
     monitor.start();
     monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
 
@@ -1485,13 +1525,12 @@ root       1  0.0  0.0   407056   1632   ??  Ss   Mon09AM   0:01.23 /sbin/launch
       errorToThrow: new Error("Command failed"),
     });
 
-    monitor = new PerformanceMonitor(
-      fakeTimer,
-      fakeAdbFactory,
+    monitor = new PerformanceMonitor(fakeTimer, {
+      adbClientFactory: fakeAdbFactory,
       serverGetter,
-      fakeSimCtlFactory,
-      fakeExec,
-    );
+      simCtlClientFactory: fakeSimCtlFactory,
+      execFileAsync: fakeExec,
+    });
     monitor.start();
     monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
 
@@ -1516,13 +1555,12 @@ ${iosSimPsLine({ pid: 111, cpu: 11.0, rssKb: 51200, deviceId: udidA, bundleId })
 ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId })}`,
     });
 
-    monitor = new PerformanceMonitor(
-      fakeTimer,
-      fakeAdbFactory,
+    monitor = new PerformanceMonitor(fakeTimer, {
+      adbClientFactory: fakeAdbFactory,
       serverGetter,
-      fakeSimCtlFactory,
-      fakeExec,
-    );
+      simCtlClientFactory: fakeSimCtlFactory,
+      execFileAsync: fakeExec,
+    });
     monitor.start();
     monitor.startMonitoring(udidA, bundleId, "ios");
     monitor.startMonitoring(udidB, bundleId, "ios");
@@ -1551,14 +1589,11 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
     });
 
     it("emits baseline telemetry on first sample", async () => {
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        () => fakeTelemetry,
-      );
+        getTelemetryEmitter: () => fakeTelemetry,
+      });
       monitor.startMonitoring("emulator-5554", "com.example.app", "android");
       monitor.start();
 
@@ -1571,14 +1606,11 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
     });
 
     it("does not emit telemetry when health unchanged", async () => {
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        () => fakeTelemetry,
-      );
+        getTelemetryEmitter: () => fakeTelemetry,
+      });
       monitor.startMonitoring("emulator-5554", "com.example.app", "android");
       monitor.start();
 
@@ -1592,14 +1624,11 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
     });
 
     it("emits telemetry when metric crosses threshold", async () => {
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        () => fakeTelemetry,
-      );
+        getTelemetryEmitter: () => fakeTelemetry,
+      });
       monitor.startMonitoring("emulator-5554", "com.example.app", "android");
       monitor.start();
 
@@ -1629,14 +1658,11 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
     });
 
     it("sets deviceId context before emitting", async () => {
-      monitor = new PerformanceMonitor(
-        fakeTimer,
-        fakeAdbFactory,
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
         serverGetter,
-        undefined,
-        undefined,
-        () => fakeTelemetry,
-      );
+        getTelemetryEmitter: () => fakeTelemetry,
+      });
       monitor.startMonitoring("emulator-5554", "com.example.app", "android");
       monitor.start();
 
@@ -1656,7 +1682,10 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
     });
 
     it("clears only the restored device's timing for the same package", () => {
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       const pkg = "com.example.startup.restore";
       setLastTtiMs("device-A", pkg, 100);
       setLastTtiMs("device-B", pkg, 200);
@@ -1677,7 +1706,10 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
       fakeTimer.advanceTime(1);
       expect(getLastStartupTimingMs("device-A", pkg)).toBeNull();
       expect(getLastStartupTimingMs("device-B", pkg)).toEqual({ displayedMs: 200, ageMs: 1 });
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.resetDeviceState("device-A");
       monitor.resetDeviceState("device-B");
     });
@@ -1690,7 +1722,10 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
       expect(startup).not.toBeNull();
       expect(startup!.displayedMs).toBe(742);
       expect(startup!.ageMs).toBe(0);
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
+      monitor = new PerformanceMonitor(fakeTimer, {
+        adbClientFactory: fakeAdbFactory,
+        serverGetter,
+      });
       monitor.resetDeviceState("startup-device");
     });
 

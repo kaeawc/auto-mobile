@@ -55,7 +55,9 @@ describe("waitForDeviceReadyOrCancel", () => {
     const deviceManager = new FakeDeviceUtils();
     const { handle, killed } = spyHandle();
 
-    const ready = await waitForDeviceReadyOrCancel(deviceManager, iosImage, handle, 30_000);
+    const ready = await waitForDeviceReadyOrCancel(deviceManager, iosImage, handle, {
+      timeoutMs: 30_000,
+    });
 
     expect(ready.deviceId).toBe("ABCD-1234");
     expect(killed()).toBe(false);
@@ -68,7 +70,7 @@ describe("waitForDeviceReadyOrCancel", () => {
     const { handle, killed } = spyHandle();
 
     await expect(
-      waitForDeviceReadyOrCancel(deviceManager, iosImage, handle, 30_000),
+      waitForDeviceReadyOrCancel(deviceManager, iosImage, handle, { timeoutMs: 30_000 }),
     ).rejects.toThrow("failed to become ready");
     expect(killed()).toBe(true);
   });
@@ -78,9 +80,11 @@ describe("waitForDeviceReadyOrCancel", () => {
     const failure = new Error("readiness timeout");
     deviceManager.setWaitForDeviceReadyError(failure);
 
-    await expect(waitForDeviceReadyOrCancel(deviceManager, iosImage, null, 30_000)).rejects.toThrow(
-      "readiness timeout",
-    );
+    await expect(
+      waitForDeviceReadyOrCancel(deviceManager, iosImage, null, {
+        timeoutMs: 30_000,
+      }),
+    ).rejects.toThrow("readiness timeout");
   });
 
   it("preserves real Android diagnostics when the wrapper deadline aborts readiness", async () => {
@@ -102,7 +106,7 @@ describe("waitForDeviceReadyOrCancel", () => {
     } as PlatformDeviceManager;
 
     await expect(
-      waitForDeviceReadyOrCancel(deviceManager, androidImage, null, 100, undefined, timer),
+      waitForDeviceReadyOrCancel(deviceManager, androidImage, null, { timeoutMs: 100, timer }),
     ).rejects.toThrow("phase=device-discovery");
   });
 
@@ -124,14 +128,11 @@ describe("waitForDeviceReadyOrCancel", () => {
       };
     };
 
-    const readiness = waitForDeviceReadyOrCancel(
-      deviceManager,
-      iosImage,
-      handle,
-      30_000,
-      controller.signal,
+    const readiness = waitForDeviceReadyOrCancel(deviceManager, iosImage, handle, {
+      timeoutMs: 30_000,
+      signal: controller.signal,
       timer,
-    );
+    });
     void readiness.catch(() => {});
     controller.abort();
 
@@ -157,14 +158,11 @@ describe("waitForDeviceReadyOrCancel", () => {
       };
     };
 
-    const readiness = waitForDeviceReadyOrCancel(
-      deviceManager,
-      iosImage,
-      null,
-      30_000,
-      controller.signal,
+    const readiness = waitForDeviceReadyOrCancel(deviceManager, iosImage, null, {
+      timeoutMs: 30_000,
+      signal: controller.signal,
       timer,
-    );
+    });
     void readiness.catch(() => {});
     controller.abort();
 
@@ -178,14 +176,11 @@ describe("waitForDeviceReadyOrCancel", () => {
     const timer = new FakeTimer();
     deviceManager.waitForDeviceReady = async () => new Promise<never>(() => {});
 
-    const readiness = waitForDeviceReadyOrCancel(
-      deviceManager,
-      iosImage,
-      null,
-      30_000,
-      controller.signal,
+    const readiness = waitForDeviceReadyOrCancel(deviceManager, iosImage, null, {
+      timeoutMs: 30_000,
+      signal: controller.signal,
       timer,
-    );
+    });
     controller.abort("caller cancelled");
 
     await expect(readiness).rejects.toBeInstanceOf(ActionableError);

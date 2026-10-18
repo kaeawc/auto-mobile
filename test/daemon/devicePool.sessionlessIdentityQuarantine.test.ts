@@ -163,9 +163,7 @@ describe("sessionless identity quarantine", () => {
           includes: () => false,
         };
       },
-      null,
-      new DefaultRetryExecutor(timer),
-      timer,
+      { retryExecutor: new DefaultRetryExecutor(timer), timer },
     );
     const factory = new AdmittingAdbClientFactory({ create: () => client });
     await runWithToolSelectionContext(

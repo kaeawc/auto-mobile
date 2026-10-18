@@ -112,6 +112,18 @@ interface NavigationPathResultContext {
   startTime: number;
 }
 
+/** Optional collaborators for {@link NavigateTo}; each defaults to the production implementation. */
+export interface NavigateToDependencies {
+  uiStateSetup?: UIStateSetup | null;
+  screenWaiter?: ScreenTransitionWaiter | null;
+  navigationManager?: NavigationGraphService;
+  timer?: Timer;
+  pathOptimizer?: PathOptimizer;
+  sessionUuid?: string;
+  foregroundObserverProvider?: () => ForegroundObserver;
+  scrollSearcher?: ReplayScrollSearcher;
+}
+
 /**
  * NavigateTo feature class that uses the navigation graph to traverse an app
  * to reach a target screen.
@@ -141,15 +153,18 @@ export class NavigateTo {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    uiStateSetup: UIStateSetup | null = null,
-    screenWaiter: ScreenTransitionWaiter | null = null,
-    navigationManager?: NavigationGraphService,
-    timer: Timer = defaultTimer,
-    pathOptimizer?: PathOptimizer,
-    sessionUuid?: string,
-    foregroundObserverProvider?: () => ForegroundObserver,
-    scrollSearcher?: ReplayScrollSearcher,
+    dependencies: NavigateToDependencies = {},
   ) {
+    const {
+      uiStateSetup = null,
+      screenWaiter = null,
+      navigationManager,
+      timer = defaultTimer,
+      pathOptimizer,
+      sessionUuid,
+      foregroundObserverProvider,
+      scrollSearcher,
+    } = dependencies;
     this.device = device;
     this.adb = adbFactory.create(device);
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();

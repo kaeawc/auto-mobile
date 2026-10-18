@@ -51,18 +51,7 @@ export class FakeAndroidInventoryLoad implements HostProcessExecutor {
   }
 
   adb(device: BootedDevice | null): AdbClient {
-    const client = new AdbClient(
-      device,
-      null,
-      null,
-      undefined,
-      this.timer,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      this,
-    );
+    const client = new AdbClient(device, null, { timer: this.timer, hostProcessExecutor: this });
     // Typed device-list seam: do not invent parser input for the five-device fixture.
     Object.defineProperty(client, "getBaseCommandParts", {
       value: async () => ({ adbPath: "fake-adb", baseArgs: device ? ["-s", device.deviceId] : [] }),

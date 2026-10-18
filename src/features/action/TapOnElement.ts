@@ -1596,8 +1596,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         },
         this.visionConfig,
         baseError,
-        signal,
-        this.visionAnalyzer,
+        { signal, visionAnalyzer: this.visionAnalyzer },
       );
       throw new TapTargetUnavailableError(enrichedMsg, "not-found");
     }

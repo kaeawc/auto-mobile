@@ -1372,9 +1372,7 @@ describe("TerminateApp (shared foreground dumpsys, #9758)", () => {
         }
         return createExecResult("", "");
       },
-      null,
-      undefined,
-      timer,
+      { timer },
     );
     const app = new TerminateApp(device, adb, { timer });
     return { app, commands };

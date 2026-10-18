@@ -4255,9 +4255,8 @@ export class UnixSocketServer {
       // Enforce the same cross-platform type guidance as the MCP-tool path
       // (storageTools.ts) before dispatch, so a platform-incompatible type
       // fails with an actionable error rather than deeper in the client (#5022).
-      validateTypeForPlatform(platform, args.type as KeyValueType);
-      const value = args.value;
-      const type = args.type as KeyValueType;
+      const entry = { key, value: args.value, type: args.type as KeyValueType };
+      validateTypeForPlatform(platform, entry.type);
       ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
         platform,
         device,
@@ -4266,9 +4265,9 @@ export class UnixSocketServer {
         {
           dispatching: () => ideMutation?.dispatching(),
           viaSdk: (onDispatch) =>
-            client.setPreference(appId, fileName, key, value, type, { onDispatch }),
+            client.setPreference(appId, fileName, key, entry.value, entry.type, { onDispatch }),
           viaDirectFile: (adb) =>
-            setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
+            setAndroidKeyValueDirect(adb, device.deviceId, { appId, fileName }, entry),
         },
       ));
     }

@@ -42,9 +42,7 @@ async function adbDevices(timer: FakeTimer, ...serials: string[]): Promise<Boote
   const client = new AdbClient(
     null,
     async (_file: string, _args: string[], _maxBuffer?: number) => createExecResult(stdout, ""),
-    null,
-    new DefaultRetryExecutor(timer),
-    timer,
+    { retryExecutor: new DefaultRetryExecutor(timer), timer },
   );
   return await client.getBootedAndroidDevices({ bypassCache: true });
 }

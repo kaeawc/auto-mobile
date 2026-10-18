@@ -190,9 +190,7 @@ test("launchApp's process reader forwards the bound through fake exec for a larg
       expect(Buffer.byteLength(stdout)).toBeLessThanOrEqual(maxBuffer ?? 1024 * 1024);
       return createExecResult(stdout, "");
     },
-    null,
-    new DefaultRetryExecutor(timer),
-    timer,
+    { retryExecutor: new DefaultRetryExecutor(timer), timer },
   );
   const state = await readAndroidPackageProcesses(adb, "com.example.app", { userId: 0, timer });
   expect(state.isRunning).toBe(true);

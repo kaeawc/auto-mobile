@@ -26,10 +26,12 @@ import {
   assertLifecycleTargetNotHeldByOtherDaemon,
   LIFECYCLE_TOOL_FOREIGN_DAEMON_REMEDY,
   assertLifecycleCallerNotOnForeignBinding,
-  lifecycleRequester,
   resolveRestartStopIdentity,
-  type LifecycleRequester,
 } from "./lifecycleDeviceOwnership";
+import {
+  lifecycleRequester,
+  type LifecycleRequester,
+} from "../features/deviceLifecycle/lifecycleRequester";
 import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
 import {
   commitStoppedRestartHold,

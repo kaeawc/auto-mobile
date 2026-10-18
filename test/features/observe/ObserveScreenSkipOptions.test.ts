@@ -526,7 +526,7 @@ describe("ObserveScreen skipBackStack parameter threading", () => {
   test("collectAllData with skipBackStack=true skips back stack", async () => {
     const result = observeScreen.createBaseResult();
 
-    await observeScreen.collectAllData(result, undefined, undefined, false, 0, undefined, true);
+    await observeScreen.collectAllData(result, { skipBackStack: true });
 
     expect(fakeDeviceStateCollector.backStackCalls).toBe(0);
     expect(result.backStack).toBeUndefined();
@@ -535,7 +535,7 @@ describe("ObserveScreen skipBackStack parameter threading", () => {
   test("collectAllData with skipBackStack=false collects back stack", async () => {
     const result = observeScreen.createBaseResult();
 
-    await observeScreen.collectAllData(result, undefined, undefined, false, 0, undefined, false);
+    await observeScreen.collectAllData(result, { skipBackStack: false });
 
     expect(fakeDeviceStateCollector.backStackCalls).toBe(1);
     expect(result.backStack).toBeDefined();

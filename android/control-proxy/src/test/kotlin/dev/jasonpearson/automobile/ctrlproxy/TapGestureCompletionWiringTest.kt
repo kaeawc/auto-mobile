@@ -80,7 +80,7 @@ class TapGestureCompletionWiringTest {
         maskedServiceSource
           .substring(settled, maskedServiceSource.indexOf("override suspend fun publishHierarchy("))
           .let {
-            "hierarchyDebouncer.extractAfterQuiescenceSuspending(" in it &&
+            "hierarchyController.debouncer.extractAfterQuiescenceSuspending(" in it &&
               "HierarchySnapshotOptions(displayId = displayId)" in it
           },
     )
@@ -88,7 +88,7 @@ class TapGestureCompletionWiringTest {
       "the service must publish the settled hierarchy synchronously",
       Regex(
           "override suspend fun publishHierarchy\\(hierarchy: ViewHierarchy\\)\\s*=\\s*" +
-            "broadcastHierarchyUpdate\\(hierarchy, sync = true\\)",
+            "hierarchyController\\.broadcastHierarchyUpdate\\(hierarchy, sync = true\\)",
         )
         .containsMatchIn(maskedServiceSource),
     )

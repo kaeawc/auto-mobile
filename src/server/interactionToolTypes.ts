@@ -1,4 +1,5 @@
 import type { z } from "zod/v4";
+import type { tapAtSchema } from "./interactionTools";
 import type {
   keyboardTool,
   selectAllTextTool,
@@ -10,7 +11,6 @@ import type {
 } from "./interactionTools";
 import type { SwipeEdge, SwipeOnOptions } from "../models/SwipeOnOptions";
 import type { ElementContainerSelector } from "../models/PinchOnOptions";
-import type { TapAtOptions } from "../models/TapAtOptions";
 import type { DragAndDropTarget } from "../models/DragAndDropOptions";
 import type { HierarchyLayer } from "../models/HierarchyLayer";
 /**
@@ -32,9 +32,8 @@ import type {
 // #6154: `platform` is optional on every one of these tools' wire schemas
 // (resolved from deviceId/session when omitted), so the hand-written arg
 // types below must match it — a typed caller could not otherwise omit it.
-// `TapOnArgs.platform` (below) is left as-is: tapOn's schema has been
-// optional since #5870, predating this pass, and fixing that pre-existing
-// mismatch is out of scope here.
+// `TapOnArgs.platform` is optional too (#11824: the registry now checks handler
+// arguments against the schema output).
 export type SelectAllTextArgs = z.output<typeof selectAllTextTool.schema>;
 
 export type PressButtonArgs = z.output<typeof pressButtonTool.schema>;
@@ -77,7 +76,7 @@ export interface TapOnArgs {
   searchUntil?: {
     duration?: number;
   };
-  platform: Platform;
+  platform?: Platform;
   preTapStability?: boolean;
   retryIfNoChange?: boolean;
   ensureTap?: boolean;
@@ -91,12 +90,11 @@ export interface TapOnArgs {
   project?: "full" | "skeleton";
 }
 
-export type TapAtArgs = TapAtOptions & {
+// The parsed wire schema; its exclusivity refinement (image xor x/y) is narrowed where the
+// options are built.
+export type TapAtArgs = z.output<typeof tapAtSchema> & {
   __tapAtPlanContext?: import("../models/TapAtGeometry").TapAtPlanContext;
   __tapAtRecordingContext?: import("../models/TapAtGeometry").TapAtPlanContext;
-  platform?: Platform;
-  raw?: boolean;
-  project?: "full" | "skeleton";
 };
 
 export interface TapAnyArgs {

@@ -30,22 +30,18 @@ function fixture() {
   const clients = Array.from(
     { length: 2 },
     () =>
-      new AndroidEmulatorClient(
-        async () => {
+      new AndroidEmulatorClient({
+        execAsync: async () => {
           throw new Error("unexpected host command");
         },
-        () => {
+        spawnFn: () => {
           throw new Error("unexpected host spawn");
         },
         timer,
-        new FakeAdbClientFactory(adb),
-        new FakeAvdConfigReader({ deviceName: "pixel", architecture: "x86_64" }),
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        busy,
-      ),
+        adbFactory: new FakeAdbClientFactory(adb),
+        avdConfigReader: new FakeAvdConfigReader({ deviceName: "pixel", architecture: "x86_64" }),
+        consoleBusyRegistry: busy,
+      }),
   );
   const probeCount = () =>
     adb.getExecutedCommands().filter((command) => command === "emu avd name").length;
@@ -201,7 +197,7 @@ describe("read-only connection-keyed AVD name memo", () => {
     const execute = f.adb.executeCommand.bind(f.adb);
     f.adb.executeCommand = async (command, ...args) => {
       if (command === "emu avd name") {
-        const signal = args[3] ?? getAbortSignal();
+        const signal = args[0]?.signal ?? getAbortSignal();
         await f.timer.sleep(25);
         signal?.throwIfAborted();
       }

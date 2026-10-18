@@ -1585,7 +1585,7 @@ export class Rotate extends BaseVisualChange {
     const observationOptions = {
       usesObservationForResolution: false,
       changeExpected: true,
-      timeoutMs: 5000,
+      timeoutMs: SETTLE_BUDGET_MS.lifecycle,
       progress,
       perf,
       signal,

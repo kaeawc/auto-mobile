@@ -1,13 +1,19 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
+import { fakeBindLock, unreachableMcpDispatcher } from "../helpers/createTestUnixSocketServer";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
+import type { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest } from "../../src/daemon/types";
+import type { A11yTapCoordinatesResult } from "../../src/features/observe/android/types";
+import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
+import { UnixSocketServerHarness } from "./helpers/UnixSocketServerHarness";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { ActionableError } from "../../src/models/ActionableError";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { androidDevice, createFakeDeviceManager } from "./helpers/inputSocketHarness";
+import {
+  androidDevice,
+  createFakeDaemonState,
+  createFakeDeviceManager,
+} from "./helpers/inputSocketHarness";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -28,16 +34,42 @@ interface TapCall {
   release: (result: { success: boolean; error?: string }) => void;
 }
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  dispatchFencedInput<T>(
+type DaemonStateArg = ConstructorParameters<typeof UnixSocketServer>[1];
+
+const unexpectedDaemonState = (): never => {
+  throw new Error("Unexpected daemon state access");
+};
+
+/** A daemon that never finished initialising: only input admission is exercised. */
+const uninitializedDaemonState: DaemonStateArg = {
+  isInitialized: () => false,
+  getSessionManager: unexpectedDaemonState,
+  getDevicePool: unexpectedDaemonState,
+  getDeviceSessionRegistry: unexpectedDaemonState,
+};
+
+/** The real server with the fenced-dispatch step exposed for direct calls. */
+class FencedInputServer extends UnixSocketServerHarness {
+  dispatchFenced<T>(
     gesture: "Tap" | "Swipe",
     signal: AbortSignal | undefined,
     timeoutMs: number,
     send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
-  ): Promise<T>;
+  ): Promise<T> {
+    return this.dispatchFencedInput(gesture, signal, timeoutMs, send);
+  }
+}
+
+function createServer(state: DaemonStateArg): FencedInputServer {
+  return new FencedInputServer(
+    "unused",
+    state,
+    timer,
+    null,
+    { mcpDispatcher: unreachableMcpDispatcher },
+    undefined,
+    { bindLock: fakeBindLock },
+  );
 }
 
 const tapFrame = (id: string, x: number): DaemonRequest => ({
@@ -55,7 +87,7 @@ const cancelFrame = (id: string, targetId: string): DaemonRequest => ({
 });
 
 let timer: FakeTimer;
-let internals: Internals;
+let internals: FencedInputServer;
 let taps: TapCall[];
 let allSockets: FakeSocket[];
 
@@ -64,29 +96,29 @@ beforeEach(() => {
   taps = [];
   allSockets = [];
   PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+  spyOnAndroidClientInstance(androidDevice, {
     getScreenScaleMetadata: () => null,
     requestTapCoordinates: (
-      x: number,
-      _y: number,
-      _duration?: number,
-      timeoutMs?: number,
-      _perf?: unknown,
-      _frameContext?: string,
-      _onDispatch?: () => void,
-      signal?: AbortSignal,
+      x,
+      _y,
+      _duration,
+      timeoutMs,
+      _perf,
+      _frameContext,
+      _onDispatch,
+      signal,
     ) =>
-      new Promise<{ success: boolean; error?: string }>((resolve) => {
-        taps.push({ x, timeoutMs, signal, release: resolve });
+      new Promise<A11yTapCoordinatesResult>((resolve) => {
+        taps.push({
+          x,
+          timeoutMs,
+          signal,
+          release: (result) => resolve({ totalTimeMs: 0, ...result }),
+        });
       }),
-  }));
-  const server = createTestUnixSocketServer(
-    "unused",
-    { isInitialized: () => false } as DaemonStateAccess,
-    timer,
-  );
-  internals = server as unknown as Internals;
-  internals.acceptingRequests = true;
+  });
+  internals = createServer(uninitializedDaemonState);
+  internals.allowRequests();
 });
 
 afterEach(() => {
@@ -102,7 +134,7 @@ afterEach(() => {
 function connect(): FakeSocket {
   const socket = new FakeSocket();
   allSockets.push(socket);
-  internals.handleConnection(socket as unknown as Socket);
+  internals.connect(socket);
   return socket;
 }
 
@@ -115,7 +147,7 @@ async function settle(): Promise<void> {
 
 async function drain(): Promise<void> {
   await settle();
-  await Promise.all([...internals.activeRequestHandlers]);
+  await Promise.all([...internals.state.activeRequestHandlers]);
 }
 
 /** Start `holder` on its own socket and wait until it owns the device key mid-dispatch. */
@@ -240,7 +272,7 @@ test("an input/tap waiting on the device key past its budget is refused instead 
 test("an abort after the frame was written is reported as an indeterminate tap", async () => {
   const controller = new AbortController();
   await expect(
-    internals.dispatchFencedInput("Tap", controller.signal, 1000, async (_fenced, onDispatch) => {
+    internals.dispatchFenced("Tap", controller.signal, 1000, async (_fenced, onDispatch) => {
       onDispatch();
       controller.abort();
       throw new Error("Daemon MCP client disconnected");
@@ -252,7 +284,7 @@ test("an abort before the frame was written keeps the original cancellation", as
   const controller = new AbortController();
   const cancelled = new Error("Daemon MCP client disconnected");
   await expect(
-    internals.dispatchFencedInput("Swipe", controller.signal, 1000, async () => {
+    internals.dispatchFenced("Swipe", controller.signal, 1000, async () => {
       controller.abort(cancelled);
       throw cancelled;
     }),
@@ -262,7 +294,7 @@ test("an abort before the frame was written keeps the original cancellation", as
 test("a dispatched swipe that fails without an abort keeps its own error", async () => {
   const failure = new ActionableError("device offline");
   await expect(
-    internals.dispatchFencedInput(
+    internals.dispatchFenced(
       "Swipe",
       new AbortController().signal,
       1000,
@@ -279,7 +311,7 @@ test("auto-advancing time does not expire a tap whose key holder finishes in tim
   let inFlight = 0;
   let maxInFlight = 0;
   let calls = 0;
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+  spyOnAndroidClientInstance(androidDevice, {
     getScreenScaleMetadata: () => null,
     requestTapCoordinates: async () => {
       calls += 1;
@@ -287,9 +319,9 @@ test("auto-advancing time does not expire a tap whose key holder finishes in tim
       maxInFlight = Math.max(maxInFlight, inFlight);
       await new Promise<void>((resolve) => timer.setTimeout(resolve, 40));
       inFlight -= 1;
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     },
-  }));
+  });
   const first = connect();
   const second = connect();
   first.send(tapFrame("first", 1));
@@ -311,17 +343,13 @@ test("a parked sessionless input/tap is not sent once another session acquires t
   sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId) => {
     executionTracker.cancelSessionlessDeviceUse(deviceId);
   });
-  const server = createTestUnixSocketServer(
-    "unused",
-    {
-      isInitialized: () => true,
-      getSessionManager: () => sessionManager,
-      getDevicePool: () => ({}),
-    } as unknown as DaemonStateAccess,
-    timer,
-  );
-  internals = server as unknown as Internals;
-  internals.acceptingRequests = true;
+  internals = createServer({
+    isInitialized: () => true,
+    getSessionManager: () => sessionManager,
+    getDevicePool: createFakeDaemonState().getDevicePool,
+    getDeviceSessionRegistry: unexpectedDaemonState,
+  });
+  internals.allowRequests();
 
   await holdDeviceKey();
   const waiter = connect();

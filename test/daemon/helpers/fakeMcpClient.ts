@@ -7,6 +7,7 @@ export interface StubMcpClientHandlers {
   listResources?: Client["listResources"];
   listResourceTemplates?: Client["listResourceTemplates"];
   readResource?: Client["readResource"];
+  close?: Client["close"];
 }
 
 /**
@@ -53,5 +54,7 @@ export class StubMcpClient extends Client {
       : { contents: [] };
   }
 
-  override async close(): Promise<void> {}
+  override async close(): Promise<void> {
+    await this.handlers.close?.();
+  }
 }

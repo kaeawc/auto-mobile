@@ -20,6 +20,13 @@ export interface AndroidClientOverrides {
   validateFrameContext?: AndroidCtrlProxyClient["validateFrameContext"];
   requestTapCoordinates?: AndroidCtrlProxyClient["requestTapCoordinates"];
   getScreenScaleMetadata?: AndroidCtrlProxyClient["getScreenScaleMetadata"];
+  clearPreferenceStore?: AndroidCtrlProxyClient["clearPreferenceStore"];
+  removePreference?: AndroidCtrlProxyClient["removePreference"];
+  setPreference?: AndroidCtrlProxyClient["setPreference"];
+  requestSwipe?: AndroidCtrlProxyClient["requestSwipe"];
+  requestGestureEnd?: AndroidCtrlProxyClient["requestGestureEnd"];
+  requestGestureMove?: AndroidCtrlProxyClient["requestGestureMove"];
+  requestGestureStart?: AndroidCtrlProxyClient["requestGestureStart"];
 }
 
 /** A real client over a fake adb executor, with the given methods replaced. */
@@ -42,6 +49,27 @@ export function createAndroidTestClient(
   }
   if (overrides.getScreenScaleMetadata) {
     spyOn(client, "getScreenScaleMetadata").mockImplementation(overrides.getScreenScaleMetadata);
+  }
+  if (overrides.requestGestureStart) {
+    spyOn(client, "requestGestureStart").mockImplementation(overrides.requestGestureStart);
+  }
+  if (overrides.requestGestureMove) {
+    spyOn(client, "requestGestureMove").mockImplementation(overrides.requestGestureMove);
+  }
+  if (overrides.requestGestureEnd) {
+    spyOn(client, "requestGestureEnd").mockImplementation(overrides.requestGestureEnd);
+  }
+  if (overrides.requestSwipe) {
+    spyOn(client, "requestSwipe").mockImplementation(overrides.requestSwipe);
+  }
+  if (overrides.setPreference) {
+    spyOn(client, "setPreference").mockImplementation(overrides.setPreference);
+  }
+  if (overrides.removePreference) {
+    spyOn(client, "removePreference").mockImplementation(overrides.removePreference);
+  }
+  if (overrides.clearPreferenceStore) {
+    spyOn(client, "clearPreferenceStore").mockImplementation(overrides.clearPreferenceStore);
   }
   return client;
 }

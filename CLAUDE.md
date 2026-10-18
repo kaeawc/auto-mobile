@@ -207,9 +207,13 @@ exit code is authoritative; CI disables fixes so even auto-fixable violations
 exit non-zero). The ratchet's violation counts cover only the rules set to `warn`
 because they carry pre-existing violations: `complexity`, `max-depth`, `max-params`,
 `max-lines-per-function`, `max-classes-per-file`, `auto-mobile/max-class-lines`
-(1000 non-blank lines), `auto-mobile/catch-convention`, and the two type-aware
-promise rules (`typescript/no-floating-promises`, `typescript/no-misused-promises`,
-currently at a zero baseline but kept here because the fast stage is not type-aware).
+(1000 non-blank lines), and `auto-mobile/catch-convention`.
+`typescript/no-floating-promises` and `typescript/no-misused-promises` are fully
+burned down and are `error` in `.oxlintrc.json`, but they need type information and
+the fast stage is not type-aware, so they are enforced by the ratchet stage
+(`oxlint --type-aware`), which keeps them in its gated codes at a zero baseline: any
+diagnostic is a new violation and fails the gate (`--update` refuses to record one
+without `--allow-grow`).
 `auto-mobile/no-unknown-cast` and `auto-mobile/no-caught-error-interpolation` are
 fully burned down and are `error` in `.oxlintrc.json`. Inline suppressions of ANY rule are ratcheted too: a
 TypeScript-scanner comment scan (`scripts/lib/oxlintDisableScan.ts`) of every
@@ -253,6 +257,14 @@ violations. The full set the ratchet gates is listed above.
 Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.
 The ratchet nudges toward declarative style where a clean declarative form
 exists; it does not outlaw iteration.
+
+## DaemonState.getInstance() ratchet
+
+`test/lint/daemonStateGetInstanceRatchet.test.ts` parses `src/` and compares per-file
+`DaemonState.getInstance(` call counts to `test/lint/daemon-state-get-instance-baseline.txt`
+(#11806). A file may never exceed its baseline count; after removing calls, run
+`UPDATE_DAEMON_STATE_BASELINE=1 bun test test/lint/daemonStateGetInstanceRatchet.test.ts`
+and commit the smaller baseline (it refuses to grow without `=grow`).
 
 ## File-backed DB lifecycle tests
 

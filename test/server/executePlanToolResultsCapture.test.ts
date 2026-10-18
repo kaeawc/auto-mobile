@@ -17,9 +17,8 @@ import {
   type VideoRecorder,
 } from "../../src/server/planExecutionOrchestrator";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  resetTapOnElementFactory,
-  setTapOnElementFactory,
 } from "../../src/server/interactionTools";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -27,6 +26,7 @@ import { createStructuredToolResponse, withIsErrorOnFailure } from "../../src/ut
 import { FakeTimer } from "../fakes/FakeTimer";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
+const interactionDeps: InteractionToolDependencies = {};
 // #10090: the JUnit runner's getSelection/getToolResult/getTypedResponse read per-step results out
 // of the `executePlan` response. This drives the real PlanExecutionOrchestrator and PlanExecutor
 // with the real tapOn tool handler and finalizer (only the device-bound TapOnElement is faked) and
@@ -102,7 +102,7 @@ describe("executePlan toolResults capture (#10090)", () => {
 
   beforeAll(() => {
     restoreSuiteTools = preserveToolRegistry();
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     // The captures carry no failure observation. In the shared-process lane an earlier file can
     // leave the real observe tool registered, and the failed plan would then observe a real device.
     ToolRegistry.unregister("observe");
@@ -111,7 +111,7 @@ describe("executePlan toolResults capture (#10090)", () => {
 
   beforeEach(() => {
     restoreTools = preserveToolRegistry();
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async (params) => {
         const label = params.selector?.text ?? params.text;
         if (label === "Dismiss" || label === "Missing") {
@@ -130,7 +130,7 @@ describe("executePlan toolResults capture (#10090)", () => {
           selectedElement: selectedElement(label === "Item" ? "Row 7" : "Confirm", 12, strategy),
         };
       },
-    }));
+    });
     const tap = ToolRegistry.getToolForPlan("tapOn")!;
     const handler = spyOn(tap, "handler").mockImplementation(async (params, progress, signal) =>
       finalizeToolResponse(await tap.deviceAwareHandler!(device, params, progress, signal), {
@@ -156,7 +156,7 @@ describe("executePlan toolResults capture (#10090)", () => {
 
   afterEach(() => {
     restoreHandler();
-    resetTapOnElementFactory();
+    delete interactionDeps.tapOnElementFactory;
     restoreTools();
   });
 

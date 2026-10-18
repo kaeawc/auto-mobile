@@ -1,3 +1,4 @@
+import { InMemoryDeviceTable } from "./deviceTable";
 import { isProductBrokerDevice } from "./sessionBroker/persistedIdentity";
 import {
   clearDeviceError,
@@ -29,6 +30,7 @@ import {
   DeviceAllocation,
   type AllocationDiscoverySnapshots,
   type AssignableIdleDeviceSelection,
+  type PooledDevicePresenceOptions,
 } from "./deviceAllocation";
 import { ExplicitDeviceBind, type ExplicitBindOptions } from "./explicitDeviceBind";
 import { DeviceReplacement } from "./deviceReplacement";
@@ -945,7 +947,8 @@ interface StopDiscoveredEmulatorOptions {
 }
 
 export class DevicePool {
-  private devices: Map<string, PooledDevice> = new Map();
+  /** Device-entry table; the field keeps its pre-extraction name (test internals read it). */
+  private readonly devices = new InMemoryDeviceTable();
   private deviceSessionStarts: Map<string, number> = new Map();
   private sessionManager: SessionManager;
   private assignmentMutex = new Mutex();
@@ -1091,7 +1094,6 @@ export class DevicePool {
     string,
     { device: PooledDevice; deviceId: string; assignmentCount: number }
   > = new Map();
-  private deviceIncarnationCounter = 0;
 
   // Max consecutive errors before marking device as failed
   private readonly MAX_DEVICE_ERRORS = 5;
@@ -1475,20 +1477,8 @@ export class DevicePool {
       isPooledEntryCurrent: (device) => this.isPooledEntryCurrent(device),
       isReservedForAssignment: (device, forSessionId) =>
         this.isReservedForAssignment(device, forSessionId),
-      ensurePooledDevicePresentForUse: (
-        device,
-        deferRecovery,
-        assignmentLockHeld,
-        idleEviction,
-        discovery,
-      ) =>
-        this.ensurePooledDevicePresentForUse(
-          device,
-          deferRecovery,
-          assignmentLockHeld,
-          idleEviction,
-          discovery,
-        ),
+      ensurePooledDevicePresentForUse: (device, options) =>
+        this.ensurePooledDevicePresentForUse(device, options),
       getDeviceHealthMarker: (deviceId) => this.getDeviceHealthMarker(deviceId),
       unhealthyDevicesError: (devices) => this.unhealthyDevicesError(devices),
       snapshotSessionAssignment: (device) => this.snapshotSessionAssignment(device),
@@ -1796,7 +1786,7 @@ export class DevicePool {
     return {
       getAmbientExecutionId: () => ambientExecutionIdReader?.getExecutionId(),
       notifyDeviceFramesInvalidated: (deviceId) => this.notifyDeviceFramesInvalidated(deviceId),
-      getDevices: () => this.devices,
+      getDevices: () => this.devices.backingMap(),
       getDeviceManager: () => this.deviceManager,
       getRetryExecutor: () => this.retryExecutor,
       getTimer: () => this.timer,
@@ -1907,7 +1897,7 @@ export class DevicePool {
 
   private createShutdownReservationsPort(): DeviceShutdownReservationsPoolPort {
     return {
-      getDevices: () => this.devices,
+      getDevices: () => this.devices.backingMap(),
       withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getIntentionalShutdowns: () => this.intentionalShutdowns,
       assertReadinessReservationOwner: (device, client) =>
@@ -1931,7 +1921,7 @@ export class DevicePool {
   private createMissingDevicePort(): MissingDeviceLivenessPoolPort {
     return {
       noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
-      getDevices: () => this.devices,
+      getDevices: () => this.devices.backingMap(),
       getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
       withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getDeviceManager: () => this.deviceManager,
@@ -1982,7 +1972,7 @@ export class DevicePool {
         this.needsAndroidTransportNormalization(devices),
       getTimer: () => this.timer,
       getDeviceManager: () => this.deviceManager,
-      getDevices: () => this.devices,
+      getDevices: () => this.devices.backingMap(),
       addPooledDevice: (device) => this.devices.set(device.id, device),
       withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
       getCriteriaMatcher: () => this.criteriaMatcher,
@@ -2021,7 +2011,7 @@ export class DevicePool {
       getTimer: () => this.timer,
       getStartedDeviceProcesses: () => this.startedDeviceProcesses,
       getStartedDeviceProcessOutput: () => this.startedDeviceProcessOutput,
-      getDevices: () => this.devices,
+      getDevices: () => this.devices.backingMap(),
       getSessionManager: () => this.sessionManager,
       isReservedForShutdown: (device) => this.isReservedForShutdown(device),
       prepareSessionPreservingRecovery: (id, device) =>
@@ -2344,7 +2334,7 @@ export class DevicePool {
       {
         noteDeviceStateChanged: (device) => this.notifyDeviceStateChanged(device),
         withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
-        getDevices: () => this.devices,
+        getDevices: () => this.devices.backingMap(),
         getSessionManager: () => this.sessionManager,
         getStartedDeviceProcesses: () => this.startedDeviceProcesses,
         getAdbServerResetTrackedProcesses: () => this.adbServerResetTrackedProcesses,
@@ -2873,7 +2863,7 @@ export class DevicePool {
 
   /** Assign the next monotonic incarnation id for a newly pooled connection. */
   private nextDeviceIncarnation(): number {
-    return ++this.deviceIncarnationCounter;
+    return this.devices.nextIncarnation();
   }
 
   /** Capture restart holds before marking the current Android incarnation for shutdown. */
@@ -4039,11 +4029,11 @@ export class DevicePool {
     matches: (device: PooledDevice) => boolean,
   ): Promise<number> {
     let evicted = 0;
-    for (const device of Array.from(this.devices.values())) {
+    for (const device of this.devices.all()) {
       if (!isIdle(device) || !matches(device)) {
         continue;
       }
-      if (!(await this.ensurePooledDevicePresentForUse(device, false, false, true))) {
+      if (!(await this.ensurePooledDevicePresentForUse(device, { idleEviction: true }))) {
         evicted++;
       }
     }
@@ -4059,11 +4049,14 @@ export class DevicePool {
    */
   private async ensurePooledDevicePresentForUse(
     device: PooledDevice,
-    deferRecovery: boolean = false,
-    assignmentLockHeld: boolean = false,
-    idleEviction: boolean = false,
-    discovery?: BootedDeviceDiscovery,
+    options: PooledDevicePresenceOptions = {},
   ): Promise<boolean> {
+    const {
+      deferRecovery = false,
+      assignmentLockHeld = false,
+      idleEviction = false,
+      discovery,
+    } = options;
     const present = await this.missingDeviceLiveness.ensurePooledDevicePresent(
       device,
       deferRecovery,
@@ -7212,7 +7205,13 @@ export class DevicePool {
       throw new ActionableError(unavailableMessage);
     }
     // iOS uses the per-source liveness snapshot; Android reconciles the supplied evidence.
-    if (await this.ensurePooledDevicePresentForUse(device, true, true, false, presence)) {
+    if (
+      await this.ensurePooledDevicePresentForUse(device, {
+        deferRecovery: true,
+        assignmentLockHeld: true,
+        discovery: presence,
+      })
+    ) {
       if (!this.isPooledEntryCurrent(device)) {
         return undefined;
       }
@@ -7753,7 +7752,7 @@ export class DevicePool {
       const normalized = this.androidTransportAliases.fold(
         devices,
         evidence,
-        new Set(this.devices.keys()),
+        new Set(this.devices.ids()),
         completeAndroidSnapshot,
       );
       this.androidAliasAppliedDevices = normalized;
@@ -8197,7 +8196,7 @@ export class DevicePool {
    * Get device assigned to session
    */
   getDeviceForSession(sessionId: string): PooledDevice | null {
-    return Array.from(this.devices.values()).find((d) => holderOf(d) === sessionId) || null;
+    return this.devices.heldBy(sessionId);
   }
 
   bindingOwnershipGate(sessionId: string): "unconfirmed" | "lost" | undefined {
@@ -8261,23 +8260,23 @@ export class DevicePool {
    * Get all idle devices (available for assignment)
    */
   getIdleDevices(): PooledDevice[] {
-    return Array.from(this.devices.values()).filter(
-      (device) => this.isIdleDeviceEligible(device) && !this.isHeldOutsideGenericAllocation(device),
-    );
+    const allocatable = (device: PooledDevice) =>
+      this.isIdleDeviceEligible(device) && !this.isHeldOutsideGenericAllocation(device);
+    return this.devices.all().filter(allocatable);
   }
 
   /**
    * Get all devices currently assigned to sessions
    */
   getAssignedDevices(): PooledDevice[] {
-    return Array.from(this.devices.values()).filter((d) => isBusy(d) && holderOf(d) !== null);
+    return this.devices.assigned();
   }
 
   /**
    * Get all devices in error state
    */
   getErrorDevices(): PooledDevice[] {
-    return Array.from(this.devices.values()).filter((d) => isErrored(d));
+    return this.devices.errored();
   }
 
   /**
@@ -8298,7 +8297,7 @@ export class DevicePool {
    * Get all devices in pool
    */
   getAllDevices(): PooledDevice[] {
-    return Array.from(this.devices.values());
+    return this.devices.all();
   }
 
   /** Effective daemon-startup policy, copied so callers cannot mutate pool state. */
@@ -8815,7 +8814,7 @@ export class DevicePool {
     if (!platform) {
       return this.getAllDevices();
     }
-    return Array.from(this.devices.values()).filter((device) => device.platform === platform);
+    return this.devices.byPlatform(platform);
   }
 
   /** A device allocation cannot lend (#11387): held, reserved, or carrying a health marker. */

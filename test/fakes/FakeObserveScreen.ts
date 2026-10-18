@@ -27,6 +27,8 @@ export class FakeObserveScreen implements ObserveScreen {
   private getMostRecentCachedObserveResultCallCount: number = 0;
   private failures: Map<string, Error> = new Map();
   private callCounter: number = 0;
+  /** What the most recent cacheable `execute()` returned: the model of the observe cache. */
+  private lastCachedObservation: ObserveResult | null = null;
   private autoVaryHierarchy: boolean = false;
   private cacheGenerationSequence: number[] | null = null;
   private cacheGenerationCallCount: number = 0;
@@ -188,6 +190,7 @@ export class FakeObserveScreen implements ObserveScreen {
     this.cacheObserveResultCallCount = 0;
     this.getMostRecentCachedObserveResultCallCount = 0;
     this.callCounter = 0;
+    this.lastCachedObservation = null;
     this.cacheGenerationCallCount = 0;
     this.executeOptionsHistory.length = 0;
     this.capturedScreenshotObservations.length = 0;
@@ -269,7 +272,18 @@ export class FakeObserveScreen implements ObserveScreen {
       throw error;
     }
 
-    return recordObservationRead(this.getNextObserveResult());
+    const observation = this.getNextObserveResult();
+    // Mirrors the real shouldCacheSingleDisplay(): observer-mode, recomposition-skipping and
+    // skipCache reads do not cache, and hierarchyOnly returns before any cache write.
+    if (
+      !options?.skipCache &&
+      !options?.observerMode &&
+      !options?.skipRecompositionTracking &&
+      !options?.hierarchyOnly
+    ) {
+      this.lastCachedObservation = observation;
+    }
+    return recordObservationRead(observation);
   }
 
   async captureScreenshot(
@@ -375,6 +389,8 @@ export class FakeObserveScreen implements ObserveScreen {
     if (error) {
       throw error;
     }
+    // The real class stores the selected poll result, which is what a cache read then replays.
+    this.lastCachedObservation = observation;
   }
 
   /** Options passed to each `execute()` call, in order. */
@@ -396,7 +412,33 @@ export class FakeObserveScreen implements ObserveScreen {
       throw error;
     }
 
+    // A cache read replays what execute() stored; it is not a new observation, so it neither
+    // advances a scripted sequence nor re-runs the factory. Before any observation has been
+    // cached the fake keeps its pre-seeded behaviour (the configured result stands in for a
+    // warm cache), and with nothing configured it answers like the real class: a base result
+    // carrying the "no cache" error, never a throw.
+    if (this.lastCachedObservation) {
+      return { ...this.lastCachedObservation };
+    }
+    if (!this.hasConfiguredObserveResult()) {
+      return {
+        updatedAt: new Date(0).toISOString(),
+        screenSize: { width: 0, height: 0 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+        observationId: "fake-no-cache",
+        error: "No cached observe result available",
+      };
+    }
     return this.getNextObserveResult();
+  }
+
+  private hasConfiguredObserveResult(): boolean {
+    return (
+      this.observeSequence !== null ||
+      this.observeResultFactory !== null ||
+      this.configuredObserveResult !== null
+    );
   }
 
   async appendRawViewHierarchy(result: ObserveResult, _signal?: AbortSignal): Promise<void> {
@@ -405,6 +447,11 @@ export class FakeObserveScreen implements ObserveScreen {
     const error = this.failures.get("appendRawViewHierarchy");
     if (error) {
       throw error;
+    }
+
+    // Like the real class: a result whose primary hierarchy was discarded gets no raw tree.
+    if (!result.viewHierarchy) {
+      return;
     }
 
     result.rawViewHierarchy = {

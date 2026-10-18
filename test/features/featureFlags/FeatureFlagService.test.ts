@@ -5,7 +5,7 @@ import { BunSqliteDialect } from "../../../src/db/bunSqliteDialect";
 import type { Database } from "../../../src/db/types";
 import { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
 import type { FeatureFlagDefinition } from "../../../src/features/featureFlags/FeatureFlagDefinitions";
-import { SqliteFeatureFlagRepository } from "../../../src/features/featureFlags/FeatureFlagRepository";
+import { SqliteFeatureFlagRepository } from "../../../src/db/featureFlagRepository";
 import { fixedBackoff } from "../../../src/utils/Backoff";
 import type { Random } from "../../../src/utils/Random";
 import { FakeFeatureFlagRepository } from "../../fakes/FakeFeatureFlagRepository";

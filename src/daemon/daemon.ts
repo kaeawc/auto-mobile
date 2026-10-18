@@ -297,6 +297,7 @@ import {
   LEGACY_PROVENANCE_SENTINEL,
   NavigationGraphManager,
 } from "../features/navigation/NavigationGraphManager";
+import type { NavigationGraphStreamSource } from "../features/navigation/NavigationGraphStreamSource";
 import {
   convertSummaryToStreamData,
   createNavigationGraphRequestHandler,
@@ -813,10 +814,10 @@ export class Daemon {
     DefaultObservationInitialFrameCoordinator
   >();
   private deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
-  private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphManager>();
+  private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphStreamSource>();
   private readonly navigationGraphSeededStreamManagers = new WeakMap<
     DeviceDataStreamSocketServer,
-    WeakSet<NavigationGraphManager>
+    WeakSet<NavigationGraphStreamSource>
   >();
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
   private unsubscribeSessionExecutionEnded: (() => void) | null = null;
@@ -1107,16 +1108,9 @@ export class Daemon {
         this.sessionManager.getHeldDeviceSessions().find((session) => session.sessionId === id)
           ?.deviceId ?? null,
       onOwnershipLost: (id) => {
-        void this.cancelAndReleaseSession(
-          id,
-          "binding-ownership-lost",
-          false,
-          undefined,
-          undefined,
-          {
-            cutCallsLearnRelease: true,
-          },
-        ).catch((error: unknown) => {
+        void this.cancelAndReleaseSession(id, "binding-ownership-lost", {
+          cutCallsLearnRelease: true,
+        }).catch((error: unknown) => {
           logger.warn(`[Daemon] Lost managed execution ${id} release failed`, error);
         });
       },
@@ -1309,7 +1303,8 @@ export class Daemon {
         shouldCommit,
         releaseOptions,
       ) =>
-        this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit, {
+        this.cancelAndReleaseSession(sessionId, releaseReason, {
+          shouldCommit,
           deferFailureFallback: true,
           releaseOptions,
         }),
@@ -1323,7 +1318,8 @@ export class Daemon {
           }
           // A cut read or a control call past the veto's bound is told the session is gone,
           // as a call arriving after the release is (#11381).
-          await this.cancelAndReleaseSession(session.sessionId, reason, false, session, undefined, {
+          await this.cancelAndReleaseSession(session.sessionId, reason, {
+            expectedSession: session,
             cutCallsLearnRelease: true,
           });
         },
@@ -2954,14 +2950,14 @@ export class Daemon {
     logger.info("[Daemon] Navigation graph stream listener configured");
   }
 
-  private resolveUnscopedNavigationGraphManager(): NavigationGraphManager {
+  private resolveUnscopedNavigationGraphManager(): NavigationGraphStreamSource {
     const sessions = this.sessionManager.getAllSessions();
     return sessions.length === 1
       ? NavigationGraphManager.getInstanceForSession(sessions[0]!.sessionId)
       : NavigationGraphManager.getInstance();
   }
 
-  private setupNavigationGraphUpdateListener(navGraphManager: NavigationGraphManager): void {
+  private setupNavigationGraphUpdateListener(navGraphManager: NavigationGraphStreamSource): void {
     const streamServer = this.deviceDataStreamServer;
     if (
       streamServer &&
@@ -2969,7 +2965,7 @@ export class Daemon {
     ) {
       const seededManagers =
         this.navigationGraphSeededStreamManagers.get(streamServer) ??
-        new WeakSet<NavigationGraphManager>();
+        new WeakSet<NavigationGraphStreamSource>();
       seededManagers.add(navGraphManager);
       this.navigationGraphSeededStreamManagers.set(streamServer, seededManagers);
       for (const context of navGraphManager.getBuildContexts()) {
@@ -3162,7 +3158,7 @@ export class Daemon {
         // A call still in flight (a read never keeps the session; a control call only until its
         // veto runs out) learns why it was cancelled: the typed terminal refusal, not a generic
         // abort (#11322). That includes a call that reached the session through autolock (#11400).
-        await this.cancelAndReleaseSession(sessionId, reason, false, undefined, undefined, {
+        await this.cancelAndReleaseSession(sessionId, reason, {
           cutCallsLearnRelease: true,
         });
       },
@@ -4108,8 +4104,7 @@ export class Daemon {
       await this.cancelAndReleaseSession(
         sessionIdAtDisconnect,
         deviceLossCancellationReason(deviceId, incidentId),
-        false,
-        sessionAtDisconnect,
+        { expectedSession: sessionAtDisconnect },
       );
     }
 
@@ -4380,10 +4375,10 @@ export class Daemon {
   async cancelAndReleaseSession(
     sessionId: string,
     releaseReason: SessionReleaseReason = "explicit-release",
-    allowExpired: boolean = false,
-    expectedSession?: Session,
-    shouldCommit?: () => boolean,
     options?: {
+      allowExpired?: boolean;
+      expectedSession?: Session;
+      shouldCommit?: () => boolean;
       deferFailureFallback?: boolean;
       releaseOptions?: SessionReleaseOptions;
       /**
@@ -4394,6 +4389,7 @@ export class Daemon {
       cutCallsLearnRelease?: boolean;
     },
   ): Promise<boolean> {
+    const { allowExpired = false, expectedSession, shouldCommit } = options ?? {};
     const release = async (cancelled: number): Promise<boolean> => {
       // Early identity fence: discovery can replace a same-serial runtime while
       // execution cancellation is in flight. It is not the final one — the
@@ -5361,7 +5357,7 @@ export class Daemon {
     const sessionIds = this.sessionManager.getAllKnownSessionIds();
     this.shutdownSessionIds = sessionIds;
     const releases = sessionIds.map(async (sessionId) => {
-      await this.cancelAndReleaseSession(sessionId, "daemon-shutdown", true);
+      await this.cancelAndReleaseSession(sessionId, "daemon-shutdown", { allowExpired: true });
     });
     const reportFailures = (results: PromiseSettledResult<void>[]): void => {
       for (const [index, release] of results.entries()) {

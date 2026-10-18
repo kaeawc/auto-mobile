@@ -20,11 +20,10 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 
-export type SwipeAtArgs = SwipeAtOptions & {
+// The handler's arguments are the parsed wire schema; its exclusivity refinement (image xor
+// from/to) is narrowed where the options are built.
+export type SwipeAtArgs = z.output<typeof swipeAtSchema> & {
   __swipeAtRecordingContext?: SwipeAtRecordingContext;
-  platform?: "android" | "ios";
-  raw?: boolean;
-  project?: "full" | "skeleton";
 };
 
 const swipeAtPointSchema = z

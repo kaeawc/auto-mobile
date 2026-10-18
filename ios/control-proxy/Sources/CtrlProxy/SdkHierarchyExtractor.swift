@@ -1,5 +1,6 @@
 import AutoMobileSdkWire
 import Foundation
+import os
 
 public enum SdkHierarchyExtractor {
     /// Matches SDK's `SdkEventType.viewHierarchy.rawValue` (separate package, can't share the enum).
@@ -21,9 +22,15 @@ public enum SdkHierarchyExtractor {
 
         var didUpdateHierarchy = false
         for event in batch.events where event.eventType == viewHierarchyEventType {
-            if let hierarchy = try? JSONDecoder().decode(SdkViewHierarchyEventPayload.self, from: event.payload) {
-                cache.update(hierarchy.hierarchy)
+            do {
+                let payload = try JSONDecoder().decode(SdkViewHierarchyEventPayload.self, from: event.payload)
+                cache.update(payload.hierarchy)
                 didUpdateHierarchy = true
+            } catch {
+                // A decode failure means SDK/runner wire drift; do not let it look like "no hierarchy".
+                // DecodingError's description includes its case, coding path and missing key.
+                Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyExtractor")
+                    .warning("SDK hierarchy event undecodable: \(String(describing: error), privacy: .public)")
             }
         }
         if didUpdateHierarchy {

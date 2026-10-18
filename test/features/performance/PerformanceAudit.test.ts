@@ -42,7 +42,7 @@ describe("PerformanceAudit TTI characterization", () => {
   const readCommand = "shell dumpsys gfxinfo 'com.example'";
   const resetCommand = `${readCommand} reset`;
   const measure = () =>
-    audit["measureTimeToInteractive"]("com.example", 250, new NoOpPerformanceTracker());
+    audit.measureTimeToInteractive("com.example", 250, new NoOpPerformanceTracker());
 
   beforeEach(() => {
     factory = new FakeAdbClientFactory();
@@ -315,7 +315,7 @@ describe("PerformanceAudit.resolveTouchLatency (#6167)", function () {
     latencyMs: number;
     animating?: boolean;
     error?: string;
-  }) => (audit as any).resolveTouchLatency(result);
+  }) => audit.resolveTouchLatency(result);
 
   test("reports the latency from a clean (non-animating) successful run", function () {
     expect(resolve({ success: true, latencyMs: 42 })).toBe(42);
@@ -351,7 +351,7 @@ describe("PerformanceAudit.measureTouchLatency skip (#6167 P1)", function () {
   });
 
   const measure = (skipTouchLatency?: boolean) =>
-    (audit as any).measureTouchLatency(
+    audit.measureTouchLatency(
       "com.example",
       { width: 1080, height: 1920 },
       new NoOpPerformanceTracker(),

@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { FakeDeviceExecutionBinding } from "../fakes/FakeDeviceExecutionBinding";
 import { Daemon } from "../../src/daemon/daemon";
@@ -7,7 +8,6 @@ import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ExecutionTracker, executionTracker } from "../../src/server/executionTracker";
@@ -20,7 +20,6 @@ import {
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceSessionExecutionCanceller } from "../fakes/FakeDeviceSessionExecutionCanceller";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -39,14 +38,12 @@ async function setup(tracker: ExecutionTracker, options: { drain?: boolean } = {
   manager.setBootedDevices("android", [device]);
   const canceller = new FakeDeviceSessionExecutionCanceller({ tracker, ...options });
   const binding = new FakeDeviceExecutionBinding();
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "test-daemon", {
-      timer,
-      deviceManager: manager,
-      cancelDeviceSessionExecutions: canceller.cancel,
-      ambientExecutionIdReader: binding,
-    }),
-  );
+  const pool = makePool(sessions, "test-daemon", {
+    timer,
+    deviceManager: manager,
+    cancelDeviceSessionExecutions: canceller.cancel,
+    ambientExecutionIdReader: binding,
+  });
   await pool.initializeWithDevices([device]);
   DaemonState.getInstance().initialize(sessions, pool);
   const quarantine = (excludeExecutionId?: string) =>

@@ -1,12 +1,11 @@
 import { makePool } from "../helpers/makePool";
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { ActionableError } from "../../src/models/ActionableError";
-import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
+import { type PooledDevice } from "../../src/daemon/devicePool";
 import {
   InMemoryEmulatorLossIncidentStore,
   type EmulatorLossIncidentStore,
@@ -20,7 +19,6 @@ import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import {
@@ -903,15 +901,12 @@ test("binding during a gated idle process exit rejects and evicts the dead emula
   sessions.stopCleanupTimer();
   const manager = new FakeDeviceManager();
   manager.bootedDevices = [original];
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon", {
-      timer,
-      deviceManager: manager,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      emulatorLossIncidentStore: incidents,
-      recoveryPolicy: { onLoss: false, maxAttempts: 1 },
-    }),
-  );
+  const pool = makePool(sessions, "daemon", {
+    timer,
+    deviceManager: manager,
+    emulatorLossIncidentStore: incidents,
+    recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+  });
   const child = Object.assign(new EventEmitter(), {
     exitCode: null as number | null,
     signalCode: null,

@@ -73,7 +73,7 @@ describe("renderObserveAppHtml", () => {
   });
 
   test("degrades to an empty state without a view hierarchy (no throw)", () => {
-    const empty = { screenSize: { width: 100, height: 200 } } as unknown as ObserveResult;
+    const empty: ObserveResult = { ...iosObserve(), viewHierarchy: undefined };
     const html = renderObserveAppHtml({ observe: empty });
     expect(html).toContain("data-observe-app");
     expect(countBoxes(html)).toBe(0);

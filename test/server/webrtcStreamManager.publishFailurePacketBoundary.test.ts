@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from "bun:test";
 import type { RTCPeerConnection } from "werift";
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { WebRtcPublisher } from "../../src/features/webrtc/WebRtcPublisher";
@@ -11,7 +11,6 @@ import {
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
-import type { AndroidH264Source } from "../../src/features/webrtc";
 import type { AndroidH264SourceOptions } from "../../src/features/webrtc/H264CaptureSource";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { capturedH264AsDevicePackets } from "../helpers/capturedH264Stream";
@@ -127,7 +126,7 @@ function installFakes() {
     createSource: (options: AndroidH264SourceOptions) => {
       const source = new GatedSource();
       sources.push({ source, options });
-      return source as unknown as AndroidH264Source;
+      return source;
     },
     resolveVideoJar: async () => null,
     // A fresh registry per test: the process-wide default keeps a capture that an earlier test
@@ -147,13 +146,15 @@ async function settle(): Promise<void> {
 
 const startRequest = { device: IOS, overrides: { whipEndpoint: ENDPOINT } };
 
+let warnSpy: Mock<typeof logger.warn>;
+
 beforeEach(() => {
-  spyOn(logger, "warn").mockImplementation(() => {});
+  warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
 });
 
 afterEach(() => {
   resetWebRtcStreamManager();
-  (logger.warn as unknown as { mockRestore(): void }).mockRestore();
+  warnSpy.mockRestore();
 });
 
 describe("a publish that fails after packet boundaries were delivered (#10149, #10150)", () => {

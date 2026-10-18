@@ -68,7 +68,7 @@ describe("PerformanceAuditor", () => {
       isEnabled: () => false,
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+      activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 0 },
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.performanceAudit).toBeUndefined();
@@ -82,7 +82,7 @@ describe("PerformanceAuditor", () => {
       adbFactory: factory,
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+      activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 0 },
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.performanceAudit).toBeUndefined();
@@ -99,7 +99,7 @@ describe("PerformanceAuditor", () => {
       adbFactory: factory,
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+      activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 0 },
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.performanceAudit).toBeUndefined();
@@ -114,7 +114,7 @@ describe("PerformanceAuditor", () => {
       isEnabled: () => true,
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+      activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 0 },
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.performanceAudit).toBeUndefined();
@@ -141,7 +141,7 @@ describe("PerformanceAuditor", () => {
       isEnabled: () => true,
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+      activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 0 },
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.errors).toBeUndefined();
@@ -163,7 +163,7 @@ describe("PerformanceAuditor", () => {
       isEnabled: () => true,
     });
     const result = makeResult({
-      activeWindow: { appId: "com.example", activityName: "Main" } as any,
+      activeWindow: { appId: "com.example", activityName: "Main", layoutSeqSum: 0 },
     });
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(factory.wasCalledForDevice(androidDevice.deviceId)).toBe(true);
@@ -193,7 +193,7 @@ describe("findAppWindowBounds (#6167)", () => {
     expect(realWindows.some((w) => w.packageName !== undefined)).toBe(false);
 
     const result = makeResult({
-      viewHierarchy: { hierarchy: {} as any, windows: realWindows } as any,
+      viewHierarchy: { hierarchy: {}, windows: realWindows },
     });
 
     expect(findAppWindowBounds(result, "com.example")).toEqual({
@@ -208,7 +208,7 @@ describe("findAppWindowBounds (#6167)", () => {
     const statusBarBounds = { left: 0, top: 0, right: 1080, bottom: 63 };
     const result = makeResult({
       viewHierarchy: {
-        hierarchy: {} as any,
+        hierarchy: {},
         windows: [
           { id: 67, type: 3, isActive: false, isFocused: true, bounds: statusBarBounds },
           {
@@ -219,7 +219,7 @@ describe("findAppWindowBounds (#6167)", () => {
             bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
           },
         ] as ViewHierarchyWindowInfo[],
-      } as any,
+      },
     });
 
     expect(findAppWindowBounds(result, "com.example")).toEqual({
@@ -237,7 +237,7 @@ describe("findAppWindowBounds (#6167)", () => {
     const lowerHalf = { left: 0, top: 960, right: 1080, bottom: 1920 };
     const result = makeResult({
       viewHierarchy: {
-        hierarchy: {} as any,
+        hierarchy: {},
         windows: [
           {
             id: 1,
@@ -248,7 +248,7 @@ describe("findAppWindowBounds (#6167)", () => {
           },
           { id: 2, type: 1, isActive: true, isFocused: false, bounds: lowerHalf },
         ] as ViewHierarchyWindowInfo[],
-      } as any,
+      },
     });
 
     expect(findAppWindowBounds(result, "com.example")).toEqual(lowerHalf);
@@ -257,7 +257,7 @@ describe("findAppWindowBounds (#6167)", () => {
   test("returns undefined when only a SystemUI window is present", () => {
     const result = makeResult({
       viewHierarchy: {
-        hierarchy: {} as any,
+        hierarchy: {},
         windows: [
           {
             id: 1,
@@ -267,7 +267,7 @@ describe("findAppWindowBounds (#6167)", () => {
             bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
           },
         ] as ViewHierarchyWindowInfo[],
-      } as any,
+      },
     });
 
     expect(findAppWindowBounds(result, "com.example")).toBeUndefined();
@@ -281,12 +281,12 @@ describe("findAppWindowBounds (#6167)", () => {
     const imeBounds = { left: 0, top: 1200, right: 1080, bottom: 2400 };
     const result = makeResult({
       viewHierarchy: {
-        hierarchy: {} as any,
+        hierarchy: {},
         windows: [
           { id: 1, type: 1, isActive: true, isFocused: false, bounds: appBounds },
           { id: 2, type: 2, isActive: true, isFocused: true, bounds: imeBounds },
         ] as ViewHierarchyWindowInfo[],
-      } as any,
+      },
     });
 
     expect(findAppWindowBounds(result, "com.example")).toEqual(appBounds);
@@ -295,7 +295,7 @@ describe("findAppWindowBounds (#6167)", () => {
   test("returns undefined when the only window is a focused IME (no app window to fall back to)", () => {
     const result = makeResult({
       viewHierarchy: {
-        hierarchy: {} as any,
+        hierarchy: {},
         windows: [
           {
             id: 1,
@@ -305,7 +305,7 @@ describe("findAppWindowBounds (#6167)", () => {
             bounds: { left: 0, top: 1200, right: 1080, bottom: 2400 },
           },
         ] as ViewHierarchyWindowInfo[],
-      } as any,
+      },
     });
 
     expect(findAppWindowBounds(result, "com.example")).toBeUndefined();
@@ -448,7 +448,7 @@ describe("collectInteractiveObstacles / deriveTouchLatencyPoint (#6167 follow-up
         hierarchy: {
           node: { $: { focusable: "true", clickable: "false", bounds: focusableBounds } },
         },
-      } as any,
+      },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -504,7 +504,7 @@ describe("collectInteractiveObstacles / deriveTouchLatencyPoint (#6167 follow-up
         hierarchy: {
           node: { $: { clickable: "true", bounds: appWindow } },
         },
-      } as any,
+      },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -526,7 +526,7 @@ describe("collectInteractiveObstacles / deriveTouchLatencyPoint (#6167 follow-up
             $: { focusable: "true", clickable: "false", bounds: focusableBounds },
           },
         },
-      } as any,
+      },
       // Mirrors the real DefaultObserveElementCollector output: a
       // focusable-only node is never added to `clickable`.
       elements: { clickable: [], scrollable: [], text: [], media: [] },
@@ -555,7 +555,7 @@ describe("collectHiddenRegionBounds / deriveTouchLatencyPoint content-hidden reg
       areaPercent: 60,
     };
     const result = makeResult({
-      viewHierarchy: { hierarchy: {} as any, contentHiddenRegions: [region] } as any,
+      viewHierarchy: { hierarchy: {}, contentHiddenRegions: [region] },
     });
 
     expect(collectHiddenRegionBounds(result)).toEqual([region.bounds]);
@@ -575,7 +575,7 @@ describe("collectHiddenRegionBounds / deriveTouchLatencyPoint content-hidden reg
   test("deriveTouchLatencyPoint skips when a full-window content-hidden region leaves no safe candidate", () => {
     const result = makeResult({
       viewHierarchy: {
-        hierarchy: {} as any,
+        hierarchy: {},
         contentHiddenRegions: [
           {
             bounds: appWindow,
@@ -583,7 +583,7 @@ describe("collectHiddenRegionBounds / deriveTouchLatencyPoint content-hidden reg
             areaPercent: 100,
           },
         ],
-      } as any,
+      },
       // The accessibility hierarchy is empty - no obstacle would be found
       // without the hidden-region check.
       elements: { clickable: [], scrollable: [], text: [], media: [] },
@@ -598,7 +598,7 @@ describe("collectHiddenRegionBounds / deriveTouchLatencyPoint content-hidden reg
     const hiddenBounds = { left: 440, top: 900, right: 640, bottom: 1020 };
     const result = makeResult({
       viewHierarchy: {
-        hierarchy: {} as any,
+        hierarchy: {},
         contentHiddenRegions: [
           {
             bounds: hiddenBounds,
@@ -606,7 +606,7 @@ describe("collectHiddenRegionBounds / deriveTouchLatencyPoint content-hidden reg
             areaPercent: 10,
           },
         ],
-      } as any,
+      },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -633,9 +633,9 @@ describe("deriveTouchLatencyPoint truncated hierarchy (#6167 follow-up)", () => 
   test("skips touch-latency when truncationReasons is non-empty, even with an empty hierarchy", () => {
     const result = makeResult({
       viewHierarchy: {
-        hierarchy: {} as any,
+        hierarchy: {},
         truncationReasons: ["max_nodes"],
-      } as any,
+      },
       // No obstacles are visible at all - without the truncation check this
       // would wrongly certify the window center as inert.
       elements: { clickable: [], scrollable: [], text: [], media: [] },
@@ -648,7 +648,7 @@ describe("deriveTouchLatencyPoint truncated hierarchy (#6167 follow-up)", () => 
 
   test("skips touch-latency for a max_depth truncation reason", () => {
     const result = makeResult({
-      viewHierarchy: { hierarchy: {} as any, truncationReasons: ["max_depth"] } as any,
+      viewHierarchy: { hierarchy: {}, truncationReasons: ["max_depth"] },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -669,7 +669,7 @@ describe("deriveTouchLatencyPoint truncated hierarchy (#6167 follow-up)", () => 
 
   test("skips touch-latency for a cancelled truncation reason", () => {
     const result = makeResult({
-      viewHierarchy: { hierarchy: {} as any, truncationReasons: ["cancelled"] } as any,
+      viewHierarchy: { hierarchy: {}, truncationReasons: ["cancelled"] },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -679,7 +679,7 @@ describe("deriveTouchLatencyPoint truncated hierarchy (#6167 follow-up)", () => 
 
   test("is unaffected by an empty truncationReasons array", () => {
     const result = makeResult({
-      viewHierarchy: { hierarchy: {} as any, truncationReasons: [] } as any,
+      viewHierarchy: { hierarchy: {}, truncationReasons: [] },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -690,7 +690,7 @@ describe("deriveTouchLatencyPoint truncated hierarchy (#6167 follow-up)", () => 
 
   test("is unaffected when truncationReasons is absent entirely", () => {
     const result = makeResult({
-      viewHierarchy: { hierarchy: {} as any } as any,
+      viewHierarchy: { hierarchy: {} },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -714,7 +714,7 @@ describe("deriveTouchLatencyPoint host output caps vs capture fidelity (#6601 re
 
   test("does not skip touch-latency for a host-side max_children output cap", () => {
     const result = makeResult({
-      viewHierarchy: { hierarchy: {} as any, truncationReasons: [outputCap] } as any,
+      viewHierarchy: { hierarchy: {}, truncationReasons: [outputCap] },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -725,7 +725,7 @@ describe("deriveTouchLatencyPoint host output caps vs capture fidelity (#6601 re
 
   test("isHierarchyReliableForTapProbe stays true for an output cap alone", () => {
     const result = makeResult({
-      viewHierarchy: { hierarchy: {} as any, truncationReasons: [outputCap] } as any,
+      viewHierarchy: { hierarchy: {}, truncationReasons: [outputCap] },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -736,9 +736,9 @@ describe("deriveTouchLatencyPoint host output caps vs capture fidelity (#6601 re
   test("still skips when a device-side reason rides alongside the output cap", () => {
     const result = makeResult({
       viewHierarchy: {
-        hierarchy: {} as any,
+        hierarchy: {},
         truncationReasons: [outputCap, "max_nodes"],
-      } as any,
+      },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -756,7 +756,7 @@ describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified ca
   // moved, appeared, or disappeared.
   test("skips touch-latency when fresh is false, even with an empty hierarchy", () => {
     const result = makeResult({
-      viewHierarchy: { hierarchy: {} as any, fresh: false } as any,
+      viewHierarchy: { hierarchy: {}, fresh: false },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -772,7 +772,7 @@ describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified ca
   // tap the wrong app.
   test("skips touch-latency when ctrlProxyIncomplete is true, even with an empty hierarchy", () => {
     const result = makeResult({
-      viewHierarchy: { hierarchy: {} as any, ctrlProxyIncomplete: true } as any,
+      viewHierarchy: { hierarchy: {}, ctrlProxyIncomplete: true },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -784,7 +784,7 @@ describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified ca
 
   test("is unaffected when fresh is true and ctrlProxyIncomplete is absent", () => {
     const result = makeResult({
-      viewHierarchy: { hierarchy: {} as any, fresh: true } as any,
+      viewHierarchy: { hierarchy: {}, fresh: true },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -796,7 +796,7 @@ describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified ca
 
   test("is unaffected when fresh and ctrlProxyIncomplete are both absent (a fully-reliable capture)", () => {
     const result = makeResult({
-      viewHierarchy: { hierarchy: {} as any } as any,
+      viewHierarchy: { hierarchy: {} },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -819,7 +819,7 @@ describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified ca
 
   test("isHierarchyReliableForTapProbe is false with non-empty truncationReasons", () => {
     const result = makeResult({
-      viewHierarchy: { hierarchy: {} as any, truncationReasons: ["max_nodes"] } as any,
+      viewHierarchy: { hierarchy: {}, truncationReasons: ["max_nodes"] },
     });
     expect(isHierarchyReliableForTapProbe(appWindow, result)).toBe(false);
   });
@@ -833,8 +833,8 @@ describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified ca
   // com.android.systemui.
   test("skips touch-latency when activeWindow.appId is com.android.systemui, even with a normal hierarchy", () => {
     const result = makeResult({
-      activeWindow: { appId: "com.android.systemui", activityName: "StatusBar" } as any,
-      viewHierarchy: { hierarchy: {} as any } as any,
+      activeWindow: { appId: "com.android.systemui", activityName: "StatusBar", layoutSeqSum: 0 },
+      viewHierarchy: { hierarchy: {} },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -846,8 +846,8 @@ describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified ca
 
   test("is unaffected when activeWindow.appId is a normal app package", () => {
     const result = makeResult({
-      activeWindow: { appId: "com.example.app", activityName: "MainActivity" } as any,
-      viewHierarchy: { hierarchy: {} as any } as any,
+      activeWindow: { appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 0 },
+      viewHierarchy: { hierarchy: {} },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -869,9 +869,10 @@ describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified ca
       activeWindow: {
         appId: "com.example.app",
         activityName: "MainActivity",
+        layoutSeqSum: 0,
         type: "notification_permission_dialog",
-      } as any,
-      viewHierarchy: { hierarchy: {} as any } as any,
+      },
+      viewHierarchy: { hierarchy: {} },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
 
@@ -883,8 +884,8 @@ describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified ca
 
   test("skips touch-latency when notificationPermissionDetected is set, even without activeWindow.type stamped", () => {
     const result = makeResult({
-      activeWindow: { appId: "com.example.app", activityName: "MainActivity" } as any,
-      viewHierarchy: { hierarchy: {} as any } as any,
+      activeWindow: { appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 0 },
+      viewHierarchy: { hierarchy: {} },
       notificationPermissionDetected: true,
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
@@ -897,8 +898,8 @@ describe("isHierarchyReliableForTapProbe / deriveTouchLatencyPoint unverified ca
 
   test("is unaffected by a normal app window with no dialog type and no permission flag", () => {
     const result = makeResult({
-      activeWindow: { appId: "com.example.app", activityName: "MainActivity" } as any,
-      viewHierarchy: { hierarchy: {} as any } as any,
+      activeWindow: { appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 0 },
+      viewHierarchy: { hierarchy: {} },
       notificationPermissionDetected: false,
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
@@ -948,13 +949,11 @@ describe("ObserveInertTouchPointResolver (#6228)", () => {
 
   function resultWithControlAt(control?: Element): ObserveResult {
     return makeResult({
-      activeWindow: { appId, activityName: "Main" } as any,
+      activeWindow: { appId, activityName: "Main", layoutSeqSum: 0 },
       viewHierarchy: {
-        hierarchy: control
-          ? { node: { $: { clickable: "true", bounds: control.bounds } } }
-          : ({} as any),
+        hierarchy: control ? { node: { $: { clickable: "true", bounds: control.bounds } } } : {},
         windows: [fullWindow],
-      } as any,
+      },
       elements: { clickable: control ? [control] : [], scrollable: [], text: [], media: [] },
     });
   }
@@ -1002,8 +1001,8 @@ describe("ObserveInertTouchPointResolver (#6228)", () => {
     // Fresh result carries the SAME timestamp as the enclosing observation.
     const staleReuse = makeResult({
       updatedAt: enclosingUpdatedAt,
-      activeWindow: { appId, activityName: "Main" } as any,
-      viewHierarchy: { hierarchy: {} as any, windows: [fullWindow] } as any,
+      activeWindow: { appId, activityName: "Main", layoutSeqSum: 0 },
+      viewHierarchy: { hierarchy: {}, windows: [fullWindow] },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
     const observeScreen = new FakeObserveScreen([staleReuse]);
@@ -1017,8 +1016,8 @@ describe("ObserveInertTouchPointResolver (#6228)", () => {
   // window - abort the sample instead.
   test("aborts when the foreground app changed during the audit", async () => {
     const otherApp = makeResult({
-      activeWindow: { appId: "com.other.app", activityName: "Main" } as any,
-      viewHierarchy: { hierarchy: {} as any, windows: [fullWindow] } as any,
+      activeWindow: { appId: "com.other.app", activityName: "Main", layoutSeqSum: 0 },
+      viewHierarchy: { hierarchy: {}, windows: [fullWindow] },
       elements: { clickable: [], scrollable: [], text: [], media: [] },
     });
     const observeScreen = new FakeObserveScreen([otherApp]);
@@ -1064,8 +1063,8 @@ describe("ObserveInertTouchPointResolver (#6228)", () => {
 
   test("returns null when the fresh capture has no app window (skipTouchLatency)", async () => {
     const noWindow = makeResult({
-      activeWindow: { appId, activityName: "Main" } as any,
-      viewHierarchy: { hierarchy: {} as any } as any,
+      activeWindow: { appId, activityName: "Main", layoutSeqSum: 0 },
+      viewHierarchy: { hierarchy: {} },
     });
     const observeScreen = new FakeObserveScreen([noWindow]);
     const resolver = new ObserveInertTouchPointResolver(observeScreen, appId, enclosingUpdatedAt);

@@ -241,9 +241,9 @@ function handleAssistant(event: JsonRecord, line: number, state: AuditState): vo
   }
   const parent = event.parent_tool_use_id;
   const isSubagent = parent !== null && parent !== undefined;
-  if (isSubagent && (typeof parent !== "string" || parent.trim() === "")) {
-    // Only null/absent (top level) or a real id (subagent) is meaningful; anything else would
-    // silently drop the call from the top-level sequence.
+  if (isSubagent && !isIdentifier(parent)) {
+    // Only null/absent (top level) or an exact id (subagent) is meaningful; anything else,
+    // padded ids included, would silently drop the call from the top-level sequence.
     state.audit.parseErrors.push(`line ${line}: invalid parent_tool_use_id`);
   }
   for (const block of contentBlocks(event, line, state)) {

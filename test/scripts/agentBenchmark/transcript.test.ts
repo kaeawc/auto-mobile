@@ -493,12 +493,14 @@ describe("agent benchmark transcript audit", () => {
     const event = (parent: unknown) =>
       JSON.stringify({ type: "assistant", parent_tool_use_id: parent, message: { content: [] } });
     const audit = auditTranscript(
-      `${INIT}${event(123)}\n${event(" ")}\n${event(null)}\n${event("toolu_parent")}\n`,
+      `${INIT}${event(123)}\n${event(" ")}\n${event(null)}\n${event("toolu_parent")}\n${event(" toolu_parent ")}\n`,
       NO_PATTERNS,
     );
     expect(audit.parseErrors).toEqual([
       "line 4: invalid parent_tool_use_id",
       "line 5: invalid parent_tool_use_id",
+      // A padded id is not the parent's exact id.
+      "line 8: invalid parent_tool_use_id",
     ]);
   });
 

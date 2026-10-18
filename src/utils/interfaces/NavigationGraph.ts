@@ -1,5 +1,11 @@
 import type { SelectedElement, SelectedElementDetection } from "../../models/SelectedElement";
 /**
+ * A navigation event as it arrives off the wire: the SDK may leave `timestamp` on the outer
+ * message, so the manager falls back to its own clock when it is absent.
+ */
+export type IncomingNavigationEvent = Omit<NavigationEvent, "timestamp"> & { timestamp?: number };
+
+/**
  * Represents a navigation event received from the Android SDK.
  */
 export interface NavigationEvent {

@@ -15,6 +15,7 @@ import {
 } from "../../../fixtures/observe/observeFixture";
 import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
 import scrollBeforeFixture from "../../../fixtures/observe/diff/scroll-before.json";
+import { partialFixture, partialFixtureArray } from "../../../helpers/partialFixture";
 import { computeFreshness } from "../../../../src/features/observe/observationFreshness";
 
 // The first cl100k encode in a process pays the tokenizer's JIT warm-up (~20 ms on the
@@ -434,11 +435,11 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: {
+            node: partialFixture({
               "view-id": "distinct-uuid",
               node: [],
               $: {},
-            } as any,
+            }),
           },
         },
       };
@@ -456,7 +457,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: [
+            node: partialFixtureArray([
               {
                 "resource-id": "id/covered",
                 "view-id": "id/covered",
@@ -476,7 +477,7 @@ describe("sanitizeObserveResult", () => {
                 node: [],
                 $: {},
               },
-            ] as any,
+            ]),
           },
         },
       };
@@ -498,7 +499,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: {
+            node: partialFixture({
               clickable: "false",
               "long-clickable": false,
               focusable: "true",
@@ -507,7 +508,7 @@ describe("sanitizeObserveResult", () => {
               "resource-id": "id/keep",
               node: [],
               $: {},
-            } as any,
+            }),
           },
         },
       };
@@ -533,12 +534,12 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: {
+            node: partialFixture({
               enabled: enabled,
               "resource-id": "id/keep",
               node: [],
               $: {},
-            } as any,
+            }),
           },
         },
       });
@@ -638,7 +639,7 @@ describe("sanitizeObserveResult", () => {
     test("per-node trim does not touch rawViewHierarchy (raw stays raw)", () => {
       const { observe } = loadAndroidHomeObserve();
       observe.rawViewHierarchy = {
-        hierarchy: {
+        hierarchy: partialFixture({
           node: {
             "view-id": "android:id/content",
             "resource-id": "android:id/content",
@@ -647,7 +648,7 @@ describe("sanitizeObserveResult", () => {
             node: [],
             $: {},
           },
-        } as any,
+        }),
       };
       const rawBefore = JSON.stringify(observe.rawViewHierarchy);
 
@@ -776,7 +777,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: { "resource-id": "id/no-bounds", node: [], $: {} } as any,
+            node: partialFixture({ "resource-id": "id/no-bounds", node: [], $: {} }),
           },
         },
       };
@@ -792,7 +793,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: [
+            node: partialFixtureArray([
               {
                 "resource-id": "a",
                 bounds: { left: 1, top: 2, right: 3, bottom: 4 },
@@ -801,7 +802,7 @@ describe("sanitizeObserveResult", () => {
                 ],
               },
               { "resource-id": "b", bounds: { left: 9, top: 10, right: 11, bottom: 12 } },
-            ] as any,
+            ]),
           },
         },
       };
@@ -819,7 +820,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: {
+            node: partialFixture({
               "resource-id": "id/root",
               "view-id": "id/root", // dup → trimmed
               clickable: "false", // default-false → trimmed
@@ -827,7 +828,7 @@ describe("sanitizeObserveResult", () => {
               bounds: { left: 0, top: 0, right: 100, bottom: 200 },
               node: [],
               $: {},
-            } as any,
+            }),
           },
         },
         elements: { clickable: [], scrollable: [], text: [], media: [] },
@@ -871,25 +872,29 @@ describe("sanitizeObserveResult", () => {
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 5, bottom: 6, left: 7, right: 8 },
-        focusedElement: { bounds: { left: 1, top: 2, right: 3, bottom: 4 } } as any,
-        accessibilityFocusedElement: { bounds: { left: 9, top: 10, right: 11, bottom: 12 } } as any,
-        awaitedElement: { bounds: { left: 13, top: 14, right: 15, bottom: 16 } } as any,
+        focusedElement: partialFixture({ bounds: { left: 1, top: 2, right: 3, bottom: 4 } }),
+        accessibilityFocusedElement: partialFixture({
+          bounds: { left: 9, top: 10, right: 11, bottom: 12 },
+        }),
+        awaitedElement: partialFixture({ bounds: { left: 13, top: 14, right: 15, bottom: 16 } }),
         elements: {
-          clickable: [{ bounds: { left: 20, top: 21, right: 22, bottom: 23 }, text: "btn" } as any],
-          scrollable: [{ bounds: { left: 30, top: 31, right: 32, bottom: 33 } } as any],
-          text: [{ bounds: { left: 40, top: 41, right: 42, bottom: 43 } } as any],
-          media: [{ bounds: { left: 50, top: 51, right: 52, bottom: 53 } } as any],
+          clickable: [
+            partialFixture({ bounds: { left: 20, top: 21, right: 22, bottom: 23 }, text: "btn" }),
+          ],
+          scrollable: [partialFixture({ bounds: { left: 30, top: 31, right: 32, bottom: 33 } })],
+          text: [partialFixture({ bounds: { left: 40, top: 41, right: 42, bottom: 43 } })],
+          media: [partialFixture({ bounds: { left: 50, top: 51, right: 52, bottom: 53 } })],
         },
         viewHierarchy: {
           systemInsets: { top: 1, bottom: 2, left: 3, right: 4 },
           hierarchy: {
-            bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } as any,
-            node: {
+            bounds: partialFixture({ left: 0, top: 0, right: 1080, bottom: 2400 }),
+            node: partialFixture({
               "resource-id": "root",
               bounds: { left: 60, top: 61, right: 62, bottom: 63 },
-            } as any,
+            }),
           },
-          windows: [{ bounds: { left: 70, top: 71, right: 72, bottom: 73 } } as any],
+          windows: [partialFixture({ bounds: { left: 70, top: 71, right: 72, bottom: 73 } })],
           contentHiddenRegions: [
             { bounds: { left: 80, top: 81, right: 82, bottom: 83 }, reason: "x", areaPercent: 1 },
           ],
@@ -900,25 +905,25 @@ describe("sanitizeObserveResult", () => {
     test("flattens elements[].bounds across all four element buckets", () => {
       const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
       const e = out.elements!;
-      expect((e.clickable[0] as any).bounds).toEqual([20, 21, 22, 23]);
-      expect((e.scrollable[0] as any).bounds).toEqual([30, 31, 32, 33]);
-      expect((e.text[0] as any).bounds).toEqual([40, 41, 42, 43]);
-      expect((e.media[0] as any).bounds).toEqual([50, 51, 52, 53]);
+      expect(Reflect.get(e.clickable[0], "bounds")).toEqual([20, 21, 22, 23]);
+      expect(Reflect.get(e.scrollable[0], "bounds")).toEqual([30, 31, 32, 33]);
+      expect(Reflect.get(e.text[0], "bounds")).toEqual([40, 41, 42, 43]);
+      expect(Reflect.get(e.media[0], "bounds")).toEqual([50, 51, 52, 53]);
     });
 
     test("flattens the Hierarchy root, window, and content-hidden-region bounds", () => {
       const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
       const vh = out.viewHierarchy!;
-      expect((vh.hierarchy as any).bounds).toEqual([0, 0, 1080, 2400]);
-      expect((vh.windows![0] as any).bounds).toEqual([70, 71, 72, 73]);
-      expect((vh.contentHiddenRegions![0] as any).bounds).toEqual([80, 81, 82, 83]);
+      expect(Reflect.get(vh.hierarchy, "bounds")).toEqual([0, 0, 1080, 2400]);
+      expect(Reflect.get(vh.windows![0], "bounds")).toEqual([70, 71, 72, 73]);
+      expect(Reflect.get(vh.contentHiddenRegions![0], "bounds")).toEqual([80, 81, 82, 83]);
     });
 
     test("flattens focused / accessibility-focused / awaited element bounds", () => {
       const out = sanitizeObserveResult(makeMultiSiteObserve(), COMPACT);
-      expect((out.focusedElement as any).bounds).toEqual([1, 2, 3, 4]);
-      expect((out.accessibilityFocusedElement as any).bounds).toEqual([9, 10, 11, 12]);
-      expect((out.awaitedElement as any).bounds).toEqual([13, 14, 15, 16]);
+      expect(Reflect.get(out.focusedElement, "bounds")).toEqual([1, 2, 3, 4]);
+      expect(Reflect.get(out.accessibilityFocusedElement, "bounds")).toEqual([9, 10, 11, 12]);
+      expect(Reflect.get(out.awaitedElement, "bounds")).toEqual([13, 14, 15, 16]);
     });
 
     test("NEVER compacts systemInsets (a {top,bottom,left,right} object, not bounds)", () => {
@@ -930,18 +935,18 @@ describe("sanitizeObserveResult", () => {
 
     test("leaves rawViewHierarchy untouched (raw stays raw)", () => {
       const obs = makeMultiSiteObserve();
-      obs.rawViewHierarchy = {
+      obs.rawViewHierarchy = partialFixture({
         hierarchy: {
           node: { "resource-id": "raw", bounds: { left: 90, top: 91, right: 92, bottom: 93 } },
         },
-      } as any;
+      });
       const rawBefore = JSON.stringify(obs.rawViewHierarchy);
 
       const out = sanitizeObserveResult(obs, COMPACT);
 
       expect(JSON.stringify(out.rawViewHierarchy)).toBe(rawBefore);
       // ...while the processed hierarchy WAS compacted (proves the skip is targeted).
-      expect((out.viewHierarchy!.hierarchy.node as any).bounds).toEqual([60, 61, 62, 63]);
+      expect(Reflect.get(out.viewHierarchy!.hierarchy.node, "bounds")).toEqual([60, 61, 62, 63]);
     });
 
     test("is output-only across every site (input object never mutated)", () => {
@@ -1249,7 +1254,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: { class: "android.view.View", ...attrs, node: [], $: {} } as any,
+            node: partialFixture({ class: "android.view.View", ...attrs, node: [], $: {} }),
           },
         },
       };
@@ -1312,11 +1317,14 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: { "resource-id": "r", bounds: input as any, node: [], $: {} } as any,
+            node: partialFixture({ "resource-id": "r", bounds: input, node: [], $: {} }),
           },
         },
       };
-      return (sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node as any).bounds;
+      return Reflect.get(
+        sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node!,
+        "bounds",
+      );
     }
 
     const ROWS: ReadonlyArray<readonly [string, unknown, unknown]> = [
@@ -1371,7 +1379,7 @@ describe("sanitizeObserveResult", () => {
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 5, bottom: 6, left: 7, right: 8 },
-        viewHierarchy: { hierarchy: { node: { "resource-id": "r" } as any } },
+        viewHierarchy: { hierarchy: { node: partialFixture({ "resource-id": "r" }) } },
       };
       expect(sanitizeObserveResult(obs, COMPACT).systemInsets).toEqual({
         top: 5,
@@ -1488,7 +1496,7 @@ describe("sanitizeObserveResult", () => {
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
-          hierarchy: { node: { "resource-id": "r", ...attrs, node: [], $: {} } as any },
+          hierarchy: { node: partialFixture({ "resource-id": "r", ...attrs, node: [], $: {} }) },
         },
       };
       return sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!
@@ -1620,7 +1628,9 @@ describe("sanitizeObserveResult", () => {
       updatedAt: 0,
       screenSize: { width: 1, height: 1 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      viewHierarchy: { hierarchy: { node: { "resource-id": "r", node: [], $: {} } as any } },
+      viewHierarchy: {
+        hierarchy: { node: partialFixture({ "resource-id": "r", node: [], $: {} }) },
+      },
     };
 
     test("compact on a bounds-free observation does not grow it", () => {

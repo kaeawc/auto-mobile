@@ -78,7 +78,7 @@ import {
 } from "../../daemon/devicePoolRefresh";
 import { releasePoolDevice, releaseSessionAndDevice } from "../../daemon/releaseSessionAndDevice";
 import { heldDeviceBindRefusal, isSameHolderSession } from "../../daemon/inputDeviceOwnership";
-import { lifecycleRequester } from "../../server/lifecycleDeviceOwnership";
+import { lifecycleRequester } from "./lifecycleRequester";
 import { deviceLossCancellationReason as utilDeviceLossCancellationReason } from "../../utils/deviceLossCancellationReason";
 import { terminateColdBootProcess } from "../../devices/coldBootProcessTermination";
 import { z } from "zod/v4";

@@ -13,11 +13,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { DaemonState } from "../../src/daemon/daemonState";
-import {
-  rotateHandler,
-  setRotateFactory,
-  resetRotateFactory,
-} from "../../src/server/interactionTools";
+import { type InteractionToolDependencies, rotateHandler } from "../../src/server/interactionTools";
 import type { ExecResult } from "../../src/models";
 import { logger } from "../../src/utils/logger";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -25,6 +21,7 @@ import { RotationSettingManagedError } from "../../src/models/RotationSettingMan
 import { readFileSync } from "fs";
 import { join } from "path";
 
+const interactionDeps: InteractionToolDependencies = {};
 // Captured `cmd device_state print-states` output from a foldable and a phone emulator.
 const FOLD_STATES = readFileSync(
   join(__dirname, "..", "fixtures", "android-display", "fold-states.txt"),
@@ -707,7 +704,7 @@ describe("session rotation restoration", () => {
     );
     const daemon = DaemonState.getInstance();
     daemon.initialize(h.manager, pool);
-    setRotateFactory((target, options) => {
+    interactionDeps.rotateFactory = (target, options) => {
       const feature = new Rotate(target, h.adb, h.timer, options);
       Object.assign(feature, {
         awaitIdle: h.rotate.awaitIdle,
@@ -715,17 +712,23 @@ describe("session rotation restoration", () => {
         window: h.rotate.window,
       });
       return feature;
-    });
+    };
     try {
       await h.manager.createSession("rotation-session", device.deviceId, "android");
-      await rotateHandler(device, { orientation: "landscape", sessionUuid: "rotation-session" });
+      await rotateHandler(
+        device,
+        { orientation: "landscape", sessionUuid: "rotation-session" },
+        undefined,
+        undefined,
+        interactionDeps,
+      );
       expect(h.adb.auto).toBe(0);
       expect(h.manager.getRotation("rotation-session")).toEqual({
         accelerometerRotation: 1,
         userRotation: 2,
       });
     } finally {
-      resetRotateFactory();
+      delete interactionDeps.rotateFactory;
       daemon.reset();
       h.manager.stopCleanupTimer();
     }

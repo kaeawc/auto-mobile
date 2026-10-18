@@ -44,8 +44,8 @@ import { logger } from "../utils/logger";
 import {
   assertLifecycleCallerHoldsDevice,
   assertLifecycleCallerNotOnForeignBinding,
-  type LifecycleRequester,
 } from "./lifecycleDeviceOwnership";
+import type { LifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
 import { DeviceAssignedToBindingError } from "../daemon/sessionBroker/provisioning/refusal";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DaemonState } from "../daemon/daemonState";

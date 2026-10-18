@@ -1,9 +1,11 @@
 import { createExecResult } from "../../../src/utils/execResult";
 import { describe, expect, test, spyOn } from "bun:test";
 import { logger } from "../../../src/utils/logger";
-import type { ChildProcess } from "node:child_process";
 import { SimulatorHighlights } from "../../../src/features/debug/SimulatorHighlights";
-import { DefaultHostCommandExecutor } from "../../../src/utils/HostCommandExecutor";
+import {
+  DefaultHostCommandExecutor,
+  type HostChildProcess,
+} from "../../../src/utils/HostCommandExecutor";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice, HighlightShape } from "../../../src/models";
@@ -30,11 +32,11 @@ class Executor extends DefaultHostCommandExecutor {
         : "capture-capability: encoded-video-h264\n",
     );
   }
-  override spawn(_file: string, args: string[]): ChildProcess {
+  override spawn(_file: string, args: string[]): HostChildProcess {
     this.args = args;
     const child = new FakeChildProcess(this.timer);
     this.children.push(child);
-    return child as unknown as ChildProcess;
+    return child;
   }
 }
 function setup() {

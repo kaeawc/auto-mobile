@@ -1,4 +1,4 @@
-import { execFile, spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { execFile, spawn, type SpawnOptions } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { promisify } from "util";
 import type { ExecResult } from "../models";
@@ -13,7 +13,7 @@ import {
 export type HostCommandOptions = ExecRequestOptions;
 
 /** Narrow injectable long-lived process launcher shared by Android clients. */
-export type SpawnFn = (file: string, args: string[], options?: SpawnOptions) => ChildProcess;
+export type SpawnFn = (file: string, args: string[], options?: SpawnOptions) => HostChildProcess;
 /**
  * The slice of a Node ChildProcess the host-launch consumers actually use.
  * Hand-written (rather than a `Pick`) so fakes can satisfy it structurally:
@@ -47,7 +47,7 @@ export interface HostCommandExecutor {
  * from the short-lived command seam so existing one-shot fakes stay minimal.
  */
 export interface HostProcessExecutor extends HostCommandExecutor {
-  spawn(file: string, args: string[], options?: SpawnOptions): ChildProcess;
+  spawn(file: string, args: string[], options?: SpawnOptions): HostChildProcess;
 
   /**
    * Starts a short-lived command while exposing its child for callers that own
@@ -62,7 +62,7 @@ export interface HostProcessExecutor extends HostCommandExecutor {
 }
 
 export interface StartedHostCommand {
-  child: ChildProcess;
+  child: HostChildProcess;
   result: Promise<ExecResult>;
 }
 
@@ -77,7 +77,7 @@ export type ExecFileWithChild = (
   args: string[],
   options: ExecSeamOptions | undefined,
   callback: (error: Error | null, stdout: string | Buffer, stderr: string | Buffer) => void,
-) => ChildProcess;
+) => HostChildProcess;
 
 /** Shared callback-style `execFile` leaf for callers that need its child handle. */
 export const execFileWithChild: ExecFileWithChild = (file, args, options, callback) =>
@@ -120,7 +120,7 @@ export class DefaultHostCommandExecutor implements HostProcessExecutor {
     });
   }
 
-  spawn(file: string, args: string[], options: SpawnOptions = {}): ChildProcess {
+  spawn(file: string, args: string[], options: SpawnOptions = {}): HostChildProcess {
     return spawn(file, args, options);
   }
 
@@ -129,7 +129,7 @@ export class DefaultHostCommandExecutor implements HostProcessExecutor {
     args: string[] = [],
     options: HostCommandOptions = {},
   ): StartedHostCommand {
-    let child: ChildProcess | undefined;
+    let child: HostChildProcess | undefined;
     let startupError: unknown;
     const result = runExecSeam(
       (execOptions) =>

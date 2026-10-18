@@ -8,6 +8,7 @@ import {
   fillPlaceholders,
   googleCredentialsIdentity,
   isolatedServerEnv,
+  managedSettingsIdentity,
   mcpServerEnv,
   providerIdentity,
   systemPromptFor,
@@ -196,6 +197,34 @@ describe("agent benchmark isolated server environment", () => {
   });
 });
 
+describe("agent benchmark managed settings", () => {
+  test("digests each managed settings file, which --setting-sources cannot exclude", () => {
+    const files: Record<string, string> = {
+      "/etc/claude-code/managed-settings.json": '{"env":{"A":"1"}}',
+      "/etc/claude-code/managed-settings.d/10-hooks.json": '{"hooks":{}}',
+    };
+    const list = (dir: string) =>
+      dir === "/etc/claude-code"
+        ? ["managed-settings.json", "managed-settings.d/10-hooks.json"]
+        : [];
+    const identity = managedSettingsIdentity("linux", list, (path) => files[path] ?? "");
+    expect(identity).toBe(
+      [
+        `/etc/claude-code/managed-settings.d/10-hooks.json=sha256:${pathDigest('{"hooks":{}}')}`,
+        `/etc/claude-code/managed-settings.json=sha256:${pathDigest('{"env":{"A":"1"}}')}`,
+      ].join("\n"),
+    );
+    // An unmanaged host records nothing.
+    expect(
+      managedSettingsIdentity(
+        "linux",
+        () => [],
+        () => "",
+      ),
+    ).toBe("");
+  });
+});
+
 describe("agent benchmark launch paths", () => {
   test("relative PATH entries and credentials paths are made absolute for the temp cwd", () => {
     const posix = claudeLaunchEnv(
@@ -306,7 +335,8 @@ describe("agent benchmark provider identity", () => {
     );
     expect(identity).toBe(
       [
-        `ANTHROPIC_BASE_URL=https://proxy.example.com/sha256:${pathDigest("/v1")}`,
+        // The userinfo is digested, never echoed.
+        `ANTHROPIC_BASE_URL=https://sha256:${pathDigest("user:secret")}@proxy.example.com/sha256:${pathDigest("/v1")}`,
         "ANTHROPIC_DEFAULT_SONNET_MODEL=routed-sonnet",
         "AWS_REGION=us-west-2",
         "CLAUDE_CODE_USE_BEDROCK=1",
@@ -361,6 +391,19 @@ describe("agent benchmark provider identity", () => {
     // The assumed role's ARN names the target account.
     expect(providerIdentity({ AWS_ROLE_ARN: "arn:aws:iam::123:role/r" })).toBe(
       `AWS_ROLE_ARN=sha256:${pathDigest("arn:aws:iam::123:role/r")}`,
+    );
+    // Custom request headers can carry tenant or routing values: digested, never echoed.
+    expect(providerIdentity({ ANTHROPIC_CUSTOM_HEADERS: "X-Tenant: a" })).toBe(
+      `ANTHROPIC_CUSTOM_HEADERS=sha256:${pathDigest("X-Tenant: a")}`,
+    );
+    // Proxy credentials pick a tenant: digested, so two tenants on one proxy differ.
+    const tenantA = providerIdentity({ HTTPS_PROXY: "http://tenant-a:key-a@proxy.example:8080" });
+    expect(tenantA).toBe(
+      `HTTPS_PROXY=http://sha256:${pathDigest("tenant-a:key-a")}@proxy.example:8080`,
+    );
+    expect(tenantA).not.toContain("key-a");
+    expect(providerIdentity({ HTTPS_PROXY: "http://tenant-b:key-b@proxy.example:8080" })).not.toBe(
+      tenantA,
     );
     // The Anthropic-on-AWS workspace selects the account's quota.
     expect(providerIdentity({ ANTHROPIC_AWS_WORKSPACE_ID: "wrkspc_1" })).toBe(
@@ -477,7 +520,7 @@ describe("agent benchmark provider identity", () => {
         "aws-config=sha256:stub",
       ].join("\n"),
     );
-    // Proxy routing is recorded by host and bypass list, never with its credentials.
+    // Proxy routing is recorded by host and bypass list, its credentials only as a digest.
     // POSIX casing: on Windows no_proxy is NO_PROXY (covered separately).
     const proxied = providerIdentity(
       { HTTPS_PROXY: "http://user:pass@proxy.corp:3128", no_proxy: "localhost,127.0.0.1" },
@@ -485,13 +528,18 @@ describe("agent benchmark provider identity", () => {
       "linux",
     );
     expect(proxied).toBe(
-      ["HTTPS_PROXY=http://proxy.corp:3128", "no_proxy=localhost,127.0.0.1"].join("\n"),
+      [
+        `HTTPS_PROXY=http://sha256:${pathDigest("user:pass")}@proxy.corp:3128`,
+        "no_proxy=localhost,127.0.0.1",
+      ].join("\n"),
     );
     expect(proxied).not.toContain("pass");
     // Claude-only proxy overrides route the API too.
     expect(
       providerIdentity({ CLAUDE_CODE_HTTPS_PROXY: "http://user:pass@claude-proxy.corp:8080" }),
-    ).toBe("CLAUDE_CODE_HTTPS_PROXY=http://claude-proxy.corp:8080");
+    ).toBe(
+      `CLAUDE_CODE_HTTPS_PROXY=http://sha256:${pathDigest("user:pass")}@claude-proxy.corp:8080`,
+    );
     expect(providerIdentity({ ANTHROPIC_BASE_URL: "not a url" })).toBe(
       "ANTHROPIC_BASE_URL=(unparseable)",
     );

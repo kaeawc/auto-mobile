@@ -76,8 +76,12 @@ they can still affect results:
   your own `~/.claude/CLAUDE.md`, auto-memory, and any organization-managed skills on the host
   don't shape the run, and `--setting-sources project,local` skips your user settings,
   so your hooks and enabled plugins don't apply either. (`--bare` would do this too, but it
-  requires API-key auth and would break subscription sign-in.) Two operators get comparable results
-  for the same suite and model.
+  requires API-key auth and would break subscription sign-in.) Organization-managed settings
+  files still apply at the highest precedence, so each one present on the host (under
+  `/etc/claude-code`, `/Library/Application Support/ClaudeCode`, or `ClaudeCode` in
+  `Program Files`/`ProgramData` on Windows) is digested into the build fingerprint; settings
+  delivered by server or MDM profile aren't visible as files and aren't covered. Two operators get
+  comparable results for the same suite and model.
 - Inherited Claude Code variables that change run behavior are removed from Claude's
   environment: effort and thinking, subagent model and limits, turn and output caps, context
   and compaction, Bash and MCP limits and timeouts, retries, tool search, and extra `CLAUDE.md`
@@ -248,7 +252,7 @@ built `dist/` with the schemas and vendor tools it loads at runtime, `bun.lock` 
 libraries the build leaves external, `package.json`, the harness sources under
 `scripts/agent-benchmark/` with every repository module they import (they run unbundled), the
 Bun version, and the host platform, architecture, and libc (which pick the native image build), the `--claude` command (by content, so an edited wrapper or binary counts), and a non-secret provider identity
-(provider selection, the scheme and host of every provider base URL and proxy with a digest of each path, digests of the account and project selectors (Vertex and Google Cloud project, the identity fields of the `GOOGLE_APPLICATION_CREDENTIALS` file, AWS profile, assumed role ARN, and access key ID, and the Anthropic workspace IDs, plus the name (never the value) of whichever direct credential is set: API key, auth token, or OAuth token, and for an AWS provider a digest of the AWS config file the profile resolves through), proxy bypass list, regions, provider-specific region routing and service tiers, adb server endpoint, and model-routing variables), the `adb version` of every adb client the server might run (SDK platform-tools, the adb on PATH, and the SDK the server's command-line tools detection finds), so a change to whichever one the server picks changes the build; the harness runs the client the server picks (it resolves adb with the server's own AdbClient) for preflight and the screen oracle, and fingerprints its version too. A stale build or changed scoring code is
+(provider selection, the scheme and host of every provider base URL and proxy with a digest of each path, digests of the account and project selectors (Vertex and Google Cloud project, the identity fields of the `GOOGLE_APPLICATION_CREDENTIALS` file, AWS profile, assumed role ARN, and access key ID, and the Anthropic workspace IDs, digests of `ANTHROPIC_CUSTOM_HEADERS` and of any proxy or base-URL credentials, plus the name (never the value) of whichever direct credential is set: API key, auth token, or OAuth token, and for an AWS provider a digest of the AWS config file the profile resolves through), proxy bypass list, regions, provider-specific region routing and service tiers, adb server endpoint, and model-routing variables), the `adb version` of every adb client the server might run (SDK platform-tools, the adb on PATH, and the SDK the server's command-line tools detection finds), so a change to whichever one the server picks changes the build; the harness runs the client the server picks (it resolves adb with the server's own AdbClient) for preflight and the screen oracle, and fingerprints its version too. A stale build or changed scoring code is
 flagged rather than silently measured. The git commit is deliberately left out, since every
 unrelated commit would change it), and
 `baseline.observedModel`, the model Claude reported running. Suites without

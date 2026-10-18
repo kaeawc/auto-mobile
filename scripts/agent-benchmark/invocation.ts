@@ -24,7 +24,7 @@
  *   variadic `--allowedTools`/`--disallowedTools` flags would swallow it.
  */
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, posix, win32 } from "node:path";
 import { MCP_SERVER_NAME, type SuiteDefinition } from "./config";
@@ -460,6 +460,9 @@ const PROVIDER_ACCOUNTS = [
   // Environment credentials outrank every profile, and the access key ID names the principal
   // (it is an identifier, not the secret key).
   "AWS_ACCESS_KEY_ID",
+  // Extra request headers (tenant or gateway-routing values), digested since they may carry
+  // a token.
+  "ANTHROPIC_CUSTOM_HEADERS",
 ];
 const PROXY_BYPASS = ["NO_PROXY", "no_proxy"];
 // The adb server the measured MCP server reaches (MCP_PASSTHROUGH_VARIABLES): a remote adb
@@ -468,7 +471,7 @@ const ADB_ENDPOINT = ["ADB_SERVER_SOCKET", "ANDROID_ADB_SERVER_ADDRESS", "ANDROI
 
 /**
  * A non-secret identity of the backend Claude will use: which provider is selected, the
- * host and a digest of the path (never credentials, the path itself, or the query) of any
+ * host and a digest of the path (never the credentials, which are digested, the path itself, or the query) of any
  * provider base URL or proxy, digests of the account and project selectors, the proxy bypass list, regions
  * and service tiers, the adb server endpoint,
  * and model-routing variables. Provider settings pass through to Claude on purpose, so they are recorded
@@ -536,6 +539,51 @@ const AWS_PROVIDER_FLAGS = [
   "CLAUDE_CODE_USE_MANTLE",
 ];
 
+/**
+ * Managed settings files, which apply at the highest precedence whatever
+ * `--setting-sources` says (hooks, env, permissions). Each existing file is digested, so a
+ * differently managed host changes the build. Server-delivered and MDM-profile settings are
+ * not visible as files and are not covered.
+ */
+export const MANAGED_SETTINGS_DIRS: Partial<Record<NodeJS.Platform, string[]>> = {
+  darwin: ["/Library/Application Support/ClaudeCode"],
+  linux: ["/etc/claude-code"],
+  win32: ["C:\\Program Files\\ClaudeCode", "C:\\ProgramData\\ClaudeCode"],
+};
+
+export function managedSettingsIdentity(
+  platform: NodeJS.Platform = process.platform,
+  listFiles: (dir: string) => string[] = managedFilesIn,
+  readFile: (path: string) => string = (file) => readFileSync(file, "utf8"),
+): string {
+  const path = platform === "win32" ? win32 : posix;
+  return (MANAGED_SETTINGS_DIRS[platform] ?? [])
+    .flatMap((dir) => listFiles(dir).map((file) => path.join(dir, file)))
+    .sort()
+    .map((file) => {
+      try {
+        return `${file}=sha256:${createHash("sha256").update(readFile(file)).digest("hex").slice(0, 12)}`;
+      } catch {
+        // Present but unreadable is still an identity, distinct from any readable digest.
+        return `${file}=unreadable`;
+      }
+    })
+    .join("\n");
+}
+
+/** managed-settings.json, managed-mcp.json, and managed-settings.d/*.json under one dir. */
+function managedFilesIn(dir: string): string[] {
+  const top = ["managed-settings.json", "managed-mcp.json"].filter((file) =>
+    existsSync(join(dir, file)),
+  );
+  const dropIns = existsSync(join(dir, "managed-settings.d"))
+    ? readdirSync(join(dir, "managed-settings.d"))
+        .filter((file) => file.endsWith(".json"))
+        .map((file) => join("managed-settings.d", file))
+    : [];
+  return [...top, ...dropIns];
+}
+
 export function providerIdentity(
   inherited: Record<string, string | undefined>,
   credentialsIdentity: (path: string) => string = googleCredentialsIdentity,
@@ -553,7 +601,13 @@ export function providerIdentity(
       // counts too. It is digested, never echoed, in case it carries a key.
       const path = url.pathname.replace(/\/+$/, "");
       // The scheme counts as well: http and https to one gateway are different transports.
-      const origin = `${url.protocol}//${url.host}`;
+      // Proxy credentials can select a tenant with its own routing, so they count too,
+      // digested and never echoed.
+      const userinfo =
+        url.username === "" && url.password === ""
+          ? ""
+          : `sha256:${createHash("sha256").update(`${url.username}:${url.password}`).digest("hex").slice(0, 12)}@`;
+      const origin = `${url.protocol}//${userinfo}${url.host}`;
       return path === ""
         ? origin
         : `${origin}/sha256:${createHash("sha256").update(path).digest("hex").slice(0, 12)}`;

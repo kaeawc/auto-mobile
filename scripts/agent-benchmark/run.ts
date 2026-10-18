@@ -68,7 +68,13 @@ import {
   type HarnessDeps,
   type HarnessFs,
 } from "./harness";
-import { buildClaudeArgs, buildMcpConfig, providerIdentity, systemPromptFor } from "./invocation";
+import {
+  buildClaudeArgs,
+  buildMcpConfig,
+  managedSettingsIdentity,
+  providerIdentity,
+  systemPromptFor,
+} from "./invocation";
 import { renderReport, renderSummary } from "./render";
 import type { BenchmarkResult } from "./result";
 
@@ -791,6 +797,11 @@ async function serverDigest(claudeCommand: string, harnessAdb: string): Promise<
     { path: "claude-command", read: () => claudeCommandIdentity(claudeCommand) },
     // Provider and routing settings reach Claude unscrubbed; record which backend served it.
     { path: "provider", read: () => new TextEncoder().encode(providerIdentity(process.env)) },
+    // Managed settings apply over --setting-sources, so a differently managed host differs.
+    {
+      path: "managed-settings",
+      read: () => new TextEncoder().encode(managedSettingsIdentity()),
+    },
     { path: "adb", read: () => new TextEncoder().encode(adb) },
     {
       path: "harness-adb",

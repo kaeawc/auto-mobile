@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -265,6 +265,41 @@ const POST_HEADERS = {
 };
 
 describe("StatelessMcpHttpEndpoint (#4678)", () => {
+  // The SDK client, the node HTTP transport and the SSE parser build their state on first use.
+  // That one-time cost belongs to the process, not to whichever test runs first (or alone, in
+  // the budget's isolated re-run), so drive one full exchange before the timed tests.
+  beforeAll(async () => {
+    const h = await harness();
+    const client = await connect(h.url, "warm-up");
+    await client.listTools();
+    await client.callTool({ name: "echo", arguments: {} }, { onprogress: () => {} });
+    await client.close();
+    const raw = await fetch(h.url, {
+      method: "POST",
+      headers: POST_HEADERS,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 0,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "w", version: "1" },
+        },
+      }),
+    });
+    await raw.text();
+    await Promise.all(
+      servers.splice(0).map(
+        (server) =>
+          new Promise<void>((resolve) => {
+            server.closeAllConnections();
+            server.close(() => resolve());
+          }),
+      ),
+    );
+  });
+
   test("a legacy initialize then tools/call works with no session header, and no response carries mcp-session-id", async () => {
     const h = await harness();
     const initialize = await fetch(h.url, {

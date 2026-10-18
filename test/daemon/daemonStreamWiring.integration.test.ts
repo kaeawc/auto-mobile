@@ -616,7 +616,7 @@ describe("Daemon stream wiring", () => {
     const connected: string[] = [];
     const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation((device) => {
       connected.push(device.deviceId);
-      return { ensureConnected: async () => false } as unknown as AndroidCtrlProxyClient;
+      return { ensureConnected: async () => false };
     });
     const sync = spyOn(appearanceSyncScheduler, "syncAppearanceForDevice").mockResolvedValue(
       undefined,
@@ -794,9 +794,9 @@ describe("Daemon stream wiring", () => {
     delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
     delete process.env.AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES;
     delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
-    const androidClient = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-      () => ({ ensureConnected: async () => false }) as unknown as AndroidCtrlProxyClient,
-    );
+    const androidClient = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+      ensureConnected: async () => false,
+    }));
     const iosClient = spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
       () => ({ ensureConnected: async () => false }) as unknown as IOSCtrlProxyClient,
     );

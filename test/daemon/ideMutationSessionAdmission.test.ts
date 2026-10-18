@@ -111,33 +111,28 @@ describe("mutating ide/* frames against a session that may not take a control ca
         succeededPlatforms: new Set(["android", "ios"]),
       }),
     } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-      () =>
-        ({
-          setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-            if (typeof args[5] === "object") {
-              args[5].onDispatch?.();
-            }
-            writes.push("setPreference");
-          },
-          removePreference: async (
-            ...args: Parameters<AndroidCtrlProxyClient["removePreference"]>
-          ) => {
-            if (typeof args[3] === "object") {
-              args[3].onDispatch?.();
-            }
-            writes.push("removePreference");
-          },
-          clearPreferenceStore: async (
-            ...args: Parameters<AndroidCtrlProxyClient["clearPreferenceStore"]>
-          ) => {
-            if (typeof args[2] === "object") {
-              args[2].onDispatch?.();
-            }
-            writes.push("clearPreferenceStore");
-          },
-        }) as unknown as AndroidCtrlProxyClient,
-    );
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+        if (typeof args[5] === "object") {
+          args[5].onDispatch?.();
+        }
+        writes.push("setPreference");
+      },
+      removePreference: async (...args: Parameters<AndroidCtrlProxyClient["removePreference"]>) => {
+        if (typeof args[3] === "object") {
+          args[3].onDispatch?.();
+        }
+        writes.push("removePreference");
+      },
+      clearPreferenceStore: async (
+        ...args: Parameters<AndroidCtrlProxyClient["clearPreferenceStore"]>
+      ) => {
+        if (typeof args[2] === "object") {
+          args[2].onDispatch?.();
+        }
+        writes.push("clearPreferenceStore");
+      },
+    }));
     spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
       () =>
         ({

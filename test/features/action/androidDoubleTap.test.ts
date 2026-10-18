@@ -689,9 +689,7 @@ describe("tapOn (Android default display)", () => {
   function createTap(timer: FakeTimer, client: ReturnType<typeof timedClient>["client"]) {
     const service = new FakeCtrlProxy(timer);
     Object.assign(service, client);
-    const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      service as unknown as AndroidCtrlProxyClient,
-    );
+    const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
     try {
       return new TapOnElement(androidDevice, new FakeAdbClient(), { timer });
     } finally {

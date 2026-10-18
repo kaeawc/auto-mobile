@@ -1,5 +1,5 @@
 import type { ViewHierarchyResult } from "../../models";
-import type { AndroidCtrlProxyClient } from "../observe/android";
+import type { AndroidCtrlProxy } from "../observe/android";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
 import { defaultTimer } from "../../utils/SystemTimer";
@@ -10,7 +10,7 @@ import {
 
 /** Refresh CtrlProxy, supplement incomplete captures within the same caller budget. */
 export async function refreshAndroidViewHierarchy(
-  accessibilityService: AndroidCtrlProxyClient,
+  accessibilityService: AndroidCtrlProxy,
   timeoutMs: number,
   signal?: AbortSignal,
   fallback?: AndroidHierarchyFallbackDeps,

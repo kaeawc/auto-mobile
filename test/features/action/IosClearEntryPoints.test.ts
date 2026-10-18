@@ -129,9 +129,7 @@ beforeEach(() => {
   iosInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
     proxy as unknown as IOSCtrlProxyClient,
   );
-  androidInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    androidProxy as unknown as AndroidCtrlProxyClient,
-  );
+  androidInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(androidProxy);
 });
 afterEach(() => {
   iosInstance.mockRestore();

@@ -47,7 +47,6 @@ import {
 } from "../features/toolSelection/toolSelectionContext";
 import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { createServer, Server as NetServer, Socket } from "node:net";
-import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
@@ -64,7 +63,6 @@ import { createRequestContext, type RequestContext } from "./requestContext";
 import { McpOverloadError, McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { isDebugModeEnabled } from "../utils/debug";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,
   BOUND_SESSION_LOSS_CODE,
@@ -184,15 +182,6 @@ import {
   withAndroidSharedPreferencesInspectionFallback,
 } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
 import { rethrowForRouteWithoutUserId } from "../features/preferences/resolveAndroidPreferencesUser";
-import {
-  IOS_CTRL_PROXY_APP_HASH,
-  resolveApkChecksum,
-  resolveApkUrl,
-  resolveAssetVersion,
-  resolveIpaChecksum,
-  resolveIpaUrl,
-  resolvePinnedVersion,
-} from "../constants/release";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
@@ -241,10 +230,7 @@ import {
   RestartAdmission,
 } from "./socketServer/restartAdmission";
 export { DAEMON_ACCEPTANCE_RESTART_ADMISSION_TTL_MS, DAEMON_MAINTENANCE_ADMISSION_TTL_MS };
-import {
-  processGenerationRecordFields,
-  recordedProcessGenerationToken,
-} from "./processGenerationFields";
+import { recordedProcessGenerationToken } from "./processGenerationFields";
 import {
   isSessionRefusal,
   mcpRequestFailureDetails,
@@ -282,6 +268,8 @@ import {
   type PendingSocketRequest,
 } from "./socketServer/PendingRequestTracker";
 import { CONTROL_SOCKET_MAX_FRAME_BYTES } from "./socketServer/LineFramer";
+import { runTrackedIdeMutation, type IdeMutationCall } from "./socketServer/ideMutationCall";
+import { buildIdeStatus } from "./socketServer/ideStatus";
 import {
   SessionReleasedDuringCallError,
   sessionReleaseThatCancelledCall,
@@ -599,25 +587,6 @@ const registeredDeviceReadClassifier: DeviceReadToolCallClassifier = (toolName, 
 
 /** How long a closed socket's late executions may still write bindings that are then forgotten. */
 const LATE_BINDING_FORGET_WINDOW_MS = 15 * 60 * 1000;
-
-/** One device-mutating `ide/*` route in flight; its ownership gate hands it the execution. */
-interface IdeMutationCall {
-  /**
-   * Keep `execution` in flight until the route settles. The holder's own call (`asHolder`) is also
-   * cut by a release of its session; a forced call acts for no session and runs to its end.
-   */
-  track(execution: ActiveExecution, asHolder: boolean): void;
-  /** The holder's session admission passed for `execution`: its dispatch will be session use. */
-  admit(execution: ActiveExecution): void;
-  /**
-   * The SDK write was sent successfully, or the direct-file fallback passed its abort check and
-   * is about to act on the device: only now is the holder's call session use (#11596, #11750).
-   * A route refused or cancelled while connecting ends unstamped.
-   */
-  dispatching(): void;
-  /** The socket session that sent the frame: a managed connection mutates only its binding devices. */
-  readonly socketSessionId: string | undefined;
-}
 
 /**
  * One `input/*` frame's device work. It calls `dispatching` once every pre-dispatch check passed
@@ -3110,7 +3079,7 @@ export class UnixSocketServer {
       return await this.handleIdeSocketRequest(request, socketSessionId);
     }
     signal?.throwIfAborted();
-    return await this.runTrackedIdeMutation(
+    return await runTrackedIdeMutation(
       socketSessionId,
       (call) => this.handleIdeSocketRequest(request, socketSessionId, call),
       signal,
@@ -3153,8 +3122,19 @@ export class UnixSocketServer {
     }),
     [
       "ide/status",
-      (request, socketSessionId, ideMutation) =>
-        this.ideStatus(request, socketSessionId, ideMutation),
+      async () =>
+        buildIdeStatus({
+          daemonIdentity: this.daemonIdentity,
+          identityStartedAt: this.identityStartedAt,
+          identityProcessStartedAt: this.identityProcessStartedAt,
+          identityDbPath: this.identityDbPath,
+          identityPidFilePath: this.identityPidFilePath,
+          identitySockets: this.identitySockets,
+          socketPath: this.socketPath,
+          startupOptions: this.startupOptions,
+          processGenerationToken: this.processGenerationToken,
+          acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
+        }),
     ],
     [
       "ide/updateService",
@@ -3189,53 +3169,6 @@ export class UnixSocketServer {
   ): Promise<any | undefined> {
     const handler = this.ideRouteHandlers.get(request.method);
     return handler ? await handler(request, socketSessionId, ideMutation) : undefined;
-  }
-
-  private async ideStatus(
-    request: DaemonRequest,
-    socketSessionId: string | undefined,
-    ideMutation: IdeMutationCall | undefined,
-  ): Promise<any | undefined> {
-    return {
-      structuredSessionNotFound: true,
-      structuredToolErrorCodes: true,
-      // Concrete pinned version (honors AUTOMOBILE_VERSION), never the
-      // floating "latest" tag — external consumers must see exactly what the
-      // daemon will fetch (#2746).
-      version: this.daemonIdentity.version,
-      pid: process.pid,
-      buildId: this.daemonIdentity.build.buildId,
-      entryScript: this.daemonIdentity.build.entryScript,
-      acceptanceCapabilityFingerprint: this.acceptanceDiscoveryCapability
-        ? createHash("sha256").update(this.acceptanceDiscoveryCapability).digest("hex").slice(0, 8)
-        : null,
-      startedAt: this.identityStartedAt,
-      processStartedAt: this.identityProcessStartedAt,
-      dbPath: this.identityDbPath,
-      reportedPidFilePath: this.identityPidFilePath,
-      reportedSocketPath: this.socketPath,
-      reportedSockets: this.identitySockets,
-      effectiveDebug: isDebugModeEnabled(),
-      options: this.startupOptions,
-      ...processGenerationRecordFields(this.processGenerationToken),
-      activeProvisioning: executionTracker.hasActiveToolExecution("provisionDevice", {
-        scope: "global",
-      }),
-      releaseVersion: resolveAssetVersion(resolvePinnedVersion()),
-      android: {
-        ctrlProxy: {
-          expectedSha256: resolveApkChecksum(),
-          url: resolveApkUrl(),
-        },
-      },
-      ios: {
-        xcTestService: {
-          expectedSha256: resolveIpaChecksum(),
-          expectedAppHash: IOS_CTRL_PROXY_APP_HASH,
-          url: resolveIpaUrl(),
-        },
-      },
-    };
   }
 
   private async ideUpdateService(
@@ -3543,62 +3476,6 @@ export class UnixSocketServer {
     } finally {
       if (!ideMutation) {
         executionTracker.endExecution(execution.id);
-      }
-    }
-  }
-
-  /**
-   * Run a device-mutating `ide/*` route as one tracked control call. The route's ownership gate
-   * starts the execution once the device and its holder are known; it stays in flight until the
-   * route settles, so the heartbeat and idle monitors see control in flight on the holder's
-   * session. A release that still lands (owner disconnect, forced release) cancels the execution:
-   * the holder's own route runs its device work under that signal, and the frame answers the
-   * release's typed refusal whatever the interrupted work threw. A forced route is not the
-   * holder's call, so the release neither cuts it nor names the holder's session to its caller.
-   */
-  private async runTrackedIdeMutation<T>(
-    socketSessionId: string | undefined,
-    run: (call: IdeMutationCall) => Promise<T>,
-    ownerSignal?: AbortSignal,
-  ): Promise<T> {
-    const abort = new AbortController();
-    let tracked: ActiveExecution | undefined;
-    let cutByRelease: ActiveExecution | undefined;
-    let admitted: ActiveExecution | undefined;
-    const call: IdeMutationCall = {
-      socketSessionId,
-      admit: (execution) => {
-        admitted = execution;
-      },
-      dispatching: () => {
-        if (admitted) {
-          // The holder's own mutation that reaches the device is use of its session (#10824).
-          executionTracker.markSessionAdmitted(admitted.id);
-        }
-      },
-      track: (execution, asHolder) => {
-        tracked = execution;
-        if (!asHolder) {
-          return;
-        }
-        cutByRelease = execution;
-        const signal = execution.abortController.signal;
-        if (signal.aborted) {
-          abort.abort(signal.reason);
-          return;
-        }
-        signal.addEventListener("abort", () => abort.abort(signal.reason), { once: true });
-      },
-    };
-    try {
-      const signal = ownerSignal ? AbortSignal.any([ownerSignal, abort.signal]) : abort.signal;
-      signal.throwIfAborted();
-      return await runWithAbortSignal(signal, () => run(call));
-    } catch (error) {
-      throw sessionReleaseThatCancelledCall(cutByRelease?.cancelReason) ?? error;
-    } finally {
-      if (tracked) {
-        executionTracker.endExecution(tracked.id);
       }
     }
   }

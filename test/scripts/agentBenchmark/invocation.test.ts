@@ -364,6 +364,15 @@ describe("agent benchmark provider identity", () => {
     expect(providerIdentity({ ANTHROPIC_AWS_WORKSPACE_ID: "wrkspc_1" })).toBe(
       `ANTHROPIC_AWS_WORKSPACE_ID=sha256:${pathDigest("wrkspc_1")}`,
     );
+    expect(providerIdentity({ ANTHROPIC_WORKSPACE_ID: "wrkspc_2" })).toBe(
+      `ANTHROPIC_WORKSPACE_ID=sha256:${pathDigest("wrkspc_2")}`,
+    );
+    // Environment credentials pick the AWS principal; only the key ID is recorded, digested.
+    const keyed = providerIdentity({
+      AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+      AWS_SECRET_ACCESS_KEY: "secret",
+    });
+    expect(keyed).toBe(`AWS_ACCESS_KEY_ID=sha256:${pathDigest("AKIAEXAMPLE")}`);
     // The AWS profile picks Bedrock's account through the credential chain.
     expect(
       providerIdentity(

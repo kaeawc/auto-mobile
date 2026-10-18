@@ -451,8 +451,13 @@ const PROVIDER_ACCOUNTS = [
   "AWS_DEFAULT_PROFILE",
   // The role the AWS credential chain assumes; its ARN names the target account.
   "AWS_ROLE_ARN",
-  // The Anthropic-on-AWS workspace, sent on every request; workspaces differ in quota.
+  // The Anthropic-on-AWS workspace, sent on every request, and the workspace workload
+  // identity federation exchanges tokens for; workspaces differ in quota.
   "ANTHROPIC_AWS_WORKSPACE_ID",
+  "ANTHROPIC_WORKSPACE_ID",
+  // Environment credentials outrank every profile, and the access key ID names the principal
+  // (it is an identifier, not the secret key).
+  "AWS_ACCESS_KEY_ID",
 ];
 const PROXY_BYPASS = ["NO_PROXY", "no_proxy"];
 // The adb server the measured MCP server reaches (MCP_PASSTHROUGH_VARIABLES): a remote adb

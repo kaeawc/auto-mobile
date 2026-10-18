@@ -136,8 +136,8 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
   test.each([false, true])("ambiguous autolock read=%s has no session echo", async (readOnly) => {
     const devices = new FakeDeviceSessionManager();
     devices.setConnectedDevices([iosDevice, { ...iosDevice, deviceId: "IOS-OTHER" }]);
-    const previous = Reflect.get(ToolRegistry, "deviceSessionManager");
-    Reflect.set(ToolRegistry, "deviceSessionManager", devices);
+    const originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
     const restore = ToolRegistry.setPipelineOverridesForTesting({
       env: { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "1" },
     });
@@ -164,7 +164,7 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
       expect(devices.getEnsureDeviceReadyCallCount()).toBe(0);
     } finally {
       restore();
-      Reflect.set(ToolRegistry, "deviceSessionManager", previous);
+      ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     }
   });
 

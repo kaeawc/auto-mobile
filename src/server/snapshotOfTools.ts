@@ -21,7 +21,8 @@ import { resolveImageBackend } from "../utils/image/backend/resolveImageBackend"
 import type { ImageBackend } from "../utils/image/backend/ImageBackend";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../utils/tempDir";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import { snapshotOfResultSchema } from "./snapshotOfToolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
 import { isSessionlessDeviceRead } from "../features/toolSelection/toolSelectionContext";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
@@ -144,7 +145,7 @@ export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {
         const protection = dependencies.pathProtection ?? screenshotPathProtection;
         await writeRetainedScreenshot(outputPath, cropped.png, dependencies);
         const expiresAt = await protection.protect(outputPath);
-        return createJSONToolResponse({
+        return createStructuredToolResponse({
           path: outputPath,
           expiresAt,
           unit: device.platform === "ios" ? "points" : "pixels",
@@ -166,6 +167,7 @@ export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {
       defaultEnabled: false,
       // A crop of a fresh capture; a non-holder watches a held device read-only (#10830).
       deviceReadOnly: true,
+      outputSchema: snapshotOfResultSchema,
     },
   );
 }

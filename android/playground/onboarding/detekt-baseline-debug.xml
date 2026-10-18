@@ -2,6 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>UnsafeCallOnNullableType:Experiments.kt:selectedExperiment!!</ID>
+    <ID>LongMethod:OnboardingScreen.kt:@Composable fun OnboardingScreen</ID>
   </CurrentIssues>
 </SmellBaseline>

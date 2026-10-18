@@ -17,7 +17,10 @@ export interface FakeRecordingProcessOptions {
  * A `ChildProcess` that never spawns: stderr is a test-owned stream, stdout/stdin are absent
  * (the `simctl io recordVideo` stdio shape), and `kill()` is scripted per test.
  */
-export class FakeRecordingProcess extends ChildProcess {
+export class FakeRecordingProcess
+  extends ChildProcess
+  implements Pick<ChildProcess, "stderr" | "kill" | "pid">
+{
   override stderr: Readable;
   override stdout: Readable | null = null;
   override stdin: null = null;

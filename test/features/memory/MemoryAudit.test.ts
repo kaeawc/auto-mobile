@@ -499,15 +499,15 @@ describe("MemoryAudit - Unit Tests", function () {
           gcTotalDurationMs: 0,
           unreachableObjects: null,
         };
-        await dbAudit["storeAuditResult"](
-          "com.example",
-          "sendKeys",
-          { commands: [{ action: "type", text: "hunter2-secret" }], platform: "android" },
+        await dbAudit["storeAuditResult"]({
+          packageName: "com.example",
+          toolName: "sendKeys",
+          toolArgs: { commands: [{ action: "type", text: "hunter2-secret" }], platform: "android" },
           metrics,
-          [],
-          null,
-          true,
-        );
+          violations: [],
+          diagnostics: null,
+          passed: true,
+        });
         const row = await db
           .selectFrom("memory_audit_results")
           .select("tool_args")

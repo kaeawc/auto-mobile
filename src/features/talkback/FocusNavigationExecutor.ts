@@ -26,6 +26,7 @@ import {
 } from "./nodeActionTarget";
 import { FocusNavigationStoppedError } from "./FocusNavigationStoppedError";
 import { FocusNavigationUnavailableError } from "./FocusNavigationUnavailableError";
+import { DefaultFocusNavigationDriverFactory } from "./DefaultFocusNavigationDriverFactory";
 export { FocusNavigationStoppedError } from "./FocusNavigationStoppedError";
 export { FocusNavigationUnavailableError } from "./FocusNavigationUnavailableError";
 
@@ -140,7 +141,7 @@ interface FocusNavigationExecutorDependencies {
   deviceResolver?: (deviceId: string) => BootedDevice;
 }
 
-type FocusDriverClient = Pick<
+export type FocusDriverClient = Pick<
   AndroidCtrlProxyClient,
   | "getAccessibilityHierarchy"
   | "requestTraversalOrder"
@@ -149,70 +150,6 @@ type FocusDriverClient = Pick<
   | "requestNodeAction"
   | "supportsNodeActionSelectors"
 >;
-class DefaultFocusNavigationDriver implements FocusNavigationDriver {
-  private accessibilityService: FocusDriverClient;
-  constructor(accessibilityService: FocusDriverClient) {
-    this.accessibilityService = accessibilityService;
-  }
-
-  async getAccessibilityHierarchy(): Promise<ViewHierarchyResult | null> {
-    return this.accessibilityService.getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      false,
-      undefined,
-      true,
-    );
-  }
-
-  async requestTraversalOrder(): Promise<TraversalOrderResult> {
-    return this.accessibilityService.requestTraversalOrder();
-  }
-
-  async requestCurrentFocus(): Promise<CurrentFocusResult> {
-    return this.accessibilityService.requestCurrentFocus();
-  }
-
-  async requestAction(
-    action: string,
-    resourceId?: string,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult> {
-    return this.accessibilityService.requestAction(
-      action,
-      resourceId,
-      undefined,
-      undefined,
-      undefined,
-      signal,
-    );
-  }
-
-  async requestNodeAction(
-    action: string,
-    selector: AccessibilityNodeSelector,
-    signal?: AbortSignal,
-  ): Promise<A11yActionResult> {
-    return this.accessibilityService.requestNodeAction(
-      action,
-      selector,
-      undefined,
-      undefined,
-      signal,
-    );
-  }
-
-  async supportsNodeActionSelectors(): Promise<boolean> {
-    return this.accessibilityService.supportsNodeActionSelectors();
-  }
-}
-
-class DefaultFocusNavigationDriverFactory implements FocusNavigationDriverFactory {
-  createDriver(device: BootedDevice): FocusNavigationDriver {
-    return new DefaultFocusNavigationDriver(AndroidCtrlProxyClient.getInstance(device));
-  }
-}
-
 function elementIdentity(element: Element): string {
   const bounds = element.bounds;
   return [

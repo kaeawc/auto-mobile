@@ -10,7 +10,7 @@
  */
 import { LineFramer } from "../../../daemon/socketServer/LineFramer";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "../prototypeSpec";
-import { createConnection, type Socket } from "node:net";
+import { createConnection } from "node:net";
 import { ActionableError } from "../../../models/ActionableError";
 import type { IdGenerator } from "../../../utils/IdGenerator";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -23,6 +23,9 @@ import {
   PROTOTYPE_RESPONSE_MESSAGE_TYPE,
 } from "../prototypeRequestProtocol";
 import { PrototypeAgentFrameTooLargeError } from "./PrototypeAgentFrameTooLargeError";
+import { PrototypeAgentRequestTimeoutError } from "./PrototypeAgentRequestTimeoutError";
+import { NodePrototypeAgentSocket } from "./NodePrototypeAgentSocket";
+export { PrototypeAgentRequestTimeoutError } from "./PrototypeAgentRequestTimeoutError";
 export { PrototypeAgentFrameTooLargeError } from "./PrototypeAgentFrameTooLargeError";
 
 /** Must equal `PrototypeAgentProtocol.protocolVersion` in the agent. */
@@ -58,16 +61,6 @@ export type PrototypeAgentRequestType =
   // Test hook: the agent advertises it only when launched with
   // AUTOMOBILE_PROTOTYPE_AGENT_TEST_HOOKS=1 (scripts/ios/prototype-agent-smoke.sh does that).
   | "simulate_tap";
-
-export class PrototypeAgentRequestTimeoutError extends ActionableError {
-  constructor(
-    readonly requestType: PrototypeAgentRequestType,
-    readonly timeoutMs: number,
-  ) {
-    super(`Prototype agent did not answer ${requestType} within ${timeoutMs} ms.`);
-    this.name = "PrototypeAgentRequestTimeoutError";
-  }
-}
 
 export type PrototypeAgentMessage = Record<string, unknown>;
 
@@ -476,32 +469,6 @@ class SocketPrototypeAgentClient implements PrototypeAgentClient {
     this.socket.end();
     this.closedListeners.forEach((listener) => listener(error));
     this.closedListeners.clear();
-  }
-}
-
-class NodePrototypeAgentSocket implements PrototypeAgentSocket {
-  constructor(private readonly socket: Socket) {
-    socket.setEncoding("utf8");
-  }
-
-  write(data: string): void {
-    this.socket.write(data);
-  }
-
-  end(): void {
-    this.socket.end();
-  }
-
-  onData(listener: (chunk: string) => void): void {
-    this.socket.on("data", (chunk: string) => listener(chunk));
-  }
-
-  onClose(listener: (error?: Error) => void): void {
-    let lastError: Error | undefined;
-    this.socket.on("error", (error) => {
-      lastError = error;
-    });
-    this.socket.on("close", () => listener(lastError));
   }
 }
 

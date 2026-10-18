@@ -28,6 +28,8 @@ import {
 import { combineAbortSignals } from "../../utils/AbortContext";
 import { ProcessTeardownUnconfirmedError } from "../../utils/ChildProcessTracker";
 import { VideoCaptureFinalizationError } from "./VideoCaptureFinalizationError";
+import { VideoCaptureStartCleanupError } from "./VideoCaptureStartCleanupError";
+export { VideoCaptureStartCleanupError } from "./VideoCaptureStartCleanupError";
 export { VideoCaptureFinalizationError } from "./VideoCaptureFinalizationError";
 
 /**
@@ -89,21 +91,6 @@ export interface RecordingHandle {
    */
   liveCapturePath?: string;
   backendHandle?: unknown;
-}
-
-/**
- * A backend rejected startup but still owns a process that cleanup could not
- * reap. Retaining this handle lets shutdown or rollback retry force-stop.
- */
-export class VideoCaptureStartCleanupError extends Error {
-  constructor(
-    message: string,
-    readonly handle: RecordingHandle,
-    options?: ErrorOptions,
-  ) {
-    super(message, options);
-    this.name = "VideoCaptureStartCleanupError";
-  }
 }
 
 export interface RecordingResult {

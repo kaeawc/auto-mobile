@@ -36,6 +36,16 @@ interface MemoryAuditResult {
   diagnostics: string | null;
 }
 
+interface StoredAuditRecord {
+  packageName: string;
+  toolName: string;
+  toolArgs: unknown;
+  metrics: MemoryMetrics;
+  violations: MemoryViolation[];
+  diagnostics: string | null;
+  passed: boolean;
+}
+
 /**
  * Memory audit class for collecting and validating memory metrics
  * Detects memory leaks, excessive GC, and memory pressure
@@ -108,7 +118,7 @@ export class MemoryAudit {
     const passed = violations.length === 0;
 
     // Store audit result in database
-    await this.storeAuditResult(
+    await this.storeAuditResult({
       packageName,
       toolName,
       toolArgs,
@@ -116,7 +126,7 @@ export class MemoryAudit {
       violations,
       diagnostics,
       passed,
-    );
+    });
 
     // Update baseline with new metrics (only if passed, to avoid poisoning baseline)
     if (passed) {
@@ -352,15 +362,8 @@ export class MemoryAudit {
   /**
    * Store audit result in database
    */
-  private async storeAuditResult(
-    packageName: string,
-    toolName: string,
-    toolArgs: unknown,
-    metrics: MemoryMetrics,
-    violations: MemoryViolation[],
-    diagnostics: string | null,
-    passed: boolean,
-  ): Promise<void> {
+  private async storeAuditResult(record: StoredAuditRecord): Promise<void> {
+    const { packageName, toolName, toolArgs, metrics, violations, diagnostics, passed } = record;
     try {
       const now = new Date();
       const sessionId = now.toISOString().split("T")[0]; // YYYY-MM-DD

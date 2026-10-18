@@ -29,9 +29,10 @@ import {
   defaultAdbClientFactory,
   AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { SimCtlClient, SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { execFileAsync as sharedExecFileAsync } from "../../utils/HostCommandExecutor";
 import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
+import { DefaultSimCtlClientFactory } from "./DefaultSimCtlClientFactory";
 
 const defaultExecFileAsync: ExecFileAsyncFn = async (file, args) => {
   const result = await sharedExecFileAsync(file, args);
@@ -59,15 +60,6 @@ export type ExecFileAsyncFn = (
  */
 export interface SimCtlClientFactory {
   create(deviceId: string): SimCtl;
-}
-
-/**
- * Default factory that creates real SimCtlClient instances.
- */
-class DefaultSimCtlClientFactory implements SimCtlClientFactory {
-  create(deviceId: string): SimCtl {
-    return new SimCtlClient({ deviceId, name: deviceId, platform: "ios" });
-  }
 }
 
 /**

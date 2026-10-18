@@ -269,6 +269,10 @@ import {
   runWithForwardSessionKey,
 } from "./socketServer/forwardSessionKey";
 import { runKeyedSerial, type McpForwardChainWait } from "./socketServer/keyedSerialQueue";
+import {
+  PendingRequestTracker,
+  type PendingSocketRequest,
+} from "./socketServer/PendingRequestTracker";
 import { CONTROL_SOCKET_MAX_FRAME_BYTES } from "./socketServer/LineFramer";
 import {
   SessionReleasedDuringCallError,
@@ -512,16 +516,6 @@ function resolveSocketBindGuard(
 interface SocketFileIdentity {
   dev: number;
   ino: number;
-}
-
-interface PendingSocketRequest {
-  id: string;
-  sessionId: string;
-  socket: Socket;
-  admitted: boolean;
-  terminal: boolean;
-  /** Control frames do not earn an idle exemption; ordinary work has a bounded live deadline. */
-  idleDeadline?: ProgressExtendableDeadline;
 }
 
 /**
@@ -921,7 +915,7 @@ export class UnixSocketServer {
   /** Request handlers that can continue after their client socket is destroyed. */
   private activeRequestHandlers: Set<Promise<void>> = new Set();
   /** Parsed requests awaiting their one terminal response to flush, including queued requests. */
-  private pendingSocketRequests = new Set<PendingSocketRequest>();
+  private pendingSocketRequests = new PendingRequestTracker();
   /** Socket sessions that opted in to server-pushed notifications. */
   private notificationSubscribers: Set<string> = new Set();
   private readonly resourceSubscriptions = new Map<string, Set<string>>();
@@ -1330,11 +1324,7 @@ export class UnixSocketServer {
       onClose: () => {
         this.controlConnections.delete(socket);
         logger.info(`Client disconnected: ${sessionId}`);
-        for (const pending of this.pendingSocketRequests) {
-          if (pending.socket === socket) {
-            this.pendingSocketRequests.delete(pending);
-          }
-        }
+        this.pendingSocketRequests.deleteForSocket(socket);
         this.releaseSocketSession(sessionId, socket);
       },
       onError: () => this.releaseSocketSession(sessionId, socket),
@@ -1376,16 +1366,7 @@ export class UnixSocketServer {
   }
 
   private hasLiveSocketRequest(socket: Socket): boolean {
-    for (const pending of this.pendingSocketRequests) {
-      if (
-        pending.socket === socket &&
-        pending.idleDeadline &&
-        pending.idleDeadline.value >= this.timer.now()
-      ) {
-        return true;
-      }
-    }
-    return false;
+    return this.pendingSocketRequests.hasLiveRequest(socket, this.timer.now());
   }
 
   private async processSocketRequestLine(

@@ -112,6 +112,12 @@ they can still affect results:
   exits, the harness stops the run's daemon and takes the allocation claim back before the post-run
   screen dump. If another session claimed the device in between, the screen is not read and the
   screen check fails.
+  **Known gap:** the benchmark-only lock is honored only by benchmark runs. Between the handover and
+  the run's first device tool call, nothing stops an ordinary AutoMobile daemon you have running
+  from claiming the device, changing it, and releasing it again. The start-screen check runs before
+  the handover, so it cannot see this. Stop other AutoMobile sessions on the device before a run whose
+  result will become a baseline. Closing the gap needs an ownership transfer that every daemon
+  honors, which is a daemon change outside this harness.
 - No iOS simulator may be booted and no physical iOS device connected (checked with
   `xcrun simctl` and `devicectl` on macOS): the benchmark's AutoMobile server discovers iOS too,
   which would make device selection ambiguous. If either check itself fails on macOS, the run stops

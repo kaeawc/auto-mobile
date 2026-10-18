@@ -52,6 +52,7 @@ import {
 } from "@modelcontextprotocol/client";
 import { LoopbackMcpClient } from "./socketServer/loopbackMcpClient";
 import { dropToolCallRecording } from "../server/toolCallRecordingManager";
+import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
 import {} from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
 import type { RefusedOwnedSessionRestore } from "./devicePool";
@@ -1096,6 +1097,13 @@ export class UnixSocketServer {
   releaseToolCallRecording: (connectionId: string) => void = dropToolCallRecording;
 
   /**
+   * Drops the session-tool bindings keyed on a socket session id once its socket is gone (#4678):
+   * the daemon-scoped store would otherwise keep one entry per connection forever.
+   */
+  forgetSessionToolBindings: (socketSessionId: string) => void = (socketSessionId) =>
+    daemonSessionToolBindingStore().forget(socketSessionId);
+
+  /**
    * Factory for the Android append-text helper behind `input/typeText mode:"append"`.
    *
    * Defaults to the real {@link InputText} bound to the default adb client factory and
@@ -1778,6 +1786,7 @@ export class UnixSocketServer {
     this.releaseDevicePoolMcpSessionBindings(sessionId);
     this.daemonState.getBrokerConnectionScopes?.().unbind(sessionId);
     this.releaseToolCallRecording(sessionId);
+    this.forgetSessionToolBindings(sessionId);
     // Lift any streamed gesture this socket left open on the device (issue: streaming gesture
     // input). Tracked so daemon shutdown drains it rather than a fire-and-forget floating promise.
     this.trackRequestHandler(this.ownedGestures.cancelAllFor(sessionId));

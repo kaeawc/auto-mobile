@@ -51,7 +51,6 @@ import { GestureOwnershipRegistry } from "./gestureOwnership";
 import { resolveMcpRequestTimeoutMsOnce, ProgressExtendableDeadline } from "./mcpRequestTimeout";
 import { createRequestContext, type RequestContext } from "./requestContext";
 import { McpOverloadError, McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
-import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isDebugModeEnabled } from "../utils/debug";
@@ -88,7 +87,6 @@ import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-  DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS,
 } from "./constants";
 import {
   isHostInventoryCall,
@@ -144,7 +142,8 @@ import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers"
 import { isDaemonRequestEnvelope, readFramePlatformHint } from "./daemonRequestEnvelope";
 import { deviceIncarnationToken } from "../utils/deviceIncarnation";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES, OutboundWriteGuard } from "./outboundWriteGuard";
+import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES } from "./outboundWriteGuard";
+import { ControlConnection } from "./socketServer/ControlConnection";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { FeatureFlagAdmin } from "../features/featureFlags/FeatureFlagService";
 import {
@@ -270,7 +269,7 @@ import {
   runWithForwardSessionKey,
 } from "./socketServer/forwardSessionKey";
 import { runKeyedSerial, type McpForwardChainWait } from "./socketServer/keyedSerialQueue";
-import { CONTROL_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
+import { CONTROL_SOCKET_MAX_FRAME_BYTES } from "./socketServer/LineFramer";
 import {
   SessionReleasedDuringCallError,
   sessionReleaseThatCancelledCall,
@@ -298,17 +297,6 @@ function socketRequestId(parsed: unknown): string | null {
 
 class ClientRequestCancellation extends ActionableError {}
 
-const EXPECTED_PEER_CLOSE_CODES = new Set([
-  "EPIPE",
-  "ECONNRESET",
-  "ERR_STREAM_DESTROYED",
-  "ECONNABORTED",
-]);
-function isExpectedPeerClose(error: Error): boolean {
-  return (
-    "code" in error && typeof error.code === "string" && EXPECTED_PEER_CLOSE_CODES.has(error.code)
-  );
-}
 function isClientForwardCancellation(
   signal: AbortSignal | undefined,
   cause: DaemonRequestFailureCause | undefined,
@@ -929,11 +917,7 @@ export class UnixSocketServer {
   private clientSockets: Map<string, Socket> = new Map();
   private acceptedClientConnections = 0;
   /** Per-socket outbound byte bound and stall watchdog (issue #10176). */
-  private readonly outboundWriteGuards = new WeakMap<Socket, OutboundWriteGuard>();
-  private readonly backpressuredSocketIdle = new WeakMap<
-    Socket,
-    { start: () => void; refresh: () => void; responseFlushed: () => void }
-  >();
+  private readonly controlConnections = new WeakMap<Socket, ControlConnection>();
   /** Request handlers that can continue after their client socket is destroyed. */
   private activeRequestHandlers: Set<Promise<void>> = new Set();
   /** Parsed requests awaiting their one terminal response to flush, including queued requests. */
@@ -1327,78 +1311,11 @@ export class UnixSocketServer {
     this.acceptedClientConnections++;
     logger.info(`New client connection: ${sessionId}`);
 
-    // Ordinary idle sockets retain Node's timeout. Once a write backpressures,
-    // writes must no longer extend the lifetime of a peer that is not reading.
-    socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
-    const onIdleTimeout = (): void => {
-      // A silent request may outlive the idle window. Renew only while its
-      // live deadline permits work, never for an unread backpressured write.
-      // A handler that never answers loses this exemption at its deadline and
-      // is disconnected on the next check (at most one further idle window).
-      if (socket.writableLength === 0 && this.hasLiveSocketRequest(socket)) {
-        socket.setTimeout(0);
-        if (idleTimeout) {
-          this.timer.clearTimeout(idleTimeout);
-        }
-        idleTimeout = armIdleTimeout();
-        return;
-      }
-      logger.warn(
-        `Daemon RPC socket ${sessionId} idle timeout after ${DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS}ms, destroying`,
-      );
-      socket.destroy();
-    };
-    socket.on("timeout", onIdleTimeout);
-    const armIdleTimeout = (): NodeJS.Timeout =>
-      this.timer.setTimeout(onIdleTimeout, DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
-    let idleTimeout: NodeJS.Timeout | undefined;
-    const refreshIdle = (): void => {
-      if (!idleTimeout || socket.destroyed) {
-        return;
-      }
-      this.timer.clearTimeout(idleTimeout);
-      idleTimeout = armIdleTimeout();
-    };
-    this.backpressuredSocketIdle.set(socket, {
-      start: () => {
-        if (idleTimeout || socket.destroyed) {
-          return;
-        }
-        socket.setTimeout(0);
-        idleTimeout = armIdleTimeout();
-      },
-      refresh: refreshIdle,
-      responseFlushed: () => {
-        if (socket.destroyed) {
-          return;
-        }
-        if (idleTimeout) {
-          if (socket.writableLength === 0) {
-            refreshIdle();
-          }
-        } else {
-          socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
-        }
-      },
-    });
-    socket.on("drain", refreshIdle);
-    socket.on("drain", () => this.outboundWriteGuards.get(socket)?.flushed());
-
-    if (this.onFrameTrace) {
-      socket.on("drain", () => this.traceFrame("socket_drain", "*"));
-      socket.on("pause", () => this.traceFrame("socket_pause", "*"));
-      socket.on("end", () => this.traceFrame("socket_end", "*"));
-      socket.on("finish", () => this.traceFrame("socket_finish", "*"));
-    }
-
-    // Frames are delivered synchronously from `framer.push`, so every frame of a
-    // chunk sees that chunk's receive time.
-    let receivedAtMs = this.timer.now();
-    const framer = new LineFramer(this.maxInboundFrameBytes, {
+    this.connectionFor(socket, sessionId).start({
       // Parse each frame synchronously and track it on its own. A held device
       // call must not keep another frame attached to its chunk's completion
       // promise (issue #6387).
-      onLine: (line) => {
+      onLine: (line, receivedAtMs) => {
         if (line.trim()) {
           this.trackRequestHandler(
             this.processSocketRequestLine(sessionId, socket, line, receivedAtMs),
@@ -1406,70 +1323,32 @@ export class UnixSocketServer {
         }
       },
       onOverflow: () => this.rejectOversizedFrame(sessionId, socket),
-    });
-    socket.on("data", (data) => {
-      // After an overflow the socket only waits for its error reply to flush;
-      // further bytes must not keep it alive past the idle timeout.
-      if (framer.hasOverflowed) {
-        return;
-      }
-      refreshIdle();
-      receivedAtMs = this.timer.now();
-      framer.push(data);
-    });
-
-    // The peer closed its side (#11058). Replies already queued may still flush within the grace;
-    // past it the socket is destroyed, because a reply queued to a peer that is gone can stay
-    // unflushed without an error, so the automatic end would never complete and `close` (and the
-    // owner-disconnect release it triggers) would never run.
-    let peerEndGrace: NodeJS.Timeout | undefined;
-    socket.on("end", () => {
-      if (socket.destroyed || peerEndGrace) {
-        return;
-      }
-      peerEndGrace = this.timer.setTimeout(() => {
-        if (!socket.destroyed) {
-          logger.debug(
-            `Daemon RPC socket ${sessionId} peer closed with ${socket.writableLength} bytes unflushed; destroying`,
-          );
-          socket.destroy();
+      hasLiveRequest: () => this.hasLiveSocketRequest(socket),
+      trace: this.onFrameTrace
+        ? (event, extra) => this.traceFrame(event, "*", undefined, undefined, extra)
+        : undefined,
+      onClose: () => {
+        this.controlConnections.delete(socket);
+        logger.info(`Client disconnected: ${sessionId}`);
+        for (const pending of this.pendingSocketRequests) {
+          if (pending.socket === socket) {
+            this.pendingSocketRequests.delete(pending);
+          }
         }
-      }, DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS);
+        this.releaseSocketSession(sessionId, socket);
+      },
+      onError: () => this.releaseSocketSession(sessionId, socket),
     });
+  }
 
-    socket.on("close", (hadError) => {
-      if (peerEndGrace) {
-        this.timer.clearTimeout(peerEndGrace);
-      }
-      if (idleTimeout) {
-        this.timer.clearTimeout(idleTimeout);
-      }
-      this.backpressuredSocketIdle.delete(socket);
-      this.outboundWriteGuards.get(socket)?.dispose();
-      if (this.onFrameTrace) {
-        this.traceFrame("socket_close", "*", undefined, undefined, { hadError });
-      }
-      logger.info(`Client disconnected: ${sessionId}`);
-      for (const pending of this.pendingSocketRequests) {
-        if (pending.socket === socket) {
-          this.pendingSocketRequests.delete(pending);
-        }
-      }
-      this.releaseSocketSession(sessionId, socket);
-    });
-
-    socket.on("error", (error) => {
-      if (isExpectedPeerClose(error)) {
-        // The peer has gone away; release and destruction still clean up this socket's work.
-        logger.debug(`Socket peer closed for ${sessionId}: ${errorMessage(error)}`);
-      } else {
-        logger.error(`Socket error for ${sessionId}:`, error);
-      }
-      this.releaseSocketSession(sessionId, socket);
-      if (!socket.destroyed) {
-        socket.destroy();
-      }
-    });
+  /** The socket's connection transport, created on first use (writers may precede `start`). */
+  private connectionFor(socket: Socket, sessionId: string): ControlConnection {
+    let connection = this.controlConnections.get(socket);
+    if (!connection) {
+      connection = new ControlConnection(socket, sessionId, this.timer, this.maxInboundFrameBytes);
+      this.controlConnections.set(socket, connection);
+    }
+    return connection;
   }
 
   /**
@@ -1598,7 +1477,7 @@ export class UnixSocketServer {
         writeAnswer(response);
       } else {
         this.pendingSocketRequests.delete(tracked);
-        this.backpressuredSocketIdle.get(socket)?.responseFlushed();
+        this.controlConnections.get(socket)?.responseFlushed();
       }
     } catch (error) {
       if (isExpectedSocketFrameAbort(error, socket.destroyed)) {
@@ -1636,7 +1515,7 @@ export class UnixSocketServer {
       response,
       () => {
         this.pendingSocketRequests.delete(pending);
-        this.backpressuredSocketIdle.get(pending.socket)?.responseFlushed();
+        this.controlConnections.get(pending.socket)?.responseFlushed();
       },
       deviceId,
     );
@@ -2008,7 +1887,7 @@ export class UnixSocketServer {
     try {
       const payload = JSON.stringify(frame) + "\n";
       const byteLength = Buffer.byteLength(payload);
-      const guard = this.outboundWriteGuard(socket, sessionId);
+      const guard = this.connectionFor(socket, sessionId).outboundWriteGuard();
       const queuedBytes = guard.admit(byteLength);
       if (queuedBytes !== undefined) {
         const error = new DaemonSocketQueueOverflowError(
@@ -2024,7 +1903,7 @@ export class UnixSocketServer {
       }
       const ok = socket.write(payload, (error) => {
         if (!error && !socket.destroyed && socket.writableLength === 0) {
-          this.backpressuredSocketIdle.get(socket)?.refresh();
+          this.controlConnections.get(socket)?.refreshIdle();
           guard.flushed();
         }
         onFlushed?.(error);
@@ -2034,7 +1913,7 @@ export class UnixSocketServer {
         onWritten(socket.writableLength, byteLength);
       }
       if (!ok) {
-        this.backpressuredSocketIdle.get(socket)?.start();
+        this.controlConnections.get(socket)?.startBackpressureIdle();
         logger.debug(`Daemon RPC socket ${sessionId} backpressured; awaiting drain`);
       }
     } catch (error) {
@@ -2044,25 +1923,6 @@ export class UnixSocketServer {
         socket.destroy();
       }
     }
-  }
-
-  /**
-   * The socket's outbound guard. A reader that frees no queued bytes for the
-   * stall deadline is destroyed with the reason logged; a reader that is
-   * draining, however slowly, is not.
-   */
-  private outboundWriteGuard(socket: Socket, sessionId: string): OutboundWriteGuard {
-    let guard = this.outboundWriteGuards.get(socket);
-    if (!guard) {
-      guard = new OutboundWriteGuard(socket, this.timer, (stall) => {
-        logger.warn(
-          `Daemon RPC socket ${sessionId} reader stalled: no queued bytes freed for ${stall.stalledMs}ms with ${stall.queuedBytes} bytes queued; destroying`,
-        );
-        socket.destroy();
-      });
-      this.outboundWriteGuards.set(socket, guard);
-    }
-    return guard;
   }
 
   /**

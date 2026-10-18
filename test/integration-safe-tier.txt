@@ -21,13 +21,17 @@ test/contracts/daemonClient.integration.test.ts | safe | fake versus real Daemon
 test/contracts/deviceResourceApplicationStore.integration.test.ts | safe | fake versus real DeviceResourceApplicationRepository over createTestDatabase in-memory L8
 test/contracts/deviceSessionPersistence.integration.test.ts | safe | fake versus real DeviceSessionRepository over createTestDatabase in-memory L8
 test/contracts/deviceSnapshotStore.integration.test.ts | safe | fake versus real store over a private mkdtemp directory removed afterwards L9
+test/contracts/imageBackend.integration.test.ts | safe | fake versus real JimpBackend and SharpBackend decoding a repo PNG fixture, no writes L9
 test/contracts/mcpTaskStore.integration.test.ts | safe | fake versus real McpTaskRepository over createTestDatabase in-memory with FakeTimer L12
 test/contracts/nativeHelperRecordStore.integration.test.ts | safe | fake versus real FileNativeHelperRecordStore over a private mkdtemp AUTOMOBILE_DATA_DIR removed afterwards L10
 test/contracts/navigationGraph.integration.test.ts | safe | fake versus real NavigationGraphManager over createTestDatabase in-memory with stubbed telemetry L7
 test/contracts/observeCacheStore.integration.test.ts | safe | fake versus real FileSystemObserveCacheStore over a private mkdtemp directory removed afterwards L11
+test/contracts/prototypeAssetFileReader.integration.test.ts | safe | fake versus real nodePrototypeAssetFileReader over a private mkdtemp directory removed afterwards L9
 test/contracts/repositoryContracts.integration.test.ts | safe | fake versus real repositories over createTestDatabase in-memory L9
 test/contracts/runAll.integration.test.ts | unsafe | DefaultHostCommandExecutor L53 runs process.execPath; DefaultFileDownloader L45 is real
+test/contracts/securePermissions.integration.test.ts | safe | fake versus real SecurePermissions over a private mkdtemp directory removed afterwards L9
 test/contracts/telemetryRepository.integration.test.ts | safe | fake versus real telemetry repositories over createTestDatabase in-memory L27
+test/contracts/terminalReleaseJournalDirectory.integration.test.ts | safe | fake versus real nodeTerminalReleaseJournalFileSystem over a private mkdtemp directory removed afterwards L10
 test/contracts/toolSelectionProfileProvenanceStore.integration.test.ts | safe | fake versus real provenance repository over createTestDatabase in-memory L10
 test/ctrlProxy/ios/IOSHostPortAvailabilityChecker.integration.test.ts | safe | loopback 127.0.0.1 ephemeral port server L22
 test/daemon/daemonClientAvailability.integration.test.ts | safe | mkdtemp socket path L20, local net server only
@@ -122,6 +126,7 @@ test/db/installedAppsProfileTypeMigration.integration.test.ts | safe | in-memory
 test/db/installedAppsRepository.integration.test.ts | safe | in-memory DB
 test/db/keyedJsonConfigRepository.integration.test.ts | safe | in-memory DB
 test/db/layoutEventRepository.integration.test.ts | safe | in-memory DB
+test/db/memoryAuditResultRepository.integration.test.ts | safe | createTestDatabase in-memory
 test/db/memoryBaselineRepository.integration.test.ts | safe | in-memory DB
 test/db/migrationDatetimeDefaults.integration.test.ts | safe | in-memory or temp DB
 test/db/migrationLock.integration.test.ts | safe | mkdtemp lock files, fake pids and isProcessRunning stubs L85/L312
@@ -143,6 +148,7 @@ test/db/performanceAuditRepository.integration.test.ts | safe | in-memory DB
 test/db/performanceLiveMetricsMigration.integration.test.ts | safe | in-memory DB
 test/db/predictionHistoryRepository.integration.test.ts | safe | in-memory DB
 test/db/provisionedDeviceTransportTombstoneRepository.integration.test.ts | safe | in-memory DB
+test/db/recompositionMetricsRepository.integration.test.ts | safe | createTestDatabase in-memory
 test/db/repairDatetimeNowDefaultsMigration.integration.test.ts | safe | in-memory BunDatabase and createTestDatabase L28/L205
 test/db/repairUpdatedAtDefaultsMigration.integration.test.ts | safe | in-memory BunDatabase and createTestDatabase L29/L387
 test/db/rowCapRetention.integration.test.ts | safe | pure retention-wrapper logic, no I/O

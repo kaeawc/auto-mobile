@@ -1,4 +1,5 @@
 import { DefaultElementParser } from "../utility/ElementParser";
+import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import {
   Element,
   InteractablePrediction,
@@ -17,7 +18,7 @@ import { PredictionHistoryRepository } from "../../db/predictionHistoryRepositor
 import { normalizeToolArgs, normalizeIdentifier } from "../../utils/predictionUtils";
 import type { PredictiveUIState as PredictiveUIStateInterface } from "./interfaces/PredictiveUIState";
 
-interface InteractableElement {
+export interface InteractableElement {
   element: Element;
   text?: string;
   contentDesc?: string;
@@ -151,14 +152,27 @@ export class EdgeMatchIndex {
   }
 }
 
+/** Collaborators a PredictiveUIState reads; defaults are the real parser and DB-backed history. */
+export interface PredictiveUIStateDependencies {
+  elementParser?: Pick<ElementParser, "flattenViewHierarchy">;
+  historyRepository?: Pick<PredictionHistoryRepository, "getTransitionStatsForScreen">;
+}
+
 export class PredictiveUIState implements PredictiveUIStateInterface {
-  private elementParser = new DefaultElementParser();
-  private historyRepository = new PredictionHistoryRepository();
+  private readonly elementParser: Pick<ElementParser, "flattenViewHierarchy">;
+  private readonly historyRepository: Pick<
+    PredictionHistoryRepository,
+    "getTransitionStatsForScreen"
+  >;
   private readonly DEFAULT_CONFIDENCE = 0.5;
 
   constructor(
     private readonly resolveNavigationGraph: NavigationGraphResolver = resolveNavigationGraphForDevice,
-  ) {}
+    dependencies: PredictiveUIStateDependencies = {},
+  ) {
+    this.elementParser = dependencies.elementParser ?? new DefaultElementParser();
+    this.historyRepository = dependencies.historyRepository ?? new PredictionHistoryRepository();
+  }
 
   async generate(
     result: ObserveResult,
@@ -230,7 +244,7 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
         continue;
       }
 
-      const predictionTarget = this.buildTarget(match, interactable);
+      const predictionTarget = buildPredictionTarget(match, interactable);
       if (!predictionTarget) {
         continue;
       }
@@ -313,84 +327,6 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
     return interactables;
   }
 
-  private buildTarget(
-    edge: NavigationEdge,
-    interactable: InteractableElement,
-  ): PredictionTarget | null {
-    const args = edge.interaction?.args;
-    const uiState = edge.interaction?.uiState;
-    const toolName = edge.interaction?.toolName;
-
-    if (toolName === "tapOn") {
-      return this.buildTapTarget(args, interactable);
-    }
-
-    if (toolName === "swipeOn") {
-      return this.buildSwipeTarget(args, uiState);
-    }
-
-    return null;
-  }
-
-  private buildTapTarget(
-    args: NonNullable<NavigationEdge["interaction"]>["args"] | undefined,
-    interactable: InteractableElement,
-  ): PredictionTarget | null {
-    const text = args?.text ?? interactable.text;
-    const elementId = args?.elementId ?? args?.id ?? interactable.resourceId;
-    const contentDesc = interactable.contentDesc;
-
-    if (!text && !elementId && !contentDesc) {
-      return null;
-    }
-
-    return { text, elementId, contentDesc };
-  }
-
-  private buildSwipeTarget(
-    args: NonNullable<NavigationEdge["interaction"]>["args"] | undefined,
-    uiState: NonNullable<NavigationEdge["interaction"]>["uiState"],
-  ): PredictionTarget | null {
-    const { container, lookFor } = this.getSwipeTargets(args, uiState);
-    const target: PredictionTarget = {};
-
-    if (container) {
-      target.container = this.buildSwipeSelector(container);
-    }
-
-    if (lookFor) {
-      target.lookFor = this.buildSwipeSelector(lookFor);
-    }
-
-    if (!target.container && !target.lookFor) {
-      return null;
-    }
-
-    return target;
-  }
-
-  private getSwipeTargets(
-    args: NonNullable<NavigationEdge["interaction"]>["args"] | undefined,
-    uiState: NonNullable<NavigationEdge["interaction"]>["uiState"],
-  ): {
-    container: (NonNullable<PredictionTarget["container"]> & { resourceId?: string }) | undefined;
-    lookFor: (NonNullable<PredictionTarget["lookFor"]> & { resourceId?: string }) | undefined;
-  } {
-    const container = args?.container || uiState?.scrollPosition?.container;
-    const lookFor = args?.lookFor || uiState?.scrollPosition?.targetElement;
-    return { container, lookFor };
-  }
-
-  private buildSwipeSelector(
-    selector: NonNullable<PredictionTarget["container"]> & { resourceId?: string },
-  ): NonNullable<PredictionTarget["container"]> {
-    return {
-      text: selector.text,
-      elementId: selector.elementId || selector.resourceId,
-      contentDesc: selector.contentDesc,
-    };
-  }
-
   private buildEdgeKey(edge: NavigationEdge): string {
     const args = edge.interaction?.args ?? {};
     return `${edge.from}:${edge.to}:${edge.interaction?.toolName}:${JSON.stringify(args)}`;
@@ -456,4 +392,86 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
     cache.set(screenName, predictedElements);
     return predictedElements;
   }
+}
+
+/**
+ * The action target a navigation edge predicts for an interactable element, or null when the
+ * edge carries nothing to target. Pure: no navigation graph or history access.
+ */
+export function buildPredictionTarget(
+  edge: NavigationEdge,
+  interactable: InteractableElement,
+): PredictionTarget | null {
+  const args = edge.interaction?.args;
+  const uiState = edge.interaction?.uiState;
+  const toolName = edge.interaction?.toolName;
+
+  if (toolName === "tapOn") {
+    return buildTapTarget(args, interactable);
+  }
+
+  if (toolName === "swipeOn") {
+    return buildSwipeTarget(args, uiState);
+  }
+
+  return null;
+}
+
+function buildTapTarget(
+  args: NonNullable<NavigationEdge["interaction"]>["args"] | undefined,
+  interactable: InteractableElement,
+): PredictionTarget | null {
+  const text = args?.text ?? interactable.text;
+  const elementId = args?.elementId ?? args?.id ?? interactable.resourceId;
+  const contentDesc = interactable.contentDesc;
+
+  if (!text && !elementId && !contentDesc) {
+    return null;
+  }
+
+  return { text, elementId, contentDesc };
+}
+
+function buildSwipeTarget(
+  args: NonNullable<NavigationEdge["interaction"]>["args"] | undefined,
+  uiState: NonNullable<NavigationEdge["interaction"]>["uiState"],
+): PredictionTarget | null {
+  const { container, lookFor } = getSwipeTargets(args, uiState);
+  const target: PredictionTarget = {};
+
+  if (container) {
+    target.container = buildSwipeSelector(container);
+  }
+
+  if (lookFor) {
+    target.lookFor = buildSwipeSelector(lookFor);
+  }
+
+  if (!target.container && !target.lookFor) {
+    return null;
+  }
+
+  return target;
+}
+
+function getSwipeTargets(
+  args: NonNullable<NavigationEdge["interaction"]>["args"] | undefined,
+  uiState: NonNullable<NavigationEdge["interaction"]>["uiState"],
+): {
+  container: (NonNullable<PredictionTarget["container"]> & { resourceId?: string }) | undefined;
+  lookFor: (NonNullable<PredictionTarget["lookFor"]> & { resourceId?: string }) | undefined;
+} {
+  const container = args?.container || uiState?.scrollPosition?.container;
+  const lookFor = args?.lookFor || uiState?.scrollPosition?.targetElement;
+  return { container, lookFor };
+}
+
+function buildSwipeSelector(
+  selector: NonNullable<PredictionTarget["container"]> & { resourceId?: string },
+): NonNullable<PredictionTarget["container"]> {
+  return {
+    text: selector.text,
+    elementId: selector.elementId || selector.resourceId,
+    contentDesc: selector.contentDesc,
+  };
 }

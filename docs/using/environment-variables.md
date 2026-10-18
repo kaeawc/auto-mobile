@@ -810,13 +810,12 @@ does not spend an attempt either way.
 
 Not AutoMobile-specific; read to locate the Android emulator and the default SDK locations.
 
-| Variable                           | Use                                                                      | Default |
-| ---------------------------------- | ------------------------------------------------------------------------ | ------- |
-| `ANDROID_HOME`, `ANDROID_SDK_ROOT` | Android SDK root used to find `emulator/emulator`.                       | unset   |
-| `ANDROID_SDK_HOME`                 | Android user-data home; only reported in emulator-not-found diagnostics. | unset   |
-| `HOME`                             | POSIX home directory; used to probe the default Android SDK locations.   | unset   |
-| `USERPROFILE`                      | Windows home directory, consulted when `HOME` is unset or empty.         | unset   |
-| `PATH`                             | Executable search path; only reported in emulator-not-found diagnostics. | unset   |
+| Variable                                               | Use                                                                                                                                                                                                                          | Default |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `ANDROID_SDK_HOME` | Android SDK root used to find `emulator/emulator`; the first that is set and exists wins, in that order. `ANDROID_SDK_HOME` is the last-resort fallback and also names the user-data home in emulator-not-found diagnostics. | unset   |
+| `HOME`                                                 | POSIX home directory; used to probe the default Android SDK locations.                                                                                                                                                       | unset   |
+| `USERPROFILE`                                          | Windows home directory, consulted when `HOME` is unset or empty.                                                                                                                                                             | unset   |
+| `PATH`                                                 | Executable search path; only reported in emulator-not-found diagnostics.                                                                                                                                                     | unset   |
 
 ### Boot capacity
 

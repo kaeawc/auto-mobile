@@ -153,15 +153,23 @@ const USAGE_KEYS = [
   "cache_read_input_tokens",
   "output_tokens",
 ];
+const REQUIRED_USAGE_KEYS = ["input_tokens", "output_tokens"];
 
 /** Usage components must be non-negative finite counts whose sums stay finite. */
-function usageErrors(usage: unknown): string[] {
+function usageErrors(usage: unknown, success: boolean): string[] {
   if (usage === undefined) {
-    return [];
+    // A successful result always reports usage; without it the token metrics go missing.
+    return success ? ["result event has no usage"] : [];
   }
   if (!isRecord(usage)) {
     return ["result event has a malformed usage"];
   }
+  // Absent counters would read as zero and understate a successful run's tokens.
+  const missing = success
+    ? REQUIRED_USAGE_KEYS.filter((key) => usage[key] === undefined).map(
+        (key) => `result event has no usage.${key}`,
+      )
+    : [];
   const invalid = USAGE_KEYS.filter((key) => {
     const value = usage[key];
     return value !== undefined && !(asNumber(value) !== undefined && (value as number) >= 0);
@@ -169,8 +177,8 @@ function usageErrors(usage: unknown): string[] {
   const input = sumTokens(usage, USAGE_KEYS.slice(0, 3)) ?? 0;
   const output = sumTokens(usage, ["output_tokens"]) ?? 0;
   return invalid.length === 0 && !(Number.isFinite(input) && Number.isFinite(output))
-    ? ["result event usage overflows"]
-    : invalid;
+    ? [...missing, "result event usage overflows"]
+    : [...missing, ...invalid];
 }
 
 function sumTokens(usage: unknown, keys: string[]): number | undefined {
@@ -325,7 +333,7 @@ function handleResult(event: JsonRecord, state: AuditState): void {
     state.audit.parseErrors.push("result event has an invalid total_cost_usd");
   }
   const usage = event.usage;
-  state.audit.parseErrors.push(...usageErrors(usage));
+  state.audit.parseErrors.push(...usageErrors(usage, event.subtype === "success"));
   state.audit.result = {
     subtype: asString(event.subtype) ?? "unknown",
     isError: event.is_error === true,

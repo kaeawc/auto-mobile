@@ -114,7 +114,9 @@ export const RUN_SHAPING_CLAUDE_VARIABLES: ReadonlySet<string> = new Set([
   "BASH_DEFAULT_TIMEOUT_MS",
   "BASH_MAX_TIMEOUT_MS",
   "CLAUDE_CODE_GLOB_TIMEOUT_SECONDS",
-  // MCP
+  // MCP (the allowlist toggle would hide PATH, and with it the adb the run was
+  // fingerprinted against, from the measured server)
+  "CLAUDE_CODE_MCP_ALLOWLIST_ENV",
   "ENABLE_CLAUDEAI_MCP_SERVERS",
   "MAX_MCP_OUTPUT_TOKENS",
   "MCP_CONNECTION_NONBLOCKING",
@@ -212,10 +214,10 @@ export function isolatedServerEnv(
 }
 
 /**
- * Inherited variables the MCP server's explicit `env` repeats. With
- * `CLAUDE_CODE_MCP_ALLOWLIST_ENV=1`, Claude gives stdio servers only a safe default
- * environment plus that block, and the private daemon must reach the same adb server and
- * claim devices under the same root that preflight and the ownership check used.
+ * Inherited variables the MCP server's explicit `env` repeats, so the private daemon reaches
+ * the same adb server and claims devices under the same root that preflight and the ownership
+ * check used. `CLAUDE_CODE_MCP_ALLOWLIST_ENV` is scrubbed from Claude's environment, so the
+ * server also inherits the rest of it (PATH included); the block is defense in depth.
  */
 const MCP_PASSTHROUGH_VARIABLES = [
   ...SHARED_AUTOMOBILE_VARIABLES,

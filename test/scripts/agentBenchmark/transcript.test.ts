@@ -324,6 +324,7 @@ describe("agent benchmark transcript audit", () => {
       num_turns: 1,
       total_cost_usd: 0,
       permission_denials: [],
+      usage: { input_tokens: 0, output_tokens: 0 },
       is_error: "true",
       result: "done",
     });
@@ -349,7 +350,7 @@ describe("agent benchmark transcript audit", () => {
 
   test("terminal metrics outside the baseline domains fail the transcript", () => {
     const result = (fields: Record<string, unknown>) =>
-      `${INIT}${JSON.stringify({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0, permission_denials: [], is_error: false, result: "done", ...fields })}\n`;
+      `${INIT}${JSON.stringify({ type: "result", subtype: "success", num_turns: 1, total_cost_usd: 0, permission_denials: [], usage: { input_tokens: 0, output_tokens: 0 }, is_error: false, result: "done", ...fields })}\n`;
     expect(auditTranscript(result({ num_turns: 2.5 }), NO_PATTERNS).parseErrors).toEqual([
       "result event has an invalid num_turns",
     ]);
@@ -374,6 +375,7 @@ describe("agent benchmark transcript audit", () => {
       num_turns: 1,
       total_cost_usd: 0,
       permission_denials: [],
+      usage: { input_tokens: 0, output_tokens: 0 },
       result: "done",
     });
     const audit = auditTranscript(`${INIT}${result}\n`, NO_PATTERNS);
@@ -413,12 +415,17 @@ describe("agent benchmark transcript audit", () => {
           input_tokens: 1e308,
           cache_creation_input_tokens: 1e308,
           cache_read_input_tokens: 1e308,
+          output_tokens: 0,
         }),
         NO_PATTERNS,
       ).parseErrors,
     ).toEqual(["result event usage overflows"]);
-    expect(auditTranscript(result({ output_tokens: -1 }), NO_PATTERNS).parseErrors).toEqual([
-      "result event has an invalid usage.output_tokens",
+    expect(
+      auditTranscript(result({ input_tokens: 0, output_tokens: -1 }), NO_PATTERNS).parseErrors,
+    ).toEqual(["result event has an invalid usage.output_tokens"]);
+    // A successful result's counters are required: an absent one would read as zero.
+    expect(auditTranscript(result({ input_tokens: 4 }), NO_PATTERNS).parseErrors).toEqual([
+      "result event has no usage.output_tokens",
     ]);
     expect(auditTranscript(result([1]), NO_PATTERNS).parseErrors).toEqual([
       "result event has a malformed usage",
@@ -428,7 +435,7 @@ describe("agent benchmark transcript audit", () => {
     ).toEqual([]);
   });
 
-  test("a successful result must report num_turns, total_cost_usd and permission_denials", () => {
+  test("a successful result must report num_turns, total_cost_usd, permission_denials and usage", () => {
     const result = JSON.stringify({
       type: "result",
       subtype: "success",
@@ -439,6 +446,7 @@ describe("agent benchmark transcript audit", () => {
     expect(audit.parseErrors).toEqual([
       "result event has no num_turns",
       "result event has no total_cost_usd",
+      "result event has no usage",
       "result event has no permission_denials",
     ]);
   });
@@ -450,6 +458,7 @@ describe("agent benchmark transcript audit", () => {
       num_turns: 1,
       total_cost_usd: 0,
       permission_denials: [],
+      usage: { input_tokens: 0, output_tokens: 0 },
       is_error: false,
     });
     const audit = auditTranscript(`${INIT}${result}\n`, NO_PATTERNS);
@@ -474,6 +483,7 @@ describe("agent benchmark transcript audit", () => {
       num_turns: 1,
       total_cost_usd: 0,
       permission_denials: [],
+      usage: { input_tokens: 0, output_tokens: 0 },
       is_error: false,
       result: { text: "COUNT: 3" },
     });
@@ -489,6 +499,7 @@ describe("agent benchmark transcript audit", () => {
       total_cost_usd: 0,
       is_error: false,
       result: "done",
+      usage: { input_tokens: 0, output_tokens: 0 },
       permission_denials: { tool_name: "Bash" },
     });
     const audit = auditTranscript(`${INIT}${result}\n`, NO_PATTERNS);

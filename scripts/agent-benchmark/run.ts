@@ -236,6 +236,26 @@ export function killProcessTree(
   }
 }
 
+/**
+ * SIGKILLs whatever is left in an exited leader's POSIX process group. Unlike
+ * `killProcessTree`, it never falls back to the PID itself, which may already belong to an
+ * unrelated process, and it does nothing on Windows, where no group outlives its leader's PID.
+ */
+export function killProcessGroupRemnants(
+  pid: number,
+  platform: NodeJS.Platform = process.platform,
+  kill: (pid: number, signal: NodeJS.Signals) => void = (target, sig) => process.kill(target, sig),
+): void {
+  if (platform === "win32") {
+    return;
+  }
+  try {
+    kill(-pid, "SIGKILL");
+  } catch {
+    // ESRCH: the group is empty, so nothing outlived the wrapper.
+  }
+}
+
 export function createLauncher(timer: Timer): ClaudeLauncher {
   return {
     launch(spec) {
@@ -325,6 +345,10 @@ export function createLauncher(timer: Timer): ClaudeLauncher {
               // The wrapper may exit on SIGTERM while a descendant ignores it; settling cancels
               // the pending SIGKILL, so kill whatever is left in the group before teardown.
               killTree("SIGKILL");
+            } else if (child.pid !== undefined) {
+              // A wrapper can exit normally while a backgrounded descendant keeps running and
+              // touching the device; kill it before the daemon stops and the claim is released.
+              killProcessGroupRemnants(child.pid);
             }
             resolveExit({ exitCode: code, timedOut });
           }
@@ -601,10 +625,7 @@ function claudeCommandIdentity(command: string): Uint8Array {
  */
 export async function adbClientIdentity(
   env: Record<string, string | undefined>,
-  version: (adb: string) => string | undefined = (adb) => {
-    const result = spawnSync(adb, ["version"], { encoding: "utf8", timeout: 5_000 });
-    return result.status === 0 ? result.stdout : undefined;
-  },
+  version: (adb: string) => string | undefined = defaultAdbVersion,
   onPath: (command: string) => string | null = (command) => Bun.which(command, { PATH: env.PATH }),
   detected: () => Promise<string | null> = detectedAdbPath,
 ): Promise<string> {
@@ -633,6 +654,25 @@ export async function adbClientIdentity(
   }
   candidates.push("adb");
   return `unavailable:${candidates.join(",")}`;
+}
+
+/**
+ * The `adb version` of the client the harness itself runs (bare `adb` from PATH) for
+ * preflight, the device fingerprint, and the screen oracle. It can differ from the server's
+ * SDK client, so both are part of the fingerprint.
+ */
+export function harnessAdbIdentity(
+  env: Record<string, string | undefined>,
+  version: (adb: string) => string | undefined = defaultAdbVersion,
+  onPath: (command: string) => string | null = (command) => Bun.which(command, { PATH: env.PATH }),
+): string {
+  const adb = onPath("adb");
+  return (adb ? version(adb)?.trim() : undefined) || `unavailable:${adb ?? "adb"}`;
+}
+
+function defaultAdbVersion(adb: string): string | undefined {
+  const result = spawnSync(adb, ["version"], { encoding: "utf8", timeout: 5_000 });
+  return result.status === 0 ? result.stdout : undefined;
 }
 
 /** The adb AdbClient's detection step would pick, derived the same way. */
@@ -675,6 +715,10 @@ async function serverDigest(claudeCommand: string): Promise<string> {
     // Provider and routing settings reach Claude unscrubbed; record which backend served it.
     { path: "provider", read: () => new TextEncoder().encode(providerIdentity(process.env)) },
     { path: "adb", read: () => new TextEncoder().encode(adb) },
+    {
+      path: "harness-adb",
+      read: () => new TextEncoder().encode(harnessAdbIdentity(process.env)),
+    },
   ]);
 }
 

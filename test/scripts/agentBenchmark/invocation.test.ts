@@ -214,6 +214,8 @@ describe("agent benchmark provider identity", () => {
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_ATTRIBUTION_HEADER")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_AUTO_BACKGROUND_TASKS")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_EXTRA_BODY")).toBe(true);
+    // The allowlist toggle would hide PATH (and the fingerprinted adb) from the server.
+    expect(isRunShapingClaudeVariable("CLAUDE_CODE_MCP_ALLOWLIST_ENV")).toBe(true);
     expect(isRunShapingClaudeVariable("ANTHROPIC_BETAS")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS")).toBe(true);

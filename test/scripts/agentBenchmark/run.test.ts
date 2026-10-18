@@ -5,7 +5,9 @@ import {
   adbClientIdentity,
   bundleDigest,
   dryRunReport,
+  harnessAdbIdentity,
   importClosure,
+  killProcessGroupRemnants,
   killProcessTree,
   parseCliArgs,
   resolveSuitePath,
@@ -44,6 +46,38 @@ describe("agent benchmark process tree kill", () => {
       taskkill: (pid) => taskkill.push(pid),
     });
     expect(taskkill).toEqual([7]);
+  });
+
+  test("kills only an exited leader's group remnants, never the reusable PID", () => {
+    const signals: Array<[number, string]> = [];
+    killProcessGroupRemnants(42, "linux", (pid, signal) => {
+      signals.push([pid, signal]);
+      throw new Error("ESRCH");
+    });
+    // An empty group is the normal case; the PID itself is never signalled.
+    expect(signals).toEqual([[-42, "SIGKILL"]]);
+    const windows: number[] = [];
+    killProcessGroupRemnants(42, "win32", (pid) => windows.push(pid));
+    expect(windows).toEqual([]);
+  });
+});
+
+describe("agent benchmark harness adb identity", () => {
+  test("fingerprints the PATH adb the harness runs, separately from the server's", () => {
+    expect(
+      harnessAdbIdentity(
+        {},
+        (adb) => (adb === "/usr/bin/adb" ? "Version 36.0.0\n" : undefined),
+        () => "/usr/bin/adb",
+      ),
+    ).toBe("Version 36.0.0");
+    expect(
+      harnessAdbIdentity(
+        {},
+        () => undefined,
+        () => null,
+      ),
+    ).toBe("unavailable:adb");
   });
 });
 

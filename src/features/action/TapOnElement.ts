@@ -22,21 +22,17 @@ import {
 } from "./tapResultMarkers";
 import { TapElementFinder } from "./tapElementFinder";
 import { TapPointPlanner } from "./tapPointPlanner";
-import { invalidateIosCacheOnSuccess, tapViaVoiceOver } from "./tapIosVoiceOver";
-import {
-  resolveAndroidStableTapTarget,
-  type StableTapTargetResult,
-} from "./androidStableTapTarget";
+
+import { type StableTapTargetResult } from "./androidStableTapTarget";
 import { POST_TAP_EFFECT_POLL_MS, PostTapSettler } from "./tapPostTapSettler";
 import { FocusVerifier } from "./tapFocusVerifier";
-import { pollSearchUntil } from "./searchUntilPoller";
-import { readFreshPlatformHierarchy, returnsRawHierarchyUnfiltered } from "./tapHierarchyRead";
+
+import { returnsRawHierarchyUnfiltered } from "./tapHierarchyRead";
 import {
   assertLongPressWithinHardMax,
   containerSelectorError,
   failedTapResult,
   resolveSearchUntilDuration,
-  throwIfLongPressInterrupted,
 } from "./tapSharedHelpers";
 import { isStrictlyScoped } from "../utility/ScopedSelection";
 import {
@@ -44,12 +40,9 @@ import {
   wasHierarchyReadDuringCall,
 } from "../observe/observationReadScope";
 import { ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS, freshTapHierarchy } from "./freshTapHierarchy";
-import {
-  isSemanticActionRejected,
-  type TalkBackTargetContext,
-} from "../talkback/resourceIdActionError";
+import { type TalkBackTargetContext } from "../talkback/resourceIdActionError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
-import { dispatchAndroidLongPress } from "./androidLongPress";
+
 import { assertLongPressFitsRequestBudget } from "./gestureTransportTimeout";
 import {
   type DisplayFence,
@@ -58,18 +51,10 @@ import {
 } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../observe/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
-import {
-  ElementResolver,
-  isFocusEditableElement,
-  promoteClickableAncestor,
-} from "../utility/ElementResolver";
+import { isFocusEditableElement, promoteClickableAncestor } from "../utility/ElementResolver";
 import { SearchableHierarchy } from "../utility/SearchableNode";
 import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
-import {
-  DefaultHierarchyCapture,
-  getHierarchySnapshot,
-  type HierarchyCapture,
-} from "../observe/HierarchyCapture";
+import { DefaultHierarchyCapture, type HierarchyCapture } from "../observe/HierarchyCapture";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback, type ObservedActionResult } from "./BaseVisualChange";
 import {
@@ -77,7 +62,7 @@ import {
   type DisplayTransitionReader,
   type DisplayTransitionTracker,
 } from "../observe/DisplayTransition";
-import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
+
 import {
   ActionableError,
   BootedDevice,
@@ -95,17 +80,16 @@ import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { isElementKeyboardFocused } from "../utility/FocusedInput";
-import { DefaultElementGeometry, isUsableScreenSize } from "../utility/ElementGeometry";
+import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
-import { IOSCtrlProxyClient, type CtrlProxyActionResult } from "../observe/ios";
+
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { reportToolDispatched } from "../../utils/ToolDispatchContext";
 import {
   DEFAULT_VISION_CONFIG,
-  getVisionEnrichedError,
   type VisionFallbackConfig,
   type VisionAnalyzer,
 } from "../../vision/index";
@@ -125,21 +109,23 @@ import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { boundsEqual } from "../../utils/bounds";
+import { TapSearchPhase, type SearchUntilStats } from "./tapSearchPhase";
+import { TapHierarchyRefreshPhase, staleSyntheticTarget } from "./tapHierarchyRefreshPhase";
+import { TapSemanticLinkPhase } from "./tapSemanticLinkPhase";
+import { TapAndroidLongPressPhase } from "./tapAndroidLongPressPhase";
+import { TapIosDispatchPhase } from "./tapIosDispatchPhase";
 import { TapEnsureCheckedPhase } from "./tapEnsureCheckedPhase";
 import { TapPostTapEffectPhase } from "./tapPostTapEffectPhase";
 import { TapRetryPhase } from "./tapRetryPhase";
 import { TapAndroidDispatchPhase, type ResolvedAndroidTapOptions } from "./tapAndroidDispatchPhase";
 import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
-import { hasOwnPrototype, scopeHierarchyForSelector } from "../observe/hierarchyLayer";
+import { scopeHierarchyForSelector } from "../observe/hierarchyLayer";
 import {
   getToggleContentDescription,
   hasAccessibilityAction,
   isTruthyFlag,
 } from "../utility/elementProperties";
 import {
-  nodeActionTargetError,
-  requiresNodeSelector,
-  stableNodeSelectorForElement,
   TalkBackTapStrategy,
   TALKBACK_ACTIVATION_WARNING,
   type ScreenReaderNavigationResult,
@@ -157,26 +143,15 @@ import { createTapStrategy } from "./strategies/createTapStrategy";
 import { LongPressMetadataDetector, type LongPressMetadata } from "./LongPressMetadataDetector";
 import { RealWaitForCondition } from "../observe/WaitForCondition";
 import type { WaitForCondition } from "../observe/interfaces/WaitForCondition";
-import {
-  dispatchIosCoordinateTap,
-  dispatchIosDoubleTap,
-  indeterminateTapError,
-} from "./coordinateTapDispatch";
+
 import { type RenderedObservationReader } from "./TargetDisplayAction";
 import {
   DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
   createDeviceHierarchyCapture,
 } from "../observe/DeviceHierarchyCapture";
-import {} from "./androidGhostTapRetry";
-import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
-import { isSdkInjectedNode } from "../observe/android/StableNodeIdentity";
+
 import { deadlineRequest, resolveTapOnCall, type TapOnCall } from "./ActionCall";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
-
-/** Internal action context; never part of the public tapOn schema. */
-type IosTapOptions = DisplayFenceOption & { signal?: AbortSignal };
-
-type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 
 /**
  * Dependencies for TapOnElement that can be injected for testing.
@@ -374,6 +349,58 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     rethrowObservationAbort: (error, signal, enabled) =>
       this.rethrowObservationAbort(error, signal, enabled),
   });
+  private readonly search = new TapSearchPhase({
+    timer: this.timer,
+    visionConfig: () => this.visionConfig,
+    screenshotCapturer: () => this.screenshotCapturer,
+    visionAnalyzer: () => this.visionAnalyzer,
+    getSearchUntilDuration: (options) => this.getSearchUntilDuration(options),
+    hashViewHierarchy: (hierarchy) => this.hashViewHierarchy(hierarchy),
+    getScreenSizeFromHierarchy: (...args) => this.getScreenSizeFromHierarchy(...args),
+    invisibleMatchFailure: (...args) => this.invisibleMatchFailure(...args),
+    isElementTapTargetOffScreen: (...args) => this.isElementTapTargetOffScreen(...args),
+    findElementInHierarchy: (options, hierarchy) => this.findElementInHierarchy(options, hierarchy),
+    withObservationScreenSize: (options, observation) =>
+      this.withObservationScreenSize(options, observation),
+    tapVerificationRefresh: (context) => this.tapVerificationRefresh(context),
+  });
+  private readonly hierarchyRefresh = new TapHierarchyRefreshPhase({
+    device: this.device,
+    timer: this.timer,
+    adb: () => this.adb,
+    accessibilityService: () => this.accessibilityService,
+    viewHierarchy: () => this.viewHierarchy,
+    hierarchyCapture: () => this.hierarchyCapture,
+    elementParser: () => this.elementParser,
+    refreshedDisplayTransitions: () => this.refreshedDisplayTransitions,
+    displayTransitionIdentityRevision: (deviceId) =>
+      this.displayTransitionReader.identityRevision(deviceId),
+    renderedDisplayGeneration: (deviceId) => this.renderedDisplayGeneration(deviceId),
+    staleDisplay: (generation) => this.staleDisplay(generation),
+    getScreenSizeFromHierarchy: (...args) => this.getScreenSizeFromHierarchy(...args),
+    prepareViewHierarchyForResponse: (raw, size) => this.prepareViewHierarchyForResponse(raw, size),
+    refreshViewHierarchy: (...args) => this.refreshViewHierarchy(...args),
+    staleSyntheticTarget: (...args) => this.staleSyntheticTarget(...args),
+    findElementInHierarchy: (options, hierarchy) => this.findElementInHierarchy(options, hierarchy),
+    resolveTapTargetElement: (element, hierarchy, action, targetOptions) =>
+      this.resolveTapTargetElement(element, hierarchy, action, targetOptions),
+    withObservationScreenSize: (options, observation) =>
+      this.withObservationScreenSize(options, observation),
+  });
+  private readonly semanticLink = new TapSemanticLinkPhase({
+    device: this.device,
+    accessibilityService: () => this.accessibilityService,
+    elementParser: () => this.elementParser,
+  });
+  private readonly androidLongPress = new TapAndroidLongPressPhase({
+    adb: () => this.adb,
+    accessibilityService: () => this.accessibilityService,
+  });
+  private readonly iosDispatch = new TapIosDispatchPhase({
+    device: this.device,
+    executeiOSTapWithCoordinates: (...args) => this.executeiOSTapWithCoordinates(...args),
+    executeIOSTapWithVoiceOver: (...args) => this.executeIOSTapWithVoiceOver(...args),
+  });
   private geometry: ElementGeometry;
   private elementParser: ElementParser;
   private accessibilityService: AndroidCtrlProxyClient;
@@ -525,212 +552,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return containerError;
     }
 
-    return this.validateSemanticLinkOptions(options);
-  }
-
-  private validateSemanticLinkOptions(options: TapOnElementOptions): string | null {
-    if (options.layer !== undefined && this.hasSemanticLinkTarget(options)) {
-      // Semantic links are activated on the device across every window, so the
-      // host cannot keep the activation inside the app or the prototype (#9305).
-      return "tapOn layer cannot be used with accessibilityLink or subtext";
-    }
-    if (options.selectionStrategy === "unique" && (options.sibling || options.accessibilityLink)) {
-      return "tapOn unique selection cannot use sibling or direct accessibilityLink; select a unique owner with subtext instead";
-    }
-    if ((options as { relativePosition?: unknown }).relativePosition !== undefined) {
-      return "tapOn relativePosition is no longer supported; use accessibilityLink or subtext";
-    }
-    if (!this.hasSemanticLinkTarget(options)) {
-      return null;
-    }
-    return this.semanticLinkValidationErrors(options).find(({ invalid }) => invalid)?.error ?? null;
-  }
-
-  private hasSemanticLinkTarget(options: TapOnElementOptions): boolean {
-    return [options.accessibilityLink, options.subtext].some((value) => value !== undefined);
-  }
-
-  private semanticLinkValidationErrors(options: TapOnElementOptions) {
-    return [
-      {
-        invalid: [options.accessibilityLink, options.subtext].every((value) => value !== undefined),
-        error: "tapOn accessibilityLink and subtext cannot be used together",
-      },
-      {
-        invalid: options.action !== "tap",
-        error: "tapOn semantic link activation supports only the tap action",
-      },
-      { invalid: options.sibling, error: "tapOn semantic link activation cannot use sibling" },
-      {
-        invalid: Boolean(options.retryIfNoChange ?? options.ensureTap),
-        error: "tapOn semantic link activation cannot retry an acknowledged link activation",
-      },
-      {
-        invalid: options.ensureChecked !== undefined,
-        error: "tapOn semantic link activation cannot ensure checked state",
-      },
-      {
-        invalid: options.searchUntil,
-        error: "tapOn semantic link activation cannot use searchUntil",
-      },
-      {
-        invalid: this.semanticLinkTextIsBlank(options),
-        error: "tapOn semantic link text must be non-empty",
-      },
-      {
-        invalid: this.semanticLinkOccurrenceIsInvalid(options),
-        error: "tapOn semantic link occurrence must be a non-negative integer",
-      },
-      {
-        invalid: options.subtext ? options.index !== undefined : false,
-        error:
-          "tapOn owner-scoped semantic link activation cannot use index; use a unique owner selector",
-      },
-      {
-        invalid: options.subtext ? options.selectionStrategy === "random" : false,
-        error:
-          "tapOn owner-scoped semantic link activation cannot use random selection; use a unique owner selector",
-      },
-    ];
-  }
-
-  private semanticLinkTextIsBlank(options: TapOnElementOptions): boolean {
-    return (options.subtext?.text ?? options.accessibilityLink)?.trim().length === 0;
-  }
-
-  private semanticLinkOccurrenceIsInvalid(options: TapOnElementOptions): boolean {
-    const occurrence = options.subtext?.occurrence ?? options.index ?? 0;
-    return ![Number.isInteger(occurrence), occurrence >= 0].every(Boolean);
-  }
-
-  private async activateSemanticLink(
-    text: string,
-    occurrence: number,
-    owner?: Element,
-    viewHierarchy?: ViewHierarchyResult,
-    signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string; warning?: string }> {
-    const confirmActivation = (result: CtrlProxyActionResult, invalidate: () => void): void => {
-      if (result.dispatched && result.acknowledged !== true) {
-        // A lost reply may mean the screen navigated; discard the pre-activation tree.
-        invalidate();
-        throw indeterminateTapError(result.error);
-      }
-    };
-    if (owner && !this.hasUniqueSemanticLinkOwner(owner, viewHierarchy)) {
-      return {
-        success: false,
-        error:
-          "Container-scoped semantic link activation requires a unique resource-id owner identity",
-      };
-    }
-    if (this.device.platform === "android") {
-      const selector = owner ? stableNodeSelectorForElement(owner) : undefined;
-      if (owner && !selector) {
-        return {
-          success: false,
-          error:
-            "Container-scoped semantic link activation requires a stable native owner identity",
-        };
-      }
-      const result = await this.accessibilityService.requestActivateAccessibilityLink(
-        text,
-        occurrence,
-        selector,
-        undefined,
-        undefined,
-        signal,
-      );
-      confirmActivation(result, () => {
-        AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
-      });
-      return { success: result.success, error: result.error };
-    }
-    if (this.device.platform === "ios") {
-      const ownerResourceId = owner?.["resource-id"];
-      if (owner && (typeof ownerResourceId !== "string" || ownerResourceId.length === 0)) {
-        return {
-          success: false,
-          error:
-            "Container-scoped semantic link activation requires a stable native owner identity",
-        };
-      }
-      const result = await IOSCtrlProxyClient.getInstance(
-        this.device,
-      ).requestActivateAccessibilityLink(
-        text,
-        occurrence,
-        ownerResourceId as string | undefined,
-        undefined,
-        undefined,
-        signal,
-      );
-      confirmActivation(result, () => invalidateIosCacheOnSuccess(this.device, { success: true }));
-      invalidateIosCacheOnSuccess(this.device, result);
-      // The runner's "first of N candidate owners" note must reach the caller (#10082).
-      return {
-        success: result.success,
-        error: result.error,
-        warning: result.warning,
-      };
-    }
-    return {
-      success: false,
-      error: unsupportedPlatformError(this.device.platform, "tap on elements").message,
-    };
+    return this.semanticLink.validateSemanticLinkOptions(options);
   }
 
   private hasUniqueSemanticLinkOwner(
-    owner: Element,
-    viewHierarchy: ViewHierarchyResult | undefined,
+    ...args: Parameters<TapSemanticLinkPhase["hasUniqueSemanticLinkOwner"]>
   ): boolean {
-    if (!viewHierarchy) {
-      return false;
-    }
-    // The owner is resolved (ElementResolver) and natively activated across every
-    // window subtree, so the uniqueness count must span the same node set. Flatten
-    // with includeWindows to match — otherwise an owner in a dialog/popup/overlay is
-    // miscounted: an ambiguous owner reads as unique, a valid one as absent. See #5618.
-    const elements = this.elementParser
-      .flattenViewHierarchy(viewHierarchy, { includeWindows: true })
-      .map(({ element }) => element);
-    if (this.device.platform === "ios") {
-      const ownerResourceId = owner["resource-id"];
-      return (
-        typeof ownerResourceId === "string" &&
-        ownerResourceId.length > 0 &&
-        preferCapturedOwners(
-          elements.filter((element) => element["resource-id"] === ownerResourceId),
-        ).length === 1
-      );
-    }
-    const selector = stableNodeSelectorForElement(owner);
-    return (
-      selector !== undefined &&
-      elements.filter((element) => this.matchesNativeOwnerSelector(element, selector)).length === 1
-    );
-  }
-
-  private matchesNativeOwnerSelector(
-    element: Element,
-    selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>,
-  ): boolean {
-    const resourceId = element["resource-id"];
-    if (
-      selector.resourceId !== undefined &&
-      (typeof resourceId !== "string" ||
-        (resourceId !== selector.resourceId && !resourceId.endsWith(`:id/${selector.resourceId}`)))
-    ) {
-      return false;
-    }
-    return (
-      (selector.testTag === undefined || element["test-tag"] === selector.testTag) &&
-      (selector.uniqueId === undefined || element["unique-id"] === selector.uniqueId) &&
-      (selector.collectionRow === undefined ||
-        element["collection-row-index"] === selector.collectionRow) &&
-      (selector.collectionColumn === undefined ||
-        element["collection-column-index"] === selector.collectionColumn)
-    );
+    return this.semanticLink.hasUniqueSemanticLinkOwner(...args);
   }
 
   private getSearchUntilDuration(options: TapOnElementOptions): number {
@@ -948,132 +776,22 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
-  async refreshViewHierarchy(
-    timeoutMs: number,
-    screenSize?: ObserveResult["screenSize"],
-    signal?: AbortSignal,
-    forceCapture: boolean = false,
-  ): Promise<ViewHierarchyResult | null> {
-    throwIfAborted(signal);
-    if (timeoutMs <= 0) {
-      return null;
-    }
-    const observedGeneration =
-      this.renderedDisplayGeneration(this.device.deviceId) ??
-      this.displayTransitionReader.identityRevision(this.device.deviceId);
-    let captured: ViewHierarchyResult;
-    try {
-      captured = (
-        await this.hierarchyCapture.capture({
-          freshness: "fresh",
-          ...(forceCapture ? { requireFreshExtraction: true } : {}),
-          searchRaw: serverConfig.isRawElementSearchEnabled(),
-          timeoutMs,
-          signal,
-        })
-      ).hierarchy;
-    } catch (error) {
-      if (error instanceof StaleDisplayError) {
-        throw error;
-      }
-      throwIfAborted(signal);
-      logger.warn(`[TapOnElement] Fresh capture failed: ${errorMessage(error)}`);
-      return null;
-    }
-    if (isUsableScreenSize(screenSize) && this.device.platform === "android") {
-      await this.checkRefreshedDisplay(captured, screenSize, observedGeneration, signal);
-    }
-    return captured;
+  refreshViewHierarchy(
+    ...args: Parameters<TapHierarchyRefreshPhase["refreshViewHierarchy"]>
+  ): ReturnType<TapHierarchyRefreshPhase["refreshViewHierarchy"]> {
+    return this.hierarchyRefresh.refreshViewHierarchy(...args);
   }
 
-  private tapVerificationRefresh(context: {
-    refresh?: AndroidTapVerification["refresh"];
-    screenSize?: ObserveResult["screenSize"];
-    signal?: AbortSignal;
-  }): AndroidTapVerification["refresh"] {
-    return (
-      context.refresh ??
-      ((timeoutMs) => this.refreshViewHierarchy(timeoutMs, context.screenSize, context.signal))
-    );
+  private tapVerificationRefresh(
+    ...args: Parameters<TapHierarchyRefreshPhase["tapVerificationRefresh"]>
+  ): AndroidTapVerification["refresh"] {
+    return this.hierarchyRefresh.tapVerificationRefresh(...args);
   }
 
-  private async checkRefreshedDisplay(
-    captured: ViewHierarchyResult,
-    screenSize: ObserveResult["screenSize"],
-    observedGeneration: number,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const freshSize = this.getScreenSizeFromHierarchy(captured);
-    if (
-      !freshSize ||
-      (freshSize.width === screenSize.width &&
-        freshSize.height === screenSize.height &&
-        (this.device.displays?.panels.length ?? 0) < 2)
-    ) {
-      return;
-    }
-    const display = await this.refreshedDisplay(captured, signal);
-    const identityChanged = this.refreshedDisplayTransitions.checkIdentity(
-      this.device.deviceId,
-      display,
-    );
-    const geometryTransition = this.refreshedDisplayTransitions.record(this.device.deviceId, {
-      display,
-      screenSize: freshSize,
-    });
-    if (identityChanged || geometryTransition) {
-      throw this.staleDisplay(observedGeneration);
-    }
-  }
-
-  private async refreshedDisplay(
-    captured: ViewHierarchyResult,
-    signal?: AbortSignal,
-  ): Promise<ObserveResult["display"]> {
-    const displayCache = new ObservedAndroidDisplayCache(this.timer);
-    const focusedPanel = await displayCache.panelForLogicalId(
-      this.device,
-      this.adb,
-      captured.displayId,
-      signal,
-      { panelUniqueId: captured.panelUniqueId, panelFingerprint: captured.panelFingerprint },
-      false,
-    );
-    const resolved = await displayCache.resolve(this.device, this.adb, signal);
-    const panel =
-      focusedPanel ??
-      this.device.displays?.panels.find((candidate) => candidate.key === resolved.display.key);
-    return {
-      ...resolved.display,
-      key: panel?.key ?? resolved.display.key,
-      role: panel?.role ?? resolved.display.role,
-      posture: await displayCache.posture(this.device, this.adb, signal),
-    };
-  }
-
-  private async readFreshHierarchy(
-    timeoutMs: number,
-    screenSize?: ObserveResult["screenSize"],
-    signal?: AbortSignal,
-    forceCapture: boolean = false,
-  ): Promise<ViewHierarchyResult | null> {
-    throwIfAborted(signal);
-    const effectiveTimeoutMs = Math.max(0, timeoutMs);
-    if (effectiveTimeoutMs === 0) {
-      return null;
-    }
-    return readFreshPlatformHierarchy(
-      {
-        device: this.device,
-        adb: this.adb,
-        timer: this.timer,
-        androidService: this.accessibilityService,
-        viewHierarchy: this.viewHierarchy,
-        prepareForResponse: (raw, size) => this.prepareViewHierarchyForResponse(raw, size),
-        actionLabel: "tap on elements",
-      },
-      { timeoutMs: effectiveTimeoutMs, screenSize, signal, forceCapture },
-    );
+  private readFreshHierarchy(
+    ...args: Parameters<TapHierarchyRefreshPhase["readFreshHierarchy"]>
+  ): ReturnType<TapHierarchyRefreshPhase["readFreshHierarchy"]> {
+    return this.hierarchyRefresh.readFreshHierarchy(...args);
   }
 
   /**
@@ -1082,256 +800,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    */
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
   resolveAndroidStableTapTargetAfterRefreshes(
-    options: TapVerificationOptions,
-    observeResult: Partial<Pick<ObserveResult, "viewHierarchy" | "screenSize">>,
-    action: TapOnElementOptions["action"],
-    requireResourceId: boolean,
-    signal?: AbortSignal,
+    ...args: Parameters<TapHierarchyRefreshPhase["resolveAndroidStableTapTargetAfterRefreshes"]>
   ): Promise<StableTapTargetResult> {
-    return resolveAndroidStableTapTarget(
-      {
-        timer: this.timer,
-        elementParser: this.elementParser,
-        findElementInHierarchy: (opts, hierarchy) => this.findElementInHierarchy(opts, hierarchy),
-        resolveTapTargetElement: (element, hierarchy, tapAction, tapOptions) =>
-          this.resolveTapTargetElement(element, hierarchy, tapAction, tapOptions),
-        staleSyntheticTarget: (original, previous, current) =>
-          this.staleSyntheticTarget(original, previous, current),
-        tapVerificationRefresh: (context) => this.tapVerificationRefresh(context),
-        withObservationScreenSize: (opts, observation) =>
-          this.withObservationScreenSize(opts, observation),
-      },
-      { options, observeResult, action, requireResourceId, signal },
-    );
+    return this.hierarchyRefresh.resolveAndroidStableTapTargetAfterRefreshes(...args);
   }
 
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
-  staleSyntheticTarget(
-    original: Element | null,
-    previous: ViewHierarchyResult | undefined,
-    current: ViewHierarchyResult,
-  ): string | undefined {
-    if (!original || original["resource-id"] || !original["view-id"] || !previous) {
-      return undefined;
-    }
-    const projection = new SearchableHierarchy();
-    const nodeKey = original["view-id"];
-    const oldNode = projection.project(previous).find((node) => node.nodeKey === nodeKey);
-    if (!oldNode) {
-      return "Stale tap target: the observed reference is no longer identifiable.";
-    }
-    const oldId = getHierarchySnapshot(previous)?.captureId ?? "before-refresh";
-    const newId =
-      getHierarchySnapshot(current)?.captureId ?? (previous === current ? oldId : "after-refresh");
-    const result = new ElementResolver().resolve(
-      { id: newId, nodes: projection.project(current) },
-      { elementId: nodeKey },
-      {
-        action: "inspect",
-        ref: {
-          snapshotId: oldId,
-          nodeKey,
-          bounds: oldNode.bounds,
-          label: oldNode.label,
-          nativeId: oldNode.nativeId,
-        },
-      },
-    );
-    return result.error;
+  staleSyntheticTarget(...args: Parameters<typeof staleSyntheticTarget>): string | undefined {
+    return staleSyntheticTarget(...args);
   }
 
-  private isPrototypeWindowPending(
-    options: TapVerificationOptions,
-    hierarchy: ViewHierarchyResult,
-  ): boolean {
-    return (
-      options.layer === "prototype" &&
-      hierarchy.prototypeSuspended !== true &&
-      !hasOwnPrototype(hierarchy)
-    );
-  }
-
-  private findElementForSearch(
-    options: TapVerificationOptions,
-    hierarchy: ViewHierarchyResult,
-  ): ReturnType<TapOnElement["findElementInHierarchy"]> {
-    if (this.isPrototypeWindowPending(options, hierarchy)) {
-      // A successful show can precede the window's first accessibility capture.
-      return {
-        selection: { element: null, indexInMatches: -1, totalMatches: 0, strategy: "first" },
-        containerFound: false,
-      };
-    }
-    return this.findElementInHierarchy(options, hierarchy);
-  }
-
-  private async searchForElement(
-    options: TapVerificationOptions,
-    observeResult: ObserveResult,
-    signal?: AbortSignal,
-  ): Promise<{
-    selection: ElementSelectionResult;
-    viewHierarchy: ViewHierarchyResult;
-    containerFound: boolean;
-    stats: SearchUntilStats;
-    /**
-     * True when `viewHierarchy` is a genuine live device re-capture taken during
-     * this search (the caller's initial hierarchy did not already contain the
-     * target), distinct from the common case where the element was found in the
-     * hierarchy the caller already had with no device round-trip. Drives
-     * whether {@link replaceObservationHierarchy} also realigns freshness
-     * (issue #6284).
-     */
-    refreshedFromDevice: boolean;
-    visibilityError?: TapTargetUnavailableError;
-  }> {
-    const viewHierarchy = observeResult.viewHierarchy;
-    if (!viewHierarchy) {
-      throw new ActionableError("Unable to get view hierarchy, cannot tap on element");
-    }
-
-    const searchDurationMs = this.getSearchUntilDuration(options);
-    const startTime = this.timer.now();
-    let requestCount = 0;
-    let changeCount = 0;
-    let offScreenRejections = 0;
-    let visibilityError: TapTargetUnavailableError | undefined;
-    let lastHash = this.hashViewHierarchy(viewHierarchy);
-
-    let latestViewHierarchy = viewHierarchy;
-    let latestScreenSize = this.getScreenSizeFromHierarchy(latestViewHierarchy, {
-      observationScreenSize: observeResult.screenSize,
-      display: observeResult.viewHierarchy,
-    });
-    const initialSearch = this.findElementForSearch(
-      this.withObservationScreenSize(options, observeResult),
-      latestViewHierarchy,
-    );
-    let selection = initialSearch.selection;
-    const invisibleError = () =>
-      this.invisibleMatchFailure(selection, options, latestViewHierarchy, latestScreenSize);
-    let element = selection.element;
-    let containerFoundEver = initialSearch.containerFound;
-    if (!element && selection.matchedElement) {
-      visibilityError = invisibleError();
-    }
-
-    if (
-      !element ||
-      this.isElementTapTargetOffScreen(selection, latestViewHierarchy, latestScreenSize, options)
-    ) {
-      if (element) {
-        visibilityError = invisibleError();
-        logger.warn(
-          `[TapOnElement] Element found but tap target is off-screen, will retry. ` +
-            `bounds=${JSON.stringify(element.bounds)}, ` +
-            `screen=${latestScreenSize?.width}x${latestScreenSize?.height}`,
-        );
-        selection = { ...selection, element: null };
-        element = null;
-        offScreenRejections += 1;
-      }
-      // Fast cached iOS responses must yield just like device round-trips.
-      // Keep an independent request ceiling even if the wall clock moves backward.
-      const polled = await pollSearchUntil({
-        timer: this.timer,
-        startTime,
-        durationMs: searchDurationMs,
-        intervalMs: TapOnElement.SEARCH_POLL_INTERVAL_MS,
-        pacing: "cadence",
-        maxRequests: Math.ceil(searchDurationMs / TapOnElement.SEARCH_POLL_INTERVAL_MS),
-        discardLateResult: false,
-        signal,
-        fetch: (remainingTimeMs) =>
-          this.tapVerificationRefresh({
-            refresh: options.verification?.refresh,
-            screenSize: latestScreenSize,
-            signal,
-          })(remainingTimeMs),
-        accept: (refreshedHierarchy) => {
-          latestScreenSize = this.getScreenSizeFromHierarchy(refreshedHierarchy, {
-            observationScreenSize: latestScreenSize,
-            display: latestViewHierarchy,
-          });
-          latestViewHierarchy = refreshedHierarchy;
-          const hash = this.hashViewHierarchy(refreshedHierarchy);
-          if (hash && hash !== lastHash) {
-            changeCount += 1;
-            lastHash = hash;
-          } else if (hash && !lastHash) {
-            changeCount += 1;
-            lastHash = hash;
-          }
-
-          const searchResult = this.findElementForSearch(
-            {
-              ...options,
-              screenSizeOptions: {
-                observationScreenSize: latestScreenSize,
-                display: latestViewHierarchy,
-              },
-            },
-            refreshedHierarchy,
-          );
-          selection = searchResult.selection;
-          element = selection.element;
-          containerFoundEver = containerFoundEver || searchResult.containerFound;
-          if (!element && selection.matchedElement) {
-            visibilityError = invisibleError();
-          }
-          if (
-            element &&
-            this.isElementTapTargetOffScreen(
-              selection,
-              refreshedHierarchy,
-              latestScreenSize,
-              options,
-            )
-          ) {
-            visibilityError = invisibleError();
-            logger.warn(
-              `[TapOnElement] Element found but tap target is off-screen, retrying. ` +
-                `bounds=${JSON.stringify(element.bounds)}`,
-            );
-            selection = { ...selection, element: null };
-            element = null;
-            offScreenRejections += 1;
-            return false;
-          }
-          return element !== null;
-        },
-      });
-      requestCount = polled.requestCount;
-    }
-
-    if (this.isPrototypeWindowPending(options, latestViewHierarchy)) {
-      scopeHierarchyForSelector(latestViewHierarchy, options.layer);
-    }
-
-    if (offScreenRejections > 0 && !element) {
-      logger.warn(
-        `[TapOnElement] Element was found ${offScreenRejections} time(s) but had no visible tap area. ` +
-          "Scroll it into view before retrying.",
-      );
-    }
-
-    const stats: SearchUntilStats = {
-      durationMs: Math.max(0, Math.round(this.timer.now() - startTime)),
-      requestCount,
-      changeCount,
-    };
-
-    return {
-      selection,
-      viewHierarchy: latestViewHierarchy,
-      containerFound: containerFoundEver,
-      stats,
-      // `latestViewHierarchy` only diverges from the caller's `viewHierarchy`
-      // when a refresh-loop iteration replaced it with a live device re-capture;
-      // the target being present in the initial hierarchy returns it unchanged.
-      refreshedFromDevice: latestViewHierarchy !== viewHierarchy,
-      ...(visibilityError && !element ? { visibilityError } : {}),
-    };
+  private searchForElement(
+    ...args: Parameters<TapSearchPhase["searchForElement"]>
+  ): ReturnType<TapSearchPhase["searchForElement"]> {
+    return this.search.searchForElement(...args);
   }
 
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
@@ -1396,74 +878,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.buildSelectedElementMetadata(selection) ?? previous;
   }
 
-  private async handleElementNotFound(
-    options: TapOnElementOptions,
-    observeResult?: ObserveResult,
-    containerFound: boolean = true,
-    signal?: AbortSignal,
-    selection?: ElementSelectionResult,
+  private handleElementNotFound(
+    ...args: Parameters<TapSearchPhase["handleElementNotFound"]>
   ): Promise<never> {
-    if (options.container && !containerFound) {
-      const containerLabel = options.container.elementId
-        ? `elementId '${options.container.elementId}'`
-        : `text '${options.container.text}'`;
-      throw new ActionableError(
-        options.container.elementId?.startsWith("s2-")
-          ? `Container element id '${options.container.elementId}' is stale; re-observe and use the id from the new observation.`
-          : `Container element not found with provided ${containerLabel}`,
-      );
-    }
-
-    const containerHint = options.container
-      ? ` within container ${options.container.elementId ? `elementId '${options.container.elementId}'` : `text '${options.container.text}'`}`
-      : "";
-
-    let baseError: string;
-    if (options.sibling && options.text) {
-      baseError = `No clickable sibling found next to element with text '${options.text}'${containerHint}`;
-    } else if (options.sibling && options.elementId) {
-      baseError = `No clickable sibling found next to element with elementId '${options.elementId}'${containerHint}`;
-    } else if (options.text) {
-      baseError = `Element not found with provided text '${options.text}'${containerHint}`;
-    } else if (options.textAny) {
-      baseError = `Element not found with any provided text '${options.textAny.join("', '")}'${containerHint}`;
-    } else if (options.testTag) {
-      baseError = `Element not found with provided testTag '${options.testTag}'${containerHint}`;
-    } else if (options.accessibilityLink) {
-      baseError = `Element not found with provided accessibilityLink '${options.accessibilityLink}'${containerHint}`;
-    } else {
-      baseError = options.elementId?.startsWith("s2-")
-        ? `Element id '${options.elementId}' is stale; re-observe and use the id from the new observation.${containerHint}`
-        : `Element not found with provided elementId '${options.elementId}'${containerHint}`;
-    }
-
-    if (selection?.onlyKeyboardKeyMatch) {
-      throw new TapTargetUnavailableError(
-        `${baseError}. The only match is a soft-keyboard key, which observe does not list; ` +
-          "use sendKeys or pressButton to drive the keyboard, or dismiss the keyboard first.",
-        "not-found",
-      );
-    }
-
-    if (this.visionConfig.enabled && observeResult) {
-      logger.info("🔍 Element not found after polling, trying vision fallback...");
-      const enrichedMsg = await getVisionEnrichedError(
-        this.screenshotCapturer,
-        observeResult.viewHierarchy,
-        {
-          text: options.text ?? options.textAny?.join(" | "),
-          resourceId: options.elementId,
-          description: `Interactive element for tapping (action: ${options.action})`,
-        },
-        this.visionConfig,
-        baseError,
-        signal,
-        this.visionAnalyzer,
-      );
-      throw new TapTargetUnavailableError(enrichedMsg, "not-found");
-    }
-
-    throw new TapTargetUnavailableError(baseError, "not-found");
+    return this.search.handleElementNotFound(...args);
   }
 
   private isClickableElement(element: Element): boolean {
@@ -2163,7 +1581,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (options.container && !owner) {
       return { success: false, error: "Semantic link container is no longer present" };
     }
-    const activation = await this.activateSemanticLink(
+    const activation = await this.semanticLink.activateSemanticLink(
       linkText,
       occurrence,
       owner,
@@ -2205,7 +1623,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     signal?: AbortSignal;
   }): Promise<TapOnFocusOutcome | ObservedActionResult> {
     const occurrence = subtext.occurrence ?? 0;
-    const activation = await this.activateSemanticLink(
+    const activation = await this.semanticLink.activateSemanticLink(
       subtext.text,
       occurrence,
       element,
@@ -2644,80 +2062,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return screenReaderNavigation;
   }
 
-  /**
-   * Execute iOS-specific tap operations using CtrlProxy iOS
-   * @param action - The tap action to perform
-   * @param x - X coordinate
-   * @param y - Y coordinate
-   * @param durationMs - Long press duration in milliseconds
-   * @param element - The target element (for VoiceOver label resolution)
-   * @param isVoiceOverEnabled - Whether VoiceOver is active
-   */
-  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
-  private async executeiOSTap(
-    action: string,
-    x: number,
-    y: number,
-    durationMs: number,
-    element?: Element,
-    isVoiceOverEnabled?: boolean,
-    fenceOptions: IosTapOptions = {},
-  ): Promise<void> {
-    if (isVoiceOverEnabled && element) {
-      await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs, fenceOptions);
-      return;
-    }
-
-    await this.executeiOSTapWithCoordinates(action, x, y, durationMs, fenceOptions);
+  private executeiOSTap(...args: Parameters<TapIosDispatchPhase["executeiOSTap"]>): Promise<void> {
+    return this.iosDispatch.executeiOSTap(...args);
   }
 
-  /**
-   * Execute iOS tap using coordinate-based input (standard mode)
-   */
-  private async executeiOSTapWithCoordinates(
-    action: string,
-    x: number,
-    y: number,
-    durationMs: number,
-    fenceOptions: IosTapOptions = {},
+  private executeiOSTapWithCoordinates(
+    ...args: Parameters<TapIosDispatchPhase["executeiOSTapWithCoordinates"]>
   ): Promise<void> {
-    const { displayFence: fence, signal } = fenceOptions;
-    // Use short duration (50ms) for tap/doubleTap, full duration for longPress
-    const tapDuration = action === "longPress" ? durationMs : 50;
-
-    const client = IOSCtrlProxyClient.getInstance(this.device);
-
-    if (action === "doubleTap") {
-      fence?.assertCurrent();
-      await dispatchIosDoubleTap(client, x, y, tapDuration, undefined, { signal });
-      IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
-    } else {
-      // Single tap or long press
-      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
-      fence?.assertCurrent();
-      await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, { signal });
-      IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
-    }
+    return this.iosDispatch.executeiOSTapWithCoordinates(...args);
   }
 
-  /** VoiceOver activation with a coordinate-tap fallback; see {@link tapViaVoiceOver}. */
   private executeIOSTapWithVoiceOver(
-    action: string,
-    element: Element,
-    x: number,
-    y: number,
-    durationMs: number,
-    fenceOptions?: IosTapOptions,
+    ...args: Parameters<TapIosDispatchPhase["executeIOSTapWithVoiceOver"]>
   ): Promise<void> {
-    return tapViaVoiceOver({
-      device: this.device,
-      action,
-      element,
-      point: { x, y },
-      durationMs,
-      fenceOptions: fenceOptions ?? {},
-      coordinateTap: (opts) => this.executeiOSTapWithCoordinates(action, x, y, durationMs, opts),
-    });
+    return this.iosDispatch.executeIOSTapWithVoiceOver(...args);
   }
 
   private readOptionalDisplayFence(options?: DisplayFenceOption): DisplayFence | undefined {
@@ -2732,124 +2090,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.strategy.longPressDurationMs;
   }
 
-  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
-  private async executeAndroidLongPress(
-    x: number,
-    y: number,
-    durationMs: number,
-    element: Element,
-    signal?: AbortSignal,
-    skipSemanticAction: boolean = false,
-    fenceOptions: ResolvedAndroidTapOptions = {},
+  executeAndroidLongPress(
+    ...args: Parameters<TapAndroidLongPressPhase["executeAndroidLongPress"]>
   ): Promise<void> {
-    const fence = fenceOptions.displayFence;
-    throwIfAborted(signal);
-    if (!skipSemanticAction) {
-      const selector = stableNodeSelectorForElement(element);
-      if (
-        selector &&
-        (await this.trySemanticAndroidLongPress(element, selector, signal, fenceOptions))
-      ) {
-        return;
-      }
-    }
-
-    await dispatchAndroidLongPress({
-      adb: this.adb,
-      x,
-      y,
-      durationMs,
-      signal,
-      assertCurrent: fence ? () => fence.assertCurrent() : undefined,
-      logTag: "TapOnElement",
-    });
-  }
-
-  private throwIfLongPressInterrupted(
-    error: unknown,
-    durationMs: number,
-    signal?: AbortSignal,
-  ): void {
-    throwIfLongPressInterrupted(error, durationMs, signal);
-  }
-
-  private semanticAndroidLongPressTargetError(
-    selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>,
-    signal?: AbortSignal,
-    options: ResolvedAndroidTapOptions = {},
-  ): Promise<string | undefined> {
-    // Raw search resolves against a filtered projection that may omit duplicate IDs.
-    // Default extraction matches the cached tree already accepted by this guard.
-    const resolvedHierarchy = resolveViewHierarchyForSearch(options.resolvedHierarchy);
-    return nodeActionTargetError(selector, {
-      supportsNodeActionSelectors: () => this.accessibilityService.supportsNodeActionSelectors(),
-      getAccessibilityHierarchy: () =>
-        resolvedHierarchy
-          ? Promise.resolve(resolvedHierarchy)
-          : this.accessibilityService.getAccessibilityHierarchy(
-              undefined,
-              undefined,
-              true,
-              undefined,
-              true,
-              signal,
-            ),
-    });
-  }
-
-  private async trySemanticAndroidLongPress(
-    element: Element,
-    selector: NonNullable<ReturnType<typeof stableNodeSelectorForElement>>,
-    signal?: AbortSignal,
-    options: ResolvedAndroidTapOptions = {},
-  ): Promise<boolean> {
-    const needsNodeSelector = requiresNodeSelector(selector);
-    const targetError = await this.semanticAndroidLongPressTargetError(selector, signal, options);
-    // The hierarchy reader turns cancellation into null; never degrade it to a press.
-    throwIfAborted(signal);
-    if (targetError) {
-      logger.info(`[TapOnElement] ${targetError}; using coordinate long press`);
-      return false;
-    }
-
-    try {
-      const result = needsNodeSelector
-        ? await this.accessibilityService.requestNodeAction("long_click", selector)
-        : await this.accessibilityService.requestAction("long_click", selector.resourceId);
-      if (result.success) {
-        return true;
-      }
-      const rejected = await isSemanticActionRejected({
-        advertised: hasAccessibilityAction(element.actions, "long_click"),
-        error: result.error,
-        needsNodeSelector,
-        selected: element,
-        // Fresh and unfiltered, like the target guard: the cached tree may predate the miss.
-        readHierarchy: () =>
-          this.accessibilityService.getAccessibilityHierarchy(
-            undefined,
-            undefined,
-            true,
-            undefined,
-            true,
-            signal,
-          ),
-      });
-      // The hierarchy reader turns cancellation into null; never degrade it to a press.
-      throwIfAborted(signal);
-      if (rejected) {
-        throw new ActionableError(
-          `Semantic long press failed for the selected element: ${result.error ?? "unknown error"}`,
-        );
-      }
-      logger.warn(`[TapOnElement] Accessibility long click failed: ${result.error}`);
-    } catch (error) {
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      logger.warn(`[TapOnElement] Accessibility long click error: ${error}`);
-    }
-    return false;
+    return this.androidLongPress.executeAndroidLongPress(...args);
   }
 
   private detectLongPressMetadata(
@@ -2858,21 +2102,4 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   ): LongPressMetadata {
     return this.longPressMetadataDetector.detect(previousObservation, currentObservation);
   }
-}
-
-/**
- * An iOS capture merges the in-app SDK snapshot into the XCUITest tree, and SDK views
- * no XCUITest node matched are injected beside it (`sdk.source=sdkWalker`). After an
- * interaction that snapshot can carry the owner's view again (the UITextView behind a
- * UILink owner), so the resource-id shows up on SDK copies too (#10843). The runner
- * resolves the owner among XCUITest elements, so when XCUITest captured the identifier,
- * the SDK copies are duplicates of it and must not make the owner ambiguous. With no
- * captured node, keep every candidate so an SDK-only identifier is still counted.
- */
-function preferCapturedOwners(candidates: Element[]): Element[] {
-  const captured = candidates.filter((element) => {
-    const source = getHierarchyNodeSource(element);
-    return !source || !isSdkInjectedNode(source);
-  });
-  return captured.length > 0 ? captured : candidates;
 }

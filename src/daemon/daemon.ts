@@ -1,10 +1,9 @@
 import { holderOf } from "./deviceBinding";
-import { wireSessionLifecycle } from "./daemonSessionLifecycleWiring";
+import { publishDaemonState, wireDaemonCollaborators, type DaemonWiringHost } from "./daemonWiring";
 import { getNativeHelperRegistry } from "../utils/nativeHelpers/NativeHelperRegistry";
 import { terminateActiveAdbProcesses } from "../utils/android-cmdline-tools/AdbClient";
 import type { SessionReleaseReason } from "./releaseReasons";
 import { type BindingExclusion } from "./sessionBroker/provisioning/exclusion";
-import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { handleHttpHeartbeat, parseHttpHeartbeatBody } from "./httpHeartbeat";
 import {
@@ -15,9 +14,7 @@ import {
   releaseSessionAndDevice,
 } from "./releaseSessionAndDevice";
 import type { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
-import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
-import { ObserverReleaseBroadcaster } from "./observerReleaseBroadcast";
 import { sweepStaleAppearanceConfigs } from "./appearanceConfigStartupSweep";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
 import { republishOwnedIdentity } from "./identityRecovery";
@@ -45,12 +42,7 @@ import { releaseDaemonTaskLeases } from "../server/tasks/daemonTaskManager";
 import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { createIosDoctorDependencies } from "../doctor/checks/ios";
 import { logger } from "../utils/logger";
-import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
-import {
-  defaultLocationRouteRegistry,
-  stopLocationRouteForRemovedDevice,
-} from "../features/utility/LocationRoutePlayer";
-import { defaultMockLocationClearRegistry } from "../features/utility/MockLocationClear";
+import { defaultLocationRouteRegistry } from "../features/utility/LocationRoutePlayer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -76,7 +68,6 @@ import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "./deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "./devicePool";
-import { ForwardLeaseForeignDeviceOwnership } from "./foreignDeviceOwnership";
 import {
   createForeignCtrlProxyForwardEvidence,
   type ForeignCtrlProxyForwardEvidence,
@@ -87,12 +78,9 @@ import {
   assertInputNotOnForeignBindingDevice,
 } from "./inputDeviceOwnership";
 import { DeviceAssignedToBindingError } from "./sessionBroker/provisioning/refusal";
-import {
-  OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
-  OwnerDisconnectExecutionVeto,
-} from "./ownerDisconnectRelease";
+import {} from "./ownerDisconnectRelease";
 import type { SessionExecutionProbe } from "./unsettledExecutionVeto";
-import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
+import { parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
 import { DaemonState } from "./daemonState";
 import {
@@ -201,10 +189,8 @@ import {
 } from "./daemonHandoffInterruption";
 import { transitionalHeldSimulators } from "../server/adbOfflineHeldDevices";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
-import { clearSessionAppearanceConfig } from "../server/appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
-import { NetworkState } from "../server/NetworkState";
 import {} from "../server/networkStateSessionCleanup";
 import {} from "../server/recordingSessionCleanup";
 import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownRedrive";
@@ -304,7 +290,6 @@ import {
 } from "./navigationGraphRequestHandler";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
-import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import {
   BackgroundBindingRegistryUpgrade,
   LegacySlotDeviceRetirement,
@@ -321,7 +306,6 @@ import {
   type DaemonTerminalReleaseJournalOptions,
   type TerminalReleaseJournal,
 } from "./terminalReleaseJournal";
-import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
 import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
 import { initializeIosCtrlProxyAtStartup, selectIosStartupWarmupDevices } from "./iosStartupInit";
@@ -933,30 +917,6 @@ export class Daemon {
       configureCallbacks: () => this.configureDeviceDataStreamServer(),
     });
     this.deviceSessionRepository = deviceSessionRepository;
-    this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
-    this.sessionManager.attachDaemonSessionId(this.daemonSessionId);
-    // Read when a recovery claims its row, so a peer that started after this daemon is seen. A
-    // restart incumbent whose pid file this daemon replaced is not listed, so it is added while
-    // it is still live: its rows and its terminal-release journal are not a dead daemon's (#11355).
-    this.sessionManager.attachLiveDaemonSessionIds(() =>
-      this.incumbentOwnerGuard.withLiveIncumbent(
-        this.liveDaemonSessionIdProvider.collectLiveDaemonSessionIds(),
-      ),
-    );
-    this.observerSessionRegistry = new ObserverSessionRegistry(
-      this.timer,
-      undefined,
-      (sessionId) => {
-        // An observer's per-session appearance config (#10976) dies with the observer.
-        clearSessionAppearanceConfig(sessionId).catch((error: unknown) => {
-          logger.warn(`[Appearance] Failed to drop config of observer ${sessionId}`, error);
-        });
-        // So do the viewer streams its registration admitted (#11076).
-        ObserverReleaseBroadcaster.emit(sessionId);
-      },
-    );
-    this.configureSessionLifecycleCallbacks();
-    this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     const recoveryConfiguration = parseDeviceRecoveryPolicy(recoveryPolicyEnvironment);
     for (const warning of recoveryConfiguration.warnings) {
       logger.warn(`[Daemon] ${warning}`);
@@ -965,23 +925,33 @@ export class Daemon {
       `[Daemon] Device recovery policy: onLoss=${recoveryConfiguration.policy.onLoss}, ` +
         `maxAttempts=${recoveryConfiguration.policy.maxAttempts}`,
     );
-    this.deviceSessionRegistry = new DeviceSessionRegistry(this.timer, this.idGenerator);
-    this.devicePool = this.createDevicePool(
-      recoveryConfiguration.policy,
+    const collaborators = wireDaemonCollaborators({
+      timer: this.timer,
+      idGenerator: this.idGenerator,
+      daemonSessionId: this.daemonSessionId,
+      deviceSessionRepository: this.deviceSessionRepository,
+      installedAppsRepository,
+      incumbentOwnerGuard: this.incumbentOwnerGuard,
+      liveDaemonSessionIdProvider: this.liveDaemonSessionIdProvider,
+      bindingExclusionFactory: this.bindingExclusionFactory,
+      foreignCtrlProxyForwardEvidence: this.foreignCtrlProxyForwardEvidence,
+      recoveryPolicy: recoveryConfiguration.policy,
       recoveryPolicyEnvironment,
-    );
+      deviceDisconnectMisses: this.deviceDisconnectMisses,
+      deviceStateChangeNotifier: this.deviceStateChangeNotifier,
+      host: this.wiringHost(),
+    });
+    this.sessionManager = collaborators.sessionManager;
+    this.observerSessionRegistry = collaborators.observerSessionRegistry;
+    this.installedAppsRepository = collaborators.installedAppsRepository;
+    this.deviceSessionRegistry = collaborators.deviceSessionRegistry;
+    this.devicePool = collaborators.devicePool;
     executionTracker.setAutolockSessionResolver({
       autolockSessionForMcpSession: (mcpSessionId) =>
         this.devicePool.captureAutolockSessionForMcpSession(mcpSessionId),
     });
     // Initialize singleton for daemon state access
-    DaemonState.getInstance().initialize(
-      this.sessionManager,
-      this.devicePool,
-      this.deviceSessionRegistry,
-      this.observerSessionRegistry,
-    );
-    DaemonState.getInstance().setSessionBrokerMode(this.sessionBrokerConfigPath !== undefined);
+    publishDaemonState(collaborators, this.sessionBrokerConfigPath !== undefined);
     this.installManagedExecutionRelease();
     this.installBrokerDeviceAcquisition();
 
@@ -1272,121 +1242,6 @@ export class Daemon {
     }
   }
 
-  private createDevicePool(
-    recoveryPolicy: ReturnType<typeof parseDeviceRecoveryPolicy>["policy"],
-    recoveryPolicyEnvironment: NodeJS.ProcessEnv,
-  ): DevicePool {
-    const ownerDisconnectExecutionVeto = new OwnerDisconnectExecutionVeto(
-      this.sessionExecutionProbe({ excludeReads: true }),
-      this.timer,
-      OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
-      () => this.sessionManager.sessionNow(),
-    );
-    return DevicePool.create({
-      sessionManager: this.sessionManager,
-      daemonSessionId: this.daemonSessionId,
-      timer: this.timer,
-      bindingExclusion: this.bindingExclusionFactory(this.timer),
-      ...(this.foreignCtrlProxyForwardEvidence
-        ? {
-            foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              this.timer,
-              this.foreignCtrlProxyForwardEvidence,
-            ),
-          }
-        : {}),
-      managedExecutionOwnership: () => this.managedExecutionReowner,
-      missingDeviceMisses: this.deviceDisconnectMisses,
-      installedAppsRepository: this.installedAppsRepository,
-      deviceSessionRepository: this.deviceSessionRepository,
-      releaseSessionForDisconnectedDevice: (
-        sessionId,
-        _deviceId,
-        releaseReason,
-        shouldCommit,
-        releaseOptions,
-      ) =>
-        this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit, {
-          deferFailureFallback: true,
-          releaseOptions,
-        }),
-      ownerDisconnect: {
-        release: async (session, reason) => {
-          // A control call defers release (#5343); retry when it ends or the veto's bound
-          // passes (#10663, #10712). A read never defers release and is cut instead (#11381).
-          const deferral = ownerDisconnectExecutionVeto.keeps(session);
-          if (deferral) {
-            return deferral;
-          }
-          // A cut read or a control call past the veto's bound is told the session is gone,
-          // as a call arriving after the release is (#11381).
-          await this.cancelAndReleaseSession(session.sessionId, reason, false, session, undefined, {
-            cutCallsLearnRelease: true,
-          });
-        },
-      },
-      onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
-      recoveryPolicy: recoveryPolicy,
-      onDeviceFramesInvalidated: (deviceId) => {
-        // Full: pool callbacks signal new incarnations or untrusted runtime identity.
-        this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId);
-        getDaemonStreamDeviceLifecycleEmitter().deviceIdentityChanged(deviceId);
-      },
-      onDeviceIncarnationAssigned: (deviceId) => this.recorderDeviceIncarnationListener?.(deviceId),
-      onDeviceRemoved: (deviceId, platform) => {
-        getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(deviceId);
-        stopLocationRouteForRemovedDevice(deviceId);
-        defaultMockLocationClearRegistry.retireDevice(deviceId);
-        NetworkState.getInstance().retireDevice(deviceId);
-        defaultDisplayInventoryProvider.invalidate(deviceId);
-        DeviceReadiness.getInstance().clearExplicitDevicePin(deviceId);
-        this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
-        // Full removal: prune AFTER epoch retirement, which also invalidates frames.
-        this.deviceDataStreamServer?.removeDeviceFrames(deviceId);
-        if (platform === "android") {
-          void AndroidCtrlProxyClient.evictAfterDeviceRemoval(deviceId).catch((error) => {
-            logger.warn(
-              `[Daemon] Failed to stop Android CtrlProxy for removed device ${deviceId}: ${errorMessage(error)}`,
-              error,
-            );
-          });
-        }
-        if (platform === "ios") {
-          void IOSCtrlProxyManager.evictAfterDeviceRemoval(deviceId).catch((error) => {
-            logger.warn(
-              `[Daemon] Failed to stop iOS CtrlProxy for removed device ${deviceId}: ${errorMessage(error)}`,
-            );
-          });
-        }
-      },
-      // Subscribers to the booted-device resources learn of status and holder changes (#11413).
-      onDeviceStateChanged: this.deviceStateChangeNotifier,
-      emulatorLossIncidentStore: new EmulatorLossIncidentRepository(
-        undefined,
-        this.timer,
-        this.idGenerator,
-      ),
-      ambientExecutionIdReader,
-      cancelDeviceSessionExecutions: Object.assign(
-        (sessionId: string, reason: string, options?: { excludeExecutionId?: string }) =>
-          this.cancelAndDrainDeviceSessionExecutions(sessionId, reason, options),
-        {
-          cancelDeviceExecutions: (
-            deviceId: string,
-            reason: string | Error,
-            options?: { excludeExecutionId?: string; onlySessionUuid?: string },
-          ) => this.cancelAndDrainDeviceExecutions(deviceId, reason, options),
-        },
-      ),
-      idGenerator: this.idGenerator,
-      deviceSessionContinuityEnabled: isDeviceSessionContinuityEnabled(recoveryPolicyEnvironment),
-    });
-  }
-
   /** Stop the session sweeps and the tool-call-end subscription that feed session expiry. */
   private stopSessionTimers(): void {
     // A change in the last debounce window must not notify after the daemon closed (#11413).
@@ -1411,8 +1266,9 @@ export class Daemon {
     );
   }
 
-  private configureSessionLifecycleCallbacks(): void {
-    wireSessionLifecycle(this.sessionManager, this.timer, {
+  /** The daemon-owned behaviour the wired collaborators call back into, read lazily. */
+  private wiringHost(): DaemonWiringHost {
+    return {
       deviceDataStreamServer: () => this.deviceDataStreamServer,
       socketServer: () => this.socketServer,
       managedExecutionReowner: () => this.managedExecutionReowner,
@@ -1431,7 +1287,14 @@ export class Daemon {
         this.latestSessionExecutionDeadlineMs(sessionId, options),
       cancelExecutionsForExpiryRelease: (sessionId, cancellation, query, releasedDeviceId) =>
         this.cancelExecutionsForExpiryRelease(sessionId, cancellation, query, releasedDeviceId),
-    });
+      cancelAndReleaseSession: (...args) => this.cancelAndReleaseSession(...args),
+      cancelAndDrainDeviceSessionExecutions: (sessionId, reason, options) =>
+        this.cancelAndDrainDeviceSessionExecutions(sessionId, reason, options),
+      cancelAndDrainDeviceExecutions: (deviceId, reason, options) =>
+        this.cancelAndDrainDeviceExecutions(deviceId, reason, options),
+      onDeviceReadyForSessionRegistry: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
+      recorderDeviceIncarnationListener: () => this.recorderDeviceIncarnationListener,
+    };
   }
 
   /** Devices host appearance sync may touch, each tagged with the session whose config applies. */

@@ -276,6 +276,8 @@ describe("verification text matching", () => {
     );
     // Inline backticks, case, spacing, and a trailing period do not matter.
     expect(missingFromAnswer("`expected_count:  3`\nDISPLAYED_COUNT: 2.", needles)).toEqual([]);
+    // The period may sit outside or inside the backticks.
+    expect(missingFromAnswer("`EXPECTED_COUNT: 3`.\n`DISPLAYED_COUNT: 2.`", needles)).toEqual([]);
     // Non-keyed needles search the whole answer.
     expect(missingFromAnswer("The status was Bug triggered.", ["Bug triggered"])).toEqual([]);
   });

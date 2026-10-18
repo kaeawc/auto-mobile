@@ -310,6 +310,8 @@ describe("agent benchmark provider identity", () => {
         "ANTHROPIC_DEFAULT_SONNET_MODEL=routed-sonnet",
         "AWS_REGION=us-west-2",
         "CLAUDE_CODE_USE_BEDROCK=1",
+        // The API key is recorded by name, never by value or digest.
+        "auth=ANTHROPIC_API_KEY",
         "aws-config=sha256:stub",
       ].join("\n"),
     );
@@ -393,6 +395,7 @@ describe("agent benchmark provider identity", () => {
       "CLAUDE_ENABLE_STREAM_WATCHDOG",
       "CLAUDE_ENABLE_BYTE_WATCHDOG",
       "CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK",
+      "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
     ]) {
       expect({ key, scrubbed: isRunShapingClaudeVariable(key) }).toEqual({ key, scrubbed: true });
     }

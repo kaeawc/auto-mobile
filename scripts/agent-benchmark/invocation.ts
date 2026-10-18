@@ -145,6 +145,8 @@ export const RUN_SHAPING_CLAUDE_VARIABLES: ReadonlySet<string> = new Set([
   "API_TIMEOUT_MS",
   "CLAUDE_CODE_MAX_RETRIES",
   "CLAUDE_CODE_RETRY_WATCHDOG",
+  // Mid-stream failures go to the retry layer instead of the non-streaming fallback
+  "CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK",
   // System prompt and tool set (the attribution toggle changes the system prompt's opening)
   "CLAUDE_CODE_ATTRIBUTION_HEADER",
   "CLAUDE_CODE_SIMPLE",
@@ -524,6 +526,9 @@ export function awsConfigIdentity(
   }
 }
 
+// Direct-API credentials; recorded by name only.
+const DIRECT_CREDENTIALS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"];
+
 // Providers that authenticate through the AWS credential chain.
 const AWS_PROVIDER_FLAGS = [
   "CLAUDE_CODE_USE_BEDROCK",
@@ -575,6 +580,9 @@ export function providerIdentity(
           .digest("hex")
           .slice(0, 12)}`,
     ),
+    // Which credential kind authenticates (an API key overrides a subscription login under -p);
+    // names only, since the only account identity in a key is the secret itself.
+    ...DIRECT_CREDENTIALS.filter(set).map((key) => `auth=${key}`),
     ...(set("GOOGLE_APPLICATION_CREDENTIALS")
       ? [
           `GOOGLE_APPLICATION_CREDENTIALS=${credentialsIdentity(

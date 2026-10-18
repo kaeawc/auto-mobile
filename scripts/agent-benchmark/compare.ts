@@ -266,14 +266,18 @@ const FENCE_LINE = /^(`{3,}|~{3,})[\w-]*$/;
  * trailing period (the UX flow's screen text ends with one) do not matter.
  */
 function normalizeReportLine(line: string): string {
-  return line
-    .normalize("NFC")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^`+|`+$/g, "")
-    .trim()
-    .replace(/\.$/, "")
-    .toLowerCase();
+  return (
+    line
+      .normalize("NFC")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/\.$/, "")
+      .replace(/^`+|`+$/g, "")
+      .trim()
+      // Again, for a period inside the backticks (`COUNT: 3.`); outside them it went above.
+      .replace(/\.$/, "")
+      .toLowerCase()
+  );
 }
 
 /**

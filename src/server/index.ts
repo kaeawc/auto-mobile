@@ -310,6 +310,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       try {
         await closeServer();
       } finally {
+        // A never-connected server never fires onclose, which is what detaches its binding.
+        sessionToolBinding.dispose();
         ToolRegistry.untrackServer(server);
         ResourceRegistry.untrackServer(server);
       }

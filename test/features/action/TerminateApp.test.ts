@@ -29,7 +29,6 @@ import { ActionableError } from "../../../src/models/ActionableError";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import {
   getObserveCacheStore,
@@ -43,6 +42,7 @@ import { AdbClient as RealAdbClient } from "../../../src/utils/android-cmdline-t
 import { createExecResult } from "../../../src/utils/execResult";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { spyOnIosExistingInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("TerminateApp (Android install listing)", () => {
   const device: BootedDevice = { deviceId: "emulator-9426", name: "Pixel", platform: "android" };
@@ -267,9 +267,9 @@ describe("TerminateApp (iOS)", () => {
 
   test("clears an existing iOS CtrlProxy hierarchy cache", () => {
     const clearCache = spyOn({ clearCache: () => {} }, "clearCache");
-    const existingClientSpy = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+    const existingClientSpy = spyOnIosExistingInstance({
       clearCache,
-    } as unknown as IOSCtrlProxyClient);
+    });
 
     try {
       new DefaultDeviceWindowCacheInvalidator().invalidate(iosDevice);
@@ -331,9 +331,7 @@ describe("TerminateApp (iOS)", () => {
       const cacheStore = new FakeObserveCacheStore(fakeTimer);
       const previousStore = getObserveCacheStore();
       setObserveCacheStore(cacheStore);
-      const existingClientSpy = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
-        client as unknown as IOSCtrlProxyClient,
-      );
+      const existingClientSpy = spyOnIosExistingInstance(client);
 
       try {
         const stale: ObserveResult = {

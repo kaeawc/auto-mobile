@@ -6,7 +6,7 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { spyOnIosExistingInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("TapOnElement VoiceOver mode", () => {
   let fakeVoiceOverDetector: FakeIosVoiceOverDetector;
@@ -122,9 +122,7 @@ describe("TapOnElement VoiceOver mode", () => {
 
       test(`${action}: successful activation invalidates the cache without a coordinate tap`, async () => {
         await wireCtrlProxy();
-        const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
-          fakeIosClient as unknown as IOSCtrlProxyClient,
-        );
+        const existing = spyOnIosExistingInstance(fakeIosClient);
         const invalidate = spyOn(fakeIosClient, "invalidateCache");
         try {
           await tapOnElement["executeIOSTapWithVoiceOver"](action, element, 50, 50, 1000);

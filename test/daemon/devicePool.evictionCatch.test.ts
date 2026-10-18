@@ -1,5 +1,5 @@
+import { makePool } from "../helpers/makePool";
 import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { EventEmitter } from "node:events";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
@@ -9,7 +9,6 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { logger } from "../../src/utils/logger";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import {
   clearAndroidImeQuarantine,
   quarantineAndroidIme,
@@ -36,12 +35,10 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     fakeDeviceUtils = new FakeDeviceUtils();
-    pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session-1", {
-        timer: timer,
-        deviceManager: fakeDeviceUtils,
-      }),
-    );
+    pool = makePool(sessionManager, "daemon-session-1", {
+      timer: timer,
+      deviceManager: fakeDeviceUtils,
+    });
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await pool.initializeWithDevices([androidDevice]);
   });
@@ -87,14 +84,12 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
       timer,
       new CountingIdGenerator("test"),
     );
-    const diagnosticPool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session-1", {
-        timer: timer,
-        deviceManager: fakeDeviceUtils,
-        recoveryPolicy: { onLoss: false, maxAttempts: 2 },
-        emulatorLossIncidentStore: incidentStore,
-      }),
-    );
+    const diagnosticPool = makePool(sessionManager, "daemon-session-1", {
+      timer: timer,
+      deviceManager: fakeDeviceUtils,
+      recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+      emulatorLossIncidentStore: incidentStore,
+    });
     await diagnosticPool.initializeWithDevices([androidDevice]);
     const pooled = diagnosticPool.getDevice(androidDevice.deviceId)!;
     pooled.avdName = "Pixel_7";
@@ -155,14 +150,11 @@ describe("device identity replacement IME quarantine", () => {
     manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     devices = new FakeDeviceUtils();
     devices.setBootedDevices("android", [device]);
-    pool = new DevicePool(
-      createDevicePoolDependencies(manager, "ime-removal", {
-        timer,
-        deviceManager: devices,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        recoveryPolicy: { onLoss: false, maxAttempts: 0 },
-      }),
-    );
+    pool = makePool(manager, "ime-removal", {
+      timer,
+      deviceManager: devices,
+      recoveryPolicy: { onLoss: false, maxAttempts: 0 },
+    });
     await pool.initializeWithDevices([device]);
     quarantineAndroidIme(device.deviceId);
     quarantineAndroidIme(otherId);

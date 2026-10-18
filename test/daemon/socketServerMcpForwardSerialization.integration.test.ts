@@ -365,7 +365,6 @@ describe("UnixSocketServer MCP forward serialization", () => {
     releasedMcpBindings = [];
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(
         sessionDevices,
         sessionDeviceLabels,
@@ -625,7 +624,6 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const order: string[] = [];
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions, (sessionId) =>
         order.push(`heartbeat:${sessionId}`),
       ),
@@ -721,7 +719,6 @@ describe("UnixSocketServer MCP forward serialization", () => {
     fakeTimer = new FakeTimer();
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
@@ -812,7 +809,6 @@ describe("UnixSocketServer MCP forward serialization", () => {
     fakeTimer = new FakeTimer();
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
       null,
@@ -1216,7 +1212,6 @@ describe("UnixSocketServer MCP forward serialization", () => {
     sessionDevices.set("session-a", "device-a");
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
@@ -1297,7 +1292,6 @@ describe("UnixSocketServer MCP forward serialization", () => {
     sessionDevices.set("session-a", "device-a");
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
@@ -1418,7 +1412,6 @@ describe("UnixSocketServer MCP forward serialization", () => {
     sessionDevices.set("session-a", "device-a");
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
@@ -1515,7 +1508,6 @@ describe("UnixSocketServer MCP forward serialization", () => {
     fakeTimer = new FakeTimer();
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
@@ -1841,7 +1833,6 @@ describe("UnixSocketServer MCP forward serialization", () => {
     fakeTimer = new FakeTimer();
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
@@ -1930,7 +1921,6 @@ describe("UnixSocketServer MCP forward serialization", () => {
     sessionDevices.set("session-a", "device-a");
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
       fakeTimer,
     );
@@ -2672,7 +2662,6 @@ describe("UnixSocketServer MCP forward serialization", () => {
       fakeTimer = new FakeTimer();
       server = new UnixSocketServer(
         socketPath,
-        "http://localhost:0/mcp",
         createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
         fakeTimer,
       );
@@ -2893,7 +2882,6 @@ describe("UnixSocketServer MCP forward execution-key rerouting (issue #6388)", (
     calls = [];
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(sessionDevices, new Map(), new Map()),
       fakeTimer,
     );
@@ -2990,7 +2978,6 @@ describe("UnixSocketServer MCP forward execution-key rerouting (issue #6388)", (
     socketPath = join(tmpdir(), `mcp-rekey-churn-${randomUUID()}.sock`);
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(churningDevices, new Map(), new Map()),
       fakeTimer,
     );

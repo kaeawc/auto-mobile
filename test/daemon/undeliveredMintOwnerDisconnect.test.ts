@@ -445,7 +445,6 @@ for (const outcome of ["answer", "answerless", "throw", "replaced", "terminal"] 
     const h = await harness();
     const server = createTestUnixSocketServer(
       "/fake/mint.sock",
-      "http://localhost:0/mcp",
       {
         isInitialized: () => true,
         getSessionManager: () => h.manager,
@@ -512,7 +511,6 @@ test("#11999 a failed optional socket claim still forwards and writes the answer
   const h = await harness();
   const server = createTestUnixSocketServer(
     "/fake/mint.sock",
-    "http://localhost:0/mcp",
     {
       isInitialized: () => true,
       getSessionManager: () => h.manager,
@@ -563,7 +561,6 @@ test("#11999 socket close around the mint's answer uses its delivery status", as
     const h = await harness();
     const server = createTestUnixSocketServer(
       "/fake/mint.sock",
-      "http://localhost:0/mcp",
       {
         isInitialized: () => true,
         getSessionManager: () => h.manager,

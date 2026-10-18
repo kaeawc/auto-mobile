@@ -13,7 +13,6 @@ import { imeOcclusionHierarchy } from "../../fixtures/observe/imeOcclusion";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
@@ -29,6 +28,7 @@ import {
   runWithTextRequestContext,
 } from "../../../src/features/action/textTransportTimeout";
 import { drainMicrotasks, drainUntil, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("InputText.execute", () => {
   const androidDevice: BootedDevice = {
@@ -485,9 +485,7 @@ describe("InputText.execute", () => {
   });
 
   test("routes iOS input through the CtrlProxy client and ignores Android modes", async () => {
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIosCtrlProxy as unknown as IOSCtrlProxyClient,
-    );
+    iosGetInstanceSpy = spyOnIosClientInstance(fakeIosCtrlProxy);
 
     const inputText = new InputText(iosDevice, fakeAdb);
     wireFakes(inputText);

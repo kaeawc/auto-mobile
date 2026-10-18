@@ -30,7 +30,7 @@ function harness(): Harness {
   // A real, unconnected socket: no fd, so nothing is opened; writes are swallowed.
   const socket = new Socket();
   spyOn(socket, "write").mockImplementation(() => true);
-  const server = createTestUnixSocketServer("unused", "http://localhost:0/mcp", undefined, timer);
+  const server = createTestUnixSocketServer("unused", undefined, timer);
   // Bracket access is TypeScript's sanctioned way to reach private members from a test.
   server["acceptingRequests"] = true;
   server["handleConnection"](socket);

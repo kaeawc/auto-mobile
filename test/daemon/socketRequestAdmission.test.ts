@@ -187,12 +187,7 @@ test.each([undefined, "device:a"])(
   async (lane) => {
     const timer = new FakeTimer();
     const socket = new FakeSocket();
-    const server = createTestUnixSocketServer(
-      "unused",
-      "http://localhost:0/mcp",
-      {} as DaemonStateAccess,
-      timer,
-    );
+    const server = createTestUnixSocketServer("unused", {} as DaemonStateAccess, timer);
     const internals = server as unknown as {
       acceptingRequests: boolean;
       handleConnection(socket: FakeSocket): void;

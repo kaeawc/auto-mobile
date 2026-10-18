@@ -21,6 +21,7 @@ import {
   IOS_RUNNER_COMMAND_APPLICABILITY,
   getMissingIosRunnerFeatureCommands,
 } from "../../../src/features/observe/ios/iosRunnerFeatureCommands";
+import { spyOnIosExistingInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("iOS service status command applicability", () => {
   for (const isVirtual of [true, false, undefined]) {
@@ -48,9 +49,7 @@ describe("iOS service status command applicability", () => {
         );
         const installed = spyOn(manager, "isInstalled").mockResolvedValue(true);
         const running = spyOn(manager, "checkRunningWithReason").mockResolvedValue({ ok: true });
-        const cachedClient = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
-          client,
-        );
+        const cachedClient = spyOnIosExistingInstance(client);
         const commands = [...IOS_RUNNER_FEATURE_COMMANDS, "set_voiceover_state"];
         const advertised = commands.filter((command) => command !== missing);
         const cachedCommands = spyOn(client, "getCachedSupportedCommands").mockReturnValue(

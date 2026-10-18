@@ -11,7 +11,7 @@ import {
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import type { createMcpServer } from "../../src/server/index";
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client } from "@modelcontextprotocol/client";
 
 export const MCP_TEST_REQUEST_TIMEOUT_MS = 4_000;
 

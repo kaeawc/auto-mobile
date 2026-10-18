@@ -6,7 +6,6 @@ import { FakeScrollElementResolver } from "../../../fakes/FakeScrollElementResol
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ScrollUntilVisible } from "../../../../src/features/action/swipeon/ScrollUntilVisible";
 import { SwipeSearchCancelledError } from "../../../../src/features/action/swipeon/searchCancellation";
-import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { ElementResolver } from "../../../../src/features/utility/ElementResolver";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { ScriptedElementLookup } from "../../../fakes/ScriptedElementLookup";
@@ -21,6 +20,7 @@ import type {
   OverlayCandidate,
   SwipeOnResolvedOptions,
 } from "../../../../src/features/action/swipeon/types";
+import { spyOnIosExistingInstance } from "../../../helpers/iosCtrlProxyClientSpies";
 
 const DEVICE: BootedDevice = {
   name: "test-device",
@@ -1014,9 +1014,9 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     talkBackExecutor.setFailureResult({ success: false, outcomeIndeterminate: true, error });
     const terminalEvidence: ObserveResult[] = [];
     const cacheInvalidations: string[] = [];
-    const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+    const existing = spyOnIosExistingInstance({
       invalidateCache: () => cacheInvalidations.push("ios"),
-    } as unknown as IOSCtrlProxyClient);
+    });
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
       scrollResolver,
@@ -1046,9 +1046,9 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
     talkBackExecutor.setFailureResult({ success: false, error: "gesture rejected" });
     const cacheInvalidations: string[] = [];
-    const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+    const existing = spyOnIosExistingInstance({
       invalidateCache: () => cacheInvalidations.push("ios"),
-    } as unknown as IOSCtrlProxyClient);
+    });
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
       scrollResolver,

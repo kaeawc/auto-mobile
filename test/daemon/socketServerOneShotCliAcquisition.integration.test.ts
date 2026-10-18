@@ -117,12 +117,7 @@ async function createHarness(): Promise<Harness> {
   registerDeviceTools();
 
   const socketPath = join(tmpdir(), `one-shot-cli-${randomUUID()}.sock`);
-  const server = new UnixSocketServer(
-    socketPath,
-    "http://localhost:0/mcp",
-    DaemonState.getInstance(),
-    new FakeTimer(),
-  );
+  const server = new UnixSocketServer(socketPath, DaemonState.getInstance(), new FakeTimer());
   // The loopback MCP hop dispatches straight to the registered handler with the arguments the
   // socket server forwards, internal markers included.
   server.mcpClientFactory = async () => ({

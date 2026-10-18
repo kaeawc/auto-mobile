@@ -177,25 +177,32 @@ describe("createMcpServer session key (#4678)", () => {
   // (~15 ms locally, several times that on a loaded runner) belongs outside the timed test body.
   describe("a binding made under a key", () => {
     let binder: McpTestFixture;
-    let sameKey: McpTestFixture;
-    let otherKey: McpTestFixture;
+    let sameKeyNames: string[];
+    let otherKeyNames: string[];
     beforeAll(async () => {
       const store = new SessionToolBindingStore();
       binder = await serve({ requestMcpSessionId: "key-1", sessionToolBindingStore: store });
-      sameKey = await serve({ requestMcpSessionId: "key-1", sessionToolBindingStore: store });
-      otherKey = await serve({ requestMcpSessionId: "key-2", sessionToolBindingStore: store });
+      const sameKey = await serve({
+        requestMcpSessionId: "key-1",
+        sessionToolBindingStore: store,
+      });
+      const otherKey = await serve({
+        requestMcpSessionId: "key-2",
+        sessionToolBindingStore: store,
+      });
       await binder.client.callTool({
         name: "bindingProbe",
         arguments: { sessionUuid: "session-a" },
       });
-      // The binding drops the schema cache; list once so the test body hits the rebuilt one.
-      await listedNames(sameKey);
-      await listedNames(otherKey);
+      // Listing is read-only: do it here (the binding dropped the schema cache, so the first list
+      // rebuilds ~75 schemas) and let the test assert on the results.
+      sameKeyNames = await listedNames(sameKey);
+      otherKeyNames = await listedNames(otherKey);
     });
 
-    test("filters another server's argument-less tools/list for that key", async () => {
-      expect(await listedNames(sameKey)).not.toContain("hiddenOnSessionA");
-      expect(await listedNames(otherKey)).toContain("hiddenOnSessionA");
+    test("filters another server's argument-less tools/list for that key", () => {
+      expect(sameKeyNames).not.toContain("hiddenOnSessionA");
+      expect(otherKeyNames).toContain("hiddenOnSessionA");
     });
   });
 

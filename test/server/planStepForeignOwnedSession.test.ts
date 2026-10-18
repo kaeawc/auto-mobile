@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -61,7 +61,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
   const tap: PlanStep = { tool: "tapAt", params: { x: 10, y: 10, sessionUuid: SESSION } };
   const read: PlanStep = { tool: "observe", params: { sessionUuid: SESSION } };
 
-  beforeEach(async () => {
+  const setup = async () => {
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -101,9 +101,9 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       undefined,
       OWNER,
     );
-  });
+  };
 
-  afterEach(() => {
+  const teardown = () => {
     tools.uninstall();
     DaemonState.getInstance().reset();
     manager.stopCleanupTimer();
@@ -115,7 +115,17 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
     } else {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
     }
+  };
+
+  // The first setup and refused step pay one-time module/JIT costs; keep them out of test 1.
+  beforeAll(async () => {
+    await setup();
+    await runStep(move, OTHER);
+    teardown();
   });
+
+  beforeEach(setup);
+  afterEach(teardown);
 
   describe("in a plan another connection started", () => {
     test("setActiveDevice is refused, typed, and moves nothing", async () => {

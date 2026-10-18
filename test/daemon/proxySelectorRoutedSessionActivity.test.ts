@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import fc from "fast-check";
 import {
   DaemonAmbiguousSessionSelectorError,
@@ -179,19 +179,31 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
     });
   }
 
-  beforeEach(() => {
+  const install = () => {
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
     warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
     infoSpy = spyOn(logger, "info").mockImplementation(() => {});
     startProxy();
-  });
+  };
 
-  afterEach(async () => {
+  const uninstall = async () => {
     await proxy.close();
     isAvailableSpy.mockRestore();
     warnSpy.mockRestore();
     infoSpy.mockRestore();
+  };
+
+  // The first proxy pays one-time module/JIT costs; a full acquire + control call warms them so
+  // the first test is not timed for them.
+  beforeAll(async () => {
+    install();
+    await proxy.callTool("getAndroid", {});
+    await callEvery(CONTROL, CONTROL_ARGS, IDLE_WINDOW_MS / 2, IDLE_WINDOW_MS);
+    await uninstall();
   });
+
+  beforeEach(install);
+  afterEach(uninstall);
 
   for (const [form, args] of [
     ["no selector", {}],

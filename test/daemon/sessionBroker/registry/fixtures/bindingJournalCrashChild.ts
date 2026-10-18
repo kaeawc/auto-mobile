@@ -4,10 +4,10 @@
  * file and hangs there until the parent SIGKILLs it).
  */
 import {
-  DefaultManagedSpecResolver,
   BindingReconciler,
   processJournalOwner,
 } from "../../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import { openSqliteBindingRegistry } from "../../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { BindingScopeIdentity } from "../../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import type { ExactDeviceSpecification } from "../../../../../src/devices/exactDeviceProvisioning";

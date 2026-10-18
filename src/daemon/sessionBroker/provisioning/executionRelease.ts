@@ -71,7 +71,7 @@ import {
   defaultBindingExecOwnerLiveness,
   inFlightBindingReservations,
 } from "../registry/ownerLiveness";
-import type { BindingJournalInFlight } from "../registry/bindingJournal";
+import type { BindingJournalInFlight } from "../registry/BindingJournalInFlight";
 import { journalOwnersEqual } from "../registry/bindingRegistry";
 import type {
   BindingAssignmentRecord,

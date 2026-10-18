@@ -1,9 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import {
-  SessionManager,
-  TerminalSessionError,
-  type SessionDeviceAssigner,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import type {
   TerminalReleaseIntent,
   TerminalReleaseJournal,

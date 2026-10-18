@@ -30,6 +30,8 @@ import {
   findSystemUiAnrDialog,
   type SystemUiAnrDialog,
 } from "../utils/androidSystemUiAnr";
+import { RunnerReadinessError } from "./RunnerReadinessError";
+import { SystemUiAnrRecoveryRequiredError } from "./SystemUiAnrRecoveryRequiredError";
 
 const READINESS_RETRY_DELAY_MS = 250;
 const READINESS_PROBE_TIMEOUT_MS = 2_000;
@@ -64,43 +66,11 @@ const SYSTEM_UI_ANR_RECOVERY_TIMEOUT_MS = 5_000;
 // the runner healthy and must fail before setup/restart begins.
 export const IOS_CTRL_PROXY_MINIMUM_IOS_VERSION = "17.0";
 
-type RunnerReadinessPhase =
+export type RunnerReadinessPhase =
   | "package-compatibility"
   | "runner-setup"
   | "runner-connect"
   | "runner-health";
-
-export class RunnerReadinessError extends ActionableError {
-  get code(): "timeout" | undefined {
-    return this.deadlineExhausted ? "timeout" : undefined;
-  }
-
-  get retryable(): true | undefined {
-    return this.deadlineExhausted ? true : undefined;
-  }
-
-  readonly diagnosticCause?: unknown;
-  readonly failureKind?: "ctrlproxy_forward_unavailable";
-
-  constructor(
-    message: string,
-    readonly retryableAndroidFrameworkFailure = false,
-    /**
-     * The phase ran out of budget rather than hitting a platform fault, so the
-     * failure is purely time-based and callers may report it as a timeout and
-     * retry it (`provisionDevice` maps this to error code `"timeout"`).
-     */
-    readonly deadlineExhausted = false,
-    readonly phase?: RunnerReadinessPhase,
-    readonly attempts?: number,
-    ...diagnostic: [diagnosticCause?: unknown, failureKind?: "ctrlproxy_forward_unavailable"]
-  ) {
-    super(message);
-    [this.diagnosticCause, this.failureKind] = diagnostic;
-  }
-}
-
-export class SystemUiAnrRecoveryRequiredError extends RunnerReadinessError {}
 
 export interface AndroidCompatibilityResult {
   status:

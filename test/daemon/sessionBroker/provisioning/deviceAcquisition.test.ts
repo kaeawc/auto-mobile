@@ -3,10 +3,8 @@ import {
   BrokerDeviceAcquisition,
   type BrokerDeviceAcquisitionSessions,
 } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
-import {
-  DefaultManagedSpecResolver,
-  BindingReconciler,
-} from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { BindingReconciler } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import { computeBindingScopeKey } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import { type BrokerProvisionRequest } from "../../../../src/daemon/sessionBroker/provisioning/provisionRequest";

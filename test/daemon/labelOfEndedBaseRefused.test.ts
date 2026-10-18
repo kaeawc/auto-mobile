@@ -1,9 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  SessionManager,
-  TerminalSessionError,
-  type Session,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   SUSPECT_GRACE_MS,

@@ -11,9 +11,9 @@ import {
   BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS,
   NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
   SessionManager,
-  TerminalSessionError,
   type KeepScreenAwakeRestorer,
 } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import type { DeviceSessionStatus } from "../../src/db/types";
 import type { RotationRestoreState } from "../../src/features/action/Rotate";

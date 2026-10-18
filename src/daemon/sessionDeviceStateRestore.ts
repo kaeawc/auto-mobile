@@ -58,6 +58,7 @@ import {
   type Session,
 } from "./sessionManager";
 import { RotationSettingManagedError } from "../models/RotationSettingManagedError";
+import { KeepAwakeRestoreError } from "./KeepAwakeRestoreError";
 
 /**
  * Each screen-reader restore attempt is a full TalkBack/VoiceOver toggle (it can
@@ -130,17 +131,6 @@ export interface IosAppNetworkRuleSessionState {
  */
 const KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS = 2;
 const KEEP_SCREEN_AWAKE_RESTORE_RETRY_DELAY_MS = 250;
-
-/** Preserve typed restore evidence through the existing bounded retry path. */
-class KeepAwakeRestoreError extends Error {
-  constructor(
-    message: string,
-    readonly report: KeepAwakeRestoreReport,
-  ) {
-    super(message);
-    this.name = "KeepAwakeRestoreError";
-  }
-}
 
 /** Keep-awake restore resolved before any await, like the biometric target below. */
 export interface KeepScreenAwakeRestoreTarget {

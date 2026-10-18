@@ -1,11 +1,8 @@
 import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
-import {
-  SessionManager,
-  SessionTerminalReleaseInProgressError,
-  type Session,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import { SessionTerminalReleaseInProgressError } from "../../src/daemon/SessionTerminalReleaseInProgressError";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";

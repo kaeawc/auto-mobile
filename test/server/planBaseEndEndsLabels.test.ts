@@ -4,7 +4,7 @@ import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { planBaseEndFields } from "../../src/server/planExecutionOrchestrator";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../../src/daemon/sessionReleasedDuringCall";
-import { TerminalSessionError } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import {
   hasActiveSessionExecution,
   latestSessionExecutionDeadlineMs,

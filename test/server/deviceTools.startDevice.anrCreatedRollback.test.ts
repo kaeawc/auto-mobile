@@ -11,7 +11,7 @@ import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
 import { FakeDeviceProvisioner } from "../fakes/FakeDeviceProvisioner";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
+import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/SystemUiAnrRecoveryRequiredError";
 
 import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";

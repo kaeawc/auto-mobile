@@ -8,7 +8,7 @@ import {
 import type { KeepAwakeRestoreReport } from "../../../../src/utils/KeepScreenAwakeManager";
 import { FakeDbWriteBarrier } from "../../../fakes/FakeDbWriteBarrier";
 import type { BindingKey } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
-import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/BindingJournalInFlight";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../../src/models/managedExecutionLiveness";
 import { logger } from "../../../../src/utils/logger";
 import { SessionManager } from "../../../../src/daemon/sessionManager";

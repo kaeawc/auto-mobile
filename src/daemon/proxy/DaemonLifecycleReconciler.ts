@@ -1,4 +1,5 @@
-import { DaemonClient, DaemonUnavailableError } from "../client";
+import { DaemonClient } from "../client";
+import { DaemonUnavailableError } from "../DaemonUnavailableError";
 import type { DaemonManagerLike, DaemonRestartResult } from "../manager";
 import type { DaemonOptions, DaemonStatus } from "../types";
 import type { Timer } from "../../utils/SystemTimer";

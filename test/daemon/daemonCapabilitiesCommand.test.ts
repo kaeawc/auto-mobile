@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import type { DaemonMethodCallOptions } from "../../src/daemon/client";
-import { DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import {
   DAEMON_CAPABILITIES_COMMAND_USAGE,
   DAEMON_CAPABILITIES_TIMEOUT_MS,

@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import {
-  DaemonClient,
-  DaemonUnavailableError,
-  type DaemonClientLike,
-} from "../../src/daemon/client";
+import { DaemonClient, type DaemonClientLike } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

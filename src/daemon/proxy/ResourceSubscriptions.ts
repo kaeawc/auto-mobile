@@ -1,5 +1,6 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { DaemonUnavailableError, type DaemonClientLike } from "../client";
+import { type DaemonClientLike } from "../client";
+import { DaemonUnavailableError } from "../DaemonUnavailableError";
 import { logger } from "../../utils/logger";
 import {
   RESOURCE_SUBSCRIBE_METHOD,

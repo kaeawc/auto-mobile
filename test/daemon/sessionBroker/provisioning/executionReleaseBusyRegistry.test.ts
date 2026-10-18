@@ -6,7 +6,7 @@ import {
   type ManagedExecutionSessions,
   type ManagedExecutionWork,
 } from "../../../../src/daemon/sessionBroker/provisioning/executionRelease";
-import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/BindingJournalInFlight";
 import {
   InFlightBindingReservations,
   withLiveExecutionSessions,

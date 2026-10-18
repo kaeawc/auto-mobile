@@ -14,11 +14,9 @@ import { DeviceShuttingDownError } from "../../src/daemon/DeviceShuttingDownErro
 import { LIFECYCLE_TOOL_REMEDY } from "../../src/server/lifecycleDeviceOwnership";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { createTeardownFailureResponse } from "../../src/server/deviceTools";
-import {
-  SessionNoLongerOwnsDeviceError,
-  SessionRebindingError,
-  SessionTerminalReleaseInProgressError,
-} from "../../src/daemon/sessionManager";
+import { SessionNoLongerOwnsDeviceError } from "../../src/daemon/sessionManager";
+import { SessionRebindingError } from "../../src/daemon/SessionRebindingError";
+import { SessionTerminalReleaseInProgressError } from "../../src/daemon/SessionTerminalReleaseInProgressError";
 import { readDeviceCleanupInProgressRefusal } from "../../src/server/deviceSessionResult";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 

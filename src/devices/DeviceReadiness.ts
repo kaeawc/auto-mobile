@@ -82,7 +82,8 @@ import {
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { disableStylusHandwriting } from "../utils/disableStylusHandwriting";
 import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
-import { RunnerReadinessError, RunnerReadinessService } from "../ctrlProxy/RunnerReadinessService";
+import { RunnerReadinessService } from "../ctrlProxy/RunnerReadinessService";
+import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { getSharedBootAdmissionGates } from "../features/bootAdmission/sharedBootAdmissionGates";
@@ -572,10 +573,6 @@ export class DeviceReadiness implements DeviceReadiness {
       },
       async () => await runWithAbortSignal(signal, async () => await simctl.bootSimulator(udid)),
     );
-  }
-
-  private get androidEmulator(): AndroidEmulatorClient | undefined {
-    return this.provider.getAndroidEmulator();
   }
 
   private get deviceUtils(): PlatformDeviceManager {

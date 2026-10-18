@@ -1,11 +1,9 @@
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { describe, expect, test, spyOn } from "bun:test";
 import { DaemonMcpProxy, DaemonToolOutcomeUnknownError } from "../../src/daemon/daemonMcpProxy";
-import {
-  DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonUnavailableError,
-} from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";

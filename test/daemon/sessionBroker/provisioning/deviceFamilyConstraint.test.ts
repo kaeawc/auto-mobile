@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import {
-  computeManagedSpecFingerprint,
-  DefaultManagedSpecMatcher,
-  DefaultManagedSpecResolver,
   BindingReconciler,
   type DefaultManagedSpecResolverOptions,
   type BindingRequestedSpec,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { computeManagedSpecFingerprint } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
+import { DefaultManagedSpecMatcher } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecMatcher";
 import type { BindingPlatform } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import type { ExactIosRuntimeCatalog } from "../../../../src/devices/exactDeviceProvisioning";
 import type { DeviceInfo } from "../../../../src/models/index";

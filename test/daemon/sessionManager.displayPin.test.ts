@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { TerminalSessionError } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { installSessionManagerCleanup, makeSessionManager } from "../helpers/sessionManagerSuite";

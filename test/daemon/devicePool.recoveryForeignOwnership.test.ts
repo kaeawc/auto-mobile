@@ -3,7 +3,8 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { afterEach, describe, expect, test } from "bun:test";
 import { DEVICE_OWNED_BY_OTHER_DAEMON_CODE } from "../../src/daemon/deviceAcquisitionRefusals";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
-import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import type { DeviceSession } from "../../src/db/types";

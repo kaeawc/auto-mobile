@@ -1,6 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import * as net from "node:net";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { ActionableError } from "../../src/models/ActionableError";
 import { logger } from "../../src/utils/logger";
 import type { DaemonNotification, DaemonResponse } from "../../src/daemon/types";

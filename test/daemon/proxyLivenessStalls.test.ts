@@ -4,11 +4,9 @@ import {
   DaemonMcpProxy,
   DaemonSessionStalledError,
 } from "../../src/daemon/daemonMcpProxy";
-import {
-  DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonUnavailableError,
-} from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -36,7 +34,7 @@ import {
 } from "../../src/daemon/types";
 import { declaresDeviceSessionSuspect } from "../../src/server/deviceSessionResult";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
-import { SessionSuspectError } from "../../src/daemon/sessionManager";
+import { SessionSuspectError } from "../../src/daemon/SessionSuspectError";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

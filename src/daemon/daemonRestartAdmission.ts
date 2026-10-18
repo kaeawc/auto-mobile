@@ -1,4 +1,4 @@
-import { DaemonUnavailableError } from "./client";
+import { DaemonUnavailableError } from "./DaemonUnavailableError";
 import { DaemonRestartPendingError } from "./DaemonRestartPendingError";
 
 export const DAEMON_REPUBLISH_IDENTITY_METHOD = "ide/republishIdentity";

@@ -29,11 +29,9 @@ afterEach(() => {
   createConnectionSpy.mockRestore();
 });
 
-import {
-  DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonUnavailableError,
-} from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 
 function createClient() {
   return new DaemonClient(

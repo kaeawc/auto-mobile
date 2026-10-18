@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createDaemonBrokerDeviceAcquisition } from "../../../../src/daemon/sessionBroker/provisioning/daemonDeviceAcquisition";
 import type { BrokerDeviceAcquisitionSessions } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import type { BindingToolInvoker } from "../../../../src/daemon/sessionBroker/provisioning/reconcilerPorts";
-import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/BindingJournalInFlight";
 import { AndroidBootAdmissionGate } from "../../../../src/features/bootAdmission/AndroidBootAdmissionGate";
 import { assertBootCapacityAvailable } from "../../../../src/features/bootAdmission/sharedBootAdmissionGates";
 import { InMemoryBootDurationHistory } from "../../../../src/features/iosSimFleet/BootDurationHistory";

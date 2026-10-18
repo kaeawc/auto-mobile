@@ -5,11 +5,9 @@ import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { DeviceOutsideBrokerGrantError } from "../../src/daemon/sessionBroker/connectionRefusal";
-import {
-  SessionRecoveryIdentityLossError,
-  SessionSuspectError,
-  TerminalSessionError,
-} from "../../src/daemon/sessionManager";
+import { SessionRecoveryIdentityLossError } from "../../src/daemon/SessionRecoveryIdentityLossError";
+import { SessionSuspectError } from "../../src/daemon/SessionSuspectError";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { DeviceOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";

@@ -1,12 +1,9 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import {
-  DAEMON_RESPONSE_GRACE_MS,
-  DaemonClient,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-} from "../../src/daemon/client";
+import { DAEMON_RESPONSE_GRACE_MS, DaemonClient } from "../../src/daemon/client";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import {
   DAEMON_SHUTTING_DOWN_ERROR_CODE,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,

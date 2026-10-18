@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
-import { PLAN_LABEL_SESSION_SOURCE, TerminalSessionError } from "../../src/daemon/sessionManager";
+import { PLAN_LABEL_SESSION_SOURCE } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import {
   BASE,
   LABEL_B,

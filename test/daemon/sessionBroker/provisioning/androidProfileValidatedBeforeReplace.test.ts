@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import {
-  DefaultManagedSpecResolver,
   BindingReconciler,
   bindingDeviceName,
   type BindingRequestedSpec,
   type DefaultManagedSpecResolverOptions,
   type ManagedAndroidProfileCatalog,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";

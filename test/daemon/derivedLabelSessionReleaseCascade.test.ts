@@ -3,11 +3,8 @@ import {
   registerDerivedLabelSessionReleaseCascade,
   type DerivedLabelSessionReleaseCascade,
 } from "../../src/daemon/derivedLabelSessionReleaseCascade";
-import {
-  PLAN_AUTO_RELEASE_REASON,
-  SessionManager,
-  TerminalSessionError,
-} from "../../src/daemon/sessionManager";
+import { PLAN_AUTO_RELEASE_REASON, SessionManager } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { sessionReleaseThatCancelledCall } from "../../src/daemon/sessionReleasedDuringCall";
 import { buildDeviceLabelMap } from "../../src/server/deviceLabelMapping";
 import { ExecutionTracker } from "../../src/server/executionTracker";

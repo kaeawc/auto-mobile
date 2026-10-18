@@ -6,10 +6,10 @@ import {
   runAsBindingReconciler,
 } from "../../../../src/daemon/sessionBroker/provisioning/exclusion";
 import {
-  DefaultManagedSpecResolver,
   BindingReconciler,
   type BindingRequestedSpec,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import type {
   BindingPlatform,
   BindingRegistry,

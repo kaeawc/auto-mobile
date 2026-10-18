@@ -14,7 +14,7 @@ import {
 } from "../../src/server/deviceTools";
 import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
+import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/SystemUiAnrRecoveryRequiredError";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";

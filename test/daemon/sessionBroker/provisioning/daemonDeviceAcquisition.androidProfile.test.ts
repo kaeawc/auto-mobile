@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { createDaemonBrokerDeviceAcquisition } from "../../../../src/daemon/sessionBroker/provisioning/daemonDeviceAcquisition";
 import type { BrokerDeviceAcquisitionSessions } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
-import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/BindingJournalInFlight";
 import type { DeviceInfo } from "../../../../src/models/index";
 import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import { WorkflowBindingDeviceDeleter } from "../../../../src/daemon/sessionBroker/provisioning/deviceDeleter";

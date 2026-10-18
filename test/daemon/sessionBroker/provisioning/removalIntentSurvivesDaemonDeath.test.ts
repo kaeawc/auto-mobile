@@ -1,14 +1,12 @@
 import { expect, test } from "bun:test";
-import {
-  DefaultManagedSpecResolver,
-  BindingReconciler,
-} from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { BindingReconciler } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import {
   BindingJournal,
   BINDING_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS,
-  BindingJournalInFlight,
-  BindingJournalRemovalRegistryTimeout,
 } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/BindingJournalInFlight";
+import { BindingJournalRemovalRegistryTimeout } from "../../../../src/daemon/sessionBroker/registry/BindingJournalRemovalRegistryTimeout";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../../../helpers/fakeTimerStepping";

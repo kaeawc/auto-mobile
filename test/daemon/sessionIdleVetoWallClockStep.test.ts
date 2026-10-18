@@ -1,10 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import {
-  SessionManager,
-  TerminalSessionError,
-  SessionHeldByRecoveryError,
-  type SessionExecutionMetadata,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type SessionExecutionMetadata } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
+import { SessionHeldByRecoveryError } from "../../src/daemon/SessionHeldByRecoveryError";
 import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/daemon/deviceAcquisitionRefusals";
 import { hasActiveSessionExecution } from "../../src/daemon/toolCallActivity";
 import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";

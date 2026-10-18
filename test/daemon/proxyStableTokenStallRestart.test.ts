@@ -17,7 +17,7 @@ import {
   type LivenessHandover,
 } from "../../src/daemon/proxyLivenessRecovery";
 import { DAEMON_INSTANCE_CHANGED_CODE } from "../../src/daemon/types";
-import { DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

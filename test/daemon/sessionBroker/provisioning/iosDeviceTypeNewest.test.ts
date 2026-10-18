@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { chooseIosDeviceType } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { chooseIosDeviceType } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import type {
   AppleDeviceRuntime,
   AppleDeviceType,

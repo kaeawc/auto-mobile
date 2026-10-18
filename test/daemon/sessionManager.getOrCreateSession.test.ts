@@ -2,12 +2,12 @@ import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecovery
 import { describe, expect, test } from "bun:test";
 import {
   SessionManager,
-  TerminalSessionError,
   PLAN_AUTO_RELEASE_REASON,
-  SessionActivityPersistenceError,
-  SessionRecoveryIdentityLossError,
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
+import { SessionRecoveryIdentityLossError } from "../../src/daemon/SessionRecoveryIdentityLossError";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
+import { SessionActivityPersistenceError } from "../../src/daemon/SessionActivityPersistenceError";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { DEVICE_SESSION_RETENTION_MAX_AGE_MS } from "../../src/db/deviceSessionRepository";

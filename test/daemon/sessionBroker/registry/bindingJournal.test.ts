@@ -1,16 +1,14 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
-  DefaultManagedSpecResolver,
   BindingReconciler,
   bindingDeviceName,
   type BindingReconcileRequest,
   type BindingReconcileResult,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
-import {
-  BindingJournal,
-  BindingJournalInFlight,
-  BindingJournalRedriveLoop,
-} from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
+import { BindingJournal } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import { BindingJournalRedriveLoop } from "../../../../src/daemon/sessionBroker/registry/BindingJournalRedriveLoop";
+import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/BindingJournalInFlight";
 import type {
   AdvanceBindingJournalInput,
   BindingJournalOwner,

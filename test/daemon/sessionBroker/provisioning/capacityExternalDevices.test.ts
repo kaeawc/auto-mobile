@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
-  DefaultManagedSpecResolver,
   BindingReconciler,
   type BindingReconcileResult,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import {
   ProvisionDeviceError,
   type ExactDeviceSpecification,

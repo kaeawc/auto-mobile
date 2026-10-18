@@ -1,5 +1,5 @@
 import { holderOf } from "../daemon/deviceBinding";
-import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessService";
+import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessError";
 import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import { DaemonState } from "../daemon/daemonState";
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";

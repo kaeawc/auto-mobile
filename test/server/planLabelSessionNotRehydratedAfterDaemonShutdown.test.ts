@@ -3,7 +3,7 @@ import {
   cancelAndReleaseSession,
   releaseSessionAndDevice,
 } from "../../src/daemon/releaseSessionAndDevice";
-import { TerminalSessionError } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { deviceRestartReleaseReason } from "../../src/db/deviceSessionRepository";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";

@@ -1,7 +1,8 @@
 import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
-import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";

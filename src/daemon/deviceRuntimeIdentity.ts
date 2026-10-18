@@ -16,7 +16,8 @@ import {
   isUnresolvedAndroidEmulatorName,
   type IdentityEvidence,
 } from "../devices/deviceIdentityEvidence";
-import { DevicePoolError, type DiscoveryReconcileOptions, type PooledDevice } from "./devicePool";
+import { type DiscoveryReconcileOptions, type PooledDevice } from "./devicePool";
+import { DevicePoolError } from "./DevicePoolError";
 
 const POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS = DEFAULT_RETRY_OPTIONS.maxAttempts;
 type MutableMetadataSource = "refresh" | "snapshot";
@@ -26,9 +27,7 @@ export type DeviceRetirementOptions = Pick<DiscoveryReconcileOptions, "excludeEx
   cancelDeviceBoundExecutions?: boolean;
 };
 
-function unknownAndroidRuntimeName(deviceId: string): string {
-  return `Unknown (${deviceId})`;
-}
+const unknownAndroidRuntimeName = (deviceId: string): string => `Unknown (${deviceId})`;
 
 /** Mutable pool state is read at use time, including after every await. */
 export interface DeviceRuntimeIdentityPoolPort {

@@ -9,7 +9,8 @@ import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry
 import { ObserverSessionRegistry } from "../../../src/daemon/observerSessionRegistry";
 import { releaseSessionAndDevice } from "../../../src/daemon/releaseSessionAndDevice";
 import { SessionHeartbeatMonitor } from "../../../src/daemon/SessionHeartbeatMonitor";
-import { SessionManager, TerminalSessionError } from "../../../src/daemon/sessionManager";
+import { SessionManager } from "../../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../../src/daemon/TerminalSessionError";
 import {
   hasActiveSessionExecution,
   subscribeToolCallEndActivity,

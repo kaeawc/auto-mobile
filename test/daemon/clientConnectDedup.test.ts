@@ -15,7 +15,8 @@ class DeferredSocket extends FakeSocket {
 }
 
 const sockets: DeferredSocket[] = [];
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 
 let timer: FakeTimer;
 let client: InstanceType<typeof DaemonClient>;

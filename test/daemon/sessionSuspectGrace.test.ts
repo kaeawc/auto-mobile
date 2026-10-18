@@ -6,12 +6,9 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
-import {
-  SessionManager,
-  SessionSuspectError,
-  TerminalSessionError,
-  type SessionDeviceAssigner,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
+import { SessionSuspectError } from "../../src/daemon/SessionSuspectError";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import {
   hasActiveSessionExecution,
   sessionExecutionProbe,

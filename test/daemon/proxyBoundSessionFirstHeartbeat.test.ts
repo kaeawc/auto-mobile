@@ -4,11 +4,8 @@ import {
   DaemonMcpProxy,
   RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
 } from "../../src/daemon/daemonMcpProxy";
-import {
-  DaemonClient,
-  DaemonUnavailableError,
-  type DaemonClientLike,
-} from "../../src/daemon/client";
+import { DaemonClient, type DaemonClientLike } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";

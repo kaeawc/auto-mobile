@@ -20,10 +20,8 @@ import {
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
-import {
-  RunnerReadinessError,
-  SystemUiAnrRecoveryRequiredError,
-} from "../../src/ctrlProxy/RunnerReadinessService";
+import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/SystemUiAnrRecoveryRequiredError";
+import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessError";
 import { RunnerReadinessService } from "../../src/ctrlProxy/RunnerReadinessService";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";

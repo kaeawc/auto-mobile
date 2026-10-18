@@ -2,7 +2,7 @@ import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { expect, test } from "bun:test";
 import { ActionableError } from "../../src/models/ActionableError";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
-import { TerminalSessionError } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";

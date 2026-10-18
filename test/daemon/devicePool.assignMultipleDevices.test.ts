@@ -5,7 +5,8 @@ import { drainUntil, drainMicrotasks } from "../helpers/fakeTimerStepping";
 
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
 import { DevicePool, type SessionPreservingRecoveryResult } from "../../src/daemon/devicePool";
-import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

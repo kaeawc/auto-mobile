@@ -14,11 +14,11 @@ import {
   type BindingResourceBudget,
 } from "../../../../src/daemon/sessionBroker/provisioning/resourceBudget";
 import {
-  DefaultManagedSpecResolver,
   BindingReconciler,
   bindingDeviceName,
   type BindingReconcileRequest,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { flushMicrotasks } from "../../../helpers/shutdownStageHarness";

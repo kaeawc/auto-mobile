@@ -3,10 +3,10 @@ import {
   type SessionManagerOptions,
   type Session,
   type SessionDeviceAssigner,
-  TerminalSessionError,
-  SessionTerminalReleaseInProgressError,
-  SessionRebindingError,
 } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
+import { SessionRebindingError } from "../../src/daemon/SessionRebindingError";
+import { SessionTerminalReleaseInProgressError } from "../../src/daemon/SessionTerminalReleaseInProgressError";
 import { SessionReleasedDuringCreationError } from "../../src/daemon/SessionReleasedDuringCreationError";
 import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import { deriveSlot, isSlotKnown, type LegacyLifecycleView } from "../../src/daemon/sessionSlots";

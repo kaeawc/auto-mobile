@@ -9,7 +9,8 @@ import { type ConnectedPlatformScan, type DeviceReadyOptions } from "../../devic
 import { ActionableError, BootedDevice, SomePlatform, type DeviceInfo } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { UnissuedSessionError, type Session } from "../../daemon/sessionManager";
+import { type Session } from "../../daemon/sessionManager";
+import { UnissuedSessionError } from "../../daemon/UnissuedSessionError";
 import { DaemonState } from "../../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../../daemon/discoveryReconcile";
 import { PlatformDeviceManagerFactory } from "../../utils/factories/PlatformDeviceManagerFactory";

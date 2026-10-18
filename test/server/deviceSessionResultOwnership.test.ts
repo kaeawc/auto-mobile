@@ -7,11 +7,11 @@ import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecovery
 import { describe, expect, test } from "bun:test";
 import {
   SessionNoLongerOwnsDeviceError,
-  SessionRecoveryIdentityLossError,
-  SessionTerminalReleaseInProgressError,
-  TerminalSessionError,
   type SessionReleaseSnapshot,
 } from "../../src/daemon/sessionManager";
+import { SessionRecoveryIdentityLossError } from "../../src/daemon/SessionRecoveryIdentityLossError";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
+import { SessionTerminalReleaseInProgressError } from "../../src/daemon/SessionTerminalReleaseInProgressError";
 import {
   sessionOwnershipLostPayload,
   declaresDeviceSessionInvalid,

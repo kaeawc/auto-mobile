@@ -1,4 +1,4 @@
-import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
+import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessError";
 import { afterEach, expect, test } from "bun:test";
 import {
   createSetActiveDeviceHandler,

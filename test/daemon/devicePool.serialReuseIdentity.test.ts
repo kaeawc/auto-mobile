@@ -9,7 +9,8 @@ import {
 } from "../../src/daemon/releaseReasons";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
-import { SessionManager, SessionRecoveryIdentityLossError } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionRecoveryIdentityLossError } from "../../src/daemon/SessionRecoveryIdentityLossError";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

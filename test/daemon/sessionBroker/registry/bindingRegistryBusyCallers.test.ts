@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { BrokerDeviceAcquisition } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import {
-  DefaultManagedSpecResolver,
   BindingReconciler,
   type BindingReconcileRequest,
   type BindingReconcileResult,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";

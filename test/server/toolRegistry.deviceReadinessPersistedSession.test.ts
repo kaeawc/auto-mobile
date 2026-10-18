@@ -10,11 +10,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
-import {
-  SessionManager,
-  TerminalSessionError,
-  type SessionRecoveryTarget,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type SessionRecoveryTarget } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { stubCtrlProxySetup, type CtrlProxySetupStub } from "../helpers/stubCtrlProxySetup";
 import type { DeviceSession } from "../../src/db/types";

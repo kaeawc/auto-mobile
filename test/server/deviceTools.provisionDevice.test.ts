@@ -64,10 +64,8 @@ import {
   type VirtualDeviceLifecycleCoordinator,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
-import {
-  RunnerReadinessError,
-  RunnerReadinessService,
-} from "../../src/ctrlProxy/RunnerReadinessService";
+import { RunnerReadinessService } from "../../src/ctrlProxy/RunnerReadinessService";
+import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessError";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 import type { BootedDevice, SomePlatform } from "../../src/models";

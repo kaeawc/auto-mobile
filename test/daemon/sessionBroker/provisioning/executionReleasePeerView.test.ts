@@ -6,7 +6,7 @@ import { FakeDeviceSessionPersistence } from "../../../fakes/FakeDeviceSessionPe
 import { ManagedExecutionReowner } from "../../../helpers/deferredProvisioningFixtures";
 import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import { BrokerExecutionRelease } from "../../../../src/daemon/sessionBroker/provisioning/executionRelease";
-import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/BindingJournalInFlight";
 import {
   InFlightBindingReservations,
   withLiveExecutionSessions,

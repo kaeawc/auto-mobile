@@ -1,7 +1,8 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
-import { DaemonClient, DaemonShuttingDownError } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { McpOverloadError } from "../../src/daemon/McpOverloadError";
 import { createProxyMcpServer } from "../../src/server/proxyServer";

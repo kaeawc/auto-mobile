@@ -65,6 +65,15 @@ import {
   type IosAppNetworkRuleCommandContext,
 } from "../features/networkFilter/IosAppNetworkRuleClient";
 import { type IosAppNetworkRuleRestorer } from "./iosAppNetworkLease";
+import { SessionActivityPersistenceError } from "./SessionActivityPersistenceError";
+import { SessionTerminalReleaseInProgressError } from "./SessionTerminalReleaseInProgressError";
+import { SessionRebindingError } from "./SessionRebindingError";
+import { SessionHeldByRecoveryError } from "./SessionHeldByRecoveryError";
+import { TerminalSessionError } from "./TerminalSessionError";
+import { SessionSuspectError } from "./SessionSuspectError";
+import { DaemonSessionCreationRejectedError } from "./DaemonSessionCreationRejectedError";
+import { SessionRecoveryIdentityLossError } from "./SessionRecoveryIdentityLossError";
+import { UnissuedSessionError } from "./UnissuedSessionError";
 
 export type { IosAppNetworkRuleSessionState } from "./sessionDeviceStateRestore";
 import { type DeviceClockRestoreState } from "../features/utility/DeviceClock";
@@ -167,12 +176,10 @@ import {
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
   SESSION_HELD_BY_RECOVERY_CODE,
-  SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
 } from "./deviceAcquisitionRefusals";
 import { SessionCreationTimeoutError } from "./SessionCreationTimeoutError";
 import { SessionReleasedDuringCreationError } from "./SessionReleasedDuringCreationError";
 import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
-import { DAEMON_SESSION_NOT_ACTIVE_CODE, DAEMON_SESSION_SUSPECT_CODE } from "./types";
 import {
   isExpiryReleaseReason,
   isIdleReleaseReason,
@@ -188,7 +195,6 @@ import {
   type SessionReleaseReason,
 } from "./releaseReasons";
 import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
-import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
 import { type TerminalReleaseIntent, type TerminalReleaseJournal } from "./terminalReleaseJournal";
 import { NoopTerminalReleaseJournal } from "./NoopTerminalReleaseJournal";
 
@@ -198,14 +204,6 @@ import { NoopTerminalReleaseJournal } from "./NoopTerminalReleaseJournal";
  * `device: "B"` tool argument can be routed to the correct label session.
  */
 export type DeviceLabelMap = Record<string, string>;
-
-/** The daemon could not durably refresh an existing session's liveness. */
-export class SessionActivityPersistenceError extends ActionableError {
-  constructor(sessionId: string, cause: unknown) {
-    super(`Failed to persist liveness activity for session ${sessionId}.`, { cause });
-    this.name = "SessionActivityPersistenceError";
-  }
-}
 
 /**
  * Narrow seam for restoring keep-awake state on session release. Production uses
@@ -634,30 +632,6 @@ export interface SessionReleaseSnapshot {
   };
 }
 
-/**
- * A session under a kill's terminal release reservation cannot be bound, rebound or reserved again
- * (#11146). It has its own wire code, serialized with `retryable: false` (#11189): the session UUID
- * ends with that release, so only a new UUID (or nothing, for a second kill) can follow. It carries
- * `nextAction: "acquire_new_session"` so runners retry under a fresh session (#11231).
- */
-export class SessionTerminalReleaseInProgressError extends ActionableError {
-  readonly code = SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE;
-  readonly retryable = false;
-  /** The UUID can never recover; a fresh session can (#11098, #11231). */
-  readonly nextAction = ACQUIRE_NEW_SESSION_NEXT_ACTION;
-
-  constructor(
-    readonly sessionUuid: string,
-    readonly deviceId: string,
-    detail: string,
-  ) {
-    super(
-      `Session ${sessionUuid} ${detail} (code ${SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE}, device '${deviceId}').`,
-    );
-    this.name = "SessionTerminalReleaseInProgressError";
-  }
-}
-
 export {
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
@@ -665,95 +639,8 @@ export {
 };
 export { SessionNoLongerOwnsDeviceError };
 
-/**
- * A terminal-release reservation (killDevice) raced the session's own rebind to another device
- * (#11166). The rebind settles on its own, so retrying the shutdown afterwards is safe; it is
- * serialized `retryable: true` with a `retryAfterMs` hint (#11189).
- */
-export class SessionRebindingError extends ActionableError {
-  readonly code = SESSION_REBINDING_CODE;
-  readonly retryable = true;
-  readonly retryAfterMs = DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
-
-  constructor(readonly sessionUuid: string) {
-    super(
-      `Session ${sessionUuid} is rebinding devices (code ${SESSION_REBINDING_CODE}); ` +
-        "retry shutdown after it settles.",
-    );
-    this.name = "SessionRebindingError";
-  }
-}
-
-/** A late control call waits for session-preserving recovery before judging idle expiry. */
-export class SessionHeldByRecoveryError extends ActionableError {
-  readonly code = SESSION_HELD_BY_RECOVERY_CODE;
-  readonly retryable = true;
-  readonly retryAfterMs = DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
-
-  constructor(
-    readonly sessionUuid: string,
-    readonly deviceId: string,
-  ) {
-    super(
-      `Session ${sessionUuid} is past its idle deadline and its device ${deviceId} is being recovered ` +
-        `(code ${SESSION_HELD_BY_RECOVERY_CODE}); retry after the recovery settles to receive ` +
-        "either the live session or the terminal idle answer.",
-    );
-    this.name = "SessionHeldByRecoveryError";
-  }
-}
-
 const TERMINAL_RELEASE_IN_PROGRESS_DETAIL =
   "is being terminally released from its device; use a new session UUID";
-
-export class TerminalSessionError extends Error {
-  constructor(
-    readonly sessionUuid: string,
-    readonly release: SessionReleaseSnapshot,
-  ) {
-    super(
-      (release.releaseReason === "explicit-release"
-        ? `Session ${sessionUuid} was released and cannot be reused. `
-        : `Session ${sessionUuid} is terminal after ${release.releaseReason} and cannot be reused. `) +
-        "Acquire a new device with getAndroid or getApple.",
-    );
-    this.name = "TerminalSessionError";
-  }
-}
-
-/**
- * A tool call reached a session whose owner's lease expired and that is held
- * inside its suspect window (#10051). Nothing runs against it until its owner
- * restores it with a heartbeat from the owner token.
- */
-export class SessionSuspectError extends ActionableError {
-  /** Travels on the socket response so a proxy can tell "restorable" from "gone" (#10053). */
-  readonly code = DAEMON_SESSION_SUSPECT_CODE;
-
-  constructor(
-    readonly sessionUuid: string,
-    readonly remainingMs: number,
-  ) {
-    super(
-      `Session ${sessionUuid} missed a liveness heartbeat and is being restored; its device ` +
-        `stays reserved for ${Math.ceil(remainingMs / 1000)}s. Retry this call now, without ` +
-        `waiting. If the retry says the session was released, acquire a device again with ` +
-        `getAndroid or getApple.`,
-    );
-    this.name = "SessionSuspectError";
-  }
-}
-
-/** A new session cannot be published after the daemon has begun shutdown. */
-export class DaemonSessionCreationRejectedError extends ActionableError {
-  constructor(
-    readonly sessionUuid: string,
-    readonly release?: SessionReleaseSnapshot,
-  ) {
-    super(`Cannot create device session ${sessionUuid}: the daemon is shutting down.`);
-    this.name = "DaemonSessionCreationRejectedError";
-  }
-}
 
 /** Idle expiry has no caller to return the device; its diagnostic may name a heartbeat timeout. */
 export interface SessionReleaseOptions {
@@ -1073,39 +960,7 @@ export interface SessionRecoveryForeignOwner {
   ownerPid: number | undefined;
 }
 
-/**
- * The persisted target cannot be recovered without assigning an unrelated
- * device. SessionManager fences the UUID when this reaches it.
- */
-export class SessionRecoveryIdentityLossError extends ActionableError {
-  readonly terminalReleaseReason: string;
-  /** Wire code when another live daemon holds the target (`device_owned_by_other_daemon`). */
-  readonly code: string | undefined;
-  readonly deviceId: string | undefined;
-  readonly ownerPid: number | undefined;
-
-  constructor(
-    readonly sessionUuid: string,
-    readonly target: SessionRecoveryTarget,
-    readonly reason: SessionRecoveryFailureReason,
-    foreignOwner?: SessionRecoveryForeignOwner,
-  ) {
-    super(
-      `Cannot safely recover session ${sessionUuid}: ${target.platform} device ` +
-        `'${target.stableDeviceId}' ${recoveryFailureDetail(reason, foreignOwner)} ` +
-        `(recovery reason: ${reason}). ` +
-        "The persisted session is terminal; " +
-        "acquire a new device with getAndroid or getApple.",
-    );
-    this.name = "SessionRecoveryIdentityLossError";
-    this.terminalReleaseReason = `identity-recovery-${reason}`;
-    this.code = reason === "owned-by-other-daemon" ? DEVICE_OWNED_BY_OTHER_DAEMON_CODE : undefined;
-    this.deviceId = foreignOwner?.deviceId;
-    this.ownerPid = foreignOwner?.ownerPid;
-  }
-}
-
-function recoveryFailureDetail(
+export function recoveryFailureDetail(
   reason: SessionRecoveryFailureReason,
   foreignOwner: SessionRecoveryForeignOwner | undefined,
 ): string {
@@ -1320,11 +1175,6 @@ type RehydrationRowOutcome =
   | { kind: "rehydrated" }
   | { kind: "terminalized"; reason: string }
   | { kind: "skipped"; reason: string };
-
-export class UnissuedSessionError extends ActionableError {
-  /** The JSON-RPC `data` the daemon proxy classifies this refusal by, instead of its prose. */
-  readonly data = { code: DAEMON_SESSION_NOT_ACTIVE_CODE };
-}
 
 /**
  * The durable device identity a persisted row can be recovered onto, or undefined when the row

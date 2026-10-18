@@ -24,11 +24,8 @@ import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   PROXY_HEARTBEAT_INTERVAL_MS,
 } from "../../src/daemon/sessionLivenessWindows";
-import {
-  PLAN_AUTO_RELEASE_REASON,
-  SessionManager,
-  TerminalSessionError,
-} from "../../src/daemon/sessionManager";
+import { PLAN_AUTO_RELEASE_REASON, SessionManager } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { BootedDevice } from "../../src/models";
 import { deviceLossCancellationReason } from "../../src/utils/deviceLossCancellationReason";

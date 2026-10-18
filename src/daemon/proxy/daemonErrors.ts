@@ -2,7 +2,7 @@ import { ActionableError } from "../../models";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { shellQuote } from "../../utils/shellQuote";
 import { releaseVersion } from "../../utils/mcpVersion";
-import { DaemonUnavailableError } from "../client";
+import { DaemonUnavailableError } from "../DaemonUnavailableError";
 import { type BuildIdentity, describeBuildIdentity } from "../buildIdentity";
 import { DAEMON_TOOL_UNAVAILABLE_CODE } from "../types";
 import { DEVICE_SESSION_RECOVERY_PROMPT } from "../../server/deviceSessionResult";

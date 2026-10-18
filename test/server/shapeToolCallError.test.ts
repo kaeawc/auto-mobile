@@ -9,7 +9,8 @@ import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaust
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
-import { SessionHeldByRecoveryError, SessionSuspectError } from "../../src/daemon/sessionManager";
+import { SessionSuspectError } from "../../src/daemon/SessionSuspectError";
+import { SessionHeldByRecoveryError } from "../../src/daemon/SessionHeldByRecoveryError";
 import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import { BindingDiscoveryIncompleteError } from "../../src/daemon/sessionBroker/provisioning/BindingDiscoveryIncompleteError";
@@ -17,7 +18,7 @@ import { BindingOwnershipLostError } from "../../src/daemon/sessionBroker/provis
 import { BindingOwnershipUnconfirmedError } from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { logger } from "../../src/utils/logger";
-import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
+import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessError";
 import { typedRefusalFields } from "../../src/models/typedRefusalFields";
 
 import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/daemon/deviceAcquisitionRefusals";

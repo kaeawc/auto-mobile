@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
-import { TerminalSessionError } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { deviceRestartReleaseReason } from "../../src/db/deviceSessionRepository";
 import { deviceLossCancellationReason } from "../../src/utils/deviceLossCancellationReason";
 import {

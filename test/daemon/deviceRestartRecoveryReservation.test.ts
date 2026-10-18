@@ -10,9 +10,9 @@ import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResul
 import {
   DEVICE_RESTART_RECOVERY_WINDOW_MS,
   SessionManager,
-  TerminalSessionError,
   type RehydrationDeviceReservation,
 } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import {
   AndroidBootAdmissionGate,
   ANDROID_MAX_BOOTED_ENV,

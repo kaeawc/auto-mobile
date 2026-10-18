@@ -6,8 +6,8 @@ import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import {
   SessionManager,
   getDefaultSessionHeartbeatTimeoutMs,
-  SessionActivityPersistenceError,
 } from "../../src/daemon/sessionManager";
+import { SessionActivityPersistenceError } from "../../src/daemon/SessionActivityPersistenceError";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";

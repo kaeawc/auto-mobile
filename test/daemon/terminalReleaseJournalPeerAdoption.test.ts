@@ -1,11 +1,8 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
-import {
-  SessionManager,
-  TerminalSessionError,
-  type SessionDeviceAssigner,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import {
   createDaemonTerminalReleaseJournal,
   terminalReleaseJournalPath,

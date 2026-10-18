@@ -5,12 +5,9 @@ import {
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
-import {
-  SessionManager,
-  TerminalSessionError,
-  UnissuedSessionError,
-  type SessionDeviceAssigner,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
+import { UnissuedSessionError } from "../../src/daemon/UnissuedSessionError";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { DAEMON_SESSION_NOT_FOUND_CODE, type DaemonRequest } from "../../src/daemon/types";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../../src/daemon/sessionReleasedDuringCall";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";

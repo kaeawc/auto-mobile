@@ -7,7 +7,8 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
-import { SessionManager, SessionSuspectError } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionSuspectError } from "../../src/daemon/SessionSuspectError";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,

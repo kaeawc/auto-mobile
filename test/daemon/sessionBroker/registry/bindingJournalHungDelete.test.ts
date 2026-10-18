@@ -1,15 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   BindingJournal,
-  BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS,
-  BINDING_JOURNAL_MAX_ABANDONED_DELETES,
   BINDING_JOURNAL_STEP_BUDGET_MS,
   BINDING_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS,
 } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
-import {
-  BindingReconciler,
-  DefaultManagedSpecResolver,
-} from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS } from "../../../../src/daemon/sessionBroker/registry/BindingJournalInFlight";
+import { BINDING_JOURNAL_MAX_ABANDONED_DELETES } from "../../../../src/daemon/sessionBroker/registry/BindingJournalInFlight";
+import { BindingReconciler } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import {

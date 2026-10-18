@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
-  DefaultManagedSpecResolver,
   BindingReconciler,
   processJournalOwner,
   type BindingReconcileResult,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import {
   openSqliteBindingRegistry,
   type SqliteBindingRegistry,

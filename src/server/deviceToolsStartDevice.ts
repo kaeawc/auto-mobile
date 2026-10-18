@@ -33,9 +33,9 @@ import {
 } from "../utils/deviceReadinessLock";
 import {
   createDefaultRunnerReadinessService,
-  RunnerReadinessError,
   type RunnerReadinessRequest,
 } from "../ctrlProxy/RunnerReadinessService";
+import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessError";
 import { FileQrPosterWriter } from "../utils/qr/QrPosterWriter";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { runWithAbortSignal } from "../utils/AbortContext";

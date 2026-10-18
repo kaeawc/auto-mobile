@@ -1,6 +1,7 @@
 import { describe, expect, test, spyOn } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { DeviceCleanupInProgressError } from "../../src/daemon/DeviceCleanupInProgressError";
 import { DeviceShuttingDownError } from "../../src/daemon/DeviceShuttingDownError";

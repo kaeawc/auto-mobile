@@ -1,11 +1,11 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import {
-  DefaultManagedSpecMatcher,
-  DefaultManagedSpecResolver,
   BindingReconciler,
   type BindingReconcileResult,
   type BindingRequestedSpec,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
+import { DefaultManagedSpecMatcher } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecMatcher";
 import type { BindingRegistry } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { openSqliteBindingRegistry } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import type { ExactIosRuntimeCatalog } from "../../../../src/devices/exactDeviceProvisioning";

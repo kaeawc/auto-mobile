@@ -1,10 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { Duplex } from "node:stream";
-import {
-  DaemonClient,
-  DaemonHandshakeMismatchError,
-  DaemonUnavailableError,
-} from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
+import { DaemonHandshakeMismatchError } from "../../src/daemon/DaemonHandshakeMismatchError";
 import { DaemonMcpProxy, DaemonVersionMismatchError } from "../../src/daemon/daemonMcpProxy";
 import type { DaemonStatus, DaemonResponse } from "../../src/daemon/types";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

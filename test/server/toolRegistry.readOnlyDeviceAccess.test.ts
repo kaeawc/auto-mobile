@@ -44,7 +44,8 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { ManagedExecutionReowner } from "../../src/daemon/sessionBroker/provisioning/executionReowner";
 import { BindingOwnershipUnconfirmedError } from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import { DevicePool } from "../../src/daemon/devicePool";

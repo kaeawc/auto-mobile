@@ -3,10 +3,8 @@ import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
 import { ManagedDevicePort } from "../../../src/daemon/sessionBroker/managedDevicePort";
 import { BrokerDeviceAcquisition } from "../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import { WorkflowBindingDeviceDeleter } from "../../../src/daemon/sessionBroker/provisioning/deviceDeleter";
-import {
-  BindingReconciler,
-  DefaultManagedSpecResolver,
-} from "../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { BindingReconciler } from "../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import { BindingJournal } from "../../../src/daemon/sessionBroker/registry/bindingJournal";
 import { BINDING_REGISTRY_MIGRATIONS } from "../../../src/daemon/sessionBroker/registry/bindingRegistryMigrations";
 import {

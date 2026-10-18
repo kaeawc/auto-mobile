@@ -46,14 +46,12 @@ import { DaemonRestartPendingError } from "../../src/daemon/DaemonRestartPending
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import {
-  daemonResponseError,
-  DaemonHandshakeMismatchError,
-  DaemonBoundSessionLostError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-  DaemonRequestNotDeliveredError,
-} from "../../src/daemon/client";
+import { daemonResponseError } from "../../src/daemon/client";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
+import { DaemonHandshakeMismatchError } from "../../src/daemon/DaemonHandshakeMismatchError";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { ToolUnavailableError } from "../../src/server/toolUnavailableError";
 import { UnknownToolError } from "../../src/server/UnknownToolError";
@@ -86,17 +84,17 @@ import { daemonShuttingDownMcpOutcome } from "../../src/daemon/daemonShutdownOut
 import { deviceAssignedToOtherSessionError } from "../../src/daemon/inputDeviceOwnership";
 import {
   SessionNoLongerOwnsDeviceError,
-  DaemonSessionCreationRejectedError,
-  SessionActivityPersistenceError,
   SessionReleasePersistTimeoutError,
-  UnissuedSessionError,
-  SessionRecoveryIdentityLossError,
-  SessionRebindingError,
-  SessionHeldByRecoveryError,
-  SessionSuspectError,
-  SessionTerminalReleaseInProgressError,
-  TerminalSessionError,
 } from "../../src/daemon/sessionManager";
+import { UnissuedSessionError } from "../../src/daemon/UnissuedSessionError";
+import { SessionRecoveryIdentityLossError } from "../../src/daemon/SessionRecoveryIdentityLossError";
+import { DaemonSessionCreationRejectedError } from "../../src/daemon/DaemonSessionCreationRejectedError";
+import { SessionSuspectError } from "../../src/daemon/SessionSuspectError";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
+import { SessionHeldByRecoveryError } from "../../src/daemon/SessionHeldByRecoveryError";
+import { SessionRebindingError } from "../../src/daemon/SessionRebindingError";
+import { SessionTerminalReleaseInProgressError } from "../../src/daemon/SessionTerminalReleaseInProgressError";
+import { SessionActivityPersistenceError } from "../../src/daemon/SessionActivityPersistenceError";
 import {
   ProvisionDeviceError,
   ProvisionDeviceCreateRejectedError,

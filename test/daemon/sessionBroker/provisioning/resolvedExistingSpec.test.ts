@@ -1,12 +1,12 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import {
-  DefaultManagedSpecMatcher,
-  DefaultManagedSpecResolver,
   BindingReconciler,
   deviceStableId,
   encodeManagedSpecFingerprint,
   type BindingRequestedSpec,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
+import { DefaultManagedSpecMatcher } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecMatcher";
 import { ToolBindingProvisioner } from "../../../../src/daemon/sessionBroker/provisioning/reconcilerPorts";
 import type { BindingRegistry } from "../../../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { openSqliteBindingRegistry } from "../../../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";

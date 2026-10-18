@@ -1,10 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import {
-  DaemonHandshakeMismatchError,
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-} from "../client";
+import { DaemonShuttingDownError } from "../DaemonShuttingDownError";
+import { DaemonRequestNotDeliveredError } from "../DaemonRequestNotDeliveredError";
+import { DaemonUnavailableError } from "../DaemonUnavailableError";
+import { DaemonHandshakeMismatchError } from "../DaemonHandshakeMismatchError";
 import { isMcpQueueTimeoutError } from "../McpTimeoutError";
 import {
   DAEMON_SESSION_NOT_ACTIVE_CODE,

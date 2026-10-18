@@ -12,7 +12,7 @@ import {
   DaemonConnectionSessionReleasedError,
   DaemonRestartDeferredError,
 } from "../../src/daemon/daemonMcpProxy";
-import { DaemonShuttingDownError } from "../../src/daemon/client";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
 import { McpOverloadError } from "../../src/daemon/McpOverloadError";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 

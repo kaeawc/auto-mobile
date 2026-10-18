@@ -26,7 +26,7 @@ import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { ProgressCallback } from "./toolRegistry";
 import { lifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
-import { TerminalSessionError } from "../daemon/sessionManager";
+import { TerminalSessionError } from "../daemon/TerminalSessionError";
 import {
   resolveTransportDeadlineMs,
   resolveLiveTransportDeadlineGetter,

@@ -1,20 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import {
   BindingJournal,
-  BindingJournalRedriveLoop,
   BINDING_JOURNAL_DISCOVERY_BUDGET_MS,
   BINDING_JOURNAL_CLAIM_BUDGET_MS,
   BINDING_JOURNAL_MATCH_BUDGET_MS,
   BINDING_JOURNAL_DELETE_GRACE_MS,
   BINDING_JOURNAL_STEP_BUDGET_MS,
-  BINDING_JOURNAL_STOP_BUDGET_MS,
-  BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS,
   type BindingJournalPassResult,
 } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
-import {
-  BindingReconciler,
-  DefaultManagedSpecResolver,
-} from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { BINDING_JOURNAL_STOP_BUDGET_MS } from "../../../../src/daemon/sessionBroker/registry/BindingJournalRedriveLoop";
+import { BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS } from "../../../../src/daemon/sessionBroker/registry/BindingJournalInFlight";
+import { BindingJournalRedriveLoop } from "../../../../src/daemon/sessionBroker/registry/BindingJournalRedriveLoop";
+import { BindingReconciler } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import type {
   BindingJournalOwner,
   BindingPlatform,

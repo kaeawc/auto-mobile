@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
-  DefaultManagedSpecResolver,
   BindingReconciler,
   type BindingReconcileRequest,
   type BindingReconcileResult,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
 import type {
   BindingKey,
   BindingRegistry,

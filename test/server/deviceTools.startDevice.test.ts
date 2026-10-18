@@ -35,10 +35,8 @@ import {
   MAX_RUNNER_READINESS_TIMEOUT_MS,
   MIN_RUNNER_READINESS_TIMEOUT_MS,
 } from "../../src/utils/runnerReadinessConfig";
-import {
-  RunnerReadinessError,
-  SystemUiAnrRecoveryRequiredError,
-} from "../../src/ctrlProxy/RunnerReadinessService";
+import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/SystemUiAnrRecoveryRequiredError";
+import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessError";
 import { DeviceUnhealthyError } from "../../src/daemon/DeviceUnhealthyError";
 import { DeviceTransportOfflineError } from "../../src/daemon/DeviceTransportOfflineError";
 import { DeviceLostError } from "../../src/models/DeviceLostError";

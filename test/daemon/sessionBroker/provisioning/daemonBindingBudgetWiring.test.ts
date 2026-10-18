@@ -5,7 +5,7 @@ import type { BindingResourceBudgetPolicy } from "../../../../src/daemon/session
 import { parseSessionBrokerHostConfig } from "../../../../src/daemon/sessionBroker/hostConfig";
 import { selectAdmission } from "../../../../src/daemon/sessionBroker/admission";
 import { buildBrokerProvisionRequest } from "../../../helpers/provisionRequestFixture";
-import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/BindingJournalInFlight";
 import type { BrokerDeviceAcquisitionSessions } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
 import { androidDefaults } from "../../../devices/sessionRequirements/fixtures";
 import { FakeBindingRegistry } from "../../../fakes/FakeBindingRegistry";

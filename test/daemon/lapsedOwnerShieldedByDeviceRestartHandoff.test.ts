@@ -10,7 +10,8 @@ import {
   isRecoverableDaemonReleaseReason,
   isTerminalReleaseReason,
 } from "../../src/daemon/releaseReasons";
-import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,

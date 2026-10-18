@@ -1,11 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import {
-  SessionManager,
-  SessionSuspectError,
-  TerminalSessionError,
-  type Session,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import { SessionSuspectError } from "../../src/daemon/SessionSuspectError";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { idleReleaseAt } from "../../src/daemon/sessionHoldDiagnostics";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,

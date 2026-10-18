@@ -3,14 +3,14 @@ import { describe, expect, test } from "bun:test";
 import { ActionableError } from "../../src/models/ActionableError";
 import {
   SessionManager,
-  TerminalSessionError,
   PLAN_AUTO_RELEASE_REASON,
   SessionNoLongerOwnsDeviceError,
-  SessionRebindingError,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
+import { SessionRebindingError } from "../../src/daemon/SessionRebindingError";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";

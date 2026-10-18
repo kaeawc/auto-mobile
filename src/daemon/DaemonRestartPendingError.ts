@@ -1,4 +1,4 @@
-import { DaemonUnavailableError } from "./client";
+import { DaemonUnavailableError } from "./DaemonUnavailableError";
 
 /** A provision request lost the atomic admission race to an accepted restart. */
 export class DaemonRestartPendingError extends DaemonUnavailableError {

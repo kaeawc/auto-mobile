@@ -7,7 +7,8 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { sessionReleaseReasonTraits } from "../../src/daemon/releaseReasons";
-import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../../src/daemon/sessionReleasedDuringCall";
 import { DAEMON_SESSION_NOT_FOUND_CODE, type DaemonRequest } from "../../src/daemon/types";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";

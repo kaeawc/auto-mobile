@@ -40,6 +40,9 @@ import {
   type BindingRegistry,
   journalCreationPlatform,
 } from "./bindingRegistry";
+import { BindingJournalRemovalRegistryTimeout } from "./BindingJournalRemovalRegistryTimeout";
+import { BindingJournalDriveCancelled } from "./BindingJournalDriveCancelled";
+import { BindingJournalInFlight } from "./BindingJournalInFlight";
 
 /**
  * Journal redrive for managed device bindings (#11179, epic #11172).
@@ -73,9 +76,6 @@ export const BINDING_JOURNAL_DISCOVERY_BUDGET_MS = 30_000;
 export const BINDING_JOURNAL_CLAIM_BUDGET_MS = 10_000;
 export const BINDING_JOURNAL_MATCH_BUDGET_MS = 10_000;
 export const BINDING_JOURNAL_DELETE_GRACE_MS = 5_000;
-export const BINDING_JOURNAL_STOP_BUDGET_MS = 100;
-export const BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS = 1_000;
-export const BINDING_JOURNAL_MAX_ABANDONED_DELETES = 3;
 export const BINDING_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS = 6;
 /** Durability gets one caller-independent attempt without indefinitely holding its session. */
 export const BINDING_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS = 500;
@@ -83,10 +83,7 @@ export const BINDING_JOURNAL_REGISTRY_RETRY_INITIAL_DELAY_MS = 25;
 export const BINDING_JOURNAL_REGISTRY_RETRY_MAX_DELAY_MS = 1_000;
 export const BINDING_JOURNAL_REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS = 5_000;
 
-/** Registry removal work exceeded its fixed cap or the caller's deadline. */
-export class BindingJournalRemovalRegistryTimeout extends Error {}
-
-interface RemovalOperation {
+export interface RemovalOperation {
   overdueAtMs?: number;
   abandoned: boolean;
 }
@@ -102,13 +99,6 @@ interface DriveOptions {
   signal?: AbortSignal;
 }
 
-/** Internal unwind: cancellation is not a failed cleanup attempt. */
-class BindingJournalDriveCancelled extends Error {
-  constructor(readonly reason: unknown) {
-    super("Journal drive cancelled");
-  }
-}
-
 function checkCancellation(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw new BindingJournalDriveCancelled(signal.reason);
@@ -122,105 +112,6 @@ export const DEFAULT_BINDING_JOURNAL_BACKOFF = exponentialBackoff({
   multiplier: 2,
   maxDelayMs: 60_000,
 });
-
-/** Entries some code in this process is driving right now; a redrive leaves them alone. */
-export class BindingJournalInFlight {
-  private readonly ids = new Set<number>();
-  private readonly removals = new Map<string, Set<RemovalOperation>>();
-  private readonly operations = new WeakMap<Promise<BindingDeletionResult>, RemovalOperation>();
-  private readonly warned = new Set<string>();
-
-  /** Callers wait for every native operation, including abandoned ones. */
-  hasRemoval(platform: BindingJournalEntry["platform"], stableId: string): boolean {
-    return (this.removals.get(JSON.stringify([platform, stableId]))?.size ?? 0) > 0;
-  }
-
-  /** Only the journal pass opens the retry gate for overdue native operations. */
-  hasRemovalForPass(
-    platform: BindingJournalEntry["platform"],
-    stableId: string,
-    nowMs: number,
-  ): boolean {
-    const records = this.removals.get(JSON.stringify([platform, stableId]));
-    for (const record of records ?? []) {
-      if (
-        record.overdueAtMs !== undefined &&
-        nowMs - record.overdueAtMs >= BINDING_JOURNAL_OVERDUE_DELETE_GRACE_MS
-      ) {
-        record.abandoned = true;
-      }
-    }
-    return this.removalBlocked(platform, stableId);
-  }
-
-  /** Non-mutating fence rechecked by steps and at the native delete chokepoint. */
-  removalBlocked(platform: BindingJournalEntry["platform"], stableId: string): boolean {
-    const key = JSON.stringify([platform, stableId]);
-    const records = this.removals.get(key);
-    if (!records) {
-      return false;
-    }
-    const abandoned = [...records].filter((record) => record.abandoned).length;
-    if (abandoned >= BINDING_JOURNAL_MAX_ABANDONED_DELETES) {
-      if (!this.warned.has(key)) {
-        this.warned.add(key);
-        logger.warn(
-          `[BindingJournal] Removal of '${stableId}' reached the pending abandoned delete bound.`,
-        );
-      }
-      return true;
-    }
-    return [...records].some((record) => !record.abandoned);
-  }
-
-  markRemovalOverdue(operation: Promise<BindingDeletionResult>, nowMs: number): void {
-    const record = this.operations.get(operation);
-    if (record && record.overdueAtMs === undefined) {
-      record.overdueAtMs = nowMs;
-    }
-  }
-
-  trackRemoval(
-    platform: BindingJournalEntry["platform"],
-    stableId: string,
-    operation: () => Promise<BindingDeletionResult>,
-  ): Promise<BindingDeletionResult> {
-    const key = JSON.stringify([platform, stableId]);
-    const records = this.removals.get(key) ?? new Set<RemovalOperation>();
-    const record: RemovalOperation = { abandoned: false };
-    records.add(record);
-    this.removals.set(key, records);
-    const promise = Promise.resolve()
-      .then(operation)
-      .finally(() => {
-        if (record.abandoned) {
-          logger.debug(`[BindingJournal] Abandoned removal of '${stableId}' settled late.`);
-        }
-        records.delete(record);
-        this.operations.delete(promise);
-        if (records.size === 0) {
-          this.removals.delete(key);
-        }
-        if (
-          [...records].filter((pending) => pending.abandoned).length <
-          BINDING_JOURNAL_MAX_ABANDONED_DELETES
-        ) {
-          this.warned.delete(key);
-        }
-      });
-    this.operations.set(promise, record);
-    return promise;
-  }
-  add(id: number): void {
-    this.ids.add(id);
-  }
-  delete(id: number): void {
-    this.ids.delete(id);
-  }
-  has(id: number): boolean {
-    return this.ids.has(id);
-  }
-}
 
 export type BindingJournalOwnerLiveness = (owner: BindingJournalOwner) => boolean;
 
@@ -1599,83 +1490,4 @@ function recordedSpec(entry: BindingJournalEntry): BindingRequestedSpec | undefi
     journalCreationPlatform(entry) === "android" ? androidBindingSpecSchema : iosBindingSpecSchema;
   const parsed = schema.safeParse(entry.target.requestedSpec);
   return parsed.success ? parsed.data : undefined;
-}
-
-/** How often the daemon's owner loop re-runs a redrive pass. */
-export const BINDING_JOURNAL_REDRIVE_INTERVAL_MS = 5_000;
-
-/**
- * The durable local owner of journal redrive: one pass at start (daemon startup), then one every
- * interval. Each pass drives every due entry once, so no entry starves and none is abandoned.
- */
-export class BindingJournalRedriveLoop {
-  private stopped = false;
-  private running: Promise<void> | undefined;
-  private stopping: Promise<"stopped" | "timed_out"> | undefined;
-  private readonly controller = new AbortController();
-  private cancelWait: (() => void) | undefined;
-
-  constructor(
-    private readonly journal: Pick<BindingJournal, "runPass">,
-    private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">,
-    private readonly intervalMs: number = BINDING_JOURNAL_REDRIVE_INTERVAL_MS,
-  ) {}
-
-  start(): void {
-    if (!this.stopped) {
-      this.running ??= this.loop();
-    }
-  }
-
-  /** Prevent new work, interrupt waits, and join owned work within the shutdown budget. */
-  stop(budgetMs: number = BINDING_JOURNAL_STOP_BUDGET_MS): Promise<"stopped" | "timed_out"> {
-    this.stopped = true;
-    this.controller.abort();
-    this.cancelWait?.();
-    this.stopping ??= this.join(budgetMs);
-    return this.stopping;
-  }
-
-  private async join(budgetMs: number): Promise<"stopped" | "timed_out"> {
-    try {
-      await raceWithDeadline(this.running ?? Promise.resolve(), {
-        timer: this.timer,
-        timeoutMs: budgetMs,
-        label: "journal redrive stop",
-      });
-      return "stopped";
-    } catch (error) {
-      logger.warn(`[BindingJournal] redrive stop failed: ${errorMessage(error)}`, error);
-      return "timed_out";
-    }
-  }
-
-  private wait(): Promise<void> {
-    return new Promise((resolve) => {
-      const handle = this.timer.setTimeout(() => {
-        this.cancelWait = undefined;
-        resolve();
-      }, this.intervalMs);
-      this.cancelWait = () => {
-        this.timer.clearTimeout(handle);
-        this.cancelWait = undefined;
-        resolve();
-      };
-    });
-  }
-
-  private async loop(): Promise<void> {
-    while (!this.stopped) {
-      try {
-        await this.journal.runPass({ signal: this.controller.signal });
-      } catch (error) {
-        // The registry may be briefly unreadable; the next pass retries every open entry.
-        logger.warn(`[BindingJournal] redrive pass failed: ${errorMessage(error)}`, error);
-      }
-      if (this.stopped) {
-        return;
-      }
-      await this.wait();
-    }
-  }
 }

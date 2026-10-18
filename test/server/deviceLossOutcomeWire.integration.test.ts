@@ -5,7 +5,7 @@ import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models";
 import { DeviceLostError, rememberDeviceLossAbort } from "../../src/server/deviceLossOutcome";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { TerminalSessionError } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { executionTracker } from "../../src/server/executionTracker";
 import { McpTestFixture, MCP_TEST_REQUEST_TIMEOUT_MS } from "../fixtures/mcpTestFixture";

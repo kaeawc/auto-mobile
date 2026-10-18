@@ -5,8 +5,8 @@ import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevic
 import {
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SessionManager,
-  TerminalSessionError,
 } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { FileTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import {

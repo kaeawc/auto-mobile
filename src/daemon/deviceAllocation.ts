@@ -12,11 +12,8 @@ import type { RetryExecutor } from "../utils/retry/RetryExecutor";
 import type { Timer } from "../utils/SystemTimer";
 import type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 import type { DeviceUnhealthyError } from "./DeviceUnhealthyError";
-import {
-  ALLOCATION_SNAPSHOT_STALE_RETRIES,
-  DevicePoolError,
-  refreshFailureContext,
-} from "./devicePool";
+import { ALLOCATION_SNAPSHOT_STALE_RETRIES, refreshFailureContext } from "./devicePool";
+import { DevicePoolError } from "./DevicePoolError";
 import type {
   DevicePool,
   PooledDevice,
@@ -31,12 +28,8 @@ import type { ForeignDeviceOwnership } from "./foreignDeviceOwnership";
 import type { IdleDeviceReaper, IosLivenessSnapshot } from "./idleDeviceReaper";
 import type { BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 import type { SessionReleaseReason } from "./releaseReasons";
-import {
-  SessionRecoveryIdentityLossError,
-  type Session,
-  type SessionManager,
-  type SessionRecoveryTarget,
-} from "./sessionManager";
+import { type Session, type SessionManager, type SessionRecoveryTarget } from "./sessionManager";
+import { SessionRecoveryIdentityLossError } from "./SessionRecoveryIdentityLossError";
 
 export interface AllocationDiscoverySnapshots {
   capturedEntries: ReadonlySet<PooledDevice>;

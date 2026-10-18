@@ -1,10 +1,8 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import fc from "fast-check";
-import {
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-  type DaemonClientLike,
-} from "../../src/daemon/client";
+import { type DaemonClientLike } from "../../src/daemon/client";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "../../src/daemon/constants";
 import {
   DaemonMcpProxy,

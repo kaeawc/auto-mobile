@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
-  DefaultManagedSpecMatcher,
-  DefaultManagedSpecResolver,
   BindingReconciler,
   encodeManagedSpecFingerprint,
   bindingDeviceName,
   type BindingReconcileRequest,
   type BindingReconcileResult,
-  chooseIosDeviceType,
 } from "../../../../src/daemon/sessionBroker/provisioning/reconciler";
+import { chooseIosDeviceType } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
+import { DefaultManagedSpecResolver } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecResolver";
+import { DefaultManagedSpecMatcher } from "../../../../src/daemon/sessionBroker/provisioning/DefaultManagedSpecMatcher";
 import type {
   BindingResourceAdmission,
   BindingResourceBudget,

@@ -4,11 +4,8 @@ import {
 } from "../helpers/mcpArgumentBudgetCases";
 import { describe, expect, test, beforeEach } from "bun:test";
 import { Duplex } from "node:stream";
-import {
-  DaemonClient,
-  DaemonUnavailableError,
-  DAEMON_RESPONSE_GRACE_MS,
-} from "../../src/daemon/client";
+import { DaemonClient, DAEMON_RESPONSE_GRACE_MS } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import {

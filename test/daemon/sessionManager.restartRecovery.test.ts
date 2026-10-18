@@ -4,9 +4,9 @@ import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerSte
 import {
   SessionManager,
   getDefaultSessionHeartbeatTimeoutMs,
-  SessionRecoveryIdentityLossError,
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
+import { SessionRecoveryIdentityLossError } from "../../src/daemon/SessionRecoveryIdentityLossError";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";

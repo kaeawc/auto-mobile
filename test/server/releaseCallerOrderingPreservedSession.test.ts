@@ -1,7 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import * as systemUiAnr from "../../src/server/deviceToolsSystemUiAnr";
 import { prepareStartDeviceRunnerReadiness } from "../../src/server/deviceTools";
-import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
+import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/SystemUiAnrRecoveryRequiredError";
 import type { DaemonState } from "../../src/daemon/daemonState";
 import type { DevicePool, PooledDevice } from "../../src/daemon/devicePool";
 import type { SessionManager, Session } from "../../src/daemon/sessionManager";

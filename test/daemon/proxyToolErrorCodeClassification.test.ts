@@ -9,7 +9,7 @@ import {
   DAEMON_UNKNOWN_TOOL_CODE,
   type DaemonResponse,
 } from "../../src/daemon/types";
-import { UnissuedSessionError } from "../../src/daemon/sessionManager";
+import { UnissuedSessionError } from "../../src/daemon/UnissuedSessionError";
 import { ToolUnavailableError } from "../../src/server/toolUnavailableError";
 import { UnknownToolError } from "../../src/server/UnknownToolError";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";

@@ -3,11 +3,9 @@ import { createServer, type Server, type Socket } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
-import {
-  DaemonBoundSessionLostError,
-  DaemonClient,
-  DaemonUnavailableError,
-} from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";

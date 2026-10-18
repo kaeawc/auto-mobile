@@ -1,10 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { DaemonErrorClassifier } from "../../../src/daemon/proxy/DaemonErrorClassifier";
-import {
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-} from "../../../src/daemon/client";
+import { DaemonShuttingDownError } from "../../../src/daemon/DaemonShuttingDownError";
+import { DaemonRequestNotDeliveredError } from "../../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonUnavailableError } from "../../../src/daemon/DaemonUnavailableError";
 import { DaemonVersionMismatchError } from "../../../src/daemon/proxy/daemonErrors";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../../src/daemon/types";
 

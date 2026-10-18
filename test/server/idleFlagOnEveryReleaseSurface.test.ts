@@ -12,7 +12,8 @@ import {
 } from "../../src/server/deviceSessionResult";
 import { DaemonConnectionSessionReleasedError } from "../../src/daemon/daemonMcpProxy";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { TerminalSessionError, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import { type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { isIdleReleaseReason, type SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import {

@@ -4,7 +4,7 @@ import { ManagedExecutionReowner } from "../../../helpers/deferredProvisioningFi
 import { BindingOwnershipLostError } from "../../../../src/daemon/sessionBroker/provisioning/BindingOwnershipLostError";
 import { BindingOwnershipUnconfirmedError } from "../../../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import { BrokerExecutionRelease } from "../../../../src/daemon/sessionBroker/provisioning/executionRelease";
-import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/BindingJournalInFlight";
 import {
   InFlightBindingReservations,
   withLiveExecutionSessions,

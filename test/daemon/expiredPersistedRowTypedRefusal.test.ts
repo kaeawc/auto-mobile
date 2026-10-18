@@ -3,11 +3,11 @@ import type { Kysely } from "kysely";
 import {
   DEVICE_RESTART_RECOVERY_WINDOW_MS,
   SessionManager,
-  TerminalSessionError,
-  UnissuedSessionError,
   type SessionDeviceAssigner,
   type SessionRecoveryTarget,
 } from "../../src/daemon/sessionManager";
+import { UnissuedSessionError } from "../../src/daemon/UnissuedSessionError";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";

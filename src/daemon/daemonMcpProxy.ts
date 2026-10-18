@@ -96,15 +96,11 @@ import { SessionOutsideBoundSessionError } from "../server/SessionOutsideBoundSe
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolListPoller } from "./proxy/ToolListPoller";
 import { getRemovedToolHint } from "../models/removedTools";
-import {
-  DaemonBoundSessionLostError,
-  DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-  type DaemonClientLike,
-  type DaemonClientFactory,
-} from "./client";
+import { DaemonClient, type DaemonClientLike, type DaemonClientFactory } from "./client";
+import { DaemonBoundSessionLostError } from "./DaemonBoundSessionLostError";
+import { DaemonShuttingDownError } from "./DaemonShuttingDownError";
+import { DaemonRequestNotDeliveredError } from "./DaemonRequestNotDeliveredError";
+import { DaemonUnavailableError } from "./DaemonUnavailableError";
 import { DaemonManager, type DaemonManagerLike, type DaemonRestartResult } from "./manager";
 import { logger } from "../utils/logger";
 import { carryToolFailureMark } from "../utils/toolFailureSignal";

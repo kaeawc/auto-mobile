@@ -56,7 +56,7 @@ import {
 import { type Timer } from "../utils/SystemTimer";
 import { combineAbortSignals } from "../utils/AbortContext";
 import { AdbDeviceOfflineError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
-import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessService";
+import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessError";
 import {
   deviceReadinessLockKey,
   trackDeviceAcquisitionReadiness,

@@ -5,11 +5,11 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import {
   SessionManager,
-  TerminalSessionError,
   PLAN_AUTO_RELEASE_REASON,
   type Session,
   type SessionReleaseSnapshot,
 } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/TerminalSessionError";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE, type DaemonRequest } from "../../src/daemon/types";

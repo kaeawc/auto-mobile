@@ -6,7 +6,8 @@ import { homedir } from "node:os";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import type { Socket } from "node:net";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
   DEFAULT_SOCKET_PATH,

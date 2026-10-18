@@ -2,10 +2,8 @@ import { DeviceUnhealthyError } from "../../src/daemon/DeviceUnhealthyError";
 import { SessionOutsideBoundSessionError } from "../../src/server/SessionOutsideBoundSessionError";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
-import {
-  SessionRecoveryIdentityLossError,
-  SessionTerminalReleaseInProgressError,
-} from "../../src/daemon/sessionManager";
+import { SessionRecoveryIdentityLossError } from "../../src/daemon/SessionRecoveryIdentityLossError";
+import { SessionTerminalReleaseInProgressError } from "../../src/daemon/SessionTerminalReleaseInProgressError";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import {
@@ -18,14 +16,11 @@ import {
   DaemonConnectionSessionReleasedError,
   DaemonToolOutcomeUnknownError,
 } from "../../src/daemon/daemonMcpProxy";
-import {
-  DaemonBoundSessionLostError,
-  DaemonClient,
-  DaemonRequestNotDeliveredError,
-  DaemonShuttingDownError,
-  DaemonUnavailableError,
-  type DaemonClientLike,
-} from "../../src/daemon/client";
+import { DaemonClient, type DaemonClientLike } from "../../src/daemon/client";
+import { DaemonBoundSessionLostError } from "../../src/daemon/DaemonBoundSessionLostError";
+import { DaemonShuttingDownError } from "../../src/daemon/DaemonShuttingDownError";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import type { DaemonRestartResult } from "../../src/daemon/manager";
 import {
   DAEMON_SESSION_NOT_FOUND_CODE,

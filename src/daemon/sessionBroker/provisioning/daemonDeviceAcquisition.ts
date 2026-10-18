@@ -34,19 +34,17 @@ import { PoolBindingDeviceClaims, type BindingClaimPool } from "./PoolBindingDev
 import { GateBindingBootCapacity } from "./GateBindingBootCapacity";
 import { DeviceManagerBindingInventory } from "./DeviceManagerBindingInventory";
 import {
-  DefaultManagedSpecMatcher,
-  DefaultManagedSpecResolver,
   BindingReconciler,
   type BindingDeviceProvisioner,
   type BindingDeviceDeleter,
   type ManagedAndroidImageCatalog,
   type ManagedAndroidProfileCatalog,
 } from "./reconciler";
-import {
-  BindingJournalRedriveLoop,
-  type BindingJournal,
-  type BindingJournalInFlight,
-} from "../registry/bindingJournal";
+import { DefaultManagedSpecResolver } from "./DefaultManagedSpecResolver";
+import { DefaultManagedSpecMatcher } from "./DefaultManagedSpecMatcher";
+import { type BindingJournal } from "../registry/bindingJournal";
+import { BindingJournalRedriveLoop } from "../registry/BindingJournalRedriveLoop";
+import { type BindingJournalInFlight } from "../registry/BindingJournalInFlight";
 import type {
   BindingJournalOwner,
   BindingProcessIdentity,

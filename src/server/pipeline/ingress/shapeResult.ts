@@ -1,10 +1,8 @@
 import { DaemonState } from "../../../daemon/daemonState";
 import { daemonShuttingDownMcpOutcome } from "../../../daemon/daemonShutdownOutcome";
 import { SessionReleasedDuringCreationError } from "../../../daemon/SessionReleasedDuringCreationError";
-import {
-  DaemonSessionCreationRejectedError,
-  TerminalSessionError,
-} from "../../../daemon/sessionManager";
+import { DaemonSessionCreationRejectedError } from "../../../daemon/DaemonSessionCreationRejectedError";
+import { TerminalSessionError } from "../../../daemon/TerminalSessionError";
 import type { TextRequestState } from "../../../features/action/textTransportTimeout";
 import { defaultTimer } from "../../../utils/SystemTimer";
 import { logger } from "../../../utils/logger";

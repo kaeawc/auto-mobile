@@ -8,7 +8,8 @@ import {
   DaemonMcpProxy,
   RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
 } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,

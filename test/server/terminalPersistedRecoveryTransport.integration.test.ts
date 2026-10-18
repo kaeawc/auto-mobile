@@ -6,11 +6,8 @@ import type { DeviceSessionPersistence } from "../../src/db/deviceSessionReposit
 import type { DeviceSession } from "../../src/db/types";
 import type { DevicePool } from "../../src/daemon/devicePool";
 import { DaemonState } from "../../src/daemon/daemonState";
-import {
-  SessionManager,
-  SessionRecoveryIdentityLossError,
-  type SessionDeviceAssigner,
-} from "../../src/daemon/sessionManager";
+import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
+import { SessionRecoveryIdentityLossError } from "../../src/daemon/SessionRecoveryIdentityLossError";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { FakeTimer } from "../fakes/FakeTimer";

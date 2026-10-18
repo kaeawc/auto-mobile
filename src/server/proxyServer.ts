@@ -18,7 +18,7 @@ import {
   DaemonRestartDeferredError,
   type DaemonMcpProxyConfig,
 } from "../daemon/daemonMcpProxy";
-import { DaemonShuttingDownError } from "../daemon/client";
+import { DaemonShuttingDownError } from "../daemon/DaemonShuttingDownError";
 import { daemonRestartDeferredPayload } from "../daemon/daemonRestartAdmission";
 import { McpTimeoutError } from "../daemon/McpTimeoutError";
 import { McpOverloadError } from "../daemon/McpOverloadError";

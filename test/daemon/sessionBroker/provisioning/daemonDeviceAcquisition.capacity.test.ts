@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect } from "bun:test";
 import { createDaemonBrokerDeviceAcquisition } from "../../../../src/daemon/sessionBroker/provisioning/daemonDeviceAcquisition";
 import type { BrokerDeviceAcquisitionSessions } from "../../../../src/daemon/sessionBroker/provisioning/deviceAcquisition";
-import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/bindingJournal";
+import { BindingJournalInFlight } from "../../../../src/daemon/sessionBroker/registry/BindingJournalInFlight";
 import { DaemonState } from "../../../../src/daemon/daemonState";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../../../src/devices/virtualDeviceLifecycleCoordinator";
 import { AndroidBootAdmissionGate } from "../../../../src/features/bootAdmission/AndroidBootAdmissionGate";

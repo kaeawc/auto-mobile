@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
+import { DaemonUnavailableError } from "../../src/daemon/DaemonUnavailableError";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { ActionableError } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";

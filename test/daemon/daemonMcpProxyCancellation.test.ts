@@ -3,7 +3,8 @@ import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/se
 import { describe, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient, DaemonRequestNotDeliveredError } from "../../src/daemon/client";
+import { DaemonClient } from "../../src/daemon/client";
+import { DaemonRequestNotDeliveredError } from "../../src/daemon/DaemonRequestNotDeliveredError";
 import { DAEMON_CANCEL_REQUEST_METHOD, DAEMON_VERSION } from "../../src/daemon/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

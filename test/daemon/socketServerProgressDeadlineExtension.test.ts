@@ -669,7 +669,7 @@ describe("pushProgressNotification is independent of the general notification su
   function createServerWithFakeSocket(): {
     server: UnixSocketServerHarness;
     sessionId: string;
-    socket: FakeSocket<Record<string, unknown>>;
+    socket: FakeSocket;
   } {
     const server = createHarnessServer(
       join(tmpdir(), `progress-subscription-${randomUUID()}.sock`),
@@ -677,7 +677,7 @@ describe("pushProgressNotification is independent of the general notification su
       new FakeTimer(),
     );
     const sessionId = "socket-unsubscribed";
-    const socket = new FakeSocket<Record<string, unknown>>();
+    const socket = new FakeSocket();
     server.state.clientSockets.set(sessionId, socket);
     return { server, sessionId, socket };
   }
@@ -699,7 +699,7 @@ describe("pushProgressNotification is independent of the general notification su
     push(server, sessionId, "tok-1", 1);
 
     expect(socket.writes.length).toBe(1);
-    expect(socket.responses[0]).toMatchObject({
+    expect(socket.frames[0]).toMatchObject({
       method: PROGRESS_NOTIFICATION_METHOD,
       progressToken: "tok-1",
       requestId: "request-1",

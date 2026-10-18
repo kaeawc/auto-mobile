@@ -34,7 +34,7 @@ class TestableServer extends PerformanceStreamSocketServer {
 
   /** Send `wire` (any JSON-serializable frame) through the real line path and return the reply. */
   async sendRawForTest(wire: unknown): Promise<PerformanceStreamSocketResponse | undefined> {
-    const socket = new FakeSocket<PerformanceStreamSocketResponse>();
+    const socket = new FakeSocket();
     await this.processLine(socket, JSON.stringify(wire));
     await this.pendingBySocket.get(socket);
     return socket.getWrittenMessages<PerformanceStreamSocketResponse>().at(-1);

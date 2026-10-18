@@ -1,5 +1,10 @@
 import { Socket, type SocketConnectOpts } from "node:net";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import {
+  daemonResponseSchema,
+  type DaemonRequest,
+  type DaemonResponse,
+} from "../../src/daemon/types";
+import { parseJsonUnknown } from "../helpers/parseJsonUnknown";
 
 type FakeSocketContract = Pick<Socket, "destroyed" | "writable" | "destroy">;
 
@@ -7,7 +12,7 @@ type FakeSocketContract = Pick<Socket, "destroyed" | "writable" | "destroy">;
  * Fake Socket for testing socket-based servers without real network connections.
  * Works cross-platform (Windows, macOS, Linux) and doesn't require file system.
  */
-export class FakeSocket<Response = DaemonResponse> extends Socket implements FakeSocketContract {
+export class FakeSocket extends Socket implements FakeSocketContract {
   public destroyed = false;
   public writable = true;
   /** When true (default), writing after destroy throws an EPIPE-coded error. */
@@ -18,12 +23,19 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
   get writes(): string[] {
     return this.getWrittenData();
   }
-  /** Each written frame parsed as JSON (one JSON document per `write`). */
-  get responses(): Response[] {
-    return this._writtenData.map((frame) => JSON.parse(frame) as Response);
+  /** Each written frame as parsed JSON, for servers whose frames are not daemon responses. */
+  get frames(): unknown[] {
+    return this._writtenData.map((frame) => parseJsonUnknown(frame));
+  }
+  /**
+   * Each written frame parsed as a daemon response envelope (one JSON document per `write`).
+   * The envelope (`type`, `id`, `success`) is validated; other fields pass through unchanged.
+   */
+  get responses(): DaemonResponse[] {
+    return this._writtenData.map((frame) => daemonResponseSchema.parse(parseJsonUnknown(frame)));
   }
   private _writtenData: string[] = [];
-  private _peer: FakeSocket<unknown> | null = null;
+  private _peer: FakeSocket | null = null;
 
   /**
    * Get all data written to this socket
@@ -55,7 +67,7 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
   /**
    * Connect this socket to a peer (for bidirectional communication)
    */
-  connectToPeer(peer: FakeSocket<unknown>): void {
+  connectToPeer(peer: FakeSocket): void {
     this._peer = peer;
     peer._peer = this;
   }

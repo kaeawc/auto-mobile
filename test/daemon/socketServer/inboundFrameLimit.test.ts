@@ -22,10 +22,10 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 const LIMIT = 64;
 
 /** Socket double that flushes writes immediately and records destruction. */
-class FlushingSocket extends FakeSocket<unknown> {}
+class FlushingSocket extends FakeSocket {}
 
 /** Socket whose writes are recorded but never flushed: the peer is not reading. */
-class UnflushedSocket extends FakeSocket<unknown> {
+class UnflushedSocket extends FakeSocket {
   write(data: string | Buffer): boolean {
     return super.write(data);
   }
@@ -115,9 +115,7 @@ describe("auxiliary socket inbound frame limit", () => {
     socket.emit("data", Buffer.from(`{"id":"1","value":"${"x".repeat(LIMIT * 2)}"}\n`));
     await flushMicrotasks();
 
-    expect(socket.responses).toEqual([
-      { success: false, error: "Invalid request: frame too large" },
-    ]);
+    expect(socket.frames).toEqual([{ success: false, error: "Invalid request: frame too large" }]);
     expect(socket.destroyed).toBe(true);
   });
 
@@ -134,7 +132,7 @@ describe("auxiliary socket inbound frame limit", () => {
 
     expect(bad.destroyed).toBe(true);
     expect(good.destroyed).toBe(false);
-    expect(good.responses).toEqual([{ id: "7", success: true, value: "hi" }]);
+    expect(good.frames).toEqual([{ id: "7", success: true, value: "hi" }]);
   });
 
   it("still serves a frame at the limit", async () => {
@@ -149,7 +147,7 @@ describe("auxiliary socket inbound frame limit", () => {
     await flushMicrotasks();
 
     expect(socket.destroyed).toBe(false);
-    expect(socket.responses).toEqual([{ id: "1", success: true, value }]);
+    expect(socket.frames).toEqual([{ id: "1", success: true, value }]);
   });
 });
 
@@ -173,7 +171,7 @@ describe("control socket inbound frame limit", () => {
     }
 
     expect(socket.destroyed).toBe(true);
-    const frames = socket.responses;
+    const frames = socket.frames;
     expect(frames).toHaveLength(1);
     expect(frames[0]).toMatchObject({
       id: null,
@@ -241,7 +239,7 @@ describe("per-server inbound frame limits", () => {
     expect(socket.destroyed).toBe(false);
     expect(repository.acknowledgedIds).toHaveLength(ids.length);
     expect(authorizedSessions).toEqual(["frame-test-session"]);
-    expect(socket.responses).toEqual([{ success: true, acknowledgedCount: ids.length }]);
+    expect(socket.frames).toEqual([{ success: true, acknowledgedCount: ids.length }]);
   });
 
   it("rejects a failures-stream frame over its own 8 MiB limit", async () => {
@@ -257,8 +255,6 @@ describe("per-server inbound frame limits", () => {
     await flushMicrotasks();
 
     expect(socket.destroyed).toBe(true);
-    expect(socket.responses).toEqual([
-      { success: false, error: "Invalid request: frame too large" },
-    ]);
+    expect(socket.frames).toEqual([{ success: false, error: "Invalid request: frame too large" }]);
   });
 });

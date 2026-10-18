@@ -52,6 +52,7 @@ import type {
   A11yCaCertResult,
   A11yDeviceOwnerStatusResult,
   A11yPermissionResult,
+  AndroidTwoFingerSwipeRequest,
 } from "./types";
 import { DeviceServiceClient } from "../DeviceServiceClient";
 import type { CtrlProxyText } from "./CtrlProxyText";
@@ -152,30 +153,8 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     return this.gestures.requestDoubleTapCoordinates(x, y, onDispatch, options);
   }
 
-  async requestTwoFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration?: number,
-    offset?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
-    return this.gestures.requestTwoFingerSwipe(
-      x1,
-      y1,
-      x2,
-      y2,
-      duration,
-      offset,
-      timeoutMs,
-      perf,
-      displayId,
-      beforeSend,
-    );
+  async requestTwoFingerSwipe(request: AndroidTwoFingerSwipeRequest): Promise<A11ySwipeResult> {
+    return this.gestures.requestTwoFingerSwipe(request);
   }
 
   async requestMultiFingerSwipe(

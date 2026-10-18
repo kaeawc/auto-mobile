@@ -407,7 +407,17 @@ const methods: RequestMethod[] = [
   {
     name: "requestTwoFingerSwipe",
     abortable: false,
-    invoke: (h) => h.client.requestTwoFingerSwipe(1, 2, 3, 4, 100, 50, LONG_TIMEOUT_MS, perf),
+    invoke: (h) =>
+      h.client.requestTwoFingerSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 100,
+        offset: 50,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+      }),
   },
   {
     name: "requestMultiFingerSwipe",

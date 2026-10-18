@@ -110,6 +110,20 @@ export interface AndroidAccessibilityLinkRequest {
   onDispatch?: () => void;
 }
 
+/** One TalkBack two-finger swipe request; unset fields take the gesture's defaults. */
+export interface AndroidTwoFingerSwipeRequest {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  duration?: number;
+  offset?: number;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  displayId?: number;
+  beforeSend?: () => void;
+}
+
 export interface AccessibilityNodeSelector {
   resourceId?: string;
   testTag?: string;

@@ -3327,16 +3327,11 @@ describe("LaunchApp", () => {
           });
           harness.calls.length = 0;
           harness.targetBundleIdCalls.length = 0;
-          const result = await harness.iosLaunchApp.execute(
-            userBundleId,
-            path.clear,
-            path.cold,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            path.args,
-          );
+          const result = await harness.iosLaunchApp.execute(userBundleId, {
+            clearAppData: path.clear,
+            coldBoot: path.cold,
+            launchArguments: path.args,
+          });
           expect(result).toEqual(warmResult);
           expect(harness.calls).toEqual(["listapps"]);
           expect(harness.installedApps.getCallCount()).toBe(2);
@@ -3353,16 +3348,11 @@ describe("LaunchApp", () => {
       fakeTimer.enableAutoAdvance();
       const harness = createIOSTestHarness({ bundleId: userBundleId });
       try {
-        const result = await harness.iosLaunchApp.execute(
-          userBundleId,
-          path.clear,
-          path.cold,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          path.args,
-        );
+        const result = await harness.iosLaunchApp.execute(userBundleId, {
+          clearAppData: path.clear,
+          coldBoot: path.cold,
+          launchArguments: path.args,
+        });
         expect(result.success).toBe(true);
         const cold = path.name !== "warm";
         expect(harness.calls).toEqual([
@@ -3415,16 +3405,11 @@ describe("LaunchApp", () => {
           fakeTimer.enableAutoAdvance();
           const harness = createIOSTestHarness({ bundleId: userBundleId, installedApps });
           try {
-            const result = await harness.iosLaunchApp.execute(
-              userBundleId,
-              path.clear,
-              path.cold,
-              undefined,
-              undefined,
-              undefined,
-              undefined,
-              path.args,
-            );
+            const result = await harness.iosLaunchApp.execute(userBundleId, {
+              clearAppData: path.clear,
+              coldBoot: path.cold,
+              launchArguments: path.args,
+            });
             expect(result.success).toBe(true);
             expect(result.error).not.toBe("App is not installed");
             expect(harness.calls).toEqual([
@@ -3953,7 +3938,10 @@ describe("LaunchApp", () => {
         const listing = spyOn(h.installedApps, "listInstalledApps");
         const retarget = spyOn(h.fakeCtrlProxy, "requestLaunchApp");
         try {
-          const result = await h.iosLaunchApp.execute(userBundleId);
+          const result = await h.iosLaunchApp.execute(userBundleId, {
+            clearAppData: false,
+            coldBoot: false,
+          });
           expect(result.success).toBe(success);
           expect(h.deviceAppLauncher.launchCalls).toHaveLength(1);
           expect(h.simctlCalls).toEqual([]);

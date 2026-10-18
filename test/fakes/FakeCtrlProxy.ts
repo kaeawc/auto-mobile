@@ -16,6 +16,7 @@ import {
   A11ySelectAllResult,
   A11yActionResult,
   AndroidAccessibilityLinkRequest,
+  AndroidTwoFingerSwipeRequest,
   AccessibilityHierarchyResponse,
   AndroidPerfTiming,
   AccessibilityHierarchy,
@@ -1236,18 +1237,18 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
-  async requestTwoFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration: number = 300,
-    offset: number = 100,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
+  async requestTwoFingerSwipe(request: AndroidTwoFingerSwipeRequest): Promise<A11ySwipeResult> {
+    const {
+      x1,
+      y1,
+      x2,
+      y2,
+      duration = 300,
+      offset = 100,
+      timeoutMs = 5000,
+      displayId,
+      beforeSend,
+    } = request;
     await this.applyDelay("requestTwoFingerSwipe");
     beforeSend?.();
     this.checkFailure("requestTwoFingerSwipe");

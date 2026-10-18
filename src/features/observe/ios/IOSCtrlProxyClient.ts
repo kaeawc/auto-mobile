@@ -2324,7 +2324,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IosCtrlPr
         : this.sdkUnavailableResult(capability);
     } catch (error) {
       if (error instanceof SdkCapabilityProbeSupersededError) {
-        logger.info(`[IOSCtrlProxyClient] ${error.message}`);
+        logger.warn(`[IOSCtrlProxyClient] ${error.message}`);
         return { success: false, totalTimeMs: 0, error: error.message };
       }
       throw error;

@@ -191,17 +191,6 @@ export interface LaunchAppCall extends ActionCall {
   launchEnvironment?: Record<string, string>;
 }
 
-/** The deprecated positional parameters of {@link LaunchApp.execute} after `clearAppData`. */
-type LaunchAppPositionalTail = [
-  coldBoot?: boolean,
-  activityName?: string,
-  userId?: number,
-  skipUiStability?: boolean,
-  signal?: AbortSignal,
-  launchArguments?: string[],
-  launchEnvironment?: Record<string, string>,
-];
-
 export class LaunchApp extends BaseVisualChange {
   readonly simctl: LaunchAppSimctl;
   private deviceAppLauncher: DeviceAppLauncher;
@@ -425,46 +414,7 @@ export class LaunchApp extends BaseVisualChange {
    * @param skipUiStability - Whether to skip UI stability checks
    * @param launchEnvironment - `SIMCTL_CHILD_*` variables for a fresh iOS simulator process
    */
-  async execute(packageName: string, launch: LaunchAppCall): Promise<LaunchAppResult>;
-  /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
-  async execute(
-    packageName: string,
-    clearAppData: boolean,
-    coldBoot: boolean,
-    activityName?: string,
-    userId?: number,
-    skipUiStability?: boolean,
-    signal?: AbortSignal,
-    launchArguments?: string[],
-    launchEnvironment?: Record<string, string>,
-  ): Promise<LaunchAppResult>;
-  async execute(
-    packageName: string,
-    clearAppDataOrCall: boolean | LaunchAppCall,
-    ...positional: LaunchAppPositionalTail
-  ): Promise<LaunchAppResult> {
-    const [
-      coldBoot,
-      activityName,
-      userId,
-      skipUiStability,
-      signal,
-      launchArguments,
-      launchEnvironment,
-    ] = positional;
-    const launch: LaunchAppCall =
-      typeof clearAppDataOrCall === "object"
-        ? clearAppDataOrCall
-        : {
-            clearAppData: clearAppDataOrCall,
-            coldBoot: coldBoot ?? false,
-            activityName,
-            userId,
-            skipUiStability,
-            signal,
-            launchArguments,
-            launchEnvironment,
-          };
+  async execute(packageName: string, launch: LaunchAppCall): Promise<LaunchAppResult> {
     return this.executeLaunch(packageName, launch);
   }
 

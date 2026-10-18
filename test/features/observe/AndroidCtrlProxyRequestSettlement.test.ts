@@ -175,7 +175,16 @@ const methods: Method[] = [
   },
   {
     name: "two finger swipe",
-    invoke: (h) => h.client["gestures"].requestTwoFingerSwipe(1, 2, 3, 4, 20, 10, 50),
+    invoke: (h) =>
+      h.client["gestures"].requestTwoFingerSwipe({
+        x1: 1,
+        y1: 2,
+        x2: 3,
+        y2: 4,
+        duration: 20,
+        offset: 10,
+        timeoutMs: 50,
+      }),
   },
   { name: "gesture start", invoke: (h) => h.client["gestures"].requestGestureStart("g", 1, 2, 50) },
   { name: "gesture move", invoke: (h) => h.client["gestures"].requestGestureMove("g", 1, 2, 50) },

@@ -12,7 +12,12 @@ import {
   DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
 } from "../shared/SharedGestureDelegate";
 import { sendCommand } from "../DeviceServiceUtils";
-import type { DelegateContext, A11ySwipeResult, A11yTapCoordinatesResult } from "./types";
+import type {
+  DelegateContext,
+  A11ySwipeResult,
+  A11yTapCoordinatesResult,
+  AndroidTwoFingerSwipeRequest,
+} from "./types";
 import {
   MULTI_FINGER_GESTURE_CAPABILITY,
   normalizeCtrlProxyMilliseconds,
@@ -89,18 +94,19 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
    * arrives, instead of the promise only ever settling via its timeout. The requestId keeps the
    * `two_finger_swipe_` prefix so callers/loggers that key on it are unaffected.
    */
-  async requestTwoFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    duration: number = 300,
-    offset: number = 100,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11ySwipeResult> {
+  async requestTwoFingerSwipe(request: AndroidTwoFingerSwipeRequest): Promise<A11ySwipeResult> {
+    const {
+      x1,
+      y1,
+      x2,
+      y2,
+      duration = 300,
+      offset = 100,
+      timeoutMs = 5000,
+      perf = new NoOpPerformanceTracker(),
+      displayId,
+      beforeSend,
+    } = request;
     // Coordinates go through the shared `coord()` policy (roundCoordinates: true for Android) so
     // TalkBack two-finger swipes land on whole pixels, exactly like the sibling swipe/tap/drag/
     // pinch gestures (#3049). Intentional and not to be regressed — the runner accepts fractional

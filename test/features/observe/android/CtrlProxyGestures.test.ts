@@ -77,7 +77,7 @@ describe("Android gesture duration wire", () => {
       const requests = [
         () => gestures.requestTapCoordinates(10, 20, duration),
         () => gestures.requestSwipe(10, 20, 30, 40, duration),
-        () => gestures.requestTwoFingerSwipe(10, 20, 30, 40, duration),
+        () => gestures.requestTwoFingerSwipe({ x1: 10, y1: 20, x2: 30, y2: 40, duration }),
         () => gestures.requestDrag(10, 20, 30, 40, duration, duration, duration, 5000),
         () =>
           gestures.requestPinch({
@@ -210,7 +210,7 @@ describe("Android swipe request duration bounds", () => {
     const { context, sent, timer, requestManager } = createFakeContext();
     const gestures = new CtrlProxyGestures(context);
     const duration = new DefaultElementGeometry().getSwipeDurationFromSpeed("slow");
-    const pending = gestures.requestTwoFingerSwipe(10, 20, 30, 40, duration);
+    const pending = gestures.requestTwoFingerSwipe({ x1: 10, y1: 20, x2: 30, y2: 40, duration });
     await flush();
     expect(timer.getPendingTimeouts()).toEqual([5000]);
     timer.advanceTime(duration + 1);
@@ -281,7 +281,15 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     const { context, sent, timer, requestManager } = createFakeContext();
     const gestures = new CtrlProxyGestures(context);
 
-    const promise = gestures.requestTwoFingerSwipe(10, 20, 30, 40, 300, 100, 5000);
+    const promise = gestures.requestTwoFingerSwipe({
+      x1: 10,
+      y1: 20,
+      x2: 30,
+      y2: 40,
+      duration: 300,
+      offset: 100,
+      timeoutMs: 5000,
+    });
     await flush();
 
     // The request must have been registered with RequestManager (not sent raw).
@@ -311,7 +319,15 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     const { context, sent, timer, requestManager } = createFakeContext();
     const gestures = new CtrlProxyGestures(context);
 
-    const promise = gestures.requestTwoFingerSwipe(1, 2, 3, 4, 300, 100, 5000);
+    const promise = gestures.requestTwoFingerSwipe({
+      x1: 1,
+      y1: 2,
+      x2: 3,
+      y2: 4,
+      duration: 300,
+      offset: 100,
+      timeoutMs: 5000,
+    });
     await flush();
 
     const sentMsg = JSON.parse(sent[sent.length - 1]);
@@ -331,7 +347,15 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     const { context, sent, requestManager } = createFakeContext();
     const gestures = new CtrlProxyGestures(context);
 
-    const promise = gestures.requestTwoFingerSwipe(10.7, 20.3, 30.4, 40.9, 250, 80, 5000);
+    const promise = gestures.requestTwoFingerSwipe({
+      x1: 10.7,
+      y1: 20.3,
+      x2: 30.4,
+      y2: 40.9,
+      duration: 250,
+      offset: 80,
+      timeoutMs: 5000,
+    });
     await flush();
 
     const sentMsg = JSON.parse(sent[sent.length - 1]);
@@ -362,7 +386,15 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     await flush();
     const swipeMsg = JSON.parse(sent[sent.length - 1]);
 
-    const twoFingerPromise = gestures.requestTwoFingerSwipe(...coords, 300, 100, 5000);
+    const twoFingerPromise = gestures.requestTwoFingerSwipe({
+      x1: coords[0],
+      y1: coords[1],
+      x2: coords[2],
+      y2: coords[3],
+      duration: 300,
+      offset: 100,
+      timeoutMs: 5000,
+    });
     await flush();
     const twoFingerMsg = JSON.parse(sent[sent.length - 1]);
 
@@ -385,7 +417,15 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     const { context, timer } = createFakeContext();
     const gestures = new CtrlProxyGestures(context);
 
-    const promise = gestures.requestTwoFingerSwipe(0, 0, 100, 100, 300, 100, 100);
+    const promise = gestures.requestTwoFingerSwipe({
+      x1: 0,
+      y1: 0,
+      x2: 100,
+      y2: 100,
+      duration: 300,
+      offset: 100,
+      timeoutMs: 100,
+    });
     await flush();
 
     timer.advanceTime(101);
@@ -402,11 +442,27 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     const { context, sent, timer, requestManager } = createFakeContext();
     const gestures = new CtrlProxyGestures(context);
 
-    const promiseA = gestures.requestTwoFingerSwipe(1, 2, 3, 4, 300, 100, 5000);
+    const promiseA = gestures.requestTwoFingerSwipe({
+      x1: 1,
+      y1: 2,
+      x2: 3,
+      y2: 4,
+      duration: 300,
+      offset: 100,
+      timeoutMs: 5000,
+    });
     await flush();
     const idA = JSON.parse(sent[sent.length - 1]).requestId as string;
 
-    const promiseB = gestures.requestTwoFingerSwipe(10, 20, 30, 40, 300, 100, 5000);
+    const promiseB = gestures.requestTwoFingerSwipe({
+      x1: 10,
+      y1: 20,
+      x2: 30,
+      y2: 40,
+      duration: 300,
+      offset: 100,
+      timeoutMs: 5000,
+    });
     await flush();
     const idB = JSON.parse(sent[sent.length - 1]).requestId as string;
 
@@ -438,7 +494,15 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     const { context, sent, timer, requestManager } = createFakeContext();
     const gestures = new CtrlProxyGestures(context);
 
-    const promise = gestures.requestTwoFingerSwipe(0, 0, 100, 100, 300, 100, 5000);
+    const promise = gestures.requestTwoFingerSwipe({
+      x1: 0,
+      y1: 0,
+      x2: 100,
+      y2: 100,
+      duration: 300,
+      offset: 100,
+      timeoutMs: 5000,
+    });
     await flush();
 
     const id = JSON.parse(sent[sent.length - 1]).requestId as string;
@@ -461,7 +525,7 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     const { context, sent } = createFakeContext({ ensureConnected: async () => false });
     const gestures = new CtrlProxyGestures(context);
 
-    const result = await gestures.requestTwoFingerSwipe(0, 0, 100, 100);
+    const result = await gestures.requestTwoFingerSwipe({ x1: 0, y1: 0, x2: 100, y2: 100 });
     expect(result.success).toBe(false);
     expect(result.error).toBe("Not connected");
     expect(sent.length).toBe(0);
@@ -496,7 +560,16 @@ describe("gesture displayId wire compatibility", () => {
       legacy:
         '{"type":"request_two_finger_swipe","requestId":"request","x1":10,"y1":20,"x2":30,"y2":40,"duration":300,"offset":100}',
       send: (g: CtrlProxyGestures, id?: number) =>
-        g.requestTwoFingerSwipe(10, 20, 30, 40, 300, 100, 5000, undefined, id),
+        g.requestTwoFingerSwipe({
+          x1: 10,
+          y1: 20,
+          x2: 30,
+          y2: 40,
+          duration: 300,
+          offset: 100,
+          timeoutMs: 5000,
+          displayId: id,
+        }),
     },
     {
       name: "drag",
@@ -648,7 +721,16 @@ describe("Android client forwards gesture displayId", () => {
     {
       name: "two-finger swipe",
       send: (c: AndroidCtrlProxyClient) =>
-        c.requestTwoFingerSwipe(1, 2, 3, 4, 300, 100, 5000, undefined, 2),
+        c.requestTwoFingerSwipe({
+          x1: 1,
+          y1: 2,
+          x2: 3,
+          y2: 4,
+          duration: 300,
+          offset: 100,
+          timeoutMs: 5000,
+          displayId: 2,
+        }),
     },
     {
       name: "drag",
@@ -804,7 +886,17 @@ describe("gesture pre-send display fence during reconnect", () => {
     {
       name: "two-finger swipe",
       send: (c: AndroidCtrlProxyClient, guard: () => void) =>
-        c.requestTwoFingerSwipe(1, 2, 3, 4, 300, 100, 5000, undefined, 2, guard),
+        c.requestTwoFingerSwipe({
+          x1: 1,
+          y1: 2,
+          x2: 3,
+          y2: 4,
+          duration: 300,
+          offset: 100,
+          timeoutMs: 5000,
+          displayId: 2,
+          beforeSend: guard,
+        }),
     },
     {
       name: "gesture start",

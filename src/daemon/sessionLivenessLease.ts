@@ -14,10 +14,8 @@ import {
   mayAdoptUnownedLiveness,
   type LivenessOwnerView,
 } from "./livenessClaimDecision";
-import {
-  MANAGED_EXECUTION_LIVENESS_POLICY,
-  resolveManagedExecutionIdleTimeoutMs,
-} from "./sessionBroker/provisioning/executionLiveness";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../models/managedExecutionLiveness";
+import { resolveManagedExecutionIdleTimeoutMs } from "./sessionBroker/provisioning/executionLiveness";
 import type {
   LivenessClaimOutcome,
   LivenessReleaseOutcome,

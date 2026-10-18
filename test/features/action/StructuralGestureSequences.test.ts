@@ -192,8 +192,8 @@ describe("gesture request sequences", () => {
       const calls: string[] = [];
       const timer = clock(calls);
       const selector = new FakeElementSelector(mode === "immediate" ? element : null);
-      const select = selector.selectClickable.bind(selector);
-      selector.selectClickable = (...args) => {
+      const select = selector.select.bind(selector);
+      selector.select = (...args) => {
         calls.push("select");
         return select(...args);
       };
@@ -282,8 +282,8 @@ describe("gesture request sequences", () => {
       const calls: string[] = [];
       const timer = clock(calls);
       const selector = new FakeElementSelector();
-      const select = selector.selectClickable.bind(selector);
-      selector.selectClickable = (...args) => {
+      const select = selector.select.bind(selector);
+      selector.select = (...args) => {
         calls.push("select");
         return select(...args);
       };

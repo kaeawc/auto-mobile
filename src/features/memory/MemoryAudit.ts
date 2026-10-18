@@ -43,7 +43,7 @@ interface MemoryAuditResult {
 export class MemoryAudit {
   private adb: AdbExecutor;
   private device: BootedDevice;
-  private metricsCollector: MemoryMetricsCollector;
+  private metricsCollector: Pick<MemoryMetricsCollector, "collectMetrics">;
   private thresholdManager: MemoryThresholdManager;
   private baselineManager: MemoryBaselineManager;
   private readonly injectedDb: Kysely<Database> | null;
@@ -55,15 +55,18 @@ export class MemoryAudit {
    * in-memory DB (`createTestDatabase`) for tests exercising the persistence
    * path (issue #3067); it is threaded to the baseline manager for a shared
    * connection.
+   * @param metricsCollector Optional collector, so tests can script the metrics an
+   * audit sees without driving a fake `dumpsys` transcript.
    */
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     db?: Kysely<Database>,
+    metricsCollector?: Pick<MemoryMetricsCollector, "collectMetrics">,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
-    this.metricsCollector = new MemoryMetricsCollector(device, adbFactory);
+    this.metricsCollector = metricsCollector ?? new MemoryMetricsCollector(device, adbFactory);
     this.thresholdManager = new MemoryThresholdManager(db);
     this.baselineManager = new MemoryBaselineManager(db);
     this.injectedDb = db ?? null;
@@ -179,9 +182,11 @@ export class MemoryAudit {
   }
 
   /**
-   * Validate metrics against thresholds
+   * Validate metrics against thresholds and, when present, the stored baseline.
+   * Pure with respect to the device: it only reads its arguments, so callers can
+   * evaluate a metrics sample without running a full audit.
    */
-  private validateMetrics(
+  validateMetrics(
     metrics: MemoryMetrics,
     thresholds: {
       heapGrowthThresholdMb: number;
@@ -260,9 +265,10 @@ export class MemoryAudit {
   }
 
   /**
-   * Generate weighted diagnostic output based on violations
+   * Generate weighted diagnostic output based on violations. Pure formatting of
+   * its arguments; returns a fixed "no issues" message when there are none.
    */
-  private generateDiagnostics(metrics: MemoryMetrics, violations: MemoryViolation[]): string {
+  generateDiagnostics(metrics: MemoryMetrics, violations: MemoryViolation[]): string {
     if (violations.length === 0) {
       return "No memory issues detected";
     }

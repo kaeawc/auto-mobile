@@ -12,6 +12,8 @@ import { PressButton } from "../../../src/features/action/PressButton";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { BootedDevice } from "../../../src/models";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { holdDispatchedRequest } from "../../../src/daemon/dispatchedRequestHold";
@@ -322,11 +324,11 @@ describe("PressButton", () => {
       },
       requestPressHome: async () => ({ success: true, totalTimeMs: 5 }),
       requestRecentApps: async () => ({ success: true, totalTimeMs: 5 }),
-    } as any);
+    });
 
     try {
       const pressButton = new PressButton(iosDevice);
-      const result = await (pressButton as any).executeiOSButtonPress("back");
+      const result = await pressButton.press("back");
 
       expect(result.success).toBe(true);
       expect(backCalls).toBe(1);
@@ -345,11 +347,11 @@ describe("PressButton", () => {
         recentCalls++;
         return { success: true, totalTimeMs: 5 };
       },
-    } as any);
+    });
 
     try {
       const pressButton = new PressButton(iosDevice);
-      const result = await (pressButton as any).executeiOSButtonPress("recent");
+      const result = await pressButton.press("recent");
 
       expect(result.success).toBe(true);
       expect(recentCalls).toBe(1);
@@ -368,20 +370,18 @@ describe("PressButton", () => {
         return { success: true, totalTimeMs: 5 };
       },
       requestRecentApps: async () => ({ success: true, totalTimeMs: 5 }),
-    } as any);
+    });
 
     try {
-      const pressButton = new PressButton(iosDevice);
-      (pressButton as any).observeScreen = {
-        getMostRecentCachedObserveResult: async () => {
-          throw new Error("press should not read cached observations");
-        },
-        execute: async () => {
-          throw new Error("press should not observe");
-        },
-      };
+      const observeScreen = new FakeObserveScreen();
+      const pressButton = new PressButton(iosDevice, null, undefined, undefined, undefined, {
+        observeScreen,
+      });
 
       const result = await pressButton.press("home");
+
+      expect(observeScreen.getExecuteCallCount()).toBe(0);
+      expect(observeScreen.getExecutedOperations()).toEqual([]);
 
       expect(result.success).toBe(true);
       expect(homeCalls).toBe(1);
@@ -415,7 +415,7 @@ describe("PressButton", () => {
         contexts.push(frameContext ?? "");
         return { success: true, totalTimeMs: 5 };
       },
-    } as any);
+    });
 
     try {
       const pressButton = new PressButton(iosDevice);
@@ -443,27 +443,14 @@ describe("PressButton", () => {
     };
 
     const fakeTimer = new FakeTimer();
-    const capturedTimeouts: (number | undefined)[] = [];
-    const fakeAdb = {
-      execute: async (_args: string[], options?: { timeoutMs?: number }) => {
-        capturedTimeouts.push(options?.timeoutMs);
-        return {
-          stdout: "",
-          stderr: "",
-          toString: () => "",
-          trim: () => "",
-          includes: () => false,
-        };
-      },
-    } as any;
+    const fakeAdb = new FakeAdbExecutor();
 
     // "menu" is not a global-action button, so it goes straight to the ADB keyevent path.
-    const pressButton = new PressButton(androidDevice, fakeAdb);
-    (pressButton as any).timer = fakeTimer;
+    const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
     const result = await pressButton.press("menu", 500);
 
     expect(result.success).toBe(true);
-    expect(capturedTimeouts).toEqual([500]);
+    expect(fakeAdb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([500]);
   });
 
   test("android ADB keyevent leaves timeout unset when no budget is given", async () => {
@@ -473,25 +460,13 @@ describe("PressButton", () => {
       name: "Pixel",
     };
 
-    const capturedTimeouts: (number | undefined)[] = [];
-    const fakeAdb = {
-      execute: async (_args: string[], options?: { timeoutMs?: number }) => {
-        capturedTimeouts.push(options?.timeoutMs);
-        return {
-          stdout: "",
-          stderr: "",
-          toString: () => "",
-          trim: () => "",
-          includes: () => false,
-        };
-      },
-    } as any;
+    const fakeAdb = new FakeAdbExecutor();
 
     const pressButton = new PressButton(androidDevice, fakeAdb);
     const result = await pressButton.press("menu");
 
     expect(result.success).toBe(true);
-    expect(capturedTimeouts).toEqual([undefined]);
+    expect(fakeAdb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([undefined]);
   });
 
   test("android global-action fallback shares the deadline budget with the ADB keyevent", async () => {
@@ -503,7 +478,6 @@ describe("PressButton", () => {
 
     const fakeTimer = new FakeTimer();
     const globalActionTimeouts: number[] = [];
-    const adbTimeouts: (number | undefined)[] = [];
 
     // Fails the accessibility path (forcing the ADB fallback) after consuming
     // part of the shared deadline.
@@ -513,24 +487,12 @@ describe("PressButton", () => {
         fakeTimer.advanceTime(300);
         return { success: false, action, totalTimeMs: 300, error: "WebSocket not connected" };
       },
-    } as any);
+    });
 
-    const fakeAdb = {
-      execute: async (_args: string[], options?: { timeoutMs?: number }) => {
-        adbTimeouts.push(options?.timeoutMs);
-        return {
-          stdout: "",
-          stderr: "",
-          toString: () => "",
-          trim: () => "",
-          includes: () => false,
-        };
-      },
-    } as any;
+    const fakeAdb = new FakeAdbExecutor();
 
     try {
-      const pressButton = new PressButton(androidDevice, fakeAdb);
-      (pressButton as any).timer = fakeTimer;
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
 
       // "back" is a global-action button, so this exercises the two-call path.
       const result = await pressButton.press("back", 500);
@@ -541,7 +503,7 @@ describe("PressButton", () => {
       // ADB fallback receives the REMAINING budget after 300ms was consumed,
       // proving total time is bounded by the caller's budget, not the sum of
       // per-transport defaults.
-      expect(adbTimeouts).toEqual([200]);
+      expect(fakeAdb.getCommandCalls().map((call) => call.timeoutMs)).toEqual([200]);
     } finally {
       getInstanceSpy.mockRestore();
     }
@@ -555,7 +517,6 @@ describe("PressButton", () => {
     };
 
     const fakeTimer = new FakeTimer();
-    let adbCalled = false;
 
     const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
       requestGlobalAction: async (
@@ -573,24 +534,12 @@ describe("PressButton", () => {
           acknowledged: false,
         };
       },
-    } as any);
+    });
 
-    const fakeAdb = {
-      executeCommand: async () => {
-        adbCalled = true;
-        return {
-          stdout: "",
-          stderr: "",
-          toString: () => "",
-          trim: () => "",
-          includes: () => false,
-        };
-      },
-    } as any;
+    const fakeAdb = new FakeAdbExecutor();
 
     try {
-      const pressButton = new PressButton(androidDevice, fakeAdb);
-      (pressButton as any).timer = fakeTimer;
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
 
       const result = await pressButton.press("back", 500);
 
@@ -598,7 +547,7 @@ describe("PressButton", () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain("may have been applied");
       expect(result.error).toContain("timeout");
-      expect(adbCalled).toBe(false);
+      expect(fakeAdb.getCommandCalls()).toEqual([]);
     } finally {
       getInstanceSpy.mockRestore();
     }
@@ -716,13 +665,13 @@ describe("PressButton", () => {
         pressButtonCalls.push(button);
         return { success: true, totalTimeMs: 5 };
       },
-    } as any);
+    });
 
     try {
       const pressButton = new PressButton(iosDevice);
 
       for (const button of ["volume_up", "volume_down", "power"]) {
-        const result = await (pressButton as any).executeiOSButtonPress(button);
+        const result = await pressButton.press(button);
         expect(result).toEqual({ success: true, button, keyCode: -1 });
       }
 
@@ -740,13 +689,13 @@ describe("PressButton", () => {
         pressButtonCalls.push(button);
         return { success: true, totalTimeMs: 5 };
       },
-    } as any);
+    });
 
     try {
       const pressButton = new PressButton(iosSimulator);
 
       for (const button of ["volume_up", "volume_down", "power"]) {
-        const result = await (pressButton as any).executeiOSButtonPress(button);
+        const result = await pressButton.press(button);
         expect(result).toEqual({ success: true, button, keyCode: -1 });
       }
 
@@ -771,7 +720,7 @@ describe("PressButton", () => {
         buttonTimeouts.push(timeoutMs);
         return { success: true, totalTimeMs: 5 };
       },
-    } as any);
+    });
 
     try {
       const pressButton = new PressButton(iosDevice);
@@ -795,7 +744,7 @@ describe("PressButton", () => {
         return { success: true, totalTimeMs: 5 };
       },
       requestRecentApps: async () => ({ success: true, totalTimeMs: 5 }),
-    } as any);
+    });
 
     try {
       const pressButton = new PressButton(iosDevice);
@@ -814,11 +763,11 @@ describe("PressButton", () => {
         error: "Power/lock button is not supported on this device",
         totalTimeMs: 5,
       }),
-    } as any);
+    });
 
     try {
       const pressButton = new PressButton(iosDevice);
-      const result = await (pressButton as any).executeiOSButtonPress("power");
+      const result = await pressButton.press("power");
 
       expect(result.success).toBe(false);
       expect(result.button).toBe("power");
@@ -870,24 +819,3 @@ beforeOutputSchema(() => {
   );
 });
 afterOutputSchema(() => pressOutputSchemaSpy.mockRestore());
-
-// Existing dispatch tests intentionally exercise the private transport seam.
-const dispatchPrototype = PressButton.prototype as unknown as {
-  executeiOSButtonPress: PressButton["press"];
-};
-const dispatchForOutputSchema = dispatchPrototype.executeiOSButtonPress;
-let dispatchOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
-beforeOutputSchema(() => {
-  dispatchOutputSchemaSpy = spyOnOutputSchema(
-    dispatchPrototype,
-    "executeiOSButtonPress",
-  ).mockImplementation(async function (
-    this: PressButton,
-    ...args: Parameters<PressButton["press"]>
-  ) {
-    const result = await dispatchForOutputSchema.apply(this, args);
-    expect(pressButtonResultSchema.parse({ message: "Result", ...result })).toBeDefined();
-    return result;
-  });
-});
-afterOutputSchema(() => dispatchOutputSchemaSpy.mockRestore());

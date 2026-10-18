@@ -88,11 +88,11 @@ describe("DragAndDrop", () => {
       fakeA11yService as any,
     );
 
-    dragAndDrop = new DragAndDrop(device, null, fakeTimer);
-    (dragAndDrop as any).observeScreen = fakeObserveScreen;
-    (dragAndDrop as any).awaitIdle = fakeAwaitIdle;
-    (dragAndDrop as any).window = fakeWindow;
-    (dragAndDrop as any).adb = fakeAdb;
+    dragAndDrop = new DragAndDrop(device, fakeAdb, fakeTimer, {
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+    });
   });
 
   afterEach(() => {

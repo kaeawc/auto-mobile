@@ -61,11 +61,11 @@ describe("BiometricAuth", () => {
       stderr: "",
     });
 
-    biometricAuth = new BiometricAuth(device, fakeAdb, fakeTimer);
-
-    (biometricAuth as any).observeScreen = fakeObserveScreen;
-    (biometricAuth as any).window = fakeWindow;
-    (biometricAuth as any).awaitIdle = fakeAwaitIdle;
+    biometricAuth = new BiometricAuth(device, fakeAdb, fakeTimer, null, undefined, {
+      observeScreen: fakeObserveScreen,
+      window: fakeWindow,
+      awaitIdle: fakeAwaitIdle,
+    });
   });
 
   afterEach(() => {

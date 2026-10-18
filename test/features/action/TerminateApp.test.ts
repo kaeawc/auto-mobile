@@ -1153,11 +1153,11 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
   let fakeAwaitIdle: FakeAwaitIdle;
   let fakeWindow: FakeWindow;
 
-  const wireDeps = (terminateApp: TerminateApp): void => {
-    (terminateApp as any).observeScreen = fakeObserveScreen;
-    (terminateApp as any).awaitIdle = fakeAwaitIdle;
-    (terminateApp as any).window = fakeWindow;
-  };
+  const collaborators = () => ({
+    observeScreen: fakeObserveScreen,
+    awaitIdle: fakeAwaitIdle,
+    window: fakeWindow,
+  });
 
   beforeEach(() => {
     setDebugPerfEnabled(true); // exercise DefaultPerformanceTracker (NoOp hides the tree)
@@ -1182,8 +1182,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     const terminateApp = new TerminateApp(iosSimDevice, null, {
       simctl: fakeSimctl,
       timer: fakeTimer,
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -1199,8 +1199,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     const terminateApp = new TerminateApp(iosSimDevice, null, {
       simctl: fakeSimctl,
       timer: fakeTimer,
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -1219,8 +1219,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
       simctl: fakeSimctl,
       timer: fakeTimer,
       deviceTerminator: terminator,
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -1241,8 +1241,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
       simctl: fakeSimctl,
       timer: fakeTimer,
       deviceTerminator: terminator,
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
     expect(result.success).toBe(false);
@@ -1269,8 +1269,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(() => {
         fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
       }),
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     // skipUiStability keeps the Android gfxinfo path out of the test; the perf
     // ownership under observedInteraction is what we are covering here.
     const result = await terminateApp.execute("com.example.app", { skipUiStability: true });
@@ -1294,8 +1294,8 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     const terminateApp = new TerminateApp(androidDevice, fakeAdb, {
       timer: fakeTimer,
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
+      ...collaborators(),
     });
-    wireDeps(terminateApp);
     try {
       const result = await terminateApp.execute("com.example.app", {
         userId: 0,

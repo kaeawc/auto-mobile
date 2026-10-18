@@ -92,8 +92,8 @@ describe("DragAndDrop vision fallback", () => {
       visionConfig: enabledVisionConfig,
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
+      observeScreen: fakeObserveScreen,
     });
-    (dnd as any).observeScreen = fakeObserveScreen;
     return dnd;
   };
 
@@ -168,8 +168,8 @@ describe("DragAndDrop vision fallback", () => {
       visionConfig: { ...enabledVisionConfig, enabled: false },
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
+      observeScreen: fakeObserveScreen,
     });
-    (dnd as any).observeScreen = fakeObserveScreen;
 
     const result = await dnd.execute({
       source: { text: "MissingSource" },

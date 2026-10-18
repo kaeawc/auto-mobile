@@ -74,12 +74,13 @@ describe("HandleIntentChooser", () => {
     fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
 
     // Create HandleIntentChooser instance
-    handleIntentChooser = new HandleIntentChooser(testDevice, null, () => fakeDeepLinkManager);
-
-    // Replace the internal managers with our fakes
-    (handleIntentChooser as any).observeScreen = fakeObserveScreen;
-    (handleIntentChooser as any).window = fakeWindow;
-    (handleIntentChooser as any).awaitIdle = fakeAwaitIdle;
+    handleIntentChooser = new HandleIntentChooser(
+      testDevice,
+      null,
+      () => fakeDeepLinkManager,
+      undefined,
+      { observeScreen: fakeObserveScreen, window: fakeWindow, awaitIdle: fakeAwaitIdle },
+    );
     // These cases exercise chooser routing. BaseVisualChange's observation and
     // settle contract is covered independently, so invoke the feature block
     // directly with the configured fake observation.

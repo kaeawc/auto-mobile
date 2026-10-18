@@ -95,10 +95,10 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       elementSelector: fakeElementSelector,
       iosVoiceOverDetector: fakeVoiceOverDetector,
       lastRenderedObservation: displayLookup,
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (tapAny as any).observeScreen = fakeObserveScreen;
-    (tapAny as any).awaitIdle = fakeAwaitIdle;
-    (tapAny as any).window = fakeWindow;
   });
 
   afterEach(() => {
@@ -263,10 +263,10 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       timer: fakeTimer,
       elementSelector: fakeElementSelector,
       iosVoiceOverDetector: realDetector,
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (tapAny as any).observeScreen = fakeObserveScreen;
-    (tapAny as any).awaitIdle = fakeAwaitIdle;
-    (tapAny as any).window = fakeWindow;
 
     const result = await tapAny.execute({ action: "tap" });
 

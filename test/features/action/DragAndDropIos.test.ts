@@ -113,10 +113,11 @@ describe("DragAndDrop - iOS", () => {
     );
     iosSpy = spyOnIosClientInstance(fakeIosClient);
 
-    dragAndDrop = new DragAndDrop(IOS_DEVICE, null, fakeTimer);
-    (dragAndDrop as any).observeScreen = fakeObserveScreen;
-    (dragAndDrop as any).awaitIdle = fakeAwaitIdle;
-    (dragAndDrop as any).window = fakeWindow;
+    dragAndDrop = new DragAndDrop(IOS_DEVICE, null, fakeTimer, {
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+    });
   });
 
   afterEach(() => {

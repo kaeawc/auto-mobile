@@ -139,10 +139,14 @@ describe("PressButton Android keycode dispatch", () => {
   });
 
   const press = async (button: string, window?: WindowInterface) => {
-    const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
-    if (window) {
-      (pressButton as any).window = window;
-    }
+    const pressButton = new PressButton(
+      androidDevice,
+      fakeAdb,
+      fakeTimer,
+      undefined,
+      undefined,
+      window ? { window } : {},
+    );
     const result = await (
       pressButton as unknown as {
         executeAndroidButtonPress(button: string): ReturnType<PressButton["press"]>;

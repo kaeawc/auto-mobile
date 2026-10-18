@@ -101,13 +101,12 @@ describe("Rotate", () => {
       createExecResult("1"),
     );
 
-    // Instantiate Rotate with fake ADB
-    rotate = new Rotate(mockDevice, fakeAdb, fakeTimer);
-
-    // Inject all fakes to avoid real device operations
-    (rotate as any).awaitIdle = fakeAwaitIdle;
-    (rotate as any).observeScreen = fakeObserveScreen;
-    (rotate as any).window = fakeWindow;
+    // Instantiate Rotate with fake ADB and every collaborator faked to avoid real device operations
+    rotate = new Rotate(mockDevice, fakeAdb, fakeTimer, undefined, {
+      awaitIdle: fakeAwaitIdle,
+      observeScreen: fakeObserveScreen,
+      window: fakeWindow,
+    });
   });
 
   test("rotate dispatches with a not-fresh pre-read", async () => {
@@ -1872,15 +1871,20 @@ describe("Rotate", () => {
         releaseFirstWait = resolve;
       });
       let waitForRotationCalls = 0;
-      const gatedAwaitIdle = {
-        waitForRotation: async () => {
+      class GatedAwaitIdle extends FakeAwaitIdle {
+        override async waitForRotation(): Promise<void> {
           waitForRotationCalls++;
           if (waitForRotationCalls === 1) {
             await firstWaitGate;
           }
-        },
-      };
-      (rotate as any).awaitIdle = gatedAwaitIdle;
+        }
+      }
+      const gatedAwaitIdle = new GatedAwaitIdle();
+      rotate = new Rotate(mockDevice, fakeAdb, fakeTimer, undefined, {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: gatedAwaitIdle,
+        window: fakeWindow,
+      });
 
       const secondRotate = new Rotate(mockDevice, fakeAdb, fakeTimer, undefined, {
         observeScreen: fakeObserveScreen,

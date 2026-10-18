@@ -14,7 +14,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
-import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
@@ -151,14 +150,12 @@ import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.coroutines.resume
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -174,7 +171,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -1309,6 +1305,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
+  private val screenshotController by lazy {
+    ScreenshotController(
+      host =
+        object : ScreenshotController.Host {
+          override fun takeScreenshot(displayId: Int, callback: TakeScreenshotCallback) {
+            this@CtrlProxy.takeScreenshot(displayId, mainExecutor, callback)
+          }
+
+          override fun rotationProvenance() = this@CtrlProxy.rotationProvenance
+        },
+      displayController = displayController,
+      timeProvider = timeProvider,
+    )
+  }
   private val nodeActionController by lazy {
     NodeActionController(
       host =
@@ -1606,36 +1616,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   // #5470 review); the next scroll discards the stale accumulation instead of combining across
   // sessions. A concurrent client joining does NOT change it, so an in-flight scroll is preserved.
   @Volatile private var pendingScrollSessionGeneration: Int = 0
-
-  private data class ScreenshotCapturePayload(
-    val base64Image: String,
-    val rotation: Int?,
-    val displayId: Int,
-    val panelUniqueId: String?,
-    val captureDurationMs: Long,
-    val encodeDurationMs: Long,
-    val byteLength: Int,
-    val base64Length: Int,
-  )
-
-  /**
-   * Raw result of the platform takeScreenshot callback, carrying the failure code (issue #4927).
-   */
-  private sealed interface ScreenshotCallbackResult {
-    data class Captured(val bitmap: Bitmap, val rotation: Int?) : ScreenshotCallbackResult
-
-    data class Failed(val errorCode: Int?) : ScreenshotCallbackResult
-  }
-
-  /**
-   * Outcome of [takeScreenshotAsync]: an encoded payload, or a failure that retains the platform
-   * error code so the broadcast can surface a rate limit distinctly instead of a generic failure.
-   */
-  private sealed interface ScreenshotCaptureOutcome {
-    data class Success(val payload: ScreenshotCapturePayload) : ScreenshotCaptureOutcome
-
-    data class Failure(val errorCode: Int?) : ScreenshotCaptureOutcome
-  }
 
   // Job for collecting hierarchy flow results
   private var hierarchyFlowJob: Job? = null
@@ -4549,120 +4529,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Takes a screenshot and returns it as a base64-encoded JPEG plus capture diagnostics. Requires
-   * Android R (API 30) or higher. Runs on IO dispatcher to avoid blocking the main thread.
-   */
-  private suspend fun takeScreenshotAsync(
-    targetDisplayId: Int,
-    quality: Int = 80,
-  ): ScreenshotCaptureOutcome {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-      Log.w(TAG, "Screenshot API requires Android R (API 30) or higher")
-      return ScreenshotCaptureOutcome.Failure(null)
-    }
-
-    return withContext(Dispatchers.IO) {
-      try {
-        val startTime = System.currentTimeMillis()
-
-        // Use suspendCancellableCoroutine to bridge callback-based API
-        val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
-        val rotationAtCaptureStart = displayController.getRotationOrNull(targetDisplayId)
-        val captured =
-          suspendCancellableCoroutine<ScreenshotCallbackResult> { continuation ->
-            takeScreenshot(
-              targetDisplayId,
-              mainExecutor,
-              object : TakeScreenshotCallback {
-                override fun onSuccess(screenshot: ScreenshotResult) {
-                  val hardwareBitmap =
-                    Bitmap.wrapHardwareBuffer(
-                      screenshot.hardwareBuffer,
-                      screenshot.colorSpace,
-                    )
-                  screenshot.hardwareBuffer.close()
-                  if (hardwareBitmap == null) {
-                    continuation.resume(ScreenshotCallbackResult.Failed(null))
-                    return
-                  }
-                  // A display change makes the pixels' orientation ambiguous. Preserve that
-                  // ambiguity as null so desktop control fails closed rather than guessing.
-                  val rotation =
-                    rotationProvenance.rotationIfUnchanged(
-                      rotationCapture,
-                      rotationAtCaptureStart,
-                      displayController.getRotationOrNull(targetDisplayId),
-                      targetDisplayId,
-                    )
-                  continuation.resume(ScreenshotCallbackResult.Captured(hardwareBitmap, rotation))
-                }
-
-                override fun onFailure(errorCode: Int) {
-                  // Retain the platform error code so the broadcast can distinguish a rate limit
-                  // (ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) from a real failure (issue #4927).
-                  Log.e(TAG, "Screenshot failed with error code: $errorCode")
-                  continuation.resume(ScreenshotCallbackResult.Failed(errorCode))
-                }
-              },
-            )
-          }
-
-        if (captured is ScreenshotCallbackResult.Failed) {
-          Log.e(TAG, "Failed to capture screenshot bitmap (errorCode=${captured.errorCode})")
-          return@withContext ScreenshotCaptureOutcome.Failure(captured.errorCode)
-        }
-
-        val (bitmap, rotation) = captured as ScreenshotCallbackResult.Captured
-
-        val screenshotTime = System.currentTimeMillis() - startTime
-        Log.d(TAG, "Screenshot captured in ${screenshotTime}ms (${bitmap.width}x${bitmap.height})")
-
-        // Convert to JPEG bytes on IO thread
-        val encodeStart = System.currentTimeMillis()
-        val outputStream = ByteArrayOutputStream()
-
-        // Convert hardware bitmap to software bitmap for compression
-        val softwareBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
-        bitmap.recycle()
-
-        softwareBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
-        softwareBitmap.recycle()
-
-        val jpegBytes = outputStream.toByteArray()
-        val base64String = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
-
-        val encodeTime = System.currentTimeMillis() - encodeStart
-        val totalTime = System.currentTimeMillis() - startTime
-
-        Log.d(
-          TAG,
-          "Screenshot encoded: ${jpegBytes.size} bytes -> ${base64String.length} base64 chars in ${encodeTime}ms (total: ${totalTime}ms)",
-        )
-
-        ScreenshotCaptureOutcome.Success(
-          ScreenshotCapturePayload(
-            base64Image = base64String,
-            rotation = rotation,
-            displayId = targetDisplayId,
-            panelUniqueId = displayController.panelUniqueId(targetDisplayId),
-            captureDurationMs = screenshotTime,
-            encodeDurationMs = encodeTime,
-            byteLength = jpegBytes.size,
-            base64Length = base64String.length,
-          ),
-        )
-      } catch (e: CancellationException) {
-        // The awaiting caller is being cancelled — rethrow instead of converting the cancellation
-        // into a null screenshot (#3191).
-        throw e
-      } catch (e: Exception) {
-        Log.e(TAG, "Error taking screenshot", e)
-        ScreenshotCaptureOutcome.Failure(null)
-      }
-    }
-  }
-
-  /**
    * Search the active window's root first, then the other windows the hierarchy extractor reports
    * for the active display (topmost first), for the first node [find] returns. The extractor's own
    * window enumeration is reused so node actions and focus read-back cannot disagree with
@@ -4874,7 +4740,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           capture.value
         } else {
           prototypesHidden = null
-          takeScreenshotAsync(targetDisplayId)
+          screenshotController.takeScreenshotAsync(targetDisplayId)
         }
       val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
       when (outcome) {
@@ -4924,8 +4790,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     targetDisplayId: Int,
   ): PrototypeHiddenCapture<ScreenshotCaptureOutcome> =
     if (::prototypeController.isInitialized)
-      prototypeController.withHiddenForCapture { takeScreenshotAsync(targetDisplayId) }
-    else PrototypeHiddenCapture(takeScreenshotAsync(targetDisplayId), prototypeExcluded = true)
+      prototypeController.withHiddenForCapture {
+        screenshotController.takeScreenshotAsync(targetDisplayId)
+      }
+    else
+      PrototypeHiddenCapture(
+        screenshotController.takeScreenshotAsync(targetDisplayId),
+        prototypeExcluded = true,
+      )
 
   /** Broadcast navigation event to WebSocket clients using typed protocol */
   private suspend fun broadcastNavigationEvent(

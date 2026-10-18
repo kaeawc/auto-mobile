@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   createCompleteLockFile,
@@ -29,16 +29,10 @@ class UnreachableProbe implements ForwardLeaseOwnerProbe {
 }
 
 describe("cross-daemon claim store: torn claims cannot exist and unreadable ones are not free", () => {
-  const roots: string[] = [];
-  afterEach(() => {
-    for (const root of roots.splice(0)) {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+  const scratch = useScratchRoot("cross-daemon-corrupt-claim-");
 
   function tempRoot(): string {
-    const root = mkdtempSync(join(tmpdir(), "cross-daemon-corrupt-claim-"));
-    roots.push(root);
+    const root = scratch.next();
     return root;
   }
 

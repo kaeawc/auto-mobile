@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { existsSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -14,19 +14,16 @@ import { FakeTimer } from "../fakes/FakeTimer";
 describe("daemon auxiliary socket exit cleanup", () => {
   const previousAuxDir = testOverrides.auxSocketDir;
   let directory: string;
+  const scratch = useScratchRoot("daemon-aux-exit-");
 
   afterEach(() => {
     // Constructing a Daemon initializes the process-wide DaemonState; do not leak it to later files.
     DaemonState.getInstance().reset();
     testOverrides.auxSocketDir = previousAuxDir;
-    if (directory) {
-      rmSync(directory, { recursive: true, force: true });
-    }
-    directory = "";
   });
 
   function makeDaemon(): { daemon: Daemon; pidFilePath: string } {
-    directory = mkdtempSync(join(tmpdir(), "daemon-aux-exit-"));
+    directory = scratch.next();
     testOverrides.auxSocketDir = directory;
     const daemon = new Daemon({}, { timer: new FakeTimer() });
     daemon["socketBindCommitted"] = true;

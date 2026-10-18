@@ -20,8 +20,8 @@ test/daemon/deviceBindingWriters.test.ts	heavy-harness
 test/daemon/deviceGestureRecordingSocketServerStartOwnership.test.ts	heavy-harness
 test/daemon/deviceHoldCharacterization.test.ts	heavy-harness
 test/daemon/deviceLeaseOwnerQuery.test.ts	recursive-rm
-test/daemon/devicePool.assignDevice.test.ts	heavy-harness
 test/daemon/devicePool.autolock.test.ts	heavy-harness
+test/daemon/devicePool.bindDevice.rebind.test.ts	heavy-harness
 test/daemon/devicePool.criteriaRollback.test.ts	heavy-harness
 test/daemon/devicePool.evictionCatch.test.ts	heavy-harness
 test/daemon/devicePool.idleEvictionStaleSnapshot.test.ts	heavy-harness

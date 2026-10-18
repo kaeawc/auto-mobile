@@ -182,7 +182,6 @@
 1	test/devices/iosCreatedSimRollbackBooted.test.ts
 1	test/devices/physicalIosDeviceResolution.test.ts
 1	test/devices/waitForDeviceReadyOrCancel.test.ts
-2	test/doctor/android.test.ts
 1	test/fakes/FakeAndroidInventoryLoad.ts
 2	test/fakes/FakeTimer.ts
 1	test/fakes/SafeDaemonManager.ts
@@ -194,7 +193,7 @@
 1	test/features/action/DragAndDrop.hierarchyLayer.test.ts
 1	test/features/action/InputText.execute.test.ts
 2	test/features/action/InputText.iosImeAction.test.ts
-4	test/features/action/InputText.test.ts
+3	test/features/action/InputText.test.ts
 1	test/features/action/IosSdkTriggerReadiness.test.ts
 7	test/features/action/LaunchApp.test.ts
 8	test/features/action/OpenURL.test.ts
@@ -463,9 +462,6 @@
 1	test/utils/android-cmdline-tools/AdbClient-executionContract.test.ts
 2	test/utils/android-cmdline-tools/AdbClient-getBootedAndroidDevices.test.ts
 1	test/utils/android-cmdline-tools/AdbClient-getDeviceLock.test.ts
-4	test/utils/android-cmdline-tools/AdbClient-missingAdbRecovery.test.ts
-8	test/utils/android-cmdline-tools/AdbClientExecWithSignal.test.ts
-7	test/utils/android-cmdline-tools/AdbClientPathDiscoveryTimeout.test.ts
 1	test/utils/android-cmdline-tools/AdbClientPerfSpan.test.ts
 2	test/utils/android-cmdline-tools/AndroidEmulatorClient-architectureCompatibility.test.ts
 4	test/utils/android-cmdline-tools/AndroidEmulatorClient-bootAdmission.test.ts

@@ -6,6 +6,7 @@ import {
   rememberSessionDeviceId,
 } from "./proxy/SessionBinding";
 import { HeartbeatKeeper, type HeartbeatKeeperPort } from "./proxy/HeartbeatKeeper";
+import { applyConnectionPresentationProfile } from "./proxy/ConnectionPresentationProfile";
 import { DaemonErrorClassifier } from "./proxy/DaemonErrorClassifier";
 import { ConnectionRecovery, type ConnectionRecoveryPort } from "./proxy/ConnectionRecovery";
 import {
@@ -1647,85 +1648,12 @@ export class DaemonMcpProxy {
       : [establishOwnership, applyPresentationProfile];
   }
 
-  /**
-   * Materialize this frontend's presentation options on its daemon-issued
-   * connection profile. The profile survives socket reconnects in this proxy,
-   * while reapplying the writes makes daemon replacement safe without promoting
-   * any of these options back to process-global startup state.
-   */
-  private async applyConnectionPresentationProfile(client: DaemonClientLike): Promise<void> {
-    const {
-      enabledTools = [],
-      disabledTools = [],
-      toolResultsNoStructuredContent,
-      actionsCompactMetadata,
-    } = this.config.daemonOptions ?? {};
-    const updates = this.connectionPresentationUpdates(
-      enabledTools,
-      disabledTools,
-      toolResultsNoStructuredContent,
-      actionsCompactMetadata,
-    );
-
-    for (const update of updates) {
-      const requestedArgs = {
-        ...update,
-        ...(toolResultsNoStructuredContent !== undefined
-          ? {
-              [INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM]: toolResultsNoStructuredContent,
-            }
-          : {}),
-        ...(actionsCompactMetadata !== undefined
-          ? { [INTERNAL_ACTIONS_COMPACT_METADATA_PARAM]: actionsCompactMetadata }
-          : {}),
-      };
-      const forwardedArgs = this.withToolSelectionProfile(requestedArgs);
-      const result = await runPreflightTransport(() =>
-        client.callTool(SET_TOOL_ENABLED_TOOL_NAME, forwardedArgs),
-      );
-      if (result?.isError) {
-        throw new DaemonUnavailableError(
-          `Failed to apply connection presentation profile: ${JSON.stringify(result)}`,
-        );
-      }
-      this.rememberToolSelectionProfile(SET_TOOL_ENABLED_TOOL_NAME, requestedArgs, result);
-      if (!this.toolSelectionProfileUuid) {
-        throw new DaemonUnavailableError(
-          "Daemon did not return a connection profile while applying presentation options",
-        );
-      }
-    }
-  }
-
-  private connectionPresentationUpdates(
-    enabledTools: string[],
-    disabledTools: string[],
-    toolResultsNoStructuredContent: boolean | undefined,
-    actionsCompactMetadata: boolean | undefined,
-  ): Array<{ toolNames: string[]; enabled: boolean }> {
-    if (
-      enabledTools.length === 0 &&
-      disabledTools.length === 0 &&
-      toolResultsNoStructuredContent === undefined &&
-      actionsCompactMetadata === undefined
-    ) {
-      return [];
-    }
-
-    const updates: Array<{ toolNames: string[]; enabled: boolean }> = [];
-    if (enabledTools.length > 0) {
-      updates.push({ toolNames: [...enabledTools], enabled: true });
-    }
-    if (disabledTools.length > 0) {
-      updates.push({ toolNames: [...disabledTools], enabled: false });
-    }
-    if (updates.length === 0) {
-      // setToolEnabled is always-on; reaffirming it is a no-op that mints the
-      // connection profile needed to carry a presentation-only policy.
-      updates.push({ toolNames: [SET_TOOL_ENABLED_TOOL_NAME], enabled: true });
-    }
-
-    return updates;
+  private applyConnectionPresentationProfile(client: DaemonClientLike): Promise<void> {
+    return applyConnectionPresentationProfile(client, this.config.daemonOptions, {
+      withToolSelectionProfile: (args) => this.withToolSelectionProfile(args),
+      rememberToolSelectionProfile: (...args) => this.rememberToolSelectionProfile(...args),
+      hasToolSelectionProfile: () => Boolean(this.toolSelectionProfileUuid),
+    });
   }
 
   // Drop the cached definitions for one list kind. Bumping the discovery epoch

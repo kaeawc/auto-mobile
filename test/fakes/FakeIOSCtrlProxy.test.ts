@@ -262,3 +262,68 @@ describe("FakeIOSCtrlProxy dispatch contract for tap, swipe and pinch", () => {
     });
   });
 });
+
+describe("FakeIOSCtrlProxy multi-finger swipe dispatch", () => {
+  const swipe = (
+    proxy: FakeIOSCtrlProxy,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+    beforeSend?: () => void,
+  ) =>
+    proxy.requestMultiFingerSwipe(
+      1,
+      2,
+      3,
+      4,
+      3,
+      300,
+      undefined,
+      undefined,
+      10,
+      signal,
+      onDispatch,
+      beforeSend,
+    );
+
+  test("runs the display fence before recording the gesture and reports onDispatch", async () => {
+    const proxy = new FakeIOSCtrlProxy();
+    const order: string[] = [];
+    const result = await swipe(
+      proxy,
+      undefined,
+      () => order.push("dispatch"),
+      () => order.push(`fence:${proxy.getMultiFingerSwipeHistory().length}`),
+    );
+    expect(order).toEqual(["fence:0", "dispatch"]);
+    expect(result).toMatchObject({ success: true, dispatched: true, acknowledged: true });
+  });
+
+  test("a throwing fence stops the gesture before it is recorded or dispatched", async () => {
+    const proxy = new FakeIOSCtrlProxy();
+    let dispatched = false;
+    const fence = new Error("display changed");
+    await expect(
+      swipe(
+        proxy,
+        undefined,
+        () => {
+          dispatched = true;
+        },
+        () => {
+          throw fence;
+        },
+      ),
+    ).rejects.toBe(fence);
+    expect(dispatched).toBe(false);
+    expect(proxy.getMultiFingerSwipeHistory()).toHaveLength(0);
+  });
+
+  test("an already-aborted signal throws the abort reason without recording", async () => {
+    const proxy = new FakeIOSCtrlProxy();
+    const controller = new AbortController();
+    const reason = new Error("deadline");
+    controller.abort(reason);
+    await expect(swipe(proxy, controller.signal)).rejects.toBe(reason);
+    expect(proxy.getMultiFingerSwipeHistory()).toHaveLength(0);
+  });
+});

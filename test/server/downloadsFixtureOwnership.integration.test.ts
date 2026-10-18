@@ -13,6 +13,9 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DownloadsFixtureService } from "../../src/server/downloadsFixtureService";
 import type { BootedDevice } from "../../src/models";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * #7007 P1 — a connection bound to session A must not be able to stage into

@@ -5,6 +5,9 @@ import {
 } from "../../src/features/toolSelection/SessionToolSelectionService";
 import { registerMcpTools } from "../../src/server";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("tool selection default declarations", () => {
   afterEach(() => {

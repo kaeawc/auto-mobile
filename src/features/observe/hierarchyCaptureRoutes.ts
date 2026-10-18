@@ -2,7 +2,7 @@ import type { ViewHierarchyResult } from "../../models";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { errorMessage as describeError } from "../../utils/describeUnknownError";
-import { AndroidDisplayReadError } from "./ObservationDisplay";
+import { AndroidDisplayReadError } from "./AndroidDisplayReadError";
 import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "./DeviceHierarchyCapture";
 import { DisplaySelectionError } from "./DisplaySelection";
 import { displayTransitions, type DisplayCaptureStart } from "./DisplayTransition";
@@ -15,7 +15,7 @@ import {
   type SelectedDisplayReadPolicy,
 } from "./SelectedDisplayRead";
 import { StaleDisplayError, staleDisplayError } from "./StaleDisplayError";
-import { StrictSettledScreenshotCaptureError } from "./SettledScreenshotCapture";
+import { StrictSettledScreenshotCaptureError } from "./StrictSettledScreenshotCaptureError";
 
 /** How one observation routes its hierarchy capture, and which capture failures must surface. */
 

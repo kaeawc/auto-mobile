@@ -3,6 +3,9 @@ import { registerFormTools, createSetUIStateHandler } from "../../src/server/for
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 import type { SetUIStateResult } from "../../src/features/action/SetUIState";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device: BootedDevice = { deviceId: "ios-test", name: "iPhone", platform: "ios" };
 const args = { fields: [{ selector: { elementId: "email" }, value: "new" }] };

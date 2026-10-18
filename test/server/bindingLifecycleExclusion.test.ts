@@ -29,6 +29,9 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /** Records each platform kill and stops there, so an admitted call proves only that it got past the gate. */
 class RecordingKillDeviceManager extends FakeDeviceUtils {

@@ -11,9 +11,9 @@ import type { ObserveResult } from "../../../models/ObserveResult";
 
 export const MAX_INLINE_SCREENSHOT_BYTES = 5 * 1024 * 1024;
 
-export type ScreenshotImageStatus =
-  | { included: true; mimeType: string; sizeBytes: number }
-  | { included: false; reason: string; sizeBytes?: number; capBytes?: number };
+import type { ScreenshotImageStatus } from "../../../models/ScreenshotImageStatus";
+
+export type { ScreenshotImageStatus };
 
 export type InlineScreenshotImageResult =
   | {

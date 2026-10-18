@@ -84,7 +84,7 @@ Whether the emulator exposes a stylus-capable input device to apps (an
 `recordDeviceGestures` reads kernel events with `getevent`. The reconstruction
 (`TouchFrameReconstructor.ts`) keeps position and `ABS_MT_PRESSURE` per slot, and
 nothing else: it ignores `ABS_MT_TOOL_TYPE`, `BTN_TOOL_PEN`, `BTN_STYLUS`,
-`ABS_MT_TILT_*`/`ABS_TILT_*` and `ABS_DISTANCE` (hover distance). The pressure it
+`ABS_TILT_X`/`ABS_TILT_Y`, and `ABS_DISTANCE`/`ABS_MT_DISTANCE` (hover distance). The pressure it
 keeps is not used by the gesture classifier. A recorded stylus stroke is therefore
 exported as an ordinary finger swipe, and hover is invisible.
 
@@ -199,7 +199,7 @@ Extending `recordDeviceGestures` needs the gesture event to carry a tool type an
 pressure series, and the exported `swipeAt`/`dragPath` step to carry `pointer`:
 
 - `GetEventReader`/`TouchFrameReconstructor` must read `ABS_MT_TOOL_TYPE`,
-  `BTN_TOOL_PEN` and the tilt and distance axes, and keep per-contact pressure over
+  `BTN_TOOL_PEN`, `ABS_TILT_X`/`ABS_TILT_Y` and `ABS_DISTANCE`/`ABS_MT_DISTANCE`, and keep per-contact pressure over
   time, not just the last value.
 - Event-node discovery must find and read the pen's node as well as the multitouch
   one, and handle non-multitouch contact coordinates (`ABS_X`/`ABS_Y`).

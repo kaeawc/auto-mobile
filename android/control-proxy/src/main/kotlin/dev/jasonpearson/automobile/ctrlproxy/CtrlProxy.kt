@@ -98,6 +98,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
+import dev.jasonpearson.automobile.protocol.ActionResult
 import dev.jasonpearson.automobile.protocol.AnrData
 import dev.jasonpearson.automobile.protocol.AnrEvent
 import dev.jasonpearson.automobile.protocol.BroadcastEventData
@@ -117,6 +118,7 @@ import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NetworkEventData
 import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
+import dev.jasonpearson.automobile.protocol.PermissionResult
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.RequestCommitText
@@ -147,6 +149,7 @@ import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.protocol.SdkNotificationActionEvent
 import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
+import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.WebSocketFrameData
 import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
@@ -5679,17 +5682,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     resultBroadcaster.guard(requestId, "set_keyboard_profile_result") {
-      webSocketServer.broadcastWithPerfSync { perfTiming ->
-        webSocketFrameJson(
-          "set_keyboard_profile_result",
+      webSocketServer.broadcastTypedWithPerf { perfTiming ->
+        SetKeyboardProfileResult(
+          timestamp = System.currentTimeMillis(),
           requestId = requestId,
+          success = success,
+          activeProfileId = activeProfileId,
+          previousProfileId = previousProfileId,
+          error = error,
           perfTiming = perfTiming,
-        ) {
-          put("success", success)
-          if (activeProfileId != null) put("activeProfileId", activeProfileId)
-          if (previousProfileId != null) put("previousProfileId", previousProfileId)
-          if (error != null) put("error", error)
-        }
+        )
       }
       Log.d(
         TAG,
@@ -5746,18 +5748,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     resultBroadcaster.guard(requestId, "action_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        webSocketFrameJson("action_result", requestId = requestId, perfTiming = perfTiming) {
-          put("action", action)
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (error != null) {
-            put("error", error)
-          }
-          if (alreadySatisfied) {
-            put("alreadySatisfied", true)
-          }
-        }
+      webSocketServer.broadcastTypedWithPerf { perfTiming ->
+        ActionResult(
+          timestamp = System.currentTimeMillis(),
+          requestId = requestId,
+          success = success,
+          action = action,
+          totalTimeMs = totalTimeMs,
+          error = error,
+          perfTiming = perfTiming,
+          alreadySatisfied = alreadySatisfied,
+        )
       }
       Log.d(TAG, "Broadcasted action result to ${webSocketServer.getConnectionCount()} clients")
     }
@@ -5776,25 +5777,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     resultBroadcaster.guard(requestId, "permission_result") {
       val success = result.error == null
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        webSocketFrameJson("permission_result", requestId = requestId, perfTiming = perfTiming) {
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          put("permission", result.permission)
-          put("granted", result.granted)
-          put("requestLaunched", result.requestLaunched)
-          put("canRequest", result.canRequest)
-          put("requiresSettings", result.requiresSettings)
-          if (result.instructions != null) {
-            put("instructions", result.instructions)
-          }
-          if (result.adbCommand != null) {
-            put("adbCommand", result.adbCommand)
-          }
-          if (result.error != null) {
-            put("error", result.error)
-          }
-        }
+      webSocketServer.broadcastTypedWithPerf { perfTiming ->
+        PermissionResult(
+          timestamp = System.currentTimeMillis(),
+          requestId = requestId,
+          success = success,
+          permission = result.permission,
+          granted = result.granted,
+          requestLaunched = result.requestLaunched,
+          canRequest = result.canRequest,
+          requiresSettings = result.requiresSettings,
+          instructions = result.instructions,
+          adbCommand = result.adbCommand,
+          totalTimeMs = totalTimeMs,
+          error = result.error,
+          perfTiming = perfTiming,
+        )
       }
       Log.d(TAG, "Broadcasted permission result to ${webSocketServer.getConnectionCount()} clients")
     }

@@ -254,7 +254,7 @@ export class SwipeOn extends BaseVisualChange {
   private executeGesture!: GestureExecutor;
   private scrollables!: ScrollableElementsQuery;
   private geometry!: ElementGeometry;
-  private accessibilityService!: AndroidCtrlProxyClient;
+  private accessibilityService!: import("./types").SwipeOnCtrlProxy;
   private accessibilityDetector!: AccessibilityDetector;
   private featureFlags!: FeatureFlagReader;
   private overlayDetector: OverlayDetector;

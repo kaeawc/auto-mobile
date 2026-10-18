@@ -47,7 +47,6 @@ function createFakeDaemonState() {
 function createServer(fakeTimer: FakeTimer): UnixSocketServer {
   return createTestUnixSocketServer(
     join(tmpdir(), `progress-deadline-${randomUUID()}.sock`),
-    "http://localhost:0/mcp",
     createFakeDaemonState(),
     fakeTimer,
   );
@@ -681,7 +680,6 @@ describe("pushProgressNotification is independent of the general notification su
   } {
     const server = createTestUnixSocketServer(
       join(tmpdir(), `progress-subscription-${randomUUID()}.sock`),
-      "http://localhost:0/mcp",
       { isInitialized: () => false },
       new FakeTimer(),
     );

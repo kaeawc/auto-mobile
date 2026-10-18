@@ -1,26 +1,20 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { makePool as buildPool } from "../helpers/makePool";
 import { describe, expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
+import type { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
-import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 function makePool(timer: FakeTimer): DevicePool {
-  return new DevicePool(
-    createDevicePoolDependencies(
-      new SessionManager(timer, new FakeDeviceSessionPersistence()),
-      "daemon-session",
-      {
-        timer: timer,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-        deviceManager: new FakeDeviceManager(),
-        retryExecutor: new DefaultRetryExecutor(timer),
-      },
-    ),
+  return buildPool(
+    new SessionManager(timer, new FakeDeviceSessionPersistence()),
+    "daemon-session",
+    {
+      timer,
+      deviceManager: new FakeDeviceManager(),
+    },
   );
 }
 

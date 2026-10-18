@@ -28,6 +28,10 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import {
+  spyOnIosClientInstance,
+  spyOnIosExistingInstance,
+} from "../../helpers/iosCtrlProxyClientSpies";
 
 const device = {
   name: "provenance-ios",
@@ -99,9 +103,7 @@ function harness(
   const latest = spyOn(client, "getLatestHierarchy").mockImplementation((...args) =>
     delegate.getLatestHierarchy(...args),
   );
-  const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-    client as unknown as IOSCtrlProxyClient,
-  );
+  const instance = spyOnIosClientInstance(client);
   const adb = new FakeAdbClientFactory(new FakeAdbExecutor());
   const hierarchy = new ViewHierarchy(device, adb, timer);
   const screen = createObserveScreenForTest(
@@ -232,7 +234,7 @@ describe("iOS acquisition through real delegate, normalization and observe proje
       const h = harness(null);
       try {
         // Exercise the production public-client forwarding boundary without its transport constructor.
-        const client = { hierarchy: h.delegate } as unknown as IOSCtrlProxyClient;
+        const client = { hierarchy: h.delegate };
         const response = await (
           forceCapture
             ? IOSCtrlProxyClient.prototype.requestHierarchySyncForTapRevalidation
@@ -263,9 +265,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
       const convert = spyOn(h.client, "convertToViewHierarchyResult").mockImplementation((value) =>
         h.delegate.convertToViewHierarchyResult(value),
       );
-      const existing = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
-        h.client as unknown as IOSCtrlProxyClient,
-      );
+      const existing = spyOnIosExistingInstance(h.client);
       const invalidate = spyOn(h.client, "invalidateCache").mockImplementation(() => {
         const cache = h.context.getCachedHierarchy();
         if (cache) {

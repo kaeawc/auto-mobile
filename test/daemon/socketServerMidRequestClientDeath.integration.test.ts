@@ -48,7 +48,6 @@ describe("a client that dies mid-request is seen as disconnected (#11058)", () =
     timer.enableAutoAdvance();
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       {
         isInitialized: () => true,
         getSessionManager: () => ({

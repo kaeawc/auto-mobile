@@ -33,7 +33,6 @@ function createFakeDaemonState() {
 function createServer(): UnixSocketServer {
   return new UnixSocketServer(
     join(tmpdir(), `fix-sessionless-provision-tool-profile-${randomUUID()}.sock`),
-    "http://localhost:0/mcp",
     createFakeDaemonState(),
     new FakeTimer(),
   );

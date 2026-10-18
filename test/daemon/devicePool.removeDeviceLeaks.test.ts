@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { EventEmitter } from "node:events";
@@ -7,7 +8,6 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import type { DeviceInfo } from "../../src/models";
 
 // Regressions for #11123 (items 1-3): tracked-process, release-capture and start-timer leaks.
@@ -22,13 +22,11 @@ describe("DevicePool removeDevice / start leaks (#11123)", () => {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     fakeDeviceUtils = new FakeDeviceUtils();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(sessionManager, "daemon-session-1", {
-        timer,
-        deviceManager: fakeDeviceUtils,
-        ...overrides,
-      }),
-    );
+    const pool = makePool(sessionManager, "daemon-session-1", {
+      timer,
+      deviceManager: fakeDeviceUtils,
+      ...overrides,
+    });
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await pool.initializeWithDevices([androidDevice]);
     return pool;

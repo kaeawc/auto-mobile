@@ -70,7 +70,6 @@ function createServer() {
 
   const server = new UnixSocketServer(
     join(tmpdir(), `scope-${randomUUID()}.sock`),
-    "http://localhost:0/mcp",
     createFakeDaemonState(sessionDevices, sessionDeviceLabels, mcpAutolockSessions),
     new FakeTimer(),
   );

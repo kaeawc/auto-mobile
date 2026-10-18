@@ -1,17 +1,15 @@
+import { makePool } from "../helpers/makePool";
 import { withAndroidTransportId } from "../../src/utils/androidSerial";
 import { MissingDeviceLiveness } from "../../src/daemon/missingDeviceLiveness";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
@@ -45,18 +43,15 @@ function harness(devices: BootedDevice[], serial = usb, avd?: string) {
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const adbFactory = new FakeAdbClientFactory(adb);
   let liveness: MissingDeviceLiveness | undefined;
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "alias-daemon", {
-      timer,
-      deviceManager: manager,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      androidAdbFactory: adbFactory,
-      missingDeviceLivenessFactory: (port) => {
-        liveness = new MissingDeviceLiveness(port);
-        return liveness;
-      },
-    }),
-  );
+  const pool = makePool(sessions, "alias-daemon", {
+    timer,
+    deviceManager: manager,
+    androidAdbFactory: adbFactory,
+    missingDeviceLivenessFactory: (port) => {
+      liveness = new MissingDeviceLiveness(port);
+      return liveness;
+    },
+  });
   return { pool, timer, manager, adb, adbFactory, liveness };
 }
 

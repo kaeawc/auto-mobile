@@ -1,4 +1,4 @@
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { McpError } from "../../src/server/mcpError";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";

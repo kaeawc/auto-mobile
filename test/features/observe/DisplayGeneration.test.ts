@@ -11,7 +11,6 @@ import { ObservedAndroidDisplayCache } from "../../../src/features/observe/Obser
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { SafeAreaAuditor } from "../../../src/features/observe/audits/SafeAreaAuditor";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import type { BootedDevice, DisplayRef, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -23,6 +22,7 @@ import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const fixture = (name: string): string =>
   readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
@@ -77,9 +77,7 @@ function harness(platform: "android" | "ios" = "android", singlePanel = false) {
   const ids = new FakeIdGenerator();
   const client = new FakeIOSCtrlProxy(timer);
   if (platform === "ios") {
-    const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const instance = spyOnIosClientInstance(client);
     restores.push(() => instance.mockRestore());
   }
   let timestamp = 0;
@@ -419,9 +417,7 @@ test("iOS capture sequences and runner client replacement preserve the current g
   expect((await h.screen.execute(options)).display.generation).toBe(1);
   for (const sequence of [7, undefined, 3]) {
     if (sequence === undefined) {
-      spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        new FakeIOSCtrlProxy(h.timer) as unknown as IOSCtrlProxyClient,
-      );
+      spyOnIosClientInstance(new FakeIOSCtrlProxy(h.timer));
     }
     h.panel("cover", { captureSequence: sequence });
     const result = await h.screen.execute(options);

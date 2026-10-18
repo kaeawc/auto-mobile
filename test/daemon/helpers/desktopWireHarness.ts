@@ -179,7 +179,6 @@ class DaemonUnderTest {
     this.monitor.start();
     const server = createTestUnixSocketServer(
       "unused",
-      "http://localhost:0/mcp",
       DaemonState.getInstance(),
       timer,
     ) as unknown as SocketServerInternals;

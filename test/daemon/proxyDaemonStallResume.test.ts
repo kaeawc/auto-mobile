@@ -1,4 +1,4 @@
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer, noActiveDeviceSessionResult } from "../../src/server/proxyServer";

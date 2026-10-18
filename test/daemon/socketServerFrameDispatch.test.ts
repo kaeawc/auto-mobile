@@ -11,12 +11,7 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 test("a later pipe data event answers another device while the first call is held", async () => {
   const timer = new FakeTimer();
-  const server = createTestUnixSocketServer(
-    "unused",
-    "http://localhost:0/mcp",
-    {} as DaemonStateAccess,
-    timer,
-  );
+  const server = createTestUnixSocketServer("unused", {} as DaemonStateAccess, timer);
   const first = Promise.withResolvers<DaemonResponse>();
   const firstStarted = Promise.withResolvers<void>();
   const socket = new FakeSocket();
@@ -78,12 +73,7 @@ test.each(["returned failure", "thrown cancellation"])(
   async (contract) => {
     const timer = new FakeTimer();
     const device: BootedDevice = { platform: "android", deviceId: "fake-press", name: "Fake" };
-    const server = createTestUnixSocketServer(
-      "unused",
-      "http://localhost:0/mcp",
-      {} as DaemonStateAccess,
-      timer,
-    );
+    const server = createTestUnixSocketServer("unused", {} as DaemonStateAccess, timer);
     const internals = server as unknown as PressServerInternals;
     internals.acceptingRequests = true;
     internals.resolveInputTargetDevice = async () => device;

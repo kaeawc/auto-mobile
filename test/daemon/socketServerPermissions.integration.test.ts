@@ -31,12 +31,7 @@ describe("UnixSocketServer filesystem permissions (issue #4750)", () => {
     // Keep the total path short: macOS caps Unix socket paths at ~104 chars.
     socketDir = await mkdtemp(join(tmpdir(), "sp-"));
     socketPath = join(socketDir, "n", "s.sock");
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      new FakeTimer(),
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), new FakeTimer());
     await server.start();
   });
 

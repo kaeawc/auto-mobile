@@ -1813,11 +1813,9 @@ export class Daemon {
   private async bindControlSocket(): Promise<UnixSocketServer> {
     logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
     logger.info(`MCP_STREAMABLE_PATH: "${MCP_STREAMABLE_PATH}"`);
-    const mcpEndpoint = `http://${this.host}:${this.port}${MCP_STREAMABLE_PATH}`;
-    logger.info(`Creating UnixSocketServer with endpoint: "${mcpEndpoint}"`);
+    logger.info(`Creating UnixSocketServer at "${SOCKET_PATH}"`);
     this.socketServer = new UnixSocketServer(
       SOCKET_PATH,
-      mcpEndpoint,
       undefined,
       undefined,
       FeatureFlagService.getInstance(),
@@ -4558,10 +4556,8 @@ export class Daemon {
         }
 
         // Recreate socket server
-        const mcpEndpoint = `http://${this.host}:${this.port}${MCP_STREAMABLE_PATH}`;
         this.socketServer = new UnixSocketServer(
           SOCKET_PATH,
-          mcpEndpoint,
           undefined,
           undefined,
           FeatureFlagService.getInstance(),

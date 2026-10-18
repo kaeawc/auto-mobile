@@ -79,12 +79,7 @@ describe("UnixSocketServer input/tap", () => {
       requestTapCoordinates,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     server.mcpClientFactory = createMcpClient;
     await server.start();
 
@@ -141,9 +136,6 @@ describe("UnixSocketServer input/tap", () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
-      // No sessions at all: the serial is idle, which is exactly the case the
-      // session-keyed gate could not see.
       createFakeDaemonState(new Map(), new Map(), new Set(["emulator-5554"])),
       fakeTimer,
     );
@@ -180,12 +172,7 @@ describe("UnixSocketServer input/tap", () => {
       requestTapCoordinates,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const tap = sendRequest(socketPath, "input/tap", {
@@ -217,12 +204,7 @@ describe("UnixSocketServer input/tap", () => {
       getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 1080, pixelHeight: 2340 }),
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const negative = await sendRequest(socketPath, "input/tap", {
@@ -263,12 +245,7 @@ describe("UnixSocketServer input/tap", () => {
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -304,12 +281,7 @@ describe("UnixSocketServer input/tap", () => {
       requestTapCoordinates,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -339,12 +311,7 @@ describe("UnixSocketServer input/tap", () => {
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     await sendRequest(socketPath, "input/tap", {
@@ -378,12 +345,7 @@ describe("UnixSocketServer input/tap", () => {
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -414,12 +376,7 @@ describe("UnixSocketServer input/tap", () => {
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -455,12 +412,7 @@ describe("UnixSocketServer input/tap", () => {
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -502,12 +454,7 @@ describe("UnixSocketServer input/tap", () => {
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -536,12 +483,7 @@ describe("UnixSocketServer input/tap", () => {
       getScreenScaleMetadata: () => ({ nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 }),
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -577,12 +519,7 @@ describe("UnixSocketServer input/tap", () => {
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -621,12 +558,7 @@ describe("UnixSocketServer input/tap", () => {
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -662,12 +594,7 @@ describe("UnixSocketServer input/tap", () => {
       requestTapCoordinates,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -699,7 +626,6 @@ describe("UnixSocketServer input/tap", () => {
     const mcpAutolockSessions = new Map<string, string>();
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(autolockSessions, mcpAutolockSessions),
       fakeTimer,
     );
@@ -760,12 +686,7 @@ describe("UnixSocketServer input/tap", () => {
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     fakeTimer.enableAutoAdvance();
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const [first, second] = await Promise.all([
@@ -807,12 +728,7 @@ describe("UnixSocketServer input/tap", () => {
       requestTapCoordinates,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const first = sendRequest(socketPath, "input/tap", {
@@ -855,12 +771,7 @@ describe("UnixSocketServer input/tap", () => {
 
   test("surfaces platform discovery failures before device targeting errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([], new Set()));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/tap", {
@@ -876,12 +787,7 @@ describe("UnixSocketServer input/tap", () => {
 
   test("rejects missing and non-numeric coordinates with actionable errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const missing = await sendRequest(socketPath, "input/tap", {
@@ -901,12 +807,7 @@ describe("UnixSocketServer input/tap", () => {
   });
 
   test("parseInputTapParams rejects non-finite x/y and non-integer duration (#3615)", () => {
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     // ±Infinity cannot survive a JSON round-trip (stringify -> null, parse rejects the
     // literal), so it only reaches the parser from a non-JSON in-process caller. Exercise
     // parseInputTapParams directly with the raw floats the parser is responsible for.
@@ -983,12 +884,7 @@ describe("UnixSocketServer input/tap", () => {
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createDrainDaemonState(sessions),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/tap", {
       platform: "android",
@@ -1044,12 +940,7 @@ describe("UnixSocketServer input/tap", () => {
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createDrainDaemonState(sessions),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/tap", {
       platform: "android",

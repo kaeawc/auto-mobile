@@ -15,7 +15,6 @@ import {
   scorePinchElement,
 } from "../../../src/features/action/PinchOn";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
@@ -26,6 +25,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import containerFixture from "../../fixtures/observe/android-container-scope.json";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("PinchOn", () => {
   const device: BootedDevice = {
@@ -94,9 +94,7 @@ describe("PinchOn", () => {
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
       fakeA11yService as any,
     );
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIosService as any,
-    );
+    iosGetInstanceSpy = spyOnIosClientInstance(fakeIosService);
 
     pinchOn = new PinchOn(device, null, {
       capture: new FakeHierarchyCapture(

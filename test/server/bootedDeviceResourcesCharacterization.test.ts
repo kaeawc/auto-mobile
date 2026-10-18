@@ -2,13 +2,14 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { queryDeviceServiceStatus } from "../../src/server/bootedDeviceResources";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import type { ForcedRestartSnapshot } from "../../src/ctrlProxy/ForcedRestartBudget";
-import {
-  IOSCtrlProxyClient,
-  IOS_RUNNER_FEATURE_FLAGS,
-} from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import { IOS_RUNNER_FEATURE_FLAGS } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import * as release from "../../src/constants/release";
+import {
+  spyOnIosExistingFactory,
+  spyOnIosExistingInstance,
+} from "../helpers/iosCtrlProxyClientSpies";
 
 for (const expectedSha256 of ["", "ABC"]) {
   for (const installedSha256 of [null, "abc", "other"]) {
@@ -94,7 +95,7 @@ for (const commands of [null, [], ["required"]]) {
           },
         }),
       } as unknown as IOSCtrlProxyManager);
-      const client = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+      const client = spyOnIosExistingInstance({
         getCachedSupportedCommands: () => {
           events.push("commands");
           return commands;
@@ -103,7 +104,7 @@ for (const commands of [null, [], ["required"]]) {
           events.push("features");
           return features;
         },
-      } as unknown as IOSCtrlProxyClient);
+      });
       try {
         const status = await queryDeviceServiceStatus(
           { name: "iPhone", platform: "ios", deviceId: "characterization" },
@@ -156,7 +157,7 @@ for (const state of ["backoff", "exhausted", "suspended"] as const) {
         checkRunningWithReason: async () => ({ ok: false, reason: "unhealthy" }),
         getForcedRestartBudget: () => ({ snapshot: () => recovery }),
       } as unknown as IOSCtrlProxyManager);
-      const client = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockImplementation(() => {
+      const client = spyOnIosExistingFactory(() => {
         throw new Error("stopped runner must not read cache");
       });
       try {

@@ -28,8 +28,9 @@ Facts worth knowing here: request handlers are registered by method string; four
 v2 behaviour differences are bridged so the wire is unchanged
 (`src/server/mcpError.ts`, `src/server/sdkMcpServer.ts`,
 `src/server/stdioServerTransport.ts`, `src/daemon/socketServer/loopbackMcpClient.ts`);
-test helpers are `test/helpers/fakeServerContext.ts` and
-`test/helpers/v1ViewMcpClient.ts`.
+the test helper is `test/helpers/fakeServerContext.ts`. Tests drive our servers with the
+plain v2 `Client` (the v1-error-shape test client was retired; the boundary checker
+rejects its reintroduction), so client error assertions see the SDK's unprefixed errors.
 
 ## Stateless daemon MCP layer (landed, #4678)
 
@@ -186,6 +187,63 @@ depend on one:
   re-emits `list_changed` only when the hash changes. A push and a poll arriving together
   must not produce two emits.
 - Outer-boundary `subscriptions/listen` support across hosts is unverified and out of scope.
+
+## Tasks extension (#4668)
+
+Owner decisions (2026-10-18): tasks are stored in SQLite so a restarted daemon still answers
+`tasks/get` and `tasks/cancel`; a task holding a device keeps that session's lease alive while
+it is `working` or `input_required`; finished tasks stay readable for minutes (10 by default);
+`startDevice` is the first tool converted.
+
+**SDK support.** `@modelcontextprotocol/server` and `client` 2.3.1 do not implement the
+extension. They ship the 2025-11-25 core task vocabulary (`ttl`, `pollInterval`,
+`tasks/result`, `tasks/list`, `params.task`) only as deprecated types "with no SDK runtime",
+know the `tasks/*` method names for `Mcp-Name` header routing, and lift the per-request
+`_meta` envelope (`io.modelcontextprotocol/clientCapabilities`) into `ctx.mcpReq.envelope` and
+a request's top-level `inputResponses` into `ctx.mcpReq.inputResponses`. `server/discover` is
+installed only on a server serving the 2026-07-28 era; ours serve the 2025 era. The separate
+`@modelcontextprotocol/ext-tasks` package is client-side and not a dependency. The wire is
+therefore implemented on our own handlers, per the extension specification (revision
+2026-07-28 of modelcontextprotocol/ext-tasks).
+
+**Negotiation.** A request declares the extension in its per-request client capabilities;
+declarations are never remembered. A `tools/call` that did not declare it never gets a task,
+and `tasks/get`, `tasks/update` and `tasks/cancel` without it answer `-32021`. Because there is
+no `server/discover` on the 2025 era, the server advertises the extension in its `initialize`
+result, and only to a client whose `initialize` declared it; every other client sees the
+`initialize` result unchanged.
+
+**Pieces** (`src/server/tasks/`):
+
+- `TaskManager` (interface, `DefaultTaskManager`, test `FakeTaskManager`): ids from
+  `IdGenerator`, time from the injected `Timer`, statuses `working`, `input_required`,
+  `completed`, `failed`, `cancelled`; a terminal status never changes. `ttlMs` is null while a
+  task runs and becomes terminal time plus retention minus creation once it settles. On first
+  use, a manager fails every running task another daemon instance left behind ("Task
+  interrupted"). A foreign session's task is reported exactly like a missing one.
+- `McpTaskRepository` (`src/db/mcpTaskRepository.ts`, table `mcp_tasks`, migration
+  `2026_10_18_000_mcp_tasks`): owner key, status, instance id, timestamps, retention, and the
+  JSON result, error or input requests. Status writes are fenced on a running status. The table
+  lives in the daemon's own `auto-mobile.db` (`src/db`), not in the host-wide session broker
+  registry file, because a task is owned by a daemon's session key.
+- `runAsTask(options, work)`: the seam a tool call opts into. When the request declared the
+  extension, carries a session key and tasks are served, it creates the task durably, starts
+  the work in the background under the task's `AbortSignal` (aborted by `tasks/cancel`, which
+  the existing `executionTracker` request-cancellation path turns into cooperative
+  cancellation), turns progress ticks into the task's `statusMessage`, and returns the
+  `CreateTaskResult`; otherwise it runs the work synchronously. `currentTaskContext()` gives
+  code inside the work the task id, `holdDeviceLease(sessionUuid)` and `requestInput(...)`.
+- `TaskLeaseKeepalive`: the hook a task uses to keep a device session's lease alive until it is
+  terminal. The default holds nothing; the session broker implements it with `startDevice`.
+- `TASK_ELIGIBLE_TOOLS`: the tools whose call may become a task. Empty in this slice.
+- `createSdkMcpServer` passes a `CreateTaskResult` through the SDK's `tools/call` result
+  validation, which would otherwise stamp `content: []` on it.
+
+**Scope.** Tasks are served by the daemon's per-request servers (HTTP endpoint and in-process
+forwards); a task's owner is the explicit session key, because a keyless request's scope id is
+one-off. Direct stdio serves no tasks. The stdio proxy does not yet relay the declaration or
+the `tasks/*` methods to the daemon, so proxy clients keep synchronous calls.
+`notifications/tasks` push and `subscriptions/listen` are out of scope (polling only).
 
 ## Open questions and resolutions
 

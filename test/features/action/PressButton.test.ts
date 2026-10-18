@@ -19,6 +19,7 @@ import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../../src/models/IosHomeLaunchTimeoutError";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("PressButton", () => {
   const iosDevice: BootedDevice = {
@@ -42,9 +43,7 @@ describe("PressButton", () => {
       updatedAt: 1,
       hierarchy: { className: "XCUIApplication" },
     });
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const getInstanceSpy = spyOnIosClientInstance(client);
     const launches: string[][] = [];
     try {
       const pressButton = new PressButton(iosSimulator, null, timer, {
@@ -69,9 +68,7 @@ describe("PressButton", () => {
     const client = new FakeIOSCtrlProxy(timer);
     const hierarchy =
       Promise.withResolvers<Awaited<ReturnType<typeof client.requestHierarchySync>>>();
-    const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const instance = spyOnIosClientInstance(client);
     const reads = spyOn(client, "requestHierarchySync").mockImplementation(() => hierarchy.promise);
     let launches = 0;
     let marks = 0;
@@ -145,9 +142,7 @@ describe("PressButton", () => {
       const controller = new AbortController();
       const client = new FakeIOSCtrlProxy(timer);
       const launch = Promise.withResolvers<{ stdout: string; stderr: string }>();
-      const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        client as unknown as IOSCtrlProxyClient,
-      );
+      const instance = spyOnIosClientInstance(client);
       const reads = spyOn(client, "requestHierarchySync");
       let sent = false;
       let marks = 0;
@@ -216,9 +211,7 @@ describe("PressButton", () => {
       updatedAt: 1,
       hierarchy: { className: "XCUIApplication" },
     });
-    const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const instance = spyOnIosClientInstance(client);
     const timeouts: number[] = [];
     try {
       const action = new PressButton(iosSimulator, null, timer, {
@@ -250,9 +243,7 @@ describe("PressButton", () => {
       updatedAt: 1,
       hierarchy: { className: "XCUIApplication" },
     });
-    const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const instance = spyOnIosClientInstance(client);
     let marks = 0;
     let launches = 0;
     const action = new PressButton(iosSimulator, null, timer, {
@@ -297,12 +288,12 @@ describe("PressButton", () => {
         expect(marks).toBe(1);
         return { success: true };
       };
-      const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      const instance = spyOnIosClientInstance({
         requestPressHome: request,
         requestPressBack: request,
         requestRecentApps: request,
         requestPressButton: request,
-      } as unknown as IOSCtrlProxyClient);
+      });
       try {
         expect(
           (
@@ -324,7 +315,7 @@ describe("PressButton", () => {
 
   test("ios back delegates to CtrlProxy pressBack", async () => {
     let backCalls = 0;
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestPressBack: async () => {
         backCalls++;
         return { success: true, totalTimeMs: 5 };
@@ -347,7 +338,7 @@ describe("PressButton", () => {
 
   test("ios recent delegates to CtrlProxy recent apps", async () => {
     let recentCalls = 0;
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestPressBack: async () => ({ success: true, totalTimeMs: 5 }),
       requestPressHome: async () => ({ success: true, totalTimeMs: 5 }),
       requestRecentApps: async () => {
@@ -370,7 +361,7 @@ describe("PressButton", () => {
 
   test("press delegates to platform button handling without observing", async () => {
     let homeCalls = 0;
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestPressBack: async () => ({ success: true, totalTimeMs: 5 }),
       requestPressHome: async () => {
         homeCalls++;
@@ -402,7 +393,7 @@ describe("PressButton", () => {
 
   test("ios button presses retain their desktop frame context through the runner request", async () => {
     const contexts: string[] = [];
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestPressBack: async (_timeoutMs?: number, _perf?: unknown, frameContext?: string) => {
         contexts.push(frameContext ?? "");
         return { success: true, totalTimeMs: 5 };
@@ -635,9 +626,7 @@ describe("PressButton", () => {
       acknowledged: false,
       error: "reply lost",
     });
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const getInstanceSpy = spyOnIosClientInstance(client);
     try {
       const result = await new PressButton(iosDevice).press("power");
       expect(result).toMatchObject({ code: "indeterminate_outcome", retryable: false });
@@ -654,9 +643,7 @@ describe("PressButton", () => {
       acknowledged: true,
       error: "runner failed",
     });
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const getInstanceSpy = spyOnIosClientInstance(client);
     try {
       const result = await new PressButton(iosDevice).press("power");
       expect(result).toMatchObject({ code: "press_failed", retryable: false });
@@ -671,9 +658,7 @@ describe("PressButton", () => {
       "pressHome",
       new IosHomeLaunchTimeoutError("SpringBoard launch exhausted"),
     );
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const getInstanceSpy = spyOnIosClientInstance(client);
     try {
       const result = await new PressButton(iosDevice).press("home");
       expect(result).toMatchObject({ code: "timeout", retryable: true });
@@ -685,9 +670,7 @@ describe("PressButton", () => {
   test("generic thrown iOS error is typed as terminal press failure", async () => {
     const client = new FakeIOSCtrlProxy();
     client.setFailureMode("pressButton", new Error("runner unavailable"));
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const getInstanceSpy = spyOnIosClientInstance(client);
     try {
       const result = await new PressButton(iosDevice).press("power");
       expect(result).toMatchObject({ code: "press_failed", retryable: false });
@@ -698,9 +681,7 @@ describe("PressButton", () => {
 
   test("successful button result has no refusal fields", async () => {
     const client = new FakeIOSCtrlProxy();
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const getInstanceSpy = spyOnIosClientInstance(client);
     try {
       const result = await new PressButton(iosDevice).press("power");
       expect(result).not.toHaveProperty("code");
@@ -716,9 +697,7 @@ describe("PressButton", () => {
       "pressButton",
       Object.assign(new Error("device is offline"), { code: "device_offline", retryable: true }),
     );
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const getInstanceSpy = spyOnIosClientInstance(client);
     try {
       const result = await new PressButton(iosDevice).press("power");
       expect(result).toMatchObject({ code: "device_offline", retryable: true });
@@ -729,7 +708,7 @@ describe("PressButton", () => {
 
   test("ios hardware buttons delegate to generic CtrlProxy pressButton on physical devices", async () => {
     const pressButtonCalls: string[] = [];
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestPressBack: async () => ({ success: true, totalTimeMs: 5 }),
       requestPressHome: async () => ({ success: true, totalTimeMs: 5 }),
       requestRecentApps: async () => ({ success: true, totalTimeMs: 5 }),
@@ -756,7 +735,7 @@ describe("PressButton", () => {
 
   test("ios simulator forwards hardware buttons to CtrlProxy", async () => {
     const pressButtonCalls: string[] = [];
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestPressButton: async (button: string) => {
         pressButtonCalls.push(button);
         return { success: true, totalTimeMs: 5 };
@@ -781,7 +760,7 @@ describe("PressButton", () => {
   test("ios press threads the caller timeout budget into the runner", async () => {
     const homeTimeouts: (number | undefined)[] = [];
     const buttonTimeouts: (number | undefined)[] = [];
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestPressBack: async () => ({ success: true, totalTimeMs: 5 }),
       requestPressHome: async (timeoutMs?: number) => {
         homeTimeouts.push(timeoutMs);
@@ -809,7 +788,7 @@ describe("PressButton", () => {
 
   test("ios press without a budget leaves runner defaults untouched", async () => {
     const homeTimeouts: (number | undefined)[] = [];
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestPressBack: async () => ({ success: true, totalTimeMs: 5 }),
       requestPressHome: async (timeoutMs?: number) => {
         homeTimeouts.push(timeoutMs);
@@ -829,7 +808,7 @@ describe("PressButton", () => {
   });
 
   test("ios hardware button runner failures return structured errors", async () => {
-    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const getInstanceSpy = spyOnIosClientInstance({
       requestPressButton: async () => ({
         success: false,
         error: "Power/lock button is not supported on this device",

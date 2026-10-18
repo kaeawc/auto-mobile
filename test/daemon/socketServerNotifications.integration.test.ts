@@ -120,12 +120,7 @@ describe("UnixSocketServer notification broadcast", () => {
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `test-notify-${randomUUID()}.sock`);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      new FakeTimer(),
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), new FakeTimer());
     await server.start();
   });
 

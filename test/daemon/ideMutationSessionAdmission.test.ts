@@ -145,7 +145,6 @@ describe("mutating ide/* frames against a session that may not take a control ca
     const fakePool = createFakeDaemonState().getDevicePool();
     const server = createTestUnixSocketServer(
       "unused",
-      "http://localhost:0/mcp",
       {
         isInitialized: () => true,
         getSessionManager: () => sessionManager,

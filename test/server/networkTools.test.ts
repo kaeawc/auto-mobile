@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import {
-  IOSCtrlProxyClient,
   type IosMockRuleSyncOutcome,
   type IosMockRuleSyncResult,
 } from "../../src/features/observe/ios";
@@ -23,6 +22,7 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
+import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 
 function ipaBytes(): Buffer {
   // A real CtrlProxy .ipa is a zip over 10KB; the override guard validates
@@ -80,7 +80,7 @@ describe("network tool schema", () => {
     androidSendResult = true;
     androidMockReport = { status: "reported", rejected: [] };
     warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    iosGetInstanceSpy = spyOnIosClientInstance({
       sendMessage: (message: string) => {
         iosMessages.push(message);
         return true;
@@ -98,7 +98,7 @@ describe("network tool schema", () => {
           ? { outcome: iosMockRuleSyncResult }
           : iosMockRuleSyncResult;
       },
-    } as IOSCtrlProxyClient);
+    });
     androidGetInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
       sendMessage: (message: string) => {
         androidMessages.push(message);
@@ -260,13 +260,13 @@ describe("network tool schema", () => {
     const state = NetworkState.getInstance();
     const nowSpy = spyOn(state.timer, "now").mockImplementation(() => nowMs);
     iosGetInstanceSpy.mockRestore();
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    iosGetInstanceSpy = spyOnIosClientInstance({
       setNetworkErrorSimulation: async (config: unknown) => {
         iosErrorSimulations.push(config);
         nowMs += 5_000;
         return { success: true, totalTimeMs: 0 };
       },
-    } as IOSCtrlProxyClient);
+    });
     const tool = ToolRegistry.getTool("network");
 
     try {
@@ -332,13 +332,13 @@ describe("network tool schema", () => {
       limit: undefined,
     });
     iosGetInstanceSpy.mockRestore();
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    iosGetInstanceSpy = spyOnIosClientInstance({
       setNetworkErrorSimulation: async () => ({
         success: false,
         totalTimeMs: 0,
         error: "in-app server is unreachable",
       }),
-    } as IOSCtrlProxyClient);
+    });
 
     await expect(
       tool!.deviceAwareHandler!(iosDevice, {
@@ -356,13 +356,13 @@ describe("network tool schema", () => {
   test("network simulateErrors on iOS fails closed when CtrlProxy rejects the command", async () => {
     await allowLocalIosRunner();
     iosGetInstanceSpy.mockRestore();
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    iosGetInstanceSpy = spyOnIosClientInstance({
       setNetworkErrorSimulation: async () => ({
         success: false,
         totalTimeMs: 0,
         error: "iOS CtrlProxy runner does not support set_network_error_simulation",
       }),
-    } as IOSCtrlProxyClient);
+    });
     const tool = ToolRegistry.getTool("network");
 
     await expect(

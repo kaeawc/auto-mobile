@@ -14,6 +14,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("Shake", () => {
   let shake: Shake;
@@ -142,9 +143,7 @@ describe("Shake", () => {
       (iosShake as any).window = fakeWindow;
       (iosShake as any).awaitIdle = fakeAwaitIdle;
       const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIOSCtrlProxy);
 
       try {
         const result = await iosShake.execute({ duration: 250, intensity: 77 });
@@ -196,9 +195,7 @@ describe("Shake", () => {
       (iosShake as any).awaitIdle = fakeAwaitIdle;
       const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
       fakeIOSCtrlProxy.setFailureMode("shake", new Error("runner disconnected"));
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIOSCtrlProxy);
 
       try {
         const result = await iosShake.execute({ duration: 250, intensity: 77 });

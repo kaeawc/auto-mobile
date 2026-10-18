@@ -29,6 +29,7 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeKeyboardHierarchyProvider } from "../fakes/FakeKeyboardHierarchyProvider";
 import { FakeDeviceUrlLauncher } from "../fakes/FakeDeviceUrlLauncher";
 import { FakeWebSocket } from "../fakes/FakeWebSocket";
+import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 
 const android: BootedDevice = { platform: "android", deviceId: "slice4-android", name: "Test" };
 const ios: BootedDevice = {
@@ -188,7 +189,7 @@ function delayedConnection() {
     },
     timer,
   );
-  const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+  const instance = spyOnIosClientInstance(client);
   restores.push(
     () => instance.mockRestore(),
     () => sent.mockRestore(),

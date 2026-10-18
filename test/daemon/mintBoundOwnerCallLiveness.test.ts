@@ -284,7 +284,6 @@ for (const outcome of [
     };
     const server = createTestUnixSocketServer(
       "/fake/owner-call.sock",
-      "http://localhost:0/mcp",
       {
         isInitialized: () => outcome !== "uninitialized",
         getDevicePool: () => pool,

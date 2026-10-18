@@ -109,7 +109,6 @@ describe("a gated tool through socket server, DaemonClient and proxy (#10179)", 
     installRelease = Promise.withResolvers<void>();
     const server = createTestUnixSocketServer(
       "unused",
-      "http://localhost:0/mcp",
       { isInitialized: () => false } as DaemonStateAccess,
       timer,
     );

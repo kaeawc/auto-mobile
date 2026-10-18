@@ -242,7 +242,6 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
     const fakePool = createFakeDaemonState().getDevicePool();
     const server = createTestUnixSocketServer(
       "unused",
-      "http://localhost:0/mcp",
       {
         isInitialized: () => true,
         getSessionManager: () => sessionManager,

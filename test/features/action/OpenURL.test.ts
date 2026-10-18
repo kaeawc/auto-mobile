@@ -3,7 +3,6 @@ import { OpenURL } from "../../../src/features/action/OpenURL";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
@@ -13,6 +12,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
+import { spyOnIosExistingInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const SIMULATOR_UDID = "ABCDEF01-1234-1234-1234-1234567890AB";
 const PHYSICAL_UDID = "00008110-000A4D8E1234567E";
@@ -160,11 +160,11 @@ describe("OpenURL iOS routing", () => {
 
   test("simulator open invalidates the pre-link hierarchy for system dialog discovery", async () => {
     let invalidations = 0;
-    const existingClientSpy = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+    const existingClientSpy = spyOnIosExistingInstance({
       invalidateCache: () => {
         invalidations += 1;
       },
-    } as any);
+    });
     restores.push(() => existingClientSpy.mockRestore());
 
     await openIos(

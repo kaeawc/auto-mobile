@@ -49,13 +49,13 @@ function harness(
     new FakeAdbClient(),
     {
       timer,
+      awaitIdle: new FakeAwaitIdle(),
+      window: new FakeWindow(),
       observeScreen: observe,
       executeGesture: gesture,
       accessibilityDetector: new FakeAccessibilityDetector(),
     },
   );
-  action.awaitIdle = new FakeAwaitIdle() as unknown as typeof action.awaitIdle;
-  action.window = new FakeWindow() as unknown as typeof action.window;
   return { action, gesture };
 }
 

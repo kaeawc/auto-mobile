@@ -22,7 +22,7 @@ import {
   lifecycleRequester,
   type LifecycleRequester,
 } from "../features/deviceLifecycle/lifecycleRequester";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { assertDeviceGestureRecordingStartHeldDevice } from "../daemon/deviceGestureRecordingStartAdmission";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -156,12 +156,12 @@ const EXPORT_PLAN_REMEDY =
  */
 function exportRequester(params: object, deviceId: string): LifecycleRequester {
   const requester = lifecycleRequester(params);
-  const daemonState = DaemonState.getInstance();
   const mcpSessionId = requester.mcpSessionId ?? getToolSelectionContext()?.callerMcpSessionId;
-  const held =
-    mcpSessionId && daemonState.isInitialized()
-      ? daemonState.getDevicePool().resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId)
-      : undefined;
+  const held = mcpSessionId
+    ? defaultDaemonContext
+        .devicePool()
+        ?.resolveOwnedDeviceSessionForMcpSession(mcpSessionId, deviceId)
+    : undefined;
   return held ? { ...requester, sessionUuid: held } : requester;
 }
 

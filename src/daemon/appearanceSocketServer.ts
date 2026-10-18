@@ -29,7 +29,7 @@ import {
 import { admitInputOnHolderSession } from "./inputDeviceOwnership";
 import { sessionReleaseThatCancelledCall } from "./sessionReleasedDuringCall";
 import { isAppearanceSyncEnabledFromEnvironment } from "../utils/appearance/appearanceSyncPolicy";
-import { DaemonState } from "./daemonState";
+import { defaultDaemonContext } from "./daemonContext";
 import type {
   AppearanceConfig,
   AppearanceConfigInput,
@@ -66,30 +66,21 @@ interface AppearanceTarget {
 
 const defaultDeviceSource: AppearanceDeviceSource = {
   getPooledDevices: () => {
-    const daemonState = DaemonState.getInstance();
-    if (!daemonState.isInitialized()) {
+    const pool = defaultDaemonContext.devicePool();
+    if (!pool) {
       return [];
     }
-    return daemonState
-      .getDevicePool()
-      .getAllDevices()
-      .map((device) => ({
-        deviceId: device.id,
-        name: device.name,
-        platform: device.platform,
-      }));
+    return pool.getAllDevices().map((device) => ({
+      deviceId: device.id,
+      name: device.name,
+      platform: device.platform,
+    }));
   },
   getCurrentDevice: () => DeviceReadiness.getInstance().getCurrentDevice(),
   getSessionForDevice: (deviceId) => {
-    const daemonState = DaemonState.getInstance();
-    return daemonState.isInitialized()
-      ? daemonState.getSessionManager().getSessionForDevice(deviceId)
-      : null;
+    return defaultDaemonContext.sessionManager()?.getSessionForDevice(deviceId) ?? null;
   },
-  getSessionManager: () => {
-    const daemonState = DaemonState.getInstance();
-    return daemonState.isInitialized() ? daemonState.getSessionManager() : undefined;
-  },
+  getSessionManager: () => defaultDaemonContext.sessionManager(),
 };
 
 export interface AppearanceSocketServerDependencies {

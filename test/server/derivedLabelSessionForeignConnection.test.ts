@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -48,7 +48,7 @@ describe("a derived label session of a base another connection owns", () => {
     restore();
   });
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -100,7 +100,19 @@ describe("a derived label session of a base another connection owns", () => {
     );
     fixture = new McpTestFixture({ daemonMode: true });
     await fixture.setup();
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(async () => {
     await fixture?.teardown();
@@ -119,68 +131,77 @@ describe("a derived label session of a base another connection owns", () => {
     }
   });
 
-  test("the setup is the plan's: the derived session holds the second device", () => {
+  arranged("the setup is the plan's: the derived session holds the second device", () => {
     expect(labelSession).toBe(`${BASE}:B`);
     expect(pool.getDevice(labelled.deviceId)?.sessionId).toBe(labelSession);
     expect(pool.isSessionOwnedByOtherConnection(BASE, OTHER)).toBe(true);
   });
 
-  test("control naming the base from another connection is refused (the #11344 rule)", async () => {
-    const result = await fixture!.client.callTool({
-      name: "tapAt",
-      arguments: { x: 10, y: 10, sessionUuid: BASE, [INTERNAL_MCP_SESSION_PARAM]: OTHER },
-    });
+  arranged(
+    "control naming the base from another connection is refused (the #11344 rule)",
+    async () => {
+      const result = await fixture!.client.callTool({
+        name: "tapAt",
+        arguments: { x: 10, y: 10, sessionUuid: BASE, [INTERNAL_MCP_SESSION_PARAM]: OTHER },
+      });
 
-    expect(result.isError).toBe(true);
-    expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    expect(tools.runs).toEqual([]);
-  });
+      expect(result.isError).toBe(true);
+      expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(tools.runs).toEqual([]);
+    },
+  );
 
-  test("control naming the derived label session from another connection is refused too", async () => {
-    const result = await fixture!.client.callTool({
-      name: "tapAt",
-      arguments: { x: 10, y: 10, sessionUuid: labelSession, [INTERNAL_MCP_SESSION_PARAM]: OTHER },
-    });
+  arranged(
+    "control naming the derived label session from another connection is refused too",
+    async () => {
+      const result = await fixture!.client.callTool({
+        name: "tapAt",
+        arguments: { x: 10, y: 10, sessionUuid: labelSession, [INTERNAL_MCP_SESSION_PARAM]: OTHER },
+      });
 
-    // No input reaches the owner's labelled device.
-    expect(tools.runs).toEqual([]);
-    expect(result.isError).toBe(true);
-    expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-  });
+      // No input reaches the owner's labelled device.
+      expect(tools.runs).toEqual([]);
+      expect(result.isError).toBe(true);
+      expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    },
+  );
 
-  test("the derived session's name does not reach the owner's base device through a label", async () => {
-    const result = await fixture!.client.callTool({
-      name: "tapAt",
-      arguments: {
-        x: 10,
-        y: 10,
-        sessionUuid: labelSession,
-        device: "A",
-        [INTERNAL_MCP_SESSION_PARAM]: OTHER,
-      },
-    });
+  arranged(
+    "the derived session's name does not reach the owner's base device through a label",
+    async () => {
+      const result = await fixture!.client.callTool({
+        name: "tapAt",
+        arguments: {
+          x: 10,
+          y: 10,
+          sessionUuid: labelSession,
+          device: "A",
+          [INTERNAL_MCP_SESSION_PARAM]: OTHER,
+        },
+      });
 
-    expect(tools.runs).toEqual([]);
-    expect(result.isError).toBe(true);
-    expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-  });
+      expect(tools.runs).toEqual([]);
+      expect(result.isError).toBe(true);
+      expect(wire(result).code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    },
+  );
 
-  test("the pool predicate counts a derived session as its base", () => {
+  arranged("the pool predicate counts a derived session as its base", () => {
     expect(pool.isSessionOwnedByOtherConnection(labelSession, OTHER)).toBe(true);
     expect(pool.isSessionOwnedByOtherConnection(labelSession, OWNER)).toBe(false);
   });
 
-  test("a derived session whose base has no connected owner is foreign to no one", () => {
+  arranged("a derived session whose base has no connected owner is foreign to no one", () => {
     pool.releaseMcpSessionBindings(OWNER);
 
     expect(pool.isSessionOwnedByOtherConnection(labelSession, OTHER)).toBe(false);
   });
 
-  test("a caller with no connection identity is not told apart from the owner", () => {
+  arranged("a caller with no connection identity is not told apart from the owner", () => {
     expect(pool.isSessionOwnedByOtherConnection(labelSession)).toBe(false);
   });
 
-  test("a read naming the derived session from another connection is not refused", async () => {
+  arranged("a read naming the derived session from another connection is not refused", async () => {
     const before = manager.getSession(labelSession)!.lastUsedAt;
 
     const result = await fixture!.client.callTool({
@@ -193,7 +214,7 @@ describe("a derived label session of a base another connection owns", () => {
     expect(manager.getSession(labelSession)!.lastUsedAt).toBe(before);
   });
 
-  test("the owner's own calls on its labelled devices run", async () => {
+  arranged("the owner's own calls on its labelled devices run", async () => {
     for (const device of ["B", "A"]) {
       const result = await fixture!.client.callTool({
         name: "tapAt",
@@ -205,7 +226,7 @@ describe("a derived label session of a base another connection owns", () => {
     expect(tools.runs.map((run) => run.deviceId)).toEqual([labelled.deviceId, primary.deviceId]);
   });
 
-  test("the owner naming its derived session runs on the labelled device", async () => {
+  arranged("the owner naming its derived session runs on the labelled device", async () => {
     const result = await fixture!.client.callTool({
       name: "tapAt",
       arguments: { x: 10, y: 10, sessionUuid: labelSession, [INTERNAL_MCP_SESSION_PARAM]: OWNER },

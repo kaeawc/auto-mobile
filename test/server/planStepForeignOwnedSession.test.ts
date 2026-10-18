@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -61,7 +61,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
   const tap: PlanStep = { tool: "tapAt", params: { x: 10, y: 10, sessionUuid: SESSION } };
   const read: PlanStep = { tool: "observe", params: { sessionUuid: SESSION } };
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -101,7 +101,19 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       undefined,
       OWNER,
     );
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     tools.uninstall();
@@ -118,7 +130,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
   });
 
   describe("in a plan another connection started", () => {
-    test("setActiveDevice is refused, typed, and moves nothing", async () => {
+    arranged("setActiveDevice is refused, typed, and moves nothing", async () => {
       const result = await runStep(move, OTHER);
 
       expect(result.status).toBe("failed");
@@ -129,7 +141,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);
     });
 
-    test("a control step is refused, typed, before any input reaches the device", async () => {
+    arranged("a control step is refused, typed, before any input reaches the device", async () => {
       const result = await runStep(tap, OTHER);
 
       expect(result.status).toBe("failed");
@@ -139,7 +151,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       expect(pool.isSessionOwnedByOtherConnection(SESSION, OTHER)).toBe(true);
     });
 
-    test("a read step is not refused and binds nothing", async () => {
+    arranged("a read step is not refused and binds nothing", async () => {
       const result = await runStep(read, OTHER);
 
       expect(result.status).toBe("completed");
@@ -147,7 +159,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       expect(pool.isSessionOwnedByOtherConnection(SESSION, OWNER)).toBe(false);
     });
 
-    test("a control step is admitted once the owner has disconnected", async () => {
+    arranged("a control step is admitted once the owner has disconnected", async () => {
       pool.releaseMcpSessionBindings(OWNER);
 
       const result = await runStep(tap, OTHER);
@@ -157,7 +169,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
   });
 
   describe("in a plan the owner started", () => {
-    test("a control step naming its own session runs on that session's device", async () => {
+    arranged("a control step naming its own session runs on that session's device", async () => {
       const result = await runStep(tap, OWNER);
 
       expect(result.status).toBe("completed");
@@ -166,7 +178,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       ]);
     });
 
-    test("setActiveDevice naming its own session is not refused as foreign", async () => {
+    arranged("setActiveDevice naming its own session is not refused as foreign", async () => {
       const result = await runStep(
         { ...move, params: { ...move.params, deviceId: held.deviceId } },
         OWNER,
@@ -177,7 +189,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
   });
 
   describe("in a plan with no originating connection", () => {
-    test("a control step naming the session keeps today's behaviour", async () => {
+    arranged("a control step naming the session keeps today's behaviour", async () => {
       const result = await runStep(tap, undefined);
 
       expect(result.status).toBe("completed");
@@ -190,35 +202,41 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
   describe("owner contracts that must keep working", () => {
     const PLAN_SESSION = "plan-session";
 
-    test("a plan with its own session overrides the step's UUID and is not refused", async () => {
-      await pool.bindOrReuseDeviceSession(PLAN_SESSION, free.deviceId, "android");
+    arranged(
+      "a plan with its own session overrides the step's UUID and is not refused",
+      async () => {
+        await pool.bindOrReuseDeviceSession(PLAN_SESSION, free.deviceId, "android");
 
-      const result = await runWithToolSelectionContext(
-        planCallerContext({ [INTERNAL_MCP_SESSION_PARAM]: OTHER }),
-        () =>
-          executor.executeStep(tap, {
-            logPrefix: "[plan]",
-            platform: "android",
-            sessionUuid: PLAN_SESSION,
-          }),
-      );
+        const result = await runWithToolSelectionContext(
+          planCallerContext({ [INTERNAL_MCP_SESSION_PARAM]: OTHER }),
+          () =>
+            executor.executeStep(tap, {
+              logPrefix: "[plan]",
+              platform: "android",
+              sessionUuid: PLAN_SESSION,
+            }),
+        );
 
-      expect(result.status).toBe("completed");
-      expect(tools.runs).toEqual([
-        { name: "tapAt", deviceId: free.deviceId, sessionUuid: PLAN_SESSION },
-      ]);
-    });
+        expect(result.status).toBe("completed");
+        expect(tools.runs).toEqual([
+          { name: "tapAt", deviceId: free.deviceId, sessionUuid: PLAN_SESSION },
+        ]);
+      },
+    );
 
-    test("a UUID no connection holds is foreign to nobody, so it stays re-issuable by name", async () => {
-      const result = await runStep(
-        { tool: "tapAt", params: { x: 10, y: 10, sessionUuid: "released-plan-session" } },
-        OTHER,
-      );
+    arranged(
+      "a UUID no connection holds is foreign to nobody, so it stays re-issuable by name",
+      async () => {
+        const result = await runStep(
+          { tool: "tapAt", params: { x: 10, y: 10, sessionUuid: "released-plan-session" } },
+          OTHER,
+        );
 
-      expect(refusalCode(result)).not.toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    });
+        expect(refusalCode(result)).not.toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      },
+    );
 
-    test("a call with no identity never clears the identity it inherited", async () => {
+    arranged("a call with no identity never clears the identity it inherited", async () => {
       expect(planCallerContext({})).toEqual({});
 
       const result = await runWithToolSelectionContext(
@@ -258,36 +276,45 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       ["empty", ""],
       ["whitespace-only", "  \t"],
     ] as const) {
-      test(`an ${name} plan session does not exempt a step naming a foreign session`, async () => {
-        const result = await runWithPlanSession(tapOnHeld, blank);
+      arranged(
+        `an ${name} plan session does not exempt a step naming a foreign session`,
+        async () => {
+          const result = await runWithPlanSession(tapOnHeld, blank);
 
-        expect(result.status).toBe("failed");
-        expect(refusalCode(result)).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-        expect(tools.runs).toEqual([]);
-      });
+          expect(result.status).toBe("failed");
+          expect(refusalCode(result)).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+          expect(tools.runs).toEqual([]);
+        },
+      );
 
-      test(`an ${name} plan session keeps the connection's ambient session override`, async () => {
-        await pool.bindOrReuseDeviceSession(OWN_SESSION, free.deviceId, "android");
+      arranged(
+        `an ${name} plan session keeps the connection's ambient session override`,
+        async () => {
+          await pool.bindOrReuseDeviceSession(OWN_SESSION, free.deviceId, "android");
 
-        const result = await runWithPlanSession(tap, blank, OWN_SESSION);
+          const result = await runWithPlanSession(tap, blank, OWN_SESSION);
 
-        expect(result.status).toBe("completed");
-        expect(tools.runs).toEqual([
-          { name: "tapAt", deviceId: free.deviceId, sessionUuid: OWN_SESSION },
-        ]);
-      });
+          expect(result.status).toBe("completed");
+          expect(tools.runs).toEqual([
+            { name: "tapAt", deviceId: free.deviceId, sessionUuid: OWN_SESSION },
+          ]);
+        },
+      );
 
-      test(`a device-aware call with an ${name} sessionUuid runs on the ambient session`, async () => {
-        await pool.bindOrReuseDeviceSession(OWN_SESSION, free.deviceId, "android");
+      arranged(
+        `a device-aware call with an ${name} sessionUuid runs on the ambient session`,
+        async () => {
+          await pool.bindOrReuseDeviceSession(OWN_SESSION, free.deviceId, "android");
 
-        await runWithToolSelectionContext({ routingSessionUuid: OWN_SESSION }, () =>
-          tools.call("tapAt", { x: 10, y: 10, sessionUuid: blank }),
-        );
+          await runWithToolSelectionContext({ routingSessionUuid: OWN_SESSION }, () =>
+            tools.call("tapAt", { x: 10, y: 10, sessionUuid: blank }),
+          );
 
-        expect(tools.runs).toEqual([
-          { name: "tapAt", deviceId: free.deviceId, sessionUuid: OWN_SESSION },
-        ]);
-      });
+          expect(tools.runs).toEqual([
+            { name: "tapAt", deviceId: free.deviceId, sessionUuid: OWN_SESSION },
+          ]);
+        },
+      );
     }
   });
 
@@ -297,7 +324,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       params: { x: 10, y: 10, deviceId: held.deviceId },
     };
 
-    test("in the holder's own plan runs as the holder's session", async () => {
+    arranged("in the holder's own plan runs as the holder's session", async () => {
       const result = await runStep(tapOnDevice, OWNER);
 
       expect(result.status).toBe("completed");
@@ -306,7 +333,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       ]);
     });
 
-    test("in another connection's plan is refused, typed", async () => {
+    arranged("in another connection's plan is refused, typed", async () => {
       const result = await runStep(tapOnDevice, OTHER);
 
       expect(result.status).toBe("failed");
@@ -343,7 +370,7 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
         sessionUuid: SESSION,
       });
 
-    test("naming a foreign session is refused, by name or typed", async () => {
+    arranged("naming a foreign session is refused, by name or typed", async () => {
       for (const call of [pressBack, swipe]) {
         const error = (await nested(call, OTHER)) as InputDeviceOwnedError | undefined;
 
@@ -352,14 +379,14 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
       expect(tools.runs).toEqual([]);
     });
 
-    test("naming the connection's own session runs", async () => {
+    arranged("naming the connection's own session runs", async () => {
       expect(await nested(pressBack, OWNER)).toBeUndefined();
       expect(tools.runs).toEqual([
         { name: "pressButton", deviceId: held.deviceId, sessionUuid: SESSION },
       ]);
     });
 
-    test("with no originating connection keeps today's behaviour", async () => {
+    arranged("with no originating connection keeps today's behaviour", async () => {
       await pressBack();
 
       expect(tools.runs).toEqual([
@@ -368,15 +395,18 @@ describe("a plan step naming a session another connection owns (#11469)", () => 
     });
   });
 
-  test("a step cannot name its own connection: plan content never supplies the identity", async () => {
-    const forged: PlanStep = {
-      tool: "tapAt",
-      params: { ...tap.params, [INTERNAL_MCP_SESSION_PARAM]: OWNER },
-    };
+  arranged(
+    "a step cannot name its own connection: plan content never supplies the identity",
+    async () => {
+      const forged: PlanStep = {
+        tool: "tapAt",
+        params: { ...tap.params, [INTERNAL_MCP_SESSION_PARAM]: OWNER },
+      };
 
-    const result = await runStep(forged, OTHER);
+      const result = await runStep(forged, OTHER);
 
-    expect(refusalCode(result)).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    expect(tools.runs).toEqual([]);
-  });
+      expect(refusalCode(result)).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(tools.runs).toEqual([]);
+    },
+  );
 });

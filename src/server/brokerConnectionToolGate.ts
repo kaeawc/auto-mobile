@@ -1,4 +1,4 @@
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { brokerConnectionPlainToolRefusal } from "../daemon/sessionBroker/connectionScope";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 
@@ -17,15 +17,15 @@ export function assertBrokerConnectionPlainToolCall(input: {
   args: unknown;
   sessionUuid: string | undefined;
 }): void {
-  const daemonState = DaemonState.getInstance();
-  if (!input.daemonMode || input.requiresDevice || !daemonState.isInitialized()) {
+  const scopes =
+    !input.daemonMode || input.requiresDevice
+      ? undefined
+      : defaultDaemonContext.brokerConnectionScopes();
+  const binding = scopes?.get(input.mcpSessionId);
+  const sessionManager = binding ? defaultDaemonContext.sessionManager() : undefined;
+  if (!binding || !sessionManager) {
     return;
   }
-  const binding = daemonState.getBrokerConnectionScopes().get(input.mcpSessionId);
-  if (!binding) {
-    return;
-  }
-  const sessionManager = daemonState.getSessionManager();
   const refusal = brokerConnectionPlainToolRefusal({
     binding,
     toolName: input.toolName,

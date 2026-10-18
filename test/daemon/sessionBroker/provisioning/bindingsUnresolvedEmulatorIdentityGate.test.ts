@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../../../src/daemon/devicePool";
 import { BINDING_INPUT_SNAPSHOT_MAX_AGE_MS } from "../../../../src/daemon/inputDeviceOwnership";
 import { RegistryBindingExclusion } from "../../../../src/daemon/sessionBroker/provisioning/exclusion";
@@ -36,7 +36,7 @@ describe("a binding's emulator whose AVD name the pool could not read", () => {
   let sessions: SessionManager;
   let pool: DevicePool;
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const registry = new FakeBindingRegistry(timer);
@@ -52,7 +52,19 @@ describe("a binding's emulator whose AVD name the pool could not read", () => {
       }),
     );
     await pool.initializeWithDevices([BINDING_EMULATOR]);
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     sessions.stopCleanupTimer();
@@ -65,24 +77,27 @@ describe("a binding's emulator whose AVD name the pool could not read", () => {
       (error: unknown) => (error as { code?: string }).code ?? "refused",
     );
 
-  test("the availability surface and the input gate agree that it is not a free device", async () => {
-    await pool.bindingStableIds("android");
-    // What listDevices / pool stats report for it.
-    expect(pool.genericAvailability(BINDING_EMULATOR.deviceId)).toBe("session_broker");
+  arranged(
+    "the availability surface and the input gate agree that it is not a free device",
+    async () => {
+      await pool.bindingStableIds("android");
+      // What listDevices / pool stats report for it.
+      expect(pool.genericAvailability(BINDING_EMULATOR.deviceId)).toBe("session_broker");
 
-    // A generic caller's device-driving frame (socket input, an MCP control call).
-    const input = await refusal(
-      pool.assertNotAssignedToBinding({
-        action: "input",
-        deviceId: BINDING_EMULATOR.deviceId,
-        platform: "android",
-        requesterSessionUuid: "generic-session",
-        maxAgeMs: BINDING_INPUT_SNAPSHOT_MAX_AGE_MS,
-      }),
-    );
+      // A generic caller's device-driving frame (socket input, an MCP control call).
+      const input = await refusal(
+        pool.assertNotAssignedToBinding({
+          action: "input",
+          deviceId: BINDING_EMULATOR.deviceId,
+          platform: "android",
+          requesterSessionUuid: "generic-session",
+          maxAgeMs: BINDING_INPUT_SNAPSHOT_MAX_AGE_MS,
+        }),
+      );
 
-    expect(input).not.toBe("allowed");
-  });
+      expect(input).not.toBe("allowed");
+    },
+  );
 
   const gate = (extra: Record<string, unknown>) =>
     refusal(
@@ -96,21 +111,21 @@ describe("a binding's emulator whose AVD name the pool could not read", () => {
       }),
     );
 
-  test("acquire with a verified non-managed AVD name passes", async () => {
+  arranged("acquire with a verified non-managed AVD name passes", async () => {
     expect(await gate({ action: "acquire", stableIds: ["generic-avd"] })).toBe("allowed");
   });
 
-  test("acquire with a managed AVD name is refused", async () => {
+  arranged("acquire with a managed AVD name is refused", async () => {
     expect(await gate({ action: "acquire", stableIds: ["amslot-avd"] })).toBe(
       "device_assigned_to_binding",
     );
   });
 
-  test("a deviceGestureRecording gate with no identity at all is refused", async () => {
+  arranged("a deviceGestureRecording gate with no identity at all is refused", async () => {
     expect(await gate({ action: "deviceGestureRecording" })).toBe("device_assigned_to_binding");
   });
 
-  test("an input gate with only undefined identities is refused", async () => {
+  arranged("an input gate with only undefined identities is refused", async () => {
     expect(await gate({ stableIds: [undefined] })).toBe("device_assigned_to_binding");
   });
 });

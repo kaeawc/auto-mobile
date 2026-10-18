@@ -1,5 +1,14 @@
 import type { z } from "zod/v4";
-import type { tapAtSchema } from "./interactionTools";
+import type {
+  tapAtSchema,
+  tapAnySchema,
+  dragAndDropSchema,
+  swipeOnSchema,
+  pinchOnSchema,
+  sendKeysSchema,
+  openLinkSchema,
+  clipboardSchema,
+} from "./interactionTools";
 import type {
   keyboardTool,
   selectAllTextTool,
@@ -9,21 +18,13 @@ import type {
   recentAppsTool,
   rotateTool,
 } from "./interactionTools";
-import type { SwipeEdge, SwipeOnOptions } from "../models/SwipeOnOptions";
 import type { ElementContainerSelector } from "../models/PinchOnOptions";
-import type { DragAndDropTarget } from "../models/DragAndDropOptions";
 import type { HierarchyLayer } from "../models/HierarchyLayer";
 /**
  * Type definitions for interaction tools.
  * Extracted from interactionTools.ts for maintainability.
  */
 import type { Platform, ElementSelectionStrategy } from "../models";
-import type { ObserveWaitForOptions, SettledOptions } from "./observeTools";
-import type {
-  SendKeysCommand,
-  SendKeysSelector,
-  SendKeysFocusOptions,
-} from "../features/action/SendKeys";
 
 // ============================================================================
 // Tool Argument Types
@@ -38,25 +39,11 @@ export type SelectAllTextArgs = z.output<typeof selectAllTextTool.schema>;
 
 export type PressButtonArgs = z.output<typeof pressButtonTool.schema>;
 
-export interface SendKeysArgs extends SendKeysFocusOptions {
-  display?: string;
-  commands: SendKeysCommand[];
-  selector?: SendKeysSelector;
-  platform?: Platform;
-  raw?: boolean;
-  project?: "full" | "skeleton";
-}
+export type SendKeysArgs = z.output<typeof sendKeysSchema>;
 
 export type WakeAndUnlockArgs = z.output<typeof wakeAndUnlockTool.schema>;
 
-export interface OpenLinkArgs {
-  url: string;
-  platform?: Platform;
-  acceptOpenAlert?: boolean;
-  chooserAppPackage?: string;
-  waitFor?: ObserveWaitForOptions;
-  settled?: SettledOptions;
-}
+export type OpenLinkArgs = z.output<typeof openLinkSchema>;
 
 export interface TapOnArgs {
   display?: string;
@@ -97,65 +84,13 @@ export type TapAtArgs = z.output<typeof tapAtSchema> & {
   __tapAtRecordingContext?: import("../models/TapAtGeometry").TapAtPlanContext;
 };
 
-export interface TapAnyArgs {
-  display?: string;
-  container?: ElementContainerSelector;
-  selectionStrategy?: ElementSelectionStrategy;
-  action: "tap" | "doubleTap" | "longPress";
-  duration?: number;
-  searchUntil?: {
-    duration?: number;
-  };
-  scrollableContainer?: boolean;
-  layer?: HierarchyLayer;
-  platform?: Platform;
-}
+export type TapAnyArgs = z.output<typeof tapAnySchema>;
 
-export interface DragAndDropArgs {
-  display?: string;
-  source: DragAndDropTarget;
-  target: DragAndDropTarget;
-  layer?: HierarchyLayer;
-  pressDurationMs?: number;
-  dragDurationMs?: number;
-  holdDurationMs?: number;
-  platform?: Platform;
-}
+export type DragAndDropArgs = z.output<typeof dragAndDropSchema>;
 
-export interface SwipeOnArgs {
-  display?: string;
-  includeSystemInsets?: boolean;
-  container?: ElementContainerSelector;
-  autoTarget?: boolean;
-  direction: "up" | "down" | "left" | "right";
-  gestureType?: "swipeFingerTowardsDirection" | "scrollTowardsDirection";
-  lookFor?: Omit<NonNullable<SwipeOnOptions["lookFor"]>, "maxTime">;
-  boomerang?: boolean;
-  apexPause?: number;
-  returnSpeed?: number;
-  speed?: "slow" | "normal" | "fast";
-  durationMs?: number;
-  fromEdge?: SwipeEdge;
-  edgeInset?: number;
-  at?: number;
-  layer?: HierarchyLayer;
-  platform?: Platform;
-}
+export type SwipeOnArgs = z.output<typeof swipeOnSchema>;
 
-export interface PinchOnArgs {
-  display?: string;
-  direction: "in" | "out";
-  distanceStart?: number;
-  distanceEnd?: number;
-  scale?: number;
-  duration?: number;
-  rotationDegrees?: number;
-  includeSystemInsets?: boolean;
-  container?: ElementContainerSelector;
-  autoTarget?: boolean;
-  layer?: HierarchyLayer;
-  platform?: Platform;
-}
+export type PinchOnArgs = z.output<typeof pinchOnSchema>;
 
 export type ShakeArgs = z.output<typeof shakeTool.schema>;
 
@@ -165,11 +100,7 @@ export type RecentAppsArgs = z.output<typeof recentAppsTool.schema>;
 
 export type RotateArgs = z.output<typeof rotateTool.schema>;
 
-export interface ClipboardArgs {
-  action: "copy" | "paste" | "clear" | "get";
-  text?: string;
-  platform?: Platform;
-}
+export type ClipboardArgs = z.output<typeof clipboardSchema>;
 
 export type {
   SystemTrayNotificationArgs,

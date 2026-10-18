@@ -134,10 +134,10 @@ function transitionalTransportAttempt(
 /** Preserve the existing MCP-owned autolock resolution and explicit UUID precedence. */
 function resolveAutolockSelection(args: HandlerArgs): string | undefined {
   const mcpSessionId = args.__mcpSessionId;
-  if (!mcpSessionId || !DaemonState.getInstance().isInitialized()) {
+  const pool = mcpSessionId ? defaultDaemonContext.devicePool() : undefined;
+  if (!mcpSessionId || !pool) {
     return undefined;
   }
-  const pool = DaemonState.getInstance().getDevicePool();
   const ownedSession = pool.resolveAutolockSessionForMcpSession(
     mcpSessionId,
     args.platform,
@@ -167,16 +167,14 @@ function refuseForeignOwnedSession(args: HandlerArgs): void {
   refuseControlOnForeignOwnedSession("setActiveDevice", args.sessionUuid, callerMcpSessionId);
   // #11235: a caller with no connection identity is not judged above, but a live autolock session
   // is owned by connection, so it is foreign to that caller too.
-  const daemonState = DaemonState.getInstance();
   if (
     !callerMcpSessionId &&
     args.sessionUuid &&
-    daemonState.isInitialized() &&
-    daemonState.getDevicePool().isSessionOwnedByOtherConnection(args.sessionUuid)
+    defaultDaemonContext.devicePool()?.isSessionOwnedByOtherConnection(args.sessionUuid)
   ) {
-    const sessionDevice = daemonState
-      .getSessionManager()
-      .getSession(args.sessionUuid)?.assignedDevice;
+    const sessionDevice = defaultDaemonContext
+      .sessionManager()
+      ?.getSession(args.sessionUuid)?.assignedDevice;
     throw deviceAssignedToOtherSessionError(
       sessionDevice ?? "unknown",
       args.sessionUuid,
@@ -401,6 +399,12 @@ async function selectSessionDevice(input: {
   return args.display !== undefined || hadDisplayPin;
 }
 
+function sessionlessDaemonReads() {
+  const pool = defaultDaemonContext.devicePool();
+  const sessions = defaultDaemonContext.sessionManager();
+  return pool && sessions ? { pool, sessions } : undefined;
+}
+
 /**
  * In daemon mode a sessionless selection of a device another session holds (a live bound session
  * or an autolock owner) is refused before readiness touches it (#11071): readiness would set up
@@ -410,12 +414,11 @@ async function selectSessionDevice(input: {
  * it (#10829).
  */
 function admitSessionlessSelection(args: HandlerArgs): void {
-  const daemonState = DaemonState.getInstance();
-  if (args.sessionUuid || !daemonState.isInitialized()) {
+  const daemon = args.sessionUuid ? undefined : sessionlessDaemonReads();
+  if (!daemon) {
     return;
   }
-  const pool = daemonState.getDevicePool();
-  const sessions = daemonState.getSessionManager();
+  const { pool, sessions } = daemon;
   const boundHolder = sessions.getSessionForDevice(args.deviceId);
   const liveHolder =
     (boundHolder && sessions.getSession(boundHolder) ? boundHolder : undefined) ??
@@ -443,10 +446,7 @@ function admitSessionlessSelection(args: HandlerArgs): void {
 }
 
 function assertNotPreparedForOtherRequest(deviceId: string): void {
-  const daemonState = DaemonState.getInstance();
-  if (daemonState.isInitialized()) {
-    daemonState.getDevicePool().assertNotPreparedForOtherRequest(deviceId);
-  }
+  defaultDaemonContext.devicePool()?.assertNotPreparedForOtherRequest(deviceId);
 }
 
 async function selectLegacyDevice(input: {

@@ -3,6 +3,8 @@ import type { Platform } from "../models";
 import { readExclusiveLockContent, type LockContent } from "../utils/fileLock";
 import { sortedReaddirSync } from "../utils/io";
 import { isProcessRunning } from "../utils/processLiveness";
+import { defaultLockOwnerGenerationProbe } from "../utils/lockOwnerGeneration";
+import type { LockOwnerGenerationVerdict } from "../utils/fileLock";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { toActionableError } from "../models/ActionableError";
@@ -155,12 +157,18 @@ export interface LockFileReaders {
   readLock(path: string): LockContent | undefined;
   isProcessRunning(pid: number): boolean;
   listFiles(dir: string): string[];
+  /**
+   * Whether `pid` is still the process generation recorded in the lock (#13279). Omitted: the PID
+   * probe alone decides. "unknown" keeps a possibly-live owner.
+   */
+  generationVerdict?(pid: number, recorded: string): LockOwnerGenerationVerdict;
 }
 
 const defaultLockFileReaders: LockFileReaders = {
   readLock: (path) => readExclusiveLockContent(path),
   isProcessRunning: (pid) => isProcessRunning(pid),
   listFiles: (dir) => sortedReaddirSync(dir),
+  generationVerdict: (pid, recorded) => defaultLockOwnerGenerationProbe.compare(pid, recorded),
 };
 
 export interface DefaultSourcesOptions {
@@ -194,7 +202,13 @@ export function createDefaultDeviceOwnershipSources(
     if (!content || Number.isNaN(content.pid)) {
       return undefined;
     }
-    return { source, pid: content.pid, alive: readers.isProcessRunning(content.pid) };
+    // A PID the OS reused for an unrelated process is not the lock holder (#13279).
+    const running = readers.isProcessRunning(content.pid);
+    const reused =
+      running &&
+      content.generation !== undefined &&
+      readers.generationVerdict?.(content.pid, content.generation) === "different";
+    return { source, pid: content.pid, alive: running && !reused };
   };
 
   const idsIn = (dir: string, platform: Platform): DeviceRef[] => {

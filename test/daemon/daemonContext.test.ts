@@ -9,7 +9,11 @@ import { resolveAppearanceSessionKey } from "../../src/server/appearanceSessionK
 import { sessionRenderedDisplayGeneration } from "../../src/features/action/BaseVisualChange";
 
 function contextWith(reads: ReturnType<DaemonContext["renderedDisplaySessions"]>): DaemonContext {
-  return { renderedDisplaySessions: () => reads, sessionManager: () => undefined };
+  return {
+    renderedDisplaySessions: () => reads,
+    sessionManager: () => undefined,
+    devicePool: () => undefined,
+  };
 }
 
 describe("DaemonContext", () => {
@@ -42,6 +46,11 @@ describe("DaemonContext", () => {
     expect(defaultDaemonContext.sessionManager()).toBeUndefined();
   });
 
+  test("devicePool is undefined while DaemonState is uninitialized", () => {
+    DaemonState.getInstance().reset();
+    expect(defaultDaemonContext.devicePool()).toBeUndefined();
+  });
+
   test("injected context feeds the admitted-session echo without DaemonState", () => {
     DaemonState.getInstance().reset();
     const ctx: DaemonContext = { ...contextWith(undefined), sessionManager: () => undefined };
@@ -57,11 +66,16 @@ describe("DaemonContext", () => {
     const ctx: DaemonContext = {
       renderedDisplaySessions: () => undefined,
       sessionManager: () => manager,
+      devicePool: () => undefined,
     };
     expect(getDeviceLabelMap("base", ctx)).toEqual({ a: "base" });
     expect(planLifecycleSessionUuid("base:b", ctx)).toBe("base");
     expect(planLifecycleSessionUuid("other", ctx)).toBe("other");
-    const none = { renderedDisplaySessions: () => undefined, sessionManager: () => undefined };
+    const none: DaemonContext = {
+      renderedDisplaySessions: () => undefined,
+      sessionManager: () => undefined,
+      devicePool: () => undefined,
+    };
     expect(getDeviceLabelMap("base", none)).toBeNull();
     expect(resolveAppearanceSessionKey(" s1 ", none)).toBe("s1");
   });

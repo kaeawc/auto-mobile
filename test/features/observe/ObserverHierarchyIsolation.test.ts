@@ -1061,11 +1061,7 @@ test("iOS observer screenshot uses the real open client without reconnect or str
   const writer = new FakeScreenshotFileWriter();
   try {
     expect(await client.ensureConnected()).toBe(true);
-    const instances = Reflect.get(IOSCtrlProxyClient, "instances") as Map<
-      string,
-      IOSCtrlProxyClient
-    >;
-    instances.set(device.deviceId, client);
+    IOSCtrlProxyClient.registerForTesting(client, device.deviceId);
     const reconnect = spyOn(client, "ensureConnected");
     const screenshot = new TakeScreenshot(
       device,

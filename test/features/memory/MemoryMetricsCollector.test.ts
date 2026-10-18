@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { MemoryMetricsCollector } from "../../../src/features/memory/MemoryMetricsCollector";
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -12,7 +13,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
     fakeAdb = new FakeAdbExecutor();
     collector = new MemoryMetricsCollector(
       { deviceId: "test-device", name: "test", platform: "android" },
-      fakeAdb as any,
+      fakeAdb,
     );
   });
 
@@ -31,7 +32,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
           TOTAL:        50000
       `;
 
-      const result = (collector as any).parseMeminfo(output);
+      const result = collector.parseMeminfo(output);
 
       expect(result.javaHeapMb).toBe(10); // 10240 KB = 10 MB
       expect(result.nativeHeapMb).toBe(5); // 5120 KB = 5 MB
@@ -44,7 +45,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         TOTAL:        50000
       `;
 
-      const result = (collector as any).parseMeminfo(output);
+      const result = collector.parseMeminfo(output);
 
       expect(result.javaHeapMb).toBe(0);
       expect(result.nativeHeapMb).toBe(5);
@@ -57,7 +58,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         TOTAL:        50000
       `;
 
-      const result = (collector as any).parseMeminfo(output);
+      const result = collector.parseMeminfo(output);
 
       expect(result.javaHeapMb).toBe(10);
       expect(result.nativeHeapMb).toBe(0);
@@ -70,7 +71,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         Native Heap:   5120
       `;
 
-      const result = (collector as any).parseMeminfo(output);
+      const result = collector.parseMeminfo(output);
 
       expect(result.javaHeapMb).toBe(10);
       expect(result.nativeHeapMb).toBe(5);
@@ -84,7 +85,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         TOTAL PSS:    50000
       `;
 
-      const result = (collector as any).parseMeminfo(output);
+      const result = collector.parseMeminfo(output);
 
       expect(result.totalPssMb).toBe(48.828125);
     });
@@ -95,13 +96,10 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       const hostilePackage = "com.example; echo pwned";
-      fakeAdb.setCommandResponse(`pidof '${hostilePackage}'`, {
-        stdout: "1111 2222",
-        stderr: "",
-      } as any);
+      fakeAdb.setCommandResponse(`pidof '${hostilePackage}'`, createExecResult("1111 2222", ""));
       const gcCollector = new MemoryMetricsCollector(
         { deviceId: "test-device", name: "test", platform: "android" },
-        fakeAdb as any,
+        fakeAdb,
         timer,
       );
 
@@ -122,7 +120,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         I/dalvikvm: GC_EXPLICIT freed 3456K, 40% free 7890K/13579K, paused 345ms
       `;
 
-      const result = (collector as any).parseGCEvents(output, 0, Date.now());
+      const result = collector.parseGCEvents(output, 0, Date.now());
 
       expect(result.length).toBe(2);
       expect(result[0].type).toBe("FOR_ALLOC");
@@ -140,7 +138,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       const output =
         "09-05 12:00:00.123  1234  1234 I com.example.app: Background concurrent copying GC freed 4180(230KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 213us,45us total 42.3ms";
 
-      const result = (collector as any).parseGCEvents(output, 0, Date.now());
+      const result = collector.parseGCEvents(output, 0, Date.now());
 
       expect(result.length).toBe(1);
       expect(result[0].type).toBe("Background concurrent copying");
@@ -153,7 +151,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       const output =
         "I/art: Background concurrent mark sweep GC freed 1234KB, 50% free, 5678KB/11356KB, paused 123ms";
 
-      const result = (collector as any).parseGCEvents(output, 0, Date.now());
+      const result = collector.parseGCEvents(output, 0, Date.now());
 
       expect(result.length).toBe(1);
       expect(result[0].type).toBe("Background concurrent mark sweep");
@@ -168,7 +166,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       const output =
         "09-05 12:00:00.000  1234  1234 I com.example.app: Explicit concurrent copying GC freed 716275(24MB) AllocSpace objects, 0(0B) LOS objects, 55% free, 30MB/60MB, paused 1.5ms";
 
-      const result = (collector as any).parseGCEvents(output, 0, Date.now());
+      const result = collector.parseGCEvents(output, 0, Date.now());
 
       expect(result.length).toBe(1);
       expect(result[0].freedKb).toBe(24 * 1024);
@@ -179,7 +177,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       const output =
         "09-05 12:00:00.000  1234  1234 I com.example.app: Background concurrent copying GC freed 500(50KB) AllocSpace objects, 0(0B) LOS objects, 60% free, 1MB/2MB, paused 213us,45us total 42.3ms";
 
-      const result = (collector as any).parseGCEvents(output, 0, Date.now());
+      const result = collector.parseGCEvents(output, 0, Date.now());
 
       expect(result.length).toBe(1);
       // (213 + 45) us = 258us = 0.258ms — not just the first component (0.213ms).
@@ -192,7 +190,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         "09-05 12:00:01.000  1234  1234 I com.example.app: Explicit concurrent copying GC freed 500(50KB) AllocSpace objects, 0(0B) LOS objects, 60% free, 1MB/2MB, paused 500us total 1.2ms",
       ].join("\n");
 
-      const result = (collector as any).parseGCEvents(output, 0, Date.now());
+      const result = collector.parseGCEvents(output, 0, Date.now());
 
       expect(result.length).toBe(2);
       expect(result[0].type).toBe("FOR_ALLOC");
@@ -210,7 +208,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         "1725000000.500  9999  9999 I com.other.app: Background concurrent copying GC freed 9000(900KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 999us",
       ].join("\n");
 
-      const result = (collector as any).parseGCEvents(output, 0, Date.now(), "1234");
+      const result = collector.parseGCEvents(output, 0, Date.now(), "1234");
 
       expect(result.length).toBe(1);
       expect(result[0].freedKb).toBe(230);
@@ -224,7 +222,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         `1725000090.000  1234  1234 I com.example.app: Background concurrent copying GC freed 200(20KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 200us`,
       ].join("\n");
 
-      const result = (collector as any).parseGCEvents(output, inWindowMs - 1000, inWindowMs + 1000);
+      const result = collector.parseGCEvents(output, inWindowMs - 1000, inWindowMs + 1000);
 
       expect(result.length).toBe(1);
       expect(result[0].freedKb).toBe(10);
@@ -235,7 +233,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
     test("should handle empty logcat output", function () {
       const output = "";
 
-      const result = (collector as any).parseGCEvents(output, 0, Date.now());
+      const result = collector.parseGCEvents(output, 0, Date.now());
 
       expect(result.length).toBe(0);
     });
@@ -246,7 +244,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         D/another-tag: Another log message
       `;
 
-      const result = (collector as any).parseGCEvents(output, 0, Date.now());
+      const result = collector.parseGCEvents(output, 0, Date.now());
 
       expect(result.length).toBe(0);
     });
@@ -254,12 +252,14 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
 
   describe("captureGCEvents", function () {
     test("should query logcat scoped to the audited process's pid, without the over-narrow dalvikvm/art tag filter", async function () {
-      fakeAdb.setCommandResponse("pidof 'com.example.app'", { stdout: "1234", stderr: "" } as any);
-      fakeAdb.setCommandResponse("logcat -d -v epoch", {
-        stdout:
+      fakeAdb.setCommandResponse("pidof 'com.example.app'", createExecResult("1234", ""));
+      fakeAdb.setCommandResponse(
+        "logcat -d -v epoch",
+        createExecResult(
           "1725000000.000  1234  1234 I com.example.app: Background concurrent copying GC freed 4180(230KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 213us,45us total 42.3ms",
-        stderr: "",
-      } as any);
+          "",
+        ),
+      );
 
       const events = await collector.captureGCEvents(
         "com.example.app",
@@ -280,7 +280,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
     });
 
     test("should skip capture (not throw) when the audited app has no resolvable pid", async function () {
-      fakeAdb.setCommandResponse("pidof 'com.example.app'", { stdout: "", stderr: "" } as any);
+      fakeAdb.setCommandResponse("pidof 'com.example.app'", createExecResult("", ""));
 
       const events = await collector.captureGCEvents("com.example.app", 0, Date.now());
 
@@ -290,8 +290,8 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
     });
 
     test("should return zero events (not throw) when logcat has no GC lines", async function () {
-      fakeAdb.setCommandResponse("pidof 'com.example.app'", { stdout: "1234", stderr: "" } as any);
-      fakeAdb.setCommandResponse("logcat -d -v epoch", { stdout: "", stderr: "" } as any);
+      fakeAdb.setCommandResponse("pidof 'com.example.app'", createExecResult("1234", ""));
+      fakeAdb.setCommandResponse("logcat -d -v epoch", createExecResult("", ""));
 
       const events = await collector.captureGCEvents("com.example.app", 0, Date.now());
 
@@ -305,12 +305,14 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       // collectMetrics), so no host<->device translation happens inside
       // captureGCEvents itself; the bounds are compared directly against
       // the device-stamped log line's epoch.
-      fakeAdb.setCommandResponse("pidof 'com.example.app'", { stdout: "1234", stderr: "" } as any);
-      fakeAdb.setCommandResponse("logcat -d -v epoch", {
-        stdout:
+      fakeAdb.setCommandResponse("pidof 'com.example.app'", createExecResult("1234", ""));
+      fakeAdb.setCommandResponse(
+        "logcat -d -v epoch",
+        createExecResult(
           "105000.000  1234  1234 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
-        stderr: "",
-      } as any);
+          "",
+        ),
+      );
 
       const events = await collector.captureGCEvents(
         "com.example.app",
@@ -323,13 +325,15 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
     });
 
     test("should drop an event whose device-epoch timestamp falls outside the given bounds", async function () {
-      fakeAdb.setCommandResponse("pidof 'com.example.app'", { stdout: "1234", stderr: "" } as any);
-      fakeAdb.setCommandResponse("logcat -d -v epoch", {
-        stdout:
+      fakeAdb.setCommandResponse("pidof 'com.example.app'", createExecResult("1234", ""));
+      fakeAdb.setCommandResponse(
+        "logcat -d -v epoch",
+        createExecResult(
           // 80s after the window end.
           "105080.000  1234  1234 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
-        stderr: "",
-      } as any);
+          "",
+        ),
+      );
 
       const events = await collector.captureGCEvents(
         "com.example.app",
@@ -341,14 +345,17 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
     });
 
     test("should treat the device-clock window bounds as inclusive", async function () {
-      fakeAdb.setCommandResponse("pidof 'com.example.app'", { stdout: "1234", stderr: "" } as any);
-      fakeAdb.setCommandResponse("logcat -d -v epoch", {
-        stdout: [
-          "100.000  1234  1234 I com.example.app: Background concurrent copying GC freed 1(1KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 1us", // exactly at start
-          "200.000  1234  1234 I com.example.app: Background concurrent copying GC freed 2(2KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 1us", // exactly at end
-        ].join("\n"),
-        stderr: "",
-      } as any);
+      fakeAdb.setCommandResponse("pidof 'com.example.app'", createExecResult("1234", ""));
+      fakeAdb.setCommandResponse(
+        "logcat -d -v epoch",
+        createExecResult(
+          [
+            "100.000  1234  1234 I com.example.app: Background concurrent copying GC freed 1(1KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 1us", // exactly at start
+            "200.000  1234  1234 I com.example.app: Background concurrent copying GC freed 2(2KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 1us", // exactly at end
+          ].join("\n"),
+          "",
+        ),
+      );
 
       const events = await collector.captureGCEvents("com.example.app", 100_000, 200_000);
 
@@ -360,17 +367,21 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       // collectMetrics now does): pid 1111 was alive during the action, but
       // if captureGCEvents queried pidof itself afterward it would get 2222
       // (the app restarted). Passing the pre-resolved pid must win.
-      fakeAdb.setCommandResponse("pidof 'com.example.app'", { stdout: "2222", stderr: "" } as any);
-      fakeAdb.setCommandResponse("logcat -d -v epoch --pid='1111'", {
-        stdout:
+      fakeAdb.setCommandResponse("pidof 'com.example.app'", createExecResult("2222", ""));
+      fakeAdb.setCommandResponse(
+        "logcat -d -v epoch --pid='1111'",
+        createExecResult(
           "1000.000  1111  1111 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
-        stderr: "",
-      } as any);
-      fakeAdb.setCommandResponse("logcat -d -v epoch --pid=2222", {
-        stdout:
+          "",
+        ),
+      );
+      fakeAdb.setCommandResponse(
+        "logcat -d -v epoch --pid=2222",
+        createExecResult(
           "1000.000  2222  2222 I com.example.app: Background concurrent copying GC freed 999(999KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 999us",
-        stderr: "",
-      } as any);
+          "",
+        ),
+      );
 
       const events = await collector.captureGCEvents(
         "com.example.app",
@@ -395,7 +406,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       const output =
         "09-05 12:00:00.000 I com.example.app: Explicit concurrent copying GC freed 123(4MB) AllocSpace objects, 45(2MB) LOS objects, 50% free, 6MB/8MB, paused 1ms";
 
-      const result = (collector as any).parseGCEvents(output, 0, Date.now());
+      const result = collector.parseGCEvents(output, 0, Date.now());
 
       expect(result.length).toBe(1);
       expect(result[0].freedKb).toBe(4 * 1024 + 2 * 1024); // 4MB AllocSpace + 2MB LOS = 6144KB
@@ -409,7 +420,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       fakeTimer.enableAutoAdvance();
       const restartCollector = new MemoryMetricsCollector(
         { deviceId: "test-device", name: "test", platform: "android" },
-        fakeAdb as any,
+        fakeAdb,
         fakeTimer,
       );
 
@@ -417,26 +428,25 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       // later pidof call (e.g. triggerGC, post-action) sees 2222 — simulating
       // the audited app restarting partway through the action.
       fakeAdb.setCommandResponseSequence("pidof 'com.example.app'", [
-        { stdout: "1111", stderr: "" } as any,
-        { stdout: "2222", stderr: "" } as any,
+        createExecResult("1111", ""),
+        createExecResult("2222", ""),
       ]);
-      fakeAdb.setCommandResponse("dumpsys meminfo 'com.example.app'", {
-        stdout: "",
-        stderr: "",
-      } as any);
-      fakeAdb.setCommandResponse("dumpsys meminfo --unreachable 'com.example.app'", {
-        stdout: "",
-        stderr: "",
-      } as any);
+      fakeAdb.setCommandResponse("dumpsys meminfo 'com.example.app'", createExecResult("", ""));
+      fakeAdb.setCommandResponse(
+        "dumpsys meminfo --unreachable 'com.example.app'",
+        createExecResult("", ""),
+      );
       // The device clock is read once immediately before the action starts
       // (500_000) and once immediately after it ends (500_500) — these two
       // reads ARE the GC window, with no host-clock translation involved.
       fakeAdb.setDeviceTimestampMsSequence([500_000, 500_500]);
-      fakeAdb.setCommandResponse("logcat -d -v epoch --pid='1111'", {
-        stdout:
+      fakeAdb.setCommandResponse(
+        "logcat -d -v epoch --pid='1111'",
+        createExecResult(
           "500.200  1111  1111 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
-        stderr: "",
-      } as any);
+          "",
+        ),
+      );
 
       const metrics = await restartCollector.collectMetrics("com.example.app", async () => {});
 
@@ -455,19 +465,16 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       fakeTimer.enableAutoAdvance();
       const coarseClockCollector = new MemoryMetricsCollector(
         { deviceId: "test-device", name: "test", platform: "android" },
-        fakeAdb as any,
+        fakeAdb,
         fakeTimer,
       );
 
-      fakeAdb.setCommandResponse("pidof 'com.example.app'", { stdout: "1111", stderr: "" } as any);
-      fakeAdb.setCommandResponse("dumpsys meminfo 'com.example.app'", {
-        stdout: "",
-        stderr: "",
-      } as any);
-      fakeAdb.setCommandResponse("dumpsys meminfo --unreachable 'com.example.app'", {
-        stdout: "",
-        stderr: "",
-      } as any);
+      fakeAdb.setCommandResponse("pidof 'com.example.app'", createExecResult("1111", ""));
+      fakeAdb.setCommandResponse("dumpsys meminfo 'com.example.app'", createExecResult("", ""));
+      fakeAdb.setCommandResponse(
+        "dumpsys meminfo --unreachable 'com.example.app'",
+        createExecResult("", ""),
+      );
 
       // The device only supports `date +%s` (second resolution): the audit
       // actually ran from 500.000s to 501.400s, but the second boundary read
@@ -476,11 +483,13 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       // — and must not be dropped.
       fakeAdb.setDeviceTimestampMsSequence([500_000, 501_000]);
       fakeAdb.setDeviceTimestampSource("device-seconds");
-      fakeAdb.setCommandResponse("logcat -d -v epoch --pid='1111'", {
-        stdout:
+      fakeAdb.setCommandResponse(
+        "logcat -d -v epoch --pid='1111'",
+        createExecResult(
           "501.300  1111  1111 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
-        stderr: "",
-      } as any);
+          "",
+        ),
+      );
 
       const metrics = await coarseClockCollector.collectMetrics("com.example.app", async () => {});
 
@@ -493,30 +502,29 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       fakeTimer.enableAutoAdvance();
       const coarseClockCollector = new MemoryMetricsCollector(
         { deviceId: "test-device", name: "test", platform: "android" },
-        fakeAdb as any,
+        fakeAdb,
         fakeTimer,
       );
 
-      fakeAdb.setCommandResponse("pidof 'com.example.app'", { stdout: "1111", stderr: "" } as any);
-      fakeAdb.setCommandResponse("dumpsys meminfo 'com.example.app'", {
-        stdout: "",
-        stderr: "",
-      } as any);
-      fakeAdb.setCommandResponse("dumpsys meminfo --unreachable 'com.example.app'", {
-        stdout: "",
-        stderr: "",
-      } as any);
+      fakeAdb.setCommandResponse("pidof 'com.example.app'", createExecResult("1111", ""));
+      fakeAdb.setCommandResponse("dumpsys meminfo 'com.example.app'", createExecResult("", ""));
+      fakeAdb.setCommandResponse(
+        "dumpsys meminfo --unreachable 'com.example.app'",
+        createExecResult("", ""),
+      );
 
       // Coarse-clock widening only pushes the end bound to the top of its
       // truncated second (501.999s here) — an event a full second later, at
       // 502.500s, is genuinely outside the window and must still be dropped.
       fakeAdb.setDeviceTimestampMsSequence([500_000, 501_000]);
       fakeAdb.setDeviceTimestampSource("device-seconds");
-      fakeAdb.setCommandResponse("logcat -d -v epoch --pid='1111'", {
-        stdout:
+      fakeAdb.setCommandResponse(
+        "logcat -d -v epoch --pid='1111'",
+        createExecResult(
           "502.500  1111  1111 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
-        stderr: "",
-      } as any);
+          "",
+        ),
+      );
 
       const metrics = await coarseClockCollector.collectMetrics("com.example.app", async () => {});
 
@@ -540,19 +548,16 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       fakeTimer.enableAutoAdvance();
       const coarseClockCollector = new MemoryMetricsCollector(
         { deviceId: "test-device", name: "test", platform: "android" },
-        fakeAdb as any,
+        fakeAdb,
         fakeTimer,
       );
 
-      fakeAdb.setCommandResponse("pidof 'com.example.app'", { stdout: "1111", stderr: "" } as any);
-      fakeAdb.setCommandResponse("dumpsys meminfo 'com.example.app'", {
-        stdout: "",
-        stderr: "",
-      } as any);
-      fakeAdb.setCommandResponse("dumpsys meminfo --unreachable 'com.example.app'", {
-        stdout: "",
-        stderr: "",
-      } as any);
+      fakeAdb.setCommandResponse("pidof 'com.example.app'", createExecResult("1111", ""));
+      fakeAdb.setCommandResponse("dumpsys meminfo 'com.example.app'", createExecResult("", ""));
+      fakeAdb.setCommandResponse(
+        "dumpsys meminfo --unreachable 'com.example.app'",
+        createExecResult("", ""),
+      );
 
       // Same boundary-second setup as the "counts a GC event landing on the
       // boundary second" test above: the widened window is [500.000, 501.999].
@@ -561,11 +566,13 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
       // The single logcat dump the collector is allowed to take contains
       // only the genuine app GC that fired during the audited action — a
       // real boundary-second app GC must still be counted (the #6212 fix).
-      fakeAdb.setCommandResponse("logcat -d -v epoch --pid='1111'", {
-        stdout:
+      fakeAdb.setCommandResponse(
+        "logcat -d -v epoch --pid='1111'",
+        createExecResult(
           "501.300  1111  1111 I com.example.app: Background concurrent copying GC freed 100(10KB) AllocSpace objects, 0(0B) LOS objects, 49% free, 2MB/4MB, paused 100us",
-        stderr: "",
-      } as any);
+          "",
+        ),
+      );
 
       const metrics = await coarseClockCollector.collectMetrics("com.example.app", async () => {});
 
@@ -597,7 +604,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         Unreachable memory: 12345 bytes in 45 unreachable objects
       `;
 
-      const result = (collector as any).parseUnreachableObjects(output);
+      const result = collector.parseUnreachableObjects(output);
 
       expect(result.count).toBe(45);
       expect(result.sizeKb).toBeCloseTo(12.06, 2); // 12345 bytes ≈ 12.06 KB
@@ -609,7 +616,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         Some other text without the specific pattern
       `;
 
-      const result = (collector as any).parseUnreachableObjects(output);
+      const result = collector.parseUnreachableObjects(output);
 
       expect(result.count).toBe(0); // Fallback counting
       expect(result.sizeKb).toBe(0);
@@ -622,7 +629,7 @@ describe("MemoryMetricsCollector - Unit Tests", function () {
         Found unreachable object C
       `;
 
-      const result = (collector as any).parseUnreachableObjects(output);
+      const result = collector.parseUnreachableObjects(output);
 
       expect(result.count).toBe(3); // Counts occurrences of "unreachable"
     });

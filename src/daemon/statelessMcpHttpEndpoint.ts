@@ -1,0 +1,385 @@
+import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
+import { readMcpSessionKey } from "../server/mcpSessionKey";
+import type { ExecutionCancellationReason } from "../server/executionTracker";
+import { describeUnknownError, errorMessage } from "../utils/describeUnknownError";
+import type { IdGenerator } from "../utils/IdGenerator";
+import { logger } from "../utils/logger";
+import type { Timer } from "../utils/SystemTimer";
+import { INTERNAL_MCP_SESSION_PARAM } from "./constants";
+
+/**
+ * The daemon's internal MCP HTTP endpoint, stateless (#4678, owner decision 2026-10-17).
+ *
+ * Every POST gets its own MCP server and transport, closed when its response closes.
+ * There is no transport map, no idle reaper and no `mcp-session-id`: the caller's
+ * session key ({@link readMcpSessionKey}, else the in-band `__mcpSessionId`) is the
+ * only thing that links one request to the next. GET and DELETE answer 405 because
+ * there is no session stream to open or terminate.
+ *
+ * What the per-session transport used to provide is kept per request:
+ * - cancellation: each request runs under its own `requestScopeId` (the one-shot
+ *   server's `sessionContext.sessionId`), so a response that closes early cancels
+ *   exactly the executions that request started, and shutdown cancels them with the
+ *   daemon's handoff reason;
+ * - `notifications/cancelled`: it arrives on a different POST, which reaches a fresh
+ *   server that never saw the request. The endpoint therefore resolves it in process
+ *   against its in-flight index (session key + JSON-RPC id) and cancels the matching
+ *   request itself.
+ */
+
+/** The request fields the endpoint reads. `IncomingMessage` satisfies it. */
+export interface McpHttpRequestLike {
+  readonly method?: string;
+  readonly headers: IncomingHttpHeaders;
+  /** Watched for a client disconnect: Bun's node:http emits no response `close` for it. */
+  readonly socket?: {
+    once(event: "close", listener: () => void): unknown;
+    off(event: "close", listener: () => void): unknown;
+  } | null;
+}
+
+/** The response surface the endpoint drives. `ServerResponse` satisfies it. */
+export interface McpHttpResponseLike {
+  readonly headersSent: boolean;
+  readonly writableEnded: boolean;
+  readonly destroyed: boolean;
+  writeHead(status: number, headers?: Record<string, string>): unknown;
+  write(chunk: string): unknown;
+  end(body?: string): unknown;
+  once(event: "close" | "finish", listener: () => void): unknown;
+}
+
+/** One request's transport: it handles exactly one POST, then closes. */
+export interface StatelessMcpTransport<Req, Res> {
+  handleRequest(req: Req, res: Res, parsedBody?: unknown): Promise<void>;
+  close(): Promise<void>;
+}
+
+/** One request's MCP server. */
+export interface StatelessMcpServer<T> {
+  connect(transport: T): Promise<void>;
+  close(): Promise<void>;
+}
+
+/** What a request's one-shot server is built with. */
+export interface StatelessMcpRequestScope {
+  /** Unique per POST: keys the executions this request starts so they cancel on their own. */
+  readonly requestScopeId: string;
+  /** The caller's session key: the header, else the in-band `__mcpSessionId` argument. */
+  readonly requestMcpSessionId: string | undefined;
+}
+
+export interface StatelessMcpHttpEndpointDeps<
+  Req extends McpHttpRequestLike,
+  Res extends McpHttpResponseLike,
+  T extends StatelessMcpTransport<Req, Res>,
+> {
+  readonly timer: Pick<Timer, "setInterval" | "clearInterval">;
+  readonly idGenerator: IdGenerator;
+  readonly keepaliveIntervalMs: number;
+  createTransport(): T;
+  createServer(req: Req, scope: StatelessMcpRequestScope): StatelessMcpServer<T>;
+  /** Cancel the executions keyed on a request scope (`executionTracker.cancelSessionExecutions`). */
+  cancelScopeExecutions(
+    requestScopeId: string,
+    reason: ExecutionCancellationReason,
+  ): Promise<number>;
+  /** Why a request that closes now is cancelled: the handoff error during shutdown. */
+  closeReason(): ExecutionCancellationReason;
+}
+
+interface InFlightRequest {
+  readonly requestScopeId: string;
+  readonly cancelKeys: readonly string[];
+  /** Cancel this request's executions, then close its server and transport. Idempotent. */
+  close(reason?: ExecutionCancellationReason): Promise<void>;
+}
+
+const METHOD_NOT_ALLOWED_BODY = JSON.stringify({
+  jsonrpc: "2.0",
+  error: { code: -32000, message: "Method not allowed." },
+  id: null,
+});
+
+type JsonRpcId = string | number;
+
+function jsonRpcMessages(parsedBody: unknown): readonly Record<string, unknown>[] {
+  const messages: unknown[] = Array.isArray(parsedBody) ? parsedBody : [parsedBody];
+  return messages.filter(
+    (message): message is Record<string, unknown> =>
+      !!message && typeof message === "object" && !Array.isArray(message),
+  );
+}
+
+function isJsonRpcId(value: unknown): value is JsonRpcId {
+  return typeof value === "string" || typeof value === "number";
+}
+
+function recordField(value: unknown, key: string): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return Object.entries(value).find(([name]) => name === key)?.[1];
+}
+
+/** The in-band `__mcpSessionId` of the first `tools/call` in the body, if any. */
+export function readInBandMcpSessionId(parsedBody: unknown): string | undefined {
+  for (const message of jsonRpcMessages(parsedBody)) {
+    const value = recordField(recordField(message.params, "arguments"), INTERNAL_MCP_SESSION_PARAM);
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function cancelKey(sessionKey: string, id: JsonRpcId): string {
+  return `${sessionKey}\u0000${typeof id}:${String(id)}`;
+}
+
+export class StatelessMcpHttpEndpoint<
+  Req extends McpHttpRequestLike = IncomingMessage,
+  Res extends McpHttpResponseLike = ServerResponse,
+  T extends StatelessMcpTransport<Req, Res> = StatelessMcpTransport<Req, Res>,
+> {
+  private readonly inFlight = new Map<string, InFlightRequest>();
+  /** session key + JSON-RPC id → request scope, for `notifications/cancelled`. */
+  private readonly byCancelKey = new Map<string, string>();
+
+  constructor(private readonly deps: StatelessMcpHttpEndpointDeps<Req, Res, T>) {}
+
+  /** Requests whose response is still open. */
+  get inFlightCount(): number {
+    return this.inFlight.size;
+  }
+
+  /** Close callbacks for every in-flight request, for the shutdown stage. */
+  inFlightRequests(): Array<{ requestScopeId: string; close: () => Promise<void> }> {
+    return Array.from(this.inFlight.values(), (request) => ({
+      requestScopeId: request.requestScopeId,
+      close: () => request.close(),
+    }));
+  }
+
+  /** Test seam: track a closable double as an in-flight request. */
+  trackForTesting(requestScopeId: string, close: () => Promise<void>): void {
+    this.inFlight.set(requestScopeId, {
+      requestScopeId,
+      cancelKeys: [],
+      close: async () => {
+        this.inFlight.delete(requestScopeId);
+        await close();
+      },
+    });
+  }
+
+  /** Drop all tracking after shutdown closed the requests (or gave up on them). */
+  clear(): void {
+    this.inFlight.clear();
+    this.byCancelKey.clear();
+  }
+
+  /**
+   * Serve one MCP HTTP request. The caller has already admitted it and parsed a
+   * POST body; `sendJsonRpcError` answers a failure before the transport wrote.
+   */
+  async handle(
+    req: Req,
+    res: Res,
+    parsedBody: unknown,
+    sendJsonRpcError: (message: string, error?: unknown) => void,
+  ): Promise<void> {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json", Allow: "POST" });
+      res.end(METHOD_NOT_ALLOWED_BODY);
+      return;
+    }
+    const headerSessionKey = readMcpSessionKey(req.headers);
+    await this.cancelNotifiedRequests(headerSessionKey, parsedBody);
+    const scope: StatelessMcpRequestScope = {
+      requestScopeId: this.deps.idGenerator.next(),
+      requestMcpSessionId: headerSessionKey ?? readInBandMcpSessionId(parsedBody),
+    };
+
+    let server: StatelessMcpServer<T>;
+    try {
+      server = this.deps.createServer(req, scope);
+    } catch (error) {
+      logger.error("Failed to create MCP server:", error);
+      sendJsonRpcError("Server error", error);
+      return;
+    }
+    const transport = this.deps.createTransport();
+    const request = this.track(scope, headerSessionKey, parsedBody, server, transport);
+    // The response ends (finish), the response is torn down (close), or the client
+    // drops the connection (socket close; on a keep-alive socket the listener is
+    // removed once the response ends, so reused connections do not accumulate it).
+    const socket = req.socket ?? undefined;
+    const closeOnResponseEnd = () => {
+      socket?.off("close", closeOnResponseEnd);
+      request.close().catch((error) => {
+        logger.warn(`Stateless MCP request close failed: ${errorMessage(error)}`, error);
+      });
+    };
+    res.once("close", closeOnResponseEnd);
+    res.once("finish", closeOnResponseEnd);
+    socket?.once("close", closeOnResponseEnd);
+
+    try {
+      await server.connect(transport);
+    } catch (error) {
+      logger.error("MCP server connect failed:", error);
+      sendJsonRpcError("Server error", error);
+      await request.close();
+      return;
+    }
+    await this.dispatch(req, res, transport, parsedBody, sendJsonRpcError);
+  }
+
+  private track(
+    scope: StatelessMcpRequestScope,
+    headerSessionKey: string | undefined,
+    parsedBody: unknown,
+    server: StatelessMcpServer<T>,
+    transport: T,
+  ): InFlightRequest {
+    const { requestScopeId } = scope;
+    // Only the header key indexes cancellation: a `notifications/cancelled` carries no
+    // in-band arguments, and JSON-RPC ids are only unique within one client.
+    const cancelKeys =
+      headerSessionKey === undefined
+        ? []
+        : jsonRpcMessages(parsedBody)
+            .map((message) => message.id)
+            .filter(isJsonRpcId)
+            .map((id) => cancelKey(headerSessionKey, id));
+    let closing: Promise<void> | undefined;
+    const request: InFlightRequest = {
+      requestScopeId,
+      cancelKeys,
+      close: (reason?: ExecutionCancellationReason) => {
+        closing ??= this.closeRequest(request, server, transport, reason);
+        return closing;
+      },
+    };
+    this.inFlight.set(requestScopeId, request);
+    for (const key of cancelKeys) {
+      this.byCancelKey.set(key, requestScopeId);
+    }
+    return request;
+  }
+
+  private async closeRequest(
+    request: InFlightRequest,
+    server: StatelessMcpServer<T>,
+    transport: T,
+    reason: ExecutionCancellationReason | undefined,
+  ): Promise<void> {
+    try {
+      // Cancel first, so the execution sees the real reason (the handoff error during
+      // shutdown) rather than the SDK's "Connection closed" abort from the close below.
+      // A request that already answered has no executions left; this is a no-op.
+      const cancelled = await this.deps.cancelScopeExecutions(
+        request.requestScopeId,
+        reason ?? this.deps.closeReason(),
+      );
+      if (cancelled > 0) {
+        logger.info(
+          `Stateless MCP request ${request.requestScopeId} closed (cancelled ${cancelled} executions)`,
+        );
+      }
+    } finally {
+      this.untrack(request);
+      const results = await Promise.allSettled([transport.close(), server.close()]);
+      for (const result of results) {
+        if (result.status === "rejected") {
+          logger.warn(
+            `Stateless MCP request ${request.requestScopeId} teardown failed: ${describeUnknownError(result.reason)}`,
+          );
+        }
+      }
+    }
+  }
+
+  private untrack(request: InFlightRequest): void {
+    if (this.inFlight.get(request.requestScopeId) === request) {
+      this.inFlight.delete(request.requestScopeId);
+    }
+    for (const key of request.cancelKeys) {
+      if (this.byCancelKey.get(key) === request.requestScopeId) {
+        this.byCancelKey.delete(key);
+      }
+    }
+  }
+
+  /**
+   * In-process fallback for `notifications/cancelled` (plan open question 1): the
+   * notification's POST reaches a fresh server, which cannot see the original
+   * request, so cancel that request's executions here and close its server, which
+   * aborts the handler signal the SDK passed it.
+   */
+  private async cancelNotifiedRequests(
+    headerSessionKey: string | undefined,
+    parsedBody: unknown,
+  ): Promise<void> {
+    if (headerSessionKey === undefined) {
+      return;
+    }
+    const cancellations = jsonRpcMessages(parsedBody).filter(
+      (message) => message.method === "notifications/cancelled",
+    );
+    await Promise.all(
+      cancellations.map(async (message) => {
+        const requestId = recordField(message.params, "requestId");
+        if (!isJsonRpcId(requestId)) {
+          return;
+        }
+        const scopeId = this.byCancelKey.get(cancelKey(headerSessionKey, requestId));
+        const request = scopeId === undefined ? undefined : this.inFlight.get(scopeId);
+        if (!request) {
+          // The request already answered (or never reached this daemon): nothing to cancel.
+          logger.debug(`notifications/cancelled for unknown request ${String(requestId)}`);
+          return;
+        }
+        const reason = recordField(message.params, "reason");
+        await request.close(typeof reason === "string" ? reason : "notifications/cancelled");
+      }),
+    );
+  }
+
+  private async dispatch(
+    req: Req,
+    res: Res,
+    transport: T,
+    parsedBody: unknown,
+    sendJsonRpcError: (message: string, error?: unknown) => void,
+  ): Promise<void> {
+    // SSE keepalive: prevent the fetch() response stream from going idle
+    // during long-running tool calls (e.g. executePlan at ~6-10 min).
+    // Without traffic the client-side stream silently dies; the server
+    // writes the result to a dead pipe and the client eventually times out.
+    // SSE comment lines (`:`) are ignored by EventSourceParserStream.
+    const keepaliveTimer = this.deps.timer.setInterval(() => {
+      if (res.headersSent && !res.writableEnded && !res.destroyed) {
+        res.write(":keepalive\n\n");
+      }
+    }, this.deps.keepaliveIntervalMs);
+    let keepaliveCleared = false;
+    const clearKeepalive = () => {
+      if (!keepaliveCleared) {
+        keepaliveCleared = true;
+        this.deps.timer.clearInterval(keepaliveTimer);
+      }
+    };
+    res.once("close", clearKeepalive);
+    res.once("finish", clearKeepalive);
+    try {
+      await transport.handleRequest(req, res, parsedBody);
+    } catch (error) {
+      logger.error("Streamable HTTP request handling failed:", error);
+      sendJsonRpcError("Server error", error);
+    } finally {
+      clearKeepalive();
+    }
+  }
+}

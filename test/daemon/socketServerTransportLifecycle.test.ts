@@ -14,6 +14,7 @@ import type { DaemonRequest, DaemonResponse, DaemonNotification } from "../../sr
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { executionTracker } from "../../src/server/executionTracker";
+import { daemonSessionToolBindingStore } from "../../src/server/daemonSessionToolBindingStore";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
   getToolCallRecorder,
@@ -46,6 +47,23 @@ class RpcSocket extends FakeSocket {
   setTimeout(_ms: number): this {
     return this;
   }
+}
+
+/** A socket server and one registered socket, for driving a disconnect by hand. */
+function connectedSocketFixture(socketSessionId: string): {
+  internals: ServerInternals;
+  socket: Socket;
+} {
+  const server = createTestUnixSocketServer(
+    "/fake/socket",
+    "http://127.0.0.1:1/mcp",
+    undefined,
+    new FakeTimer(),
+  );
+  const internals = server as unknown as ServerInternals;
+  const socket = new RpcSocket() as unknown as Socket;
+  internals.clientSockets.set(socketSessionId, socket);
+  return { internals, socket };
 }
 
 describe("daemon socket transport lifecycle", () => {
@@ -144,15 +162,7 @@ describe("daemon socket transport lifecycle", () => {
   });
 
   test("socket disconnect cancels the executions keyed by its session id", async () => {
-    const server = createTestUnixSocketServer(
-      "/fake/socket",
-      "http://127.0.0.1:1/mcp",
-      undefined,
-      new FakeTimer(),
-    );
-    const internals = server as unknown as ServerInternals;
-    const socket = new RpcSocket() as unknown as Socket;
-    internals.clientSockets.set("cancel-socket", socket);
+    const { internals, socket } = connectedSocketFixture("cancel-socket");
     const execution = executionTracker.startExecution("observe", "cancel-socket");
     try {
       internals.releaseSocketSession("cancel-socket", socket);
@@ -160,6 +170,23 @@ describe("daemon socket transport lifecycle", () => {
       expect(execution.abortController.signal.aborted).toBe(true);
     } finally {
       executionTracker.endExecution(execution.id);
+    }
+  });
+
+  test("socket disconnect forgets the session-tool bindings keyed by its session id", async () => {
+    const { internals, socket } = connectedSocketFixture("forget-socket");
+    const store = daemonSessionToolBindingStore();
+    const baseline = store.keyCount;
+    store.bind("forget-socket", "device-session-a");
+    store.bindToolSelectionProfile("forget-socket", "profile-a");
+    try {
+      expect(store.keyCount).toBe(baseline + 1);
+      internals.releaseSocketSession("forget-socket", socket);
+      await Promise.all([...internals.activeRequestHandlers]);
+      expect(store.keyCount).toBe(baseline);
+      expect(store.boundSessionUuid("forget-socket")).toBeUndefined();
+    } finally {
+      store.forget("forget-socket");
     }
   });
 

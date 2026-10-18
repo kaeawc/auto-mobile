@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  IMPORT_ROOTS,
   compare,
   countImportViolations,
   countTokenViolations,
@@ -14,6 +15,18 @@ const importCounts = (source: string): Counts => {
 };
 
 describe("check-mcp-sdk-boundary", () => {
+  test("scans test/ for v1 SDK imports, not only src/ and scripts/", () => {
+    expect(IMPORT_ROOTS).toContain("test");
+    const counts = scan(
+      () => 'import { Client } from "@modelcontextprotocol/sdk/client/index.js";',
+      ["test/server/x.test.ts"],
+      [],
+    );
+    expect(compare(counts, {}).excess).toEqual([
+      "test/server/x.test.ts: sdk-import x1 (allowed 0)",
+    ]);
+  });
+
   test("flags every v1 SDK import form", () => {
     const source = [
       'import { Server } from "@modelcontextprotocol/sdk/server/index.js";',

@@ -39,6 +39,8 @@ import {
 } from "../../utils/AbortContext";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ProgressCallback } from "../../server/toolRegistry";
+
+export type { ProgressCallback };
 import { getHostEmulatorProcessStopper } from "../../devices/hostEmulatorProcessStopper";
 import {
   emulatorProcessEscapeHint,
@@ -52,6 +54,10 @@ import { fixedBackoff } from "../../utils/Backoff";
 import { DaemonState, type DaemonStateLike } from "../../daemon/daemonState";
 import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { type Session, type SessionManager } from "../../daemon/sessionManager";
+import type {
+  StartDeviceRunnerReadinessInput,
+  ReadinessDevicePool,
+} from "./startDeviceReadinessTypes";
 import { reconcileDiscoveryObservation } from "../../daemon/discoveryReconcile";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
@@ -4992,7 +4998,7 @@ export interface SystemUiAnrRebootContext {
   args: StartDeviceArgs;
   bootService: DeviceBootService;
   deviceManager: PlatformDeviceManager;
-  devicePool: DevicePool | undefined;
+  devicePool: ReadinessDevicePool | undefined;
   totalDeadlineMs: number;
   timer: Timer;
   signal: AbortSignal | undefined;
@@ -5187,7 +5193,7 @@ export function assertSystemUiAnrReplacementIdentity(
 }
 
 export async function handoffSystemUiAnrReplacement(
-  devicePool: DevicePool | undefined,
+  devicePool: ReadinessDevicePool | undefined,
   shutdownReservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>,
   replacementBoot: DeviceBootResult,
   sourceImage: DeviceInfo,
@@ -5207,7 +5213,7 @@ export async function handoffSystemUiAnrReplacement(
 }
 
 export async function retireSystemUiAnrReplacement(
-  devicePool: DevicePool | undefined,
+  devicePool: ReadinessDevicePool | undefined,
   expectedReplacement: PooledDevice | undefined,
   replacementBoot: DeviceBootResult,
   collectColdBootSettlement: ColdBootSettlementCollector,
@@ -5313,7 +5319,7 @@ export async function restartAndroidForSystemUiAnr(
  * emulator is dying and stays fenced until its disconnect.
  */
 export function noteSettledRejectedKillCommand(
-  devicePool: DevicePool | undefined,
+  devicePool: ReadinessDevicePool | undefined,
   device: PooledDevice,
   command: Promise<BootedDevice | void>,
 ): void {
@@ -5430,7 +5436,7 @@ export async function settleCancelledSystemUiAnrRecovery(
 }
 
 export async function reserveSystemUiAnrShutdown(
-  devicePool: DevicePool | undefined,
+  devicePool: ReadinessDevicePool | undefined,
   deviceId: string,
   signal: AbortSignal | undefined,
   autolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
@@ -5581,7 +5587,7 @@ export async function ensureRunnerReadyWithSystemUiAnrRecovery(
 }
 
 export async function reserveRecoveredDeviceForReadiness(
-  devicePool: DevicePool | undefined,
+  devicePool: Pick<DevicePool, "reserveDeviceForReadiness"> | undefined,
   boot: DeviceBootResult,
   args: StartDeviceArgs,
   requestedIdentity: string,
@@ -5604,7 +5610,10 @@ export async function reserveRecoveredDeviceForReadiness(
   clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
 }
 
-export function getStartDevicePool(daemonState: DaemonStateLike): DevicePool | undefined {
+export function getStartDevicePool<Pool>(daemonState: {
+  isInitialized(): boolean;
+  getDevicePool(): Pool;
+}): Pool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 
@@ -5668,27 +5677,6 @@ export function refreshResourcesAfterCommittedBoot(
   })();
 }
 
-export interface StartDeviceRunnerReadinessInput {
-  autolockEnabled?: boolean;
-  boot: DeviceBootResult;
-  args: StartDeviceArgs;
-  operationName: string;
-  bootService: DeviceBootService;
-  deviceUtils: PlatformDeviceManager;
-  daemonState: DaemonStateLike;
-  totalDeadlineMs: number;
-  readinessTimeoutMs: number;
-  timer: Timer;
-  signal: AbortSignal | undefined;
-  progress: ProgressCallback | undefined;
-  perf: ReturnType<typeof createPerformanceTracker>;
-  requestedIdentity: string;
-  ensureCtrlProxyReady: (request: RunnerReadinessRequest) => Promise<void>;
-  releaseReadinessReservations: DeviceReadinessReservation[];
-  publishRecoveredReadinessMarker?: (device: BootedDevice) => void;
-  collectColdBootSettlement: ColdBootSettlementCollector;
-}
-
 export function createRunnerReadinessAttempt(
   input: StartDeviceRunnerReadinessInput,
 ): (candidate: DeviceBootResult) => Promise<void> {
@@ -5724,7 +5712,7 @@ export function captureSystemUiAnrInitialHolder(
 
 export function createSystemUiAnrRebooter(
   input: StartDeviceRunnerReadinessInput,
-  devicePool: DevicePool | undefined,
+  devicePool: ReadinessDevicePool | undefined,
   recoveryAutolockClient: { mcpSessionId?: string; expectedSessionId?: string } | undefined,
   entitlement: {
     initialHolder: string | undefined;
@@ -5819,7 +5807,7 @@ export function createSystemUiAnrRebooter(
 
 export async function prepareRecoveredDeviceForRunnerReadiness(
   input: StartDeviceRunnerReadinessInput,
-  devicePool: DevicePool | undefined,
+  devicePool: Pick<DevicePool, "reserveDeviceForReadiness"> | undefined,
   recovery: SystemUiAnrRecoveryResult,
 ): Promise<void> {
   if (recovery.releaseReadinessReservation) {

@@ -29,6 +29,7 @@ import {
   DeviceAllocation,
   type AllocationDiscoverySnapshots,
   type AssignableIdleDeviceSelection,
+  type PooledDevicePresenceOptions,
 } from "./deviceAllocation";
 import { ExplicitDeviceBind, type ExplicitBindOptions } from "./explicitDeviceBind";
 import { DeviceReplacement } from "./deviceReplacement";
@@ -1475,20 +1476,8 @@ export class DevicePool {
       isPooledEntryCurrent: (device) => this.isPooledEntryCurrent(device),
       isReservedForAssignment: (device, forSessionId) =>
         this.isReservedForAssignment(device, forSessionId),
-      ensurePooledDevicePresentForUse: (
-        device,
-        deferRecovery,
-        assignmentLockHeld,
-        idleEviction,
-        discovery,
-      ) =>
-        this.ensurePooledDevicePresentForUse(
-          device,
-          deferRecovery,
-          assignmentLockHeld,
-          idleEviction,
-          discovery,
-        ),
+      ensurePooledDevicePresentForUse: (device, options) =>
+        this.ensurePooledDevicePresentForUse(device, options),
       getDeviceHealthMarker: (deviceId) => this.getDeviceHealthMarker(deviceId),
       unhealthyDevicesError: (devices) => this.unhealthyDevicesError(devices),
       snapshotSessionAssignment: (device) => this.snapshotSessionAssignment(device),
@@ -4043,7 +4032,7 @@ export class DevicePool {
       if (!isIdle(device) || !matches(device)) {
         continue;
       }
-      if (!(await this.ensurePooledDevicePresentForUse(device, false, false, true))) {
+      if (!(await this.ensurePooledDevicePresentForUse(device, { idleEviction: true }))) {
         evicted++;
       }
     }
@@ -4059,11 +4048,14 @@ export class DevicePool {
    */
   private async ensurePooledDevicePresentForUse(
     device: PooledDevice,
-    deferRecovery: boolean = false,
-    assignmentLockHeld: boolean = false,
-    idleEviction: boolean = false,
-    discovery?: BootedDeviceDiscovery,
+    options: PooledDevicePresenceOptions = {},
   ): Promise<boolean> {
+    const {
+      deferRecovery = false,
+      assignmentLockHeld = false,
+      idleEviction = false,
+      discovery,
+    } = options;
     const present = await this.missingDeviceLiveness.ensurePooledDevicePresent(
       device,
       deferRecovery,
@@ -7212,7 +7204,13 @@ export class DevicePool {
       throw new ActionableError(unavailableMessage);
     }
     // iOS uses the per-source liveness snapshot; Android reconciles the supplied evidence.
-    if (await this.ensurePooledDevicePresentForUse(device, true, true, false, presence)) {
+    if (
+      await this.ensurePooledDevicePresentForUse(device, {
+        deferRecovery: true,
+        assignmentLockHeld: true,
+        discovery: presence,
+      })
+    ) {
       if (!this.isPooledEntryCurrent(device)) {
         return undefined;
       }

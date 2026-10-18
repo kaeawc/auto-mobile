@@ -100,6 +100,30 @@ describe("tapAt stylus pointer (#13081)", () => {
     expect(result.error).toContain("Do not retry automatically");
   });
 
+  test("an interrupted long press says how long the press may stay held", async () => {
+    const fake = androidWithSdk(34);
+    fake.adb.setCommandError(
+      "input stylus swipe",
+      Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+    );
+    const result = await fake.tapAt.execute(stylusTap({ action: "longPress", durationMs: 800 }));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("press may still be held on the device for up to 800 ms");
+    expect(result.error).toContain("Do not retry automatically");
+  });
+
+  test("an interrupted plain tap carries no hold warning", async () => {
+    const fake = androidWithSdk(34);
+    fake.adb.setCommandError(
+      "input stylus tap",
+      Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+    );
+    const result = await fake.tapAt.execute(stylusTap());
+
+    expect(result.error).not.toContain("still be held");
+  });
+
   test("a command the device rejected is a plain failure, safe to retry", async () => {
     const fake = androidWithSdk(34);
     fake.adb.setCommandResponse("input stylus tap", {

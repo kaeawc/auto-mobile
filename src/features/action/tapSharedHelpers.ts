@@ -11,22 +11,32 @@ import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 // Fallback for injected selectors that predate `hasContainer`; resolver semantics, no finder.
 const defaultContainerSelector = new ResolverElementSelector();
 
-/** Rethrow an interrupted Android long press as an error naming how long the press may stay held. */
-export function throwIfLongPressInterrupted(
+/** Text naming how long an interrupted Android long press may stay held; undefined when it was not interrupted. */
+export function longPressInterruptedMessage(
   error: unknown,
   durationMs: number,
   signal?: AbortSignal,
-): void {
+): string | undefined {
   if (
     signal?.aborted ||
     error instanceof AdbCommandTimeoutError ||
     (error instanceof Error && error.name === "AbortError")
   ) {
     // Killing host adb cannot cancel input's system_server injection.
-    throw new ActionableError(
-      `Android long press interrupted; press may still be held on the device for up to ${durationMs} ms. Wait ${durationMs} ms before retrying touch input.`,
-      { cause: error },
-    );
+    return `Android long press interrupted; press may still be held on the device for up to ${durationMs} ms. Wait ${durationMs} ms before retrying touch input.`;
+  }
+  return undefined;
+}
+
+/** Rethrow an interrupted Android long press as an error naming how long the press may stay held. */
+export function throwIfLongPressInterrupted(
+  error: unknown,
+  durationMs: number,
+  signal?: AbortSignal,
+): void {
+  const message = longPressInterruptedMessage(error, durationMs, signal);
+  if (message) {
+    throw new ActionableError(message, { cause: error });
   }
 }
 

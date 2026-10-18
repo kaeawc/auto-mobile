@@ -5,6 +5,7 @@ import type { PointerOption } from "../../models/PointerOption";
 import { LONG_PRESS_DEFAULT_MS } from "./tapAtGesture";
 import { resolveGestureCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import { indeterminateTapError } from "./coordinateTapDispatch";
+import { longPressInterruptedMessage } from "./tapSharedHelpers";
 import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
@@ -175,7 +176,11 @@ export async function dispatchStylusTap(
     });
   } catch (error) {
     if (failedAfterDispatch(error, dispatched)) {
-      throw indeterminateTapError(errorMessage(error));
+      // A held press outlives the killed adb process, so name how long it may stay down.
+      const held = longPress
+        ? longPressInterruptedMessage(error, durationMs, options.signal)
+        : undefined;
+      throw indeterminateTapError(held ?? errorMessage(error));
     }
     throw error;
   }

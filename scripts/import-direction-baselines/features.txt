@@ -7,7 +7,6 @@ src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/deviceResource
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/directSessionDeviceRegistry
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/executionTracker
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/inventoryDeviceDescription
-src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/lifecycleDeviceOwnership
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/provisionDeviceSpecSchemas
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/resourceRegistry
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/toolRegistry
@@ -16,6 +15,7 @@ src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/toolSelectionT
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/undeliveredAcquisition
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/videoRecordingManager
 src/features/deviceLifecycle/deviceLifecycleCore.ts -> src/server/videoRecordingTools
+src/features/deviceLifecycle/deviceToolsDependencies.ts -> src/server/appResources
 src/features/failures/FailureRecorder.ts -> src/server/failuresResources
 src/features/navigation/DefaultUIStateSetup.ts -> src/server/internalToolCall
 src/features/navigation/DefaultUIStateSetup.ts -> src/server/toolRegistry

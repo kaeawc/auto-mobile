@@ -1,10 +1,11 @@
 /**
  * Device lifecycle core (#11827): the shared helpers, types and errors that the deviceTools*.ts
- * handler modules used to import back from deviceTools.ts, together with the shutdown and
+ * handler modules used to import import back from deviceTools.ts, together with the shutdown and
  * SystemUiAnr helpers they depend on. Moving them into a leaf module breaks the import cycle:
  * deviceTools.ts registers the tools and the sibling modules import only from here. The code
  * moved verbatim.
  */
+import type { DeviceToolsDependencies, TeardownDependencies } from "./deviceToolsDependencies";
 import { deviceReservedForRestartRecoveryError } from "../../daemon/inputDeviceOwnership";
 import { type BindingFields, holderOf } from "../../daemon/deviceBinding";
 import { ActionableError, BootedDevice, DeviceInfo, SomePlatform, Platform } from "../../models";
@@ -63,15 +64,9 @@ import { unregisterDirectSessionsForStableIdentity } from "../../server/directSe
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import { bindingPoolGate } from "../../daemon/sessionBroker/provisioning/poolGate";
-import { type QrPosterWriter } from "../../utils/qr/QrPosterWriter";
-import {
-  DefaultDeviceResourceObserver,
-  type DeviceResourceObserver,
-} from "../../utils/deviceResourceObserver";
-import {
-  unadmittedAdbClientFactory,
-  type AdbClientFactory,
-} from "../../utils/android-cmdline-tools/AdbClientFactory";
+
+import { DefaultDeviceResourceObserver } from "../../utils/deviceResourceObserver";
+import { unadmittedAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import {
   discoveryRefreshOutcome,
   deviceListRefreshFailureMessage,
@@ -82,17 +77,11 @@ import { lifecycleRequester } from "./lifecycleRequester";
 import { deviceLossCancellationReason as utilDeviceLossCancellationReason } from "../../utils/deviceLossCancellationReason";
 import { terminateColdBootProcess } from "../../devices/coldBootProcessTermination";
 import { z } from "zod/v4";
-import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
+import { defaultIdGenerator } from "../../utils/IdGenerator";
 import { enableToolsSchemaField } from "../../server/toolSelectionTools";
 import { deviceResourceConfigurationSchema } from "../../server/deviceResourceSchemas";
-import {
-  DefaultDeviceResourceController,
-  type DeviceResourceController,
-} from "../../utils/deviceResourceController";
-import {
-  DefaultDeviceResourceReconciler,
-  type DeviceResourceReconciler,
-} from "../../utils/deviceResourceReconciler";
+import { DefaultDeviceResourceController } from "../../utils/deviceResourceController";
+import { DefaultDeviceResourceReconciler } from "../../utils/deviceResourceReconciler";
 import { IosDeviceResourceReader } from "../../utils/iosDeviceResourceReader";
 import { DeviceResourceApplicationRepository } from "../../db/deviceResourceApplicationRepository";
 import {
@@ -125,38 +114,27 @@ import {
   type TransitionalHold,
 } from "../../server/inventoryDeviceDescription";
 import {
-  type AppResourceDependencies,
   notifyInstalledAppResourceListChanged,
   syncInstalledAppResourceRegistry,
   syncInstalledAppResources,
 } from "../../server/appResources";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
-import { type BootCapacityReporter } from "../bootAdmission/BootAdmissionGate";
+
 import { getPerformanceMonitor } from "../performance/PerformanceMonitor";
 import {
   platformSchema,
   withCanonicalDiscriminatedUnionJsonSchema,
 } from "../../server/toolSchemaHelpers";
-import { DefaultDeviceMatcher, type DeviceMatcher } from "../../utils/deviceMatcher";
-import {
-  defaultDisplayInventoryProvider,
-  type DisplayInventoryProvider,
-} from "../../devices/DisplayInventoryProvider";
-import { type Environment } from "../../daemon/poolConfig";
+import { DefaultDeviceMatcher } from "../../utils/deviceMatcher";
+import { defaultDisplayInventoryProvider } from "../../devices/DisplayInventoryProvider";
+
 import { captureAutolockPolicy } from "../../daemon/deviceAutolockPolicy";
 import {
   deleteInternalToolParams,
   INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM,
 } from "../../daemon/constants";
-import {
-  DEVICE_CREATE_ENV_VAR,
-  getDeviceCreationGate,
-  type DeviceCreationGate,
-} from "../../devices/deviceCreationGate";
-import {
-  createDefaultDeviceProvisioner,
-  type DeviceProvisioner,
-} from "../../devices/deviceProvisioning";
+import { DEVICE_CREATE_ENV_VAR, getDeviceCreationGate } from "../../devices/deviceCreationGate";
+import { createDefaultDeviceProvisioner } from "../../devices/deviceProvisioning";
 import {
   commitAcquisition,
   requestAcquisitionReceipt,
@@ -194,7 +172,6 @@ import {
 } from "../../utils/deviceTimeouts";
 import {
   createDefaultExactDeviceProvisioner,
-  type ExactDeviceProvisioner,
   type ExactDeviceSpecification,
   ProvisionDeviceError,
 } from "../../devices/exactDeviceProvisioning";
@@ -1118,60 +1095,6 @@ export function detailedDiscoveryOptions(
   return presentationOrder === undefined ? {} : { presentationOrder };
 }
 
-export interface DeviceToolsDependencies {
-  androidEmulatorProcessStopper: EmulatorProcessStopper;
-  /** Renders `cameraPosterQr` payloads to a poster image; defaults to a file writer under the data dir. */
-  cameraPosterQrWriter?: QrPosterWriter;
-  androidAdbFactory: AdbClientFactory;
-  env?: Environment;
-  deviceResourceControllerFactory: () => DeviceResourceController;
-  deviceResourceObserverFactory: () => DeviceResourceObserver;
-  deviceResourceReconcilerFactory: () => DeviceResourceReconciler;
-  deviceManagerFactory: () => PlatformDeviceManager;
-  avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
-  deviceMatcherFactory: () => DeviceMatcher;
-  displayInventory: DisplayInventoryProvider;
-  appResourceDependencies?: AppResourceDependencies;
-  notifyResourcesChanged: () => Promise<void>;
-  notifyDeviceInventoryResourcesChanged: (installedAppResourcesChanged: boolean) => Promise<void>;
-  syncInstalledAppResourceRegistry: () => Promise<boolean>;
-  ensureCtrlProxyReady?: (request: RunnerReadinessRequest) => Promise<void>;
-  deviceCreationGateFactory: () => DeviceCreationGate;
-  deviceProvisionerFactory: () => DeviceProvisioner;
-  exactDeviceProvisionerFactory: (
-    deviceManager: PlatformDeviceManager,
-    deviceCreationGate: DeviceCreationGate,
-  ) => ExactDeviceProvisioner;
-  /**
-   * Read-only boot capacity check run before creating a device that will be booted (#11236);
-   * defaults to the process-wide admission gates.
-   */
-  checkBootCapacity?: (platform: Platform, signal?: AbortSignal) => Promise<void>;
-  /**
-   * Per-platform boot capacity reporters the `listDevices` `capacity` field samples; defaults to
-   * the process-wide admission gates, which probe adb/simctl/ps. Injected by the benchmark so the
-   * listing runs without spawning host processes.
-   */
-  bootCapacityReporters?: Partial<Record<Platform, BootCapacityReporter>>;
-  clearInstalledAppsForDevice: (deviceId: string) => Promise<void>;
-  stopPerformanceMonitoring: (deviceId: string) => void;
-  stopAndroidObservers: (device: BootedDevice) => Promise<void>;
-  idGenerator: IdGenerator;
-  timer: Timer;
-  lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
-  /**
-   * Re-resolve an emulator's AVD name from the RUNTIME rather than from any
-   * host-side cache (`emu avd name`). Resolves to undefined when the emulator
-   * console cannot answer inside `timeoutMs`, which is the caller's REMAINING
-   * deadline, not an independent budget. See {@link confirmPooledAvdIdentity}.
-   */
-  resolveRunningAndroidAvdName: (
-    device: BootedDevice,
-    timeoutMs: number,
-    signal?: AbortSignal,
-  ) => Promise<string | undefined>;
-}
-
 /**
  * One in-flight provisionDevice request. Every call runs its own lifecycle;
  * nothing is shared between callers (#11065). Concurrent requests for the same
@@ -1370,7 +1293,7 @@ export async function defaultNotifyResourcesChanged(): Promise<void> {
 }
 
 export async function notifyResourcesAfterShutdown(
-  dependencies: DeviceToolsDependencies,
+  dependencies: Pick<DeviceToolsDependencies, "notifyResourcesChanged">,
 ): Promise<void> {
   try {
     await dependencies.notifyResourcesChanged();
@@ -2272,7 +2195,7 @@ export function isTeardownFailure(response: TeardownToolResponse): boolean {
 export let deviceTeardownService: DeviceTeardownService | undefined;
 
 export function getDeviceTeardownService(
-  dependencies: DeviceToolsDependencies,
+  dependencies: Pick<DeviceToolsDependencies, "lifecycleCoordinator" | "timer">,
 ): DeviceTeardownService {
   deviceTeardownService ??= new DeviceTeardownService({
     lifecycleCoordinator: dependencies.lifecycleCoordinator,
@@ -2292,7 +2215,7 @@ export interface TeardownInitialAndroidScan {
 
 export interface TeardownContext {
   args: TeardownDeviceArgs;
-  dependencies: DeviceToolsDependencies;
+  dependencies: TeardownDependencies;
   deviceManager: PlatformDeviceManager;
   requestAbortSignal: AbortSignal | undefined;
   deadlineDevice: BootedDevice;

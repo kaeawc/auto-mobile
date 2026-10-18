@@ -1,4 +1,5 @@
 import type { RestartStopIdentity } from "../daemon/devicePool";
+import type { DeviceLifecycleToolsDependencies } from "../features/deviceLifecycle/deviceToolsDependencies";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { DaemonState } from "../daemon/daemonState";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
@@ -40,7 +41,6 @@ import {
 } from "./deviceToolsShutdown";
 import {
   DEVICE_SHUTDOWN_TIMEOUT_MS,
-  DeviceToolsDependencies,
   KillDeviceArgs,
   PooledAvdIdentityError,
   TeardownContext,
@@ -230,7 +230,7 @@ async function bindingDeleteRefusal(
  */
 async function assertKillDeviceCaller(
   args: KillDeviceArgs,
-  deps: DeviceToolsDependencies,
+  deps: DeviceLifecycleToolsDependencies,
   deadlineMs: number,
   signal: AbortSignal | undefined,
 ): Promise<RestartStopIdentity | undefined> {
@@ -267,7 +267,7 @@ type TeardownStopIdentities = Map<string, RestartStopIdentity | undefined>;
 
 interface PreLeaseTeardown {
   args: TeardownDeviceArgs;
-  deps: DeviceToolsDependencies;
+  deps: DeviceLifecycleToolsDependencies;
   deadlineMs: number;
   timeoutMs: number;
   requestAbortSignal: AbortSignal | undefined;
@@ -404,7 +404,7 @@ async function destroyDeleteDeviceTarget(
 async function verifyDeleteDeviceTarget(
   state: TeardownState,
   stop: "accepted" | "not_required",
-  deps: DeviceToolsDependencies,
+  deps: DeviceLifecycleToolsDependencies,
 ): Promise<TeardownToolResponse> {
   if (state.earlyResponse) {
     return state.earlyResponse;
@@ -425,7 +425,7 @@ async function verifyDeleteDeviceTarget(
 
 function createDeleteDeviceWorkflow(
   args: TeardownDeviceArgs,
-  deps: DeviceToolsDependencies,
+  deps: DeviceLifecycleToolsDependencies,
   deadlineMs: number,
   timeoutMs: number,
   requester: LifecycleRequester | undefined,
@@ -700,7 +700,7 @@ export function createLifecycleHandlers() {
 
   async function executeDeleteDevice(
     args: TeardownDeviceArgs,
-    deps: DeviceToolsDependencies,
+    deps: DeviceLifecycleToolsDependencies,
     callerSignal: AbortSignal | undefined,
     teardownService: DeviceTeardownService,
     lifecycleLease?: VirtualDeviceLifecycleLease,

@@ -1,4 +1,5 @@
 import { captureAutolockPolicy, runWithAutolockPolicy } from "../daemon/deviceAutolockPolicy";
+import type { AcquisitionDependencies } from "../features/deviceLifecycle/deviceToolsDependencies";
 import { ActionableError, toActionableError } from "../models";
 import type { DeviceInfo } from "../models";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
@@ -37,7 +38,6 @@ import type { createBootAndPrepareDevice } from "./deviceToolsStartDevice";
 import {
   AcquisitionStage,
   DevicePreparationBudgets,
-  DeviceToolsDependencies,
   GetAndroidArgs,
   GetAppleArgs,
   StableDeviceTarget,
@@ -334,7 +334,7 @@ async function resolveStartStableDeviceLifecycleTarget(
 async function reserveStartSelectorDeviceLifecycle(
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
-  deps: DeviceToolsDependencies,
+  deps: AcquisitionDependencies,
   signal: AbortSignal | undefined,
 ): Promise<VirtualDeviceLifecycleLease> {
   const identity = selectorLifecycleIdentity(args.platform, args);
@@ -381,7 +381,7 @@ async function assertStartTargetNotManaged(
 async function reserveStartDeviceLifecycleReservations(
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
-  deps: DeviceToolsDependencies,
+  deps: AcquisitionDependencies,
   deviceUtils: PlatformDeviceManager,
   {
     deviceMatcher,

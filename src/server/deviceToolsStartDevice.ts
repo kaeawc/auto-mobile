@@ -1,4 +1,5 @@
 import { holderOf } from "../daemon/deviceBinding";
+import type { StartDeviceDependencies } from "../features/deviceLifecycle/deviceToolsDependencies";
 import { currentTaskContext } from "./tasks/runAsTask";
 import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
 import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
@@ -51,7 +52,6 @@ import type { StableConfiguredDeviceImage } from "../utils/configuredDeviceInven
 import { runWithAcquisitionDeadline } from "./deviceToolsAcquisition";
 import {
   DevicePreparationBudgets,
-  DeviceToolsDependencies,
   ProvisionDeviceCleanup,
   StartDeviceArgs,
   acquisitionLifecycleTimeoutError,
@@ -307,7 +307,7 @@ function recordStartedDevice(
 const bootAndPrepareDevice = async (
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
-  deps: DeviceToolsDependencies,
+  deps: StartDeviceDependencies,
   deviceUtils: PlatformDeviceManager,
   options: BootPreparationOptions,
 ) => {
@@ -590,7 +590,7 @@ type BootPreparationState = {
 
 async function waitForBootedIosRunnerCleanup(
   budgets: DevicePreparationBudgets,
-  deps: DeviceToolsDependencies,
+  deps: StartDeviceDependencies,
   { state, signal, requestedIdentity }: BootPreparationOptions,
 ): Promise<void> {
   setAcquisitionStage(budgets, "waiting for iOS runner removal cleanup");
@@ -618,7 +618,7 @@ async function waitForBootedIosRunnerCleanup(
 async function reserveBootReadiness(
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
-  deps: DeviceToolsDependencies,
+  deps: StartDeviceDependencies,
   daemonState: DaemonStateLike,
   { state, signal, requestedIdentity, releaseReadinessReservations }: BootPreparationOptions,
 ): Promise<void> {
@@ -695,7 +695,7 @@ async function reserveBootReadiness(
 async function bindPreparedDevice(
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
-  deps: DeviceToolsDependencies,
+  deps: StartDeviceDependencies,
   {
     state,
     signal,
@@ -1218,7 +1218,7 @@ export function createBootAndPrepareDevice(rollbackCreatedDevice: CreatedDeviceR
   return async (
     args: StartDeviceArgs,
     budgets: DevicePreparationBudgets,
-    deps: DeviceToolsDependencies,
+    deps: StartDeviceDependencies,
     deviceUtils: PlatformDeviceManager,
     options: BootPreparationOptions,
   ) => {

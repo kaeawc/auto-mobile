@@ -1,4 +1,8 @@
 import { isEmulatorStopDispatchedError } from "../utils/android-cmdline-tools/EmulatorProcessStop";
+import type {
+  DeviceToolsDependencies,
+  TeardownDependencies,
+} from "../features/deviceLifecycle/deviceToolsDependencies";
 import { ctrlProxyClientLifecycle } from "../features/observe/ctrlProxyClientLifecycle";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { ActionableError, type BootedDevice, type SomePlatform } from "../models";
@@ -31,7 +35,6 @@ import {
   DEVICE_ALREADY_STOPPED_ERROR_CODE,
   DEVICE_SHUTDOWN_POLL_INTERVAL_MS,
   DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
-  DeviceToolsDependencies,
   KillDeviceArgs,
   PooledAvdIdentityError,
   PooledAvdKillIdentity,
@@ -118,7 +121,7 @@ export function createKillDeviceResponse(
 }
 
 async function clearInstalledAppsAfterShutdown(
-  dependencies: DeviceToolsDependencies,
+  dependencies: TeardownDependencies,
   deviceId: string,
 ): Promise<boolean> {
   try {
@@ -643,7 +646,7 @@ type ShutdownEntryContext = Pick<
  * ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
  */
 async function resolvePooledAvdKillTarget(
-  dependencies: DeviceToolsDependencies,
+  dependencies: TeardownDependencies,
   device: BootedDevice,
   pooledAvdIdentity: PooledAvdKillIdentity | undefined,
   devicePool: DevicePool | undefined,
@@ -846,7 +849,7 @@ export async function commitStoppedRestartHold(
 }
 
 function androidKillProcessStop(
-  dependencies: DeviceToolsDependencies,
+  dependencies: TeardownDependencies,
   device: BootedDevice,
   identity: PooledAvdKillIdentity | undefined,
 ): DeviceShutdownOptions["processStop"] {
@@ -864,7 +867,7 @@ async function killProcessAndRetireOwnership(
       ShutdownOwnershipContext,
       "expectedPooledDevice" | "expectedSession" | "retainReservationUntil"
     >,
-  dependencies: DeviceToolsDependencies,
+  dependencies: TeardownDependencies,
   perf: ReturnType<typeof createPerformanceTracker>,
   devicePool: DevicePool | undefined,
   options: KillProcessAndRetireOwnershipOptions,
@@ -1053,7 +1056,7 @@ const deviceShutdownService = new DeviceShutdownService();
 
 async function finishShutdownCleanup(
   shutdownContext: ShutdownDeadlineContext,
-  dependencies: DeviceToolsDependencies,
+  dependencies: TeardownDependencies,
   perf: ReturnType<typeof createPerformanceTracker>,
   options: {
     strictDeadline: boolean;
@@ -1123,7 +1126,7 @@ interface ShutdownDeviceOptions {
 
 /** Reuse entry evidence unless the existing pooled shutdown path performs a fresh probe. */
 async function resolveRestartStopKillTarget(
-  dependencies: DeviceToolsDependencies,
+  dependencies: TeardownDependencies,
   context: ShutdownEntryContext,
   options: ShutdownDeviceOptions,
   devicePool: DevicePool | undefined,
@@ -1154,7 +1157,7 @@ async function resolveRestartStopKillTarget(
 
 export async function shutdownDevice(
   context: ShutdownEntryContext,
-  dependencies: DeviceToolsDependencies,
+  dependencies: TeardownDependencies,
   operationName: string,
   options: ShutdownDeviceOptions,
 ): Promise<ShutdownResult> {

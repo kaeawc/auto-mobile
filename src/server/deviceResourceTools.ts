@@ -2,12 +2,12 @@ import type {
   DeviceResourceConfigurationResult,
   ConfigurableDeviceResource,
 } from "../models/DeviceResourceConfiguration";
+import type { DeviceToolsDependencies } from "../features/deviceLifecycle/deviceToolsDependencies";
 import type { DeviceResourceObservationRequest } from "../utils/deviceResourceObserver";
 import type { DeviceResourceStatus } from "../models/DeviceResource";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { z } from "zod/v4";
-import type { DeviceToolsDependencies } from "./deviceTools";
 import { reconcileDeviceResourcesSchema, setDeviceResourcesSchema } from "./deviceResourceSchemas";
 import type { BootedDevice } from "../models/DeviceInfo";
 import { ToolRegistry } from "./toolRegistry";

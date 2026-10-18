@@ -1,4 +1,5 @@
 import { holderOf } from "../daemon/deviceBinding";
+import type { LifecycleOwnershipDependencies } from "../features/deviceLifecycle/deviceToolsDependencies";
 import { DaemonState, type DaemonStateLike } from "../daemon/daemonState";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import {
@@ -11,7 +12,6 @@ import type { RestartStopIdentity } from "../daemon/devicePool";
 import {
   androidLifecycleDiscoveryIncomplete,
   POOLED_AVD_NAME_VERIFICATION_TIMEOUT_MS,
-  type DeviceToolsDependencies,
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import { isUnresolvedAndroidEmulatorName } from "../devices/deviceIdentityEvidence";
 import type { BootedDevice, Platform } from "../models";
@@ -26,7 +26,7 @@ export const LIFECYCLE_TOOL_REMEDY =
 /** Resolve once before synchronous stop guards; shutdown reuses this evidence for its capture. */
 export async function resolveRestartStopIdentity(input: {
   device: BootedDevice;
-  dependencies: DeviceToolsDependencies;
+  dependencies: LifecycleOwnershipDependencies;
   deadlineMs: number;
   signal?: AbortSignal;
   /** Identity of an already-stopped image from teardown's existing target resolution. */

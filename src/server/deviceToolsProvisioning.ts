@@ -1,4 +1,8 @@
 import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
+import type {
+  DeviceToolsDependencies,
+  ProvisioningDependencies,
+} from "../features/deviceLifecycle/deviceToolsDependencies";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
@@ -85,7 +89,6 @@ import type { RunnerReadinessRequest } from "../ctrlProxy/RunnerReadinessService
 import { restartResumeSessionForDevice } from "./deviceToolsStartDevice";
 import {
   ActiveProvisionDeviceRequest,
-  DeviceToolsDependencies,
   PROVISION_DEVICE_SETTLEMENT_WAIT_MS,
   ProvisionDeviceArgs,
   ProvisionDeviceCleanup,
@@ -146,7 +149,7 @@ type ProvisioningHooks = {
   ensureCtrlProxyReady: (request: RunnerReadinessRequest) => Promise<void>;
   executeDeleteDevice: (
     args: TeardownDeviceArgs,
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     callerSignal: AbortSignal | undefined,
     teardownService: DeviceTeardownService,
     lifecycleLease?: VirtualDeviceLifecycleLease,
@@ -693,7 +696,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
   }
 
   async function provisionMutationSettledWithinRollbackBudget(
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     settlement: Promise<unknown>,
     rollbackDeadlineMs: number,
   ): Promise<boolean> {
@@ -763,7 +766,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
   }
 
   function continueProvisionCleanupAfterMutationSettles(
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     createdDevice: DeviceInfo,
     provisionFailure: ProvisionDeviceError,
     {
@@ -857,7 +860,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
   }
 
   async function cleanupFailedProvisionDevice(
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     createdDevice: DeviceInfo,
     provisionFailure: ProvisionDeviceError,
     {
@@ -1054,7 +1057,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
    */
   async function resolveCreatedIosProvisionDeviceRollbackTarget(
     identity: ExactIosDeviceIdentity,
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     deviceManager: PlatformDeviceManager,
     pendingMutationSettlement: Promise<unknown> | undefined,
     rollbackDeadlineMs: number,
@@ -1103,7 +1106,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
 
   async function resolveProvisionDeviceRollbackTarget(
     args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     deviceManager: PlatformDeviceManager,
     {
       provisioned,
@@ -1215,7 +1218,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
 
   async function rethrowFailedProvisionDeviceLifecycle(
     args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     deviceManager: PlatformDeviceManager,
     provisioned: Awaited<ReturnType<ExactDeviceProvisioner["provision"]>> | undefined,
     {
@@ -1302,7 +1305,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
 
   async function reserveExistingIosProvisionDeviceLifecycle(
     args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     deviceManager: PlatformDeviceManager,
     totalDeadlineMs: number,
     signal: AbortSignal | undefined,
@@ -1352,7 +1355,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
    */
   async function reserveIosSelectorProvisionDeviceLifecycle(
     args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     totalDeadlineMs: number,
     signal: AbortSignal | undefined,
   ): Promise<VirtualDeviceLifecycleLease> {
@@ -1378,7 +1381,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
 
   async function reserveIosProvisionDeviceLifecycle(
     args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     device: Pick<DeviceInfo, "deviceId">,
     totalDeadlineMs: number,
     signal: AbortSignal | undefined,
@@ -1442,7 +1445,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
 
   async function runProvisionDeviceLifecycle(
     args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     {
       recordLifecycle,
       totalDeadlineMs,
@@ -1691,7 +1694,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
   }
 
   function createProvisionBootService(
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     deviceManager: PlatformDeviceManager,
     deviceCreationGate: DeviceCreationGate,
     lifecycleLease: VirtualDeviceLifecycleLease,
@@ -1857,7 +1860,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
 
   async function bootExactProvisionedDevice(
     args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     deviceManager: PlatformDeviceManager,
     deviceCreationGate: DeviceCreationGate,
     {
@@ -2159,7 +2162,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
 
   async function applyProvisionDeviceResources(
     args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     device: BootedDevice,
     deadlineMs: number,
     signal?: AbortSignal,
@@ -2272,7 +2275,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
 
   async function ensureProvisionDeviceReadiness(
     args: ProvisionDeviceArgs,
-    deps: DeviceToolsDependencies,
+    deps: ProvisioningDependencies,
     device: BootedDevice,
     requestedIdentity: string,
     {
@@ -2504,7 +2507,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       pendingMutationSettlement,
       rollbackDeadlineMs,
     }: {
-      deps: DeviceToolsDependencies;
+      deps: ProvisioningDependencies;
       pendingMutationSettlement: Promise<unknown> | undefined;
       rollbackDeadlineMs: number;
     },

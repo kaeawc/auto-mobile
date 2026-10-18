@@ -1,5 +1,7 @@
+import type { UnixSocketServer } from "../../src/daemon/socketServer";
+import { asDaemonState } from "./helpers/narrowStubs";
+import { asSocket } from "./helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import {
   afterAll,
   afterEach,
@@ -45,12 +47,6 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * device client is a fake.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-
 const SESSION = "suspect-input-session";
 const OWNER_TOKEN = "harness-a";
 const DEVICE = androidDevice.deviceId;
@@ -81,7 +77,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
   let timer: FakeTimer;
   let sessionManager: SessionManager;
   let socket: FakeSocket;
-  let internals: Internals;
+  let internals: UnixSocketServer;
   let taps: number;
   /** Device-side gesture frames, in the order the fake device received them. */
   let strokes: string[];
@@ -192,7 +188,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
       },
     });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
     return socket.responses.find((frame) => frame.id === id);
   }
 
@@ -242,17 +238,17 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
     const fakePool = createFakeDaemonState().getDevicePool();
     const server = createTestUnixSocketServer(
       "unused",
-      {
+      asDaemonState({
         isInitialized: () => true,
         getSessionManager: () => sessionManager,
         getDevicePool: () => fakePool,
-      } as unknown as DaemonStateAccess,
+      }),
       new FakeTimer(),
     );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+    internals = server;
+    internals["acceptingRequests"] = true;
     socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
+    internals["handleConnection"](asSocket(socket));
   });
 
   afterEach(async () => {
@@ -355,7 +351,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
 
     // A second pane: a connection answers its own frames in order.
     const second = new FakeSocket();
-    internals.handleConnection(second as unknown as Socket);
+    internals["handleConnection"](asSocket(second));
     second.send({
       id: "tap-2",
       type: "mcp_request",
@@ -367,7 +363,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
     const heldDuringCall = sessionManager.getSession(SESSION);
     tapOnDevice.resolve({ success: true });
     await settle();
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
     second.destroy();
 
     // Never released under an in-flight control call: the newcomer gets the retryable refusal.
@@ -448,7 +444,7 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
 
         tapOnDevice.resolve({ success: true });
         await settle();
-        await Promise.all([...internals.activeRequestHandlers]);
+        await Promise.all([...internals["activeRequestHandlers"]]);
         expect(socket.responses.find((frame) => frame.id === "tap")).toMatchObject({
           success: true,
         });

@@ -156,9 +156,7 @@ beforeEach(() => {
   );
   spyOn(screenshotPathProtection, "start").mockImplementation(() => {});
   spyOn(screenshotPathProtection, "sweepOnce").mockResolvedValue(undefined);
-  spyOn(TakeScreenshot as unknown as { getCacheDir(): string }, "getCacheDir").mockReturnValue(
-    "scratch/hold-lane/screenshots",
-  );
+  spyOn(TakeScreenshot, "getCacheDir").mockReturnValue("scratch/hold-lane/screenshots");
 });
 afterEach(() => {
   expect(trackerTimer.getPendingTimeoutCount()).toBe(0);

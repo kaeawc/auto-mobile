@@ -1,3 +1,6 @@
+import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
+import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
+import { asDeviceManager } from "./helpers/narrowStubs";
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
@@ -86,32 +89,36 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
 
     // Only the two platform-specific booted devices exist; discovery is scoped
     // by the platform the handler asks for.
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevicesDetailed: async (platform: "android" | "ios" | "either") => {
-        const iosFails = simctlSweepFails && platform !== "android";
-        const succeeded: ("android" | "ios")[] = [];
-        const devices: BootedDevice[] = [];
-        if (platform !== "ios") {
-          succeeded.push("android");
-          devices.push(androidDevice);
-        }
-        if (platform !== "android" && !iosFails) {
-          succeeded.push("ios");
-          devices.push(iosDevice);
-        }
-        return {
-          devices,
-          succeededPlatforms: new Set(succeeded),
-          discoveryErrors: iosFails ? { ios: { code: "failed", message: "simctl exploded" } } : {},
-        };
-      },
-      getBootedDevices: async (platform: "android" | "ios" | "either") =>
-        platform === "ios"
-          ? [iosDevice]
-          : platform === "android"
-            ? [androidDevice]
-            : [androidDevice, iosDevice],
-    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    PlatformDeviceManagerFactory.setInstance(
+      asDeviceManager({
+        getBootedDevicesDetailed: async (platform: "android" | "ios" | "either") => {
+          const iosFails = simctlSweepFails && platform !== "android";
+          const succeeded: ("android" | "ios")[] = [];
+          const devices: BootedDevice[] = [];
+          if (platform !== "ios") {
+            succeeded.push("android");
+            devices.push(androidDevice);
+          }
+          if (platform !== "android" && !iosFails) {
+            succeeded.push("ios");
+            devices.push(iosDevice);
+          }
+          return {
+            devices,
+            succeededPlatforms: new Set(succeeded),
+            discoveryErrors: iosFails
+              ? { ios: { code: "failed", message: "simctl exploded" } }
+              : {},
+          };
+        },
+        getBootedDevices: async (platform: "android" | "ios" | "either") =>
+          platform === "ios"
+            ? [iosDevice]
+            : platform === "android"
+              ? [androidDevice]
+              : [androidDevice, iosDevice],
+      }),
+    );
 
     androidSetPreference = mock(
       async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
@@ -161,16 +168,16 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
         throw new Error("Unexpected ADB access");
       },
     };
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       setPreference: androidSetPreference,
       removePreference: androidRemovePreference,
       clearPreferenceStore: androidClearPreferenceStore,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    });
+    spyOnIosClientInstance({
       setPreference: iosSetPreference,
       removePreference: iosRemovePreference,
       clearPreferenceStore: iosClearPreferenceStore,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
 
     const profileService: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled"> = {
       isEnabled: async () => true,
@@ -531,7 +538,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
     const INSPECTION_DISABLED = "SharedPreferences inspection is disabled";
 
     function useAndroidClientThrowing(overrides: Partial<Record<string, () => Promise<void>>>) {
-      AndroidCtrlProxyClient.getInstance = mock(() => ({
+      spyOnAndroidClientInstance({
         setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
           if (typeof args[5] === "object") {
             args[5].onDispatch?.();
@@ -563,7 +570,7 @@ describe("UnixSocketServer key-value mutation platform routing (#4708)", () => {
           }
           throw new Error(INSPECTION_DISABLED);
         },
-      })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+      });
     }
 
     function injectFakeAdb(adb: FakeAdbExecutor): void {

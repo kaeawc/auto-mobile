@@ -1,5 +1,9 @@
+import type { UnixSocketServer } from "../../src/daemon/socketServer";
+import { asDeviceManager } from "./helpers/narrowStubs";
+import { asCtrlProxyManager } from "./helpers/narrowStubs";
+import { asDaemonState } from "./helpers/narrowStubs";
+import { asSocket } from "./helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import {
@@ -13,7 +17,7 @@ import {
   hasActiveSessionExecution,
   subscribeToolCallEndActivity,
 } from "../../src/daemon/toolCallActivity";
-import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { DaemonResponse } from "../../src/daemon/types";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import type { StorageWriteOptions } from "../../src/features/storage/storageTypes";
@@ -41,30 +45,6 @@ import { spyOnIosClientFactory } from "../helpers/iosCtrlProxyClientSpies";
  * Real SessionManager, execution tracker and socket server on a FakeTimer, wired as `daemon.ts`
  * wires them; only the device clients are fakes.
  */
-
-interface Internals {
-  resolveInputTargetDevice(...args: unknown[]): Promise<typeof androidDevice>;
-  answeringSessionRelease<T>(
-    execution: { cancelReason?: Error },
-    run: () => Promise<T>,
-  ): Promise<T>;
-  captureStrokeAdmission(deviceId: string, signal?: AbortSignal): unknown;
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  runIdeKeyValueMutation(
-    platform: "android",
-    device: typeof androidDevice,
-    appId: string,
-    fileName: string,
-    mutation: {
-      dispatching: () => void;
-      viaSdk: (onDispatch: () => void) => Promise<void>;
-      viaDirectFile: () => Promise<void>;
-    },
-  ): Promise<{ usedDirectFileFallback: boolean }>;
-  handleIdeSocketRequest(request: DaemonRequest): Promise<unknown>;
-}
 
 const SESSION = "idle-input-session";
 const OWNER_TOKEN = "harness-a";
@@ -120,7 +100,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
   let serverTimer: FakeTimer;
   let sessionManager: SessionManager;
   let socket: FakeSocket;
-  let internals: Internals;
+  let internals: UnixSocketServer;
   let sent: string[];
   let unsubscribeActivity: () => void;
   /** Server-clock time a discovery sweep takes; a frame's budget runs on that clock. */
@@ -175,7 +155,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
       params: { platform: "android", deviceId: DEVICE, sessionUuid: SESSION, ...params },
     });
     await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
     return socket.responses.find((frame) => frame.id === id);
   }
 
@@ -222,15 +202,17 @@ describe("a holder's control frame refused before it reaches the device", () => 
     await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
     await heartbeat(true);
 
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevicesDetailed: async () => {
-        serverTimer.advanceTime(discoveryTakesMs);
-        return {
-          devices: [androidDevice, { ...androidDevice, deviceId: "idle-ios", platform: "ios" }],
-          succeededPlatforms: new Set(["android", "ios"]),
-        };
-      },
-    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    PlatformDeviceManagerFactory.setInstance(
+      asDeviceManager({
+        getBootedDevicesDetailed: async () => {
+          serverTimer.advanceTime(discoveryTakesMs);
+          return {
+            devices: [androidDevice, { ...androidDevice, deviceId: "idle-ios", platform: "ios" }],
+            succeededPlatforms: new Set(["android", "ios"]),
+          };
+        },
+      }),
+    );
     spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
       // After resolveKeyValueMutationClient's abort check, before the mutation's own check.
       beforeDeviceWork?.();
@@ -259,21 +241,16 @@ describe("a holder's control frame refused before it reaches the device", () => 
       removePreference: record("removePreference", 3),
       clearPreferenceStore: record("clearPreferenceStore", 2),
     }));
-    spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
-      () =>
-        ({
-          ensureCompatibleVersion: async () => {
-            sent.push("updateService");
-            return { status: "compatible" };
-          },
-        }) as unknown as AndroidCtrlProxyManager,
+    spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(() =>
+      asCtrlProxyManager({
+        ensureCompatibleVersion: async () => {
+          sent.push("updateService");
+          return { status: "compatible" };
+        },
+      }),
     );
-    spyOn(PressButton.prototype, "press").mockImplementation(
-      record("pressButton", 4) as unknown as PressButton["press"],
-    );
-    spyOn(InputKey.prototype, "press").mockImplementation(
-      record("key", 4) as unknown as InputKey["press"],
-    );
+    spyOn(PressButton.prototype, "press").mockImplementation(record("pressButton", 4));
+    spyOn(InputKey.prototype, "press").mockImplementation(record("key", 4));
     const fakePool = {
       ...createFakeDaemonState().getDevicePool(),
       assertNotClaimedByForeignDaemon: async () => {
@@ -282,11 +259,11 @@ describe("a holder's control frame refused before it reaches the device", () => 
     };
     const server = createTestUnixSocketServer(
       "unused",
-      {
+      asDaemonState({
         isInitialized: () => true,
         getSessionManager: () => sessionManager,
         getDevicePool: () => fakePool,
-      } as unknown as DaemonStateAccess,
+      }),
       serverTimer,
       null,
       {
@@ -303,12 +280,12 @@ describe("a holder's control frame refused before it reaches the device", () => 
         charsSent: args[0].length,
       }),
     });
-    internals = server as unknown as Internals;
+    internals = server;
     // Observe the route rejection even when a closed socket suppresses its response.
     spyOn(internals, "handleIdeSocketRequest");
-    internals.acceptingRequests = true;
+    internals["acceptingRequests"] = true;
     socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
+    internals["handleConnection"](asSocket(socket));
   });
 
   afterEach(async () => {
@@ -316,7 +293,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
     // before the fakes are restored.
     socket.destroy();
     await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
     spyOn(internals, "handleIdeSocketRequest").mockRestore();
     spyOn(executionTracker, "markSessionAdmitted").mockRestore();
     unsubscribeActivity();
@@ -456,7 +433,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
       expect(mark).toHaveBeenCalledTimes(1);
       expect(executionTracker.getActiveExecutionCount()).toBe(1);
       reply.resolve({ success: true });
-      await Promise.all([...internals.activeRequestHandlers]);
+      await Promise.all([...internals["activeRequestHandlers"]]);
       const response = socket.responses.find((r) => r.id === "typing");
       expect(response).toMatchObject(
         abort === "session release"
@@ -485,7 +462,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
         }
         expect(release.message).toBe(releaseMessage);
         await expect(
-          internals.answeringSessionRelease({ cancelReason: release }, async () => {
+          internals["answeringSessionRelease"]({ cancelReason: release }, async () => {
             throw new Error("tap aborted");
           }),
         ).rejects.toBe(release);
@@ -503,7 +480,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
     async (abort) => {
       const before = idleClock();
       const target = Promise.withResolvers<typeof androidDevice>();
-      const resolve = internals.resolveInputTargetDevice.bind(internals);
+      const resolve = internals["resolveInputTargetDevice"].bind(internals);
       let calls = 0;
       let resolving = false;
       const resolution = spyOn(internals, "resolveInputTargetDevice").mockImplementation(
@@ -567,7 +544,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
       } finally {
         target.resolve(androidDevice);
         await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
-        await Promise.all([...internals.activeRequestHandlers]);
+        await Promise.all([...internals["activeRequestHandlers"]]);
         resolution.mockRestore();
         releaseAnswer.mockRestore();
         mark.mockRestore();
@@ -673,7 +650,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
               socket.destroy();
             }
             connecting.resolve();
-            await Promise.all([...internals.activeRequestHandlers]);
+            await Promise.all([...internals["activeRequestHandlers"]]);
             expect(clockWhileConnecting).toEqual(before);
             expect(marksWhileConnecting).toBe(0);
             if (outcome === "sent") {
@@ -699,7 +676,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
 
   test("gestureStart stamps before stroke admission is captured", async () => {
     const mark = spyOn(executionTracker, "markSessionAdmitted");
-    const capture = internals.captureStrokeAdmission.bind(internals);
+    const capture = internals["captureStrokeAdmission"].bind(internals);
     const admission = spyOn(internals, "captureStrokeAdmission").mockImplementation((...args) => {
       expect(mark).toHaveBeenCalledTimes(1);
       const result = capture(...args);
@@ -757,7 +734,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
           let directWrites = 0;
           const call = new AbortController();
           const pending = runWithAbortSignal(call.signal, () =>
-            internals.runIdeKeyValueMutation("android", androidDevice, "com.example", "prefs", {
+            internals["runIdeKeyValueMutation"]("android", androidDevice, "com.example", "prefs", {
               dispatching: () => stamps++,
               viaSdk: async (onDispatch) => {
                 if (sdkSent) {

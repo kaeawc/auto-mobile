@@ -1,7 +1,10 @@
+import type { UnixSocketServer } from "../../src/daemon/socketServer";
+import { asDeviceManager } from "./helpers/narrowStubs";
+import { asCtrlProxyManager } from "./helpers/narrowStubs";
+import { asDaemonState } from "./helpers/narrowStubs";
+import { asSocket } from "./helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DeviceAssignedToBindingError } from "../../src/daemon/sessionBroker/provisioning/refusal";
 import {
@@ -36,13 +39,6 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * device clients and mutation services are fakes.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  sessions: Map<string, unknown>;
-}
-
 const SLOT_SESSION = "slot-exec";
 const GENERIC_SESSION = "generic-harness";
 const SCOPE_IDENTITY = {
@@ -60,7 +56,7 @@ const OUTSIDE_SLOTS = { success: false, code: "device_outside_broker_grant" };
 describe("direct frames from a managed connection outside its slots", () => {
   let sessionManager: SessionManager;
   let scopes: BrokerConnectionScopes;
-  let internals: Internals;
+  let internals: UnixSocketServer;
   let managed: FakeSocket;
   let generic: FakeSocket;
   let writes: string[];
@@ -94,7 +90,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     for (let i = 0; i < 6; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...internals["activeRequestHandlers"]]);
     return socket.responses.find((frame) => frame.id === id);
   }
 
@@ -130,13 +126,15 @@ describe("direct frames from a managed connection outside its slots", () => {
     scopes = new BrokerConnectionScopes();
 
     discovered = [slotDevice, freeDevice, heldDevice];
-    PlatformDeviceManagerFactory.setInstance({
-      getBootedDevices: async () => discovered,
-      getBootedDevicesDetailed: async () => ({
-        devices: discovered,
-        succeededPlatforms: new Set(["android", "ios"]),
+    PlatformDeviceManagerFactory.setInstance(
+      asDeviceManager({
+        getBootedDevices: async () => discovered,
+        getBootedDevicesDetailed: async () => ({
+          devices: discovered,
+          succeededPlatforms: new Set(["android", "ios"]),
+        }),
       }),
-    } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    );
     spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
       getScreenScaleMetadata: () => null,
       requestTapCoordinates: async (
@@ -167,14 +165,13 @@ describe("direct frames from a managed connection outside its slots", () => {
         writes.push("clearPreferenceStore");
       },
     }));
-    spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
-      () =>
-        ({
-          ensureCompatibleVersion: async () => {
-            writes.push("ensureCompatibleVersion");
-            return { status: "compatible" };
-          },
-        }) as unknown as AndroidCtrlProxyManager,
+    spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(() =>
+      asCtrlProxyManager({
+        ensureCompatibleVersion: async () => {
+          writes.push("ensureCompatibleVersion");
+          return { status: "compatible" };
+        },
+      }),
     );
     const fakePool = {
       ...createFakeDaemonState().getDevicePool(),
@@ -209,13 +206,13 @@ describe("direct frames from a managed connection outside its slots", () => {
     };
     const server = createTestUnixSocketServer(
       "unused",
-      {
+      asDaemonState({
         isInitialized: () => true,
         getSessionManager: () => sessionManager,
         getDevicePool: () => fakePool,
         getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
         getBrokerConnectionScopes: () => scopes,
-      } as unknown as DaemonStateAccess,
+      }),
       new FakeTimer(),
       {
         setFlag: async (key: string, enabled: boolean) => {
@@ -234,16 +231,16 @@ describe("direct frames from a managed connection outside its slots", () => {
         },
       },
     );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+    internals = server;
+    internals["acceptingRequests"] = true;
     managed = new FakeSocket();
-    internals.handleConnection(managed as unknown as Socket);
+    internals["handleConnection"](asSocket(managed));
     // What broker acquisition does for the socket that asked (`bindBrokerConnection`).
-    const [socketSessionId] = [...internals.sessions.keys()];
+    const [socketSessionId] = [...internals["sessions"].keys()];
     scopes.bind(socketSessionId!, { scopeKey: SCOPE_KEY, sessionUuids: [SLOT_SESSION] });
     // An ordinary connection on the same daemon: never bound, never confined.
     generic = new FakeSocket();
-    internals.handleConnection(generic as unknown as Socket);
+    internals["handleConnection"](asSocket(generic));
   });
 
   afterEach(() => {

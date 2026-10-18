@@ -1,3 +1,4 @@
+import { asSocket } from "../helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../../helpers/createTestUnixSocketServer";
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
@@ -46,7 +47,7 @@ class FlushingSocket extends EventEmitter {
   }
 
   asSocket(): Socket {
-    return this as unknown as Socket;
+    return asSocket(this);
   }
 }
 
@@ -168,14 +169,10 @@ describe("auxiliary socket inbound frame limit", () => {
 describe("control socket inbound frame limit", () => {
   function connect(socket: FlushingSocket): UnixSocketServer {
     const server = createTestUnixSocketServer("unused", undefined, new FakeTimer());
-    const internals = server as unknown as {
-      acceptingRequests: boolean;
-      maxInboundFrameBytes: number;
-      handleConnection(socket: Socket): void;
-    };
-    internals.acceptingRequests = true;
-    internals.maxInboundFrameBytes = LIMIT;
-    internals.handleConnection(socket.asSocket());
+    server["acceptingRequests"] = true;
+    // Readonly in production; the test lowers the cap so it can overflow it cheaply.
+    Object.assign(server, { maxInboundFrameBytes: LIMIT });
+    server["handleConnection"](socket.asSocket());
     return server;
   }
 
@@ -231,9 +228,7 @@ describe("per-server inbound frame limits", () => {
     expect(AUX_SOCKET_MAX_FRAME_BYTES).toBe(1024 * 1024);
     expect(FAILURES_STREAM_MAX_FRAME_BYTES).toBeGreaterThan(AUX_SOCKET_MAX_FRAME_BYTES);
     const control = createTestUnixSocketServer("unused", undefined, new FakeTimer());
-    expect((control as unknown as { maxInboundFrameBytes: number }).maxInboundFrameBytes).toBe(
-      CONTROL_SOCKET_MAX_FRAME_BYTES,
-    );
+    expect(control["maxInboundFrameBytes"]).toBe(CONTROL_SOCKET_MAX_FRAME_BYTES);
   });
 
   it("accepts a failures-stream acknowledge frame larger than the 1 MiB default", async () => {
@@ -252,9 +247,7 @@ describe("per-server inbound frame limits", () => {
         },
       },
     );
-    (server as unknown as { handleConnection(socket: Socket): void }).handleConnection(
-      socket.asSocket(),
-    );
+    server["handleConnection"](socket.asSocket());
     const ids = Array.from({ length: 250_000 }, (_, index) => index);
     const frame = JSON.stringify({
       id: "1",
@@ -282,9 +275,7 @@ describe("per-server inbound frame limits", () => {
       new FakeTimer(),
       new FakeFailuresStreamRepository(),
     );
-    (server as unknown as { handleConnection(socket: Socket): void }).handleConnection(
-      socket.asSocket(),
-    );
+    server["handleConnection"](socket.asSocket());
 
     socket.emit("data", Buffer.alloc(FAILURES_STREAM_MAX_FRAME_BYTES + 1, 0x61));
     await flushMicrotasks();

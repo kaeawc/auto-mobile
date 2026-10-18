@@ -1,3 +1,4 @@
+import { asEmulatorClient } from "./helpers/narrowStubs";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
@@ -29,7 +30,6 @@ import {
   resetAdbDeviceListCache,
 } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
-import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { ExecResult } from "../../src/models";
 
@@ -440,14 +440,14 @@ describe("UnixSocketServer MCP forward serialization", () => {
         undefined,
         inventoryTimer,
       );
-      const emulator = {
+      const emulator = asEmulatorClient({
         getBootedDevicesChecked: async (
           _onlyEmulators: boolean,
           _options: unknown,
           signal?: AbortSignal,
         ) => await adb.getBootedAndroidDevices({ throwOnMissingAdb: true, signal }),
         listAvds: async () => [{ name: "Pixel_9", platform: "android", isRunning: false } as const],
-      } as unknown as AndroidEmulatorClient;
+      });
       const manager = new MultiPlatformDeviceManager(
         adb,
         {} as SimCtlClient,
@@ -760,25 +760,16 @@ describe("UnixSocketServer MCP forward serialization", () => {
         500,
       );
       for (let attempt = 0; attempt < 20; attempt++) {
-        const contexts = Array.from(
-          (
-            server as unknown as {
-              sessions: Map<string, { requestQueue: { pendingCount: number } }>;
-            }
-          ).sessions.values(),
-        );
+        const contexts = Array.from(server["sessions"].values());
         if (contexts.some((context) => context.requestQueue.pendingCount > 0)) {
           break;
         }
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
-      const queuedRequestCount = Array.from(
-        (
-          server as unknown as {
-            sessions: Map<string, { requestQueue: { pendingCount: number } }>;
-          }
-        ).sessions.values(),
-      ).reduce((count, context) => count + context.requestQueue.pendingCount, 0);
+      const queuedRequestCount = Array.from(server["sessions"].values()).reduce(
+        (count, context) => count + context.requestQueue.pendingCount,
+        0,
+      );
       expect(queuedRequestCount).toBe(1);
 
       fakeTimer.advanceTime(501);
@@ -1038,14 +1029,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await forwardStarted.promise;
     client.close();
 
-    const internals = server as unknown as {
-      clientSockets: Map<string, unknown>;
-      boundMcpClientKeysBySocketSession: Map<string, unknown>;
-    };
-    for (let attempt = 0; attempt < 20 && internals.clientSockets.size > 0; attempt++) {
+    const internals = server;
+    for (let attempt = 0; attempt < 20 && internals["clientSockets"].size > 0; attempt++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    expect(internals.clientSockets.size).toBe(0);
+    expect(internals["clientSockets"].size).toBe(0);
 
     // This is the same response shape that normally creates the socket's
     // generated tool-selection-profile binding.
@@ -1061,7 +1049,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
 
-    expect(internals.boundMcpClientKeysBySocketSession.size).toBe(0);
+    expect(internals["boundMcpClientKeysBySocketSession"].size).toBe(0);
   });
 
   test("preserves a socket-bound selection profile for a later explicit device call", async () => {
@@ -1361,21 +1349,13 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
       // Simulate socket B's "close" handler: clear its bound client key while the
       // sessionless call is still queued behind socket A's op.
-      const boundClientKeysBySocketSession = (
-        server as unknown as {
-          boundMcpClientKeysBySocketSession: Map<string, unknown>;
-        }
-      ).boundMcpClientKeysBySocketSession;
+      const boundClientKeysBySocketSession = server["boundMcpClientKeysBySocketSession"];
       const socketSessionId = boundClientKeysBySocketSession.keys().next().value as string;
       expect(socketSessionId).toBeDefined();
       // Disconnect drops the transport binding, while the pool still owns the
       // live session. Keep its device scope so this exercises client retention.
       mcpAutolockSessions.set(socketSessionId, "session-a");
-      (
-        server as unknown as {
-          clearBoundMcpClientKey(socketSessionId: string): void;
-        }
-      ).clearBoundMcpClientKey(socketSessionId);
+      server["clearBoundMcpClientKey"](socketSessionId);
 
       // Release socket A's op so socket B's queued call runs post-disconnect.
       releaseBlocker();
@@ -1884,18 +1864,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
         arguments: { sessionUuid: "session-a" },
       });
       await longCallStarted;
-      const boundClientKeysBySocketSession = (
-        server as unknown as {
-          boundMcpClientKeysBySocketSession: Map<string, unknown>;
-        }
-      ).boundMcpClientKeysBySocketSession;
+      const boundClientKeysBySocketSession = server["boundMcpClientKeysBySocketSession"];
       const socketSessionId = boundClientKeysBySocketSession.keys().next().value;
       expect(socketSessionId).toBeDefined();
-      (
-        server as unknown as {
-          clearBoundMcpClientKey(socketSessionId: string): void;
-        }
-      ).clearBoundMcpClientKey(socketSessionId);
+      server["clearBoundMcpClientKey"](socketSessionId);
       await fakeTimer.advanceTimeAsync(5 * 60 * 1000);
 
       try {

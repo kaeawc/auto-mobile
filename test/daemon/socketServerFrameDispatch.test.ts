@@ -1,5 +1,5 @@
+import { asSocket } from "./helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { expect, spyOn, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
@@ -22,25 +22,15 @@ test("a later pipe data event answers another device while the first call is hel
     method: "tools/call",
     params: { name: "tapOn", arguments: { deviceId } },
   });
-  (
-    server as unknown as {
-      handleRequest: (
-        sessionId: string,
-        socket: Socket,
-        frame: DaemonRequest,
-      ) => Promise<DaemonResponse>;
-    }
-  ).handleRequest = async (_sessionId, _socket, frame) => {
+  server["handleRequest"] = async (_sessionId, _socket, frame) => {
     if (frame.id === "first") {
       firstStarted.resolve();
       return first.promise;
     }
     return { id: frame.id, type: "mcp_response", success: true, result: {} };
   };
-  (server as unknown as { acceptingRequests: boolean }).acceptingRequests = true;
-  (server as unknown as { handleConnection: (socket: Socket) => void }).handleConnection(
-    socket as unknown as Socket,
-  );
+  server["acceptingRequests"] = true;
+  server["handleConnection"](asSocket(socket));
 
   socket.send(request("first", "device-1"));
   await firstStarted.promise;
@@ -57,28 +47,17 @@ test("a later pipe data event answers another device while the first call is hel
   expect(socket.responses.map((response) => response.id)).toEqual(["second", "first"]);
 });
 
-interface PressServerInternals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  resolveInputTargetDevice(): Promise<BootedDevice>;
-  runTrackedKeyedDeviceInput<T>(
-    method: string,
-    device: BootedDevice,
-    operation: (signal?: AbortSignal) => Promise<T>,
-  ): Promise<T>;
-}
-
 test.each(["returned failure", "thrown cancellation"])(
   "cancelled input/pressButton sends a well-formed wire error for %s",
   async (contract) => {
     const timer = new FakeTimer();
     const device: BootedDevice = { platform: "android", deviceId: "fake-press", name: "Fake" };
     const server = createTestUnixSocketServer("unused", {} as DaemonStateAccess, timer);
-    const internals = server as unknown as PressServerInternals;
-    internals.acceptingRequests = true;
-    internals.resolveInputTargetDevice = async () => device;
+    const internals = server;
+    internals["acceptingRequests"] = true;
+    internals["resolveInputTargetDevice"] = async () => device;
     const controller = new AbortController();
-    internals.runTrackedKeyedDeviceInput = async (_method, _device, operation) =>
+    internals["runTrackedKeyedDeviceInput"] = async (_method, _device, operation) =>
       operation(controller.signal);
     const adb = new FakeAdbExecutor();
     const dispatch = spyOn(adb, "execute").mockImplementation(() =>
@@ -107,7 +86,7 @@ test.each(["returned failure", "thrown cancellation"])(
     const socket = new FakeSocket();
     socket.writeReturnValue = false;
     try {
-      internals.handleConnection(socket as unknown as Socket);
+      internals["handleConnection"](asSocket(socket));
       socket.send({
         id: "press-cancel",
         type: "mcp_request",

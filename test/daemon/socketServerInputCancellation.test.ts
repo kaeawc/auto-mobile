@@ -1,5 +1,7 @@
+import type { UnixSocketServer } from "../../src/daemon/socketServer";
+import { asDaemonState } from "./helpers/narrowStubs";
+import { asSocket } from "./helpers/fakeSocket";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import type { DaemonRequest } from "../../src/daemon/types";
@@ -28,18 +30,6 @@ interface TapCall {
   release: (result: { success: boolean; error?: string }) => void;
 }
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-  dispatchFencedInput<T>(
-    gesture: "Tap" | "Swipe",
-    signal: AbortSignal | undefined,
-    timeoutMs: number,
-    send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
-  ): Promise<T>;
-}
-
 const tapFrame = (id: string, x: number): DaemonRequest => ({
   id,
   type: "mcp_request",
@@ -55,7 +45,7 @@ const cancelFrame = (id: string, targetId: string): DaemonRequest => ({
 });
 
 let timer: FakeTimer;
-let internals: Internals;
+let internals: UnixSocketServer;
 let taps: TapCall[];
 let allSockets: FakeSocket[];
 
@@ -85,8 +75,8 @@ beforeEach(() => {
     { isInitialized: () => false } as DaemonStateAccess,
     timer,
   );
-  internals = server as unknown as Internals;
-  internals.acceptingRequests = true;
+  internals = server;
+  internals["acceptingRequests"] = true;
 });
 
 afterEach(() => {
@@ -102,7 +92,7 @@ afterEach(() => {
 function connect(): FakeSocket {
   const socket = new FakeSocket();
   allSockets.push(socket);
-  internals.handleConnection(socket as unknown as Socket);
+  internals["handleConnection"](asSocket(socket));
   return socket;
 }
 
@@ -115,7 +105,7 @@ async function settle(): Promise<void> {
 
 async function drain(): Promise<void> {
   await settle();
-  await Promise.all([...internals.activeRequestHandlers]);
+  await Promise.all([...internals["activeRequestHandlers"]]);
 }
 
 /** Start `holder` on its own socket and wait until it owns the device key mid-dispatch. */
@@ -240,11 +230,16 @@ test("an input/tap waiting on the device key past its budget is refused instead 
 test("an abort after the frame was written is reported as an indeterminate tap", async () => {
   const controller = new AbortController();
   await expect(
-    internals.dispatchFencedInput("Tap", controller.signal, 1000, async (_fenced, onDispatch) => {
-      onDispatch();
-      controller.abort();
-      throw new Error("Daemon MCP client disconnected");
-    }),
+    internals["dispatchFencedInput"](
+      "Tap",
+      controller.signal,
+      1000,
+      async (_fenced, onDispatch) => {
+        onDispatch();
+        controller.abort();
+        throw new Error("Daemon MCP client disconnected");
+      },
+    ),
   ).rejects.toThrow("Tap outcome is indeterminate");
 });
 
@@ -252,7 +247,7 @@ test("an abort before the frame was written keeps the original cancellation", as
   const controller = new AbortController();
   const cancelled = new Error("Daemon MCP client disconnected");
   await expect(
-    internals.dispatchFencedInput("Swipe", controller.signal, 1000, async () => {
+    internals["dispatchFencedInput"]("Swipe", controller.signal, 1000, async () => {
       controller.abort(cancelled);
       throw cancelled;
     }),
@@ -262,7 +257,7 @@ test("an abort before the frame was written keeps the original cancellation", as
 test("a dispatched swipe that fails without an abort keeps its own error", async () => {
   const failure = new ActionableError("device offline");
   await expect(
-    internals.dispatchFencedInput(
+    internals["dispatchFencedInput"](
       "Swipe",
       new AbortController().signal,
       1000,
@@ -313,15 +308,15 @@ test("a parked sessionless input/tap is not sent once another session acquires t
   });
   const server = createTestUnixSocketServer(
     "unused",
-    {
+    asDaemonState({
       isInitialized: () => true,
       getSessionManager: () => sessionManager,
       getDevicePool: () => ({}),
-    } as unknown as DaemonStateAccess,
+    }),
     timer,
   );
-  internals = server as unknown as Internals;
-  internals.acceptingRequests = true;
+  internals = server;
+  internals["acceptingRequests"] = true;
 
   await holdDeviceKey();
   const waiter = connect();

@@ -51,27 +51,13 @@ function route(
     method: "tools/call",
     params: { name: "provisionDevice", arguments: arguments_ },
   };
-  return (
-    server as unknown as {
-      getMcpForwardRoute: (request: DaemonRequest, socketSessionId: string) => McpForwardRoute;
-    }
-  ).getMcpForwardRoute(request, socketSessionId);
+  return server["getMcpForwardRoute"](request, socketSessionId);
 }
 
 describe("UnixSocketServer sessionless acquisition tool-selection forwarding", () => {
   test("inventory reads with an expired session identity do not bind a socket client", () => {
     const server = createServer();
-    const internals = server as unknown as {
-      getMcpForwardRoute: (request: DaemonRequest, socketSessionId: string) => McpForwardRoute;
-      recordBoundMcpClientKey: (
-        request: DaemonRequest,
-        socketSessionId: string,
-        route: McpForwardRoute,
-        sessionWasActiveBeforeForward: boolean,
-        response: unknown,
-      ) => void;
-      boundMcpClientKeysBySocketSession: Map<string, unknown>;
-    };
+    const internals = server;
     for (const name of ["listDevices", "listDeviceImages"]) {
       const socketSessionId = `socket-${name}`;
       const request: DaemonRequest = {
@@ -79,9 +65,9 @@ describe("UnixSocketServer sessionless acquisition tool-selection forwarding", (
         method: "tools/call",
         params: { name, arguments: { sessionUuid: "expired-session" } },
       };
-      const route = internals.getMcpForwardRoute(request, socketSessionId);
-      internals.recordBoundMcpClientKey(request, socketSessionId, route, false, { content: [] });
-      expect(internals.boundMcpClientKeysBySocketSession.has(socketSessionId)).toBe(false);
+      const route = internals["getMcpForwardRoute"](request, socketSessionId);
+      internals["recordBoundMcpClientKey"](request, socketSessionId, route, false, { content: [] });
+      expect(internals["boundMcpClientKeysBySocketSession"].has(socketSessionId)).toBe(false);
     }
   });
 
@@ -94,22 +80,8 @@ describe("UnixSocketServer sessionless acquisition tool-selection forwarding", (
       method: "tools/call",
       params: { name: "setToolEnabled", arguments: { toolName: "provisionDevice", enabled: true } },
     };
-    const enableRoute = (
-      server as unknown as {
-        getMcpForwardRoute: (request: DaemonRequest, socketSessionId: string) => McpForwardRoute;
-      }
-    ).getMcpForwardRoute(enableRequest, socketSessionId);
-    (
-      server as unknown as {
-        recordBoundMcpClientKey: (
-          request: DaemonRequest,
-          socketSessionId: string,
-          route: McpForwardRoute,
-          sessionWasActiveBeforeForward: boolean,
-          response: unknown,
-        ) => void;
-      }
-    ).recordBoundMcpClientKey(enableRequest, socketSessionId, enableRoute, false, {
+    const enableRoute = server["getMcpForwardRoute"](enableRequest, socketSessionId);
+    server["recordBoundMcpClientKey"](enableRequest, socketSessionId, enableRoute, false, {
       content: [{ type: "text", text: JSON.stringify({ sessionUuid: profileUuid }) }],
     });
 

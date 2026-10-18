@@ -1,3 +1,5 @@
+import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
+import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 import { spyOn } from "bun:test";
 import { executionTracker } from "../../src/server/executionTracker";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
@@ -72,9 +74,9 @@ describe("UnixSocketServer input/swipe", () => {
     const createMcpClient = mock(async () => {
       throw new Error("input/swipe should not create an MCP client");
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSwipe,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     server.mcpClientFactory = createMcpClient;
@@ -126,11 +128,11 @@ describe("UnixSocketServer input/swipe", () => {
       return { success: true };
     });
     const fetchHierarchy = mock(async () => ({ hierarchy: {} })); // success, no metadata => legacy
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestDrag,
       getScreenScaleMetadata: () => null,
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
     server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
@@ -176,10 +178,10 @@ describe("UnixSocketServer input/swipe", () => {
       args[10]?.();
       return { success: true };
     });
-    IOSCtrlProxyClient.getInstance = mock(() => ({
+    spyOnIosClientInstance({
       requestDrag,
       getScreenScaleMetadata: () => ({ nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 }),
-    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
     server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
@@ -219,9 +221,9 @@ describe("UnixSocketServer input/swipe", () => {
         return { success: true };
       },
     );
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSwipe,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     const session = createFakeSession("session-1", "emulator-5554", "android");
     const autolockSessions = new Map([[session.sessionId, session]]);
@@ -248,9 +250,7 @@ describe("UnixSocketServer input/swipe", () => {
         },
       },
       () => {
-        const socketSessionId = [
-          ...(server as unknown as { sessions: Map<string, unknown> }).sessions.keys(),
-        ][0];
+        const socketSessionId = [...server["sessions"].keys()][0];
         mcpAutolockSessions.set(socketSessionId, session.sessionId);
       },
     );
@@ -288,9 +288,9 @@ describe("UnixSocketServer input/swipe", () => {
       inFlight -= 1;
       return { success: true };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSwipe,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     fakeTimer.enableAutoAdvance();
     server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
@@ -335,9 +335,9 @@ describe("UnixSocketServer input/swipe", () => {
       }
       return { success: true };
     });
-    AndroidCtrlProxyClient.getInstance = mock(() => ({
+    spyOnAndroidClientInstance({
       requestSwipe,
-    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();

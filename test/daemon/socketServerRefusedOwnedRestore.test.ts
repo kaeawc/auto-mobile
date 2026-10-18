@@ -1,3 +1,4 @@
+import { asDaemonState } from "./helpers/narrowStubs";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { describe, expect, test } from "bun:test";
 import {
@@ -5,7 +6,6 @@ import {
   DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM,
 } from "../../src/daemon/constants";
 import type { RefusedOwnedSessionRestore } from "../../src/daemon/devicePool";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { type UnixSocketServer } from "../../src/daemon/socketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
@@ -21,11 +21,6 @@ const REFUSED: RefusedOwnedSessionRestore = {
   reason: "owned-by-other-connection",
 };
 
-/** The socket server's private restore step, the only seam this test drives. */
-interface RestoreSeam {
-  restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void>;
-}
-
 function serverRefusing(autolockRestores: string[][]): UnixSocketServer {
   const pool = {
     refreshDevices: async () => 0,
@@ -39,13 +34,13 @@ function serverRefusing(autolockRestores: string[][]): UnixSocketServer {
   };
   return createTestUnixSocketServer(
     "/tmp/never-listened.sock",
-    { isInitialized: () => true, getDevicePool: () => pool } as unknown as DaemonStateAccess,
+    asDaemonState({ isInitialized: () => true, getDevicePool: () => pool }),
     new FakeTimer(),
   );
 }
 
 function restore(server: UnixSocketServer, args: Record<string, unknown>): Promise<void> {
-  return (server as unknown as RestoreSeam).restoreSelectorSessions(
+  return server["restoreSelectorSessions"](
     { ...args, [DAEMON_OWNED_SESSIONS_PARAM]: [OTHER_SESSION, MINE] },
     "client",
   );
@@ -122,17 +117,17 @@ describe("refused owned-session restore", () => {
     };
     const server = createTestUnixSocketServer(
       "/tmp/never-listened.sock",
-      {
+      asDaemonState({
         isInitialized: () => true,
         getDevicePool: () => pool,
-      } as unknown as DaemonStateAccess,
+      }),
       new FakeTimer(),
     );
     server["acceptingRequests"] = true;
     const socket = new FakeSocket();
     server["handleConnection"](socket);
     const socketId = [...server["sessions"].keys()][0]!;
-    const seam = server as unknown as RestoreSeam;
+    const seam = { restoreSelectorSessions: server["restoreSelectorSessions"].bind(server) };
     try {
       for (const args of [
         undefined,

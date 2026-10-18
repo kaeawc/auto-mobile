@@ -1,4 +1,4 @@
-import type { Socket } from "node:net";
+import { asSocket } from "./helpers/fakeSocket";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import {
   harness,
@@ -11,8 +11,6 @@ import {
 import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { screenshotPathProtection } from "../../src/features/observe/ScreenshotPathProtection";
 import { TakeScreenshot } from "../../src/features/observe/TakeScreenshot";
-import type { DaemonResponse } from "../../src/daemon/types";
-import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { CtrlProxyText as IosTextDelegate } from "../../src/features/observe/ios/CtrlProxyText";
@@ -29,9 +27,7 @@ beforeEach(() => {
   // their filesystem/retention work so these tests use no real timers or I/O.
   spyOn(screenshotPathProtection, "start").mockImplementation(() => {});
   spyOn(screenshotPathProtection, "sweepOnce").mockResolvedValue(undefined);
-  spyOn(TakeScreenshot as unknown as { getCacheDir(): string }, "getCacheDir").mockReturnValue(
-    "scratch/restart-edges-codex/screenshots",
-  );
+  spyOn(TakeScreenshot, "getCacheDir").mockReturnValue("scratch/restart-edges-codex/screenshots");
 });
 afterEach(() => {
   mock.restore();
@@ -607,20 +603,9 @@ test("dispatched append session release carries confirmed charsSent without muta
   spyOn(f.client, "requestImeAction").mockImplementation(
     (_action, _timeout, _perf, signal, dispatch) => first.send(signal, dispatch),
   );
-  const internals = f.server as unknown as {
-    answeringSessionRelease<T>(
-      execution: { cancelReason: unknown },
-      run: () => Promise<T>,
-    ): Promise<T>;
-    mcpForwardFailureResponse(args: {
-      error: unknown;
-      request: DaemonRequest;
-      sessionId: string;
-      ownerSocket: Socket;
-    }): DaemonResponse;
-  };
+  const internals = f.server;
   const request = frame("android", "A", true, true);
-  const a = internals.answeringSessionRelease({ cancelReason: release }, () =>
+  const a = internals["answeringSessionRelease"]({ cancelReason: release }, () =>
     f.server.handleInputTypeText(request, undefined, { signal: owner.signal }),
   );
   void a.catch(() => {});
@@ -630,11 +615,11 @@ test("dispatched append session release carries confirmed charsSent without muta
   first.reply();
   const error: unknown = await a.catch((value) => value);
   expect(error).toBeInstanceOf(SessionReleasedDuringCallError);
-  const response = internals.mcpForwardFailureResponse({
+  const response = internals["mcpForwardFailureResponse"]({
     error,
     request,
     sessionId: "socket",
-    ownerSocket: f.socket as unknown as Socket,
+    ownerSocket: asSocket(f.socket),
   });
   expect(response).toMatchObject({ success: false, code: "session_ownership_lost", charsSent: 2 });
   expect(response.error).toContain(
@@ -642,26 +627,26 @@ test("dispatched append session release carries confirmed charsSent without muta
   );
   expect(release.message).toBe(originalMessage);
   expect("charsSent" in release).toBe(false);
-  const concurrent = internals.answeringSessionRelease({ cancelReason: release }, async () => {
+  const concurrent = internals["answeringSessionRelease"]({ cancelReason: release }, async () => {
     throw release;
   });
   await expect(concurrent).rejects.toBe(release);
   const concurrentError: unknown = await concurrent.catch((value) => value);
   expect(
-    internals.mcpForwardFailureResponse({
+    internals["mcpForwardFailureResponse"]({
       error: concurrentError,
       request,
       sessionId: "socket",
-      ownerSocket: f.socket as unknown as Socket,
+      ownerSocket: asSocket(f.socket),
     }),
   ).toMatchObject({ error: originalMessage });
   expect(
     "charsSent" in
-      internals.mcpForwardFailureResponse({
+      internals["mcpForwardFailureResponse"]({
         error: concurrentError,
         request,
         sessionId: "socket",
-        ownerSocket: f.socket as unknown as Socket,
+        ownerSocket: asSocket(f.socket),
       }),
   ).toBe(false);
   await finishSockets(f);

@@ -70,19 +70,7 @@ function callHandleIdeRequest(
   originalTimeoutMs: number = timeoutMs,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  return (
-    server as unknown as {
-      handleIdeRequest: (
-        c: unknown,
-        r: DaemonRequest,
-        t: number,
-        s: string,
-        d: ProgressExtendableDeadline,
-        o: number,
-        signal?: AbortSignal,
-      ) => Promise<unknown>;
-    }
-  ).handleIdeRequest(
+  return server["handleIdeRequest"](
     mcpClient,
     request,
     timeoutMs,
@@ -230,16 +218,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     deadline.extendOnProgress(fakeTimer.now(), timeoutMs);
     fakeTimer.advanceTime(15_000);
     expect(originalRemainingMs - fakeTimer.now()).toBeLessThan(0);
-    const internals = server as unknown as {
-      requireRemainingMcpForwardBudget: (
-        request: DaemonRequest,
-        timeout: number,
-        deadline: ProgressExtendableDeadline,
-        phase: string,
-      ) => number;
-      remainingMcpForwardBudget: (input: { deadline: ProgressExtendableDeadline }) => number;
-      forwardMcpRequest: (input: unknown) => Promise<unknown>;
-    };
+    const internals = server;
     const request: DaemonRequest = {
       id: "recovery-request",
       type: "mcp_request",
@@ -247,12 +226,12 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
       params: { name: "observe", arguments: {} },
       progressToken: "recovery-token",
     };
-    expect(internals.remainingMcpForwardBudget({ deadline })).toBe(15_000);
+    expect(internals["remainingMcpForwardBudget"]({ deadline })).toBe(15_000);
     expect(
-      internals.requireRemainingMcpForwardBudget(request, timeoutMs, deadline, "recovery"),
+      internals["requireRemainingMcpForwardBudget"](request, timeoutMs, deadline, "recovery"),
     ).toBe(15_000);
     await expect(
-      internals.forwardMcpRequest({
+      internals["forwardMcpRequest"]({
         request,
         route: { executionKey: "execution", clientKey: "forward-client" },
         socketSessionId: "socket-forward",
@@ -268,16 +247,8 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     const server = createServer(fakeTimer);
     const completed = Promise.withResolvers<unknown>();
     const socketSessionId = "socket-late-acquisition";
-    (
-      server as unknown as {
-        clientSockets: Map<string, { destroyed: boolean }>;
-      }
-    ).clientSockets.set(socketSessionId, { destroyed: false });
-    const requestSignal = (
-      server as unknown as {
-        mcpRequestSignal: (sessionId: string) => { signal: AbortSignal; dispose: () => void };
-      }
-    ).mcpRequestSignal(socketSessionId);
+    server["clientSockets"].set(socketSessionId, { destroyed: false });
+    const requestSignal = server["mcpRequestSignal"](socketSessionId);
     let forwardedSignal: AbortSignal | undefined;
     const fakeMcpClient = {
       callTool: async (_params: unknown, options: CapturedCallToolOptions) => {
@@ -303,9 +274,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     );
     await Promise.resolve();
 
-    (server as unknown as { abortMcpRequests: (sessionId: string) => void }).abortMcpRequests(
-      socketSessionId,
-    );
+    server["abortMcpRequests"](socketSessionId);
     expect(forwardedSignal?.aborted).toBe(true);
 
     // A late transport result cannot clear cancellation. The MCP server's
@@ -318,11 +287,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
 
   test("starts queued MCP work already aborted after its owner socket disconnected", () => {
     const server = createServer(new FakeTimer());
-    const requestSignal = (
-      server as unknown as {
-        mcpRequestSignal: (sessionId: string) => { signal: AbortSignal; dispose: () => void };
-      }
-    ).mcpRequestSignal("disconnected-before-forward");
+    const requestSignal = server["mcpRequestSignal"]("disconnected-before-forward");
 
     expect(requestSignal.signal.aborted).toBe(true);
     expect((requestSignal.signal.reason as Error).message).toBe("Daemon MCP client disconnected");
@@ -341,16 +306,8 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     for (const { method, result } of discoveryRequests) {
       const completed = Promise.withResolvers<unknown>();
       const socketSessionId = `socket-${method}`;
-      (
-        server as unknown as {
-          clientSockets: Map<string, { destroyed: boolean }>;
-        }
-      ).clientSockets.set(socketSessionId, { destroyed: false });
-      const requestSignal = (
-        server as unknown as {
-          mcpRequestSignal: (sessionId: string) => { signal: AbortSignal; dispose: () => void };
-        }
-      ).mcpRequestSignal(socketSessionId);
+      server["clientSockets"].set(socketSessionId, { destroyed: false });
+      const requestSignal = server["mcpRequestSignal"](socketSessionId);
       let capturedOptions: CapturedCallToolOptions | undefined;
       const fakeMcpClient = {
         listTools: async (_params?: unknown, options?: CapturedCallToolOptions) => {
@@ -380,9 +337,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
 
       expect(capturedOptions?.timeout).toBe(1_000);
       expect(capturedOptions?.signal).toBe(requestSignal.signal);
-      (server as unknown as { abortMcpRequests: (sessionId: string) => void }).abortMcpRequests(
-        socketSessionId,
-      );
+      server["abortMcpRequests"](socketSessionId);
       expect(capturedOptions?.signal?.aborted).toBe(true);
 
       completed.resolve(result);
@@ -692,10 +647,7 @@ describe("pushProgressNotification is independent of the general notification su
         return true;
       },
     };
-    (server as unknown as { clientSockets: Map<string, unknown> }).clientSockets.set(
-      sessionId,
-      fakeSocket,
-    );
+    server["clientSockets"].set(sessionId, fakeSocket);
     return { server, sessionId, writes };
   }
 
@@ -705,11 +657,7 @@ describe("pushProgressNotification is independent of the general notification su
     progressToken: string | number,
     progress: number,
   ): void {
-    (
-      server as unknown as {
-        pushProgressNotification: (s: string, id: string, t: string | number, p: number) => void;
-      }
-    ).pushProgressNotification(sessionId, "request-1", progressToken, progress);
+    server["pushProgressNotification"](sessionId, "request-1", progressToken, progress);
   }
 
   test("delivers a progress tick to a session that never subscribed to general notifications", () => {
@@ -729,9 +677,7 @@ describe("pushProgressNotification is independent of the general notification su
 
   test("still skips a torn-down (destroyed) socket, subscribed or not", () => {
     const { server, sessionId, writes } = createServerWithFakeSocket();
-    const destroyedSocket = (
-      server as unknown as { clientSockets: Map<string, { destroyed: boolean }> }
-    ).clientSockets.get(sessionId)!;
+    const destroyedSocket = server["clientSockets"].get(sessionId)!;
     destroyedSocket.destroyed = true;
 
     push(server, sessionId, "tok-2", 1);

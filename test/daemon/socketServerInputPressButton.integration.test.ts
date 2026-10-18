@@ -1,3 +1,5 @@
+import { asDeviceManager } from "./helpers/narrowStubs";
+import { asDaemonState } from "./helpers/narrowStubs";
 import { spyOn } from "bun:test";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -38,12 +40,12 @@ function createFakeDeviceManager(
   devices: BootedDevice[],
   succeededPlatforms: Set<"android" | "ios"> = new Set(["android", "ios"]),
 ) {
-  return {
+  return asDeviceManager({
     getBootedDevicesDetailed: mock(async () => ({
       devices,
       succeededPlatforms,
     })),
-  } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>;
+  });
 }
 
 function createFakeSession(
@@ -192,8 +194,7 @@ describe("UnixSocketServer input/pressButton", () => {
     PressButton.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
-    (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
-      () => {};
+    server["requireCurrentFrameContext"] = () => {};
     await server.start();
 
     const response = await sendRequest(socketPath, "input/pressButton", {
@@ -345,9 +346,7 @@ describe("UnixSocketServer input/pressButton", () => {
         },
       },
       () => {
-        const socketSessionId = [
-          ...(server as unknown as { sessions: Map<string, unknown> }).sessions.keys(),
-        ][0];
+        const socketSessionId = [...server["sessions"].keys()][0];
         mcpAutolockSessions.set(socketSessionId, session.sessionId);
       },
     );
@@ -432,11 +431,11 @@ describe("UnixSocketServer input/pressButton", () => {
       resolveAutolockSessionForMcpSession: () => undefined,
       assertSessionReadyForAutomation: () => {},
     };
-    const daemonState = {
+    const daemonState = asDaemonState({
       isInitialized: () => true,
       getSessionManager: () => sessionManager,
       getDevicePool: () => devicePool,
-    } as unknown as ReturnType<typeof createFakeDaemonState>;
+    });
 
     server = new UnixSocketServer(socketPath, daemonState, fakeTimer);
     await server.start();

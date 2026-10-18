@@ -56,13 +56,6 @@ interface McpForwardRoute {
   sessionUuid?: string;
 }
 
-interface BoundClientEntry {
-  clientKey: string;
-  executionKey: string;
-  sessionUuid: string;
-  requiresLiveDaemonSession: boolean;
-}
-
 function createServer(): UnixSocketServer {
   const sessionDevices = new Map<string, string>();
   // session-a is a live daemon session; session-b exists but is unbound to a device.
@@ -76,11 +69,7 @@ function createServer(): UnixSocketServer {
 }
 
 function bindSocketToSessionA(server: UnixSocketServer, socketSessionId: string): void {
-  const boundMap = (
-    server as unknown as {
-      boundMcpClientKeysBySocketSession: Map<string, BoundClientEntry>;
-    }
-  ).boundMcpClientKeysBySocketSession;
+  const boundMap = server["boundMcpClientKeysBySocketSession"];
   boundMap.set(socketSessionId, {
     clientKey: `socket:${socketSessionId}:session:session-a`,
     executionKey: "device:device-1",
@@ -94,11 +83,7 @@ function route(
   request: DaemonRequest,
   socketSessionId: string,
 ): McpForwardRoute {
-  return (
-    server as unknown as {
-      getMcpForwardRoute: (r: DaemonRequest, s: string) => McpForwardRoute;
-    }
-  ).getMcpForwardRoute(request, socketSessionId);
+  return server["getMcpForwardRoute"](request, socketSessionId);
 }
 
 describe("UnixSocketServer ide/getNavigationGraph cross-session routing", () => {
@@ -166,7 +151,7 @@ describe("tools/call selector forwarding", () => {
         "socket-A",
       );
       expect(resolved.sessionUuid).toBeUndefined();
-      const forwarded = (server as any).withSocketSessionAutolockKey(args, "socket-A", 1000);
+      const forwarded = server["withSocketSessionAutolockKey"](args, "socket-A", 1000);
       expect(forwarded.sessionUuid).toBeUndefined();
       expect(forwarded.__mcpSessionId).toBe("socket-A");
     },
@@ -187,7 +172,7 @@ describe("tools/call selector forwarding", () => {
       "socket-A",
     );
     expect(resolved.sessionUuid).toBe("session-a");
-    const forwarded = (server as any).withSocketSessionAutolockKey(args, "socket-A", 1000);
+    const forwarded = server["withSocketSessionAutolockKey"](args, "socket-A", 1000);
     const binding = new SessionToolBinding(resolved.sessionUuid);
     expect(() =>
       binding.resolveDeviceSessionUuid(undefined, forwarded, () => ({
@@ -206,7 +191,7 @@ describe("tools/call selector forwarding", () => {
       { id: "explicit", method: "tools/call", params: { name: "observe", arguments: args } },
       "socket-A",
     );
-    const forwarded = (server as any).withSocketSessionAutolockKey(args, "socket-A", 1000);
+    const forwarded = server["withSocketSessionAutolockKey"](args, "socket-A", 1000);
     const binding = new SessionToolBinding(resolved.sessionUuid);
     expect(forwarded.sessionUuid).toBe("session-a");
     expect(

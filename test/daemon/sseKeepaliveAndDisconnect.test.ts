@@ -907,9 +907,7 @@ describe("disconnect monitor miss counting", () => {
       forceDisconnectedDeviceGenerations: generations,
       unsubscribeAdbMissingDevice: null as (() => void) | null,
     };
-    const startAdbMissingDeviceListener = (
-      Daemon.prototype as unknown as { startAdbMissingDeviceListener: () => void }
-    ).startAdbMissingDeviceListener;
+    const startAdbMissingDeviceListener = Daemon.prototype["startAdbMissingDeviceListener"];
 
     startAdbMissingDeviceListener.call(daemon);
     try {
@@ -943,8 +941,7 @@ describe("disconnect monitor miss counting", () => {
         forceDisconnectedDeviceGenerations: new Map<string, number>(),
         unsubscribeAdbMissingDevice: null as (() => void) | null,
       };
-      const start = (Daemon.prototype as unknown as { startAdbMissingDeviceListener(): void })
-        .startAdbMissingDeviceListener;
+      const start = Daemon.prototype["startAdbMissingDeviceListener"];
       start.call(daemon);
       const screen = new FakeObserveScreen();
       screen.setObserveResult((index) => {
@@ -1031,8 +1028,7 @@ describe("disconnect monitor miss counting", () => {
       forceDisconnectedDeviceGenerations: new Map<string, number>(),
       unsubscribeAdbMissingDevice: null as (() => void) | null,
     };
-    const start = (Daemon.prototype as unknown as { startAdbMissingDeviceListener(): void })
-      .startAdbMissingDeviceListener;
+    const start = Daemon.prototype["startAdbMissingDeviceListener"];
     start.call(daemon);
     try {
       for (let i = 0; i < 710; i++) {
@@ -1269,14 +1265,7 @@ describe("disconnect monitor miss counting", () => {
       forceDisconnectedDeviceIds: forced,
       forceDisconnectedDeviceGenerations: new Map(),
     };
-    const shouldSkipStaleDisconnectCleanup = (
-      Daemon.prototype as unknown as {
-        shouldSkipStaleDisconnectCleanup: (
-          pooledDeviceAtDisconnect: null,
-          deviceId: string,
-        ) => Promise<boolean>;
-      }
-    ).shouldSkipStaleDisconnectCleanup;
+    const shouldSkipStaleDisconnectCleanup = Daemon.prototype["shouldSkipStaleDisconnectCleanup"];
 
     await expect(shouldSkipStaleDisconnectCleanup.call(daemon, null, "sim-1")).resolves.toBe(true);
     expect(misses.has("sim-1")).toBe(false);
@@ -1298,15 +1287,7 @@ describe("disconnect monitor miss counting", () => {
       forceDisconnectedDeviceIds: forced,
       forceDisconnectedDeviceGenerations: forceGenerations,
     };
-    const shouldSkipStaleDisconnectCleanup = (
-      Daemon.prototype as unknown as {
-        shouldSkipStaleDisconnectCleanup: (
-          pooledDeviceAtDisconnect: null,
-          deviceId: string,
-          forceGenerationAtDisconnect: number | undefined,
-        ) => Promise<boolean>;
-      }
-    ).shouldSkipStaleDisconnectCleanup;
+    const shouldSkipStaleDisconnectCleanup = Daemon.prototype["shouldSkipStaleDisconnectCleanup"];
 
     await expect(shouldSkipStaleDisconnectCleanup.call(daemon, null, "sim-1", 1)).resolves.toBe(
       true,
@@ -1328,14 +1309,7 @@ describe("disconnect monitor miss counting", () => {
       forceDisconnectedDeviceIds: new Set(["emulator-5554"]),
       forceDisconnectedDeviceGenerations: new Map([["emulator-5554", 1]]),
     };
-    const shouldSkipStaleDisconnectCleanup = (
-      Daemon.prototype as unknown as {
-        shouldSkipStaleDisconnectCleanup: (
-          pooledDeviceAtDisconnect: object,
-          deviceId: string,
-        ) => Promise<boolean>;
-      }
-    ).shouldSkipStaleDisconnectCleanup;
+    const shouldSkipStaleDisconnectCleanup = Daemon.prototype["shouldSkipStaleDisconnectCleanup"];
 
     await expect(shouldSkipStaleDisconnectCleanup.call(daemon, {}, "emulator-5554")).resolves.toBe(
       true,
@@ -1366,14 +1340,7 @@ describe("disconnect monitor miss counting", () => {
       forceDisconnectedDeviceIds: forced,
       forceDisconnectedDeviceGenerations: forceGenerations,
     };
-    const shouldSkipStaleDisconnectCleanup = (
-      Daemon.prototype as unknown as {
-        shouldSkipStaleDisconnectCleanup: (
-          pooledDeviceAtDisconnect: object,
-          deviceId: string,
-        ) => Promise<boolean>;
-      }
-    ).shouldSkipStaleDisconnectCleanup;
+    const shouldSkipStaleDisconnectCleanup = Daemon.prototype["shouldSkipStaleDisconnectCleanup"];
 
     const pending = shouldSkipStaleDisconnectCleanup.call(daemon, {}, "emulator-5554");
     forced.add("emulator-5554");
@@ -1396,15 +1363,7 @@ describe("disconnect monitor miss counting", () => {
         getSessionForDevice: () => null,
       },
     };
-    const isCapturedDisconnectTargetCurrent = (
-      Daemon.prototype as unknown as {
-        isCapturedDisconnectTargetCurrent: (
-          deviceId: string,
-          pooledDeviceAtDisconnect: object,
-          assignmentCountAtDisconnect: number,
-        ) => boolean;
-      }
-    ).isCapturedDisconnectTargetCurrent;
+    const isCapturedDisconnectTargetCurrent = Daemon.prototype["isCapturedDisconnectTargetCurrent"];
 
     expect(isCapturedDisconnectTargetCurrent.call(daemon, "emulator-5554", capturedDevice, 4)).toBe(
       false,
@@ -1424,14 +1383,7 @@ describe("disconnect monitor miss counting", () => {
       forceDisconnectedDeviceIds: new Set(["emulator-5554"]),
       forceDisconnectedDeviceGenerations: new Map([["emulator-5554", 1]]),
     };
-    const shouldSkipStaleDisconnectCleanup = (
-      Daemon.prototype as unknown as {
-        shouldSkipStaleDisconnectCleanup: (
-          pooledDeviceAtDisconnect: object,
-          deviceId: string,
-        ) => Promise<boolean>;
-      }
-    ).shouldSkipStaleDisconnectCleanup;
+    const shouldSkipStaleDisconnectCleanup = Daemon.prototype["shouldSkipStaleDisconnectCleanup"];
 
     await expect(shouldSkipStaleDisconnectCleanup.call(daemon, {}, "emulator-5554")).resolves.toBe(
       true,

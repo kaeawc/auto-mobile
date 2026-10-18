@@ -102,6 +102,14 @@ interface ScreenshotUpdate {
   frameContext?: string;
 }
 
+/** The stream reads `frameContext` off the hierarchy it is handed, beside the typed fields. */
+function withFrameContext<T extends object>(
+  hierarchy: T,
+  frameContext: string,
+): T & { frameContext: string } {
+  return { ...hierarchy, frameContext };
+}
+
 class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
   readonly latestHierarchyCalls: Array<{
     waitForFresh?: boolean;
@@ -474,14 +482,16 @@ describe("pushInitialObservationFramesForSubscriber", () => {
     const streamServer = new FakeObservationStreamServer(43);
     const androidClient = new FakeAndroidInitialFrameClient(
       true,
-      {
-        updatedAt: 123,
-        packageName: "com.example",
-        screenWidth: 1440,
-        screenHeight: 3120,
-        hierarchy: { text: "Home" },
-        frameContext: "android-hierarchy",
-      } as any,
+      withFrameContext(
+        {
+          updatedAt: 123,
+          packageName: "com.example",
+          screenWidth: 1440,
+          screenHeight: 3120,
+          hierarchy: { text: "Home" },
+        },
+        "android-hierarchy",
+      ),
       undefined,
       true,
       {
@@ -508,14 +518,16 @@ describe("pushInitialObservationFramesForSubscriber", () => {
     const streamServer = new FakeObservationStreamServer(43);
     const androidClient = new FakeAndroidInitialFrameClient(
       true,
-      {
-        updatedAt: 123,
-        packageName: "com.example",
-        screenWidth: 1440,
-        screenHeight: 3120,
-        hierarchy: { text: "Screen A" },
-        frameContext: "android-screen-a",
-      } as any,
+      withFrameContext(
+        {
+          updatedAt: 123,
+          packageName: "com.example",
+          screenWidth: 1440,
+          screenHeight: 3120,
+          hierarchy: { text: "Screen A" },
+        },
+        "android-screen-a",
+      ),
       undefined,
       true,
       {
@@ -813,15 +825,17 @@ describe("pushInitialObservationFramesForSubscriber", () => {
     const streamServer = new FakeObservationStreamServer(44);
     const iosClient = new FakeIosInitialFrameClient(
       true,
-      {
-        updatedAt: 456,
-        packageName: "com.example.ios",
-        screenWidth: 390,
-        screenHeight: 844,
-        screenScale: 3,
-        hierarchy: { text: "Home" },
-        frameContext: "ios-hierarchy",
-      } as any,
+      withFrameContext(
+        {
+          updatedAt: 456,
+          packageName: "com.example.ios",
+          screenWidth: 390,
+          screenHeight: 844,
+          screenScale: 3,
+          hierarchy: { text: "Home" },
+        },
+        "ios-hierarchy",
+      ),
       undefined,
       { success: true, data: "ios-shot", format: "png", frameContext: "ios-hierarchy" },
     );
@@ -843,15 +857,17 @@ describe("pushInitialObservationFramesForSubscriber", () => {
     const streamServer = new FakeObservationStreamServer(44);
     const iosClient = new FakeIosInitialFrameClient(
       true,
-      {
-        updatedAt: 456,
-        packageName: "com.example.ios",
-        screenWidth: 390,
-        screenHeight: 844,
-        screenScale: 3,
-        hierarchy: { text: "Screen A" },
-        frameContext: "ios-screen-a",
-      } as any,
+      withFrameContext(
+        {
+          updatedAt: 456,
+          packageName: "com.example.ios",
+          screenWidth: 390,
+          screenHeight: 844,
+          screenScale: 3,
+          hierarchy: { text: "Screen A" },
+        },
+        "ios-screen-a",
+      ),
       undefined,
       { success: true, data: "ios-shot", format: "png", frameContext: "ios-screen-b" },
     );
@@ -902,15 +918,21 @@ describe("pushInitialObservationFramesForSubscriber", () => {
 
   it("forwards the synchronous iOS hierarchy context when the initial cache is empty", async () => {
     const streamServer = new FakeObservationStreamServer();
-    const iosClient = new FakeIosInitialFrameClient(true, null, {
-      updatedAt: 789,
-      packageName: "com.example",
-      screenWidth: 390,
-      screenHeight: 844,
-      screenScale: 3,
-      hierarchy: { text: "Cold start" },
-      frameContext: "ios-sync",
-    } as any);
+    const iosClient = new FakeIosInitialFrameClient(
+      true,
+      null,
+      withFrameContext(
+        {
+          updatedAt: 789,
+          packageName: "com.example",
+          screenWidth: 390,
+          screenHeight: 844,
+          screenScale: 3,
+          hierarchy: { text: "Cold start" },
+        },
+        "ios-sync",
+      ),
+    );
 
     await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
       streamServer,
@@ -1115,7 +1137,7 @@ describe("pushInitialObservationFramesForSubscriber", () => {
               }
             : {}),
           hierarchy: { text: "Golden" },
-        } as any);
+        });
 
         await pushInitialObservationFramesForSubscriber(iosDevice.id, [iosDevice], {
           streamServer,

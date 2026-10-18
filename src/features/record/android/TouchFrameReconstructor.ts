@@ -98,8 +98,10 @@ export class TouchFrameReconstructor {
             slot.trackingId = -1;
           }
         } else {
-          // New or continuing contact; a new tracking id starts a fresh contact, so pen state
-          // from the slot's previous occupant must not carry over to it.
+          // New or continuing contact; a new tracking id starts a fresh contact, so per-contact pen
+          // state from the slot's previous occupant must not carry over to it. The tool type is kept:
+          // the kernel only re-sends ABS_MT_TOOL_TYPE when it changes, so a second pen contact on
+          // the slot arrives without it, and a finger replacing a pen arrives with an explicit 0.
           const slot = this.getOrCreateSlot();
           if (slot.trackingId !== value) {
             clearPenState(slot);
@@ -297,7 +299,6 @@ export class TouchFrameReconstructor {
 }
 
 function clearPenState(slot: TouchSlot): void {
-  delete slot.toolType;
   delete slot.buttons;
   delete slot.tiltX;
   delete slot.tiltY;

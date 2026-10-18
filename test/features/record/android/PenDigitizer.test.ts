@@ -283,6 +283,7 @@ describe("a slot reused by a pen then a finger", () => {
       "[  1.1] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
       "[  1.1] EV_SYN    SYN_REPORT           00000000",
       "[  2.0] EV_ABS    ABS_MT_TRACKING_ID   00000002",
+      "[  2.0] EV_ABS    ABS_MT_TOOL_TYPE     00000000",
       "[  2.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
       "[  2.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
       "[  2.0] EV_SYN    SYN_REPORT           00000000",
@@ -296,6 +297,26 @@ describe("a slot reused by a pen then a finger", () => {
     );
     expect(gestures[0].toolType).toBe("stylus");
     expect(gestures[1].toolType).toBeUndefined();
+  });
+
+  test("a second pen contact keeps the stylus tool type the kernel does not re-send", () => {
+    const lines = [
+      "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+      "[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     00000001",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+      "[  1.1] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+      "[  1.1] EV_SYN    SYN_REPORT           00000000",
+      "[  2.0] EV_ABS    ABS_MT_TRACKING_ID   00000002",
+      "[  2.0] EV_ABS    ABS_MT_POSITION_X    000001b0",
+      "[  2.0] EV_ABS    ABS_MT_POSITION_Y    000002c0",
+      "[  2.0] EV_SYN    SYN_REPORT           00000000",
+      "[  2.1] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+      "[  2.1] EV_SYN    SYN_REPORT           00000000",
+    ];
+    const { gestures } = run(lines);
+    expect(gestures.map((gesture) => gesture.toolType)).toEqual(["stylus", "stylus"]);
   });
 
   test("an explicit finger tool type clears a pen tool type", () => {

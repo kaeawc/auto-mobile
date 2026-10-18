@@ -85,7 +85,11 @@ export class GetEventReader implements GestureEmitter {
       const normalized = error instanceof Error ? error : new Error(String(error));
       logger.error(`[GetEventReader] spawn error: ${normalized.message}`);
       if (generation === this.generation) {
-        this.starting = false;
+        // Only the touch process gates start(): a pen spawn failing first must not let a second
+        // start() spawn duplicates while the touch spawn is still pending.
+        if (node === this.opts.touchNode) {
+          this.starting = false;
+        }
         onError?.(normalized);
       }
       return;
@@ -96,7 +100,9 @@ export class GetEventReader implements GestureEmitter {
       return;
     }
     this.children.add(child);
-    this.starting = false;
+    if (node === this.opts.touchNode) {
+      this.starting = false;
+    }
 
     let lineBuffer = "";
     let stderrTail = "";

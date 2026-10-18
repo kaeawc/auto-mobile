@@ -23,7 +23,6 @@ import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
 import type { ViewHierarchyResult } from "../../../models";
-import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type {
   HierarchyDelegateContext,
@@ -44,6 +43,8 @@ import {
   resolveAccessibilityHierarchyArgs,
   type AccessibilityHierarchyRequest,
 } from "../hierarchyReadArgs";
+import { HierarchyRunnerError } from "./HierarchyRunnerError";
+import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
 
 /** Cooldown after a WebSocket timeout before retrying fresh-data waits. Keep short: a long
  *  cooldown (e.g. 5s) makes one slow response cascade into stale data for every request. */
@@ -76,13 +77,6 @@ function accessibilityToolSpread(hierarchy: AccessibilityHierarchy): {
   return typeof hierarchy.accessibilityTool === "boolean"
     ? { accessibilityTool: hierarchy.accessibilityTool }
     : {};
-}
-
-class HierarchyRunnerError extends Error {
-  constructor(readonly runnerError: string) {
-    super(runnerError);
-    this.name = "HierarchyRunnerError";
-  }
 }
 
 /**

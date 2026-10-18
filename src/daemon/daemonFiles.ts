@@ -4,8 +4,7 @@ import { rename, unlink, writeFile } from "node:fs/promises";
 import { DEFAULT_PID_FILE_PATH, PID_FILE_PATH, SOCKET_PATH } from "./constants";
 import {
   compareProcessGenerationTokens,
-  readDarwinProcessGenerationToken,
-  readLinuxProcessGenerationToken,
+  readProcessGenerationTokenForPid,
 } from "./processGeneration";
 import { recordedProcessGenerationToken } from "./processGenerationFields";
 import { getSocketPath, resolveAuxSocketDir, type SocketServerConfig } from "./socketServer/index";
@@ -20,6 +19,7 @@ import { sortedReaddirSync } from "../utils/io";
 
 export {
   compareProcessGenerationTokens,
+  readProcessGenerationTokenForPid,
   type ProcessGenerationTokenComparison,
 } from "./processGeneration";
 
@@ -668,16 +668,6 @@ export interface PidFileLiveDaemonSessionIdProviderDependencies {
   readPidFile?: (pidFilePath?: string) => LiveDaemonPidFileRead;
   isProcessRunning?: (pid: number) => boolean;
   readProcessGenerationToken?: (pid: number) => string | undefined;
-}
-
-export function readProcessGenerationTokenForPid(pid: number): string | undefined {
-  if (process.platform === "darwin") {
-    return readDarwinProcessGenerationToken(pid);
-  }
-  if (process.platform === "linux") {
-    return readLinuxProcessGenerationToken(pid);
-  }
-  return undefined;
 }
 
 /**

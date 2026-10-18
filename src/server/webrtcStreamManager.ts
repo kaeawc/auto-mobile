@@ -17,7 +17,7 @@ import { ActionableError, type BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { registerWebRtcStreamIncarnationCleanup } from "./webrtcStreamIncarnationListener";
 import {
@@ -153,8 +153,8 @@ export interface WebRtcStreamManagerDependencies {
 }
 
 function isDaemonSessionLive(sessionUuid: string): boolean {
-  const state = DaemonState.getInstance();
-  return state.isInitialized() ? Boolean(state.getSessionManager().getSession(sessionUuid)) : false;
+  const sessions = defaultDaemonContext.sessionManager();
+  return sessions ? Boolean(sessions.getSession(sessionUuid)) : false;
 }
 
 const defaultDependencies: WebRtcStreamManagerDependencies = {

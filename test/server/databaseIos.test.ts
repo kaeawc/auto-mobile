@@ -8,6 +8,9 @@ import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { BootedDevice } from "../../src/models";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("iOS database inspection server integration", function () {
   const iosDevice: BootedDevice = {

@@ -1111,7 +1111,6 @@ test/plan/planExecutorAbortAfterStep.test.ts
 test/plan/planExecutorCancelledPlanDeviceCalls.test.ts
 test/plan/planExecutorCaptureFailureObservationTimer.test.ts
 test/plan/planExecutorCaptureObserveSteps.test.ts
-test/plan/planExecutorExecuteStepRefactor.test.ts
 test/plan/planExecutorInternalStepParams.test.ts
 test/plan/planExecutorMixedPlatformInjection.test.ts
 test/plan/planExecutorObserveAwaitTimeout.test.ts

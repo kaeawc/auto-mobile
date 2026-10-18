@@ -15,6 +15,9 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const SIM = "12345678-1234-1234-1234-123456789ABC";
 const OTHER_SIM = "7B3A3792-DB53-4654-BA94-27A1D305C3B7";

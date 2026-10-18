@@ -35,6 +35,9 @@ import type {
 import { tapOnResultSchema } from "../../src/server/toolOutputSchemas";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { TapOnCall } from "../../src/features/action/ActionCall";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const interactionDeps: InteractionToolDependencies = {};
 /** Validates a value as a spec `CallToolResult`, as the v1 SDK's `CallToolResultSchema.parse` did. */

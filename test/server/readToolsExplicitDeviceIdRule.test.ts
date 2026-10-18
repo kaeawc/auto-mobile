@@ -66,6 +66,9 @@ import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDevic
 import { FakeWindow } from "../fakes/FakeWindow";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const readArgs: Record<string, Record<string, unknown>> = {
   keyboard: { action: "detect" },

@@ -10,6 +10,9 @@ import { registerMcpTools } from "../../src/server";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createToolCatalogResourceHandler } from "../../src/server/toolCatalogResource";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // Issue #5879: the proxy MCP server serves tools/list from the static tool
 // registry without connecting to the daemon, so a wedged/absent daemon never

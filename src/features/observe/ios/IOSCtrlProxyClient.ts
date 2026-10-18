@@ -81,11 +81,11 @@ import { AccessibilityHierarchy } from "../../navigation/ScreenFingerprint";
 import { appWindowsOnly } from "../hierarchyLayer";
 import {
   DeviceServiceClient,
-  ObserverPendingRequestTimeoutError,
   WebSocketFactory,
   rethrowRealCtrlProxyWebSocketInTestError,
   defaultWebSocketFactory,
 } from "../DeviceServiceClient";
+import { ObserverPendingRequestTimeoutError } from "../ObserverPendingRequestTimeoutError";
 import { sendCommand } from "../DeviceServiceUtils";
 import {
   observationStreamDeviceConnectionLostNotifier,
@@ -113,14 +113,6 @@ import { resolveAssetVersion, resolvePinnedVersion } from "../../../constants/re
 import { compareStrictNumericVersions } from "../../../utils/deviceMatcher";
 import { serializeIosRequest } from "./serializeIosRequest";
 import { iosMutationTokens } from "../../storage/IosMutationTokens";
-
-/** Pending requests lose their transport when the service endpoint changes. */
-export class CtrlProxyServicePortChangedError extends Error {
-  constructor() {
-    super("CtrlProxy service port changed");
-    this.name = "CtrlProxyServicePortChangedError";
-  }
-}
 
 /**
  * Factory function type for creating CtrlProxyIosManager instances.
@@ -245,15 +237,6 @@ const noOpIosMetadataSource: IosAppMetadataSource = {
   getPhysicalDeviceAppInfo: async () => null,
 };
 
-type IosSdkCapability =
-  | "hierarchy"
-  | "network_mocking"
-  | "network_fault_rules"
-  | "network_error_simulation"
-  | "database"
-  | "highlight"
-  | "magic_tap";
-
 interface IosSdkCapabilities {
   bundleId: string;
   capabilities: Set<IosSdkCapability>;
@@ -265,66 +248,9 @@ interface IosSdkCapabilitiesResult extends BaseResult {
   capabilities?: string[];
 }
 
-/**
- * A capability waiter was created under one probe generation, but a hierarchy
- * update (foreground app change, reconnect, SDK failure) invalidated that
- * generation before its probe answered. The replacement generation's result
- * belongs to a different foreground app and must never authorize this waiter
- * (#6896): callers either retry against the new generation or fail actionably.
- */
-export class SdkCapabilityProbeSupersededError extends ActionableError {
-  constructor(
-    readonly capability: IosSdkCapability,
-    readonly probeGeneration: number,
-    readonly currentGeneration: number,
-  ) {
-    super(
-      `The AutoMobile SDK capability probe for ${capability} (generation ${probeGeneration}) was superseded by a newer foreground state (generation ${currentGeneration}); re-observe and retry against the current foreground app.`,
-    );
-    this.name = "SdkCapabilityProbeSupersededError";
-  }
-}
-
 /** Default production lister that queries the real device manager. */
 const defaultBootedDeviceLister: BootedDeviceLister = () =>
   PlatformDeviceManagerFactory.getInstance().getBootedDevices("ios");
-
-/**
- * No-op factory used by createForTesting so that tests which don't supply
- * a factory never trigger real CtrlProxy setup on connection failure.
- */
-class NoOpIOSCtrlProxyManager implements CtrlProxyIosManager {
-  private readonly forcedRestartBudget = new ForcedRestartBudget();
-  getForcedRestartBudget(): ForcedRestartBudget {
-    return this.forcedRestartBudget;
-  }
-  async setup(): Promise<{ success: false; message: string }> {
-    return { success: false, message: "no-op test stub" };
-  }
-  async isInstalled(): Promise<boolean> {
-    return false;
-  }
-  async isRunning(): Promise<boolean> {
-    return false;
-  }
-  async isAvailable(): Promise<boolean> {
-    return false;
-  }
-  async start(): Promise<void> {}
-  async stop(): Promise<void> {}
-  getServicePort(): number {
-    return 0;
-  }
-  async getReportedRunnerPort(): Promise<number | null> {
-    return null;
-  }
-  setAutoRestart(): void {}
-  isAutoRestartEnabled(): boolean {
-    return false;
-  }
-  async forceRestart(): Promise<void> {}
-  resetSetupState(): void {}
-}
 
 const noOpServiceManagerFactory: ServiceManagerFactory = () => new NoOpIOSCtrlProxyManager();
 
@@ -390,6 +316,12 @@ import type {
   CtrlProxyHighlightResult,
   WebSocketMessage,
 } from "./types";
+import { CtrlProxyServicePortChangedError } from "./CtrlProxyServicePortChangedError";
+import {
+  SdkCapabilityProbeSupersededError,
+  type IosSdkCapability,
+} from "./SdkCapabilityProbeSupersededError";
+import { NoOpIOSCtrlProxyManager } from "./NoOpIOSCtrlProxyManager";
 
 /**
  * Interface for CtrlProxy providing iOS UI hierarchy and interaction capabilities

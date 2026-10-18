@@ -20,6 +20,9 @@ import {
   derivePhysicalDevicectlRecord,
   loadDerivedDevicectlListing,
 } from "../helpers/devicectlListFixtures";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const PHYSICAL_UDID = "00008120-001C2D3E1234567A";
 const DEVICECTL_CACHE_TTL_MS = 3_000;

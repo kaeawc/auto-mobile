@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../src/utils/logger";
 import {
   Keyboard,
-  DefaultKeyboardHierarchyProvider,
   selectKeyboardHierarchyCache,
   type KeyboardHierarchyReadOptions,
 } from "../../../src/features/action/Keyboard";
+import { DefaultKeyboardHierarchyProvider } from "../../../src/features/action/DefaultKeyboardHierarchyProvider";
 import { decodeCtrlProxyMessage } from "../../../src/features/observe/ios/decodeCtrlProxyMessage";
 import type {
   CtrlProxyKeyboardResult,

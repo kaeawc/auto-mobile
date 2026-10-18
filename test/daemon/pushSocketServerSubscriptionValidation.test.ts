@@ -1,8 +1,10 @@
 import { describe, it, expect } from "bun:test";
-import { Socket } from "node:net";
 import { TelemetryPushSocketServer } from "../../src/daemon/telemetryPushSocketServer";
 import { FailuresPushSocketServer } from "../../src/daemon/failuresPushSocketServer";
-import { PerformancePushSocketServer } from "../../src/daemon/performancePushSocketServer";
+import {
+  DEFAULT_THRESHOLDS,
+  PerformancePushSocketServer,
+} from "../../src/daemon/performancePushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -28,20 +30,77 @@ interface SubscribeReply {
  */
 interface LineDrivable {
   processLineForTest(socket: FakeSocket, line: string): Promise<void>;
-  /** Fan an event out through the stored subscriber filters; returns the delivery count. */
-  pushForTest(data: unknown): number;
+  /** Fan an event for `deviceSessionUuid` out through the stored subscriber filters; returns the delivery count. */
+  pushForTest(deviceSessionUuid: string): number;
 }
 
-function drivable<T extends object>(server: T): T & LineDrivable {
-  const target = server as T & {
-    processLine(socket: Socket, line: string): Promise<void>;
-    pushToSubscribers(data: unknown): number;
-  };
-  return Object.assign(server, {
-    processLineForTest: (socket: FakeSocket, line: string): Promise<void> =>
-      target.processLine(socket as unknown as Socket, line),
-    pushForTest: (data: unknown): number => target.pushToSubscribers(data),
-  }) as T & LineDrivable;
+type PushServerOptions = ConstructorParameters<typeof TelemetryPushSocketServer>[2];
+const openAuth: PushServerOptions = { authenticator: { authorize: () => {} } };
+
+class DrivableTelemetryServer extends TelemetryPushSocketServer implements LineDrivable {
+  processLineForTest(socket: FakeSocket, line: string): Promise<void> {
+    return this.processLine(socket, line);
+  }
+
+  pushForTest(deviceSessionUuid: string): number {
+    return this.pushToSubscribers({
+      category: "log",
+      timestamp: 0,
+      deviceId: null,
+      deviceSessionUuid,
+      sessionId: null,
+      data: null,
+    });
+  }
+}
+
+class DrivableFailuresServer extends FailuresPushSocketServer implements LineDrivable {
+  processLineForTest(socket: FakeSocket, line: string): Promise<void> {
+    return this.processLine(socket, line);
+  }
+
+  pushForTest(deviceSessionUuid: string): number {
+    return this.pushToSubscribers({
+      occurrenceId: "occurrence",
+      groupId: "group",
+      type: "crash",
+      severity: "high",
+      title: "title",
+      message: "message",
+      timestamp: 0,
+      deviceId: null,
+      deviceSessionUuid,
+    });
+  }
+}
+
+class DrivablePerformanceServer extends PerformancePushSocketServer implements LineDrivable {
+  processLineForTest(socket: FakeSocket, line: string): Promise<void> {
+    return this.processLine(socket, line);
+  }
+
+  pushForTest(deviceSessionUuid: string): number {
+    return this.pushToSubscribers({
+      deviceId: "d",
+      deviceSessionUuid,
+      packageName: "com.example",
+      timestamp: 0,
+      nodeId: null,
+      screenName: null,
+      metrics: {
+        fps: null,
+        frameTimeMs: null,
+        jankFrames: null,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
+      },
+      thresholds: DEFAULT_THRESHOLDS,
+      health: "healthy",
+    });
+  }
 }
 
 async function subscribe(
@@ -66,30 +125,16 @@ const servers: Array<{
 }> = [
   {
     name: "TelemetryPushSocketServer",
-    create: () =>
-      drivable(
-        new TelemetryPushSocketServer("/fake/telemetry.sock", new FakeTimer(), {
-          authenticator: { authorize: () => {} },
-        }),
-      ),
+    create: () => new DrivableTelemetryServer("/fake/telemetry.sock", new FakeTimer(), openAuth),
   },
   {
     name: "FailuresPushSocketServer",
-    create: () =>
-      drivable(
-        new FailuresPushSocketServer("/fake/failures.sock", new FakeTimer(), {
-          authenticator: { authorize: () => {} },
-        }),
-      ),
+    create: () => new DrivableFailuresServer("/fake/failures.sock", new FakeTimer(), openAuth),
   },
   {
     name: "PerformancePushSocketServer",
     create: () =>
-      drivable(
-        new PerformancePushSocketServer("/fake/performance.sock", new FakeTimer(), {
-          authenticator: { authorize: () => {} },
-        }),
-      ),
+      new DrivablePerformanceServer("/fake/performance.sock", new FakeTimer(), openAuth),
   },
 ];
 
@@ -195,7 +240,7 @@ describe("push socket subscription deviceSessionUuid validation (#6676)", () => 
         const socket = new FakeSocket();
 
         const reply = await subscribe(server, { deviceSessionUuid: " uuid-a " }, socket);
-        const delivered = server.pushForTest({ deviceSessionUuid: "uuid-a" });
+        const delivered = server.pushForTest("uuid-a");
 
         // Accepting the padded key but filtering on it verbatim would recreate the
         // inert subscription this validation exists to prevent (#6676).

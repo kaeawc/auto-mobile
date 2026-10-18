@@ -128,21 +128,21 @@ describe("a terminal upgrade of an already-finalized release (#10825)", () => {
   });
 });
 
-interface DaemonNavigationInternals {
-  navigationGraphBridge: {
-    listenerManagers: WeakSet<NavigationGraphManager>;
-    attach(manager: NavigationGraphManager): void;
-  };
+/** A real Daemon exposing its navigation-graph stream bridge. */
+class NavigationBridgeDaemon extends Daemon {
+  get bridge() {
+    return this.navigationGraphBridge;
+  }
 }
 
 describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
   let timer: FakeTimer;
-  let daemon: Daemon;
+  let daemon: NavigationBridgeDaemon;
 
   // Building a daemon (and its database) is setup, not the behavior under test.
   beforeAll(async () => {
     timer = new FakeTimer();
-    daemon = new Daemon(
+    daemon = new NavigationBridgeDaemon(
       {},
       {
         timer,
@@ -162,9 +162,8 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
 
   test("keep B's pin and the global navigation listener, and still broadcast the upgrade", async () => {
     const sessions = daemon.getSessionManager();
-    const internals = daemon as unknown as DaemonNavigationInternals;
     const globalNavigation = NavigationGraphManager.getInstance();
-    internals.navigationGraphBridge.attach(globalNavigation);
+    daemon.bridge.attach(globalNavigation);
     const broadcasts: string[] = [];
     SessionReleaseBroadcaster.subscribe((sessionId, reason, _snapshot, extras) =>
       broadcasts.push(`${sessionId}:${reason}${extras?.upgradeOnly ? ":upgrade" : ""}`),
@@ -182,13 +181,13 @@ describe("the daemon's release hooks on a terminal upgrade (#10825)", () => {
     await sessions.releaseSessionIfOwned("A", sessionA, DEVICE, "device-killed");
 
     expect(DeviceSessionManager.getInstance().getExplicitDevicePin()?.deviceId).toBe(DEVICE);
-    expect(internals.navigationGraphBridge.listenerManagers.has(globalNavigation)).toBe(true);
+    expect(daemon.bridge.listenerManagers.has(globalNavigation)).toBe(true);
     // Device-keyed broadcast listeners (prototype agents and events) skip the marked upgrade (#11206).
     expect(broadcasts).toEqual(["A:cleanup-expired", "A:device-killed:upgrade"]);
 
     // B's own release is a real one: it clears B's pin.
     await sessions.releaseSession("B", "explicit-release");
     expect(DeviceSessionManager.getInstance().getExplicitDevicePin()).toBeUndefined();
-    expect(internals.navigationGraphBridge.listenerManagers.has(globalNavigation)).toBe(true);
+    expect(daemon.bridge.listenerManagers.has(globalNavigation)).toBe(true);
   });
 });

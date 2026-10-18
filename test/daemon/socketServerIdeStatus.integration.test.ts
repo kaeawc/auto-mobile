@@ -15,6 +15,9 @@ import {
   sendSocketRequest,
 } from "./helpers/socketRequest";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
@@ -43,9 +46,10 @@ function createFakeDaemonState(isShutdownReserved: () => Promise<boolean> = asyn
     isInitialized: () => true,
     getSessionManager: () => ({
       getSession: () => null,
-      getAllSessions: () => [],
+      getAllSessions: (): Array<{ sessionId: string }> => [],
       releaseSession: async () => null,
     }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       isShutdownReserved,
       refreshDevices: async () => 0,
@@ -71,6 +75,12 @@ function createFakeDaemonStateWithSessions(
       releaseSession: async () => null,
     }),
   };
+}
+
+function deviceManagerWith(devices: BootedDevice[]): FakeDeviceManager {
+  const manager = new FakeDeviceManager();
+  manager.bootedDevices = devices;
+  return manager;
 }
 
 function sendRequest(
@@ -146,12 +156,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     const response = await sendRequest(socketPath, "ide/status");
 
     expect(response.success).toBe(true);
-    const result = response.result as {
-      version: string;
-      releaseVersion: string;
-      android: { ctrlProxy: { expectedSha256: string; url: string } };
-      ios: { xcTestService: { expectedSha256: string; expectedAppHash: string; url: string } };
-    };
+    const result = response.result;
     const entry = RELEASE_CHECKSUM_REGISTRY[0];
 
     expect(result.version.length).toBeGreaterThan(0);
@@ -345,7 +350,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     const status = (await sendRequest(socketPath, "ide/status")).result!;
     expect(status).toMatchObject({ processGenerationToken: "socket-generation-1" });
     const accepted = await sendRequest(socketPath, DAEMON_PREPARE_MAINTENANCE_METHOD, status);
-    const maintenanceToken = (accepted.result as { maintenanceToken: string }).maintenanceToken;
+    const maintenanceToken = accepted.result.maintenanceToken;
     expect(accepted.result).toMatchObject({
       accepted: true,
       maintenanceToken: expect.any(String),
@@ -387,7 +392,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       DAEMON_PREPARE_MAINTENANCE_METHOD,
       status,
     );
-    const secondToken = (secondAdmission.result as { maintenanceToken: string }).maintenanceToken;
+    const secondToken = secondAdmission.result.maintenanceToken;
     expect((await sendRequest(socketPath, DAEMON_RESTART_ADMITTED_METHOD, status)).result).toEqual({
       accepted: false,
       reason: "maintenance_token_invalid",
@@ -425,7 +430,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
   test("abandoned maintenance admission expires after its request socket disconnects", async () => {
     const status = (await sendRequest(socketPath, "ide/status")).result!;
     const admitted = await sendRequest(socketPath, DAEMON_PREPARE_MAINTENANCE_METHOD, status);
-    const maintenanceToken = (admitted.result as { maintenanceToken: string }).maintenanceToken;
+    const maintenanceToken = admitted.result.maintenanceToken;
 
     // sendSocketRequest destroys its one-request socket after receiving the
     // response. The lease must outlive that valid transport pattern, but not
@@ -468,7 +473,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
         DAEMON_PREPARE_MAINTENANCE_METHOD,
         status,
       );
-      const firstToken = (firstAdmission.result as { maintenanceToken: string }).maintenanceToken;
+      const firstToken = firstAdmission.result.maintenanceToken;
       expect(
         (
           await sendRequest(lateSocketPath, DAEMON_COMPLETE_MAINTENANCE_METHOD, {
@@ -484,7 +489,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
         DAEMON_PREPARE_MAINTENANCE_METHOD,
         status,
       );
-      const secondToken = (secondAdmission.result as { maintenanceToken: string }).maintenanceToken;
+      const secondToken = secondAdmission.result.maintenanceToken;
       expect(secondToken).not.toBe(firstToken);
 
       timer.advanceTime(DAEMON_MAINTENANCE_ADMISSION_TTL_MS - 1);
@@ -559,12 +564,12 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       await acceptanceServer.start();
       const status = (await sendRequest(acceptanceSocketPath, "ide/status")).result!;
       const generation = {
-        pid: status.pid as number,
-        startedAt: status.startedAt as number,
-        processGenerationToken: status.processGenerationToken as string,
-        version: status.version as string,
-        buildId: status.buildId as string,
-        entryScript: status.entryScript as string,
+        pid: status.pid,
+        startedAt: status.startedAt,
+        processGenerationToken: status.processGenerationToken,
+        version: status.version,
+        buildId: status.buildId,
+        entryScript: status.entryScript,
       };
       const capability = createDaemonLiveAcceptanceScopedCapability(
         startupSecret,
@@ -630,8 +635,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
           acceptanceCapability: capability,
         },
       );
-      const restartToken = (committedAdmission.response.result as { restartToken: string })
-        .restartToken;
+      const restartToken = committedAdmission.response.result.restartToken;
       expect(
         (
           await sendRequestOnPersistentSocket(
@@ -711,12 +715,12 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       const capability = createDaemonLiveAcceptanceScopedCapability(
         startupSecret,
         {
-          pid: status.pid as number,
-          startedAt: status.startedAt as number,
-          processGenerationToken: status.processGenerationToken as string,
-          version: status.version as string,
-          buildId: status.buildId as string,
-          entryScript: status.entryScript as string,
+          pid: status.pid,
+          startedAt: status.startedAt,
+          processGenerationToken: status.processGenerationToken,
+          version: status.version,
+          buildId: status.buildId,
+          entryScript: status.entryScript,
         },
         scope,
       );
@@ -727,7 +731,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
         params,
       );
       firstSocket = first.socket;
-      const firstToken = (first.response.result as { restartToken: string }).restartToken;
+      const firstToken = first.response.result.restartToken;
 
       const disconnected = new Promise<void>((resolve) => first.socket.once("close", resolve));
       first.socket.destroy();
@@ -741,7 +745,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
         params,
       );
       secondSocket = second.socket;
-      const secondToken = (second.response.result as { restartToken: string }).restartToken;
+      const secondToken = second.response.result.restartToken;
       expect(secondToken).not.toBe(firstToken);
 
       // clearTimeout intentionally leaves the first callback queued. At its
@@ -767,10 +771,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
 
   test("ide/status reports a concrete releaseVersion, never the 'latest' literal (EC7)", async () => {
     const response = await sendRequest(socketPath, "ide/status");
-    const result = response.result as {
-      releaseVersion: string;
-      android: { ctrlProxy: { url: string } };
-    };
+    const result = response.result;
     // Issue #2746: external consumers must see the concrete version the daemon
     // will actually fetch, not the floating "latest" tag.
     expect(result.releaseVersion).not.toBe("latest");
@@ -785,11 +786,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     process.env.AUTOMOBILE_ASSET_BASE_URL = "https://mirror.test/am";
     try {
       const response = await sendRequest(socketPath, "ide/status");
-      const result = response.result as {
-        releaseVersion: string;
-        android: { ctrlProxy: { expectedSha256: string; url: string } };
-        ios: { xcTestService: { expectedSha256: string; url: string } };
-      };
+      const result = response.result;
       expect(result.releaseVersion).toBe("0.0.18");
       expect(result.android.ctrlProxy.url).toBe(
         "https://mirror.test/am/0.0.18/control-proxy-debug.apk",
@@ -843,22 +840,23 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     const device: BootedDevice = {
       deviceId: "emulator-5554",
       platform: "android",
-      isEmulator: true,
       name: "Pixel",
     };
-    const platformSpy = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue({
-      getBootedDevicesDetailed: async () => ({
-        devices: [device],
-        succeededPlatforms: new Set([device.platform]),
-      }),
-    } as any);
-    const ctrlProxySpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      ensureCompatibleVersion: async () => ({
-        status: "skipped",
-        expectedSha256: "",
-        acceptedPreinstalled: true,
-      }),
-    } as any);
+    const platformSpy = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue(
+      deviceManagerWith([device]),
+    );
+    const androidManager = AndroidCtrlProxyManager.createForTestingWithDeps(
+      device,
+      new FakeAdbExecutor(),
+    );
+    spyOn(androidManager, "ensureCompatibleVersion").mockResolvedValue({
+      status: "skipped",
+      expectedSha256: "",
+      acceptedPreinstalled: true,
+    });
+    const ctrlProxySpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+      androidManager,
+    );
 
     try {
       const response = await sendRequest(socketPath, "ide/updateService", {
@@ -867,11 +865,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       });
 
       expect(response.success).toBe(true);
-      const result = response.result as {
-        success: boolean;
-        message: string;
-        status: { status: string };
-      };
+      const result = response.result;
       expect(result.success).toBe(false);
       expect(result.message).toContain("Accessibility service skipped");
       expect(result.status.status).toBe("skipped");
@@ -884,15 +878,17 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
   test("A2 iOS updateService waits for the shutdown fence before resuming a fresh boot", async () => {
     const device: BootedDevice = { deviceId: "sim-shutdown", platform: "ios", name: "iPhone 16" };
     shutdownReserved = true;
-    const discovery = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue({
-      getBootedDevicesDetailed: async () => ({
-        devices: [device],
-        succeededPlatforms: new Set(["ios"]),
-      }),
-    } as never);
-    const restart = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-      forceRestart: async () => {},
-    } as never);
+    const discovery = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue(
+      deviceManagerWith([device]),
+    );
+    const iosManager = IOSCtrlProxyManager.createForTestingWithDeps(
+      device,
+      new FakeTimer(),
+      undefined,
+      new FakeProcessExecutor(),
+    );
+    spyOn(iosManager, "forceRestart").mockResolvedValue();
+    const restart = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue(iosManager);
     const resume = spyOn(IOSCtrlProxyClient, "resumeAfterDeviceStart");
     try {
       const response = await sendRequest(socketPath, "ide/updateService", {
@@ -917,13 +913,11 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
   });
 
   test("iOS updateService reports incomplete simulator discovery instead of 'Device not found' (#11122)", async () => {
-    const discovery = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue({
-      getBootedDevicesDetailed: async () => ({
-        devices: [],
-        succeededPlatforms: new Set(),
-        discoveryErrors: { ios: { code: "failed", message: "simctl exploded" } },
-      }),
-    } as never);
+    const incompleteDiscovery = deviceManagerWith([]);
+    incompleteDiscovery.failedPlatforms.add("ios");
+    const discovery = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue(
+      incompleteDiscovery,
+    );
     try {
       const response = await sendRequest(socketPath, "ide/updateService", {
         deviceId: "sim-1",
@@ -939,15 +933,15 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
 
   test("A4 Android updateService resumes a freshly rediscovered booted emulator", async () => {
     const device: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
-    const discovery = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue({
-      getBootedDevicesDetailed: async () => ({
-        devices: [device],
-        succeededPlatforms: new Set([device.platform]),
-      }),
-    } as never);
-    const manager = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      ensureCompatibleVersion: async () => ({ status: "compatible" }),
-    } as never);
+    const discovery = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue(
+      deviceManagerWith([device]),
+    );
+    const androidManager = AndroidCtrlProxyManager.createForTestingWithDeps(
+      device,
+      new FakeAdbExecutor(),
+    );
+    spyOn(androidManager, "ensureCompatibleVersion").mockResolvedValue({ status: "compatible" });
+    const manager = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(androidManager);
     const resume = spyOn(AndroidCtrlProxyClient, "resumeAfterDeviceStart");
     try {
       shutdownReserved = true;

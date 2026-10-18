@@ -1873,7 +1873,7 @@ export class DaemonManager implements DaemonManagerLike {
    * Reuses the injected liveness checker and the shared lock format so there is one
    * canonical primitive per concern rather than a second PID reader (issue #5878).
    */
-  private readStartupLockHolder(): StartupLockHolder {
+  protected readStartupLockHolder(): StartupLockHolder {
     let content: string;
     try {
       content = readFileSync(this.lockFilePath, "utf-8").trim();

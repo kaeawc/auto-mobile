@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import type { ChildProcess, SpawnOptions } from "node:child_process";
+import type { SpawnOptions } from "node:child_process";
 import { runDaemonCommand } from "../../src/daemon/manager";
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { FakeDaemonSpawner } from "../fakes/FakeDaemonSpawner";
@@ -40,6 +40,7 @@ import { DaemonLauncher } from "../../src/daemon/DaemonLauncher";
 import type { BuildIdentity } from "../../src/daemon/buildIdentity";
 import type { DaemonOptions, DaemonStatus } from "../../src/daemon/types";
 import type { DaemonProcessSpawner, ExtractionCleaner } from "../../src/daemon/manager";
+import type { DaemonLaunchedProcess } from "../../src/daemon/DaemonLauncher";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";
@@ -53,6 +54,13 @@ import {
 } from "../../src/daemon/daemonRestartAdmission";
 import { INCOMPLETE_EXTRACTION_CODE } from "../../src/db/migrationDependencyIntegrity";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { CodedError } from "../helpers/CodedError";
+import { parseJsonUnknown } from "../helpers/parseJsonUnknown";
+import {
+  buildPooledDevice,
+  ScriptedDevicePool,
+  ScriptedSessionManager,
+} from "./helpers/cliDaemonState";
 import { formatLockContent } from "../../src/utils/fileLock";
 import { logger } from "../../src/utils/logger";
 import {
@@ -1256,7 +1264,7 @@ describe("DaemonManager stop", () => {
     writeStopPidFile(pidFilePath, pid, socketPath);
     writeFileSync(socketPath, "live daemon socket");
     const signaler = new FakeDaemonProcessSignaler(() => {
-      throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+      throw new CodedError("EPERM", "EPERM");
     });
     const manager = createManagerForStop(
       livePids,
@@ -1275,8 +1283,8 @@ describe("DaemonManager stop", () => {
       );
 
       expect(error).toBeInstanceOf(ActionableError);
-      expect((error as Error).message).toContain(String(pid));
-      expect((error as Error).message).toContain("cannot signal");
+      expect(requireError(error).message).toContain(String(pid));
+      expect(requireError(error).message).toContain("cannot signal");
       expect(signaler.signals).toEqual([{ pid, signal: "SIGTERM" }]);
       expect(existsSync(pidFilePath)).toBe(true);
       expect(existsSync(socketPath)).toBe(true);
@@ -1295,7 +1303,7 @@ describe("DaemonManager stop", () => {
     writeStopPidFile(pidFilePath, pid, socketPath);
     writeFileSync(socketPath, "stale daemon socket");
     const signaler = new FakeDaemonProcessSignaler(() => {
-      throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+      throw new CodedError("ESRCH", "ESRCH");
     });
     const manager = createManagerForStop(
       livePids,
@@ -1776,8 +1784,9 @@ describe("DaemonManager stop", () => {
       await expect(manager.stop()).resolves.toBeUndefined();
 
       expect(signaler.signals).toEqual([]);
-      const survivingPidData = JSON.parse(readFileSync(pidFilePath, "utf-8")) as { pid: number };
-      expect(survivingPidData.pid).toBe(winnerPid);
+      expect(parseJsonUnknown(readFileSync(pidFilePath, "utf-8"))).toMatchObject({
+        pid: winnerPid,
+      });
       expect(readFileSync(socketPath, "utf-8")).toBe("winner socket");
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -2013,8 +2022,9 @@ describe("DaemonManager stop", () => {
       expect(signaler.signals).toEqual([]);
       // The winner's live PID record must survive intact.
       expect(existsSync(pidFilePath)).toBe(true);
-      const survivingPidData = JSON.parse(readFileSync(pidFilePath, "utf-8")) as { pid: number };
-      expect(survivingPidData.pid).toBe(winnerPid);
+      expect(parseJsonUnknown(readFileSync(pidFilePath, "utf-8"))).toMatchObject({
+        pid: winnerPid,
+      });
       expect(existsSync(socketPath)).toBe(true);
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -2353,12 +2363,38 @@ class SlowFakeDaemonPortAvailabilityChecker extends FakeDaemonPortAvailabilityCh
   }
 }
 
-class FakeDaemonChildProcess extends EventEmitter {
-  unref(): void {}
+/** A launched daemon process with no pid, so a failed launch can never signal a real process group. */
+class FakeDaemonChildProcess extends EventEmitter implements DaemonLaunchedProcess {
+  pid: number | undefined = undefined;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  stderr: DaemonLaunchedProcess["stderr"] = null;
+  killed = false;
+
+  constructor(private readonly onUnref: () => void = () => {}) {
+    super();
+  }
+
+  unref(): void {
+    this.onUnref();
+  }
+
+  kill(): boolean {
+    this.killed = true;
+    return true;
+  }
 
   exit(code: number | null, signal: NodeJS.Signals | null = null): void {
     this.emit("exit", code, signal);
   }
+}
+
+/** Narrow a caught value to the Error the test expects, failing loudly otherwise. */
+function requireError(value: unknown): Error {
+  if (value instanceof Error) {
+    return value;
+  }
+  throw new Error(`Expected an Error but received ${String(value)}`);
 }
 
 function neverReadyAfterExit(child: FakeDaemonChildProcess, code: number): Promise<boolean> {
@@ -2399,7 +2435,7 @@ class FakeProbeListener extends EventEmitter implements ProbeListener {
 }
 
 function bindError(code: string): NodeJS.ErrnoException {
-  return Object.assign(new Error(`listen ${code}`), { code });
+  return new CodedError(`listen ${code}`, code);
 }
 
 describe("NetDaemonPortAvailabilityChecker", () => {
@@ -2985,7 +3021,7 @@ describe("Daemon manager process detection", () => {
     const calls: Array<{ options: { timeout: number } }> = [];
     const finder = new PsDaemonProcessFinder(
       (_command, options) => {
-        calls.push({ options: options as { timeout: number } });
+        calls.push({ options });
         return "";
       },
       "linux",
@@ -3002,7 +3038,7 @@ describe("Daemon manager process detection", () => {
     const calls: Array<{ options: { timeout: number } }> = [];
     const finder = new PsDaemonProcessFinder(
       (_command, options) => {
-        calls.push({ options: options as { timeout: number } });
+        calls.push({ options });
         return "";
       },
       "linux",
@@ -3019,7 +3055,7 @@ describe("Daemon manager process detection", () => {
     const calls: Array<{ options: { timeout: number } }> = [];
     const finder = new PsDaemonProcessFinder(
       (_command, options) => {
-        calls.push({ options: options as { timeout: number } });
+        calls.push({ options });
         return "";
       },
       "linux",
@@ -3168,15 +3204,7 @@ describe("Daemon manager process detection", () => {
     const processSpawner: DaemonProcessSpawner = {
       spawn: () => {
         events.push("launch");
-        return {
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        } as ChildProcess;
+        return new FakeDaemonChildProcess();
       },
     };
 
@@ -3544,15 +3572,7 @@ describe("Daemon manager process detection", () => {
     const processSpawner: DaemonProcessSpawner = {
       spawn: () => {
         spawnCalls++;
-        return {
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        } as ChildProcess;
+        return new FakeDaemonChildProcess();
       },
     };
 
@@ -3983,7 +4003,7 @@ describe("Daemon manager process detection", () => {
         () => {
           throw new Error("expected start to reject");
         },
-        (rejection: unknown) => rejection as Error,
+        (rejection: unknown) => requireError(rejection),
       );
 
       expect(error).toBeInstanceOf(ActionableError);
@@ -4094,7 +4114,7 @@ describe("Daemon manager process detection", () => {
     const pidFilePath = join(dir, "daemon.pid");
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    const killCalls: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = [];
+    const killCalls: Array<{ pid: number; signal: string | number | undefined }> = [];
     let spawnCalls = 0;
     const processFinder = new FakeDaemonProcessFinder(
       [
@@ -4108,28 +4128,16 @@ describe("Daemon manager process detection", () => {
     );
     const processSpawner: DaemonProcessSpawner = {
       spawn: (_command: string, _args: string[], _options: SpawnOptions) =>
-        ({
-          get unref() {
-            spawnCalls++;
-            return () => {};
-          },
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        }) as ChildProcess,
+        new FakeDaemonChildProcess(() => {
+          spawnCalls++;
+        }),
     };
-    const killSpy = spyOn(process, "kill").mockImplementation(((
-      pid: number,
-      signal?: NodeJS.Signals | number,
-    ) => {
+    const killSpy = spyOn(process, "kill").mockImplementation((pid, signal) => {
       if (pid === 301) {
         killCalls.push({ pid, signal });
       }
       return true;
-    }) as typeof process.kill);
+    });
 
     class TestDaemonManager extends DaemonManager {
       override async status(): Promise<any> {
@@ -4168,7 +4176,7 @@ describe("Daemon manager process detection", () => {
     const pidFilePath = join(dir, "daemon.pid");
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    const killCalls: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = [];
+    const killCalls: Array<{ pid: number; signal: string | number | undefined }> = [];
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
       findDaemonProcesses() {
         return [
@@ -4188,15 +4196,12 @@ describe("Daemon manager process detection", () => {
         throw new Error("should not spawn while a live daemon exists");
       },
     };
-    const killSpy = spyOn(process, "kill").mockImplementation(((
-      pid: number,
-      signal?: NodeJS.Signals | number,
-    ) => {
+    const killSpy = spyOn(process, "kill").mockImplementation((pid, signal) => {
       if (pid === 301) {
         killCalls.push({ pid, signal });
       }
       return true;
-    }) as typeof process.kill);
+    });
 
     class TestDaemonManager extends DaemonManager {
       override async status(): Promise<any> {
@@ -4255,9 +4260,7 @@ describe("Daemon manager process detection", () => {
         throw new Error("should not spawn while a live daemon exists");
       },
     };
-    const killSpy = spyOn(process, "kill").mockImplementation(
-      ((_pid: number) => true) as typeof process.kill,
-    );
+    const killSpy = spyOn(process, "kill").mockImplementation((_pid) => true);
 
     class TestDaemonManager extends DaemonManager {
       override async status(): Promise<any> {
@@ -4281,7 +4284,7 @@ describe("Daemon manager process detection", () => {
         () => {
           throw new Error("expected start to reject");
         },
-        (rejection: unknown) => rejection as Error,
+        (rejection: unknown) => requireError(rejection),
       );
       const elapsed = fakeTimer.now() - startedAt;
 
@@ -4347,7 +4350,7 @@ describe("Daemon manager process detection", () => {
         () => {
           throw new Error("expected start to reject");
         },
-        (rejection: unknown) => rejection as Error,
+        (rejection: unknown) => requireError(rejection),
       );
       const elapsed = fakeTimer.now() - startedAt;
 
@@ -4409,7 +4412,7 @@ describe("Daemon manager process detection", () => {
         () => {
           throw new Error("expected start to reject");
         },
-        (rejection: unknown) => rejection as Error,
+        (rejection: unknown) => requireError(rejection),
       );
       const elapsed = fakeTimer.now() - startedAt;
 
@@ -4568,7 +4571,7 @@ describe("Daemon manager process detection", () => {
         () => {
           throw new Error("expected start to reject");
         },
-        (rejection: unknown) => rejection as Error,
+        (rejection: unknown) => requireError(rejection),
       );
       const elapsed = fakeTimer.now() - startedAt;
 
@@ -4739,7 +4742,7 @@ describe("Daemon manager process detection", () => {
         () => {
           throw new Error("expected start to reject");
         },
-        (rejection: unknown) => rejection as Error,
+        (rejection: unknown) => requireError(rejection),
       );
       const elapsed = fakeTimer.now() - startedAt;
 
@@ -4807,7 +4810,7 @@ describe("Daemon manager process detection", () => {
         () => {
           throw new Error("expected start to reject");
         },
-        (rejection: unknown) => rejection as Error,
+        (rejection: unknown) => requireError(rejection),
       );
       const elapsed = fakeTimer.now() - startedAt;
 
@@ -5393,7 +5396,7 @@ describe("Daemon manager process detection", () => {
         caught = error;
       }
       expect(caught).toBeInstanceOf(Error);
-      const message = (caught as Error).message;
+      const message = requireError(caught).message;
       expect(message).toContain(`PID(s) ${orphanPid} still running`);
       // PRRT fuUIM (issue #6260): the remediation must not hand out a bare
       // `kill <pid>` from this stale process-table snapshot — that PID can be
@@ -5499,7 +5502,7 @@ describe("Daemon manager process detection", () => {
     writeFileSync(socketPath, "socket owned by another launcher");
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    const killCalls: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = [];
+    const killCalls: Array<{ pid: number; signal: string | number | undefined }> = [];
     const processFinder = new FakeDaemonProcessFinder(
       [
         {
@@ -5512,25 +5515,14 @@ describe("Daemon manager process detection", () => {
     );
     const processSpawner: DaemonProcessSpawner = {
       spawn: (_command: string, _args: string[], _options: SpawnOptions) =>
-        ({
-          unref() {},
-          once() {
-            return this;
-          },
-          off() {
-            return this;
-          },
-        }) as ChildProcess,
+        new FakeDaemonChildProcess(),
     };
-    const killSpy = spyOn(process, "kill").mockImplementation(((
-      pid: number,
-      signal?: NodeJS.Signals | number,
-    ) => {
+    const killSpy = spyOn(process, "kill").mockImplementation((pid, signal) => {
       if (pid === 401) {
         killCalls.push({ pid, signal });
       }
       return true;
-    }) as typeof process.kill);
+    });
 
     class TestDaemonManager extends DaemonManager {
       override async status(): Promise<any> {
@@ -5584,7 +5576,7 @@ describe("Daemon manager process detection", () => {
     );
     const child = new FakeDaemonChildProcess();
     const processSpawner: DaemonProcessSpawner = {
-      spawn: () => child as ChildProcess,
+      spawn: () => child,
     };
     const cleaner = new FakeExtractionCleaner();
 
@@ -5648,7 +5640,7 @@ describe("Daemon manager process detection", () => {
         const child = new FakeDaemonChildProcess();
         children.push(child);
         spawnCalls.push({ command, args: [...args] });
-        return child as ChildProcess;
+        return child;
       },
     };
     const cleaner = new FakeExtractionCleaner();
@@ -5723,9 +5715,7 @@ describe("Daemon manager process detection", () => {
     const launchSpy = spyOn(launcher, "launchAndWait").mockImplementation(async () => {
       if (launchSpy.mock.calls.length === 1) {
         fakeTimer.advanceTime(12_345);
-        throw Object.assign(new Error("incomplete extraction"), {
-          code: INCOMPLETE_EXTRACTION_CODE,
-        });
+        throw new CodedError("incomplete extraction", INCOMPLETE_EXTRACTION_CODE);
       }
     });
 
@@ -5783,7 +5773,7 @@ describe("Daemon manager process detection", () => {
         const child = new FakeDaemonChildProcess();
         children.push(child);
         spawnCalls.push({ command, args: [...args] });
-        return child as ChildProcess;
+        return child;
       },
     };
     let waitCalls = 0;
@@ -5849,7 +5839,7 @@ describe("Daemon manager process detection", () => {
       spawn: () => {
         const child = new FakeDaemonChildProcess();
         children.push(child);
-        return child as ChildProcess;
+        return child;
       },
     };
     const cleaner = new FakeExtractionCleaner();
@@ -5901,7 +5891,7 @@ describe("Daemon manager process detection", () => {
     fakeTimer.enableAutoAdvance();
     const child = new FakeDaemonChildProcess();
     const processSpawner: DaemonProcessSpawner = {
-      spawn: () => child as ChildProcess,
+      spawn: () => child,
     };
     const cleaner = new FakeExtractionCleaner();
 
@@ -6023,29 +6013,24 @@ describe("Daemon manager available-devices", () => {
       output.push(args.join(" "));
     });
 
+    const sessions = new ScriptedSessionManager({
+      getSession: () => null,
+      releaseSession: async () => null,
+    });
+    const pool = new ScriptedDevicePool(sessions, {
+      // The in-daemon path refreshes slot and foreign ownership before reading stats (#11317).
+      getRefreshedInventory: async () => ({
+        stats: { idle: 1, assigned: 2, error: 1, total: 4, avgAssignments: 0 },
+        deviceIds: new Set(["physical-ios-device"]),
+      }),
+      getRecoveryPolicy: () => ({ onLoss: false, maxAttempts: 2 }),
+      getAllDevices: () => [buildPooledDevice({ id: "physical-ios-device", platform: "ios" })],
+      getRecoveryEligibility: () => ({ eligible: false, reason: "unsupported-platform" }),
+    });
     const fakeState: DaemonStateLike = {
       isInitialized: () => true,
-      getDevicePool: () =>
-        ({
-          // The in-daemon path refreshes slot and foreign ownership before reading stats (#11317).
-          getRefreshedInventory: async () => ({
-            stats: { idle: 1, assigned: 2, error: 1, total: 4 },
-            deviceIds: new Set(["physical-ios-device"]),
-          }),
-          getRecoveryPolicy: () => ({ onLoss: false, maxAttempts: 2 }),
-          getAllDevices: () => [
-            {
-              id: "physical-ios-device",
-              platform: "ios",
-            },
-          ],
-          getRecoveryEligibility: () => ({ eligible: false, reason: "unsupported-platform" }),
-        }) as any,
-      getSessionManager: () =>
-        ({
-          getSession: () => null,
-          releaseSession: async () => null,
-        }) as any,
+      getDevicePool: () => pool,
+      getSessionManager: () => sessions,
       getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
     };
 
@@ -6144,37 +6129,40 @@ describe("Daemon manager heartbeat", () => {
     };
     const output: string[] = [];
     const errors: string[] = [];
-    const exitCodes: number[] = [];
-    const originalExit = process.exit;
+    const exitCodes: Array<string | number> = [];
+    const exited = new Error("fake exit");
     const logSpy = spyOn(console, "log").mockImplementation((...args) => {
       output.push(args.join(" "));
     });
     const errorSpy = spyOn(console, "error").mockImplementation((...args) => {
       errors.push(args.join(" "));
     });
-    process.exit = ((exitCode?: number) => {
+    const exitSpy = spyOn(process, "exit").mockImplementation((exitCode) => {
       exitCodes.push(exitCode ?? 0);
-    }) as typeof process.exit;
+      throw exited;
+    });
 
     try {
-      await runDaemonCommand("heartbeat", ["session-1"], {
-        clientFactory: () => fakeClient,
-        stateProvider: () =>
-          ({
-            isInitialized: () => false,
-            getDevicePool: () => {
-              throw new Error("Device pool unavailable");
-            },
-            getSessionManager: () => {
-              throw new Error("Session manager unavailable");
-            },
-            getDeviceSessionRegistry: () => {
-              throw new Error("Device session registry unavailable");
-            },
-          }) satisfies DaemonStateLike,
-      });
+      await expect(
+        runDaemonCommand("heartbeat", ["session-1"], {
+          clientFactory: () => fakeClient,
+          stateProvider: () =>
+            ({
+              isInitialized: () => false,
+              getDevicePool: () => {
+                throw new Error("Device pool unavailable");
+              },
+              getSessionManager: () => {
+                throw new Error("Session manager unavailable");
+              },
+              getDeviceSessionRegistry: () => {
+                throw new Error("Device session registry unavailable");
+              },
+            }) satisfies DaemonStateLike,
+        }),
+      ).rejects.toBe(exited);
     } finally {
-      process.exit = originalExit;
+      exitSpy.mockRestore();
       logSpy.mockRestore();
       errorSpy.mockRestore();
     }

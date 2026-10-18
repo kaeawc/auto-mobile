@@ -10420,7 +10420,7 @@ export class SessionManager {
    * the liveness columns existed fall back to the strict default contract;
    * autolock metadata alone is not proof that a client declared CLI liveness.
    */
-  private recoveryLivenessFromPersisted(persisted: DeviceSession): SessionRecoveryLiveness {
+  protected recoveryLivenessFromPersisted(persisted: DeviceSession): SessionRecoveryLiveness {
     const heartbeatTimeoutSource = persistedHeartbeatTimeoutSource(
       persisted.heartbeat_timeout_source,
     );

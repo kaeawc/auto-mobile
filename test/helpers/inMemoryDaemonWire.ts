@@ -220,7 +220,7 @@ export class InMemoryControlSocket {
     timer: Timer;
     connectionIds: ConnectionIdQueue;
     loopback: McpClientFactory;
-    startupOptions?: ConstructorParameters<typeof UnixSocketServer>[5];
+    startupOptions?: ConstructorParameters<typeof UnixSocketServer>[4];
     daemonInstance?: string;
   }): InMemoryControlSocket {
     const daemonInstance = deps.daemonInstance;

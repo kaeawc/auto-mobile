@@ -6,6 +6,6 @@
     <ID>UnnecessarySafeCall:CtrlProxy.kt:CtrlProxy$event.text?.joinToString("") { it.toString() }</ID>
     <ID>UnnecessarySafeCall:CtrlProxy.kt:CtrlProxy$resolvedAlias?.let { deleteCaCertFromStorage(it) }</ID>
     <ID>UnnecessarySafeCall:HierarchyDebouncer.kt:HierarchyDebouncer$resultToEmit?.let { _hierarchyFlow.emit(it) }</ID>
-    <ID>UnsafeCallOnNullableType:CtrlProxy.kt:CtrlProxy$focusedNode!!</ID>
+    <ID>UnsafeCallOnNullableType:TextInputController.kt:TextInputController$focusedNode!!</ID>
   </CurrentIssues>
 </SmellBaseline>

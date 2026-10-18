@@ -40,16 +40,19 @@ class HierarchySuspendWiringTest {
 
   @Test
   fun `text acknowledgement and async refresh use complete suspend paths`() {
-    val setText = functionBody("private suspend fun performSetText(")
+    val setText = functionBody("suspend fun performSetText(", "TextInputController.kt")
     assertFalse(setText.contains("runBlocking"))
     assertTrue(setText.contains("broadcastSetTextResult("))
-    val refresh = functionBody("private fun refreshHierarchyAfterTextInput()")
+    val refresh =
+      functionBody("private fun refreshHierarchyAfterTextInput()", "TextInputController.kt")
     assertTrue(refresh.contains("serviceScope.launch"))
-    assertTrue(refresh.contains("hierarchyDebouncer.extractAfterQuiescenceSuspending("))
+    assertTrue(refresh.contains("host.publishSettledHierarchy()"))
+    val publish = functionBody("override suspend fun publishSettledHierarchy()")
+    assertTrue(publish.contains("hierarchyDebouncer.extractAfterQuiescenceSuspending("))
   }
 
-  private fun functionBody(signature: String): String {
-    val relative = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"
+  private fun functionBody(signature: String, fileName: String = "CtrlProxy.kt"): String {
+    val relative = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/$fileName"
     val file =
       listOf(
           File(relative),

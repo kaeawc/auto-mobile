@@ -4,7 +4,6 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
-import android.annotation.TargetApi
 import android.app.Activity
 import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
@@ -16,7 +15,6 @@ import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.graphics.Path
 import android.graphics.Point
 import android.graphics.Rect
 import android.os.Build
@@ -52,7 +50,6 @@ import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
-import dev.jasonpearson.automobile.ctrlproxy.perf.MutablePerfEntry
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
 import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
@@ -98,6 +95,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
+import dev.jasonpearson.automobile.protocol.ActionResult
 import dev.jasonpearson.automobile.protocol.AnrData
 import dev.jasonpearson.automobile.protocol.AnrEvent
 import dev.jasonpearson.automobile.protocol.BroadcastEventData
@@ -117,6 +115,7 @@ import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NetworkEventData
 import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
+import dev.jasonpearson.automobile.protocol.PermissionResult
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.RequestCommitText
@@ -147,6 +146,7 @@ import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.protocol.SdkNotificationActionEvent
 import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
+import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.WebSocketFrameData
 import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
@@ -156,7 +156,6 @@ import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
-import dev.jasonpearson.automobile.sdk.logging.AutoMobileLog
 import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -174,7 +173,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.android.asCoroutineDispatcher
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
@@ -183,8 +181,6 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -742,7 +738,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // File name for app-scoped storage
     private const val HIERARCHY_FILE_NAME = "latest_hierarchy.json"
     private const val DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250L
-    private const val REMEMBER_TTL_MS = 5_000L
 
     /**
      * The universe of accessibility event types we classify for subscription. [HANDLED_EVENT_TYPES]
@@ -917,68 +912,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   // Prototype cleanup must finish on Main even after serviceScope is cancelled during teardown.
   private val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-  /**
-   * The DEDICATED thread streamed gestures are driven on — deliberately NOT the main thread.
-   * `StrokeDescription.continueStroke` must be issued promptly after the previous stroke completes
-   * or the framework cancels the continued gesture; the main thread runs the accessibility-event
-   * and hierarchy work (e.g. a ~460ms `hierarchyDebouncer` pass) that would stall a continuation
-   * posted there long enough to trip that cancel. A private [HandlerGestureThread] keeps the
-   * continuation cadence off that contention. The gesture state machine is single-threaded, so
-   * every gesture mutation and pump is funnelled onto this one thread (see [GestureStreamSession]);
-   * WebSocket requests arrive on [serviceScope]'s IO threads and hand their work here.
-   */
-  // Android constructs services without arguments. Resolve this after construction so tests can
-  // supply a deterministic queue before onCreate, without starting a real HandlerThread.
+  // Android constructs services without arguments. GestureController resolves this on first use
+  // so tests can supply a deterministic queue before onCreate, without a real HandlerThread.
   internal var gestureThreadFactory: () -> GestureThread = ::HandlerGestureThread
-  private val gestureThread by lazy { gestureThreadFactory() }
-  private val gestureHandler: Handler
-    get() = gestureThread.handler
-
-  // Atomic terminal callbacks remain FIFO even while a tap's quiescence wait yields the handler.
-  private val gestureCompletionMutex = Mutex()
-
-  internal var dragDeadline: GestureDeadline = GestureDeadline { delayMs, onTimeout ->
-    val task = Runnable { onTimeout() }
-    check(gestureHandler.postDelayed(task, delayMs)) { "Gesture thread rejected drag deadline" }
-    val cancel: () -> Unit = { gestureHandler.removeCallbacks(task) }
-    cancel
-  }
-
-  internal var dragResultReporter: (String?, GestureDispatchOutcome) -> Unit =
-    { requestId, outcome ->
-      if (outcome.completed) {
-        Log.d(
-          TAG,
-          "Drag completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
-        )
-      } else {
-        Log.w(TAG, "Drag failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
-      }
-      launchRequestScope(requestId) {
-        broadcastDragResult(
-          requestId,
-          outcome.completed,
-          outcome.error,
-          outcome.totalTimeMs,
-          outcome.gestureTimeMs,
-        )
-      }
-    }
-
-  private val gestureStreamRouter =
-    GestureStreamRouter(
-      runOnGestureThread = { gestureThread.post(it) },
-      newSession = { onFinished ->
-        GestureStreamSession(
-          coordinator = GestureStreamCoordinator(),
-          dispatcher = AccessibilityStrokeDispatcher(),
-          runOnGestureThread = { gestureThread.post(it) },
-          onFinished = onFinished,
-        )
-      },
-      onResult = ::broadcastGestureResult,
-      logWarning = { Log.w(TAG, it) },
-    )
 
   private class ImeCommitState {
     val cancelled = AtomicBoolean(false)
@@ -1419,6 +1355,141 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
+  /**
+   * Set text, insert text, IME actions and select all. Constructed eagerly (not `by lazy`) because
+   * gesture, event and command paths invalidate its remembered insert caret from the first event.
+   */
+  private val textInputController =
+    TextInputController(
+      host =
+        object : TextInputController.Host {
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) {
+            this@CtrlProxy.launchRequestScope(requestId, block)
+          }
+
+          override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
+
+          override fun screenDimensions(displayId: Int) = getScreenDimensions(displayId)
+
+          override fun hideSoftKeyboard() {
+            softKeyboardController.setShowMode(AccessibilityService.SHOW_MODE_HIDDEN)
+          }
+
+          override suspend fun performImeNavigationAction(actionId: Int) =
+            CtrlProxyIme.current()?.performNavigationAction(actionId)
+
+          override fun sendKeycodeEnter() =
+            Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
+
+          override suspend fun publishSettledHierarchy() {
+            val freshHierarchy =
+              hierarchyDebouncer.extractAfterQuiescenceSuspending(
+                quiescenceMs = HierarchyQuiescence.POLL_MS,
+                maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
+                pollIntervalMs = 10L,
+              )
+            if (freshHierarchy != null) {
+              broadcastHierarchyUpdate(freshHierarchy, sync = true)
+            }
+          }
+        },
+      serviceScope = serviceScope,
+      perfProvider = perfProvider,
+      timeProvider = timeProvider,
+      resultBroadcaster = resultBroadcaster,
+      jsonCompact = jsonCompact,
+      responseSender =
+        object : TextInputController.ResponseSender {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcastWithPerf(
+            type: String,
+            requestId: String?,
+            buildContent: JsonObjectBuilder.() -> Unit,
+          ) {
+            webSocketServer.broadcastWithPerf { perfTiming ->
+              webSocketFrameJson(
+                type,
+                requestId = requestId,
+                perfTiming = perfTiming,
+                buildContent = buildContent,
+              )
+            }
+          }
+
+          override suspend fun broadcastWithPerfSync(
+            type: String,
+            requestId: String?,
+            buildContent: JsonObjectBuilder.() -> Unit,
+          ) {
+            webSocketServer.broadcastWithPerfSync { perfTiming ->
+              webSocketFrameJson(
+                type,
+                requestId = requestId,
+                perfTiming = perfTiming,
+                buildContent = buildContent,
+              )
+            }
+          }
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+        },
+    )
+  /**
+   * Tap, swipe, multi-finger, pinch, drag and streamed gestures plus their result frames, and the
+   * dedicated gesture thread their callbacks run on.
+   */
+  private val gestureController =
+    GestureController(
+      host =
+        object : GestureController.Host {
+          override fun dispatchGesture(
+            gesture: GestureDescription,
+            callback: GestureResultCallback,
+            handler: Handler,
+          ) = this@CtrlProxy.dispatchGesture(gesture, callback, handler)
+
+          override fun currentFrameContext() = this@CtrlProxy.currentFrameContext()
+
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) {
+            this@CtrlProxy.launchRequestScope(requestId, block)
+          }
+
+          override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
+
+          override suspend fun settledHierarchy(displayId: Int?) =
+            hierarchyDebouncer.extractAfterQuiescenceSuspending(
+              quiescenceMs = HierarchyQuiescence.POLL_MS,
+              maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
+              pollIntervalMs = 10L,
+              snapshotOptions = HierarchySnapshotOptions(displayId = displayId),
+            )
+
+          override suspend fun publishHierarchy(hierarchy: ViewHierarchy) =
+            broadcastHierarchyUpdate(hierarchy, sync = true)
+        },
+      scope = { serviceScope },
+      perfProvider = perfProvider,
+      timeProvider = timeProvider,
+      resultBroadcaster = resultBroadcaster,
+      responseSender =
+        object : GestureController.ResponseSender {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcastWithPerf(
+            messageBuilder: (perfTiming: JsonElement?) -> String,
+          ) = webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+        },
+      gestureThreadFactory = { gestureThreadFactory() },
+    )
   @Volatile private var lastWindowClassName: String? = null
   /**
    * Changes immediately on a native UI event; capture and input share this device-owned context.
@@ -1649,7 +1720,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun onCreate() {
     super.onCreate()
     // Keep the production queue running from service creation, before any connection or request.
-    gestureThread
+    gestureController.startThread()
   }
 
   override fun onServiceConnected() {
@@ -2024,7 +2095,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             messageHandler = queuedHandler,
             onClientDisconnected = { client ->
               queuedHandler.disconnect(client)
-              gestureStreamRouter.cancelOwnedBy(client)
+              gestureController.cancelStreamsOwnedBy(client)
               // Its in-flight host requests have no socket to answer on, even if another remains.
               hostPrototypeHttp.onHostLost(client)
             },
@@ -2233,8 +2304,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // platform's result callback need not arrive: the router has already closed and resolved
     // pending end results, and it ignores any late callback.
     teardownGestures(
-      close = gestureStreamRouter::close,
-      quitThread = { gestureThread.quitSafely() },
+      close = gestureController::closeStreams,
+      quitThread = gestureController::quitThread,
       cancelScope = { serviceScope.cancel() },
       onCloseFailure = { Log.w(TAG, "Failed to close streamed gestures", it) },
     )
@@ -2355,7 +2426,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     displayId: Int?,
   ) {
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
-    performTapCoordinates(requestId, x, y, 50L, frameContext, displayId, doubleTap = true)
+    gestureController.performTapCoordinates(
+      requestId,
+      x,
+      y,
+      50L,
+      frameContext,
+      displayId,
+      doubleTap = true,
+    )
   }
 
   override suspend fun requestTapCoordinates(request: RequestTapCoordinates) {
@@ -2367,7 +2446,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
-    performTapCoordinates(requestId, x, y, duration, frameContext, displayId)
+    gestureController.performTapCoordinates(requestId, x, y, duration, frameContext, displayId)
   }
 
   override suspend fun requestSwipe(request: RequestSwipe) {
@@ -2381,7 +2460,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE)) return
-    performSwipe(requestId, x1, y1, x2, y2, duration, frameContext, displayId)
+    gestureController.performSwipe(requestId, x1, y1, x2, y2, duration, frameContext, displayId)
   }
 
   override suspend fun requestTwoFingerSwipe(request: RequestTwoFingerSwipe) {
@@ -2394,7 +2473,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val offset = request.offset
     val displayId = request.displayId
 
-    performTwoFingerSwipe(
+    gestureController.performTwoFingerSwipe(
       requestId,
       x1,
       y1,
@@ -2420,7 +2499,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val displayId = request.displayId
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG)) return
-    performDrag(
+    gestureController.performDrag(
       requestId,
       x1,
       y1,
@@ -2444,7 +2523,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val duration = request.duration
     val displayId = request.displayId
 
-    performPinch(
+    gestureController.performPinch(
       requestId,
       centerX,
       centerY,
@@ -2457,95 +2536,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   override suspend fun requestGestureStart(request: RequestGestureStart) {
-    val requestId = request.requestId
-    val gestureId = request.gestureId
-    val x = request.x
-    val y = request.y
-    val displayId = request.displayId
-
-    rememberedInsert = null
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-      broadcastGestureResult(requestId, false, "Streaming gestures require Android 8.0 (API 26)")
-      return
-    }
-    gestureStreamRouter.start(
-      requestId,
-      gestureId,
-      x.toFloat(),
-      y.toFloat(),
-      displayId,
+    gestureController.startStream(
+      request.requestId,
+      request.gestureId,
+      request.x,
+      request.y,
+      request.displayId,
       CommandOriginContext.currentClient(),
     )
-  }
-
-  /**
-   * The Android half of streaming gesture input: builds real `StrokeDescription`s and dispatches
-   * them through the AccessibilityService, one continued stroke per [GestureSegment]. Kept a thin
-   * seam so the continuation loop ([GestureStreamSession]) stays framework-free and unit-tested.
-   * Requires API 26+ (the `willContinue` constructor and `continueStroke`); the caller guards.
-   */
-  @TargetApi(Build.VERSION_CODES.O)
-  private inner class AccessibilityStrokeDispatcher :
-    StrokeDispatcher<GestureDescription.StrokeDescription> {
-    override fun initialStroke(segment: GestureSegment): GestureDescription.StrokeDescription =
-      GestureDescription.StrokeDescription(
-        segment.toPath(),
-        0,
-        segment.durationMs.coerceAtLeast(1L),
-        segment.willContinue,
-      )
-
-    override fun continueStroke(
-      previous: GestureDescription.StrokeDescription,
-      segment: GestureSegment,
-    ): GestureDescription.StrokeDescription =
-      previous.continueStroke(
-        segment.toPath(),
-        0,
-        segment.durationMs.coerceAtLeast(1L),
-        segment.willContinue,
-      )
-
-    override fun dispatch(
-      stroke: GestureDescription.StrokeDescription,
-      onComplete: () -> Unit,
-      onFailed: (error: String) -> Unit,
-      displayId: Int?,
-    ) = dispatchContinuing(stroke, onComplete, onFailed, onFailed, displayId)
-
-    override fun dispatchContinuing(
-      stroke: GestureDescription.StrokeDescription,
-      onComplete: () -> Unit,
-      onFailed: (error: String) -> Unit,
-      onRejected: (error: String) -> Unit,
-      displayId: Int?,
-    ) {
-      val gesture = gestureBuilder(displayId).addStroke(stroke).build()
-      val dispatched =
-        try {
-          dispatchGesture(
-            gesture,
-            object : GestureResultCallback() {
-              override fun onCompleted(gestureDescription: GestureDescription?) = onComplete()
-
-              override fun onCancelled(gestureDescription: GestureDescription?) =
-                onFailed("Streamed gesture stroke was cancelled")
-            },
-            gestureHandler,
-          )
-        } catch (e: Exception) {
-          Log.e(TAG, "Error dispatching streamed gesture stroke", e)
-          onRejected(e.message ?: "Failed to dispatch streamed gesture stroke")
-          return
-        }
-      if (!dispatched) onRejected("Failed to dispatch streamed gesture stroke")
-    }
-
-    private fun GestureSegment.toPath(): Path =
-      Path().apply {
-        moveTo(from.x, from.y)
-        lineTo(to.x, to.y)
-      }
   }
 
   override suspend fun requestGestureMove(
@@ -2554,8 +2552,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     x: Double,
     y: Double,
   ) {
-    rememberedInsert = null
-    gestureStreamRouter.move(requestId, gestureId, x.toFloat(), y.toFloat())
+    gestureController.moveStream(requestId, gestureId, x, y)
   }
 
   override suspend fun requestGestureEnd(
@@ -2565,20 +2562,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     y: Double,
     cancel: Boolean,
   ) {
-    rememberedInsert = null
-    gestureStreamRouter.end(
+    gestureController.endStream(
       requestId,
       gestureId,
-      x.toFloat(),
-      y.toFloat(),
+      x,
+      y,
       cancel,
       requester = CommandOriginContext.currentClient(),
     )
-  }
-
-  /** Ack one streamed-gesture request, reusing the shared `swipe_result` frame. */
-  private fun broadcastGestureResult(requestId: String?, success: Boolean, error: String?) {
-    launchRequestScope(requestId) { broadcastSwipeResult(requestId, success, error, 0L, null) }
   }
 
   private enum class StaleFrameContextAction(val wireName: String) {
@@ -2622,12 +2613,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     error: String,
   ) =
     when (action) {
-      StaleFrameContextAction.TAP -> broadcastTapCoordinatesResult(requestId, false, error, 0)
-      StaleFrameContextAction.SWIPE -> broadcastSwipeResult(requestId, false, error, 0, null)
-      StaleFrameContextAction.DRAG -> broadcastDragResult(requestId, false, error, 0, null)
-      StaleFrameContextAction.SET_TEXT -> broadcastSetTextResult(requestId, false, error, 0)
+      StaleFrameContextAction.TAP ->
+        gestureController.broadcastTapCoordinatesResult(requestId, false, error, 0)
+      StaleFrameContextAction.SWIPE ->
+        gestureController.broadcastSwipeResult(requestId, false, error, 0, null)
+      StaleFrameContextAction.DRAG ->
+        gestureController.broadcastDragResult(requestId, false, error, 0, null)
+      StaleFrameContextAction.SET_TEXT ->
+        textInputController.broadcastSetTextResult(requestId, false, error, 0)
       StaleFrameContextAction.IME_ACTION ->
-        broadcastImeActionResult(requestId, action.wireName, false, error, 0)
+        textInputController.broadcastImeActionResult(requestId, action.wireName, false, error, 0)
       StaleFrameContextAction.GLOBAL_ACTION ->
         webSocketServer.broadcast(
           dev.jasonpearson.automobile.protocol.GlobalActionResult(
@@ -2649,46 +2644,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val frameContext = request.frameContext
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SET_TEXT)) return
-    performSetText(requestId, text, resourceId, dismissKeyboard)
+    textInputController.performSetText(requestId, text, resourceId, dismissKeyboard)
   }
 
-  override suspend fun requestInsertTextState(requestId: String?) {
-    // The host awaits this reply BEFORE dispatching ADB key events. No baseline is stored globally.
-    launchRequestScope(requestId) {
-      if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-        Log.d(TAG, "WebSocket server not running, skipping insert text state result broadcast")
-        return@launchRequestScope
-      }
-      val node = findFocusedEditableNode(rootInActiveWindow)
-      val state =
-        try {
-          if (
-            node != null && node.refresh() && node.isEditable && node.isFocused && !node.isPassword
-          ) {
-            InsertTextSnapshot(
-              node.text?.toString(),
-              node.isShowingHintTextCompat(),
-              node.textSelectionStart,
-              node.textSelectionEnd,
-            )
-          } else null
-        } finally {
-          node?.recycle()
-        }
-      resultBroadcaster.guard(requestId, "insert_text_state_result") {
-        webSocketServer.broadcastWithPerfSync { perfTiming ->
-          webSocketFrameJson(
-            "insert_text_state_result",
-            requestId = requestId,
-            perfTiming = perfTiming,
-          ) {
-            put("success", true)
-            if (state != null) put("state", jsonCompact.encodeToJsonElement(state))
-          }
-        }
-      }
-    }
-  }
+  override suspend fun requestInsertTextState(requestId: String?) =
+    textInputController.handleInsertTextState(requestId)
 
   override suspend fun requestInsertText(request: RequestInsertText) {
     val requestId = request.requestId
@@ -2697,7 +2657,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val acceptsCaretNotPlaced = request.acceptsCaretNotPlaced
     val precedingState = request.precedingState
 
-    performInsertText(requestId, text, expectedSuffix, acceptsCaretNotPlaced, precedingState)
+    textInputController.performInsertText(
+      requestId,
+      text,
+      expectedSuffix,
+      acceptsCaretNotPlaced,
+      precedingState,
+    )
   }
 
   override suspend fun requestCommitText(request: RequestCommitText) {
@@ -2708,7 +2674,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val timeoutMs = request.timeoutMs
     val trace = request.trace
 
-    rememberedInsert = null
+    textInputController.forgetRememberedInsert()
     val start = System.currentTimeMillis()
     val requestDeadlineMs =
       timeoutMs?.let { android.os.SystemClock.uptimeMillis() + it.coerceAtLeast(0) }
@@ -2912,13 +2878,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val frameContext = request.frameContext
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.IME_ACTION)) return
-    performImeAction(requestId, action)
+    textInputController.performImeAction(requestId, action)
   }
 
-  override suspend fun requestSelectAll(requestId: String?) = performSelectAll(requestId)
+  override suspend fun requestSelectAll(requestId: String?) =
+    textInputController.performSelectAll(requestId)
 
   override suspend fun requestClickFocusedInput(requestId: String?) {
-    rememberedInsert = null
+    textInputController.forgetRememberedInsert()
     val startTime = System.currentTimeMillis()
     // Like performNodeAction, stay on the inbound command queue until settling and replying.
     try {
@@ -3510,16 +3477,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         AccessibilityEvent.TYPE_WINDOWS_CHANGED,
         AccessibilityEvent.TYPE_VIEW_FOCUSED,
         AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
-        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED -> rememberedInsert = null
-        AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
-          val caret = rememberedInsert?.second?.caret
-          if (
-            caret != null &&
-              (event.fromIndex != caret.reportedStart || event.toIndex != caret.reportedEnd)
-          ) {
-            rememberedInsert = null
-          }
-        }
+        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED ->
+          textInputController.forgetRememberedInsert()
+        AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED ->
+          textInputController.onTextSelectionChanged(event.fromIndex, event.toIndex)
       }
       if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
         lastWindowClassName = event.className?.toString()
@@ -4060,7 +4021,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /** Handle a request_global_action WebSocket message. */
   private fun performGlobalActionRequest(requestId: String?, action: String) {
-    rememberedInsert = null
+    textInputController.forgetRememberedInsert()
     val startTime = System.currentTimeMillis()
     val success = executeGlobalAction(action)
     val totalTimeMs = System.currentTimeMillis() - startTime
@@ -4758,1419 +4719,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Dispatch a built gesture and centralize the callback/perf lifecycle shared by every gesture
-   * action. The caller owns gesture construction and result broadcasting; this helper owns the
-   * `dispatchGesture` perf operation, callback result conversion, and guaranteed outer perf close.
-   */
-  private fun dispatchGestureWithResult(
-    perfLabel: String,
-    gesture: GestureDescription,
-    requestId: String?,
-    startTimeMs: Long,
-    gestureBuiltTimeMs: Long,
-    frameContext: String? = null,
-    beforeCompletedResult: suspend () -> Unit = {},
-    onResult: (GestureDispatchOutcome) -> Unit,
-  ) {
-    rememberedInsert = null
-    val lifecycle =
-      GestureDispatchLifecycle(
-        startTimeMs = startTimeMs,
-        gestureBuiltTimeMs = gestureBuiltTimeMs,
-        nowMs = { System.currentTimeMillis() },
-        startOperation = { perfProvider.startOperation(it) },
-        endOperation = { perfProvider.endOperation(it) },
-        endPerfBlock = { perfProvider.end() },
-      )
-
-    lifecycle.startDispatch()
-    if (frameContext != null && frameContext != currentFrameContext()) {
-      lifecycle.failed(
-        IllegalStateException("Stale frame context; observe a fresh frame before retrying"),
-        onResult,
-      )
-      return
-    }
-    val dispatched =
-      try {
-        dispatchGesture(
-          gesture,
-          object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-              // Keep extraction, perf closure and result in callback order on the gesture thread;
-              // quiescence polling yields that thread instead of blocking its continuation queue.
-              serviceScope.launch(
-                gestureHandler.asCoroutineDispatcher().immediate +
-                  RequestIdContext(requestId) +
-                  PerfRequestContext(requestId),
-              ) {
-                gestureCompletionMutex.withLock {
-                  lifecycle.completed(beforeResult = beforeCompletedResult, onResult = onResult)
-                }
-              }
-            }
-
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-              serviceScope.launch(
-                gestureHandler.asCoroutineDispatcher().immediate +
-                  RequestIdContext(requestId) +
-                  PerfRequestContext(requestId),
-              ) {
-                gestureCompletionMutex.withLock { lifecycle.cancelled(onResult) }
-              }
-            }
-          },
-          gestureHandler,
-        )
-      } catch (e: Exception) {
-        Log.e(TAG, "Error dispatching $perfLabel gesture (requestId=$requestId)", e)
-        lifecycle.failed(e, onResult)
-        return
-      }
-
-    if (!dispatched) {
-      Log.e(TAG, "Failed to dispatch $perfLabel gesture (requestId=$requestId)")
-      lifecycle.notDispatched(onResult)
-    }
-  }
-
-  /** Preserve legacy routing when absent; explicit displays share the validated API gate. */
-  private fun gestureBuilder(displayId: Int?): GestureDescription.Builder =
-    GestureDescription.Builder().apply {
-      GestureDisplayRouting.apply(displayId, Build.VERSION.SDK_INT) { id ->
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) setDisplayId(id)
-      }
-    }
-
-  /**
-   * Perform a swipe gesture using AccessibilityService's dispatchGesture API. This is significantly
-   * faster than ADB's input swipe command.
-   */
-  private fun performSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    frameContext: String? = null,
-    displayId: Int? = null,
-  ) {
-    val startTime = System.currentTimeMillis()
-    Log.d(TAG, "performSwipe: ($x1, $y1) -> ($x2, $y2) duration=${duration}ms")
-    perfProvider.serial("performSwipe")
-
-    try {
-      // Create the swipe path
-      perfProvider.startOperation("buildPath")
-      val path =
-        Path().apply {
-          moveTo(x1.toFloat(), y1.toFloat())
-          lineTo(x2.toFloat(), y2.toFloat())
-        }
-
-      // Build the gesture description
-      val gesture =
-        gestureBuilder(displayId)
-          .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
-          .build()
-      perfProvider.endOperation("buildPath")
-
-      val gestureBuiltTime = System.currentTimeMillis()
-      Log.d(TAG, "Gesture built in ${gestureBuiltTime - startTime}ms")
-
-      dispatchGestureWithResult(
-        "performSwipe",
-        gesture,
-        requestId,
-        startTime,
-        gestureBuiltTime,
-        frameContext,
-      ) { outcome ->
-        if (outcome.completed) {
-          Log.d(
-            TAG,
-            "Swipe completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
-          )
-          launchRequestScope(requestId) {
-            broadcastSwipeResult(
-              requestId,
-              true,
-              null,
-              outcome.totalTimeMs,
-              outcome.gestureTimeMs,
-            )
-          }
-        } else {
-          Log.w(TAG, "Swipe failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
-          launchRequestScope(requestId) {
-            broadcastSwipeResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
-          }
-        }
-      }
-    } catch (e: Exception) {
-      perfProvider.end() // end performSwipe block
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing swipe", e)
-      launchRequestScope(requestId) {
-        broadcastSwipeResult(requestId, false, e.message, errorTime - startTime, null)
-      }
-    }
-  }
-
-  /**
-   * Perform a drag gesture using AccessibilityService's dispatchGesture API.
-   *
-   * @param requestId Optional request ID for response correlation
-   * @param x1 Starting X coordinate
-   * @param y1 Starting Y coordinate
-   * @param x2 Ending X coordinate
-   * @param y2 Ending Y coordinate
-   * @param pressDurationMs Press duration before dragging in milliseconds
-   * @param dragDurationMs Drag duration in milliseconds
-   * @param holdDurationMs Hold duration after dragging in milliseconds
-   */
-  private fun performDrag(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    pressDurationMs: Long,
-    dragDurationMs: Long,
-    holdDurationMs: Long,
-    frameContext: String? = null,
-    displayId: Int? = null,
-  ) {
-    val startTime = System.currentTimeMillis()
-    Log.d(
-      TAG,
-      "performDrag: ($x1, $y1) -> ($x2, $y2) press=${pressDurationMs}ms drag=${dragDurationMs}ms hold=${holdDurationMs}ms",
-    )
-    // Chained callbacks cross threads. Own these entries by request rather than leaving an IO
-    // thread's perf stack open and trying to close it from the gesture thread.
-    val dragPerf =
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        MutablePerfEntry("performDrag", startTime, requestId).apply {
-          children.add(MutablePerfEntry("buildPath", System.currentTimeMillis(), requestId))
-        }
-      } else null
-    if (dragPerf == null) perfProvider.serial("performDrag")
-
-    try {
-      if (dragPerf == null) perfProvider.startOperation("buildPath")
-      val gestureBuilder = gestureBuilder(displayId)
-      val startX = x1.toFloat()
-      val startY = y1.toFloat()
-      val endX = x2.toFloat()
-      val endY = y2.toFloat()
-
-      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-        // Pre-API-26 GestureDescription has no stroke continuation (the willContinue
-        // StrokeDescription constructor is API 26+), so press/drag/hold cannot be
-        // chained as one continuous touch. Approximate with a single stroke covering
-        // the combined duration. Previously this path threw NoSuchMethodError.
-        val totalDurationMs = maxOf(1L, pressDurationMs + dragDurationMs + holdDurationMs)
-        val dragPath =
-          Path().apply {
-            moveTo(startX, startY)
-            lineTo(endX, endY)
-          }
-        gestureBuilder.addStroke(GestureDescription.StrokeDescription(dragPath, 0, totalDurationMs))
-        Log.d(
-          TAG,
-          "Legacy (<API 26) single-stroke drag: ($startX, $startY) -> ($endX, $endY), duration=${totalDurationMs}ms",
-        )
-      } else {
-        val plan =
-          dragStrokePlan(
-            GesturePoint(startX, startY),
-            GesturePoint(endX, endY),
-            pressDurationMs,
-            dragDurationMs,
-            holdDurationMs,
-          )
-        val ownedPerf = requireNotNull(dragPerf)
-        val gestureBuiltTime = System.currentTimeMillis()
-        ownedPerf.children.single().endTime = gestureBuiltTime
-        val dispatchPerf = MutablePerfEntry("dispatchGesture", gestureBuiltTime, requestId)
-        val lifecycle =
-          GestureDispatchLifecycle(
-            startTimeMs = startTime,
-            gestureBuiltTimeMs = gestureBuiltTime,
-            nowMs = { System.currentTimeMillis() },
-            startOperation = { ownedPerf.children.add(dispatchPerf) },
-            endOperation = { dispatchPerf.endTime = System.currentTimeMillis() },
-            endPerfBlock = {
-              ownedPerf.endTime = System.currentTimeMillis()
-              perfProvider.complete(ownedPerf)
-            },
-          )
-        rememberedInsert = null
-        lifecycle.startDispatch()
-        val onResult: (GestureDispatchOutcome) -> Unit = { dragResultReporter(requestId, it) }
-        val posted = gestureThread.post {
-          // Check once immediately before DOWN; this gesture's own events may advance the token.
-          if (frameContext != null && frameContext != currentFrameContext()) {
-            lifecycle.failed(
-              IllegalStateException("Stale frame context; observe a fresh frame before retrying"),
-              onResult,
-            )
-          } else {
-            DragStrokeSession(
-                plan = plan,
-                dispatcher = AccessibilityStrokeDispatcher(),
-                deadline = dragDeadline,
-                displayId = displayId,
-                logError = { Log.e(TAG, "Error dispatching drag stroke", it) },
-                onFinished = { success, error ->
-                  if (success) {
-                    serviceScope.launch(
-                      gestureHandler.asCoroutineDispatcher().immediate +
-                        RequestIdContext(requestId) +
-                        PerfRequestContext(requestId),
-                    ) {
-                      gestureCompletionMutex.withLock { lifecycle.completed(onResult = onResult) }
-                    }
-                  } else {
-                    lifecycle.failed(IllegalStateException(error ?: "Drag failed"), onResult)
-                  }
-                },
-                nowMs = android.os.SystemClock::elapsedRealtime,
-              )
-              .start()
-          }
-        }
-        if (!posted) lifecycle.notDispatched(onResult)
-        return
-      }
-      val gesture = gestureBuilder.build()
-      perfProvider.endOperation("buildPath")
-
-      val gestureBuiltTime = System.currentTimeMillis()
-      Log.d(TAG, "Drag gesture built in ${gestureBuiltTime - startTime}ms")
-
-      dispatchGestureWithResult(
-        "performDrag",
-        gesture,
-        requestId,
-        startTime,
-        gestureBuiltTime,
-        frameContext,
-      ) { outcome ->
-        dragResultReporter(requestId, outcome)
-      }
-    } catch (e: Exception) {
-      val errorTime = System.currentTimeMillis()
-      if (dragPerf == null) perfProvider.end()
-      else {
-        dragPerf.children.forEach { if (it.endTime == null) it.endTime = errorTime }
-        dragPerf.endTime = errorTime
-        perfProvider.complete(dragPerf)
-      }
-      Log.e(TAG, "Error performing drag", e)
-      dragResultReporter(
-        requestId,
-        GestureDispatchOutcome(
-          false,
-          errorTime - startTime,
-          null,
-          e.message ?: "Failed to perform drag",
-        ),
-      )
-    }
-  }
-
-  /**
-   * Perform a tap at specific coordinates using AccessibilityService's dispatchGesture API. This is
-   * significantly faster than ADB input tap and more precise than resource-id lookup.
-   *
-   * @param requestId Optional request ID for response correlation
-   * @param x X coordinate to tap
-   * @param y Y coordinate to tap
-   * @param duration Duration of the tap in milliseconds (default 10ms for a quick tap)
-   */
-  private fun performTapCoordinates(
-    requestId: String?,
-    x: Double,
-    y: Double,
-    duration: Long = 10,
-    frameContext: String? = null,
-    displayId: Int? = null,
-    doubleTap: Boolean = false,
-  ) {
-    val startTime = System.currentTimeMillis()
-    Log.d(TAG, "performTapCoordinates: ($x, $y) duration=${duration}ms")
-    perfProvider.serial("performTapCoordinates")
-
-    try {
-      // Create a tap path (single point, no movement)
-      perfProvider.startOperation("buildPath")
-      val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
-
-      // Build the gesture description
-      val builder =
-        gestureBuilder(displayId).addStroke(GestureDescription.StrokeDescription(path, 0, duration))
-      if (doubleTap) {
-        // Fixed 100ms release-to-press gap, independent of host reply latency.
-        builder.addStroke(GestureDescription.StrokeDescription(path, duration + 100L, duration))
-      }
-      val gesture = builder.build()
-      perfProvider.endOperation("buildPath")
-
-      val gestureBuiltTime = System.currentTimeMillis()
-      Log.d(TAG, "Tap gesture built in ${gestureBuiltTime - startTime}ms")
-
-      var freshHierarchy: ViewHierarchy? = null
-      dispatchGestureWithResult(
-        "performTapCoordinates",
-        gesture,
-        requestId,
-        startTime,
-        gestureBuiltTime,
-        frameContext,
-        beforeCompletedResult = {
-          // Wait for UI to settle after tap, then extract fresh hierarchy.
-          freshHierarchy =
-            hierarchyDebouncer.extractAfterQuiescenceSuspending(
-              quiescenceMs = HierarchyQuiescence.POLL_MS,
-              maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-              pollIntervalMs = 10L,
-              snapshotOptions = HierarchySnapshotOptions(displayId = displayId),
-            )
-        },
-      ) { outcome ->
-        if (outcome.completed) {
-          Log.d(
-            TAG,
-            "Tap completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
-          )
-          launchRequestScope(requestId) {
-            freshHierarchy?.let { broadcastHierarchyUpdate(it, sync = true) }
-            broadcastTapCoordinatesResult(requestId, true, null, outcome.totalTimeMs)
-          }
-        } else {
-          Log.w(TAG, "Tap failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
-          launchRequestScope(requestId) {
-            broadcastTapCoordinatesResult(requestId, false, outcome.error, outcome.totalTimeMs)
-          }
-        }
-      }
-    } catch (e: Exception) {
-      perfProvider.end() // end performTapCoordinates block
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing tap", e)
-      launchRequestScope(requestId) {
-        broadcastTapCoordinatesResult(requestId, false, e.message, errorTime - startTime)
-      }
-    }
-  }
-
-  /**
-   * Perform a two-finger swipe gesture for TalkBack mode scrolling. This allows scrolling content
-   * without moving the TalkBack focus cursor.
-   *
-   * @param requestId Optional request ID for response correlation
-   * @param x1 Starting X coordinate
-   * @param y1 Starting Y coordinate
-   * @param x2 Ending X coordinate
-   * @param y2 Ending Y coordinate
-   * @param duration Duration of the swipe in milliseconds
-   * @param offset Horizontal offset between the two fingers (default 100px)
-   */
-  private fun performTwoFingerSwipe(
-    requestId: String?,
-    x1: Double,
-    y1: Double,
-    x2: Double,
-    y2: Double,
-    duration: Long,
-    offset: Int = 100,
-    displayId: Int? = null,
-    fingerCount: Int = 2,
-  ) {
-    val startTime = System.currentTimeMillis()
-    Log.d(
-      TAG,
-      "performTwoFingerSwipe: ($x1, $y1) -> ($x2, $y2) duration=${duration}ms, offset=${offset}px, fingers=$fingerCount",
-    )
-    perfProvider.serial("performTwoFingerSwipe")
-
-    try {
-      // One parallel stroke per finger (geometry shared with iOS via computeMultiFingerStrokes).
-      perfProvider.startOperation("buildPaths")
-      val builder = gestureBuilder(displayId)
-      for (stroke in computeMultiFingerStrokes(x1, y1, x2, y2, offset, fingerCount)) {
-        val path =
-          Path().apply {
-            moveTo(stroke.startX, stroke.startY)
-            // A stationary stroke (multi-finger tap / long press) is a bare moveTo, like a tap.
-            if (stroke.startX != stroke.endX || stroke.startY != stroke.endY) {
-              lineTo(stroke.endX, stroke.endY)
-            }
-          }
-        builder.addStroke(GestureDescription.StrokeDescription(path, 0, duration))
-      }
-      val gesture = builder.build()
-      perfProvider.endOperation("buildPaths")
-
-      val gestureBuiltTime = System.currentTimeMillis()
-      Log.d(TAG, "Two-finger gesture built in ${gestureBuiltTime - startTime}ms")
-
-      dispatchGestureWithResult(
-        "performTwoFingerSwipe",
-        gesture,
-        requestId,
-        startTime,
-        gestureBuiltTime,
-      ) { outcome ->
-        if (outcome.completed) {
-          Log.d(
-            TAG,
-            "Two-finger swipe completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
-          )
-          launchRequestScope(requestId) {
-            broadcastSwipeResult(
-              requestId,
-              true,
-              null,
-              outcome.totalTimeMs,
-              outcome.gestureTimeMs,
-            )
-          }
-        } else {
-          Log.w(TAG, "Two-finger swipe failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
-          launchRequestScope(requestId) {
-            broadcastSwipeResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
-          }
-        }
-      }
-    } catch (e: Exception) {
-      perfProvider.end() // end performTwoFingerSwipe block
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing two-finger swipe", e)
-      launchRequestScope(requestId) {
-        broadcastSwipeResult(requestId, false, e.message, errorTime - startTime, null)
-      }
-    }
-  }
-
-  /** Perform a pinch gesture using AccessibilityService's dispatchGesture API. */
-  private fun performPinch(
-    requestId: String?,
-    centerX: Double,
-    centerY: Double,
-    distanceStart: Double,
-    distanceEnd: Double,
-    rotationDegrees: Float,
-    duration: Long,
-    displayId: Int? = null,
-  ) {
-    val startTime = System.currentTimeMillis()
-    Log.d(
-      TAG,
-      "performPinch: center=($centerX,$centerY) start=$distanceStart end=$distanceEnd rotation=$rotationDegrees duration=${duration}ms",
-    )
-    perfProvider.serial("performPinch")
-
-    try {
-      perfProvider.startOperation("buildPath")
-      // Geometry is extracted into computePinchPoints so it stays unit testable (see
-      // PinchGeometryTest) and stays in sync with the iOS runner. rotationDegrees rotates the
-      // finger axis *during* the pinch (start horizontal, end rotated); see issue #2911.
-      val points = computePinchPoints(centerX, centerY, distanceStart, distanceEnd, rotationDegrees)
-
-      // A rotating pinch follows an arc (angle and radius interpolated) instead of the straight
-      // chord, which would shrink the radius mid-gesture and zoom a pure rotation (issue #12996).
-      val interior =
-        computePinchPathInterior(centerX, centerY, distanceStart, distanceEnd, rotationDegrees)
-      val path1 =
-        Path().apply {
-          moveTo(points.startX1, points.startY1)
-          interior.forEach { lineTo(it.x1, it.y1) }
-          lineTo(points.endX1, points.endY1)
-        }
-      val path2 =
-        Path().apply {
-          moveTo(points.startX2, points.startY2)
-          interior.forEach { lineTo(it.x2, it.y2) }
-          lineTo(points.endX2, points.endY2)
-        }
-
-      val gesture =
-        gestureBuilder(displayId)
-          .addStroke(GestureDescription.StrokeDescription(path1, 0, duration))
-          .addStroke(GestureDescription.StrokeDescription(path2, 0, duration))
-          .build()
-      perfProvider.endOperation("buildPath")
-
-      val gestureBuiltTime = System.currentTimeMillis()
-      Log.d(TAG, "Pinch gesture built in ${gestureBuiltTime - startTime}ms")
-
-      dispatchGestureWithResult("performPinch", gesture, requestId, startTime, gestureBuiltTime) {
-        outcome ->
-        if (outcome.completed) {
-          Log.d(
-            TAG,
-            "Pinch completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
-          )
-          launchRequestScope(requestId) {
-            broadcastPinchResult(
-              requestId,
-              true,
-              null,
-              outcome.totalTimeMs,
-              outcome.gestureTimeMs,
-            )
-          }
-        } else {
-          Log.w(TAG, "Pinch failed after ${outcome.totalTimeMs}ms: ${outcome.error}")
-          launchRequestScope(requestId) {
-            broadcastPinchResult(requestId, false, outcome.error, outcome.totalTimeMs, null)
-          }
-        }
-      }
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing pinch", e)
-      launchRequestScope(requestId) {
-        broadcastPinchResult(requestId, false, e.message, errorTime - startTime, null)
-      }
-    }
-  }
-
-  /**
-   * Perform text input using AccessibilityService's ACTION_SET_TEXT. This is significantly faster
-   * than ADB's input text command.
-   */
-  private suspend fun performSetText(
-    requestId: String?,
-    text: String,
-    resourceId: String?,
-    dismissKeyboard: Boolean = false,
-  ) {
-    rememberedInsert = null
-    val startTime = System.currentTimeMillis()
-    // Never log the text: the target may be a password field.
-    Log.d(TAG, "performSetText: ${text.length} chars resourceId=$resourceId")
-    perfProvider.serial("performSetText")
-
-    try {
-      perfProvider.startOperation("findNode")
-      val root = rootInActiveWindow
-      var foundTargetNode: android.view.accessibility.AccessibilityNodeInfo? = null
-      try {
-        foundTargetNode =
-          if (resourceId != null) {
-            // Find node by resource-id
-            findNodeByResourceIdOnRootDisplay(root, resourceId, ::getScreenDimensions)
-          } else {
-            // Find currently focused input node
-            findFocusedEditableNode(root)
-          }
-      } finally {
-        if (root !== foundTargetNode) {
-          root?.recycle()
-        }
-      }
-      val targetNode = foundTargetNode
-      perfProvider.endOperation("findNode")
-
-      if (targetNode == null) {
-        perfProvider.end()
-        val errorTime = System.currentTimeMillis()
-        val error =
-          if (resourceId != null) {
-            "No node found with resource-id: $resourceId"
-          } else {
-            "No focused editable node found"
-          }
-        Log.w(TAG, error)
-        launchRequestScope(requestId) {
-          broadcastSetTextResult(requestId, false, error, errorTime - startTime)
-        }
-        return
-      }
-
-      perfProvider.startOperation("setText")
-      val arguments =
-        android.os.Bundle().apply {
-          putCharSequence(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-            text,
-          )
-        }
-      val success =
-        try {
-          targetNode.performAction(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT,
-            arguments,
-          )
-        } finally {
-          targetNode.recycle()
-        }
-      perfProvider.endOperation("setText")
-      perfProvider.end()
-
-      Log.d(TAG, "Set text completed: success=$success")
-
-      // Dismiss the soft keyboard if requested.
-      // When enabled (via --dismiss-keyboard-after-input or per-call dismissKeyboard param),
-      // SHOW_MODE_HIDDEN suppresses the keyboard globally for the accessibility service.
-      // This prevents the keyboard from stealing touch events and accessibility focus
-      // from UI elements behind it during subsequent tapOn steps.
-      if (success && dismissKeyboard) {
-        try {
-          softKeyboardController.setShowMode(
-            android.accessibilityservice.AccessibilityService.SHOW_MODE_HIDDEN,
-          )
-          Log.d(TAG, "[KeyboardDismiss] Set SHOW_MODE_HIDDEN after text injection")
-        } catch (e: CancellationException) {
-          throw e
-        } catch (e: Exception) {
-          Log.w(TAG, "[KeyboardDismiss] softKeyboardController failed", e)
-        }
-      }
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "Set text completed in ${totalTime}ms")
-      // ACTION_SET_TEXT and the requested keyboard state are complete, so acknowledge before
-      // optional hierarchy work. Waiting for quiescence/extraction first can turn a completed
-      // write into a host-side timeout.
-      broadcastSetTextResult(
-        requestId,
-        success,
-        if (success) null else "performAction returned false",
-        totalTime,
-      )
-
-      if (success) refreshHierarchyAfterTextInput()
-    } catch (e: CancellationException) {
-      perfProvider.end()
-      throw e
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing set text", e)
-      broadcastSetTextResult(requestId, false, e.message, errorTime - startTime)
-    }
-  }
-
-  /**
-   * Publishes the settled text state after a successful text mutation without delaying its result.
-   */
-  private fun refreshHierarchyAfterTextInput() {
-    serviceScope.launch {
-      try {
-        val freshHierarchy =
-          hierarchyDebouncer.extractAfterQuiescenceSuspending(
-            quiescenceMs = HierarchyQuiescence.POLL_MS,
-            maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-            pollIntervalMs = 10L,
-          )
-        if (freshHierarchy != null) {
-          broadcastHierarchyUpdate(freshHierarchy, sync = true)
-        }
-      } catch (e: CancellationException) {
-        throw e
-      } catch (e: Exception) {
-        Log.w(TAG, "Failed to refresh hierarchy after text input", e)
-      }
-    }
-  }
-
-  private data class InsertNodeKey(
-    val windowId: Int,
-    val packageName: String?,
-    val className: String?,
-    val viewId: String?,
-  )
-
-  private data class RememberedCaretAt(val caret: RememberedCaret, val atMs: Long)
-
-  // Compose may expose no stable view ID. Exact text AND reported selection, command/event
-  // invalidation, and a 5s TTL bound reuse to a continuation of the previous insert.
-  @Volatile private var rememberedInsert: Pair<InsertNodeKey, RememberedCaretAt>? = null
-
-  /**
-   * Insert text at the focused field's current selection using accessibility actions.
-   *
-   * Android exposes replacement through ACTION_SET_TEXT but no separate insert primitive. Build the
-   * new value from the node's UTF-16 selection range, then restore the caret immediately after the
-   * inserted text. This matches ordinary typing: a collapsed selection inserts at the caret, while
-   * a non-empty selection is replaced. If the selection is invalid, refresh the node once and
-   * append at the end of its current text if the refreshed selection is still invalid.
-   */
-  private suspend fun performInsertText(
-    requestId: String?,
-    text: String,
-    expectedSuffix: String?,
-    acceptsCaretNotPlaced: Boolean,
-    precedingState: InsertTextSnapshot? = null,
-  ) {
-    val startTime = System.currentTimeMillis()
-    // Suspend waits can resume on another IO thread; keep timing out of a thread-local stack.
-    val insertPerf = MutablePerfEntry("performInsertText", startTime)
-    fun finishPerf() {
-      if (insertPerf.endTime == null) {
-        insertPerf.endTime = System.currentTimeMillis()
-        perfProvider.complete(insertPerf)
-      }
-    }
-
-    var nodeToRecycle: android.view.accessibility.AccessibilityNodeInfo? = null
-    val warnings = mutableListOf<String>()
-    var textMutated = false
-    try {
-      val originalNode = findFocusedEditableNode(rootInActiveWindow)
-      if (originalNode == null) {
-        rememberedInsert = null
-        finishPerf()
-        launchRequestScope(requestId) {
-          broadcastInsertTextResult(
-            requestId,
-            false,
-            "No focused editable node found",
-            System.currentTimeMillis() - startTime,
-          )
-        }
-        return
-      }
-
-      var targetNode: android.view.accessibility.AccessibilityNodeInfo = originalNode
-      nodeToRecycle = targetNode
-      if (targetNode.isPassword) {
-        rememberedInsert = null
-        targetNode.recycle()
-        nodeToRecycle = null
-        finishPerf()
-        broadcastInsertTextResult(
-          requestId,
-          false,
-          "Cannot insert text into a password field without exposing its original value",
-          System.currentTimeMillis() - startTime,
-        )
-        return
-      }
-
-      fun nodeKey() =
-        InsertNodeKey(
-          targetNode.windowId,
-          targetNode.packageName?.toString(),
-          targetNode.className?.toString(),
-          targetNode.viewIdResourceName,
-        )
-
-      fun readFreshSnapshot(): InsertTextSnapshot? {
-        if (nodeToRecycle == null) return null
-        if (!targetNode.refresh()) {
-          val replacementNode = findFocusedEditableNode(rootInActiveWindow)
-          targetNode.recycle()
-          nodeToRecycle = replacementNode
-          if (replacementNode == null) {
-            rememberedInsert = null
-            return null
-          }
-          targetNode = replacementNode
-        }
-        // Re-found nodes may be password/non-editable fields. Never read their text or mutate them.
-        if (!targetNode.isEditable || !targetNode.isFocused || targetNode.isPassword) {
-          rememberedInsert = null
-          return null
-        }
-        if (rememberedInsert?.first != nodeKey()) rememberedInsert = null
-        return InsertTextSnapshot(
-          targetNode.text?.toString(),
-          targetNode.isShowingHintTextCompat(),
-          targetNode.textSelectionStart,
-          targetNode.textSelectionEnd,
-        )
-      }
-
-      // Every insert, including a caret-warning remainder, plans against a refreshed node.
-      var snapshot = readFreshSnapshot()
-      val waitStarted = android.os.SystemClock.uptimeMillis()
-      val remembered = rememberedInsert?.takeIf {
-        it.first == nodeKey() &&
-          android.os.SystemClock.uptimeMillis() - it.second.atMs <= REMEMBER_TTL_MS
-      }
-      if (remembered == null) rememberedInsert = null
-      val rememberedTextMatched = remembered?.let {
-        snapshot?.let { s -> !s.isShowingHintText && s.text.orEmpty() == it.second.caret.text }
-      }
-      if (remembered != null && snapshot != null && rememberedTextMatched == false) {
-        val matched =
-          awaitPrecedingInput(
-            expectedSuffix = "",
-            readSnapshot = { readFreshSnapshot().also { snapshot = it } },
-            nowMs = { android.os.SystemClock.uptimeMillis() },
-            pause = { ms -> kotlinx.coroutines.delay(ms) },
-            matches = { s ->
-              nodeKey() == remembered.first &&
-                !s.isShowingHintText &&
-                s.text.orEmpty() == remembered.second.caret.text
-            },
-          )
-        if (!matched) {
-          rememberedInsert = null
-          warnings.add(
-            "The field changed since the previous insert; its text did not match within 300ms, so the reported selection was used",
-          )
-        }
-      }
-      if (snapshot != null && shouldWaitForPrecedingInput(expectedSuffix)) {
-        val observed =
-          awaitPrecedingInput(
-            expectedSuffix = requireNotNull(expectedSuffix),
-            baseline = precedingState,
-            readSnapshot = { readFreshSnapshot().also { snapshot = it } },
-            nowMs = { android.os.SystemClock.uptimeMillis() },
-            pause = { ms -> kotlinx.coroutines.delay(ms) },
-          )
-        if (!observed) {
-          warnings.add(
-            "Preceding key-event input was not observed in the field within 300ms; the inserted text was planned against the latest observed value, so earlier input may have been overwritten",
-          )
-        }
-      }
-      AutoMobileLog.d(
-        TAG,
-        "insertText rememberedTextMatchedInitially=${rememberedTextMatched == true} rememberedTextMatchedAfterWait=${remembered != null && snapshot?.text == remembered.second.caret.text && snapshot?.isShowingHintText == false} waitMs=${android.os.SystemClock.uptimeMillis() - waitStarted}",
-      )
-      val liveSnapshot = snapshot
-      if (liveSnapshot == null) {
-        val error =
-          when {
-            nodeToRecycle == null -> "No focused editable node found"
-            targetNode.isPassword ->
-              "Cannot insert text into a password field without exposing its original value"
-            !targetNode.isEditable -> "Focused node is not editable"
-            else -> "No focused editable node found"
-          }
-        nodeToRecycle?.recycle()
-        nodeToRecycle = null
-        rememberedInsert = null
-        finishPerf()
-        broadcastInsertTextResult(
-          requestId,
-          false,
-          error,
-          System.currentTimeMillis() - startTime,
-          warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
-        )
-        return
-      }
-      // Reuse only when no command/event invalidated the same entry during polling.
-      val caret =
-        rememberedInsert
-          ?.takeIf {
-            it == remembered &&
-              android.os.SystemClock.uptimeMillis() - it.second.atMs <= REMEMBER_TTL_MS
-          }
-          ?.second
-          ?.caret
-      val plan =
-        planInsertText(
-          liveSnapshot.text,
-          liveSnapshot.isShowingHintText,
-          liveSnapshot.selectionStart,
-          liveSnapshot.selectionEnd,
-          text,
-          caret,
-        )
-      if (!plan.usedRememberedCaret) rememberedInsert = null
-      val precedingWarning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" ")
-      AutoMobileLog.d(
-        TAG,
-        "insertText selectionBeforeStart=${liveSnapshot.selectionStart} selectionBeforeEnd=${liveSnapshot.selectionEnd} textLength=${liveSnapshot.text.orEmpty().length}",
-      )
-
-      val actionIds = targetNode.actionList.map { it.id }.toSet()
-      AutoMobileLog.d(
-        TAG,
-        "insertText selectionActionListed=${android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION in actionIds}",
-      )
-      val requiredActions =
-        if (plan.usedFallbackCaret || plan.usedRememberedCaret) {
-          mapOf(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT to "ACTION_SET_TEXT",
-          )
-        } else {
-          mapOf(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT to "ACTION_SET_TEXT",
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION to
-              "ACTION_SET_SELECTION",
-          )
-        }
-      val unsupportedAction = requiredActions.entries.firstOrNull { it.key !in actionIds }
-      if (unsupportedAction != null) {
-        targetNode.recycle()
-        nodeToRecycle = null
-        finishPerf()
-        broadcastInsertTextResult(
-          requestId,
-          false,
-          "Focused editable node does not support ${unsupportedAction.value}",
-          System.currentTimeMillis() - startTime,
-          warning = precedingWarning,
-        )
-        return
-      }
-
-      val setTextArguments =
-        android.os.Bundle().apply {
-          putCharSequence(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-            plan.updatedText,
-          )
-        }
-      val setTextSucceeded =
-        targetNode.performAction(
-          android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT,
-          setTextArguments,
-        )
-      textMutated = setTextSucceeded
-      // Compose may acknowledge SET_TEXT before its semantics reflect the replacement. Wait
-      // briefly on the same node before reading selection support and placing the caret (#10414).
-      val mutationNodeKey = nodeKey()
-      fun readMutationSnapshot(): InsertTextSnapshot? {
-        // After writing, never re-find and move a caret in a different focused field.
-        if (
-          !targetNode.refresh() ||
-            nodeKey() != mutationNodeKey ||
-            !targetNode.isEditable ||
-            !targetNode.isFocused ||
-            targetNode.isPassword
-        )
-          return null
-        return InsertTextSnapshot(
-          targetNode.text?.toString(),
-          targetNode.isShowingHintTextCompat(),
-          targetNode.textSelectionStart,
-          targetNode.textSelectionEnd,
-        )
-      }
-      val afterSetText =
-        if (setTextSucceeded) {
-          awaitInsertTextMutation(
-            plan,
-            readSnapshot = ::readMutationSnapshot,
-            nowMs = { android.os.SystemClock.uptimeMillis() },
-            pause = { ms -> kotlinx.coroutines.delay(ms) },
-          )
-        } else null
-      AutoMobileLog.d(
-        TAG,
-        "insertText selectionAfterSetTextStart=${afterSetText?.selectionStart ?: -1} selectionAfterSetTextEnd=${afterSetText?.selectionEnd ?: -1}",
-      )
-      val selectionAttempted =
-        setTextSucceeded &&
-          afterSetText != null &&
-          android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION in
-            targetNode.actionList.map { it.id }
-      val selectionReturned =
-        if (selectionAttempted) {
-          val selectionArguments =
-            android.os.Bundle().apply {
-              putInt(
-                android.view.accessibility.AccessibilityNodeInfo
-                  .ACTION_ARGUMENT_SELECTION_START_INT,
-                plan.caret,
-              )
-              putInt(
-                android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
-                plan.caret,
-              )
-            }
-          targetNode.performAction(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
-            selectionArguments,
-          )
-        } else false
-      // A widget may reject SET_SELECTION when SET_TEXT already placed the caret correctly.
-      val observedSelection =
-        if (selectionAttempted && !selectionReturned) readMutationSnapshot() else afterSetText
-      val selectionSucceeded =
-        insertTextSelectionSucceeded(
-          setTextSucceeded,
-          selectionAttempted,
-          selectionReturned,
-          plan,
-          observedSelection,
-        )
-      AutoMobileLog.d(
-        TAG,
-        "insertText selectionAttempted=$selectionAttempted selectionReturned=$selectionReturned",
-      )
-      // Record the reported selection after placement, including the rejected-action refresh.
-      val afterSelection =
-        if (afterSetText != null)
-          InsertTextSnapshot(
-            targetNode.text?.toString(),
-            targetNode.isShowingHintTextCompat(),
-            targetNode.textSelectionStart,
-            targetNode.textSelectionEnd,
-          )
-        else null
-      val outcome =
-        insertTextOutcome(
-          setTextSucceeded,
-          selectionAttempted,
-          selectionSucceeded,
-          precedingWarning,
-          acceptsCaretNotPlaced,
-        )
-      rememberedInsert = afterSelection?.let { s ->
-        nextRememberedCaret(outcome, plan, s.selectionStart, s.selectionEnd)?.let {
-          nodeKey() to RememberedCaretAt(it, android.os.SystemClock.uptimeMillis())
-        }
-      }
-      nodeToRecycle?.recycle()
-      nodeToRecycle = null
-      finishPerf()
-
-      broadcastInsertTextResult(
-        requestId,
-        outcome.success,
-        outcome.error,
-        System.currentTimeMillis() - startTime,
-        outcome.partialApplication,
-        outcome.warning,
-        outcome.caretPlaced,
-        if (setTextSucceeded && acceptsCaretNotPlaced) plan.updatedText.length else null,
-      )
-      if (setTextSucceeded) refreshHierarchyAfterTextInput()
-    } catch (e: CancellationException) {
-      rememberedInsert = null
-      nodeToRecycle?.recycle()
-      finishPerf()
-      throw e
-    } catch (e: Exception) {
-      rememberedInsert = null
-      nodeToRecycle?.recycle()
-      finishPerf()
-      Log.e(TAG, "Error inserting text", e)
-      broadcastInsertTextResult(
-        requestId,
-        false,
-        e.message,
-        System.currentTimeMillis() - startTime,
-        partialApplication = textMutated,
-        warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
-      )
-    }
-  }
-
-  internal enum class ImeActionStep(val error: String? = null, val approximated: Boolean? = null) {
-    NO_FOCUSED_EDITABLE("No focused editable node found for IME action"),
-    NEXT(approximated = true),
-    PREVIOUS(approximated = true),
-    EDITOR_NEXT,
-    EDITOR_PREVIOUS,
-    IME_ENTER,
-    KEYCODE_ENTER,
-    UNSUPPORTED;
-
-    companion object {
-      fun select(
-        action: String,
-        hasFocusedEditable: Boolean,
-        sdkInt: Int,
-        hasImeConnection: Boolean = false,
-      ): ImeActionStep {
-        if (hasImeConnection) {
-          if (action == "next") return EDITOR_NEXT
-          if (action == "previous") return EDITOR_PREVIOUS
-        }
-        if (!hasFocusedEditable) {
-          return NO_FOCUSED_EDITABLE
-        }
-        return when (action) {
-          "next" -> NEXT
-          "previous" -> PREVIOUS
-          "done",
-          "go",
-          "send",
-          "search" -> if (sdkInt >= android.os.Build.VERSION_CODES.R) IME_ENTER else KEYCODE_ENTER
-          else -> UNSUPPORTED
-        }
-      }
-    }
-  }
-
-  /**
-   * Dispatch navigation through the active IME when possible, otherwise approximate it with focus
-   * traversal. Other keyboard actions retain their AccessibilityService handling.
-   */
-  private suspend fun performImeAction(requestId: String?, action: String) {
-    rememberedInsert = null
-    val startTime = System.currentTimeMillis()
-    Log.d(TAG, "performImeAction: action='$action'")
-    // Suspend waits can resume on another IO thread; keep timing out of a thread-local stack.
-    val imePerf = MutablePerfEntry("performImeAction", startTime)
-    fun finishPerf() {
-      if (imePerf.endTime == null) {
-        imePerf.endTime = System.currentTimeMillis()
-        perfProvider.complete(imePerf)
-      }
-    }
-
-    var root: android.view.accessibility.AccessibilityNodeInfo? = null
-    var focusedNode: android.view.accessibility.AccessibilityNodeInfo? = null
-    var approximated: Boolean? = null
-    try {
-      val findFocusedNodePerf = MutablePerfEntry("findFocusedNode", System.currentTimeMillis())
-      imePerf.children.add(findFocusedNodePerf)
-      root = rootInActiveWindow
-      focusedNode = findFocusedEditableNode(root)
-      findFocusedNodePerf.endTime = System.currentTimeMillis()
-
-      val navigationActionId =
-        when (action) {
-          "next" -> android.view.inputmethod.EditorInfo.IME_ACTION_NEXT
-          "previous" -> android.view.inputmethod.EditorInfo.IME_ACTION_PREVIOUS
-          else -> null
-        }
-      val editorActionResult =
-        if (navigationActionId != null) {
-          CtrlProxyIme.current()?.performNavigationAction(navigationActionId)
-        } else null
-      // Accessibility nodes expose no configured imeOptions. ACTION_IME_ENTER alone does not
-      // prove the editor is configured for NEXT, so an unavailable IME uses traversal.
-      val step =
-        ImeActionStep.select(
-          action,
-          focusedNode != null,
-          android.os.Build.VERSION.SDK_INT,
-          hasImeConnection = editorActionResult != null,
-        )
-      approximated = step.approximated
-      val error = step.error
-      if (error != null) {
-        finishPerf()
-        val errorTime = System.currentTimeMillis()
-        Log.w(TAG, error)
-        launchRequestScope(requestId) {
-          broadcastImeActionResult(requestId, action, false, error, errorTime - startTime)
-        }
-        return
-      }
-
-      val executeActionPerf = MutablePerfEntry("executeAction", System.currentTimeMillis())
-      imePerf.children.add(executeActionPerf)
-      val success =
-        when (step) {
-          ImeActionStep.EDITOR_NEXT,
-          ImeActionStep.EDITOR_PREVIOUS -> editorActionResult == true
-          ImeActionStep.NEXT -> {
-            // Find next focusable element and focus it
-            val nextNode = findNextFocusableNode(root, focusedNode!!)
-            if (nextNode != null) {
-              val focusSuccess =
-                nextNode.performAction(
-                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS,
-                )
-              nextNode.recycle()
-              focusSuccess
-            } else {
-              Log.w(TAG, "No next focusable node found")
-              false
-            }
-          }
-          ImeActionStep.PREVIOUS -> {
-            // Find previous focusable element and focus it
-            val prevNode = findPreviousFocusableNode(root, focusedNode!!)
-            if (prevNode != null) {
-              val focusSuccess =
-                prevNode.performAction(
-                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS,
-                )
-              prevNode.recycle()
-              focusSuccess
-            } else {
-              Log.w(TAG, "No previous focusable node found")
-              false
-            }
-          }
-          ImeActionStep.IME_ENTER -> {
-            // API 30+: Use ACTION_IME_ENTER for proper IME action handling
-            @Suppress("NewApi")
-            val actionId =
-              android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER
-                .id
-            val imeResult = focusedNode!!.performAction(actionId)
-            Log.d(TAG, "ACTION_IME_ENTER result: $imeResult")
-            imeResult
-          }
-          ImeActionStep.KEYCODE_ENTER -> {
-            // Pre-API 30: Fall back to pressing Enter key via input shell command
-            // This is less reliable but works on older devices
-            Log.d(TAG, "Pre-API 30: falling back to KEYCODE_ENTER")
-            try {
-              Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
-            } catch (e: CancellationException) {
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Failed to send KEYCODE_ENTER", e)
-              false
-            }
-          }
-          else -> {
-            Log.w(TAG, "Unknown IME action: $action")
-            false
-          }
-        }
-      executeActionPerf.endTime = System.currentTimeMillis()
-
-      finishPerf()
-
-      Log.d(TAG, "IME action completed: success=$success")
-
-      // Wait for UI to settle, then extract fresh hierarchy
-      if (success) {
-        val freshHierarchy =
-          hierarchyDebouncer.extractAfterQuiescenceSuspending(
-            quiescenceMs = HierarchyQuiescence.POLL_MS,
-            maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-            pollIntervalMs = 10L,
-          )
-        if (freshHierarchy != null) {
-          broadcastHierarchyUpdate(freshHierarchy, sync = true)
-        }
-      }
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "IME action total time: ${totalTime}ms")
-
-      broadcastImeActionResult(
-        requestId,
-        action,
-        success,
-        if (success) null else "Action failed",
-        totalTime,
-        approximated,
-      )
-    } catch (e: CancellationException) {
-      finishPerf()
-      throw e
-    } catch (e: Exception) {
-      finishPerf()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing IME action", e)
-      broadcastImeActionResult(
-        requestId,
-        action,
-        false,
-        e.message,
-        errorTime - startTime,
-        approximated,
-      )
-    } finally {
-      if (focusedNode !== root) {
-        focusedNode?.recycle()
-      }
-      root?.recycle()
-    }
-  }
-
-  /**
-   * Perform select all text using AccessibilityService's ACTION_SET_SELECTION. This is
-   * significantly faster than using ADB double-tap gestures.
-   */
-  private suspend fun performSelectAll(requestId: String?) {
-    rememberedInsert = null
-    val startTime = System.currentTimeMillis()
-    Log.d(TAG, "performSelectAll")
-    perfProvider.serial("performSelectAll")
-
-    try {
-      perfProvider.startOperation("findFocusedNode")
-      val focusedNode = findFocusedEditableNode(rootInActiveWindow)
-      perfProvider.endOperation("findFocusedNode")
-
-      if (focusedNode == null) {
-        perfProvider.end()
-        val errorTime = System.currentTimeMillis()
-        val error = "No focused editable node found"
-        Log.w(TAG, error)
-        broadcastSelectAllResult(requestId, false, error, errorTime - startTime)
-        return
-      }
-
-      perfProvider.startOperation("setSelection")
-      // Get the text length to set selection from 0 to end
-      val text = focusedNode.text
-      val plan =
-        planSelectAll(
-          text?.length ?: 0,
-          focusedNode.isShowingHintTextCompat(),
-          focusedNode.textSelectionStart,
-          focusedNode.textSelectionEnd,
-        )
-      val textLength = plan.textLength
-
-      val outcome =
-        if (plan.shouldPerformAction) {
-          // Use ACTION_SET_SELECTION with start=0 and end=textLength to select all
-          val arguments =
-            android.os.Bundle().apply {
-              putInt(
-                android.view.accessibility.AccessibilityNodeInfo
-                  .ACTION_ARGUMENT_SELECTION_START_INT,
-                0,
-              )
-              putInt(
-                android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
-                textLength,
-              )
-            }
-          val actionSucceeded =
-            focusedNode.performAction(
-              android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
-              arguments,
-            )
-          val selectionRefreshed = !actionSucceeded && focusedNode.refresh()
-          selectAllOutcome(
-            textLength,
-            actionSucceeded,
-            selectionRefreshed,
-            if (selectionRefreshed) focusedNode.textSelectionStart else -1,
-            if (selectionRefreshed) focusedNode.textSelectionEnd else -1,
-          )
-        } else {
-          // No text to select, or all text is already selected
-          if (textLength == 0) Log.d(TAG, "No text in focused node to select")
-          SelectAllOutcome(true, null)
-        }
-      val success = outcome.success
-
-      focusedNode.recycle()
-      perfProvider.endOperation("setSelection")
-      perfProvider.end()
-
-      Log.d(TAG, "Select all completed: success=$success, textLength=$textLength")
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "Select all total time: ${totalTime}ms")
-
-      broadcastSelectAllResult(
-        requestId,
-        success,
-        outcome.error,
-        totalTime,
-      )
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing select all", e)
-      broadcastSelectAllResult(requestId, false, e.message, errorTime - startTime)
-    }
-  }
-
-  /**
    * Perform an accessibility action on a node selected from observed stable fields. Resource ID is
    * preserved as the legacy selector; newer clients can additionally use test tags, Android unique
    * IDs, and collection coordinates.
@@ -6303,7 +4851,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     resourceId: String?,
     selector: NodeSelector?,
   ) {
-    rememberedInsert = null
+    textInputController.forgetRememberedInsert()
     val startTime = System.currentTimeMillis()
     val effectiveSelector = selector?.takeIf { it.hasCriteria() }
     val targetDescription = effectiveSelector?.toString() ?: "resource-id: $resourceId"
@@ -6410,32 +4958,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       emptyList()
     }
 
-  /** Broadcast set text result to WebSocket clients */
-  private suspend fun broadcastSetTextResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping set text result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "set_text_result") {
-      webSocketServer.broadcastWithPerfSync { perfTiming ->
-        webSocketFrameJson("set_text_result", requestId = requestId, perfTiming = perfTiming) {
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (error != null) {
-            put("error", error)
-          }
-        }
-      }
-      Log.d(TAG, "Broadcasted set text result to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
   private suspend fun broadcastCommitTextResult(
     requestId: String?,
     success: Boolean,
@@ -6487,17 +5009,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     resultBroadcaster.guard(requestId, "set_keyboard_profile_result") {
-      webSocketServer.broadcastWithPerfSync { perfTiming ->
-        webSocketFrameJson(
-          "set_keyboard_profile_result",
+      webSocketServer.broadcastTypedWithPerf { perfTiming ->
+        SetKeyboardProfileResult(
+          timestamp = System.currentTimeMillis(),
           requestId = requestId,
+          success = success,
+          activeProfileId = activeProfileId,
+          previousProfileId = previousProfileId,
+          error = error,
           perfTiming = perfTiming,
-        ) {
-          put("success", success)
-          if (activeProfileId != null) put("activeProfileId", activeProfileId)
-          if (previousProfileId != null) put("previousProfileId", previousProfileId)
-          if (error != null) put("error", error)
-        }
+        )
       }
       Log.d(
         TAG,
@@ -6539,97 +5060,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  /** Broadcast insert text result to WebSocket clients. */
-  private suspend fun broadcastInsertTextResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    partialApplication: Boolean = false,
-    warning: String? = null,
-    caretPlaced: Boolean? = null,
-    resultingTextLength: Int? = null,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping insert text result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "insert_text_result") {
-      webSocketServer.broadcastWithPerfSync { perfTiming ->
-        webSocketFrameJson("insert_text_result", requestId = requestId, perfTiming = perfTiming) {
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (error != null) {
-            put("error", error)
-          }
-          if (warning != null) put("warning", warning)
-          if (caretPlaced != null) put("caretPlaced", caretPlaced)
-          if (resultingTextLength != null) put("resultingTextLength", resultingTextLength)
-          if (partialApplication) {
-            put("partialApplication", true)
-          }
-        }
-      }
-    }
-  }
-
-  /** Broadcast IME action result to WebSocket clients */
-  private suspend fun broadcastImeActionResult(
-    requestId: String?,
-    action: String,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    approximated: Boolean? = null,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping IME action result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "ime_action_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        webSocketFrameJson("ime_action_result", requestId = requestId, perfTiming = perfTiming) {
-          if (approximated != null) put("approximated", approximated)
-          put("action", action)
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (error != null) {
-            put("error", error)
-          }
-        }
-      }
-      Log.d(TAG, "Broadcasted IME action result to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
-  /** Broadcast select all result to WebSocket clients */
-  private suspend fun broadcastSelectAllResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping select all result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "select_all_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        webSocketFrameJson("select_all_result", requestId = requestId, perfTiming = perfTiming) {
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (error != null) {
-            put("error", error)
-          }
-        }
-      }
-      Log.d(TAG, "Broadcasted select all result to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
   /** Broadcast accessibility action result to WebSocket clients */
   private suspend fun broadcastActionResult(
     requestId: String?,
@@ -6645,18 +5075,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     resultBroadcaster.guard(requestId, "action_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        webSocketFrameJson("action_result", requestId = requestId, perfTiming = perfTiming) {
-          put("action", action)
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (error != null) {
-            put("error", error)
-          }
-          if (alreadySatisfied) {
-            put("alreadySatisfied", true)
-          }
-        }
+      webSocketServer.broadcastTypedWithPerf { perfTiming ->
+        ActionResult(
+          timestamp = System.currentTimeMillis(),
+          requestId = requestId,
+          success = success,
+          action = action,
+          totalTimeMs = totalTimeMs,
+          error = error,
+          perfTiming = perfTiming,
+          alreadySatisfied = alreadySatisfied,
+        )
       }
       Log.d(TAG, "Broadcasted action result to ${webSocketServer.getConnectionCount()} clients")
     }
@@ -6675,113 +5104,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     resultBroadcaster.guard(requestId, "permission_result") {
       val success = result.error == null
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        webSocketFrameJson("permission_result", requestId = requestId, perfTiming = perfTiming) {
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          put("permission", result.permission)
-          put("granted", result.granted)
-          put("requestLaunched", result.requestLaunched)
-          put("canRequest", result.canRequest)
-          put("requiresSettings", result.requiresSettings)
-          if (result.instructions != null) {
-            put("instructions", result.instructions)
-          }
-          if (result.adbCommand != null) {
-            put("adbCommand", result.adbCommand)
-          }
-          if (result.error != null) {
-            put("error", result.error)
-          }
-        }
+      webSocketServer.broadcastTypedWithPerf { perfTiming ->
+        PermissionResult(
+          timestamp = System.currentTimeMillis(),
+          requestId = requestId,
+          success = success,
+          permission = result.permission,
+          granted = result.granted,
+          requestLaunched = result.requestLaunched,
+          canRequest = result.canRequest,
+          requiresSettings = result.requiresSettings,
+          instructions = result.instructions,
+          adbCommand = result.adbCommand,
+          totalTimeMs = totalTimeMs,
+          error = result.error,
+          perfTiming = perfTiming,
+        )
       }
       Log.d(TAG, "Broadcasted permission result to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
-  /** Broadcast swipe result to WebSocket clients */
-  private suspend fun broadcastSwipeResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    gestureTimeMs: Long?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping swipe result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "swipe_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        swipeResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
-      }
-      Log.d(TAG, "Broadcasted swipe result to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
-  /** Broadcast drag result to WebSocket clients */
-  private suspend fun broadcastDragResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    gestureTimeMs: Long?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping drag result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "drag_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        dragResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
-      }
-      Log.d(TAG, "Broadcasted drag result to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
-  /** Broadcast tap coordinates result to WebSocket clients */
-  private suspend fun broadcastTapCoordinatesResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping tap coordinates result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "tap_coordinates_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        tapCoordinatesResultFrame(requestId, success, error, totalTimeMs, perfTiming)
-      }
-      Log.d(
-        TAG,
-        "Broadcasted tap coordinates result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  /** Broadcast pinch result to WebSocket clients */
-  private suspend fun broadcastPinchResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    gestureTimeMs: Long?,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping pinch result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "pinch_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        pinchResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
-      }
-      Log.d(TAG, "Broadcasted pinch result to ${webSocketServer.getConnectionCount()} clients")
     }
   }
 
@@ -7126,7 +5466,3 @@ internal data class ImeFocusCandidate(
 
 internal fun isImeFocusCandidate(row: ImeFocusCandidate): Boolean =
   row.isEditable && row.isFocusable && row.isVisibleToUser && row.isEnabled
-
-/** `isShowingHintText` is API 26+; older platforms cannot report it, so treat the text as real. */
-private fun AccessibilityNodeInfo.isShowingHintTextCompat(): Boolean =
-  Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isShowingHintText

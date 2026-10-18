@@ -6,6 +6,11 @@ setup_file() {
   mkdir -p "$repo_dir/scripts/lib" "$repo_dir/src"
   cp "$BATS_TEST_DIRNAME/../../scripts/check-no-new-direct-simctl.sh" "$repo_dir/scripts/"
   cp "$BATS_TEST_DIRNAME/../../scripts/lib/vcs-diff.sh" "$repo_dir/scripts/lib/"
+  cp "$BATS_TEST_DIRNAME/../../scripts/check-boundary-row.ts" "$repo_dir/scripts/"
+  cp "$BATS_TEST_DIRNAME/../../scripts/lib/boundary-row.sh" "$BATS_TEST_DIRNAME"/../../scripts/lib/*.ts "$repo_dir/scripts/lib/"
+  mkdir -p "$repo_dir/src/utils"
+  cp "$BATS_TEST_DIRNAME/../../src/utils/io.ts" "$repo_dir/src/utils/"
+  ln -s "$BATS_TEST_DIRNAME/../../node_modules" "$repo_dir/node_modules"
   git -C "$repo_dir" init -q
   git -C "$repo_dir" config user.email test@example.com
   git -C "$repo_dir" config user.name test

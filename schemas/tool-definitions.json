@@ -599,6 +599,27 @@
       "required": ["lock", "deviceCount"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "lock": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "deviceCount": {
+          "type": "number"
+        }
+      },
+      "required": ["success", "lock", "deviceId", "deviceCount"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/planOnly": true
     }
@@ -659,6 +680,51 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "message": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["match", "fail", "cancel", "error", "enroll", "unenroll"]
+        },
+        "modality": {
+          "type": "string",
+          "enum": ["any", "fingerprint", "face"]
+        },
+        "fingerprintId": {
+          "type": "number"
+        },
+        "errorCode": {
+          "type": "number"
+        },
+        "supported": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "const": "partial"
+            }
+          ]
+        },
+        "observation": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "message", "action", "modality", "supported"],
+      "additionalProperties": {}
     }
   },
   {
@@ -843,6 +909,30 @@
       "required": ["appId"],
       "additionalProperties": false,
       "description": "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`"
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "appId", "name"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true
@@ -1277,6 +1367,74 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "snapshotName": {
+          "type": "string"
+        },
+        "snapshotType": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "deviceName": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "manifest": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "bundleStatuses": {
+          "type": "array",
+          "items": {}
+        },
+        "evictedSnapshotNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "restoreMode": {
+          "type": "string",
+          "enum": ["vm", "settings_only"]
+        },
+        "restoreNote": {
+          "type": "string"
+        },
+        "restoredAt": {
+          "type": "string"
+        },
+        "deviceSessionUuid": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": ["message", "snapshotName", "snapshotType", "deviceId", "deviceName"]
     }
   },
   {
@@ -2914,6 +3072,28 @@
       "required": ["appId", "adapterName", "name"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "adapterName": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "entries": {}
+      },
+      "required": ["success", "appId", "adapterName", "name", "entries"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
       "automobile/deviceReadOnly": true
@@ -2950,6 +3130,107 @@
       },
       "required": ["appId"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "schemes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "intentFilters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string"
+              },
+              "category": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "data": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "scheme": {
+                      "type": "string"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "port": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "pathPattern": {
+                      "type": "string"
+                    },
+                    "pathPrefix": {
+                      "type": "string"
+                    },
+                    "mimeType": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": {}
+                }
+              }
+            },
+            "required": ["action", "category"],
+            "additionalProperties": {}
+          }
+        },
+        "supportedMimeTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "note": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "rawOutput": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "success",
+        "appId",
+        "schemes",
+        "hosts",
+        "intentFilters",
+        "supportedMimeTypes"
+      ],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/deviceReadOnly": true
@@ -3681,6 +3962,84 @@
       "required": ["appId"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "policyAccess": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "type": "boolean"
+            },
+            "allowed": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "android_cmd_notification",
+                "android_dumpsys_notification",
+                "ios_bulletinboard_plist",
+                "unsupported"
+              ]
+            },
+            "rawValue": {
+              "type": "string"
+            },
+            "warning": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            },
+            "authorizationStatus": {
+              "type": "string",
+              "enum": ["notDetermined", "denied", "authorized", "provisional", "ephemeral"]
+            },
+            "lockScreen": {
+              "type": "boolean"
+            },
+            "notificationCenter": {
+              "type": "boolean"
+            },
+            "alerts": {
+              "type": "boolean"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "appId", "deviceId", "platform", "policyAccess"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/deviceReadOnly": true
     }
@@ -3738,6 +4097,93 @@
       },
       "required": ["scope", "key"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["systemProperty", "sharedPreferences", "userDefaults"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "suite": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "number"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "type": "string"
+        },
+        "found": {
+          "type": "boolean"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "redacted": {
+          "type": "boolean",
+          "const": true
+        },
+        "valueFormat": {
+          "type": "string",
+          "enum": ["canonical-json", "sdk-description"]
+        },
+        "warning": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "storeRoute": {
+          "type": "string",
+          "enum": ["sdk", "container-plist", "defaults"]
+        }
+      },
+      "required": ["success", "deviceId", "platform", "scope", "key", "value", "found"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/deviceReadOnly": true
@@ -3953,6 +4399,20 @@
           ]
         }
       }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success"],
+      "additionalProperties": {}
     }
   },
   {
@@ -8110,6 +8570,25 @@
       "required": ["appId", "adapterName"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "adapterName": {
+          "type": "string"
+        },
+        "stores": {}
+      },
+      "required": ["success", "appId", "adapterName", "stores"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
       "automobile/deviceReadOnly": true
@@ -9780,6 +10259,95 @@
       "required": ["action", "x", "y"],
       "additionalProperties": false,
       "description": "Simultaneous 2-5 finger tap, long press, or swipe at a screen point. Fingers sit in a horizontal row centered on x/y."
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "x1": {
+          "type": "number"
+        },
+        "y1": {
+          "type": "number"
+        },
+        "x2": {
+          "type": "number"
+        },
+        "y2": {
+          "type": "number"
+        },
+        "duration": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        },
+        "observation": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "action": {
+          "type": "string",
+          "enum": ["tap", "longPress", "swipe"]
+        },
+        "fingers": {
+          "type": "number"
+        },
+        "fingerSpacing": {
+          "type": "number"
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": ["x", "y"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "message",
+        "success",
+        "deviceId",
+        "platform",
+        "x1",
+        "y1",
+        "x2",
+        "y2",
+        "duration",
+        "action",
+        "fingers",
+        "fingerSpacing",
+        "points"
+      ],
+      "additionalProperties": {}
     }
   },
   {
@@ -16014,6 +16582,31 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "action": {
+          "type": "string",
+          "enum": ["call", "accept", "cancel", "busy", "hold"]
+        },
+        "phoneNumber": {
+          "type": "string"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "action", "supported", "message"],
+      "additionalProperties": {}
     }
   },
   {
@@ -16235,6 +16828,43 @@
       },
       "required": ["title", "body"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["sdk", "simctlPush"]
+        },
+        "imageType": {
+          "type": "string",
+          "enum": ["normal", "bigPicture"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "channelId": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "supported"],
+      "additionalProperties": {}
     }
   },
   {
@@ -24084,7 +24714,7 @@
           "minLength": 1
         },
         "display": {
-          "description": "show only: panel key, role, or active to show the prototype on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising prototype_display_id_v1; a disconnected panel is refused. Ignored, with a warning, by a same-id show without reset, which keeps the display the prototype is on.",
+          "description": "show only: panel key, role, or active to show the prototype on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising prototype_display_id_v2; a disconnected panel is refused. Ignored, with a warning, by a same-id show without reset, which keeps the display the prototype is on.",
           "type": "string"
         },
         "replaceOthers": {
@@ -26596,6 +27226,112 @@
       },
       "required": ["target", "files"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "warning": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean",
+          "enum": [true]
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "target": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "destinationPath": {
+                "type": "string"
+              },
+              "byteCount": {
+                "type": "number"
+              },
+              "resourceUri": {
+                "type": "string"
+              },
+              "effects": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["completed", "notRequested", "unavailable"]
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["type", "status"],
+                  "additionalProperties": {}
+                }
+              }
+            },
+            "required": ["destinationPath", "byteCount", "effects"],
+            "additionalProperties": {}
+          }
+        },
+        "appId": {
+          "type": "string"
+        },
+        "container": {
+          "type": "string"
+        },
+        "destinationPath": {
+          "type": "string"
+        },
+        "byteCount": {
+          "type": "number"
+        },
+        "resourceUri": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "deviceId", "platform"],
+      "if": {
+        "properties": {
+          "success": {
+            "const": true
+          }
+        },
+        "required": ["success"]
+      },
+      "then": {
+        "required": ["target", "files"]
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "success": {
+              "const": true
+            }
+          },
+          "required": ["success"]
+        },
+        "then": {
+          "required": ["appId", "container", "destinationPath", "byteCount", "resourceUri"]
+        }
+      }
     }
   },
   {
@@ -27217,6 +27953,33 @@
       "additionalProperties": false,
       "description": "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`"
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "appId", "name", "key"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true
     }
@@ -27269,6 +28032,51 @@
       },
       "required": ["appId", "paths"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "container": {
+          "type": "string"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["reset", "missing", "failed"]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["path", "status"],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": ["success", "deviceId", "platform", "appId", "container", "entries"],
+      "additionalProperties": {}
     }
   },
   {
@@ -31172,6 +31980,30 @@
       },
       "required": ["phoneNumber", "message"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "phoneNumber": {
+          "type": "string"
+        },
+        "messageLength": {
+          "type": "number"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "phoneNumber", "messageLength", "supported", "message"],
+      "additionalProperties": {}
     }
   },
   {
@@ -32802,6 +33634,39 @@
       "additionalProperties": false,
       "description": "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`"
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "effectiveValueDiffers": {
+          "type": "boolean"
+        }
+      },
+      "required": ["success", "appId", "name", "key", "type"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true
     }
@@ -32841,6 +33706,84 @@
       },
       "required": ["appId", "policyAccess"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "policyAccess": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "type": "boolean"
+            },
+            "allowed": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "android_cmd_notification",
+                "android_dumpsys_notification",
+                "ios_bulletinboard_plist",
+                "unsupported"
+              ]
+            },
+            "rawValue": {
+              "type": "string"
+            },
+            "warning": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            },
+            "authorizationStatus": {
+              "type": "string",
+              "enum": ["notDetermined", "denied", "authorized", "provisional", "ephemeral"]
+            },
+            "lockScreen": {
+              "type": "boolean"
+            },
+            "notificationCenter": {
+              "type": "boolean"
+            },
+            "alerts": {
+              "type": "boolean"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "appId", "deviceId", "platform", "policyAccess"],
+      "additionalProperties": {}
     }
   },
   {
@@ -33033,6 +33976,93 @@
       },
       "required": ["scope", "key", "value", "type"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["systemProperty", "sharedPreferences", "userDefaults"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "suite": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "number"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "type": "string"
+        },
+        "found": {
+          "type": "boolean"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "redacted": {
+          "type": "boolean",
+          "const": true
+        },
+        "valueFormat": {
+          "type": "string",
+          "enum": ["canonical-json", "sdk-description"]
+        },
+        "warning": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "storeRoute": {
+          "type": "string",
+          "enum": ["sdk", "container-plist", "defaults"]
+        }
+      },
+      "required": ["success", "deviceId", "platform", "scope", "key", "value", "found"],
+      "additionalProperties": {}
     }
   },
   {
@@ -33519,6 +34549,141 @@
       },
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "expiresAt": {},
+        "unit": {
+          "type": "string",
+          "enum": ["points", "pixels"]
+        },
+        "requestedBounds": {
+          "type": "object",
+          "properties": {
+            "left": {
+              "type": "number"
+            },
+            "top": {
+              "type": "number"
+            },
+            "right": {
+              "type": "number"
+            },
+            "bottom": {
+              "type": "number"
+            }
+          },
+          "required": ["left", "top", "right", "bottom"],
+          "additionalProperties": {}
+        },
+        "clippedBounds": {
+          "type": "object",
+          "properties": {
+            "left": {
+              "type": "number"
+            },
+            "top": {
+              "type": "number"
+            },
+            "right": {
+              "type": "number"
+            },
+            "bottom": {
+              "type": "number"
+            }
+          },
+          "required": ["left", "top", "right", "bottom"],
+          "additionalProperties": {}
+        },
+        "screenSize": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            }
+          },
+          "required": ["width", "height"],
+          "additionalProperties": {}
+        },
+        "imageSize": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            }
+          },
+          "required": ["width", "height"],
+          "additionalProperties": {}
+        },
+        "pixelsPerNativeUnit": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": ["x", "y"],
+          "additionalProperties": false
+        },
+        "scaleProvenance": {
+          "type": "string",
+          "enum": ["raster-dimensions", "native-scale-confirmed"]
+        },
+        "clipped": {
+          "type": "boolean"
+        },
+        "rasterBounds": {
+          "type": "object",
+          "properties": {
+            "left": {
+              "type": "number"
+            },
+            "top": {
+              "type": "number"
+            },
+            "right": {
+              "type": "number"
+            },
+            "bottom": {
+              "type": "number"
+            }
+          },
+          "required": ["left", "top", "right", "bottom"],
+          "additionalProperties": false
+        },
+        "screenshotOrientation": {
+          "type": "string",
+          "enum": ["display", "native"]
+        }
+      },
+      "required": [
+        "path",
+        "unit",
+        "requestedBounds",
+        "clippedBounds",
+        "screenSize",
+        "imageSize",
+        "pixelsPerNativeUnit",
+        "scaleProvenance",
+        "clipped",
+        "rasterBounds",
+        "screenshotOrientation"
+      ],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/deviceReadOnly": true
     }
@@ -33562,6 +34727,59 @@
       },
       "required": ["appId", "databasePath", "query"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["query", "mutation"]
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {}
+          }
+        },
+        "rowsAffected": {
+          "type": "number"
+        },
+        "bigIntegerColumns": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "diagnostic": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": ["code", "message"],
+          "additionalProperties": {}
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": ["message", "type"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true
@@ -33640,6 +34858,84 @@
       },
       "required": ["sessionUuid", "directory", "files"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "enum": [true, false]
+        },
+        "sessionUuid": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "directory": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "number"
+        },
+        "userSource": {
+          "type": "string",
+          "enum": ["explicit", "currentUser", "foregroundPackage", "managedProfile", "primary"]
+        },
+        "destinationDirectory": {
+          "type": "string"
+        },
+        "reset": {
+          "type": "boolean"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "status": {
+          "type": "string",
+          "const": "unavailable"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "sessionUuid", "deviceId", "platform"],
+      "if": {
+        "properties": {
+          "success": {
+            "const": true
+          }
+        },
+        "required": ["success"]
+      },
+      "then": {
+        "required": ["directory", "userId", "userSource", "destinationDirectory", "reset", "files"]
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "success": {
+              "const": false
+            }
+          },
+          "required": ["success"]
+        },
+        "then": {
+          "required": ["status", "reason"]
+        }
+      }
     }
   },
   {
@@ -34051,6 +35347,68 @@
       },
       "additionalProperties": false,
       "description": "Swipe from one screen point to another, including diagonals. Bare from/to use platform-native observe coordinates; image uses explicit normalized fractions (preferred) or real raster pixels from a screenshot or observe.crop."
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "x1": {
+          "type": "number"
+        },
+        "y1": {
+          "type": "number"
+        },
+        "x2": {
+          "type": "number"
+        },
+        "y2": {
+          "type": "number"
+        },
+        "duration": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        },
+        "observation": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": {}
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "velocityPxPerSecond": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "message",
+        "success",
+        "deviceId",
+        "platform",
+        "x1",
+        "y1",
+        "x2",
+        "y2",
+        "duration"
+      ],
+      "additionalProperties": {}
     }
   },
   {

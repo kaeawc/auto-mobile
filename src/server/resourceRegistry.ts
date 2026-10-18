@@ -737,6 +737,20 @@ class ResourceRegistryClass {
     return { notified: this.servers.size, ephemeral: this.ephemeralServers.size };
   }
 
+  /** Test-only: copy of the registered resources and templates, for {@link restoreForTesting}. */
+  snapshotForTesting(): {
+    resources: Map<string, RegisteredResource>;
+    templates: Map<string, RegisteredResourceTemplate>;
+  } {
+    return { resources: new Map(this.resources), templates: new Map(this.templates) };
+  }
+
+  /** Test-only: put back what {@link snapshotForTesting} captured, replacing current entries. */
+  restoreForTesting(snapshot: ReturnType<ResourceRegistryClass["snapshotForTesting"]>): void {
+    this.resources = new Map(snapshot.resources);
+    this.templates = new Map(snapshot.templates);
+  }
+
   // Clear all registered resources, templates, and subscriptions (for testing)
   clearResources(): void {
     this.clearEpoch++;

@@ -136,6 +136,16 @@ export class DaemonState implements DaemonStateLike {
   /**
    * Get the SessionManager
    */
+  /**
+   * Test-only: install a partial SessionManager fake without a full `initialize`, returning the
+   * previous one so the caller can restore it. Pass null to clear.
+   */
+  setSessionManagerForTesting(manager: Partial<SessionManager> | null): SessionManager | null {
+    const previous = this.sessionManager;
+    this.sessionManager = manager as SessionManager | null;
+    return previous;
+  }
+
   getSessionManager(): SessionManager {
     if (!this.sessionManager) {
       throw new Error("DaemonState not initialized");

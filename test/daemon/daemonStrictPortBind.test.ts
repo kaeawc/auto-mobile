@@ -24,8 +24,7 @@ import { ActionableError } from "../../src/models/ActionableError";
  */
 
 interface DaemonHttpBindInternals {
-  startHttpServer(): Promise<void>;
-  closeHttpListener(): Promise<void>;
+  httpIngress: { start(): Promise<void>; closeListener(): Promise<void> };
 }
 
 function bindInternals(daemon: Daemon): DaemonHttpBindInternals {
@@ -93,13 +92,13 @@ describe("Daemon strict-port bind (issue #6260)", () => {
       "bind-refused",
     );
 
-    await expect(bindInternals(daemon).startHttpServer()).rejects.toThrow(ActionableError);
+    await expect(bindInternals(daemon).httpIngress.start()).rejects.toThrow(ActionableError);
 
     const daemonAgain = daemonWithFakeHttpServer(
       { port, host: "127.0.0.1", strictPort: true },
       "bind-refused",
     );
-    await expect(bindInternals(daemonAgain).startHttpServer()).rejects.toThrow(
+    await expect(bindInternals(daemonAgain).httpIngress.start()).rejects.toThrow(
       new RegExp(`Port ${port}.*already in use`),
     );
   });
@@ -110,7 +109,7 @@ describe("Daemon strict-port bind (issue #6260)", () => {
 
     let caught: unknown;
     try {
-      await bindInternals(daemon).startHttpServer();
+      await bindInternals(daemon).httpIngress.start();
     } catch (error) {
       caught = error;
     }
@@ -125,12 +124,12 @@ describe("Daemon strict-port bind (issue #6260)", () => {
       "bind-ok",
     );
 
-    await bindInternals(daemon).startHttpServer();
+    await bindInternals(daemon).httpIngress.start();
 
     // No port+1..3 fallback: the daemon must still be configured for the
     // exact requested port, not a substitute one.
     expect((daemon as unknown as { port: number }).port).toBe(port);
 
-    await bindInternals(daemon).closeHttpListener();
+    await bindInternals(daemon).httpIngress.closeListener();
   });
 });

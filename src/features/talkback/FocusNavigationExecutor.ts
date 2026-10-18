@@ -150,9 +150,18 @@ interface FocusNavigationExecutorDependencies {
   deviceResolver?: (deviceId: string) => BootedDevice;
 }
 
+type FocusDriverClient = Pick<
+  AndroidCtrlProxyClient,
+  | "getAccessibilityHierarchy"
+  | "requestTraversalOrder"
+  | "requestCurrentFocus"
+  | "requestAction"
+  | "requestNodeAction"
+  | "supportsNodeActionSelectors"
+>;
 class DefaultFocusNavigationDriver implements FocusNavigationDriver {
-  private accessibilityService: AndroidCtrlProxyClient;
-  constructor(accessibilityService: AndroidCtrlProxyClient) {
+  private accessibilityService: FocusDriverClient;
+  constructor(accessibilityService: FocusDriverClient) {
     this.accessibilityService = accessibilityService;
   }
 

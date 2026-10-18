@@ -255,7 +255,6 @@ const HOST_TOUCHING_DAEMON_METHODS = [
   "writePidFile",
   "persistPidFileData",
   "startHttpIngress",
-  "startHttpServer",
   "bindControlSocket",
   "startServicesAfterSocketBind",
   "startAuxiliarySocket",

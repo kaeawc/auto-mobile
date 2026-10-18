@@ -8,7 +8,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, PressButtonResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { IOSCtrlProxyClient } from "../observe/ios";
+import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBackend";
@@ -528,7 +528,7 @@ export class PressButton extends BaseVisualChange {
   }
 
   private async executeiOSNavigationButton(
-    client: IOSCtrlProxyClient,
+    client: IOSCtrlProxy,
     button: string,
     timeoutMs?: number,
     frameContext?: string,

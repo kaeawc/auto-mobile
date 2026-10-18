@@ -10,7 +10,6 @@ src/daemon/daemon.ts -> src/server/adbOfflineHeldDevices
 src/daemon/daemon.ts -> src/server/appearanceManager
 src/daemon/daemon.ts -> src/server/appearanceSessionKey
 src/daemon/daemon.ts -> src/server/bootedDeviceResources
-src/daemon/daemon.ts -> src/server/daemonSessionToolBindingStore
 src/daemon/daemon.ts -> src/server/deviceExecutionBinding
 src/daemon/daemon.ts -> src/server/deviceStateChangeNotifier
 src/daemon/daemon.ts -> src/server/executionTracker
@@ -22,6 +21,8 @@ src/daemon/daemon.ts -> src/server/tasks/daemonTaskManager
 src/daemon/daemon.ts -> src/server/toolSelectionProfileRegistry
 src/daemon/daemon.ts -> src/server/videoRecordingManager
 src/daemon/daemonDependencies.ts -> src/server/toolSelectionProfileRegistry
+src/daemon/daemonHttpIngress.ts -> src/server/daemonSessionToolBindingStore
+src/daemon/daemonHttpIngress.ts -> src/server/executionTracker
 src/daemon/daemonMcpProxy.ts -> src/server/deviceOutsideBoundSessionRefusal
 src/daemon/daemonMcpProxy.ts -> src/server/deviceReadOnlyArgShapes
 src/daemon/daemonMcpProxy.ts -> src/server/deviceSessionResult

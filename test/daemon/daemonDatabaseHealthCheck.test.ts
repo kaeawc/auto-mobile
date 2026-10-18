@@ -24,7 +24,7 @@ interface FakeObservationStreamHealth {
 }
 
 interface DaemonHealthInternals {
-  httpServer: { listening: boolean } | null;
+  httpIngress: { httpServer: { listening: boolean } | null };
   socketServer: FakeSocketServer | null;
   observationStreamHealth: FakeObservationStreamHealth;
   healthCheckTimer: NodeJS.Timeout | null;
@@ -108,7 +108,7 @@ describe("Daemon database health check", () => {
     });
     const internals = daemon as unknown as DaemonHealthInternals;
     cleanup = { internals, timer };
-    internals.httpServer = { listening: true };
+    internals.httpIngress.httpServer = { listening: true };
     internals.socketServer = { isListening: () => true };
     internals.startHealthCheckTimer();
     // Move past the schedule before firing; async advance preserves the late reading.
@@ -241,7 +241,7 @@ describe("Daemon database health check", () => {
     cleanup = { internals, timer };
     const recoveryCalls: Array<{ at: number; failureKind?: string }> = [];
 
-    internals.httpServer = { listening: true };
+    internals.httpIngress.httpServer = { listening: true };
     internals.socketServer = { isListening: () => true };
     internals.attemptRecovery = async (failureKind) => {
       recoveryCalls.push({ at: timer.now(), failureKind });
@@ -273,7 +273,7 @@ describe("Daemon database health check", () => {
     const internals = daemon as unknown as DaemonHealthInternals;
     cleanup = { internals, timer };
 
-    internals.httpServer = { listening: true };
+    internals.httpIngress.httpServer = { listening: true };
     internals.socketServer = { isListening: () => true };
     internals.startHealthCheckTimer();
 
@@ -295,7 +295,7 @@ describe("Daemon database health check", () => {
     const internals = daemon as unknown as DaemonHealthInternals;
     cleanup = { internals, timer };
 
-    internals.httpServer = { listening: true };
+    internals.httpIngress.httpServer = { listening: true };
     internals.socketServer = { isListening: () => true };
     internals.startHealthCheckTimer();
 
@@ -319,7 +319,7 @@ describe("Daemon database health check", () => {
     const internals = daemon as unknown as DaemonHealthInternals;
     cleanup = { internals, timer };
 
-    internals.httpServer = { listening: true };
+    internals.httpIngress.httpServer = { listening: true };
     internals.socketServer = { isListening: () => true };
     internals.startHealthCheckTimer();
 
@@ -380,7 +380,7 @@ describe("Daemon database health check", () => {
     const internals = daemon as unknown as DaemonHealthInternals;
     cleanup = { internals, timer };
 
-    internals.httpServer = { listening: false };
+    internals.httpIngress.httpServer = { listening: false };
     internals.socketServer = { isListening: () => true };
     internals.startHealthCheckTimer();
 
@@ -388,7 +388,7 @@ describe("Daemon database health check", () => {
       await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
     }
 
-    internals.httpServer = { listening: true };
+    internals.httpIngress.httpServer = { listening: true };
     await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
 
     expect(databaseHealthProbe.checkCalls).toBe(1);
@@ -413,13 +413,13 @@ describe("Daemon database health check", () => {
     const internals = daemon as unknown as DaemonHealthInternals;
     cleanup = { internals, timer };
 
-    internals.httpServer = { listening: false };
+    internals.httpIngress.httpServer = { listening: false };
     internals.socketServer = { isListening: () => true };
     internals.startHealthCheckTimer();
 
     await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
 
-    internals.httpServer = { listening: true };
+    internals.httpIngress.httpServer = { listening: true };
     internals.socketServer = { isListening: () => false };
     await timer.advanceTimersByTimeAsync(HEALTH_CHECK_INTERVAL_MS);
 
@@ -446,7 +446,7 @@ describe("Daemon database health check", () => {
     const recoveryCalls: Array<{ at: number; failureKind?: string }> = [];
     let observationHealthChecks = 0;
 
-    internals.httpServer = { listening: false };
+    internals.httpIngress.httpServer = { listening: false };
     internals.socketServer = { isListening: () => true };
     internals.observationStreamHealth = {
       isHealthy: () => {
@@ -484,7 +484,7 @@ describe("Daemon database health check", () => {
     const recoveryCalls: Array<{ at: number; failureKind?: string }> = [];
     let observationHealthChecks = 0;
 
-    internals.httpServer = { listening: true };
+    internals.httpIngress.httpServer = { listening: true };
     internals.socketServer = { isListening: () => false };
     internals.observationStreamHealth = {
       isHealthy: () => {
@@ -521,7 +521,7 @@ describe("Daemon database health check", () => {
     cleanup = { internals, timer };
     const recoveryCalls: Array<{ at: number; failureKind?: string }> = [];
 
-    internals.httpServer = { listening: true };
+    internals.httpIngress.httpServer = { listening: true };
     internals.socketServer = { isListening: () => true };
     internals.observationStreamHealth = {
       isHealthy: () => false,

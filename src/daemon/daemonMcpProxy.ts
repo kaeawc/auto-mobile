@@ -816,6 +816,8 @@ export class DaemonMcpProxy {
   private mintedTaskOwnerKey: string | undefined;
   /** Device-binding calls relayed as MCP tasks, bound once from their completed result (#4668). */
   private deviceBindingTasks: TaskSessionBindings<ForwardedResultContext> | undefined;
+  /** A device-binding task outlasted the close's drain: its late bind must publish nothing (#13155). */
+  private deviceBindingTasksAbandoned = false;
   private readonly buildIdentity: BuildIdentity;
   private readonly clientVersion: string;
   private readonly clientAssetVersion: string | null;
@@ -3431,6 +3433,9 @@ export class DaemonMcpProxy {
           throw error;
         }
       },
+      abandon: () => {
+        this.deviceBindingTasksAbandoned = true;
+      },
       retain: ({ learnsResultSession, callReleaseEpoch }) =>
         this.releaseLedger.retainAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch),
       release: ({ learnsResultSession, callReleaseEpoch }) =>
@@ -5491,7 +5496,9 @@ export class DaemonMcpProxy {
       fenceReleasedForwardedSession: (...args) => this.fenceReleasedForwardedSession(...args),
       throwIfSessionReleasedSince: (...args) => this.throwIfSessionReleasedSince(...args),
       sessionReleaseReasonSince: (sessionUuid, forwardEpoch) =>
-        this.releaseLedger.sessionReleaseReasonSince(sessionUuid, forwardEpoch),
+        this.deviceBindingTasksAbandoned
+          ? "proxy_closing"
+          : this.releaseLedger.sessionReleaseReasonSince(sessionUuid, forwardEpoch),
       invalidateListCache: (...args) => this.invalidateListCache(...args),
       notifyListChanged: (...args) => this.notifyListChanged(...args),
       holdPreviousBinding: (...args) => this.holdPreviousBinding(...args),
@@ -6466,6 +6473,8 @@ export class DaemonMcpProxy {
     this.cancelBackgroundConnectRetry();
     this.cancelConnectedFallbackReconcile();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
+    // A completed device-binding task must not bind a session after the release below (#13144).
+    await this.deviceBindingTasks?.drain(BROKER_EXECUTION_RELEASE_TIMEOUT_MS);
     // Before the keeper stops, so the lease stays live until the release lands (#11176).
     await Promise.all([
       this.releaseOwnedSessions(connectedClient),
@@ -6513,8 +6522,6 @@ export class DaemonMcpProxy {
     // backstop the reference counter does not cover — a proxy closed with calls
     // still in flight, or reused across a reconnect, cannot retain release
     // records across its lifetime (issue #4689).
-    // No device-binding task binds into a closed proxy; their acquisition epochs go with them.
-    this.deviceBindingTasks?.clear();
     this.releaseLedger.clearReleaseRecords();
     this.invalidateCache();
     logger.debug("[DaemonMcpProxy] Disconnected from daemon");

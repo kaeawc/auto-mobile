@@ -18,7 +18,7 @@ import type {
   AccessibilityHierarchy,
   HierarchyDelegateContext,
 } from "../../../src/features/observe/android/types";
-import type { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { makeViewHierarchyCtrlProxy } from "../../helpers/androidViewHierarchyClient";
 import type { XCTestHierarchy } from "../../../src/features/observe/ios/types";
 import { GetBackStack } from "../../../src/features/observe/GetBackStack";
 import { DisplaySelectionError } from "../../../src/features/observe/DisplaySelection";
@@ -425,9 +425,9 @@ describe("observation display stamp", () => {
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
     };
     const converter = new CtrlProxyHierarchy({ timer } as HierarchyDelegateContext);
-    const client = {
+    const client = makeViewHierarchyCtrlProxy({
       getAccessibilityHierarchy: async () => converter.convertToViewHierarchyResult(raw),
-    } as unknown as AndroidCtrlProxyClient;
+    });
     const hierarchy = new ViewHierarchy(
       device,
       new FakeAdbClientFactory(adb),

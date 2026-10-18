@@ -144,7 +144,7 @@ import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
 import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
-import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
+import { FeatureFlagService, type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import { createTapStrategy } from "./strategies/createTapStrategy";
 import { LongPressMetadataDetector, type LongPressMetadata } from "./LongPressMetadataDetector";
 import { RealWaitForCondition } from "../observe/WaitForCondition";
@@ -215,7 +215,7 @@ interface TapOnElementDependencies extends DisplayFenceDependencies {
   talkBackStrategy?: TalkBackTapStrategy;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   iosVoiceOverDetector?: IosVoiceOverDetector;
-  featureFlags?: FeatureFlagService;
+  featureFlags?: FeatureFlagReader;
   waitForCondition?: WaitForCondition;
   /**
    * Override the platform-specific {@link TapStrategy}. Tests use this
@@ -315,11 +315,11 @@ function markFocusFailure(
 }
 
 function appendDisabledElementWarning(
-  platform: string,
+  strategy: TapStrategy,
   element: Element,
   warnings: string[],
 ): void {
-  if (platform === "android" && isFalsy(element.enabled)) {
+  if (strategy.warnsOnDisabledElement && isFalsy(element.enabled)) {
     warnings.push("The matched element is disabled; the tap may have no effect.");
   }
 }
@@ -376,7 +376,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private viewHierarchy: ViewHierarchy;
   private hierarchyCapture: HierarchyCapture;
   private talkBackStrategy: TalkBackTapStrategy;
-  private readonly featureFlags: FeatureFlagService;
+  private readonly featureFlags: FeatureFlagReader;
   private talkBackDriverFactory: TalkBackNavigationDriverFactory;
   private iosVoiceOverDetector: IosVoiceOverDetector;
   private strategy: TapStrategy;
@@ -749,7 +749,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     signal?: AbortSignal,
   ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
     const immediateEffect = this.deriveTapEffect(previousObservation, currentObservation);
-    if (this.device.platform !== "android" || !previousObservation) {
+    if (!this.strategy.settlesPostTapChange || !previousObservation) {
       return { effect: immediateEffect, observation: currentObservation };
     }
 
@@ -1119,7 +1119,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       logger.warn(`[TapOnElement] Fresh capture failed: ${errorMessage(error)}`);
       return null;
     }
-    if (isUsableScreenSize(screenSize) && this.device.platform === "android") {
+    if (isUsableScreenSize(screenSize) && this.strategy.verifiesRefreshedDisplay) {
       await this.checkRefreshedDisplay(captured, screenSize, observedGeneration, signal);
     }
     return captured;
@@ -1810,7 +1810,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
     const requireResourceId =
       typeof targetOptions === "boolean" ? targetOptions : targetOptions.requireResourceId;
-    if (!viewHierarchy || this.device.platform !== "android") {
+    if (!viewHierarchy || !this.strategy.promotesClickableAncestor) {
       return { element, usedParent: false };
     }
     const nodes = new SearchableHierarchy().project(viewHierarchy);
@@ -2685,7 +2685,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               return ensureCheckedResult;
             }
           }
-          appendDisabledElementWarning(this.device.platform, tapElement, activationWarnings);
+          appendDisabledElementWarning(this.strategy, tapElement, activationWarnings);
           this.logClickableParentSelection(usedParent);
           const { tapPoint, warning: tapPointWarning } = this.tapPoints.planVisibleTapPoint({
             options: tapOptions,

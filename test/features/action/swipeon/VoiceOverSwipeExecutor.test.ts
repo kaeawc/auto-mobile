@@ -8,7 +8,6 @@ import type { GestureExecutor } from "../../../../src/features/action/swipeon/ty
 import type { SwipeResult } from "../../../../src/models/SwipeResult";
 import type { BootedDevice, Element } from "../../../../src/models";
 import { VOICEOVER_STATE_UNKNOWN_WARNING } from "../../../../src/features/accessibility/interfaces/IosVoiceOverDetector";
-import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
 
 function makeSwipeResult(overrides: Partial<SwipeResult> = {}): SwipeResult {
   return {
@@ -156,7 +155,7 @@ describe("VoiceOverSwipeExecutor", () => {
     test("forwards the injected featureFlags to isVoiceOverEnabled on iOS", async () => {
       const { executor } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(false);
-      const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
+      const sentinelFlags = { __sentinel: true, isEnabled: () => false };
 
       const voiceOverExecutor = new VoiceOverSwipeExecutor(
         { platform: "ios", deviceId: "00001234-ABCD" } as any,

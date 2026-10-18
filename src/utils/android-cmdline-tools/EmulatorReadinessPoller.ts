@@ -1,6 +1,7 @@
 import type { HostChildProcess as ChildProcess } from "../HostCommandExecutor";
 import { StringDecoder } from "node:string_decoder";
 import { logger } from "../logger";
+import { errorMessage } from "../describeUnknownError";
 import { ActionableError, type BootedDevice } from "../../models";
 import type { Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
@@ -16,7 +17,7 @@ import {
   type ReadinessDiagnostic,
 } from "./AndroidDeviceInventoryScanner";
 import { EmulatorExitedDuringReadinessError } from "./EmulatorLauncher";
-import type { AdbDeviceState } from "./interfaces/AdbExecutor";
+import type { AdbDeviceState, AdbExecutor } from "./interfaces/AdbExecutor";
 import type { AndroidEmulatorReadinessOptions } from "./AndroidEmulatorClient";
 import {
   matchesRequestedAvdOrUnknown,
@@ -106,14 +107,6 @@ export interface EmulatorReadinessHost {
   throwLaunchError(error?: ActionableError): void;
   getLaunchTargetDeviceId(childProcess?: ChildProcess | null): string | undefined;
   captureLaunchTargetDeviceId(childProcess: ChildProcess, output: string): void;
-  clearOfflineTracker(tracker: OfflineTracker): void;
-  detectOfflineFailure(
-    deviceId: string | undefined,
-    tracker: OfflineTracker,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-    observedStates?: AdbDeviceState[],
-  ): Promise<ActionableError | null>;
   maybeRecoverFreshOffline(
     tracker: OfflineTracker,
     options: AndroidEmulatorReadinessOptions | undefined,
@@ -163,6 +156,13 @@ export interface EmulatorReadinessPoller {
     options?: AndroidEmulatorReadinessOptions,
   ): Promise<BootedDevice>;
   wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void>;
+  detectOfflineFailure(
+    deviceId: string | undefined,
+    tracker: OfflineTracker,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    observedStates?: AdbDeviceState[],
+  ): Promise<ActionableError | null>;
 }
 
 export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
@@ -174,6 +174,81 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
 
   private get adbFactory(): AdbClientFactory {
     return this.host.adbFactory();
+  }
+
+  /**
+   * Clear only the CURRENT OBSERVATION on the offline tracker (device serial,
+   * offline-since, and last observed state). Used when there is no target serial
+   * and when a device-state probe rejects/omits the target, so a stale offline
+   * reading cannot drive recovery off out-of-date data (#7054).
+   *
+   * `recoveryAttempted` is deliberately NOT reset: it is MONOTONIC for the
+   * lifetime of a single `waitForEmulatorReady` invocation. A probe gap after
+   * the one-shot `adb -s <serial> reconnect` has been dispatched must not wipe that
+   * history, or a later re-confirmed offline would issue a SECOND reconnect.
+   */
+  private clearOfflineTracker(tracker: OfflineTracker): void {
+    tracker.deviceId = null;
+    tracker.since = null;
+    tracker.state = undefined;
+  }
+
+  async detectOfflineFailure(
+    deviceId: string | undefined,
+    tracker: OfflineTracker,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+    observedStates?: AdbDeviceState[],
+  ): Promise<ActionableError | null> {
+    let states: AdbDeviceState[];
+    try {
+      states =
+        observedStates ??
+        (await this.adbFactory.create(null).getDeviceStates?.({ timeoutMs, signal })) ??
+        [];
+    } catch (error) {
+      throwIfReadinessAborted(signal);
+      // Auxiliary diagnostic probe; a failure here must not block readiness polling.
+      logger.debug(
+        `Offline-state probe unavailable during emulator readiness: ${errorMessage(error)}`,
+      );
+      // A rejected probe is NOT a current offline observation. Clear the tracker
+      // so both the reconnect dispatch and the fail-fast wait for a fresh,
+      // successful observation that still shows offline; a run of failed probes
+      // must not by itself satisfy the offline-failure threshold (#7054).
+      this.clearOfflineTracker(tracker);
+      return null;
+    }
+    if (!deviceId) {
+      this.clearOfflineTracker(tracker);
+      return null;
+    }
+    const targetState = states.find((state: AdbDeviceState) => state.deviceId === deviceId);
+    tracker.state = this.targetReadinessState(targetState);
+    if (targetState?.state !== "offline") {
+      tracker.deviceId = null;
+      tracker.since = null;
+      return null;
+    }
+    if (tracker.deviceId !== targetState.deviceId) {
+      // Refresh the current observation for a (re-)observed offline serial.
+      // Recovery history stays monotonic for the invocation, so a re-confirmed
+      // offline after the one-shot reconnect keeps advancing toward the
+      // fail-fast instead of resurrecting a second reconnect (#7054).
+      tracker.deviceId = targetState.deviceId;
+      tracker.since = this.timer.now();
+    }
+    // An offline ADB state is transient during normal emulator startup. Keep
+    // tracking it for diagnostics, but wait for the caller's readiness deadline
+    // unless the emulator process provides definitive failure evidence.
+    return null;
+  }
+
+  private targetReadinessState(targetState: AdbDeviceState | undefined): TargetReadinessState {
+    if (targetState?.state === "offline") {
+      return "offline";
+    }
+    return targetState === undefined ? "absent" : "not-ready";
   }
 
   private async settleReadinessExit(
@@ -516,10 +591,10 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     emulator: BootedDevice,
     scanDiagnostic: ReadinessDiagnostic | undefined,
     results: [
-      PromiseSettledResult<Awaited<ReturnType<AdbClient["executeCommand"]>>>,
-      PromiseSettledResult<Awaited<ReturnType<AdbClient["executeCommand"]>>>,
-      PromiseSettledResult<Awaited<ReturnType<AdbClient["executeCommand"]>>>,
-      PromiseSettledResult<Awaited<ReturnType<AdbClient["executeCommand"]>>>,
+      PromiseSettledResult<Awaited<ReturnType<AdbExecutor["executeCommand"]>>>,
+      PromiseSettledResult<Awaited<ReturnType<AdbExecutor["executeCommand"]>>>,
+      PromiseSettledResult<Awaited<ReturnType<AdbExecutor["executeCommand"]>>>,
+      PromiseSettledResult<Awaited<ReturnType<AdbExecutor["executeCommand"]>>>,
     ],
   ): boolean {
     const { state, signal } = context;
@@ -690,10 +765,10 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
             : undefined;
         } catch (error) {
           // A failed snapshot is a gap in offline observations, not continued offline time.
-          this.host.clearOfflineTracker(offlineTracker);
+          this.clearOfflineTracker(offlineTracker);
           throw error;
         }
-        await this.host.detectOfflineFailure(
+        await this.detectOfflineFailure(
           correlatedTargetDeviceId,
           offlineTracker,
           Math.min(AdbClient.DEVICE_LIST_TIMEOUT_MS, remainingTimeoutMs),

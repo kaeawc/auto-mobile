@@ -4,6 +4,11 @@ import type {
 } from "../../src/features/observe/interfaces/ViewHierarchy";
 import type { Element, ScreenIdentity, ViewHierarchyResult } from "../../src/models";
 import { resolveViewHierarchyReadArgs } from "../../src/features/observe/hierarchyReadArgs";
+import {
+  findAccessibilityFocusedElement,
+  findFocusedElement,
+} from "../../src/features/observe/HierarchyFocus";
+import { filterOffscreenNodes } from "../../src/features/observe/HierarchyNormalization";
 
 /**
  * Fake implementation of ViewHierarchy for testing.
@@ -72,29 +77,28 @@ export class FakeViewHierarchy implements ViewHierarchy {
   }
 
   /**
-   * Find focused element (fake implementation).
+   * Find the focused element: the configured override, else the real pure search so a
+   * hierarchy carrying a focused node resolves exactly as in production.
    */
-  findFocusedElement(_viewHierarchy: any): Element | null {
-    return this.configuredFocusedElement;
+  findFocusedElement(viewHierarchy: any): Element | null {
+    return this.configuredFocusedElement ?? findFocusedElement(viewHierarchy);
   }
 
-  /**
-   * Find accessibility-focused element (fake implementation).
-   */
-  findAccessibilityFocusedElement(_viewHierarchy: any): Element | null {
-    return this.configuredAccessibilityFocusedElement;
+  /** Find the accessibility-focused element: the configured override, else the real search. */
+  findAccessibilityFocusedElement(viewHierarchy: any): Element | null {
+    return (
+      this.configuredAccessibilityFocusedElement ?? findAccessibilityFocusedElement(viewHierarchy)
+    );
   }
 
-  /**
-   * Filter offscreen nodes (fake implementation - returns input unchanged).
-   */
+  /** Filter offscreen nodes with the production filter. */
   filterOffscreenNodes(
     viewHierarchy: any,
-    _screenWidth: number,
-    _screenHeight: number,
-    _margin?: number,
+    screenWidth: number,
+    screenHeight: number,
+    margin?: number,
   ): any {
-    return viewHierarchy;
+    return filterOffscreenNodes(viewHierarchy, screenWidth, screenHeight, margin);
   }
 
   /**

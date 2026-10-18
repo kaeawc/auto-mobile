@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 
 public struct RequestSetNetworkFaultRules: Decodable, Sendable {

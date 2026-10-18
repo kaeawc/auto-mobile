@@ -200,9 +200,13 @@ exit code is authoritative; CI disables fixes so even auto-fixable violations
 exit non-zero). The ratchet's violation counts cover only the rules set to `warn`
 because they carry pre-existing violations: `complexity`, `max-depth`, `max-params`,
 `max-lines-per-function`, `max-classes-per-file`, `auto-mobile/max-class-lines`
-(1000 non-blank lines), `auto-mobile/catch-convention`, and the two type-aware
-promise rules (`typescript/no-floating-promises`, `typescript/no-misused-promises`,
-currently at a zero baseline but kept here because the fast stage is not type-aware).
+(1000 non-blank lines), and `auto-mobile/catch-convention`.
+`typescript/no-floating-promises` and `typescript/no-misused-promises` are fully
+burned down and are `error` in `.oxlintrc.json`, but they need type information and
+the fast stage is not type-aware, so they are enforced by the ratchet stage
+(`oxlint --type-aware`), which keeps them in its gated codes at a zero baseline: any
+diagnostic is a new violation and fails the gate (`--update` refuses to record one
+without `--allow-grow`).
 `auto-mobile/no-unknown-cast` and `auto-mobile/no-caught-error-interpolation` are
 fully burned down and are `error` in `.oxlintrc.json`. Inline suppressions of ANY rule are ratcheted too: a
 TypeScript-scanner comment scan (`scripts/lib/oxlintDisableScan.ts`) of every

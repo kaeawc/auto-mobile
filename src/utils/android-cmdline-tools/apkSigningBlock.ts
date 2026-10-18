@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { ApkSignatureScheme, ApkSignerCertificate } from "../../models/ApkSignerCertificate";
 
 /**
  * Reads the signing certificates of an APK from its APK Signing Block (signature schemes v2, v3
@@ -22,18 +23,7 @@ const V3_BLOCK_ID = 0xf05368c0;
 const V31_BLOCK_ID = 0x1b93ad61;
 const V3_LINEAGE_ATTRIBUTE_ID = 0x3ba06f8c;
 
-export type ApkSignatureScheme = "v2" | "v3" | "v3.1";
-
-export interface ApkSignerCertificate {
-  /** Lowercase hex SHA-256 of the DER-encoded signer certificate. */
-  sha256: string;
-  /** v3/v3.1 only: first platform SDK this signer applies to. */
-  minSdkVersion?: number;
-  /** v3/v3.1 only: last platform SDK this signer applies to. */
-  maxSdkVersion?: number;
-  /** v3/v3.1 only: certificate history from the signing-certificate lineage, oldest first. */
-  lineage?: string[];
-}
+export type { ApkSignatureScheme, ApkSignerCertificate };
 
 export type ApkSigningSchemes = Partial<Record<ApkSignatureScheme, ApkSignerCertificate[]>>;
 

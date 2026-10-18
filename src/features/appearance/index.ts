@@ -1,1 +1,1 @@
-export { DEFAULT_APPEARANCE_CONFIG, parseAppearanceConfig } from "./AppearanceConfig";
+export { parseAppearanceConfig } from "./AppearanceConfig";

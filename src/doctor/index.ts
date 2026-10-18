@@ -236,5 +236,5 @@ export async function runDoctor(
 }
 
 // Re-export types and formatter for convenience
-export { formatConsoleOutput, formatJsonOutput } from "./formatter";
+export { formatConsoleOutput } from "./formatter";
 export * from "./types";

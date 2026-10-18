@@ -1,9 +1,5 @@
 {
-  "ignorePaths": [
-    "src/daemon/socketServer/index.ts",
-    "src/features/action/swipeon/index.ts",
-    "src/features/appearance/index.ts"
-  ],
+  "ignorePaths": ["src/daemon/socketServer/index.ts"],
   "ignorePathPatterns": ["scripts/memory/", "^src/daemon/sessionBroker/registry/migrations/"],
   "ignoreEntries": [
     {
@@ -94,11 +90,6 @@
     {
       "file": "src/doctor/index.ts",
       "name": "formatConsoleOutput",
-      "reason": "Doctor module barrel re-export of src/doctor/formatter.ts; consumers import the implementation directly"
-    },
-    {
-      "file": "src/doctor/index.ts",
-      "name": "formatJsonOutput",
       "reason": "Doctor module barrel re-export of src/doctor/formatter.ts; consumers import the implementation directly"
     },
     {

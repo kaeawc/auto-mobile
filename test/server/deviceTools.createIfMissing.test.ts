@@ -320,9 +320,7 @@ describe("startDevice --create-if-missing wiring", () => {
     });
     await useFakeTeardown("android");
     // Observe the pool's readiness reservation at the moment the AVD is deleted.
-    const pool = DaemonState.getInstance().getDevicePool() as unknown as {
-      isReservedForReadiness(deviceId: string): boolean;
-    };
+    const pool = DaemonState.getInstance().getDevicePool();
     const reservedDuringRollback: boolean[] = [];
     const reservedIds: string[] = [];
     const reserve = DaemonState.getInstance().getDevicePool().reserveDeviceForReadiness;

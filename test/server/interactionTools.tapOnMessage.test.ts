@@ -214,7 +214,7 @@ describe("buildTapOnResultMessage", () => {
 // selector that matched nothing still produced "Tapped on element (...)" and no
 // `isError` on the envelope — the exact shape #5902 first fixed for text input.
 describe("tapOnHandler (registered handler wiring)", () => {
-  const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
+  const fakeDevice: BootedDevice = { deviceId: "fake", name: "fake", platform: "android" };
   const args: TapOnArgs = { selector: { text: "ZZZ_NO_SUCH_TEXT_ZZZ" }, platform: "android" };
 
   afterEach(() => {
@@ -500,7 +500,7 @@ describe("tapOnHandler (registered handler wiring)", () => {
 });
 
 describe("tapAtHandler (registered handler wiring)", () => {
-  const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
+  const fakeDevice: BootedDevice = { deviceId: "fake", name: "fake", platform: "android" };
   const args: TapAtArgs = { x: 12, y: 34, platform: "android" };
 
   afterEach(() => {

@@ -1,23 +1,19 @@
-import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { ChildProcess } from "node:child_process";
 import { defaultTimer, Timer } from "../../src/utils/SystemTimer";
 
 /**
  * Fake ChildProcess for testing without spawning real processes
  * Simulates process lifecycle: spawn -> running -> exit
  */
-export class FakeChildProcess
-  extends EventEmitter
-  implements Partial<ChildProcessWithoutNullStreams>
-{
-  stdout: Readable;
-  stderr: Readable;
-  stdin: Writable;
-  exitCode: number | null = null;
-  signalCode: NodeJS.Signals | null = null;
-  killed = false;
-  pid: number | undefined;
+export class FakeChildProcess extends ChildProcess {
+  override stdout: Readable;
+  override stderr: Readable;
+  override stdin: Writable;
+  override exitCode: number | null = null;
+  override signalCode: NodeJS.Signals | null = null;
+  override killed = false;
+  override pid: number | undefined;
 
   private spawnDelay: number = 0;
   private exitDelay: number = 0;
@@ -141,7 +137,7 @@ export class FakeChildProcess
   /**
    * Kill the process (simulated)
    */
-  kill(signal?: NodeJS.Signals | number): boolean {
+  override kill(signal?: NodeJS.Signals | number): boolean {
     if (this.killed || this.exitCode !== null) {
       return false;
     }
@@ -157,27 +153,20 @@ export class FakeChildProcess
   /**
    * Ref (no-op for testing)
    */
-  ref(): this {
-    return this;
-  }
+  override ref(): void {}
 
   /**
    * Unref (no-op for testing)
    */
-  unref(): this {
-    return this;
-  }
+  override unref(): void {}
 
-  /**
-   * Get all other required properties from ChildProcessWithoutNullStreams
-   * These are stubs for testing purposes
-   */
-  channel?: any;
-  connected = false;
-  disconnect(): void {
+  override connected = false;
+
+  override disconnect(): void {
     this.connected = false;
   }
-  send(): boolean {
+
+  override send(): boolean {
     return false;
   }
 }

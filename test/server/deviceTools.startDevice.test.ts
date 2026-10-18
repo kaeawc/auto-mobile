@@ -5,7 +5,6 @@ import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterAll, describe, expect, beforeEach, afterEach, test } from "bun:test";
 import type { ChildProcess } from "child_process";
-import { EventEmitter } from "node:events";
 import {
   setDeviceToolsDependencies,
   resetDeviceToolsDependencies,
@@ -23,6 +22,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeColdBootProcess } from "../fakes/FakeColdBootProcess";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { setDebugPerfEnabled } from "../../src/utils/PerformanceTracker";
@@ -80,17 +80,7 @@ const autolockEnv = new Proxy<Record<string, string | undefined>>(
   },
 );
 
-class FakeExitChildProcess extends EventEmitter {
-  readonly pid = 4242;
-  readonly exitCode: number | null = null;
-  readonly signalCode: NodeJS.Signals | null = null;
-  killed = false;
-
-  kill(): boolean {
-    this.killed = true;
-    return true;
-  }
-}
+class FakeExitChildProcess extends FakeColdBootProcess {}
 
 function clearAutolockEnv(): void {
   autolockEnv.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "0";
@@ -399,7 +389,7 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setDeviceImages("android", [image]);
     fakeMatcher.setImageResult(image);
     const ownerHandle = new FakeExitChildProcess();
-    fakeDeviceUtils.setMockChildProcess(image.name, ownerHandle as ChildProcess);
+    fakeDeviceUtils.setMockChildProcess(image.name, ownerHandle);
     const waitForDeviceReady = fakeDeviceUtils.waitForDeviceReady.bind(fakeDeviceUtils);
     fakeDeviceUtils.waitForDeviceReady = async (...args) => {
       if (args[2] === ownerHandle) {
@@ -909,10 +899,7 @@ describe("startDevice handler", () => {
     const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
     const childProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
-    fakeDeviceUtils.setMockChildProcess(
-      coldBootImage.name,
-      childProcess as unknown as ChildProcess,
-    );
+    fakeDeviceUtils.setMockChildProcess(coldBootImage.name, childProcess);
     // #7178 checks discovery before deciding to cold-boot; expose this
     // transport only after that decision, then verify readiness enriches it.
     const originalStartDevice = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
@@ -955,10 +942,7 @@ describe("startDevice handler", () => {
     const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
     const childProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
-    fakeDeviceUtils.setMockChildProcess(
-      coldBootImage.name,
-      childProcess as unknown as ChildProcess,
-    );
+    fakeDeviceUtils.setMockChildProcess(coldBootImage.name, childProcess);
     // Keep the pre-boot discovery empty so this remains a cold-boot readiness
     // recording test rather than the stale-image external-adoption case.
     const originalStartDevice = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
@@ -994,10 +978,7 @@ describe("startDevice handler", () => {
     const coldBootImage = { ...androidImage, deviceId: androidDevice.deviceId };
     const childProcess = new FakeExitChildProcess();
     fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
-    fakeDeviceUtils.setMockChildProcess(
-      coldBootImage.name,
-      childProcess as unknown as ChildProcess,
-    );
+    fakeDeviceUtils.setMockChildProcess(coldBootImage.name, childProcess);
     fakeMatcher.setBootedResult(null);
     fakeMatcher.setImageResult(coldBootImage);
 
@@ -1380,14 +1361,8 @@ describe("startDevice handler", () => {
     await pool.bindOrReuseDeviceSession("owner-session", anrDevice.deviceId, "android", anrImage);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [anrImage, siblingImage]);
-    fakeDeviceUtils.setMockChildProcess(
-      siblingImage.name,
-      new FakeExitChildProcess() as unknown as ChildProcess,
-    );
-    fakeDeviceUtils.setMockChildProcess(
-      anrImage.name,
-      new FakeExitChildProcess() as unknown as ChildProcess,
-    );
+    fakeDeviceUtils.setMockChildProcess(siblingImage.name, new FakeExitChildProcess());
+    fakeDeviceUtils.setMockChildProcess(anrImage.name, new FakeExitChildProcess());
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
     fakeDeviceUtils.killDevice = async (device, options) => {
       await originalKillDevice(device, options);
@@ -1635,10 +1610,7 @@ describe("startDevice handler", () => {
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
-    fakeDeviceUtils.setMockChildProcess(
-      recoveryImage.name,
-      replacementProcess as unknown as ChildProcess,
-    );
+    fakeDeviceUtils.setMockChildProcess(recoveryImage.name, replacementProcess);
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
@@ -1700,10 +1672,7 @@ describe("startDevice handler", () => {
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
-    fakeDeviceUtils.setMockChildProcess(
-      recoveryImage.name,
-      replacementProcess as unknown as ChildProcess,
-    );
+    fakeDeviceUtils.setMockChildProcess(recoveryImage.name, replacementProcess);
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
@@ -1772,10 +1741,7 @@ describe("startDevice handler", () => {
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
-    fakeDeviceUtils.setMockChildProcess(
-      recoveryImage.name,
-      replacementProcess as unknown as ChildProcess,
-    );
+    fakeDeviceUtils.setMockChildProcess(recoveryImage.name, replacementProcess);
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
@@ -1853,10 +1819,7 @@ describe("startDevice handler", () => {
     };
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
-    fakeDeviceUtils.setMockChildProcess(
-      recoveryImage.name,
-      replacementProcess as unknown as ChildProcess,
-    );
+    fakeDeviceUtils.setMockChildProcess(recoveryImage.name, replacementProcess);
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
@@ -1918,10 +1881,7 @@ describe("startDevice handler", () => {
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
-    fakeDeviceUtils.setMockChildProcess(
-      recoveryImage.name,
-      replacementProcess as unknown as ChildProcess,
-    );
+    fakeDeviceUtils.setMockChildProcess(recoveryImage.name, replacementProcess);
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
@@ -2247,10 +2207,7 @@ describe("startDevice handler", () => {
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
-    fakeDeviceUtils.setMockChildProcess(
-      recoveryImage.name,
-      replacementProcess as unknown as ChildProcess,
-    );
+    fakeDeviceUtils.setMockChildProcess(recoveryImage.name, replacementProcess);
     fakeMatcher.setBootedResult(pooledAnrDevice);
     fakeMatcher.setImageResult(recoveryImage);
     const originalKillDevice = fakeDeviceUtils.killDevice.bind(fakeDeviceUtils);
@@ -2493,13 +2450,14 @@ describe("startDevice handler", () => {
     // The boot must be torn back down via handle.kill() rather than left
     // mid-boot (issue #3952).
     let killed = false;
-    fakeDeviceUtils.setMockChildProcess(androidImage.name, {
-      kill: (): boolean => {
-        killed = true;
-        return true;
-      },
-      pid: 4242,
-    } as any);
+    const stoppableProcess = new FakeColdBootProcess();
+    spyOn(stoppableProcess, "kill").mockImplementation((): boolean => {
+      killed = true;
+      stoppableProcess.exitCode = 0;
+      stoppableProcess.emit("exit", 0, null);
+      return true;
+    });
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, stoppableProcess);
     fakeDeviceUtils.setWaitForDeviceReadyError(new Error("readiness timeout"));
 
     await expect(callStartDevice({ platform: "android" })).rejects.toThrow("readiness timeout");
@@ -2537,7 +2495,7 @@ describe("startDevice handler", () => {
       });
       const coldImage = { ...androidImage, deviceId: androidDevice.deviceId };
       fakeDeviceUtils.setDeviceImages("android", [coldImage]);
-      fakeDeviceUtils.setMockChildProcess(coldImage.name, child as unknown as ChildProcess);
+      fakeDeviceUtils.setMockChildProcess(coldImage.name, child);
       fakeMatcher.setBootedResult(null);
       fakeMatcher.setImageResult(coldImage);
       daemonSessionManager = new SessionManager(bootTimer, new FakeDeviceSessionPersistence());
@@ -2665,7 +2623,7 @@ describe("startDevice handler", () => {
           device: androidDevice,
           source: "cold-boot",
           provisioned: kind === "provisioned",
-          processHandle: child as unknown as ChildProcess,
+          processHandle: child,
         },
         new DeviceUnhealthyError(evidence, "recorder quarantine"),
         controller.signal,
@@ -2691,7 +2649,7 @@ describe("startDevice handler", () => {
     });
     try {
       const settlement = cancelUnownedColdBootUnlessRetryable(
-        { device: iosDevice, source: "cold-boot", processHandle: child as unknown as ChildProcess },
+        { device: iosDevice, source: "cold-boot", processHandle: child },
         new RunnerReadinessError("readiness timeout", false, true, "runner-connect"),
         undefined,
       );
@@ -2716,7 +2674,7 @@ describe("startDevice handler", () => {
           device: androidDevice,
           source: "cold-boot",
           provisioned: true,
-          processHandle: child as unknown as ChildProcess,
+          processHandle: child,
         },
         new RunnerReadinessError("readiness timeout", false, true, "runner-connect"),
         undefined,
@@ -2735,13 +2693,14 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(null);
     fakeMatcher.setImageResult(androidImage);
     let killed = false;
-    fakeDeviceUtils.setMockChildProcess(androidImage.name, {
-      kill: (): boolean => {
-        killed = true;
-        return true;
-      },
-      pid: 4242,
-    } as any);
+    const stoppableProcess = new FakeColdBootProcess();
+    spyOn(stoppableProcess, "kill").mockImplementation((): boolean => {
+      killed = true;
+      stoppableProcess.exitCode = 0;
+      stoppableProcess.emit("exit", 0, null);
+      return true;
+    });
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, stoppableProcess);
     setDeviceToolsDependencies({
       ensureCtrlProxyReady: async () => {
         throw new Error("runner unavailable");
@@ -2760,7 +2719,7 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
     fakeMatcher.setBootedResult(null);
     fakeMatcher.setImageResult(androidImage);
-    fakeDeviceUtils.setMockChildProcess(androidImage.name, childProcess as unknown as ChildProcess);
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, childProcess);
     setDeviceToolsDependencies({
       lifecycleCoordinator,
       ensureCtrlProxyReady: async () => {
@@ -2813,7 +2772,7 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
     fakeMatcher.setBootedResult(null);
     fakeMatcher.setImageResult(androidImage);
-    fakeDeviceUtils.setMockChildProcess(androidImage.name, childProcess as unknown as ChildProcess);
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, childProcess);
     setDeviceToolsDependencies({
       lifecycleCoordinator,
       ensureCtrlProxyReady: async () => {
@@ -2876,7 +2835,7 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setDeviceImages("android", [androidImage]);
     fakeMatcher.setBootedResult(null);
     fakeMatcher.setImageResult(androidImage);
-    fakeDeviceUtils.setMockChildProcess(androidImage.name, childProcess as unknown as ChildProcess);
+    fakeDeviceUtils.setMockChildProcess(androidImage.name, childProcess);
     setDeviceToolsDependencies({
       lifecycleCoordinator,
       ensureCtrlProxyReady: async () => {
@@ -2937,10 +2896,7 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
     fakeMatcher.setBootedResult(null);
     fakeMatcher.setImageResult(coldBootImage);
-    fakeDeviceUtils.setMockChildProcess(
-      coldBootImage.name,
-      childProcess as unknown as ChildProcess,
-    );
+    fakeDeviceUtils.setMockChildProcess(coldBootImage.name, childProcess);
 
     const originalStartDevice = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
     let startCount = 0;
@@ -3042,10 +2998,7 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setDeviceImages("android", [coldBootImage]);
     fakeMatcher.setBootedResult(null);
     fakeMatcher.setImageResult(coldBootImage);
-    fakeDeviceUtils.setMockChildProcess(
-      coldBootImage.name,
-      childProcess as unknown as ChildProcess,
-    );
+    fakeDeviceUtils.setMockChildProcess(coldBootImage.name, childProcess);
 
     const originalStartDevice = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
     let startCount = 0;

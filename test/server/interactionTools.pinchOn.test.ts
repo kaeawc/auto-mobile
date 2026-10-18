@@ -60,7 +60,7 @@ describe("formatPinchOnMessage", () => {
 // response's message. This is the test that would fail if the handler wiring
 // reverted to the hard-coded `Pinched ${direction}` (#6056; AGENTS.md L22-24).
 describe("pinchOnHandler (registered handler wiring)", () => {
-  const fakeDevice = { deviceId: "fake", platform: "android" } as unknown as BootedDevice;
+  const fakeDevice: BootedDevice = { deviceId: "fake", name: "fake", platform: "android" };
   const args: PinchOnArgs = { direction: "in", platform: "android" };
 
   afterEach(() => {

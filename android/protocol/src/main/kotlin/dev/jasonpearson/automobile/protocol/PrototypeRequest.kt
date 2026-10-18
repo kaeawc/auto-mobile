@@ -55,6 +55,43 @@ object PrototypeRequests {
       else -> value
     }
 
+  /**
+   * A JSON number as text for a header or query value, by JavaScript's `Number.prototype.toString`
+   * rules so every runtime sends the same bytes: the shortest digits that round-trip, plain
+   * notation for exponents from -7 up to 20 and `1e+21` / `1.5e-7` outside it, no `.0` on integers
+   * and `-0` as `0`. A non-finite number (not valid JSON) keeps its own spelling.
+   */
+  fun numberText(value: Double): String {
+    if (value == 0.0) return "0"
+    if (!value.isFinite()) return value.toString()
+    val sign = if (value < 0) "-" else ""
+    val exact = java.math.BigDecimal(Math.abs(value))
+    var digits = ""
+    var scale = 0
+    for (precision in 1..17) {
+      val rounded = exact.round(java.math.MathContext(precision))
+      if (rounded.toDouble() == Math.abs(value)) {
+        digits = rounded.unscaledValue().toString().trimEnd('0').ifEmpty { "0" }
+        // value = 0.<digits> * 10^scale
+        scale = rounded.precision() - rounded.scale()
+        break
+      }
+    }
+    val count = digits.length
+    val text =
+      when {
+        scale in count..21 -> digits + "0".repeat(scale - count)
+        scale in 1..21 -> digits.substring(0, scale) + "." + digits.substring(scale)
+        scale in -5..0 -> "0." + "0".repeat(-scale) + digits
+        else -> {
+          val exponent = scale - 1
+          val mantissa = if (count == 1) digits else digits[0] + "." + digits.substring(1)
+          mantissa + "e" + (if (exponent < 0) "-" else "+") + Math.abs(exponent)
+        }
+      }
+    return sign + text
+  }
+
   /** The `<into>__meta` pointer: the same path with `__meta` appended to its last segment. */
   fun metaPath(into: String): String = into + META_SUFFIX
 
@@ -234,11 +271,10 @@ object PrototypeRequestResolver {
   private fun scalarText(value: JsonElement?): String? {
     val primitive = value as? JsonPrimitive ?: return null
     if (primitive is JsonNull) return null
-    return if (
-      primitive.isString || primitive.booleanOrNull != null || primitive.doubleOrNull != null
-    )
-      PrototypeRepeatTemplate.rendered(primitive)
-    else null
+    if (primitive.isString) return primitive.content
+    if (primitive.booleanOrNull != null) return primitive.content
+    val number = primitive.doubleOrNull ?: return null
+    return PrototypeRequests.numberText(number)
   }
 
   private sealed interface Parsed {

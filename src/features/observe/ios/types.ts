@@ -5,6 +5,7 @@
  * shared state and functionality from the main CtrlProxyClient.
  */
 
+import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { SemanticLink, ViewHierarchyWindowInfo } from "../../../models";
 import type { ObservationInsets } from "../../../models/ObservationInsets";
 import type { CtrlProxyReconnectStatus } from "../../../models/CtrlProxyReconnectStatus";
@@ -275,6 +276,17 @@ interface TapDiagnosticOrientation {
 }
 
 /** Drag result from CtrlProxy iOS */
+/** One semantic accessibility-link activation request; the owner scopes the occurrence count. */
+export interface IosAccessibilityLinkRequest {
+  text: string;
+  occurrence: number;
+  ownerResourceId?: string;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+}
+
 export type CtrlProxyDragResult = GestureTimingResult;
 
 /** Pinch result from CtrlProxy iOS */

@@ -346,9 +346,21 @@ describe("IOSCtrlProxyClient press option forwarding", () => {
         onDispatch,
         beforeSend,
       );
-      expect(await client.requestPinch(1, 2, 3, 4, 0, 300, 50, undefined, signal, onDispatch)).toBe(
-        result,
-      );
+      expect(
+        await client.requestPinch(
+          {
+            centerX: 1,
+            centerY: 2,
+            distanceStart: 3,
+            distanceEnd: 4,
+            rotationDegrees: 0,
+            duration: 300,
+            timeoutMs: 50,
+            signal,
+          },
+          onDispatch,
+        ),
+      ).toBe(result);
       expect(pinch).toHaveBeenCalledWith(
         {
           centerX: 1,

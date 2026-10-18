@@ -1911,12 +1911,21 @@ describe("CtrlProxy display-targeted action routing", () => {
                 expect(calls).toHaveLength(
                   gesture === "doubleTapOn" && (!failure || fallsBack) ? 2 : 1,
                 );
-                expect(calls[0].at(gesture === "drag" ? -3 : -2)).toBe(
-                  panel === "external" ? 2 : undefined,
-                );
-                expect(calls[0].at(gesture === "drag" ? -2 : -1)).toBeFunction();
-                if (panel === "external") {
-                  expect(calls[0].at(gesture === "drag" ? -4 : -3)).toBe(controller.signal);
+                if (gesture === "pinch") {
+                  const [request] = pinch.mock.calls[0];
+                  expect(request.displayId).toBe(panel === "external" ? 2 : undefined);
+                  expect(request.beforeSend).toBeFunction();
+                  if (panel === "external") {
+                    expect(request.signal).toBe(controller.signal);
+                  }
+                } else {
+                  expect(calls[0].at(gesture === "drag" ? -3 : -2)).toBe(
+                    panel === "external" ? 2 : undefined,
+                  );
+                  expect(calls[0].at(gesture === "drag" ? -2 : -1)).toBeFunction();
+                  if (panel === "external") {
+                    expect(calls[0].at(gesture === "drag" ? -4 : -3)).toBe(controller.signal);
+                  }
                 }
                 expect(inputs).toEqual(
                   fallsBack
@@ -1944,7 +1953,9 @@ describe("CtrlProxy display-targeted action routing", () => {
                   }
                 }
                 if (gesture === "pinch") {
-                  expect(pinch.mock.calls[0].slice(0, 2)).toEqual([100, 100]);
+                  expect([pinch.mock.calls[0][0].centerX, pinch.mock.calls[0][0].centerY]).toEqual([
+                    100, 100,
+                  ]);
                 }
               } else if (gesture === "pinch") {
                 expect(result.error).toBe(

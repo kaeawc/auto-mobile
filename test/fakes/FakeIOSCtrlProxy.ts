@@ -1,3 +1,4 @@
+import type { PinchRequest } from "../../src/utils/interfaces/DeviceService";
 import { IosCtrlProxy } from "../../src/features/observe/ios";
 import type { IOSDispatchResult } from "../../src/features/observe/ios/CtrlProxyDispatch";
 import {
@@ -30,6 +31,7 @@ import type {
   CtrlProxyHingeAngleResult,
   CtrlProxyActionResult,
   CtrlProxyHierarchy,
+  IosAccessibilityLinkRequest,
 } from "../../src/features/observe/ios/types";
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import type { BaseResult, SwipeRequestOptions } from "../../src/features/observe/shared/types";
@@ -908,17 +910,19 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
   }
 
   async requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    request: PinchRequest,
     onDispatch?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxyPinchResult>> {
+    const {
+      centerX,
+      centerY,
+      distanceStart,
+      distanceEnd,
+      rotationDegrees,
+      duration,
+      timeoutMs,
+      signal,
+    } = request;
     signal?.throwIfAborted();
     await this.applyDelay("pinch");
     this.checkFailure("pinch");
@@ -1475,14 +1479,9 @@ export class FakeIOSCtrlProxy implements IosCtrlProxy {
   }
 
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    ownerResourceId?: string,
-    _timeoutMs?: number,
-    _perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: IosAccessibilityLinkRequest,
   ): Promise<CtrlProxyActionResult> {
+    const { text, occurrence, ownerResourceId, signal, onDispatch } = request;
     signal?.throwIfAborted();
     await this.applyDelay("accessibilityLink");
     this.checkFailure("accessibilityLink");

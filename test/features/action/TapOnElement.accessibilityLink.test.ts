@@ -121,7 +121,7 @@ describe("tapOn semantic link outcomes", () => {
               }
             }
             expect(activate).toHaveBeenCalledTimes(1);
-            expect(activate.mock.calls[0][5]).toBe(controller.signal);
+            expect(activate.mock.calls[0][0].signal).toBe(controller.signal);
             expect(android.getTapHistory()).toHaveLength(0);
             expect(ios.getTapHistory()).toHaveLength(0);
             expect(adb.getCommandCalls()).toEqual([]);

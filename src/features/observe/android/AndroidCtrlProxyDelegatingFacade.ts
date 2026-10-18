@@ -1,3 +1,4 @@
+import type { PinchRequest } from "../../../utils/interfaces/DeviceService";
 /**
  * The thin, positional-signature delegating facades of `AndroidCtrlProxyClient` (gestures, text,
  * certificates, storage, focus, prototypes, highlights), extracted from the client (#11846). Every
@@ -215,32 +216,8 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
     );
   }
 
-  async requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yPinchResult> {
-    return this.gestures.requestPinch(
-      centerX,
-      centerY,
-      distanceStart,
-      distanceEnd,
-      rotationDegrees,
-      duration,
-      timeoutMs,
-      perf,
-      signal,
-      displayId,
-      beforeSend,
-    );
+  async requestPinch(request: PinchRequest): Promise<A11yPinchResult> {
+    return this.gestures.requestPinch(request);
   }
 
   // Streaming gesture input (Android-only): one live drag = start + moves + end sharing a gestureId,

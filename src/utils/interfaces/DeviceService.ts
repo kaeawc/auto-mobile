@@ -90,6 +90,21 @@ interface ImeActionResult extends DeviceOperationResult {
 // Device Service Interface
 // =============================================================================
 
+/** Everything `request_pinch` needs; an object because the positional form is already too wide. */
+export interface PinchRequest {
+  centerX: number;
+  centerY: number;
+  distanceStart: number;
+  distanceEnd: number;
+  rotationDegrees: number;
+  duration?: number;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+  displayId?: number;
+  beforeSend?: () => void;
+}
+
 /**
  * Core device service interface with operations common to all platforms.
  *
@@ -220,16 +235,7 @@ export interface DeviceService {
    * @param timeoutMs Operation timeout in milliseconds
    * @param perf Optional performance tracker
    */
-  requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees?: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-  ): Promise<GestureResult>;
+  requestPinch(request: PinchRequest): Promise<GestureResult>;
 
   // ---------------------------------------------------------------------------
   // Text Input

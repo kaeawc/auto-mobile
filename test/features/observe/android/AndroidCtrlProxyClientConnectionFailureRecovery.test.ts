@@ -156,9 +156,9 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     await expect(client.requestAction("click")).rejects.toBeInstanceOf(
       RealCtrlProxyWebSocketInTestError,
     );
-    await expect(client.requestActivateAccessibilityLink("Terms", 0)).rejects.toBeInstanceOf(
-      RealCtrlProxyWebSocketInTestError,
-    );
+    await expect(
+      client.requestActivateAccessibilityLink({ text: "Terms", occurrence: 0 }),
+    ).rejects.toBeInstanceOf(RealCtrlProxyWebSocketInTestError);
     await flushMicrotasks();
 
     expect(manager.isAccessibilityServiceHealthyCallCount).toBe(0);

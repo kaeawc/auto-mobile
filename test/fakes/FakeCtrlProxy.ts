@@ -1,3 +1,4 @@
+import type { PinchRequest } from "../../src/utils/interfaces/DeviceService";
 import type { PrototypeShowOverrides } from "../../src/features/prototype/PrototypeTransport";
 import type {
   PrototypePatchReply,
@@ -14,6 +15,7 @@ import {
   A11yImeActionResult,
   A11ySelectAllResult,
   A11yActionResult,
+  AndroidAccessibilityLinkRequest,
   AccessibilityHierarchyResponse,
   AndroidPerfTiming,
   AccessibilityHierarchy,
@@ -976,19 +978,19 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     };
   }
 
-  async requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    displayId?: number,
-    beforeSend?: () => void,
-  ): Promise<A11yPinchResult> {
+  async requestPinch(request: PinchRequest): Promise<A11yPinchResult> {
+    const {
+      centerX,
+      centerY,
+      distanceStart,
+      distanceEnd,
+      rotationDegrees,
+      duration,
+      timeoutMs,
+      signal,
+      displayId,
+      beforeSend,
+    } = request;
     await this.applyDelay("pinch");
     beforeSend?.();
     this.checkFailure("pinch");
@@ -1214,14 +1216,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   }
 
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    _perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: AndroidAccessibilityLinkRequest,
   ): Promise<A11yActionResult> {
+    const { selector, timeoutMs = 5000, signal, onDispatch } = request;
     signal?.throwIfAborted();
     await this.applyDelay("requestActivateAccessibilityLink");
     this.checkFailure("requestActivateAccessibilityLink");

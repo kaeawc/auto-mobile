@@ -15,6 +15,7 @@ import type {
   CtrlProxyVoiceOverResult,
   CtrlProxyActionResult,
   CtrlProxyMagicTapResult,
+  IosAccessibilityLinkRequest,
 } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 import { combineWithAmbientAbort, getAbortSignal } from "../../../utils/AbortContext";
@@ -186,17 +187,18 @@ export class CtrlProxyVoiceOver {
    * Android remains unchanged: count matching links in document order within the
    * owner's subtree, or the whole active-window tree when owner-less.
    */
-  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
-  // oxlint-disable-next-line max-params
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    ownerResourceId?: string,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: IosAccessibilityLinkRequest,
   ): Promise<CtrlProxyActionResult> {
+    const {
+      text,
+      occurrence,
+      ownerResourceId,
+      timeoutMs = 5000,
+      perf,
+      signal,
+      onDispatch,
+    } = request;
     const combinedSignal = combineWithAmbientAbort(signal);
     let dispatched = false;
     const unconfirmed = (error: string): CtrlProxyActionResult => ({

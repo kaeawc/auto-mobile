@@ -131,7 +131,13 @@ const methods: RequestMethod[] = [
   {
     name: "requestActivateAccessibilityLink",
     invoke: (h, s) =>
-      h.client.requestActivateAccessibilityLink("link", 1, undefined, LONG_TIMEOUT_MS, perf, s),
+      h.client.requestActivateAccessibilityLink({
+        text: "link",
+        occurrence: 1,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+        signal: s,
+      }),
   },
   {
     name: "requestClipboard",
@@ -183,7 +189,18 @@ const methods: RequestMethod[] = [
   },
   {
     name: "requestPinch",
-    invoke: (h, s) => h.client.requestPinch(5, 5, 10, 20, 0, 100, LONG_TIMEOUT_MS, perf, s),
+    invoke: (h, s) =>
+      h.client.requestPinch({
+        centerX: 5,
+        centerY: 5,
+        distanceStart: 10,
+        distanceEnd: 20,
+        rotationDegrees: 0,
+        duration: 100,
+        timeoutMs: LONG_TIMEOUT_MS,
+        perf,
+        signal: s,
+      }),
   },
   {
     name: "requestGestureStart",

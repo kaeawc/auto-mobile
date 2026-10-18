@@ -250,7 +250,13 @@ describe("SharedGestureDelegate", () => {
       });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestPinch(50.1, 50.9, 100.3, 200.7, 0),
+        delegate.requestPinch({
+          centerX: 50.1,
+          centerY: 50.9,
+          distanceStart: 100.3,
+          distanceEnd: 200.7,
+          rotationDegrees: 0,
+        }),
       );
 
       expect(sentMsg.centerX).toBe(50);
@@ -284,7 +290,13 @@ describe("SharedGestureDelegate", () => {
       expect(cancelCalls()).toBe(3);
 
       await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestPinch(50, 50, 100, 200, 0),
+        delegate.requestPinch({
+          centerX: 50,
+          centerY: 50,
+          distanceStart: 100,
+          distanceEnd: 200,
+          rotationDegrees: 0,
+        }),
       );
       expect(cancelCalls()).toBe(4);
     });
@@ -353,7 +365,14 @@ describe("SharedGestureDelegate", () => {
       });
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestPinch(50, 60, 100, 200, 45, 500),
+        delegate.requestPinch({
+          centerX: 50,
+          centerY: 60,
+          distanceStart: 100,
+          distanceEnd: 200,
+          rotationDegrees: 45,
+          duration: 500,
+        }),
       );
 
       expect(sentMsg.type).toBe("request_pinch");
@@ -386,7 +405,13 @@ describe("SharedGestureDelegate", () => {
       expect(drag.success).toBe(false);
       expect(drag.error).toBe("Not connected");
 
-      const pinch = await delegate.requestPinch(50, 50, 100, 200, 0);
+      const pinch = await delegate.requestPinch({
+        centerX: 50,
+        centerY: 50,
+        distanceStart: 100,
+        distanceEnd: 200,
+        rotationDegrees: 0,
+      });
       expect(pinch.success).toBe(false);
       expect(pinch.error).toBe("Not connected");
 

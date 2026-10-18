@@ -1,3 +1,4 @@
+import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { PrototypeHiddenReason } from "../../prototype/prototypeHidden";
 import type { PanelFingerprint } from "../../../models/DisplayPanel";
 /**
@@ -98,6 +99,17 @@ export interface AccessibilityNode {
  * Stable fields observed from an accessibility node that can identify it for a semantic action.
  * All populated fields must match the target node.
  */
+/** One semantic accessibility-link activation request; the selector scopes the occurrence count. */
+export interface AndroidAccessibilityLinkRequest {
+  text: string;
+  occurrence: number;
+  selector?: AccessibilityNodeSelector;
+  timeoutMs?: number;
+  perf?: PerformanceTracker;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+}
+
 export interface AccessibilityNodeSelector {
   resourceId?: string;
   testTag?: string;

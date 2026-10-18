@@ -79,7 +79,15 @@ describe("Android gesture duration wire", () => {
         () => gestures.requestSwipe(10, 20, 30, 40, duration),
         () => gestures.requestTwoFingerSwipe(10, 20, 30, 40, duration),
         () => gestures.requestDrag(10, 20, 30, 40, duration, duration, duration, 5000),
-        () => gestures.requestPinch(10, 20, 30, 40, 15.5, duration),
+        () =>
+          gestures.requestPinch({
+            centerX: 10,
+            centerY: 20,
+            distanceStart: 30,
+            distanceEnd: 40,
+            rotationDegrees: 15.5,
+            duration: duration,
+          }),
       ];
       for (const send of requests) {
         const promise = send();
@@ -502,7 +510,16 @@ describe("gesture displayId wire compatibility", () => {
       legacy:
         '{"type":"request_pinch","requestId":"request","centerX":10,"centerY":20,"distanceStart":30,"distanceEnd":40,"rotationDegrees":0,"duration":300}',
       send: (g: CtrlProxyGestures, id?: number) =>
-        g.requestPinch(10, 20, 30, 40, 0, 300, 5000, undefined, undefined, id),
+        g.requestPinch({
+          centerX: 10,
+          centerY: 20,
+          distanceStart: 30,
+          distanceEnd: 40,
+          rotationDegrees: 0,
+          duration: 300,
+          timeoutMs: 5000,
+          displayId: id,
+        }),
     },
     {
       name: "gesture start",
@@ -641,7 +658,16 @@ describe("Android client forwards gesture displayId", () => {
     {
       name: "pinch",
       send: (c: AndroidCtrlProxyClient) =>
-        c.requestPinch(1, 2, 3, 4, 0, 300, 5000, undefined, undefined, 2),
+        c.requestPinch({
+          centerX: 1,
+          centerY: 2,
+          distanceStart: 3,
+          distanceEnd: 4,
+          rotationDegrees: 0,
+          duration: 300,
+          timeoutMs: 5000,
+          displayId: 2,
+        }),
     },
     {
       name: "gesture start",
@@ -689,7 +715,17 @@ describe("Android display gesture cancellation", () => {
     {
       name: "pinch",
       send: (c: AndroidCtrlProxyClient, signal: AbortSignal) =>
-        c.requestPinch(1, 2, 30, 40, 0, 300, 5000, undefined, signal, 2),
+        c.requestPinch({
+          centerX: 1,
+          centerY: 2,
+          distanceStart: 30,
+          distanceEnd: 40,
+          rotationDegrees: 0,
+          duration: 300,
+          timeoutMs: 5000,
+          signal: signal,
+          displayId: 2,
+        }),
     },
   ];
   for (const { name, send } of cases) {
@@ -752,7 +788,18 @@ describe("gesture pre-send display fence during reconnect", () => {
     {
       name: "pinch",
       send: (c: AndroidCtrlProxyClient, guard: () => void, signal?: AbortSignal) =>
-        c.requestPinch(1, 2, 30, 40, 0, 300, 5000, undefined, signal, 2, guard),
+        c.requestPinch({
+          centerX: 1,
+          centerY: 2,
+          distanceStart: 30,
+          distanceEnd: 40,
+          rotationDegrees: 0,
+          duration: 300,
+          timeoutMs: 5000,
+          signal: signal,
+          displayId: 2,
+          beforeSend: guard,
+        }),
     },
     {
       name: "two-finger swipe",

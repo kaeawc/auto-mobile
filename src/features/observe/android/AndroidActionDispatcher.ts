@@ -15,7 +15,11 @@ import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { errorMessage } from "../../../utils/describeUnknownError";
-import type { A11yActionResult, AccessibilityNodeSelector } from "./types";
+import type {
+  A11yActionResult,
+  AccessibilityNodeSelector,
+  AndroidAccessibilityLinkRequest,
+} from "./types";
 import type { PerformanceTracker as PerformanceTrackerType } from "../../../utils/PerformanceTracker";
 import type { RequestManager } from "../../../utils/RequestManager";
 import type { Timer } from "../../../utils/SystemTimer";
@@ -305,17 +309,18 @@ export class AndroidActionDispatcher {
     return connected && this.context.isCommandSupported("request_activate_accessibility_link");
   }
 
-  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
-  // oxlint-disable-next-line max-params
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    selector?: AccessibilityNodeSelector,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: AndroidAccessibilityLinkRequest,
   ): Promise<A11yActionResult> {
+    const {
+      text,
+      occurrence,
+      selector,
+      timeoutMs = 5000,
+      perf = new NoOpPerformanceTracker(),
+      signal,
+      onDispatch,
+    } = request;
     const startTime = this.context.timer.now();
     const action = "activate_accessibility_link";
     const combinedSignal = combineWithAmbientAbort(signal);

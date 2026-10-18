@@ -1,3 +1,4 @@
+import type { PinchRequest } from "../../../utils/interfaces/DeviceService";
 import { MapDeviceClientRegistry } from "../../../ctrlProxy/deviceClientRegistry";
 import { iosWireDeadlineParams, type IOSDispatchResult } from "./CtrlProxyDispatch";
 import { withCtrlProxyRecordingFromEnv } from "./CtrlProxyExchangeRecorder";
@@ -315,6 +316,7 @@ import type {
   CtrlProxyClipboardResult,
   CtrlProxyHighlightResult,
   WebSocketMessage,
+  IosAccessibilityLinkRequest,
 } from "./types";
 import { CtrlProxyServicePortChangedError } from "./CtrlProxyServicePortChangedError";
 import {
@@ -430,15 +432,7 @@ export interface IosCtrlProxy extends CtrlProxyClient {
   ): Promise<IOSDispatchResult<GestureTimingResult>>;
 
   requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    request: PinchRequest,
     onDispatch?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxyPinchResult>>;
 
@@ -608,13 +602,7 @@ export interface IosCtrlProxy extends CtrlProxyClient {
   requestSdkTrigger(request: SdkTriggerRequest): Promise<CtrlProxySdkTriggerResult>;
 
   requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    ownerResourceId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: IosAccessibilityLinkRequest,
   ): Promise<CtrlProxyActionResult>;
 
   requestMultiFingerSwipe(
@@ -3859,31 +3847,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IosCtrlPr
   }
 
   async requestPinch(
-    centerX: number,
-    centerY: number,
-    distanceStart: number,
-    distanceEnd: number,
-    rotationDegrees: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
+    request: PinchRequest,
     onDispatch?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxyPinchResult>> {
-    return this.gestures.requestPinchWithDispatch(
-      {
-        centerX,
-        centerY,
-        distanceStart,
-        distanceEnd,
-        rotationDegrees,
-        duration,
-        timeoutMs,
-        perf,
-        signal,
-      },
-      onDispatch,
-    );
+    return this.gestures.requestPinchWithDispatch(request, onDispatch);
   }
 
   // ===========================================================================
@@ -4195,26 +4162,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IosCtrlPr
    * Android remains unchanged: count matching links in document order within the
    * owner's subtree, or the whole active-window tree when owner-less.
    */
-  // Keep existing positional arguments compatible while adding cancellation and dispatch tracking.
-  // oxlint-disable-next-line max-params
   async requestActivateAccessibilityLink(
-    text: string,
-    occurrence: number,
-    ownerResourceId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    request: IosAccessibilityLinkRequest,
   ): Promise<CtrlProxyActionResult> {
-    return this.voiceOver.requestActivateAccessibilityLink(
-      text,
-      occurrence,
-      ownerResourceId,
-      timeoutMs,
-      perf,
-      signal,
-      onDispatch,
-    );
+    return this.voiceOver.requestActivateAccessibilityLink(request);
   }
 
   async requestMultiFingerSwipe(

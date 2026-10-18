@@ -90,7 +90,7 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
     "SessionLivenessController.restoreHeartbeatLivenessPolicy",
   ],
   "src/daemon/daemonRequestHandlers.ts": ["handleHeartbeat"],
-  "src/daemon/daemon.ts": ["Daemon.handleHeartbeatHttpRequest"],
+  "src/daemon/daemonHttpIngress.ts": ["DaemonHttpIngress.handleHeartbeatHttpRequest"],
   "src/daemon/cli/runDaemonCommand.ts": ["recordLocalDaemonHeartbeat"],
   "src/daemon/daemonMcpProxy.ts": [
     "DaemonMcpProxy.sendFirstBoundSessionHeartbeat",
@@ -463,6 +463,11 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
   "src/server/snapshotOfTools.ts registerSnapshotOfTools": {
     writes: 1,
     reason: "Retained screenshot file-protection expiry in a tool response, not a session clock.",
+  },
+  "src/server/snapshotOfToolOutputSchemas.ts <module>": {
+    writes: 1,
+    reason:
+      "Output-schema field declaration (zod) for the retained-screenshot expiry, not a clock value.",
   },
   "src/server/toolOutputSchemas.ts <module>": {
     writes: 2,

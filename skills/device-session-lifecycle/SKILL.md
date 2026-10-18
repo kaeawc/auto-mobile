@@ -183,7 +183,7 @@ is kept — same session, same `incarnation` — but:
   device-addressed operation does exactly once:
   `AdbClientFactory.create(device)` and — because it memoizes per serial —
   `AndroidCtrlProxyClient.getInstance(device)`. Both call the gate through
-  `daemonDeviceAdmissionGate` (`src/daemon/deviceAdmissionGate.ts`), which is a
+  `daemonDeviceAdmissionGate` (`src/utils/deviceAdmissionGate.ts`), which is a
   no-op in direct mode, where there is no pool. Android-only is complete coverage
   rather than a gap: `hasReusableSerial` restricts the quarantine to Android
   emulator serials, because an iOS UDID is never reused. The one exception is

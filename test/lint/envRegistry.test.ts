@@ -114,21 +114,85 @@ function isProcessEnv(node: Expression): boolean {
   );
 }
 
-/** Registered names read straight off `process.env` instead of through readEnvRaw/readEnvTrimmed. */
+/** Marker for reads whose variable name is not statically known (`[name]: v`, `Object.entries`). */
+const DYNAMIC_READ = "<dynamic>";
+const ENUMERATORS = new Set(["entries", "keys", "values"]);
+
+function patternKeyNames(pattern: { properties: readonly unknown[] }): string[] {
+  return pattern.properties.flatMap((entry) => {
+    const property = entry as {
+      type: string;
+      computed?: boolean;
+      key?: Expression;
+    };
+    if (property.type === "RestElement") {
+      return [DYNAMIC_READ];
+    }
+    if (property.type !== "Property" || !property.key) {
+      return [];
+    }
+    if (property.computed) {
+      return [staticName(property.key) ?? DYNAMIC_READ];
+    }
+    return property.key.type === "Identifier" ? [property.key.name] : [staticName(property.key)!];
+  });
+}
+
+/**
+ * Registered names read straight off `process.env` instead of through
+ * readEnvRaw/readEnvTrimmed: `process.env.X`, `process.env["X"]`,
+ * `const { X } = process.env`, plus unresolvable bulk reads (`[name]: v`, `...rest`,
+ * `Object.entries/keys/values(process.env)`), which are flagged as `<dynamic>`.
+ * Spreading `process.env` into a child-process env is pass-through and is allowed.
+ */
 function rawProcessEnvReads(file: string, source: string, registered: Set<string>): string[] {
   const hits: string[] = [];
+  const record = (name: string | undefined): void => {
+    if (name && (name === DYNAMIC_READ || registered.has(name))) {
+      hits.push(`${file}\t${name}`);
+    }
+  };
   new Visitor({
     MemberExpression(node) {
       if (!isProcessEnv(node.object)) {
         return;
       }
-      const name = node.computed
-        ? staticName(node.property as Expression)
-        : node.property.type === "Identifier"
-          ? node.property.name
-          : undefined;
-      if (name && registered.has(name)) {
-        hits.push(`${file}\t${name}`);
+      record(
+        node.computed
+          ? staticName(node.property as Expression)
+          : node.property.type === "Identifier"
+            ? node.property.name
+            : undefined,
+      );
+    },
+    VariableDeclarator(node) {
+      if (node.id.type === "ObjectPattern" && node.init && isProcessEnv(node.init)) {
+        patternKeyNames(node.id).forEach(record);
+      }
+    },
+    AssignmentExpression(node) {
+      if (node.left.type === "ObjectPattern" && isProcessEnv(node.right)) {
+        patternKeyNames(node.left).forEach(record);
+      }
+    },
+    CallExpression(node) {
+      const callee = node.callee;
+      if (
+        callee.type === "MemberExpression" &&
+        !callee.computed &&
+        callee.object.type === "Identifier" &&
+        callee.object.name === "Object" &&
+        callee.property.type === "Identifier" &&
+        ENUMERATORS.has(callee.property.name) &&
+        node.arguments[0] &&
+        isProcessEnv(node.arguments[0] as Expression)
+      ) {
+        record(DYNAMIC_READ);
+      }
+    },
+    ForInStatement(node) {
+      if (isProcessEnv(node.right)) {
+        record(DYNAMIC_READ);
       }
     },
   }).visit(parseGuardSource(file, source));
@@ -215,6 +279,35 @@ describe("environment variable registry", () => {
         registered,
       ),
     ).toEqual(["x.ts\tHOME", "x.ts\tHOME"]);
+  });
+
+  test("raw process.env detector flags destructuring and dynamic enumeration", () => {
+    const registered = new Set(["HOME", "PATH"]);
+    const scan = (code: string) => rawProcessEnvReads("x.ts", code, registered);
+    expect(scan(`const { HOME, PATH: p, OTHER } = process.env;`)).toEqual([
+      "x.ts\tHOME",
+      "x.ts\tPATH",
+    ]);
+    expect(scan(`const { "HOME": h } = process.env;`)).toEqual(["x.ts\tHOME"]);
+    expect(scan(`const { ["HOME"]: h } = process.env;`)).toEqual(["x.ts\tHOME"]);
+    expect(scan(`let h; ({ HOME: h } = process.env);`)).toEqual(["x.ts\tHOME"]);
+    expect(scan(`const { [name]: v } = process.env;`)).toEqual(["x.ts\t<dynamic>"]);
+    expect(scan(`const { ...rest } = process.env;`)).toEqual(["x.ts\t<dynamic>"]);
+    expect(scan(`Object.entries(process.env); Object.keys(process.env);`)).toEqual([
+      "x.ts\t<dynamic>",
+      "x.ts\t<dynamic>",
+    ]);
+    expect(scan(`for (const k in process.env) {}`)).toEqual(["x.ts\t<dynamic>"]);
+  });
+
+  test("raw process.env detector allows injected env objects and pass-through", () => {
+    const registered = new Set(["HOME"]);
+    const scan = (code: string) => rawProcessEnvReads("x.ts", code, registered);
+    expect(scan(`const { HOME } = env; const { HOME: h } = deps.env;`)).toEqual([]);
+    expect(scan(`const { OTHER } = process.env;`)).toEqual([]);
+    expect(scan(`spawn("x", { env: { ...process.env, A: "1" } });`)).toEqual([]);
+    expect(scan(`Object.entries(env); Object.entries(other);`)).toEqual([]);
+    expect(scan(`const { HOME } = process;`)).toEqual([]);
   });
 
   test("baseline is sorted and has no duplicates", () => {

@@ -10,8 +10,8 @@ import {
 } from "../../src/db/keyedJsonConfigRepository";
 import { InstalledAppsRepository } from "../../src/db/installedAppsRepository";
 import { VideoRecordingRepository } from "../../src/db/videoRecordingRepository";
-import { SqliteFeatureFlagRepository } from "../../src/features/featureFlags/FeatureFlagRepository";
-import { SqliteSessionToolSelectionRepository } from "../../src/features/toolSelection/SqliteSessionToolSelectionRepository";
+import { SqliteFeatureFlagRepository } from "../../src/db/featureFlagRepository";
+import { SqliteSessionToolSelectionRepository } from "../../src/db/sessionToolSelectionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeVideoRecordingConfigRepository } from "../fakes/FakeVideoRecordingConfigRepository";
 import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";

@@ -1,8 +1,8 @@
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
-  stripNavigationToolParams,
 } from "../../daemon/constants";
+import { stripNavigationToolParams } from "../../models/navigationToolParams";
 import { ActionableError, BootedDevice, NavigateToResult } from "../../models";
 import {
   AdbClientFactory,
@@ -19,7 +19,7 @@ import {
   type NavigationGraphService,
 } from "./NavigationGraphManager";
 import type { PathResult, ToolCallInteraction } from "../../utils/interfaces/NavigationGraph";
-import { edgeReplayKey } from "./edgeReplayKey";
+import { edgeReplayKey } from "../../db/edgeReplayKey";
 import { ProgressCallback } from "../../server/toolRegistry";
 import { SmartNavigationHelper } from "./SmartNavigationHelper";
 import type { PathOptimizer } from "./interfaces/PathOptimizer";

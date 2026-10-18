@@ -12,15 +12,16 @@ import org.junit.Test
  * broadcast before optional hierarchy settling and extraction, whose latency otherwise turns a
  * completed write into a host-side timeout.
  *
- * CtrlProxy is an AccessibilityService and cannot be constructed in a fast unit test. This
- * Android-free source test verifies the ordering at the production call site.
+ * The behaviour itself is pinned by [TextInputControllerTest]; this Android-free source test keeps
+ * the statement ordering at the production call sites in [TextInputController] (and the caret
+ * invalidation hooks that stay in CtrlProxy) from drifting.
  */
 class SetTextAcknowledgementOrderTest {
 
   @Test
   fun `performSetText acknowledges a successful action before hierarchy postprocessing`() {
-    val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    val body = functionBody(source, "private suspend fun performSetText(")
+    val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
+    val body = functionBody(source, "suspend fun performSetText(")
     val action = body.indexOf("targetNode.performAction(")
     val acknowledgement = body.indexOf("broadcastSetTextResult(", startIndex = action)
     val refresh = body.indexOf("refreshHierarchyAfterTextInput()", startIndex = action)
@@ -40,21 +41,32 @@ class SetTextAcknowledgementOrderTest {
     )
     val refreshBody = functionBody(source, "private fun refreshHierarchyAfterTextInput()")
     assertTrue(
-      "text hierarchy refresh must wait for quiescence",
-      "hierarchyDebouncer.extractAfterQuiescenceSuspending(" in refreshBody,
+      "text hierarchy refresh must publish the settled hierarchy",
+      "host.publishSettledHierarchy()" in refreshBody,
+    )
+    val serviceSource = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
+    assertTrue(
+      "the service's settled-hierarchy hook must wait for quiescence",
+      "hierarchyController.debouncer.extractAfterQuiescenceSuspending(" in
+        functionBody(serviceSource, "override suspend fun publishSettledHierarchy()"),
     )
 
-    val broadcaster = functionBody(source, "private suspend fun broadcastSetTextResult(")
+    val broadcaster = functionBody(source, "suspend fun broadcastSetTextResult(")
     assertTrue(
       "set_text_result must use synchronous delivery instead of the backpressured event flow",
-      "webSocketServer.broadcastWithPerfSync" in broadcaster,
+      "responseSender.broadcastWithPerfSync" in broadcaster,
+    )
+    assertTrue(
+      "the sync sender must reach the WebSocket server's synchronous broadcast",
+      "webSocketServer.broadcastWithPerfSync" in
+        functionBody(serviceSource, "override suspend fun broadcastWithPerfSync("),
     )
   }
 
   @Test
   fun `performInsertText validates password and actions before mutating text`() {
-    val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    val body = functionBody(source, "private suspend fun performInsertText(")
+    val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
+    val body = functionBody(source, "suspend fun performInsertText(")
     val passwordGuard = body.indexOf("if (targetNode.isPassword)")
     val selectionPlan = body.indexOf("planInsertText(")
     val refresh = body.indexOf("var snapshot = readFreshSnapshot()")
@@ -82,8 +94,8 @@ class SetTextAcknowledgementOrderTest {
 
   @Test
   fun `refresh replacements are validated before reading text and remembered state has hooks`() {
-    val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    val body = functionBody(source, "private suspend fun performInsertText(")
+    val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
+    val body = functionBody(source, "suspend fun performInsertText(")
     val refresh = functionBody(body, "fun readFreshSnapshot()")
     val guard =
       refresh.indexOf(
@@ -92,36 +104,61 @@ class SetTextAcknowledgementOrderTest {
     assertTrue(guard >= 0 && refresh.indexOf("targetNode.text?.toString()") > guard)
     assertTrue(
       body.contains("it == remembered &&") &&
-        body.contains("android.os.SystemClock.uptimeMillis() - it.second.atMs <= REMEMBER_TTL_MS"),
+        body.contains("uptimeMillis() - it.second.atMs <= REMEMBER_TTL_MS"),
     )
     for (signature in
       listOf(
-        "private suspend fun performSetText(",
-        "private suspend fun performImeAction(",
-        "private suspend fun performSelectAll(",
-        "private suspend fun performNodeAction(",
-        "private fun performGlobalActionRequest(",
-        "override suspend fun requestGestureStart(",
-        "override suspend fun requestGestureMove(",
-        "override suspend fun requestGestureEnd(",
+        "suspend fun performSetText(",
+        "suspend fun performImeAction(",
+        "suspend fun performSelectAll(",
       )) {
       assertTrue(
         "$signature clears caret",
         functionBody(source, signature).contains("rememberedInsert = null"),
       )
     }
-    val gestureStart = source.indexOf("private fun dispatchGestureWithResult(")
-    val gestureLifecycle = source.indexOf("val lifecycle", gestureStart)
-    assertTrue(source.substring(gestureStart, gestureLifecycle).contains("rememberedInsert = null"))
-    val events = functionBody(source, "override fun onAccessibilityEvent(")
-    assertTrue(events.indexOf("rememberedInsert = null") < events.indexOf("val connectionCount"))
+    val forget = "textInputController.forgetRememberedInsert()"
+    val serviceSource = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
+    for (signature in
+      listOf(
+        "private fun performGlobalActionRequest(",
+        "override suspend fun requestCommitText(",
+        "override suspend fun requestClickFocusedInput(",
+      )) {
+      assertTrue("$signature clears caret", functionBody(serviceSource, signature).contains(forget))
+    }
+    val nodeActionSource =
+      KotlinSourceScan.maskLiteralsAndComments(locateSource("NodeActionController.kt").readText())
+    assertTrue(
+      "performNodeAction clears caret",
+      functionBody(nodeActionSource, "suspend fun performNodeAction(")
+        .contains("host.forgetRememberedInsert()"),
+    )
+    // Gestures reach the caret through GestureController.Host, which the service wires to it.
+    assertTrue(serviceSource.contains("override fun forgetRememberedInsert() = $forget"))
+    val gestureSource = KotlinSourceScan.maskLiteralsAndComments(readGestureSource())
+    val hostForget = "host.forgetRememberedInsert()"
+    for (signature in listOf("fun startStream(", "fun moveStream(", "fun endStream(")) {
+      assertTrue(
+        "$signature clears caret",
+        functionBody(gestureSource, signature).contains(hostForget),
+      )
+    }
+    val gestureStart = gestureSource.indexOf("private fun dispatchGestureWithResult(")
+    val gestureLifecycle = gestureSource.indexOf("val lifecycle", gestureStart)
+    assertTrue(gestureSource.substring(gestureStart, gestureLifecycle).contains(hostForget))
+    val events = functionBody(serviceSource, "override fun onAccessibilityEvent(")
+    assertTrue(events.indexOf(forget) in 0 until events.indexOf("val connectionCount"))
     assertTrue(events.contains("AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED"))
+    assertTrue(
+      events.contains("textInputController.onTextSelectionChanged(event.fromIndex, event.toIndex)"),
+    )
   }
 
   @Test
   fun `performInsertText waits for mutation before reading selection actions`() {
-    val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    val body = functionBody(source, "private suspend fun performInsertText(")
+    val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
+    val body = functionBody(source, "suspend fun performInsertText(")
     val mutation = body.indexOf("textMutated = setTextSucceeded")
     val poll = body.indexOf("awaitInsertTextMutation(", startIndex = mutation)
     val selection = body.indexOf("val selectionAttempted", startIndex = mutation)
@@ -151,8 +188,8 @@ class SetTextAcknowledgementOrderTest {
 
   @Test
   fun `performInsertText reports caret warnings after attempting selection`() {
-    val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    val body = functionBody(source, "private suspend fun performInsertText(")
+    val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
+    val body = functionBody(source, "suspend fun performInsertText(")
     val selection = body.indexOf("val selectionReturned")
     val selectionAction = body.indexOf("targetNode.performAction(", startIndex = selection)
     val selectionDecision = body.indexOf("val selectionSucceeded", startIndex = selectionAction)
@@ -166,38 +203,31 @@ class SetTextAcknowledgementOrderTest {
         outcome > selectionDecision,
     )
     assertTrue("acknowledgement must include the computed outcome", broadcast > outcome)
+    // The wire encoding (omitted optionals, partialApplication only when true) is pinned
+    // byte-for-byte against the old hand-built frame in ResultFramesGoldenTest.
     val broadcaster = functionBody(source, "private suspend fun broadcastInsertTextResult(")
-    val rawBroadcaster =
-      functionBody(readCtrlProxySource(), "private suspend fun broadcastInsertTextResult(")
-    assertTrue(
-      "legacy partialApplication must be serialized",
-      "put(\"partialApplication\", true)" in rawBroadcaster,
-    )
-    assertTrue("success must be serialized", "put(\"success\", success)" in rawBroadcaster)
-    assertTrue("partialApplication must be guarded", "if (partialApplication)" in broadcaster)
     assertTrue(
       "insert acknowledgements must be synchronous",
-      "webSocketServer.broadcastWithPerfSync" in broadcaster,
+      "responseSender.broadcastWithPerfSync" in broadcaster,
     )
-    assertTrue("error must be serialized", "put(\"error\", error)" in rawBroadcaster)
-    for (field in listOf("warning", "caretPlaced", "resultingTextLength")) {
-      val guard = broadcaster.indexOf("if ($field != null)")
-      assertTrue("optional $field must be guarded", guard >= 0)
-      assertTrue(
-        "optional $field must serialize its value",
-        "put(\"$field\", $field)" in rawBroadcaster,
-      )
-      assertTrue(
-        "optional $field must be serialized after its guard",
-        broadcaster.indexOf("put(", startIndex = guard) > guard,
-      )
+    for (field in
+      listOf(
+        "success",
+        "totalTimeMs",
+        "error",
+        "warning",
+        "caretPlaced",
+        "resultingTextLength",
+        "partialApplication",
+      )) {
+      assertTrue("$field must reach the typed body", "$field = $field" in broadcaster)
     }
   }
 
   @Test
   fun `performInsertText acknowledges before asynchronously refreshing successful text mutations`() {
-    val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    val body = functionBody(source, "private suspend fun performInsertText(")
+    val source = KotlinSourceScan.maskLiteralsAndComments(readTextInputSource())
+    val body = functionBody(source, "suspend fun performInsertText(")
     val setText = body.indexOf("targetNode.performAction(")
     val acknowledgement = body.indexOf("broadcastInsertTextResult(", startIndex = setText)
     val refresh = body.indexOf("refreshHierarchyAfterTextInput()", startIndex = acknowledgement)
@@ -217,16 +247,20 @@ class SetTextAcknowledgementOrderTest {
 
   private fun functionBody(source: String, signature: String): String {
     val start = source.indexOf(signature)
-    if (start < 0) fail("$signature not found in CtrlProxy.kt")
+    if (start < 0) fail("$signature not found")
     val open = source.indexOf('{', start)
-    if (open < 0) fail("$signature body not found in CtrlProxy.kt")
+    if (open < 0) fail("$signature body not found")
     return source.substring(open, KotlinSourceScan.matchBrace(source, open))
   }
 
-  private fun readCtrlProxySource(): String = locateCtrlProxySource().readText()
+  private fun readCtrlProxySource(): String = locateSource("CtrlProxy.kt").readText()
 
-  private fun locateCtrlProxySource(): File {
-    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"
+  private fun readTextInputSource(): String = locateSource("TextInputController.kt").readText()
+
+  private fun readGestureSource(): String = locateSource("GestureController.kt").readText()
+
+  private fun locateSource(fileName: String): File {
+    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/$fileName"
     val direct =
       listOf(File(rel), File("control-proxy/$rel"), File("android/control-proxy/$rel"))
         .firstOrNull { it.isFile }
@@ -244,7 +278,7 @@ class SetTextAcknowledgementOrderTest {
       }
       dir = dir.parentFile
     }
-    fail("Could not locate CtrlProxy.kt from user.dir=${System.getProperty("user.dir")}")
+    fail("Could not locate $fileName from user.dir=${System.getProperty("user.dir")}")
     error("unreachable")
   }
 }

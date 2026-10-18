@@ -542,8 +542,8 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   private hwAccelCache: Map<string, HardwareAccelInfo> = new Map();
   private ffmpegProbeResult: FfmpegProbeResult | undefined;
   // Overridable in tests so the retry path can be exercised without real waits.
-  private readonly iosRecordingStartTimeoutMs: number = IOS_RECORDING_START_TIMEOUT_MS;
-  private readonly iosRecordingStartMaxAttempts: number = IOS_RECORDING_START_MAX_ATTEMPTS;
+  iosRecordingStartTimeoutMs: number = IOS_RECORDING_START_TIMEOUT_MS;
+  iosRecordingStartMaxAttempts: number = IOS_RECORDING_START_MAX_ATTEMPTS;
 
   constructor(
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,

@@ -1,5 +1,5 @@
 import { makePool } from "../helpers/makePool";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -65,7 +65,7 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     await devicePool.refreshDevices();
   };
 
-  beforeEach(() => {
+  function arrangeHarness(): void {
     fakeTimer = new FakeTimer();
     sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     fakeDeviceManager = new FakeDeviceManager();
@@ -73,30 +73,45 @@ describe("DevicePool physical iOS rename (#5690)", () => {
       timer: fakeTimer,
       deviceManager: fakeDeviceManager,
     });
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     sessionManager.stopCleanupTimer();
   });
 
-  test("keeps the pooled incarnation and active session when a physical iPhone is renamed", async () => {
-    const original = booted(PHYSICAL_IPHONE_UDID, "ios", "Jason's iPhone");
-    await initialize(original);
-    await devicePool.bindOrReuseDeviceSession("owner-session", PHYSICAL_IPHONE_UDID, "ios");
-    const incarnation = devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.incarnation;
-    expect(incarnation).toBeDefined();
+  arranged(
+    "keeps the pooled incarnation and active session when a physical iPhone is renamed",
+    async () => {
+      const original = booted(PHYSICAL_IPHONE_UDID, "ios", "Jason's iPhone");
+      await initialize(original);
+      await devicePool.bindOrReuseDeviceSession("owner-session", PHYSICAL_IPHONE_UDID, "ios");
+      const incarnation = devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.incarnation;
+      expect(incarnation).toBeDefined();
 
-    await republishAs(booted(PHYSICAL_IPHONE_UDID, "ios", "iPhone 15 Pro"));
+      await republishAs(booted(PHYSICAL_IPHONE_UDID, "ios", "iPhone 15 Pro"));
 
-    const pooled = devicePool.getDevice(PHYSICAL_IPHONE_UDID);
-    expect(pooled?.incarnation).toBe(incarnation!);
-    expect(pooled?.sessionId).toBe("owner-session");
-    // The display name is mutable metadata: updated in place, never identity.
-    expect(pooled?.name).toBe("iPhone 15 Pro");
-    expect(sessionManager.getSession("owner-session")?.assignedDevice).toBe(PHYSICAL_IPHONE_UDID);
-  });
+      const pooled = devicePool.getDevice(PHYSICAL_IPHONE_UDID);
+      expect(pooled?.incarnation).toBe(incarnation!);
+      expect(pooled?.sessionId).toBe("owner-session");
+      // The display name is mutable metadata: updated in place, never identity.
+      expect(pooled?.name).toBe("iPhone 15 Pro");
+      expect(sessionManager.getSession("owner-session")?.assignedDevice).toBe(PHYSICAL_IPHONE_UDID);
+    },
+  );
 
-  test("keeps a legacy 40-hex physical iPhone across a rename too", async () => {
+  arranged("keeps a legacy 40-hex physical iPhone across a rename too", async () => {
     await initialize(booted(LEGACY_IPHONE_UDID, "ios", "Old iPhone"));
     const incarnation = devicePool.getDevice(LEGACY_IPHONE_UDID)?.incarnation;
 
@@ -107,29 +122,32 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     expect(pooled?.name).toBe("iPhone 8");
   });
 
-  test("reconciles the pooled name when startDevice tolerates a rename before any refresh", async () => {
-    const original = booted(PHYSICAL_IPHONE_UDID, "ios", "Jason's iPhone");
-    await initialize(original);
+  arranged(
+    "reconciles the pooled name when startDevice tolerates a rename before any refresh",
+    async () => {
+      const original = booted(PHYSICAL_IPHONE_UDID, "ios", "Jason's iPhone");
+      await initialize(original);
 
-    // The iPhone is renamed in Settings; discovery reports the new label to the
-    // public start path while the pooled snapshot still carries the old one.
-    const renamed = booted(PHYSICAL_IPHONE_UDID, "ios", "iPhone 15 Pro");
-    fakeDeviceManager.bootedDevices = [renamed];
-    await devicePool.bindOrReuseDeviceSession(
-      "owner-session",
-      PHYSICAL_IPHONE_UDID,
-      "ios",
-      undefined,
-      undefined,
-      renamed,
-    );
+      // The iPhone is renamed in Settings; discovery reports the new label to the
+      // public start path while the pooled snapshot still carries the old one.
+      const renamed = booted(PHYSICAL_IPHONE_UDID, "ios", "iPhone 15 Pro");
+      fakeDeviceManager.bootedDevices = [renamed];
+      await devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        PHYSICAL_IPHONE_UDID,
+        "ios",
+        undefined,
+        undefined,
+        renamed,
+      );
 
-    // Tolerating the rename must also fold it in: a stale PooledDevice.name
-    // makes DeviceCriteriaMatcher match the obsolete label (#5690).
-    expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("iPhone 15 Pro");
-  });
+      // Tolerating the rename must also fold it in: a stale PooledDevice.name
+      // makes DeviceCriteriaMatcher match the obsolete label (#5690).
+      expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("iPhone 15 Pro");
+    },
+  );
 
-  test("reconciles the pooled name when readiness reservation tolerates a rename", async () => {
+  arranged("reconciles the pooled name when readiness reservation tolerates a rename", async () => {
     await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Jason's iPhone"));
 
     const renamed = booted(PHYSICAL_IPHONE_UDID, "ios", "iPhone 15 Pro");
@@ -139,46 +157,52 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("iPhone 15 Pro");
   });
 
-  test("does not rewrite a simulator's pooled name through the tolerated-match path", async () => {
-    await initialize(booted(SIMULATOR_UDID, "ios", "iPhone 15"));
+  arranged(
+    "does not rewrite a simulator's pooled name through the tolerated-match path",
+    async () => {
+      await initialize(booted(SIMULATOR_UDID, "ios", "iPhone 15"));
 
-    // A simulator rename is a genuine identity change, so it must not be
-    // quietly folded in behind a tolerated match.
-    const renamed = booted(SIMULATOR_UDID, "ios", "iPhone 16");
-    fakeDeviceManager.bootedDevices = [renamed];
-    await expect(
-      devicePool.bindOrReuseDeviceSession(
+      // A simulator rename is a genuine identity change, so it must not be
+      // quietly folded in behind a tolerated match.
+      const renamed = booted(SIMULATOR_UDID, "ios", "iPhone 16");
+      fakeDeviceManager.bootedDevices = [renamed];
+      await expect(
+        devicePool.bindOrReuseDeviceSession(
+          "owner-session",
+          SIMULATOR_UDID,
+          "ios",
+          undefined,
+          undefined,
+          renamed,
+        ),
+      ).rejects.toThrow(/identity mismatch/i);
+      expect(devicePool.getDevice(SIMULATOR_UDID)?.name).toBe("iPhone 15");
+    },
+  );
+
+  arranged(
+    "a newer start-path observation updates a name a refresh already folded in",
+    async () => {
+      fakeTimer.advanceTime(1);
+      await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone", fakeTimer.now()));
+      fakeTimer.advanceTime(1);
+      await republishAs(booted(PHYSICAL_IPHONE_UDID, "ios", "Refresh iPhone", fakeTimer.now()));
+      fakeTimer.advanceTime(1);
+
+      await devicePool.bindOrReuseDeviceSession(
         "owner-session",
-        SIMULATOR_UDID,
+        PHYSICAL_IPHONE_UDID,
         "ios",
         undefined,
         undefined,
-        renamed,
-      ),
-    ).rejects.toThrow(/identity mismatch/i);
-    expect(devicePool.getDevice(SIMULATOR_UDID)?.name).toBe("iPhone 15");
-  });
+        booted(PHYSICAL_IPHONE_UDID, "ios", "Start-path iPhone", fakeTimer.now()),
+      );
 
-  test("a newer start-path observation updates a name a refresh already folded in", async () => {
-    fakeTimer.advanceTime(1);
-    await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone", fakeTimer.now()));
-    fakeTimer.advanceTime(1);
-    await republishAs(booted(PHYSICAL_IPHONE_UDID, "ios", "Refresh iPhone", fakeTimer.now()));
-    fakeTimer.advanceTime(1);
+      expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("Start-path iPhone");
+    },
+  );
 
-    await devicePool.bindOrReuseDeviceSession(
-      "owner-session",
-      PHYSICAL_IPHONE_UDID,
-      "ios",
-      undefined,
-      undefined,
-      booted(PHYSICAL_IPHONE_UDID, "ios", "Start-path iPhone", fakeTimer.now()),
-    );
-
-    expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("Start-path iPhone");
-  });
-
-  test("an older start snapshot never reverts a name a refresh already folded in", async () => {
+  arranged("an older start snapshot never reverts a name a refresh already folded in", async () => {
     fakeTimer.advanceTime(1);
     await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone", fakeTimer.now()));
     // Capture the snapshot the start path will carry, then let a refresh land
@@ -203,7 +227,7 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
   });
 
-  test("refreshes a physical iPhone rename after the lister clock rolls back", async () => {
+  arranged("refreshes a physical iPhone rename after the lister clock rolls back", async () => {
     let name = "Old iPhone";
     let executions = 0;
     const lister = new DevicectlDeviceLister({
@@ -233,7 +257,7 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
   });
 
-  test("an unstamped start snapshot cannot revert an unstamped refresh", async () => {
+  arranged("an unstamped start snapshot cannot revert an unstamped refresh", async () => {
     await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone"));
     const staleSnapshot = booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone");
     await republishAs(booted(PHYSICAL_IPHONE_UDID, "ios", "New iPhone"));
@@ -250,7 +274,7 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
   });
 
-  test("an unstamped start snapshot cannot revert a stamped refresh", async () => {
+  arranged("an unstamped start snapshot cannot revert a stamped refresh", async () => {
     fakeTimer.advanceTime(1);
     await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone", fakeTimer.now()));
     fakeTimer.advanceTime(1);
@@ -268,7 +292,7 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
   });
 
-  test("still replaces a physical iOS UDID whose platform changes", async () => {
+  arranged("still replaces a physical iOS UDID whose platform changes", async () => {
     await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Jason's iPhone"));
     const incarnation = devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.incarnation;
 
@@ -279,7 +303,7 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     expect(pooled?.incarnation).not.toBe(incarnation!);
   });
 
-  test("leaves simulator rename semantics alone: a renamed simulator is replaced", async () => {
+  arranged("leaves simulator rename semantics alone: a renamed simulator is replaced", async () => {
     await initialize(booted(SIMULATOR_UDID, "ios", "iPhone 15"));
     const incarnation = devicePool.getDevice(SIMULATOR_UDID)?.incarnation;
 
@@ -290,13 +314,16 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     expect(pooled?.name).toBe("iPhone 16");
   });
 
-  test("leaves non-emulator Android name tolerance alone: a renamed Android serial is replaced", async () => {
-    await initialize(booted("R5CT1234ABC", "android", "Pixel 8"));
-    const incarnation = devicePool.getDevice("R5CT1234ABC")?.incarnation;
+  arranged(
+    "leaves non-emulator Android name tolerance alone: a renamed Android serial is replaced",
+    async () => {
+      await initialize(booted("R5CT1234ABC", "android", "Pixel 8"));
+      const incarnation = devicePool.getDevice("R5CT1234ABC")?.incarnation;
 
-    await republishAs(booted("R5CT1234ABC", "android", "Pixel 9"));
+      await republishAs(booted("R5CT1234ABC", "android", "Pixel 9"));
 
-    const pooled = devicePool.getDevice("R5CT1234ABC");
-    expect(pooled?.incarnation).not.toBe(incarnation!);
-  });
+      const pooled = devicePool.getDevice("R5CT1234ABC");
+      expect(pooled?.incarnation).not.toBe(incarnation!);
+    },
+  );
 });

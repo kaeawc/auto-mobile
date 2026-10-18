@@ -1,5 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
@@ -57,7 +57,7 @@ describe("ToolRegistry daemon session/deviceId routing contract (#9945)", () => 
   const call = (name: string, args: Record<string, unknown>) =>
     ToolRegistry.getTool(name)!.handler(args);
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     seenDevices = [];
     ToolRegistry.clearTools();
     restoreInventory = ToolRegistry.setPipelineOverridesForTesting({
@@ -88,7 +88,19 @@ describe("ToolRegistry daemon session/deviceId routing contract (#9945)", () => 
     DaemonState.getInstance().initialize(sessionManager, pool);
     await sessionManager.createSession(sessionUuid, androidA.deviceId, "android");
     sessionManager.setDeviceReadiness(sessionUuid, "automationReady");
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     restoreInventory();
@@ -98,71 +110,83 @@ describe("ToolRegistry daemon session/deviceId routing contract (#9945)", () => 
     sessionManager.stopCleanupTimer();
   });
 
-  test("a device-aware tool rejects another device's deviceId and never runs the handler", async () => {
-    registerProbe("tapProbe");
-    let rejection: unknown;
-    try {
-      await call("tapProbe", { sessionUuid, deviceId: androidB.deviceId });
-    } catch (error) {
-      rejection = error;
-    }
-    expect(rejection).toBeInstanceOf(ActionableError);
-    expect((rejection as ActionableError).message).toBe(
-      `tapProbe deviceId '${androidB.deviceId}' does not match session '${sessionUuid}' device '${androidA.deviceId}'.`,
-    );
-    expect(seenDevices).toEqual([]);
-    // The session stays on its own device; nothing was rebound to the hint.
-    expect(sessionManager.getSession(sessionUuid)?.assignedDevice).toBe(androidA.deviceId);
-  });
+  arranged(
+    "a device-aware tool rejects another device's deviceId and never runs the handler",
+    async () => {
+      registerProbe("tapProbe");
+      let rejection: unknown;
+      try {
+        await call("tapProbe", { sessionUuid, deviceId: androidB.deviceId });
+      } catch (error) {
+        rejection = error;
+      }
+      expect(rejection).toBeInstanceOf(ActionableError);
+      expect((rejection as ActionableError).message).toBe(
+        `tapProbe deviceId '${androidB.deviceId}' does not match session '${sessionUuid}' device '${androidA.deviceId}'.`,
+      );
+      expect(seenDevices).toEqual([]);
+      // The session stays on its own device; nothing was rebound to the hint.
+      expect(sessionManager.getSession(sessionUuid)?.assignedDevice).toBe(androidA.deviceId);
+    },
+  );
 
-  test("the refusal is the typed device_outside_bound_session on the wire (#11351)", async () => {
-    registerProbe("tapProbe");
-    let rejection: unknown;
-    try {
-      await call("tapProbe", { sessionUuid, deviceId: androidB.deviceId });
-    } catch (error) {
-      rejection = error;
-    }
-    const wire = JSON.parse(
-      shapeToolCallError(rejection, { toolName: "tapProbe", source: "MCP" }).content[0].text,
-    );
-    expect(wire).toMatchObject({
-      success: false,
-      code: "device_outside_bound_session",
-      boundSessionUuid: sessionUuid,
-      boundDeviceId: androidA.deviceId,
-      deviceId: androidB.deviceId,
-      retryable: false,
-    });
-  });
+  arranged(
+    "the refusal is the typed device_outside_bound_session on the wire (#11351)",
+    async () => {
+      registerProbe("tapProbe");
+      let rejection: unknown;
+      try {
+        await call("tapProbe", { sessionUuid, deviceId: androidB.deviceId });
+      } catch (error) {
+        rejection = error;
+      }
+      const wire = JSON.parse(
+        shapeToolCallError(rejection, { toolName: "tapProbe", source: "MCP" }).content[0].text,
+      );
+      expect(wire).toMatchObject({
+        success: false,
+        code: "device_outside_bound_session",
+        boundSessionUuid: sessionUuid,
+        boundDeviceId: androidA.deviceId,
+        deviceId: androidB.deviceId,
+        retryable: false,
+      });
+    },
+  );
 
-  test("the error text for observe is unchanged (same rule, tool name interpolated)", async () => {
-    registerProbe("observe");
-    await expect(call("observe", { sessionUuid, deviceId: androidB.deviceId })).rejects.toThrow(
-      `observe deviceId '${androidB.deviceId}' does not match session '${sessionUuid}' device '${androidA.deviceId}'.`,
-    );
-  });
+  arranged(
+    "the error text for observe is unchanged (same rule, tool name interpolated)",
+    async () => {
+      registerProbe("observe");
+      await expect(call("observe", { sessionUuid, deviceId: androidB.deviceId })).rejects.toThrow(
+        `observe deviceId '${androidB.deviceId}' does not match session '${sessionUuid}' device '${androidA.deviceId}'.`,
+      );
+    },
+  );
 
-  test("a deviceId that matches the session's device still runs on it", async () => {
+  arranged("a deviceId that matches the session's device still runs on it", async () => {
     registerProbe("tapProbe");
     await call("tapProbe", { sessionUuid, deviceId: androidA.deviceId });
     expect(seenDevices).toEqual([androidA.deviceId]);
   });
 
-  test("a session call with no deviceId still runs on the session's device", async () => {
+  arranged("a session call with no deviceId still runs on the session's device", async () => {
     registerProbe("tapProbe");
     await call("tapProbe", { sessionUuid });
     expect(seenDevices).toEqual([androidA.deviceId]);
   });
 
-  test("a device label drops a stray deviceId, so multi-device plan steps are not rejected", async () => {
-    registerProbe("tapProbe");
-    sessionManager.setDeviceLabels(sessionUuid, { A: sessionUuid });
-    await call("tapProbe", { sessionUuid, device: "A", deviceId: androidB.deviceId });
-    expect(seenDevices).toEqual([androidA.deviceId]);
-  });
+  arranged(
+    "a device label drops a stray deviceId, so multi-device plan steps are not rejected",
+    async () => {
+      registerProbe("tapProbe");
+      sessionManager.setDeviceLabels(sessionUuid, { A: sessionUuid });
+      await call("tapProbe", { sessionUuid, device: "A", deviceId: androidB.deviceId });
+      expect(seenDevices).toEqual([androidA.deviceId]);
+    },
+  );
 
-  test("tools registered outside the device-aware pipeline may name any device", async () => {
+  arranged("tools registered outside the device-aware pipeline may name any device", async () => {
     // setActiveDevice, startDevice, killDevice, listDevices and the other
     // `ToolRegistry.register` tools never reach target resolution.
     const seen: unknown[] = [];
@@ -174,7 +198,7 @@ describe("ToolRegistry daemon session/deviceId routing contract (#9945)", () => 
     expect(seen).toEqual([androidB.deviceId]);
   });
 
-  test("a deviceId without a session is still honored", async () => {
+  arranged("a deviceId without a session is still honored", async () => {
     registerProbe("tapProbe");
     await call("tapProbe", { deviceId: androidB.deviceId });
     expect(seenDevices).toEqual([androidB.deviceId]);

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import { z } from "zod/v4";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -58,7 +58,7 @@ describe("a sessionless read never readies a device held outside this daemon's s
       .getExecutedCommands()
       .filter((command) => /cmd uimode night|settings put|settings delete/.test(command));
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     reads = [];
     appearanceApplies = [];
     ToolRegistry.clearTools();
@@ -153,7 +153,19 @@ describe("a sessionless read never readies a device held outside this daemon's s
       async () => ({ success: true }),
       { deviceReadiness: "booted" },
     );
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     restorePipeline();
@@ -163,73 +175,85 @@ describe("a sessionless read never readies a device held outside this daemon's s
     sessionManager.stopCleanupTimer();
   });
 
-  test("a read on a device another daemon claims is answered without a device write", async () => {
-    // The pool's cross-daemon claim verdict for `theirs`: a live peer daemon (pid 4242) owns it.
-    pool.assertNotClaimedByForeignDaemon = async (deviceId) => {
-      if (deviceId === theirs.deviceId) {
-        throw new DeviceOwnedByOtherDaemonError(deviceId, 4242);
-      }
-    };
-    // Control is refused before any device work, so the device is held elsewhere for the pipeline.
-    await expect(
-      call("controlProbe", { platform: "android", deviceId: theirs.deviceId }),
-    ).rejects.toBeInstanceOf(DeviceOwnedByOtherDaemonError);
-    expect(deviceWrites()).toEqual([]);
+  arranged(
+    "a read on a device another daemon claims is answered without a device write",
+    async () => {
+      // The pool's cross-daemon claim verdict for `theirs`: a live peer daemon (pid 4242) owns it.
+      pool.assertNotClaimedByForeignDaemon = async (deviceId) => {
+        if (deviceId === theirs.deviceId) {
+          throw new DeviceOwnedByOtherDaemonError(deviceId, 4242);
+        }
+      };
+      // Control is refused before any device work, so the device is held elsewhere for the pipeline.
+      await expect(
+        call("controlProbe", { platform: "android", deviceId: theirs.deviceId }),
+      ).rejects.toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+      expect(deviceWrites()).toEqual([]);
 
-    await call("readProbe", { platform: "android", deviceId: theirs.deviceId });
+      await call("readProbe", { platform: "android", deviceId: theirs.deviceId });
 
-    expect(reads).toEqual([{ deviceId: theirs.deviceId, readPath: true }]);
-    expect(appearanceApplies).toEqual([]);
-    expect(deviceWrites()).toEqual([]);
-  });
+      expect(reads).toEqual([{ deviceId: theirs.deviceId, readPath: true }]);
+      expect(appearanceApplies).toEqual([]);
+      expect(deviceWrites()).toEqual([]);
+    },
+  );
 
-  test("a read on another execution's idle binding device is answered without a device write", async () => {
-    pool.assertNotAssignedToBinding = async (input) => {
-      if (input.deviceId === theirs.deviceId && input.requesterSessionUuid !== "slot-exec") {
-        throw new DeviceAssignedToBindingError(input.action, input.deviceId, {
-          platform: "android",
-          stableDeviceId: "Pixel_B",
-          holder: "session_broker",
-          scopeKey: "scope",
-          bindingIndex: 0,
-          scopeState: null,
-          execSessionUuid: "slot-exec",
-        });
-      }
-    };
-    await expect(
-      call("controlProbe", { platform: "android", deviceId: theirs.deviceId }),
-    ).rejects.toBeInstanceOf(DeviceAssignedToBindingError);
-    expect(deviceWrites()).toEqual([]);
+  arranged(
+    "a read on another execution's idle binding device is answered without a device write",
+    async () => {
+      pool.assertNotAssignedToBinding = async (input) => {
+        if (input.deviceId === theirs.deviceId && input.requesterSessionUuid !== "slot-exec") {
+          throw new DeviceAssignedToBindingError(input.action, input.deviceId, {
+            platform: "android",
+            stableDeviceId: "Pixel_B",
+            holder: "session_broker",
+            scopeKey: "scope",
+            bindingIndex: 0,
+            scopeState: null,
+            execSessionUuid: "slot-exec",
+          });
+        }
+      };
+      await expect(
+        call("controlProbe", { platform: "android", deviceId: theirs.deviceId }),
+      ).rejects.toBeInstanceOf(DeviceAssignedToBindingError);
+      expect(deviceWrites()).toEqual([]);
 
-    await call("readProbe", { platform: "android", deviceId: theirs.deviceId });
+      await call("readProbe", { platform: "android", deviceId: theirs.deviceId });
 
-    expect(reads).toEqual([{ deviceId: theirs.deviceId, readPath: true }]);
-    expect(appearanceApplies).toEqual([]);
-    expect(deviceWrites()).toEqual([]);
-  });
+      expect(reads).toEqual([{ deviceId: theirs.deviceId, readPath: true }]);
+      expect(appearanceApplies).toEqual([]);
+      expect(deviceWrites()).toEqual([]);
+    },
+  );
 
-  test("a read on a device whose ownership cannot be read is answered without a device write", async () => {
-    pool.assertNotClaimedByForeignDaemon = async () => {
-      throw new Error("claim registry unreadable");
-    };
+  arranged(
+    "a read on a device whose ownership cannot be read is answered without a device write",
+    async () => {
+      pool.assertNotClaimedByForeignDaemon = async () => {
+        throw new Error("claim registry unreadable");
+      };
 
-    await call("readProbe", { platform: "android", deviceId: theirs.deviceId });
+      await call("readProbe", { platform: "android", deviceId: theirs.deviceId });
 
-    expect(reads).toEqual([{ deviceId: theirs.deviceId, readPath: true }]);
-    expect(deviceWrites()).toEqual([]);
-  });
+      expect(reads).toEqual([{ deviceId: theirs.deviceId, readPath: true }]);
+      expect(deviceWrites()).toEqual([]);
+    },
+  );
 
-  test("a read on a device nobody holds runs required readiness without preference writes", async () => {
-    await call("readProbe", { platform: "android", deviceId: theirs.deviceId });
+  arranged(
+    "a read on a device nobody holds runs required readiness without preference writes",
+    async () => {
+      await call("readProbe", { platform: "android", deviceId: theirs.deviceId });
 
-    expect(reads).toEqual([{ deviceId: theirs.deviceId, readPath: false }]);
-    expect(appearanceApplies).toEqual([]);
-    expect(deviceWrites()).toEqual([]);
-    expect(devices.getCurrentDevice()).toBeUndefined();
-  });
+      expect(reads).toEqual([{ deviceId: theirs.deviceId, readPath: false }]);
+      expect(appearanceApplies).toEqual([]);
+      expect(deviceWrites()).toEqual([]);
+      expect(devices.getCurrentDevice()).toBeUndefined();
+    },
+  );
 
-  test("a read leaves the preference writes for a later sessionless control call", async () => {
+  arranged("a read leaves the preference writes for a later sessionless control call", async () => {
     await call("readProbe", { platform: "android", deviceId: theirs.deviceId });
     expect(appearanceApplies).toEqual([]);
     expect(deviceWrites()).toEqual([]);

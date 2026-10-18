@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { DevicePool } from "../../../../src/daemon/devicePool";
 import { BINDING_INPUT_SNAPSHOT_MAX_AGE_MS } from "../../../../src/daemon/inputDeviceOwnership";
 import {
@@ -36,7 +36,7 @@ describe("a binding's own execution right after its acquisition", () => {
   let registry: FakeBindingRegistry;
   let pool: DevicePool;
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     timer.setCurrentTime(1_000_000);
     registry = new FakeBindingRegistry(timer);
@@ -52,7 +52,19 @@ describe("a binding's own execution right after its acquisition", () => {
       }),
     );
     await pool.initializeWithDevices([DEVICE]);
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   /** What the reconciler's provision step does when it binds the binding device to a new session. */
   const bindAsReconciler = (key: BindingKey, sessionUuid: string) =>
@@ -91,7 +103,7 @@ describe("a binding's own execution right after its acquisition", () => {
         (error: unknown) => (error as { code?: string }).code ?? String(error),
       );
 
-  test("its first control call is allowed on an idle binding it just claimed", async () => {
+  arranged("its first control call is allowed on an idle binding it just claimed", async () => {
     const key = await assignBindingDevice(registry, "ios", DEVICE.deviceId);
 
     await bindAsReconciler(key, EXECUTION);
@@ -100,18 +112,21 @@ describe("a binding's own execution right after its acquisition", () => {
     expect(await control(EXECUTION)).toBe("allowed");
   });
 
-  test("its first control call is allowed when it follows an earlier execution of the binding", async () => {
-    const key = await assignBindingDevice(registry, "ios", DEVICE.deviceId, "runner-a", PREVIOUS);
-    expect(await control(PREVIOUS)).toBe("allowed");
-    await registry.releaseExecution(key, PREVIOUS);
+  arranged(
+    "its first control call is allowed when it follows an earlier execution of the binding",
+    async () => {
+      const key = await assignBindingDevice(registry, "ios", DEVICE.deviceId, "runner-a", PREVIOUS);
+      expect(await control(PREVIOUS)).toBe("allowed");
+      await registry.releaseExecution(key, PREVIOUS);
 
-    await bindAsReconciler(key, EXECUTION);
-    await claim(key, EXECUTION);
+      await bindAsReconciler(key, EXECUTION);
+      await claim(key, EXECUTION);
 
-    expect(await control(EXECUTION)).toBe("allowed");
-    // The ended execution no longer owns the device.
-    expect(await control(PREVIOUS)).toBe("device_assigned_to_binding");
-  });
+      expect(await control(EXECUTION)).toBe("allowed");
+      // The ended execution no longer owns the device.
+      expect(await control(PREVIOUS)).toBe("device_assigned_to_binding");
+    },
+  );
 });
 
 describe("a forced exclusion re-read after a refusal", () => {

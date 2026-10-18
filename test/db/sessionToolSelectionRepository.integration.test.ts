@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
-import type { Database } from "../../../src/db/types";
-import { SqliteSessionToolSelectionRepository } from "../../../src/features/toolSelection/SqliteSessionToolSelectionRepository";
-import { createTestDatabase } from "../../db/testDbHelper";
+import type { Database } from "../../src/db/types";
+import { SqliteSessionToolSelectionRepository } from "../../src/db/sessionToolSelectionRepository";
+import { createTestDatabase } from "./testDbHelper";
 
 /**
  * #6886 review — `setToolEnabled { toolNames: [...] }` advertises all-or-nothing

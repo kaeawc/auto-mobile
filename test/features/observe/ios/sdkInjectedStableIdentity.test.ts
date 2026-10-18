@@ -8,7 +8,6 @@ import type {
 } from "../../../../src/features/observe/ios/types";
 import { normalizeIosHierarchy } from "../../../../src/features/observe/HierarchyNormalization";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
-import type { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { DefaultElementParser } from "../../../../src/features/utility/ElementParser";
 import {
   nodeAttributes,
@@ -21,6 +20,7 @@ import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { getStructuredPayload } from "../../../../src/utils/toolUtils";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { makeViewHierarchyCtrlProxy } from "../../../helpers/androidViewHierarchyClient";
 import { spyOnIosClientInstance } from "../../../helpers/iosCtrlProxyClientSpies";
 
 interface CaptureNode extends Record<string, unknown> {
@@ -161,10 +161,11 @@ describe("iOS SDK-injected stable identity (real batch-13 captures, #9260)", () 
     const client = new FakeIOSCtrlProxy(timer);
     const getInstance = spyOnIosClientInstance(client);
     try {
+      const androidProxy = new FakeCtrlProxy(timer);
       const reader = new ViewHierarchy(
         { deviceId: "sdk-identity-ios-test", platform: "ios", name: "Test iPhone" },
         new FakeAdbClientFactory(),
-        new FakeCtrlProxy(timer) as unknown as AndroidCtrlProxyClient,
+        makeViewHierarchyCtrlProxy(androidProxy),
         timer,
       );
       const ids: string[] = [];

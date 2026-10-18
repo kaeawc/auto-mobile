@@ -249,8 +249,8 @@ describe("AndroidH264Source", () => {
   });
 
   test("does not rotate when a segment exits with a non-zero code; surfaces onError after retries", async () => {
-    let captured: Error | null = null;
-    const { source, processes, timer } = makeSource({ onError: (error) => (captured = error) });
+    const errors: Error[] = [];
+    const { source, processes, timer } = makeSource({ onError: (error) => errors.push(error) });
     await source.start();
     expect(processes).toHaveLength(1);
 
@@ -258,7 +258,7 @@ describe("AndroidH264Source", () => {
     for (let attempt = 1; attempt <= ANDROID_RUNNING_RETRY_MAX_ATTEMPTS; attempt++) {
       processes[attempt - 1].simulateExit(1, null);
       await drainSegmentStart();
-      expect(captured).toBeNull();
+      expect(errors).toHaveLength(0);
       expect(processes).toHaveLength(attempt); // backoff blocks the next spawn
       timer.advanceTime(attempt === 1 ? 500 : 1000);
       await drainSegmentStart();
@@ -269,8 +269,8 @@ describe("AndroidH264Source", () => {
 
     expect(processes).toHaveLength(1 + ANDROID_RUNNING_RETRY_MAX_ATTEMPTS);
     expect(source.isRunning).toBe(false);
-    expect(captured).not.toBeNull();
-    expect((captured as unknown as Error).message).toContain("code 1");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("code 1");
   });
 
   test("still rotates on a clean time-limit exit (code 0)", async () => {
@@ -313,20 +313,20 @@ describe("AndroidH264Source", () => {
   });
 
   test("surfaces a fatal error when a segment process errors", async () => {
-    let captured: Error | null = null;
-    const { source, processes, timer } = makeSource({ onError: (error) => (captured = error) });
+    const errors: Error[] = [];
+    const { source, processes, timer } = makeSource({ onError: (error) => errors.push(error) });
     await source.start();
 
     for (let attempt = 1; attempt <= ANDROID_RUNNING_RETRY_MAX_ATTEMPTS; attempt++) {
       processes[attempt - 1].emit("error", new Error("adb not found"));
-      expect(captured).toBeNull();
+      expect(errors).toHaveLength(0);
       timer.advanceTime(attempt === 1 ? 500 : 1000);
       await drainSegmentStart();
       expect(processes).toHaveLength(attempt + 1);
     }
     processes[ANDROID_RUNNING_RETRY_MAX_ATTEMPTS].emit("error", new Error("adb not found"));
-    expect(captured).not.toBeNull();
-    expect((captured as unknown as Error).message).toBe("adb not found");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe("adb not found");
     expect(source.isRunning).toBe(false);
   });
 

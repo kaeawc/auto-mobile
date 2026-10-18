@@ -3,7 +3,7 @@ import { sql, type Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 import type { FeatureFlagDefinition } from "../../src/features/featureFlags/FeatureFlagDefinitions";
-import { SqliteFeatureFlagRepository } from "../../src/features/featureFlags/FeatureFlagRepository";
+import { SqliteFeatureFlagRepository } from "../../src/db/featureFlagRepository";
 import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { createTestDatabase } from "./testDbHelper";

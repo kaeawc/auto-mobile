@@ -130,7 +130,7 @@ describe("InputText", () => {
 
     expect(capturedFactory).toBeDefined();
     expect(typeof (capturedFactory as AdbClientFactory).create).toBe("function");
-    expect(capturedFactory).toBe(factory as unknown as AdbClientFactory);
+    expect(capturedFactory).toBe(factory);
   });
 
   test("does not turn device-loss cancellation into a success:false input result", async () => {
@@ -344,8 +344,8 @@ describe("InputText", () => {
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
     const originalExecuteCommand = fakeClient.executeCommand.bind(fakeClient);
     const executeSpy = spyOn(fakeClient, "executeCommand").mockImplementation(
-      async (command, timeoutMs, maxBuffer, noRetry, signal) => {
-        const result = await originalExecuteCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      async (command, options) => {
+        const result = await originalExecuteCommand(command, options);
         if (command === "shell input keyevent KEYCODE_A") {
           controller.abort(deviceLoss);
         }

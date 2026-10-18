@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { MemoryAuditResultRepository } from "../../../src/db/memoryAuditResultRepository";
 import { MemoryAudit } from "../../../src/features/memory/MemoryAudit";
+import { MemoryAuditResultStore } from "../../../src/features/memory/MemoryAuditResultStore";
 import type { MemoryMetrics } from "../../../src/features/memory/MemoryMetricsCollector";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { createTestDatabase } from "../../db/testDbHelper";
@@ -478,14 +480,13 @@ describe("MemoryAudit - Unit Tests", function () {
     });
   });
 
-  describe("storeAuditResult", function () {
+  describe("MemoryAuditResultStore.store", function () {
     test("stores sendKeys arguments with typed text redacted", async function () {
       const db = await createTestDatabase();
       try {
-        const dbAudit = new MemoryAudit(
-          { deviceId: "test-device", name: "test", platform: "android" },
-          new FakeAdbClientFactory(),
-          db,
+        const store = new MemoryAuditResultStore(
+          "test-device",
+          new MemoryAuditResultRepository(db),
         );
         const snapshot = { javaHeapMb: 1, nativeHeapMb: 1, totalPssMb: 1, timestamp: 0, raw: "" };
         const metrics: MemoryMetrics = {
@@ -499,7 +500,7 @@ describe("MemoryAudit - Unit Tests", function () {
           gcTotalDurationMs: 0,
           unreachableObjects: null,
         };
-        await dbAudit["storeAuditResult"]({
+        await store.store({
           packageName: "com.example",
           toolName: "sendKeys",
           toolArgs: { commands: [{ action: "type", text: "hunter2-secret" }], platform: "android" },

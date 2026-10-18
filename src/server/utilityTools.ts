@@ -533,17 +533,7 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
 );
 
 // Export interfaces for type safety
-export interface ChangeLocalizationArgs {
-  // #6154: optional — resolved from deviceId/session when omitted.
-  platform?: Platform;
-  appId?: string;
-  locale?: string;
-  timeZone?: string;
-  textDirection?: "ltr" | "rtl";
-  timeFormat?: "12" | "24";
-  calendarSystem?: string;
-  restartApp?: string;
-}
+export type ChangeLocalizationArgs = z.output<typeof changeLocalizationSchema>;
 
 /**
  * #6154 follow-up: `platform` is optional on the wire (resolved from

@@ -15,10 +15,8 @@ import {
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 type ContractFields = Record<string, { rule: Record<string, unknown> }>;
-const contractNodes = contract.definitions.node.variants as unknown as Record<
-  string,
-  { fields: ContractFields }
->;
+const contractNodes: Record<string, { fields: ContractFields }> =
+  contract.definitions.node.variants;
 
 /** The Zod node union, unwrapped from its lazy wrapper, keyed by node type. */
 function zodNodeShapes(): Map<string, string[]> {
@@ -92,7 +90,7 @@ describe("prototype node contract parity", () => {
     ).innerType().schema;
     const box = (union.options as z.AnyZodObject[])[0];
     const style = (box.shape.style as z.ZodOptional<z.AnyZodObject>).unwrap();
-    const contractStyle = contract.definitions.style.fields as unknown as ContractFields;
+    const contractStyle: ContractFields = contract.definitions.style.fields;
     expect(Object.keys(style.shape).sort()).toEqual(Object.keys(contractStyle).sort());
   });
 

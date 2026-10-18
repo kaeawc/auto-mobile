@@ -15,7 +15,7 @@ import { isClickableElementProperties } from "./elementProperties";
  */
 function collectMatchingElements(
   parser: ElementParser,
-  viewHierarchy: ViewHierarchyResult,
+  viewHierarchy: ViewHierarchyResult | null,
   predicate: (properties: Record<string, unknown>) => boolean,
 ): Element[] {
   if (!viewHierarchy) {
@@ -47,7 +47,7 @@ const isScrollable = (properties: Record<string, unknown>): boolean =>
 export class DefaultScrollableElementsQuery implements ScrollableElementsQuery {
   constructor(private readonly parser: ElementParser = new DefaultElementParser()) {}
 
-  findScrollableElements(viewHierarchy: ViewHierarchyResult): Element[] {
+  findScrollableElements(viewHierarchy: ViewHierarchyResult | null): Element[] {
     return collectMatchingElements(this.parser, viewHierarchy, isScrollable);
   }
 }
@@ -56,7 +56,7 @@ export class DefaultScrollableElementsQuery implements ScrollableElementsQuery {
 export class DefaultClickableElementsQuery implements ClickableElementsQuery {
   constructor(private readonly parser: ElementParser = new DefaultElementParser()) {}
 
-  findClickableElements(viewHierarchy: ViewHierarchyResult): Element[] {
+  findClickableElements(viewHierarchy: ViewHierarchyResult | null): Element[] {
     return collectMatchingElements(this.parser, viewHierarchy, isClickableElementProperties);
   }
 }

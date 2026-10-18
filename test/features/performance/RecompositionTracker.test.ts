@@ -3,6 +3,8 @@ import { RecompositionTracker } from "../../../src/features/performance/Recompos
 import type { BootedDevice, ObserveResult, RecompositionNodeInfo } from "../../../src/models";
 import { createTestDatabase } from "../../db/testDbHelper";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { createObserveResultForTest } from "../observe/observeScreenTestBuilders";
+import { wireCapture } from "../../helpers/wireCapture";
 
 /**
  * Summary-math tests deliberately omit any package name (no activeWindow.appId and no
@@ -14,16 +16,19 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 const device: BootedDevice = { deviceId: "device-1" } as BootedDevice;
 
+/** The wire type of `total` is looser than the model: older runners send it as a string. */
+type WireRecompositionNodeInfo = Omit<RecompositionNodeInfo, "total"> & { total: unknown };
+
 /** A view-hierarchy node carrying recomposition info (CtrlProxy JSON shape, no `$`). */
-function node(recomposition: RecompositionNodeInfo, children: unknown[] = []): unknown {
+function node(recomposition: WireRecompositionNodeInfo, children: unknown[] = []): unknown {
   return { recomposition, node: children };
 }
 
 function observation(nodes: unknown[], updatedAt?: number): ObserveResult {
   return {
-    viewHierarchy: { hierarchy: { node: nodes } },
+    ...createObserveResultForTest({ viewHierarchy: wireCapture({ hierarchy: { node: nodes } }) }),
     ...(updatedAt === undefined ? {} : { updatedAt }),
-  } as unknown as ObserveResult;
+  };
 }
 
 describe("RecompositionTracker", () => {
@@ -184,10 +189,7 @@ describe("RecompositionTracker", () => {
 
   it("coerces numeric recomposition totals provided as strings", async () => {
     const tracker = new RecompositionTracker(new FakeTimer());
-    const result = observation(
-      [node({ id: "a", total: "7" as unknown as number, rolling1sAverage: 0 })],
-      0,
-    );
+    const result = observation([node({ id: "a", total: "7", rolling1sAverage: 0 })], 0);
 
     await tracker.processObservation(result, device);
 

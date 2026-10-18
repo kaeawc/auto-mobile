@@ -127,15 +127,15 @@ export class Explore extends BaseVisualChange {
   private explorationPath: string[] = [];
   private elementSelections: ElementSelectionStats[] = [];
   private consecutiveBackCount: number = 0;
-  private consecutiveNoChangeCount: number = 0;
+  consecutiveNoChangeCount: number = 0;
   private permissionDialogIdentity: string | null = null;
   private permissionDialogTapAttempts: number = 0;
-  private loopDetection: Map<string, number> = new Map();
+  loopDetection: Map<string, number> = new Map();
   private elementParser: ElementParser;
   private stopReason: string = "";
-  private previousScreen: string | null = null;
+  previousScreen: string | null = null;
   private targetPackageName: string | null = null;
-  private consecutiveOutOfAppCount: number = 0;
+  consecutiveOutOfAppCount: number = 0;
   private readonly rootScreens: Set<string> = new Set();
   private pendingBackScreen: string | null = null;
   private awaitingRelaunchScreen: boolean = false;
@@ -1046,7 +1046,7 @@ export class Explore extends BaseVisualChange {
     return trimmed.length > 0 ? trimmed : null;
   }
 
-  private async enforceTargetApp(
+  async enforceTargetApp(
     observation: ObserveResult,
     targetPackageName: string,
     progress?: ProgressCallback,

@@ -41,7 +41,8 @@ import {
   defaultRotationRestorerFactory,
   defaultScreenReaderRestorer,
 } from "./sessionDefaultRestorers";
-import { ignoresManagedExecutionIdleDeadline } from "./sessionBroker/provisioning/executionLiveness";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../models/managedExecutionLiveness";
+import { ignoresManagedExecutionIdleDeadline } from "../models/managedExecutionLiveness";
 import type { DeferredRebindCleanup } from "./acquisitionReceipt";
 import type { TimingData } from "../utils/PerformanceTracker";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
@@ -106,7 +107,6 @@ import { RELEASE_PERSIST_TIMEOUT_REASON, SessionReleasePersistTimeoutError } fro
 import { UNATTACHED, assertCollaboratorsAttached } from "./daemonAttachedCollaborators";
 export * from "./releaseErrors";
 import {
-  MANAGED_EXECUTION_LIVENESS_POLICY,
   clampManagedExecutionIdleTimeoutMs,
   holdsOwnerHeartbeatLease,
 } from "./sessionBroker/provisioning/executionLiveness";

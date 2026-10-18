@@ -149,13 +149,13 @@ src/db/navigationRetention.ts	AUTOMOBILE_NAV_RETENTION_INTERVAL_MS
 src/db/navigationRetention.ts	AUTOMOBILE_NAV_RETENTION_PER_APP_MAX_OBSERVATIONS
 src/db/navigationRetention.ts	AUTOMOBILE_NAV_RETENTION_SCREENSHOT_TTL_MS
 src/db/navigationRetention.ts	AUTOMOBILE_NAV_RETENTION_STRUCTURE_TTL_MS
+src/devices/bootAdmission/BootAdmissionGate.ts	AUTOMOBILE_BOOT_CAPACITY_GATE
+src/devices/bootAdmission/BootAdmissionGate.ts	AUTOMOBILE_IOS_SIM_CAPACITY_GATE
 src/devices/deviceBootRecovery.ts	CI
 src/devices/deviceBootRecovery.ts	GITHUB_ACTIONS
 src/devices/deviceCreationGate.ts	AUTOMOBILE_ALLOW_DEVICE_CREATE
 src/doctor/checks/android.ts	JAVA_HOME
 src/features/bootAdmission/AndroidBootAdmissionGate.ts	AUTOMOBILE_ANDROID_MAX_BOOTED
-src/features/bootAdmission/BootAdmissionGate.ts	AUTOMOBILE_BOOT_CAPACITY_GATE
-src/features/bootAdmission/BootAdmissionGate.ts	AUTOMOBILE_IOS_SIM_CAPACITY_GATE
 src/features/iosSimFleet/capacityPolicy.ts	AUTOMOBILE_IOS_SIM_MAX_BOOTED
 src/features/networkFilter/networkFilterApp.ts	AUTOMOBILE_NETWORK_FILTER_APP_PATH
 src/features/networkFilter/networkFilterApp.ts	AUTOMOBILE_NETWORK_FILTER_TEAM_ID

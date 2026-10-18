@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { RTCPeerConnection } from "werift";
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { WebRtcPublisher } from "../../src/features/webrtc/WebRtcPublisher";
-import type { WhipClient } from "../../src/features/webrtc/WhipClient";
 import {
   getWebRtcStreamDescriptor,
   resetWebRtcStreamManager,
@@ -16,6 +15,7 @@ import type { AndroidH264Source } from "../../src/features/webrtc";
 import type { AndroidH264SourceOptions } from "../../src/features/webrtc/H264CaptureSource";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { capturedH264AsDevicePackets } from "../helpers/capturedH264Stream";
+import { fakeWhipClient } from "../helpers/fakeWhipClient";
 
 // Interaction of the initial-publish teardown (#10149) with the end-of-packet delivery (#10150),
 // run through the REAL WebRtcPublisher and RTP writer fed the repo's captured x264 stream.
@@ -109,7 +109,7 @@ function installFakes() {
           timer,
           createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
           createWhipClient: () =>
-            ({
+            fakeWhipClient({
               publish: () =>
                 new Promise((_resolve, reject) => {
                   // The first WHIP publish is rejected on demand; later ones stay pending.
@@ -118,7 +118,7 @@ function installFakes() {
                   }
                 }),
               delete: async () => {},
-            }) as unknown as WhipClient,
+            }),
         },
       );
       publishers.push(publisher);

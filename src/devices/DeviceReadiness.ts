@@ -9,7 +9,7 @@ import {
   providedReadTargetNotFound,
 } from "./runningReadTarget";
 import { isDeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuarantinedError";
-import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../daemon/deviceAdmissionGate";
+import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import {
   ambientDeviceExecutionBinding,
   type DeviceExecutionBinding,
@@ -69,7 +69,7 @@ import type { AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlPr
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { IOSCtrlProxy } from "../features/observe/ios/IOSCtrlProxyClient";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import type { ObserveScreenCache } from "../features/observe/interfaces/ObserveScreenCache";
+import type { ObserveScreenCache } from "../models/ObserveScreenCache";
 import {
   createPerformanceTracker,
   createGlobalPerformanceTracker,

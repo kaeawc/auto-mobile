@@ -6,7 +6,6 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import {
   type DeviceSessionPersistence,
   type DeviceSessionRecord,
@@ -14,6 +13,7 @@ import {
 import type { DeviceSession } from "../../src/db/types";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 
+import { persistenceServing, sessionRow } from "../helpers/sessionManagerSuite";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import {
   createBootedDevice,
@@ -37,6 +37,22 @@ describe("DevicePool", () => {
     fakeDeviceManager,
   }));
 
+  /** A restarted-daemon row: the shared expired session, stamped as this suite's recovery fixture. */
+  const restartedRow = (overrides: Partial<DeviceSession> = {}): DeviceSession =>
+    sessionRow({
+      source: "session-manager",
+      created_at: "2026-09-14T00:00:00.000Z",
+      updated_at: "2026-09-14T00:00:00.000Z",
+      ...overrides,
+    });
+
+  /** Swap in a manager over `persistence` plus a fresh pool, as a restarted daemon would have. */
+  const restartOn = (persistence: DeviceSessionPersistence): void => {
+    sessionManager.stopCleanupTimer();
+    sessionManager = new SessionManager(fakeTimer, persistence);
+    devicePool = makePool();
+  };
+
   beforeEach(() => {
     ({ devicePool, sessionManager, fakeTimer, fakeAppsRepo, fakeDeviceManager } =
       createDevicePoolSuite());
@@ -50,49 +66,20 @@ describe("DevicePool", () => {
     test.each([false, true])(
       "recovers a restarted Android session only onto its persisted AVD identity, reverse=%s",
       async (reverse) => {
-        const persisted: DeviceSession = {
-          session_uuid: "restarted-session",
-          device_id: "emulator-5554",
+        const persisted = restartedRow({
           stable_device_id: "Original_AVD",
-          platform: "android",
-          status: "expired",
-          source: "session-manager",
-          autolock_enabled: 0,
-          mcp_session_id: null,
-          daemon_session_id: "old-daemon",
-          created_at_ms: 1,
-          last_used_at_ms: 20,
-          expires_at_ms: 30,
-          released_at_ms: 25,
-          release_reason: "daemon-restart",
           session_timeout_ms: 60_000,
           heartbeat_timeout_ms: 12_000,
           heartbeat_timeout_source: "custom",
-          has_received_heartbeat: 1,
           liveness_policy: "heartbeat",
-          created_at: "2026-09-14T00:00:00.000Z",
-          updated_at: "2026-09-14T00:00:00.000Z",
-        };
+        });
         const persistedUpdates: DeviceSessionRecord[] = [];
-        const persistence: DeviceSessionPersistence = Object.assign(
-          new FakeDeviceSessionPersistence(),
-          {
-            recordLivenessOwnership: async () => {},
-            replaceLivenessOwnership: async () => {},
-            claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
-            async getSession() {
-              return persisted;
-            },
-            async upsertActiveSession(record) {
-              persistedUpdates.push(record);
-            },
-            async recordActivity() {},
-            async markReleased() {},
-          } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
-        );
-        sessionManager.stopCleanupTimer();
-        sessionManager = new SessionManager(fakeTimer, persistence);
-        devicePool = makePool();
+        const persistence = persistenceServing(persisted, {
+          async upsertActiveSession(record) {
+            persistedUpdates.push(record);
+          },
+        });
+        restartOn(persistence);
         const devices = [
           createBootedDevice("emulator-5554", "android", "Unrelated_AVD"),
           createBootedDevice("emulator-5556", "android", "Original_AVD"),
@@ -142,21 +129,13 @@ describe("DevicePool", () => {
     );
 
     test("restores a recovered autolock session's CLI idle policy", async () => {
-      const persisted: DeviceSession = {
+      const persisted = restartedRow({
         session_uuid: "restarted-cli-session",
-        device_id: "emulator-5554",
         stable_device_id: "Original_AVD",
-        platform: "android",
-        status: "expired",
         source: "autolock",
         autolock_enabled: 1,
         mcp_session_id: "old-mcp-session",
-        daemon_session_id: "old-daemon",
-        created_at_ms: 1,
-        last_used_at_ms: 20,
         expires_at_ms: 60_020,
-        released_at_ms: 25,
-        release_reason: "daemon-restart",
         session_timeout_ms: 60_000,
         heartbeat_timeout_ms: 60_000,
         heartbeat_timeout_source: "custom",
@@ -165,26 +144,9 @@ describe("DevicePool", () => {
         pre_cli_heartbeat_timeout_ms: 12_000,
         pre_cli_heartbeat_timeout_source: "custom",
         pre_cli_session_timeout_ms: 60_000,
-        created_at: "2026-09-14T00:00:00.000Z",
-        updated_at: "2026-09-14T00:00:00.000Z",
-      };
-      const persistence: DeviceSessionPersistence = Object.assign(
-        new FakeDeviceSessionPersistence(),
-        {
-          recordLivenessOwnership: async () => {},
-          replaceLivenessOwnership: async () => {},
-          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
-          async getSession() {
-            return persisted;
-          },
-          async upsertActiveSession() {},
-          async recordActivity() {},
-          async markReleased() {},
-        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
-      );
-      sessionManager.stopCleanupTimer();
-      sessionManager = new SessionManager(fakeTimer, persistence);
-      devicePool = makePool();
+      });
+      const persistence = persistenceServing(persisted);
+      restartOn(persistence);
       await initializeLiveDevices([createBootedDevice("emulator-5556", "android", "Original_AVD")]);
 
       const recovered = await sessionManager.getOrCreateSession(
@@ -222,50 +184,20 @@ describe("DevicePool", () => {
     });
 
     test("keeps unresolved persisted identity retryable before fencing a resolved same-serial replacement", async () => {
-      const persisted: DeviceSession = {
-        session_uuid: "restarted-session",
-        device_id: "emulator-5554",
+      const persisted = restartedRow({
         stable_device_id: "Original_AVD",
-        platform: "android",
-        status: "expired",
-        source: "session-manager",
-        autolock_enabled: 0,
-        mcp_session_id: null,
-        daemon_session_id: "old-daemon",
-        created_at_ms: 1,
-        last_used_at_ms: 20,
-        expires_at_ms: 30,
-        released_at_ms: 25,
-        release_reason: "daemon-restart",
-        session_timeout_ms: 10,
-        heartbeat_timeout_ms: 5,
-        has_received_heartbeat: 1,
-        created_at: "2026-09-14T00:00:00.000Z",
-        updated_at: "2026-09-14T00:00:00.000Z",
-      };
+      });
       const releaseReasons: string[] = [];
-      const persistence: DeviceSessionPersistence = Object.assign(
-        new FakeDeviceSessionPersistence(),
-        {
-          recordLivenessOwnership: async () => {},
-          replaceLivenessOwnership: async () => {},
-          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
-          async getSession() {
-            return persisted;
-          },
-          async upsertActiveSession() {
-            throw new Error("same-serial replacement must not create a recovered session");
-          },
-          async recordActivity() {},
-          async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
-            releaseReasons.push(releaseReason);
-            persisted.release_reason = releaseReason;
-          },
-        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
-      );
-      sessionManager.stopCleanupTimer();
-      sessionManager = new SessionManager(fakeTimer, persistence);
-      devicePool = makePool();
+      const persistence = persistenceServing(persisted, {
+        async upsertActiveSession() {
+          throw new Error("same-serial replacement must not create a recovered session");
+        },
+        async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+          releaseReasons.push(releaseReason);
+          persisted.release_reason = releaseReason;
+        },
+      });
+      restartOn(persistence);
       await initializeLiveDevices([
         createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)"),
       ]);
@@ -316,50 +248,23 @@ describe("DevicePool", () => {
     ])(
       "keeps an absent $platform recovery target retryable until its discovery source succeeds",
       async ({ platform, deviceId, stableDeviceId, failedSource }) => {
-        const persisted: DeviceSession = {
+        const persisted = restartedRow({
           session_uuid: `restarted-${platform}-session`,
           device_id: deviceId,
           stable_device_id: stableDeviceId,
           platform,
-          status: "expired",
-          source: "session-manager",
-          autolock_enabled: 0,
-          mcp_session_id: null,
-          daemon_session_id: "old-daemon",
-          created_at_ms: 1,
-          last_used_at_ms: 20,
-          expires_at_ms: 30,
-          released_at_ms: 25,
-          release_reason: "daemon-restart",
-          session_timeout_ms: 10,
-          heartbeat_timeout_ms: 5,
-          has_received_heartbeat: 1,
-          created_at: "2026-09-14T00:00:00.000Z",
-          updated_at: "2026-09-14T00:00:00.000Z",
-        };
+        });
         const releaseReasons: string[] = [];
-        const persistence: DeviceSessionPersistence = Object.assign(
-          new FakeDeviceSessionPersistence(),
-          {
-            recordLivenessOwnership: async () => {},
-            replaceLivenessOwnership: async () => {},
-            claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
-            async getSession() {
-              return persisted;
-            },
-            async upsertActiveSession() {
-              throw new Error("an absent recovery target must not create a recovered session");
-            },
-            async recordActivity() {},
-            async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
-              releaseReasons.push(releaseReason);
-              persisted.release_reason = releaseReason;
-            },
-          } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
-        );
-        sessionManager.stopCleanupTimer();
-        sessionManager = new SessionManager(fakeTimer, persistence);
-        devicePool = makePool();
+        const persistence = persistenceServing(persisted, {
+          async upsertActiveSession() {
+            throw new Error("an absent recovery target must not create a recovered session");
+          },
+          async markReleased(_sessionUuid, _status, _releasedAtMs, releaseReason) {
+            releaseReasons.push(releaseReason);
+            persisted.release_reason = releaseReason;
+          },
+        });
+        restartOn(persistence);
         fakeDeviceManager.bootedDevices = [];
         fakeDeviceManager.failedSources.add(failedSource);
 
@@ -386,44 +291,11 @@ describe("DevicePool", () => {
     );
 
     test("does not recover an Android emulator session onto a physical device with the same identifier", async () => {
-      const persisted: DeviceSession = {
-        session_uuid: "restarted-session",
-        device_id: "emulator-5554",
+      const persisted = restartedRow({
         stable_device_id: "Original_AVD",
-        platform: "android",
-        status: "expired",
-        source: "session-manager",
-        autolock_enabled: 0,
-        mcp_session_id: null,
-        daemon_session_id: "old-daemon",
-        created_at_ms: 1,
-        last_used_at_ms: 20,
-        expires_at_ms: 30,
-        released_at_ms: 25,
-        release_reason: "daemon-restart",
-        session_timeout_ms: 10,
-        heartbeat_timeout_ms: 5,
-        has_received_heartbeat: 1,
-        created_at: "2026-09-14T00:00:00.000Z",
-        updated_at: "2026-09-14T00:00:00.000Z",
-      };
-      const persistence: DeviceSessionPersistence = Object.assign(
-        new FakeDeviceSessionPersistence(),
-        {
-          recordLivenessOwnership: async () => {},
-          replaceLivenessOwnership: async () => {},
-          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
-          async getSession() {
-            return persisted;
-          },
-          async upsertActiveSession() {},
-          async recordActivity() {},
-          async markReleased() {},
-        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
-      );
-      sessionManager.stopCleanupTimer();
-      sessionManager = new SessionManager(fakeTimer, persistence);
-      devicePool = makePool();
+      });
+      const persistence = persistenceServing(persisted);
+      restartOn(persistence);
       await initializeLiveDevices([createBootedDevice("Original_AVD", "android", "Pixel 9")]);
 
       await expect(
@@ -442,44 +314,11 @@ describe("DevicePool", () => {
     });
 
     test("does not recover an Android emulator session onto an unresolved placeholder", async () => {
-      const persisted: DeviceSession = {
-        session_uuid: "restarted-session",
-        device_id: "emulator-5554",
+      const persisted = restartedRow({
         stable_device_id: "Unknown (emulator-5554)",
-        platform: "android",
-        status: "expired",
-        source: "session-manager",
-        autolock_enabled: 0,
-        mcp_session_id: null,
-        daemon_session_id: "old-daemon",
-        created_at_ms: 1,
-        last_used_at_ms: 20,
-        expires_at_ms: 30,
-        released_at_ms: 25,
-        release_reason: "daemon-restart",
-        session_timeout_ms: 10,
-        heartbeat_timeout_ms: 5,
-        has_received_heartbeat: 1,
-        created_at: "2026-09-14T00:00:00.000Z",
-        updated_at: "2026-09-14T00:00:00.000Z",
-      };
-      const persistence: DeviceSessionPersistence = Object.assign(
-        new FakeDeviceSessionPersistence(),
-        {
-          recordLivenessOwnership: async () => {},
-          replaceLivenessOwnership: async () => {},
-          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
-          async getSession() {
-            return persisted;
-          },
-          async upsertActiveSession() {},
-          async recordActivity() {},
-          async markReleased() {},
-        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
-      );
-      sessionManager.stopCleanupTimer();
-      sessionManager = new SessionManager(fakeTimer, persistence);
-      devicePool = makePool();
+      });
+      const persistence = persistenceServing(persisted);
+      restartOn(persistence);
       await initializeLiveDevices([
         createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)"),
       ]);
@@ -500,44 +339,13 @@ describe("DevicePool", () => {
     });
 
     test("refuses a restarted iOS session when only a different UUID is available", async () => {
-      const persisted: DeviceSession = {
-        session_uuid: "restarted-session",
+      const persisted = restartedRow({
         device_id: "old-simulator-uuid",
         stable_device_id: "original-simulator-uuid",
         platform: "ios",
-        status: "expired",
-        source: "session-manager",
-        autolock_enabled: 0,
-        mcp_session_id: null,
-        daemon_session_id: "old-daemon",
-        created_at_ms: 1,
-        last_used_at_ms: 20,
-        expires_at_ms: 30,
-        released_at_ms: 25,
-        release_reason: "daemon-restart",
-        session_timeout_ms: 10,
-        heartbeat_timeout_ms: 5,
-        has_received_heartbeat: 1,
-        created_at: "2026-09-14T00:00:00.000Z",
-        updated_at: "2026-09-14T00:00:00.000Z",
-      };
-      const persistence: DeviceSessionPersistence = Object.assign(
-        new FakeDeviceSessionPersistence(),
-        {
-          recordLivenessOwnership: async () => {},
-          replaceLivenessOwnership: async () => {},
-          claimRecoverableSession: async (_id, expected) => expected.rowGeneration,
-          async getSession() {
-            return persisted;
-          },
-          async upsertActiveSession() {},
-          async recordActivity() {},
-          async markReleased() {},
-        } satisfies Partial<DeviceSessionPersistence> & Record<string, unknown>,
-      );
-      sessionManager.stopCleanupTimer();
-      sessionManager = new SessionManager(fakeTimer, persistence);
-      devicePool = makePool();
+      });
+      const persistence = persistenceServing(persisted);
+      restartOn(persistence);
       await initializeLiveDevices([
         createBootedDevice("replacement-simulator-uuid", "ios", "iPhone 16"),
       ]);

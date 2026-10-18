@@ -16,12 +16,11 @@ export type ResourceRegistryRequestMethod =
 
 /**
  * The slice of the SDK's low-level `Server` the registries touch. Both the real
- * `McpServer["server"]` and `FakeUnderlyingServer` satisfy it structurally, so
+ * the real `McpServer.server` and `FakeUnderlyingServer` satisfy it structurally, so
  * tests need no cast to hand a fake to `registerWithServer`.
  */
-export interface RegistryUnderlyingServer {
+export interface RegistryUnderlyingServer extends Pick<Server, "notification"> {
   onclose?: (() => void) | undefined;
-  notification: Server["notification"];
   setRequestHandler<M extends ResourceRegistryRequestMethod>(
     method: M,
     handler: (

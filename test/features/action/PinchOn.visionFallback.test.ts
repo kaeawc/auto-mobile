@@ -81,11 +81,11 @@ describe("PinchOn vision fallback", () => {
       visionConfig: enabledVisionConfig,
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+      timer: fakeTimer,
     });
-    (pinchOn as any).observeScreen = fakeObserveScreen;
-    (pinchOn as any).timer = fakeTimer;
-    (pinchOn as any).awaitIdle = fakeAwaitIdle;
-    (pinchOn as any).window = fakeWindow;
     return pinchOn;
   };
 
@@ -160,11 +160,11 @@ describe("PinchOn vision fallback", () => {
       visionConfig: { ...enabledVisionConfig, enabled: false },
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+      timer: fakeTimer,
     });
-    (pinchOn as any).observeScreen = fakeObserveScreen;
-    (pinchOn as any).timer = fakeTimer;
-    (pinchOn as any).awaitIdle = fakeAwaitIdle;
-    (pinchOn as any).window = fakeWindow;
 
     const result = await pinchOn.execute({
       direction: "in",

@@ -1,5 +1,5 @@
 import { holderOf } from "../daemon/deviceBinding";
-import { DaemonState } from "../daemon/daemonState";
+import { DaemonState, type DaemonStateLike } from "../daemon/daemonState";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import {
@@ -316,7 +316,7 @@ async function checkForeignHolder(
  * already holding this device in the pool; a current snapshot still judges the registry first.
  */
 function assertNotForeignBindingFromSnapshot(
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   input: {
     toolName: string;
     device: { deviceId: string; platform: Platform };
@@ -348,7 +348,7 @@ function assertNotForeignBindingFromSnapshot(
 }
 
 function baseRequesterSession(
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   requester: LifecycleRequester,
 ): string | undefined {
   if (!requester.sessionUuid) {

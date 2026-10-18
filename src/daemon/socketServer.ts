@@ -255,8 +255,15 @@ import {
   mcpRequestFailureDetails,
   requestFailureCause,
 } from "./socketServer/errorFrames";
+import { isTaskRelayMethod, parseTaskRelayFrame } from "../server/tasks/taskRelay";
+import {
+  callForwardedTool,
+  forwardTaskRequest,
+  taskRelayErrorFrame,
+} from "./socketServer/taskRelayForward";
 import {
   currentForwardSessionKey,
+  currentForwardTaskOwnerKey,
   FORWARD_KEY_IDLE_MS,
   type McpClientFactory,
   runWithForwardSessionKey,
@@ -2132,9 +2139,9 @@ export class UnixSocketServer {
       };
     }
 
-    // Must bypass the queue: queued, it would wait behind the very request it cancels.
-    if (request.method === DAEMON_CANCEL_REQUEST_METHOD) {
-      return this.cancelSocketRequest(session, request);
+    const unqueued = this.unqueuedRequest(session, ownerSocket, request, context);
+    if (unqueued) {
+      return unqueued;
     }
 
     const { totalTimeoutMs, deadline } = context;
@@ -2377,6 +2384,66 @@ export class UnixSocketServer {
         admissionCancellation.dispose();
         cancellation.dispose();
       });
+  }
+
+  /** A request answered without waiting in the socket's admission queue, if this is one. */
+  private unqueuedRequest(
+    session: SessionContext,
+    ownerSocket: Socket,
+    request: DaemonRequest,
+    context: RequestContext,
+  ): DaemonResponse | Promise<DaemonResponse | undefined> | undefined {
+    // Must bypass the queue: queued, it would wait behind the very request it cancels.
+    if (request.method === DAEMON_CANCEL_REQUEST_METHOD) {
+      return this.cancelSocketRequest(session, request);
+    }
+    // Task polling touches no device and must not wait behind this socket's other calls (#4668).
+    if (isTaskRelayMethod(request.method)) {
+      return this.relayTaskRequest(session, ownerSocket, request, context);
+    }
+    return undefined;
+  }
+
+  /**
+   * Relays a `tasks/*` request (#4668) outside the socket's admission queue: it reads or cancels a
+   * stored task and touches no device, so a poll never waits behind a long call on the same
+   * socket. The daemon MCP server's JSON-RPC error is carried on the frame unchanged.
+   */
+  private async relayTaskRequest(
+    session: SessionContext,
+    ownerSocket: Socket,
+    request: DaemonRequest,
+    context: RequestContext,
+  ): Promise<DaemonResponse | undefined> {
+    const sessionId = session.sessionId;
+    const cancellation = this.registerRequestCancellation(session, context);
+    const mcpRequest = this.mcpRequestSignal(sessionId, ownerSocket, cancellation.signal);
+    try {
+      await this.waitForStartup(request, context.deadline, mcpRequest.signal);
+      const result = await this.forwardMcpRequest({
+        request,
+        route: this.sharedMcpForwardRoute(`method:${request.method}`),
+        socketSessionId: sessionId,
+        signal: mcpRequest.signal,
+        totalTimeoutMs: context.totalTimeoutMs,
+        deadline: context.deadline,
+      });
+      return { id: request.id, type: "mcp_response", success: true, result };
+    } catch (error) {
+      return (
+        taskRelayErrorFrame(error, request) ??
+        this.mcpForwardFailureResponse({
+          error,
+          request,
+          sessionId,
+          ownerSocket,
+          signal: mcpRequest.signal,
+        })
+      );
+    } finally {
+      mcpRequest.dispose();
+      cancellation.dispose();
+    }
   }
 
   /**
@@ -3652,12 +3719,15 @@ export class UnixSocketServer {
    */
   private async forwardMcpRequest(context: McpForwardContext): Promise<unknown> {
     context.signal?.throwIfAborted();
-    const mcpClient = await runWithForwardSessionKey(context.socketSessionId, () =>
-      this.mcpClientFactory(
-        context.route.sessionUuid,
-        context.route.toolSelectionProfileUuid,
-        context.route.releasedSessionUuid,
-      ),
+    const mcpClient = await runWithForwardSessionKey(
+      context.socketSessionId,
+      () =>
+        this.mcpClientFactory(
+          context.route.sessionUuid,
+          context.route.toolSelectionProfileUuid,
+          context.route.releasedSessionUuid,
+        ),
+      parseTaskRelayFrame(context.request.tasks)?.ownerKey,
     );
     try {
       context.signal?.throwIfAborted();
@@ -7002,11 +7072,10 @@ export class UnixSocketServer {
                 timeoutMs,
               );
               return this.traceCallTool(request, () =>
-                mcpClient.callTool(
-                  {
-                    name: request.params.name,
-                    arguments: this.withLiveDeadlineKey(forwardedArguments, liveDeadlineKey),
-                  },
+                callForwardedTool(
+                  mcpClient,
+                  request,
+                  this.withLiveDeadlineKey(forwardedArguments, liveDeadlineKey),
                   callOptions,
                 ),
               );
@@ -7069,7 +7138,8 @@ export class UnixSocketServer {
         );
       }
       default:
-        throw new Error(`Unsupported daemon method: ${request.method}`);
+        // `tasks/get`, `tasks/update` and `tasks/cancel` (#4668); anything else is refused.
+        return await forwardTaskRequest(mcpClient, request, requestOptions);
     }
   }
 
@@ -7197,6 +7267,7 @@ export class UnixSocketServer {
       toolSelectionProfileUuid,
       releasedSessionUuid,
       sessionKey: currentForwardSessionKey(),
+      taskOwnerKey: currentForwardTaskOwnerKey(),
     });
   }
 

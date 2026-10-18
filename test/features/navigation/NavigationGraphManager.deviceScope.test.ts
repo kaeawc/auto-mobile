@@ -36,7 +36,7 @@ describe("NavigationGraphManager with two devices on one manager", () => {
     timer.setCurrentTime(T0);
     manager = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       timer,
     );
   });

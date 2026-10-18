@@ -86,7 +86,7 @@ describe("navigation resource session resolution", () => {
     const make = (id: string) =>
       NavigationGraphManager.createForTesting(
         new NavigationRepository(harness.db),
-        new TestCoverageRepository(undefined, harness.db),
+        new TestCoverageRepository(harness.db),
         new FakeTimer(),
         id,
       );

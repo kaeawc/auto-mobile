@@ -49,7 +49,7 @@ import { createStructuredToolResponse } from "../../utils/toolUtils";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { DeviceShutdownTimeoutError } from "../../models/DeviceShutdownTimeoutError";
 import { fixedBackoff } from "../../utils/Backoff";
-import { DaemonState } from "../../daemon/daemonState";
+import { DaemonState, type DaemonStateLike } from "../../daemon/daemonState";
 import { type Session, type SessionManager } from "../../daemon/sessionManager";
 import { reconcileDiscoveryObservation } from "../../daemon/discoveryReconcile";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
@@ -2673,7 +2673,7 @@ export async function rebuildSameIdReplacement(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice,
   replacement: BootedDevice,
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   stopPerformanceMonitoring: (deviceId: string) => void,
 ): Promise<void> {
   const devicePool = daemonState.getDevicePool();
@@ -2984,7 +2984,7 @@ export function captureCurrentShutdownPooledOwnership(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice | null,
 ):
-  | { daemonState: DaemonState; devicePool: DevicePool; expectedPooledDevice: PooledDevice }
+  | { daemonState: DaemonStateLike; devicePool: DevicePool; expectedPooledDevice: PooledDevice }
   | undefined {
   if (!expectedPooledDevice) {
     return undefined;
@@ -3169,7 +3169,7 @@ export function preserveLateShutdownRetirement(
 
 export async function releaseShutdownSessionOwnership(
   context: ShutdownOwnershipContext,
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   observedReplacement: BootedDevice | undefined,
   strictDeadline: boolean,
   options: {
@@ -5605,12 +5605,12 @@ export async function reserveRecoveredDeviceForReadiness(
   clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
 }
 
-export function getStartDevicePool(daemonState: DaemonState): DevicePool | undefined {
+export function getStartDevicePool(daemonState: DaemonStateLike): DevicePool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 
 export async function reserveInitialDeviceForReadiness(
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   boot: DeviceBootResult,
   releaseReadinessReservations: DeviceReadinessReservation[],
   mcpSessionId: string | undefined,
@@ -5676,7 +5676,7 @@ export interface StartDeviceRunnerReadinessInput {
   operationName: string;
   bootService: DeviceBootService;
   deviceUtils: PlatformDeviceManager;
-  daemonState: DaemonState;
+  daemonState: DaemonStateLike;
   totalDeadlineMs: number;
   readinessTimeoutMs: number;
   timer: Timer;

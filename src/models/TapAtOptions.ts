@@ -1,6 +1,7 @@
 import type { ImageRelativePoint } from "./ImageRelativePoint";
 
 import type { HierarchyLayer } from "./HierarchyLayer";
+import type { PointerOption } from "./PointerOption";
 import type { TapAtPlanContext } from "./TapAtGeometry";
 
 /** One screen point, resolved to the platform-native observe coordinate space. */
@@ -16,6 +17,8 @@ interface TapAtGestureOptions {
   durationMs?: number;
   /** Refuse the gesture when the point lies on the other layer's windows (issue #9305). */
   layer?: HierarchyLayer;
+  /** Stylus instead of a finger (Android 12+, tap and long press only; #13081). */
+  pointer?: PointerOption;
 }
 
 export type TapAtOptions = TapAtGestureOptions &

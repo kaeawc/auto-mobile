@@ -19,10 +19,10 @@ describe("EmulatorLossIncidentRepository", () => {
 
   test("persists recovery attempts and prunes oldest records", async () => {
     const repository = new EmulatorLossIncidentRepository(
+      db,
       new FakeTimer(),
       new CountingIdGenerator("incident"),
       2,
-      db,
     );
     const first = await repository.open({
       deviceId: "emulator-5554",
@@ -55,10 +55,10 @@ describe("EmulatorLossIncidentRepository", () => {
   test("retains the most recently inserted incident when timestamps tie", async () => {
     const ids = ["z-first", "a-second"];
     const repository = new EmulatorLossIncidentRepository(
+      db,
       new FakeTimer(),
       { next: () => ids.shift()! },
       1,
-      db,
     );
     const first = await repository.open({
       deviceId: "emulator-5554",
@@ -78,16 +78,16 @@ describe("EmulatorLossIncidentRepository", () => {
   test("preserves concurrent recovery updates", async () => {
     const timer = new FakeTimer();
     const repository = new EmulatorLossIncidentRepository(
+      db,
       timer,
       new CountingIdGenerator("incident"),
       2,
-      db,
     );
     const concurrentRepository = new EmulatorLossIncidentRepository(
+      db,
       timer,
       new CountingIdGenerator("concurrent"),
       2,
-      db,
     );
     const incident = await repository.open({
       deviceId: "emulator-5554",
@@ -110,10 +110,10 @@ describe("EmulatorLossIncidentRepository", () => {
   test("persists session diagnostics and replacement settlement", async () => {
     const timer = new FakeTimer();
     const repository = new EmulatorLossIncidentRepository(
+      db,
       timer,
       new CountingIdGenerator("incident"),
       50,
-      db,
     );
     const opened = await repository.open({
       deviceId: "emulator-5554",
@@ -135,10 +135,10 @@ describe("EmulatorLossIncidentRepository", () => {
     });
 
     const reopened = new EmulatorLossIncidentRepository(
+      db,
       timer,
       new CountingIdGenerator("other"),
       50,
-      db,
     );
     await expect(reopened.get(opened.id)).resolves.toMatchObject({
       deviceId: "emulator-5554",

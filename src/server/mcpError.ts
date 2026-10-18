@@ -50,3 +50,17 @@ export function toV1ClientError(error: unknown): unknown {
   }
   return error;
 }
+
+/**
+ * Awaits an SDK v2 `Client` call and rethrows its failure in the v1 client shape (see
+ * {@link toV1ClientError}), so a caller that reports or classifies the error — a
+ * request timeout as code `-32001` with `"MCP error -32001: Request timed out"` — sees
+ * what the v1 client raised (issue #4678).
+ */
+export async function withV1ClientErrors<T>(call: Promise<T>): Promise<T> {
+  try {
+    return await call;
+  } catch (error) {
+    throw toV1ClientError(error);
+  }
+}

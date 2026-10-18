@@ -628,8 +628,8 @@ test("observer readOnly flag is independent of recomposition skipping and logica
       skipBackStack: true,
       skipRecompositionTracking: false,
     });
-    expect(collect.mock.calls[0]?.[7]).toBe(true);
-    expect(collect.mock.calls[0]?.[10]).toBe(2);
+    expect(collect.mock.calls[0]?.[1]?.readOnly).toBe(true);
+    expect(collect.mock.calls[0]?.[1]?.displayId).toBe(2);
     expect(window.getGetActiveOptions()).toEqual([{ cacheResult: false }]);
   } finally {
     collect.mockRestore();

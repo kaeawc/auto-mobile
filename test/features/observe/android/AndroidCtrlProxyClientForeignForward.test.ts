@@ -1,4 +1,3 @@
-import { installFakeCtrlProxyManagers } from "../../../helpers/hermeticDeviceTools";
 import { setCtrlProxyHostPortProbeForTesting } from "../../../../src/features/observe/android/ctrlProxyHostPortProbe";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
@@ -10,16 +9,13 @@ import { createSuccessWebSocketFactory } from "../../../fakes/FakeWebSocket";
 
 const device = { deviceId: "foreign-forward-test", name: "Pixel", platform: "android" as const };
 let client: AndroidCtrlProxyClient | undefined;
-let restoreManagers: () => void;
 beforeEach(() => {
-  restoreManagers = installFakeCtrlProxyManagers();
   setCtrlProxyHostPortProbeForTesting({ isPortFree: async () => true });
 });
 afterEach(async () => {
   await client?.close();
   client = undefined;
   AndroidCtrlProxyClient.resetInstances();
-  restoreManagers();
   setCtrlProxyHostPortProbeForTesting(null);
 });
 

@@ -1,5 +1,4 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { installFakeCtrlProxyManagers } from "../helpers/hermeticDeviceTools";
 import { maskRealCtrlProxyWebSocketOptIn } from "../helpers/maskRealCtrlProxyWebSocketOptIn";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
@@ -44,11 +43,9 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
   let clientTimer: FakeTimer;
   let sessions: SessionManager;
   let client: AndroidCtrlProxyClient;
-  let restoreProviders: () => void;
   let restoreFactory: () => void;
 
   const arrange = async (): Promise<void> => {
-    restoreProviders = installFakeCtrlProxyManagers();
     timer = new FakeTimer();
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence(), {
       barrier: () => new FakeDbWriteBarrier(),
@@ -86,7 +83,6 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     sessions.stopCleanupTimer();
     DaemonState.getInstance().reset();
     restoreFactory();
-    restoreProviders();
   };
   beforeEach(arrange);
   afterEach(dispose);

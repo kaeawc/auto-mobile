@@ -19,7 +19,6 @@ import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { createSuccessWebSocketFactory } from "../../../fakes/FakeWebSocket";
-import { installFakeCtrlProxyManagers } from "../../../helpers/hermeticDeviceTools";
 import { drainUntil, settleByFakeEvents } from "../../../helpers/fakeTimerStepping";
 import { useScratchRoot } from "../../../helpers/scratchRoot";
 
@@ -29,7 +28,6 @@ describe("Android CtrlProxy singleton incarnation", () => {
   const scratch = useScratchRoot("ctrlproxy-incarnation-");
   let previousDataDir: string | undefined;
   let previousCoordinationDir: string | undefined;
-  let restoreManagers: () => void;
   let token: number | undefined;
   let timer: FakeTimer;
   let clients: AndroidCtrlProxyClient[];
@@ -64,22 +62,17 @@ describe("Android CtrlProxy singleton incarnation", () => {
 
     // Initialize the shared constructor/close code without connecting or forwarding.
     // No client or manager state from this throwaway instance reaches a scenario.
-    const restoreWarmupManagers = installFakeCtrlProxyManagers();
-    try {
-      const warmup = AndroidCtrlProxyClient.createForTesting(
-        { ...device, deviceId: "warm-up" },
-        new FakeAdbExecutor(),
-        {
-          webSocketFactory: () => {
-            throw new Error("Constructor warm-up must never connect");
-          },
-          timer: new FakeTimer(),
+    const warmup = AndroidCtrlProxyClient.createForTesting(
+      { ...device, deviceId: "warm-up" },
+      new FakeAdbExecutor(),
+      {
+        webSocketFactory: () => {
+          throw new Error("Constructor warm-up must never connect");
         },
-      );
-      await warmup.close();
-    } finally {
-      restoreWarmupManagers();
-    }
+        timer: new FakeTimer(),
+      },
+    );
+    await warmup.close();
   });
 
   beforeEach(() => {
@@ -87,7 +80,6 @@ describe("Android CtrlProxy singleton incarnation", () => {
     process.env.AUTOMOBILE_DATA_DIR = scratch.next();
     previousCoordinationDir = process.env.AUTOMOBILE_COORDINATION_DIR;
     process.env.AUTOMOBILE_COORDINATION_DIR = process.env.AUTOMOBILE_DATA_DIR;
-    restoreManagers = installFakeCtrlProxyManagers();
     PortManager.reset();
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     setCtrlProxyHostPortProbeForTesting({ isPortFree: async () => true });
@@ -113,7 +105,6 @@ describe("Android CtrlProxy singleton incarnation", () => {
     expect(PortManager.getAllocations().size).toBe(0);
     PortManager.setPortAvailabilityCheckerForTesting(null);
     setCtrlProxyHostPortProbeForTesting(null);
-    restoreManagers();
     if (previousCoordinationDir === undefined) {
       delete process.env.AUTOMOBILE_COORDINATION_DIR;
     } else {

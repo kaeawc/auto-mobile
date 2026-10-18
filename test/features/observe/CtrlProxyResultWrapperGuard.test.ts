@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import {
@@ -11,7 +11,6 @@ import type { CtrlProxyIosManager } from "../../../src/ctrlProxy/IOSCtrlProxyMan
 import type { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { installFakeCtrlProxyManagers } from "../../helpers/hermeticDeviceTools";
 import { maskRealCtrlProxyWebSocketOptIn } from "../../helpers/maskRealCtrlProxyWebSocketOptIn";
 
 /**
@@ -115,13 +114,8 @@ const iosCases: IosCase[] = [
 describe("CtrlProxy result wrappers rethrow the unit-test WebSocket guard (#10470)", () => {
   maskRealCtrlProxyWebSocketOptIn();
 
-  let restoreManagers: () => void;
   let android: AndroidCtrlProxyClient | null = null;
   let ios: IOSCtrlProxyClient | null = null;
-
-  beforeEach(() => {
-    restoreManagers = installFakeCtrlProxyManagers();
-  });
 
   afterEach(async () => {
     await android?.close();
@@ -129,7 +123,6 @@ describe("CtrlProxy result wrappers rethrow the unit-test WebSocket guard (#1047
     await ios?.close();
     ios = null;
     IOSCtrlProxyClient.resetInstances();
-    restoreManagers();
   });
 
   test.each(androidCases)("Android %s rejects with the guard error", async (_name, call) => {

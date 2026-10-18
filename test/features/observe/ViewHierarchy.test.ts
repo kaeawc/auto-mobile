@@ -1,5 +1,4 @@
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
-import { installFakeCtrlProxyManagers } from "../../helpers/hermeticDeviceTools";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   ViewHierarchy,
@@ -23,14 +22,6 @@ const setupReadFileMock = () => {
 const teardownReadFileMock = () => {
   /* no-op: patched dependency was removed */
 };
-
-let restoreDeviceToolProviders: () => void;
-beforeEach(() => {
-  restoreDeviceToolProviders = installFakeCtrlProxyManagers();
-});
-afterEach(() => {
-  restoreDeviceToolProviders();
-});
 
 describe("ViewHierarchy", function () {
   describe("Unit Tests for Public Methods", function () {

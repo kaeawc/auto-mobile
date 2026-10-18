@@ -1,5 +1,4 @@
-import { installFakeCtrlProxyManagers } from "../../../helpers/hermeticDeviceTools";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   AndroidCtrlProxyClient,
   type AndroidServiceRecoveryManager,
@@ -7,6 +6,8 @@ import {
 import type { ProxySetupResult } from "../../../../src/utils/interfaces/ProxyManager";
 import { BootedDevice } from "../../../../src/models";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
+import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import {
   createInstantFailureWebSocketFactory,
   createSuccessWebSocketFactory,
@@ -29,13 +30,6 @@ import { maskRealCtrlProxyWebSocketOptIn } from "../../../helpers/maskRealCtrlPr
  * checks the accessibility service's health through an injected manager seam,
  * rebinding (#7470) or running full setup only when it is actually unhealthy.
  */
-let restoreDeviceToolProviders: () => void;
-beforeEach(() => {
-  restoreDeviceToolProviders = installFakeCtrlProxyManagers();
-});
-afterEach(() => {
-  restoreDeviceToolProviders();
-});
 
 describe("AndroidCtrlProxyClient - connection-failure escalation to service recovery", function () {
   maskRealCtrlProxyWebSocketOptIn();
@@ -662,16 +656,6 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const dialTimes: number[] = [];
-    let setupCalls = 0;
-    const manager: AndroidServiceRecoveryManager = {
-      isAccessibilityServiceHealthy: async () => false,
-      rebindIfUnhealthy: async () => false,
-      waitForAccessibilityServiceBinding: async () => "already-bound",
-      setup: async () => {
-        setupCalls++;
-        return { success: true, message: "setup ok" };
-      },
-    };
     const successSocket = createSuccessWebSocketFactory(timer);
     client = AndroidCtrlProxyClient.createForTesting(testDevice, buildFakeAdb(), {
       webSocketFactory: (url) => {
@@ -679,7 +663,11 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
         return successSocket(url);
       },
       timer,
-      idGenerator: () => manager,
+      serviceManagerFactory: (device) =>
+        AndroidCtrlProxyManager.getInstance(
+          device,
+          new FakeAdbClientFactory(new FakeAdbExecutor()),
+        ),
     });
     const internals = client as any;
     internals.connectionAttempts = 3;
@@ -691,6 +679,5 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     expect(await client.awaitRecovery(10_000)).toBe("timed_out");
     expect(dialTimes).toEqual([]);
     expect(client.getReconnectStatus()?.connectionAttempts).toBe(3);
-    expect(setupCalls).toBe(0);
   });
 });

@@ -5,7 +5,7 @@
 1752	src/ctrlProxy/RunnerReadinessService.ts
 1183	src/daemon/cli/runDaemonCommand.ts
 1588	src/daemon/client.ts
-5218	src/daemon/daemon.ts
+5222	src/daemon/daemon.ts
 6097	src/daemon/daemonMcpProxy.ts
 1730	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
@@ -30,11 +30,11 @@
 1359	src/devices/deviceUtils.ts
 1596	src/doctor/checks/ios.ts
 1673	src/features/accessibility/ContrastChecker.ts
-1287	src/features/action/BaseVisualChange.ts
+1297	src/features/action/BaseVisualChange.ts
 1099	src/features/action/InputText.ts
 1528	src/features/action/InstallApp.ts
 2261	src/features/action/LaunchApp.ts
-2030	src/features/action/Rotate.ts
+2031	src/features/action/Rotate.ts
 1915	src/features/action/SetUIState.ts
 1887	src/features/action/TapAnyElement.ts
 1424	src/features/action/TapAtCoordinate.ts

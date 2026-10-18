@@ -162,10 +162,11 @@ describe("HomeScreen", () => {
       platform: "ios",
       deviceId: options?.simulator ? "A1B2C3D4-E5F6-7890-ABCD-EF1234567890" : "ios-device",
     };
-    const action = new HomeScreen(iosDevice, fakeAdb, fakeTimer, options?.simctl);
-    (action as any).observeScreen = fakeObserveScreen;
-    (action as any).window = fakeWindow;
-    (action as any).awaitIdle = fakeAwaitIdle;
+    const action = new HomeScreen(iosDevice, fakeAdb, fakeTimer, options?.simctl, {
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+    });
 
     const client = new FakeIOSCtrlProxy(fakeTimer);
     getInstanceSpy = spyOnIosClientInstance(client);

@@ -912,7 +912,7 @@ describe("getNavigationGraph over a re-traversed graph (#10194)", () => {
     const repository = new NavigationRepository(db);
     const manager = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, db),
+      new TestCoverageRepository(db),
     );
     await repository.getOrCreateApp(APP);
     const traversals = Array.from({ length: 10 }, (_, index) => ({

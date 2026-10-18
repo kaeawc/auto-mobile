@@ -33,7 +33,7 @@ describe("NavigationGraphManager tool call attribution", () => {
     timer.setCurrentTime(1_000_000);
     manager = NavigationGraphManager.createForTesting(
       new NavigationRepository(harness.db),
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       timer,
     );
     await manager.setCurrentApp("com.x");

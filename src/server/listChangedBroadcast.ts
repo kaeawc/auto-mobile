@@ -28,6 +28,17 @@ export function listChangedKindForMethod(method: string): ListChangedKind | unde
   return undefined;
 }
 
+/**
+ * How a registry tracks an MCP server it registers with. An `ephemeral` server
+ * serves one request (the stateless daemon endpoint, #4678): it is tracked only
+ * until it closes and is never sent list_changed or resource-updated
+ * notifications, because it has no client to receive them afterwards. Its
+ * clients learn of changes through {@link ListChangedBroadcaster} instead.
+ */
+export interface ServerRegistrationOptions {
+  ephemeral?: boolean;
+}
+
 export interface ListChangedListener {
   (kind: ListChangedKind): void;
 }

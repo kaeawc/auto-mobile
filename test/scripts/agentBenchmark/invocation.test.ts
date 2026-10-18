@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { parseSuiteDefinition } from "../../../scripts/agent-benchmark/config";
 import {
+  awsConfigIdentity,
   buildClaudeArgs,
   buildMcpConfig,
   claudeLaunchEnv,
   fillPlaceholders,
   googleCredentialsIdentity,
   isolatedServerEnv,
+  mcpServerEnv,
   providerIdentity,
   systemPromptFor,
   isRunShapingClaudeVariable,
@@ -216,8 +218,47 @@ describe("agent benchmark launch paths", () => {
       aws.AWS_SHARED_CREDENTIALS_FILE,
       aws.AWS_WEB_IDENTITY_TOKEN_FILE,
     ]).toEqual(["/work/aws/config", "/abs/credentials", "/work/token"]);
+    // So do the Android SDK roots and the shared claim root, in Claude's env and the server's.
+    const inherited = {
+      ANDROID_HOME: "sdk",
+      ANDROID_SDK_ROOT: "/abs/sdk",
+      AUTOMOBILE_ADB_SERVER_COORDINATION_DIR: "claims",
+    };
+    const launch = claudeLaunchEnv(inherited, PATHS, "linux", "/work");
+    const server = mcpServerEnv(inherited, PATHS, "linux", "/work");
+    for (const env of [launch, server]) {
+      expect(env.ANDROID_HOME).toBe("/work/sdk");
+      expect(env.ANDROID_SDK_ROOT).toBe("/abs/sdk");
+      expect(env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR).toBe("/work/claims");
+    }
     const windows = claudeLaunchEnv({ Path: "bin;C:\\tools" }, PATHS, "win32", "C:\\work");
     expect(windows.Path).toBe("C:\\work\\bin;C:\\tools");
+  });
+
+  test("an AWS provider fingerprints the AWS config file the credential chain reads", () => {
+    const files: Record<string, string> = {
+      "/home/u/.aws/config": "[profile dev]\nrole_arn = arn:aws:iam::111:role/a\n",
+      "/work/aws-config": "[profile dev]\nrole_arn = arn:aws:iam::222:role/a\n",
+    };
+    const read = (path: string) => {
+      const content = files[path.replaceAll("\\", "/")];
+      if (content === undefined) {
+        throw new Error("ENOENT");
+      }
+      return content;
+    };
+    const identity = (env: Record<string, string>) =>
+      providerIdentity(env, undefined, "linux", (path) => awsConfigIdentity(path, read), "/home/u");
+    const bedrock = { CLAUDE_CODE_USE_BEDROCK: "1", AWS_PROFILE: "dev" };
+    const home = identity(bedrock);
+    expect(home).toMatch(/^aws-config=sha256:[0-9a-f]{12}$/m);
+    // Same profile name, different file: a different identity.
+    expect(identity({ ...bedrock, AWS_CONFIG_FILE: "/work/aws-config" })).not.toBe(home);
+    expect(identity({ ...bedrock, AWS_CONFIG_FILE: "/missing" })).toContain(
+      "aws-config=unreadable",
+    );
+    // Other providers never read it.
+    expect(identity({ CLAUDE_CODE_USE_VERTEX: "1" })).not.toContain("aws-config");
   });
 
   test("Windows provider keys count in any case", () => {
@@ -240,22 +281,31 @@ describe("agent benchmark Windows environment casing", () => {
   });
 });
 
+// The real reader would digest this machine's ~/.aws/config.
+const STUB_AWS_CONFIG = () => "sha256:stub";
+
 describe("agent benchmark provider identity", () => {
   test("records provider, base URL host, region, and routing without secrets", () => {
-    const identity = providerIdentity({
-      CLAUDE_CODE_USE_BEDROCK: "1",
-      ANTHROPIC_BASE_URL: "https://user:secret@proxy.example.com/v1?key=abc",
-      AWS_REGION: "us-west-2",
-      ANTHROPIC_DEFAULT_SONNET_MODEL: "routed-sonnet",
-      ANTHROPIC_API_KEY: "sk-secret",
-      AWS_SECRET_ACCESS_KEY: "secret",
-    });
+    const identity = providerIdentity(
+      {
+        CLAUDE_CODE_USE_BEDROCK: "1",
+        ANTHROPIC_BASE_URL: "https://user:secret@proxy.example.com/v1?key=abc",
+        AWS_REGION: "us-west-2",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "routed-sonnet",
+        ANTHROPIC_API_KEY: "sk-secret",
+        AWS_SECRET_ACCESS_KEY: "secret",
+      },
+      undefined,
+      "linux",
+      STUB_AWS_CONFIG,
+    );
     expect(identity).toBe(
       [
         `ANTHROPIC_BASE_URL=https://proxy.example.com/sha256:${pathDigest("/v1")}`,
         "ANTHROPIC_DEFAULT_SONNET_MODEL=routed-sonnet",
         "AWS_REGION=us-west-2",
         "CLAUDE_CODE_USE_BEDROCK=1",
+        "aws-config=sha256:stub",
       ].join("\n"),
     );
     expect(identity).not.toContain("secret");
@@ -306,9 +356,14 @@ describe("agent benchmark provider identity", () => {
       `AWS_ROLE_ARN=sha256:${pathDigest("arn:aws:iam::123:role/r")}`,
     );
     // The AWS profile picks Bedrock's account through the credential chain.
-    expect(providerIdentity({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_PROFILE: "team-a" })).toContain(
-      `AWS_PROFILE=sha256:${pathDigest("team-a")}`,
-    );
+    expect(
+      providerIdentity(
+        { CLAUDE_CODE_USE_BEDROCK: "1", AWS_PROFILE: "team-a" },
+        undefined,
+        "linux",
+        STUB_AWS_CONFIG,
+      ),
+    ).toContain(`AWS_PROFILE=sha256:${pathDigest("team-a")}`);
     // Every Claude/API/MCP/Bash timeout or watchdog override is run-shaping.
     for (const key of [
       "API_TIMEOUT_MS",
@@ -384,8 +439,19 @@ describe("agent benchmark provider identity", () => {
       ].join("\n"),
     );
     expect(
-      providerIdentity({ CLAUDE_CODE_USE_MANTLE: "1", CLAUDE_CODE_USE_ANTHROPIC_AWS: "1" }),
-    ).toBe(["CLAUDE_CODE_USE_ANTHROPIC_AWS=1", "CLAUDE_CODE_USE_MANTLE=1"].join("\n"));
+      providerIdentity(
+        { CLAUDE_CODE_USE_MANTLE: "1", CLAUDE_CODE_USE_ANTHROPIC_AWS: "1" },
+        undefined,
+        "linux",
+        STUB_AWS_CONFIG,
+      ),
+    ).toBe(
+      [
+        "CLAUDE_CODE_USE_ANTHROPIC_AWS=1",
+        "CLAUDE_CODE_USE_MANTLE=1",
+        "aws-config=sha256:stub",
+      ].join("\n"),
+    );
     // Proxy routing is recorded by host and bypass list, never with its credentials.
     // POSIX casing: on Windows no_proxy is NO_PROXY (covered separately).
     const proxied = providerIdentity(

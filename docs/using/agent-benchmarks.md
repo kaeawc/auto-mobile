@@ -102,7 +102,7 @@ they can still affect results:
   `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` (and its legacy `AUTO_MOBILE_` spelling), kept so a
   resident daemon's device claims are still respected. It is also written into the MCP config's
   `env`, with the adb endpoint (`ADB_SERVER_SOCKET`, `ANDROID_ADB_SERVER_ADDRESS`,
-  `ANDROID_ADB_SERVER_PORT`) and SDK location (`ANDROID_HOME`, `ANDROID_SDK_ROOT`), so the server
+  `ANDROID_ADB_SERVER_PORT`) and SDK location (`ANDROID_HOME`, `ANDROID_SDK_ROOT`), made absolute like the claim root since the server runs from a temp directory, so the server
   reaches the same adb server. `CLAUDE_CODE_MCP_ALLOWLIST_ENV` is removed from Claude's
   environment, so the server also inherits `PATH` and runs the same `adb` the run was
   fingerprinted against. Before preflight touches the device,
@@ -248,7 +248,7 @@ built `dist/` with the schemas and vendor tools it loads at runtime, `bun.lock` 
 libraries the build leaves external, `package.json`, the harness sources under
 `scripts/agent-benchmark/` with every repository module they import (they run unbundled), the
 Bun version, and the host platform, architecture, and libc (which pick the native image build), the `--claude` command (by content, so an edited wrapper or binary counts), and a non-secret provider identity
-(provider selection, the scheme and host of every provider base URL and proxy with a digest of each path, digests of the account and project selectors (Vertex and Google Cloud project, the identity fields of the `GOOGLE_APPLICATION_CREDENTIALS` file, AWS profile and assumed role ARN), proxy bypass list, regions, provider-specific region routing and service tiers, adb server endpoint, and model-routing variables), the `adb version` of every adb client the server might run (SDK platform-tools, the adb on PATH, and the SDK the server's command-line tools detection finds), so a change to whichever one the server picks changes the build; the harness runs the client the server picks (it resolves adb with the server's own AdbClient) for preflight and the screen oracle, and fingerprints its version too. A stale build or changed scoring code is
+(provider selection, the scheme and host of every provider base URL and proxy with a digest of each path, digests of the account and project selectors (Vertex and Google Cloud project, the identity fields of the `GOOGLE_APPLICATION_CREDENTIALS` file, AWS profile and assumed role ARN, and for an AWS provider a digest of the AWS config file the profile resolves through), proxy bypass list, regions, provider-specific region routing and service tiers, adb server endpoint, and model-routing variables), the `adb version` of every adb client the server might run (SDK platform-tools, the adb on PATH, and the SDK the server's command-line tools detection finds), so a change to whichever one the server picks changes the build; the harness runs the client the server picks (it resolves adb with the server's own AdbClient) for preflight and the screen oracle, and fingerprints its version too. A stale build or changed scoring code is
 flagged rather than silently measured. The git commit is deliberately left out, since every
 unrelated commit would change it), and
 `baseline.observedModel`, the model Claude reported running. Suites without

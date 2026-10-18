@@ -25,7 +25,8 @@
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { posix, win32 } from "node:path";
+import { homedir } from "node:os";
+import { join, posix, win32 } from "node:path";
 import { MCP_SERVER_NAME, type SuiteDefinition } from "./config";
 
 /** The one AutoMobile setting shared with any resident daemon: device claims. */
@@ -207,18 +208,25 @@ function canonicalEnv(
     : env;
 }
 
-/** Credential and config file paths the provider SDKs read from the environment. */
-const CREDENTIAL_FILE_VARIABLES = new Set([
+/**
+ * File and directory paths read from the environment: the provider SDKs' credential and
+ * config files, the Android SDK roots, and the shared claim root the server also receives.
+ */
+const PATH_VARIABLES = new Set([
   "GOOGLE_APPLICATION_CREDENTIALS",
   "AWS_CONFIG_FILE",
   "AWS_SHARED_CREDENTIALS_FILE",
   "AWS_WEB_IDENTITY_TOKEN_FILE",
+  "ANDROID_HOME",
+  "ANDROID_SDK_ROOT",
+  ...SHARED_AUTOMOBILE_VARIABLES,
 ]);
 
 /**
- * Claude runs from an empty temp directory, so a relative PATH entry or credentials path
- * that resolved from the invocation directory would resolve somewhere else (or nowhere)
- * there. They are made absolute against the invocation directory first.
+ * Claude and the MCP server run from an empty temp directory, so a relative PATH entry,
+ * credentials path, or SDK root that resolved from the invocation directory (as preflight's
+ * did) would resolve somewhere else (or nowhere) there. They are made absolute against the
+ * invocation directory first.
  */
 function absolutizeInheritedPaths(
   env: Record<string, string>,
@@ -234,7 +242,7 @@ function absolutizeInheritedPaths(
         // An empty POSIX entry means the current directory, which is also relative.
         return [key, value.split(path.delimiter).map(absolute).join(path.delimiter)];
       }
-      if (CREDENTIAL_FILE_VARIABLES.has(canonical) && value !== "") {
+      if (PATH_VARIABLES.has(canonical) && value !== "") {
         return [key, absolute(value)];
       }
       return [key, value];
@@ -303,6 +311,8 @@ const MCP_PASSTHROUGH_VARIABLES = [
 export function mcpServerEnv(
   inherited: Record<string, string | undefined>,
   paths: ServerPaths,
+  platform: NodeJS.Platform = process.platform,
+  cwd: string = process.cwd(),
 ): Record<string, string> {
   const shared = Object.fromEntries(
     MCP_PASSTHROUGH_VARIABLES.flatMap((key) => {
@@ -310,12 +320,14 @@ export function mcpServerEnv(
       return value === undefined ? [] : [[key, value]];
     }),
   );
-  return { ...shared, ...privateServerEnv(paths) };
+  return { ...absolutizeInheritedPaths(shared, cwd, platform), ...privateServerEnv(paths) };
 }
 
 export function buildMcpConfig(
   paths: ServerPaths,
   inherited: Record<string, string | undefined> = {},
+  platform: NodeJS.Platform = process.platform,
+  cwd: string = process.cwd(),
 ): Record<string, unknown> {
   return {
     mcpServers: {
@@ -323,7 +335,7 @@ export function buildMcpConfig(
         type: "stdio",
         command: paths.runtime,
         args: [paths.serverEntry],
-        env: mcpServerEnv(inherited, paths),
+        env: mcpServerEnv(inherited, paths, platform, cwd),
       },
     },
   };
@@ -480,10 +492,38 @@ export function googleCredentialsIdentity(
   return `sha256:${createHash("sha256").update(JSON.stringify(identity)).digest("hex").slice(0, 12)}`;
 }
 
+/**
+ * The AWS config file the Bedrock credential chain reads (AWS_CONFIG_FILE, else
+ * ~/.aws/config). A profile name alone can map to a different account, role, region, or
+ * endpoint on another host or after an edit, so the file's contents are digested. It holds
+ * profile settings, not keys (those live in the credentials file, which is never read).
+ */
+export function awsConfigIdentity(
+  path: string,
+  readFile: (path: string) => string = (file) => readFileSync(file, "utf8"),
+): string {
+  try {
+    return `sha256:${createHash("sha256").update(readFile(path)).digest("hex").slice(0, 12)}`;
+  } catch {
+    // No config file is a valid setup (environment or SSO-cache credentials); unreadable is
+    // still an identity, distinct from any file's digest.
+    return "unreadable";
+  }
+}
+
+// Providers that authenticate through the AWS credential chain.
+const AWS_PROVIDER_FLAGS = [
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+  "CLAUDE_CODE_USE_MANTLE",
+];
+
 export function providerIdentity(
   inherited: Record<string, string | undefined>,
   credentialsIdentity: (path: string) => string = googleCredentialsIdentity,
   platform: NodeJS.Platform = process.platform,
+  awsConfig: (path: string) => string = awsConfigIdentity,
+  home: string = homedir(),
 ): string {
   // Windows names are case-insensitive (anthropic_base_url is ANTHROPIC_BASE_URL there), so
   // every key is matched in canonical case.
@@ -526,6 +566,13 @@ export function providerIdentity(
       ? [
           `GOOGLE_APPLICATION_CREDENTIALS=${credentialsIdentity(
             env.GOOGLE_APPLICATION_CREDENTIALS as string,
+          )}`,
+        ]
+      : []),
+    ...(AWS_PROVIDER_FLAGS.some(set)
+      ? [
+          `aws-config=${awsConfig(
+            set("AWS_CONFIG_FILE") ? (env.AWS_CONFIG_FILE as string) : join(home, ".aws", "config"),
           )}`,
         ]
       : []),

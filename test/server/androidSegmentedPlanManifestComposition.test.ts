@@ -9,7 +9,7 @@ import {
   PlanExecutionOrchestrator,
   type VideoRecorder,
 } from "../../src/server/planExecutionOrchestrator";
-import * as planUtils from "../../src/utils/planUtils";
+import * as planUtils from "../../src/server/planExecutorFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 

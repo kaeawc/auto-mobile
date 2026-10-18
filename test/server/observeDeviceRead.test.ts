@@ -33,7 +33,7 @@ import { NavigationGraphManager } from "../../src/features/navigation/Navigation
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { resetObserveCacheStore } from "../../src/features/observe/cache/ObserveCacheRegistry";
 import { resetScreenshotStateStore } from "../../src/features/observe/screenshot/ScreenshotStateRegistry";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import type { Plan } from "../../src/models/Plan";
 import {
   getToolSelectionContext,
@@ -649,7 +649,12 @@ describe("session-free observe device read", () => {
       }),
     });
     const plan: Plan = { name: "observe routing", steps: [{ tool: "observe", params: {} }] };
-    const result = await new DefaultPlanExecutor().executePlan(plan, 0, "android", device.deviceId);
+    const result = await createDefaultPlanExecutor().executePlan(
+      plan,
+      0,
+      "android",
+      device.deviceId,
+    );
     expect(result.success).toBe(true);
     expect(manager.getEnsureDeviceReadyCalls()).toBeGreaterThan(0);
     expect(modes).toEqual([undefined]);

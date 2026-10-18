@@ -2,7 +2,8 @@ import { expect, describe, test, beforeAll, beforeEach, afterAll } from "bun:tes
 import fs from "fs/promises";
 import path from "path";
 import os from "os";
-import { exportPlanFromLogs, importPlanFromYaml, executePlan } from "../src/utils/planUtils";
+import { exportPlanFromLogs, importPlanFromYaml } from "../src/utils/planUtils";
+import { executePlan } from "../src/server/planExecutorFactory";
 import { Plan } from "../src/models/Plan";
 
 describe("Plan Utils", () => {

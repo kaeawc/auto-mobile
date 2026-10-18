@@ -32,7 +32,7 @@ import {
   planLifecycleSessionUuid,
   registerDeviceLabelMap,
 } from "./deviceLabelMapping";
-import { importPlanFromYaml, executePlan } from "../utils/planUtils";
+import { executePlan, importPlanFromYaml } from "./planExecutorFactory";
 import { DaemonState } from "../daemon/daemonState";
 import { DAEMON_SHUTTING_DOWN_ERROR_CODE, INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import {
@@ -456,7 +456,7 @@ export function convertPerDeviceSkippedStepsToRecords(
  *   1. {@link preparePlan} — base64 decode, schema validation, YAML parse, device-list reconcile
  *   2. {@link allocateDevices} — multi-device upfront allocation with shared timeout
  *   3. {@link startVideoRecording} — Android segmented OR iOS single-file recording
- *   4. {@link runPlan} — delegates to planUtils.executePlan with the right options
+ *   4. {@link runPlan} — delegates to executePlan (planExecutorFactory) with the right options
  *   5. {@link finalizeVideo} — stops/finalizes recording (always runs in finally)
  *   6. {@link recordExecution} — writes a row to the test-execution timing DB
  *

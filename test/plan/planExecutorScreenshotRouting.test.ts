@@ -5,7 +5,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import type { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
-import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
+import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -20,7 +20,7 @@ describe("PlanExecutor screenshot cancellation routing", () => {
   });
   type Event = { cancel: string } | { step: z.infer<typeof schema> };
   let events: Event[];
-  let executor: DefaultPlanExecutor;
+  let executor: ReturnType<typeof createDefaultPlanExecutor>;
   let sessionManager: SessionManager;
   let restoreSpies: Array<() => void>;
 
@@ -29,7 +29,7 @@ describe("PlanExecutor screenshot cancellation routing", () => {
     events = [];
     restoreSpies = [];
     const timer = new FakeTimer();
-    executor = new DefaultPlanExecutor(timer);
+    executor = createDefaultPlanExecutor(timer);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     await sessionManager.createSession(baseSessionUuid, "device-A", "android");
     await sessionManager.createSession("session-for-B", "device-B", "android");

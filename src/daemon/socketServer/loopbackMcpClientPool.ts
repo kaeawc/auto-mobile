@@ -25,6 +25,11 @@ export function runWithLoopbackSessionKey<T>(sessionKey: string, fn: () => Promi
   return loopbackSessionKey.run(sessionKey, fn);
 }
 
+/** The session key of the forward in flight on this async call chain, if any. */
+export function currentLoopbackSessionKey(): string | undefined {
+  return loopbackSessionKey.getStore();
+}
+
 type LoopbackFetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
 
 /** Request ids remembered per wrapped fetch: enough for every forward a pooled client has in flight. */

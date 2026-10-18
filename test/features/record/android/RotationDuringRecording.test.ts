@@ -165,9 +165,7 @@ async function setupTapPipeline(withClientNotifications = false) {
       onInteraction: () => () => notificationCounts.unsubscribed++,
       onDisplayTransition: undefined,
     };
-    const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as AndroidCtrlProxyClient,
-    );
+    const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     restoreClientSpy = () => clientSpy.mockRestore();
   } else {
     a11y = new FakeA11y();

@@ -696,9 +696,7 @@ describe("explicit action display", () => {
         return { success: true };
       },
     };
-    const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      ctrlProxy as unknown as AndroidCtrlProxyClient,
-    );
+    const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrlProxy);
     try {
       const action = new TapOnElement(android, executor, {
         timer: autoTimer(),
@@ -770,9 +768,7 @@ describe("explicit action display", () => {
     const manager = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       isAvailable: async () => true,
     } as never);
-    const service = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as AndroidCtrlProxyClient,
-    );
+    const service = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     try {
       const action = new DragAndDrop(android, fakeAdb, timer);
       Object.assign(action, {
@@ -806,9 +802,7 @@ describe("explicit action display", () => {
     const manager = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       isAvailable: async () => true,
     } as never);
-    const service = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as AndroidCtrlProxyClient,
-    );
+    const service = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
     try {
       const action = new PinchOn(android, fakeAdb);
       Object.assign(action, {

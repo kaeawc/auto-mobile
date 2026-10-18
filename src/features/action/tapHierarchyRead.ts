@@ -3,7 +3,7 @@ import { unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { Timer } from "../../utils/SystemTimer";
 import type { ViewHierarchy } from "../observe/ViewHierarchy";
-import type { AndroidCtrlProxyClient } from "../observe/android";
+import type { AndroidCtrlProxy } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { iosHierarchyAcquisition } from "../observe/ios/types";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
@@ -30,7 +30,7 @@ export interface FreshHierarchyReadDeps {
   adb: AdbExecutor;
   timer: Timer;
   /** CtrlProxy client used for the Android read (the two tools hold different fields). */
-  androidService: AndroidCtrlProxyClient;
+  androidService: AndroidCtrlProxy;
   viewHierarchy: ViewHierarchy;
   /** Filter a raw tree for the response (platform-specific, owned by each tool). */
   prepareForResponse: (

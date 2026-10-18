@@ -14,7 +14,7 @@ import {
 import { logger } from "../../utils/logger";
 import { executeAndroidInputText } from "../../utils/android-cmdline-tools/AndroidInputText";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { AndroidCtrlProxyClient } from "../observe/android";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
@@ -524,7 +524,7 @@ export class InputText extends BaseVisualChange {
   private async sendAndroidEventAllCharacters(
     text: string,
     chars: string[],
-    a11yClient: Pick<AndroidCtrlProxyClient, "requestSetText">,
+    a11yClient: Pick<AndroidCtrlProxy, "requestSetText">,
     signal?: AbortSignal,
   ): Promise<(SendTextResult & { method?: InputTextMode }) | undefined> {
     let targetText = "";

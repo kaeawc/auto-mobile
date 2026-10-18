@@ -44,9 +44,7 @@ describe("CaptureSnapshot settings characterization", () => {
           return { success: mode === "missing" };
         },
       };
-      const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        client as unknown as AndroidCtrlProxyClient,
-      );
+      const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
       restores.push(
         () => execute.mockRestore(),
         () => instance.mockRestore(),

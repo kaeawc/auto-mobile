@@ -45,9 +45,7 @@ function harness(
 ) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    new FakeCtrlProxy(timer) as unknown as AndroidCtrlProxyClient,
-  );
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(new FakeCtrlProxy(timer));
   const observation: ObserveResult = {
     ...observationOf(viewHierarchy),
     timestamp: 0,

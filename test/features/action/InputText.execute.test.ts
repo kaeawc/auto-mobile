@@ -115,9 +115,7 @@ describe("InputText.execute", () => {
 
   test("uses the atomic a11y setText (no key events) when no marker matches", async () => {
     serverConfig.setEventAllMarkers([]);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as unknown as AndroidCtrlProxyClient,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
     const inputText = new InputText(androidDevice, fakeAdb as any);
     wireFakes(inputText);
@@ -133,9 +131,7 @@ describe("InputText.execute", () => {
 
   test.each([false, true])("a11y dispatch settles when rejected=%s", async (reject) => {
     serverConfig.setEventAllMarkers([]);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as unknown as AndroidCtrlProxyClient,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
     const state = new TextRequestState();
     const entered = Promise.withResolvers<void>();
     const reply = Promise.withResolvers<Awaited<ReturnType<FakeCtrlProxy["requestSetText"]>>>();
@@ -180,7 +176,7 @@ describe("InputText.execute", () => {
       async (settlement) => {
         fakeTimer = new FakeTimer();
         getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-          fakeA11yService as unknown as AndroidCtrlProxyClient,
+          fakeA11yService,
         );
         const child = new EventEmitter() as ChildProcess;
         const signals: (string | number | undefined)[] = [];
@@ -298,7 +294,7 @@ describe("InputText.execute", () => {
     async (mode) => {
       serverConfig.setEventAllMarkers([]);
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeA11yService as unknown as AndroidCtrlProxyClient,
+        fakeA11yService,
       );
       const state = new TextRequestState();
       const entered = Promise.withResolvers<void>();
@@ -350,7 +346,7 @@ describe("InputText.execute", () => {
     async (mode, text, dispatchedText, dismissKeyboard) => {
       fakeTimer = new FakeTimer();
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeA11yService as unknown as AndroidCtrlProxyClient,
+        fakeA11yService,
       );
       const state = new TextRequestState();
       const entered = Promise.withResolvers<void>();
@@ -411,9 +407,7 @@ describe("InputText.execute", () => {
   ] as const)("IME %s marks %s until settled", async (imeAction, key) => {
     fakeTimer = new FakeTimer();
     serverConfig.setEventAllMarkers([]);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as unknown as AndroidCtrlProxyClient,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
     const state = new TextRequestState();
     const entered = Promise.withResolvers<void>();
     const reply = Promise.withResolvers<void>();
@@ -464,7 +458,7 @@ describe("InputText.execute", () => {
     async (mode) => {
       serverConfig.setEventAllMarkers([]);
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeA11yService as unknown as AndroidCtrlProxyClient,
+        fakeA11yService,
       );
       const input = new InputText(androidDevice, fakeAdb);
       wireFakes(input);
@@ -476,9 +470,7 @@ describe("InputText.execute", () => {
 
   test("auto-promotes to eventAll key events when the text matches a configured marker", async () => {
     serverConfig.setEventAllMarkers(["/"]);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as unknown as AndroidCtrlProxyClient,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
     const inputText = new InputText(androidDevice, fakeAdb as any);
     wireFakes(inputText);
@@ -566,7 +558,7 @@ describe("InputText.execute", () => {
     test("focuses the selected element, then types into it", async () => {
       serverConfig.setEventAllMarkers([]);
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeA11yService as unknown as AndroidCtrlProxyClient,
+        fakeA11yService,
       );
 
       const focusCalls: unknown[] = [];
@@ -619,7 +611,7 @@ describe("InputText.execute", () => {
     test("does not type into the previously focused field when focus is not verified", async () => {
       serverConfig.setEventAllMarkers([]);
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeA11yService as unknown as AndroidCtrlProxyClient,
+        fakeA11yService,
       );
 
       const inputText = new InputText(androidDevice, fakeAdb as any);

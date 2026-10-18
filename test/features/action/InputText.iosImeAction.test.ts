@@ -280,7 +280,7 @@ describe("InputText iOS IME action", () => {
   test("Android also reports failure when text lands but the action fails", async () => {
     const fakeCtrlProxy = new FakeCtrlProxy();
     androidGetInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeCtrlProxy as unknown as AndroidCtrlProxyClient,
+      fakeCtrlProxy,
     );
     fakeAdb.setCommandError("shell input keyevent KEYCODE_TAB", new Error("key event failed"));
     const androidInputText = createInputText({ ...iosDevice, platform: "android" });

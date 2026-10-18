@@ -10,15 +10,8 @@ import { AndroidImeCatalog } from "../../src/features/action/AndroidImeCatalog";
 import { InstalledImeKeySession } from "../../src/features/action/InstalledImeKeySession";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  resetKeyboardFactory,
-  resetOpenUrlFactory,
-  resetSendKeysFactory,
-  setKeyboardFactory,
-  setOpenUrlFactory,
-  setSendKeysFactory,
-  setShakeFactory,
-  resetShakeFactory,
 } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createJSONToolResponse } from "../../src/utils/toolUtils";
@@ -26,13 +19,14 @@ import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/A
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
+const interactionDeps: InteractionToolDependencies = {};
 isolateToolRegistry();
 const device: BootedDevice = { deviceId: "fake-output-schema", name: "Fake", platform: "android" };
 const validators = new Map<string, JsonSchemaValidator<unknown>>();
 
 // Compile the same validators the SDK caches on tools/list, outside test timing.
 beforeAll(() => {
-  registerInteractionTools();
+  registerInteractionTools(interactionDeps);
   const provider = new AjvJsonSchemaValidator();
   for (const name of ["sendKeys", "keyboard", "openLink"]) {
     const definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === name)!;
@@ -42,12 +36,12 @@ beforeAll(() => {
     validators.set(name, provider.getValidator(schema));
   }
 });
-beforeEach(() => registerInteractionTools());
+beforeEach(() => registerInteractionTools(interactionDeps));
 afterEach(() => {
-  resetSendKeysFactory();
-  resetKeyboardFactory();
-  resetOpenUrlFactory();
-  resetShakeFactory();
+  delete interactionDeps.sendKeysFactory;
+  delete interactionDeps.keyboardFactory;
+  delete interactionDeps.openUrlFactory;
+  delete interactionDeps.shakeFactory;
 });
 
 async function checkResponse(
@@ -79,7 +73,7 @@ for (const success of [true, false]) {
       commands: [{ index: 0, action: "clear", success }],
       ...(success ? {} : { failedIndex: 0, error: "No focused input" }),
     };
-    setSendKeysFactory(() => ({ execute: async () => result }));
+    interactionDeps.sendKeysFactory = () => ({ execute: async () => result });
     try {
       await checkResponse(
         "sendKeys",
@@ -103,18 +97,18 @@ for (const success of [true, false]) {
         open: success,
         ...(success ? {} : { error: "failed" }),
       };
-      setKeyboardFactory(() => ({ execute: async () => result }));
+      interactionDeps.keyboardFactory = () => ({ execute: async () => result });
       await checkResponse("keyboard", { action }, result, success ? undefined : true);
     });
   }
 }
 
 test("keyboard exceptions still throw actionable errors", async () => {
-  setKeyboardFactory(() => ({
+  interactionDeps.keyboardFactory = () => ({
     execute: async () => {
       throw new Error("failed");
     },
-  }));
+  });
   await expect(
     ToolRegistry.getTool("keyboard")!.deviceAwareHandler!(device, { action: "detect" }),
   ).rejects.toThrow("Failed to execute keyboard detect: failed");
@@ -216,7 +210,7 @@ for (const action of ["listImes", "setIme", "tapImeKey"] as const) {
 for (const success of [true, false]) {
   test(`openLink ${success ? "success" : "failure"} preserves text`, async () => {
     const result = { success, url: "https://example.com", ...(success ? {} : { error: "failed" }) };
-    setOpenUrlFactory(() => ({ execute: async () => result }));
+    interactionDeps.openUrlFactory = () => ({ execute: async () => result });
     await checkResponse(
       "openLink",
       { url: result.url },
@@ -231,7 +225,7 @@ for (const success of [true, false]) {
 
 test("neighbouring shake retains its text-only envelope", async () => {
   const result = { success: true, duration: 10, intensity: 20 };
-  setShakeFactory(() => ({ execute: async () => result }));
+  interactionDeps.shakeFactory = () => ({ execute: async () => result });
   const tool = ToolRegistry.getTool("shake")!;
   expect(tool.outputSchema).toBeUndefined();
   expect(await tool.deviceAwareHandler!(device, { duration: 10, intensity: 20 })).toEqual(

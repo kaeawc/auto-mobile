@@ -37,7 +37,6 @@ import {
   type AdbSpawnOptions,
   type DeviceTimestampResult,
 } from "./interfaces/AdbExecutor";
-import { resolveExecuteCommandOptions } from "./executeCommandArgs";
 import { runWithAbortSignal, getAbortSignal } from "../AbortContext";
 import { trackAmbient } from "../PerfContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
@@ -643,36 +642,8 @@ export class AdbClient implements AdbExecutor {
    *   and streaming options
    * @returns Promise with command output
    */
-  async executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult>;
-  /**
-   * @deprecated Pass an {@link AdbExecuteOptions} object instead of positional arguments.
-   */
-  async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort?: boolean,
-  ): Promise<ExecResult>;
-  async executeCommand(
-    command: string,
-    timeoutMsOrOptions?: number | AdbExecuteOptions,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-    waitForProcessSettlementAfterAbort?: boolean,
-  ): Promise<ExecResult> {
-    return this.execute(
-      this.parseCommandArgs(command),
-      resolveExecuteCommandOptions(
-        timeoutMsOrOptions,
-        maxBuffer,
-        noRetry,
-        signal,
-        waitForProcessSettlementAfterAbort,
-      ),
-    );
+  async executeCommand(command: string, options: AdbExecuteOptions = {}): Promise<ExecResult> {
+    return this.execute(this.parseCommandArgs(command), options);
   }
 
   async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {

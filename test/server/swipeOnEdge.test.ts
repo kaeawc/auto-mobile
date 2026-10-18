@@ -1,15 +1,15 @@
 import { afterEach, expect, test } from "bun:test";
 import {
-  resetSwipeOnFactory,
-  setSwipeOnFactory,
+  type InteractionToolDependencies,
   swipeOnHandler,
   swipeOnSchema,
 } from "../../src/server/interactionTools";
 import type { BootedDevice, SwipeOnOptions } from "../../src/models";
 
+const interactionDeps: InteractionToolDependencies = {};
 const device: BootedDevice = { deviceId: "fake", platform: "android", name: "fake" };
 
-afterEach(() => resetSwipeOnFactory());
+afterEach(() => delete interactionDeps.swipeOnFactory);
 
 const failedPaths = (input: unknown): string[] => {
   const result = swipeOnSchema.safeParse(input);
@@ -42,22 +42,26 @@ test("fromEdge schema enforces inward direction, exclusivity and ranges (#12537)
 
 test("handler forwards the new options and turns autoTarget off for an edge swipe", async () => {
   let seen: SwipeOnOptions | undefined;
-  setSwipeOnFactory(
-    () =>
-      ({
-        execute: async (options: SwipeOnOptions) => {
-          seen = options;
-          return { success: true, x1: 0, y1: 0, x2: 0, y2: 0, duration: 120 };
-        },
-      }) as never,
+  interactionDeps.swipeOnFactory = () =>
+    ({
+      execute: async (options: SwipeOnOptions) => {
+        seen = options;
+        return { success: true, x1: 0, y1: 0, x2: 0, y2: 0, duration: 120 };
+      },
+    }) as never;
+  await swipeOnHandler(
+    device,
+    {
+      direction: "right",
+      fromEdge: "left",
+      at: 0.4,
+      edgeInset: 6,
+      durationMs: 120,
+    },
+    undefined,
+    undefined,
+    interactionDeps,
   );
-  await swipeOnHandler(device, {
-    direction: "right",
-    fromEdge: "left",
-    at: 0.4,
-    edgeInset: 6,
-    durationMs: 120,
-  });
   expect(seen).toMatchObject({
     fromEdge: "left",
     at: 0.4,
@@ -65,7 +69,7 @@ test("handler forwards the new options and turns autoTarget off for an edge swip
     durationMs: 120,
     autoTarget: false,
   });
-  await swipeOnHandler(device, { direction: "up" });
+  await swipeOnHandler(device, { direction: "up" }, undefined, undefined, interactionDeps);
   expect(seen?.autoTarget).toBe(true);
   expect(seen?.durationMs).toBeUndefined();
 });

@@ -2,7 +2,7 @@ import { DEFAULT_OBSERVE_MCP_TIMEOUT_MS } from "../../src/daemon/mcpRequestTimeo
 import {
   DEFAULT_VM_SNAPSHOT_TIMEOUT_MS,
   SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
-} from "../../src/features/snapshot/deviceSnapshotTimeout";
+} from "../../src/models/deviceSnapshotTimeout";
 import { BARRIER_TIMEOUT_MS } from "../../src/features/action/coordinationTimeout";
 import { WAIT_BUDGET_MCP_TIMEOUT_HEADROOM_MS } from "../../src/features/observe/waitForTimeout";
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "../../src/features/navigation/exploreTimeout";

@@ -81,11 +81,16 @@ export class FakeDaemonManager implements DaemonManagerLike {
   }
 
   async waitForReady(
-    _timeout: number,
-    _signal?: AbortSignal,
+    timeout: number,
+    signal?: AbortSignal,
     _shouldContinueWaiting?: () => boolean,
   ): Promise<boolean> {
     this.waitForReadyCallCount++;
+    // The real wait checks its loop bound and the caller's signal before it ever
+    // probes the socket, so a spent budget or a cancelled wait is never ready.
+    if (timeout <= 0 || signal?.aborted) {
+      return false;
+    }
     return this.waitForReadyResult;
   }
 

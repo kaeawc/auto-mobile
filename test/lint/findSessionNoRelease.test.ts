@@ -24,12 +24,6 @@ const methods = manager.members.filter(ts.isMethodDeclaration);
 // Counts must shrink with migrations; adding a reader requires an explicit expiry decision.
 const RETAINED_EXPIRY_READERS: Readonly<Record<string, number>> = {
   recoverPersistedRow: 1,
-  getDeviceForSession: 1,
-  updateSessionCache: 1,
-  setDisplayPin: 1,
-  invalidateAutomationReadiness: 1,
-  setDeviceLabels: 1,
-  clearSessionCache: 1,
 };
 
 // The liveness lease and policy moved to SessionLivenessController (#11797). Its lookups reach

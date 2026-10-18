@@ -195,6 +195,26 @@ function decodeGestureActionResult(
     ...(type === "tap_coordinates_result" && message.tapDiagnostics !== undefined
       ? { tapDiagnostics: message.tapDiagnostics }
       : {}),
+    ...(type === "swipe_result" ? decodeSwipeRouteReport(message) : {}),
+  };
+}
+
+/** Additive `swipe_result` fields (#13145); a malformed value is dropped, not trusted. */
+function decodeSwipeRouteReport(message: WebSocketMessage): {
+  swipeRoute?: string;
+  effectiveDurationMs?: number;
+} {
+  const { swipeRoute, effectiveDurationMs } = message as {
+    swipeRoute?: unknown;
+    effectiveDurationMs?: unknown;
+  };
+  return {
+    ...(typeof swipeRoute === "string" ? { swipeRoute } : {}),
+    ...(typeof effectiveDurationMs === "number" &&
+    Number.isFinite(effectiveDurationMs) &&
+    effectiveDurationMs > 0
+      ? { effectiveDurationMs }
+      : {}),
   };
 }
 

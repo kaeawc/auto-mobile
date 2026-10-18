@@ -388,7 +388,7 @@ describe("Daemon stream wiring", () => {
         const db = await createTestDatabase();
         const graph = NavigationGraphManager.createForTesting(
           new NavigationRepository(db),
-          new TestCoverageRepository(undefined, db),
+          new TestCoverageRepository(db),
         );
         const navigation = spyOn(NavigationGraphManager, "getInstanceForSession").mockReturnValue(
           graph,
@@ -980,14 +980,14 @@ describe("Daemon stream wiring", () => {
     const sessionId = "navigation-session";
     const sessionNavigation = NavigationGraphManager.createForTesting(
       new NavigationRepository(db),
-      new TestCoverageRepository(undefined, db),
+      new TestCoverageRepository(db),
       undefined,
       sessionId,
     );
     NavigationGraphManager.setInstanceForTesting(
       NavigationGraphManager.createForTesting(
         new NavigationRepository(db),
-        new TestCoverageRepository(undefined, db),
+        new TestCoverageRepository(db),
       ),
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionNavigation);
@@ -1023,14 +1023,14 @@ describe("Daemon stream wiring", () => {
     const sessionId = "navigation-request-session";
     const sessionNavigation = NavigationGraphManager.createForTesting(
       new NavigationRepository(db),
-      new TestCoverageRepository(undefined, db),
+      new TestCoverageRepository(db),
       undefined,
       sessionId,
     );
     NavigationGraphManager.setInstanceForTesting(
       NavigationGraphManager.createForTesting(
         new NavigationRepository(db),
-        new TestCoverageRepository(undefined, db),
+        new TestCoverageRepository(db),
       ),
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionNavigation);
@@ -1075,14 +1075,14 @@ describe("Daemon stream wiring", () => {
     const sessionId = "created-after-stream-setup";
     const sessionNavigation = NavigationGraphManager.createForTesting(
       new NavigationRepository(db),
-      new TestCoverageRepository(undefined, db),
+      new TestCoverageRepository(db),
       undefined,
       sessionId,
     );
     NavigationGraphManager.setInstanceForTesting(
       NavigationGraphManager.createForTesting(
         new NavigationRepository(db),
-        new TestCoverageRepository(undefined, db),
+        new TestCoverageRepository(db),
       ),
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, sessionNavigation);
@@ -1120,14 +1120,14 @@ describe("Daemon stream wiring", () => {
     const sessionId = "rebound-navigation-session";
     const initialNavigation = NavigationGraphManager.createForTesting(
       new NavigationRepository(db),
-      new TestCoverageRepository(undefined, db),
+      new TestCoverageRepository(db),
       undefined,
       sessionId,
     );
     NavigationGraphManager.setInstanceForTesting(
       NavigationGraphManager.createForTesting(
         new NavigationRepository(db),
-        new TestCoverageRepository(undefined, db),
+        new TestCoverageRepository(db),
       ),
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionId, initialNavigation);
@@ -1169,12 +1169,12 @@ describe("Daemon stream wiring", () => {
     NavigationGraphManager.setInstanceForTesting(
       NavigationGraphManager.createForTesting(
         new NavigationRepository(db),
-        new TestCoverageRepository(undefined, db),
+        new TestCoverageRepository(db),
       ),
     );
     const sessionNavigation = NavigationGraphManager.createForTesting(
       new NavigationRepository(db),
-      new TestCoverageRepository(undefined, db),
+      new TestCoverageRepository(db),
       undefined,
       sessionId,
     );
@@ -1222,7 +1222,7 @@ describe("Daemon stream wiring", () => {
     const sessionId = "recreated-session";
     const globalNavigation = NavigationGraphManager.createForTesting(
       new NavigationRepository(db),
-      new TestCoverageRepository(undefined, db),
+      new TestCoverageRepository(db),
     );
     NavigationGraphManager.setInstanceForTesting(globalNavigation);
     NavigationGraphManager.releaseSession(sessionId);

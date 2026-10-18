@@ -902,7 +902,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
           .max(SWIPE_DURATION_MAX_MS)
           .optional()
           .describe(
-            `Forward-stroke duration in ms (integer ${SWIPE_DURATION_MIN_MS}-${SWIPE_DURATION_MAX_MS}); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total). Android may quantize very short strokes. Limits: the TalkBack semantic-scroll route has no timed stroke and ignores it (durationIgnored + warnings); the iOS XCUICoordinate route clamps velocity to 100-10000 pt/s (effectiveDurationMs + warnings).`,
+            `Forward-stroke duration in ms (integer ${SWIPE_DURATION_MIN_MS}-${SWIPE_DURATION_MAX_MS}); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total) and, for a single swipe, velocityPxPerSecond (omitted for boomerang, lookFor, and the TalkBack route that ignores duration; uses effectiveDurationMs when clamped). Android may quantize very short strokes. Limits: the TalkBack semantic-scroll route has no timed stroke and ignores it (durationIgnored + warnings); the iOS XCUICoordinate route clamps velocity to 100-10000 pt/s (effectiveDurationMs + warnings).`,
           ),
         fromEdge: z
           .enum(["left", "right", "top", "bottom"])

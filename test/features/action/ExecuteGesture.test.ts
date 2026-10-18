@@ -185,7 +185,7 @@ describe("ExecuteGesture", () => {
 
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
 
-    const gesture = new ExecuteGesture(androidDevice, factory as any);
+    const gesture = new ExecuteGesture(androidDevice, factory);
     const result = await gesture.swipe(0, 0, 100, 100, { scrollMode: "a11y" });
 
     expect(result.success).toBe(true);

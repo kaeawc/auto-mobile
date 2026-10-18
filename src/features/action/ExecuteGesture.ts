@@ -6,6 +6,7 @@ import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./swipeon
 import { inputDurationArgument } from "./touchscreenInput";
 import { StaleDisplayError } from "../observe/StaleDisplayError";
 import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, Point } from "../../models";
 import { FingerPath } from "../../models";
@@ -73,7 +74,11 @@ export interface GestureCall extends ActionCall {
  * Executes gestures using platform-specific commands
  */
 export class ExecuteGesture extends BaseVisualChange {
-  constructor(device: BootedDevice, adb: AdbExecutor | null = null, timer: Timer = defaultTimer) {
+  constructor(
+    device: BootedDevice,
+    adb: AdbExecutor | AdbClientFactory | null = null,
+    timer: Timer = defaultTimer,
+  ) {
     super(device, adb, timer);
     this.device = device;
   }

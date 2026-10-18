@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ClearText } from "../../../src/features/action/ClearText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
-import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import type { BootedDevice } from "../../../src/models";
 
 describe("ClearText accessibility-service path", () => {
   const device: BootedDevice = { name: "device-1", platform: "android", deviceId: "device-1" };
@@ -22,16 +23,20 @@ describe("ClearText accessibility-service path", () => {
     const fakeFactory = new FakeAdbClientFactory();
     const capturedArgs: unknown[] = [];
 
-    AndroidCtrlProxyClient.getInstance = ((dev: BootedDevice, adbFactory: unknown) => {
+    AndroidCtrlProxyClient.getInstance = (dev: BootedDevice, adbFactory?: AdbClientFactory) => {
       capturedArgs.push(adbFactory);
-      return {
-        requestClearText: async () => ({ success: true, totalTimeMs: 50 }),
-      } as any;
-    }) as any;
+      const client = originalGetInstance(dev, adbFactory);
+      spyOn(client, "requestClearText").mockResolvedValue({ success: true, totalTimeMs: 50 });
+      return client;
+    };
 
-    const clearText = new ClearText(device, fakeFactory as any);
+    const clearText = new ClearText(device, fakeFactory);
     capturedArgs.length = 0; // ignore construction-time calls; only assert about the a11y path
-    const result = await (clearText as any).executeAndroidClearText({} as ObserveResult);
+    const result = await clearText.testHooks.executeAndroidClearText({
+      timestamp: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    });
 
     expect(result.success).toBe(true);
     expect(capturedArgs.length).toBe(1);

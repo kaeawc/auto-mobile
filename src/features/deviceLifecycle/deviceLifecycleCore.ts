@@ -4216,7 +4216,7 @@ export function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
   );
 }
 
-export function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceArgs {
+export function parseProvisionDeviceArgs(input: Partial<ProvisionDeviceArgs>): ProvisionDeviceArgs {
   const __mcpSessionId = input.__mcpSessionId;
   const __oneShotCli = input.__oneShotCli === true;
   const __mcpRequestDeadlineMs = input.__mcpRequestDeadlineMs;

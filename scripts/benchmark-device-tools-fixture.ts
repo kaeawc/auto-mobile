@@ -27,10 +27,8 @@ import {
   type AppToolsDependencies,
 } from "../src/server/appTools";
 import {
-  resetPressButtonFactory,
-  resetTapOnElementFactory,
-  setPressButtonFactory,
-  setTapOnElementFactory,
+  registerInteractionTools,
+  type InteractionToolDependencies,
 } from "../src/server/interactionTools";
 import { registerObserveTools } from "../src/server/observeTools";
 import { ResourceRegistry } from "../src/server/resourceRegistry";
@@ -96,6 +94,21 @@ function installObserveFixture(): ToolFixture {
   };
 }
 
+// Fixtures share one registration of the interaction tools, so each keeps only its own fake.
+const interactionToolFakes: InteractionToolDependencies = {};
+
+function setInteractionToolFake<K extends keyof InteractionToolDependencies>(
+  family: K,
+  fake: InteractionToolDependencies[K] | undefined,
+): void {
+  if (fake === undefined) {
+    delete interactionToolFakes[family];
+  } else {
+    interactionToolFakes[family] = fake;
+  }
+  registerInteractionTools(interactionToolFakes);
+}
+
 async function installTapOnFixture(): Promise<ToolFixture> {
   const navigation = await installBenchmarkNavigationManager();
   const initial = capturedObservation();
@@ -117,7 +130,7 @@ async function installTapOnFixture(): Promise<ToolFixture> {
       ? initial
       : { ...initial, observationId: "after-tap", viewHierarchy: capturedAt(index) },
   );
-  setTapOnElementFactory((device: BootedDevice) => {
+  const tapOnElementFactory = (device: BootedDevice) => {
     const tap = new TapOnElement(device, new FakeAdbExecutor(), {
       lastRenderedObservation: () => initial,
       timer,
@@ -130,7 +143,8 @@ async function installTapOnFixture(): Promise<ToolFixture> {
     tap.window.getCachedActiveWindow = async () => null;
     tap["accessibilityService"].requestTapCoordinates = async () => ({ success: true });
     return tap;
-  });
+  };
+  setInteractionToolFake("tapOnElementFactory", tapOnElementFactory);
   return {
     args: {
       platform: "android",
@@ -140,7 +154,7 @@ async function installTapOnFixture(): Promise<ToolFixture> {
       retryIfNoChange: false,
     },
     async dispose() {
-      resetTapOnElementFactory();
+      setInteractionToolFake("tapOnElementFactory", undefined);
       await navigation.dispose();
     },
   };
@@ -153,8 +167,11 @@ function installPressButtonFixture(): ToolFixture {
     keyCode: 3,
     observation: capturedObservation(),
   };
-  setPressButtonFactory(() => ({ execute: async () => result }));
-  return { args: { platform: "android", button: "home" }, dispose: resetPressButtonFactory };
+  setInteractionToolFake("pressButtonFactory", () => ({ execute: async () => result }));
+  return {
+    args: { platform: "android", button: "home" },
+    dispose: () => setInteractionToolFake("pressButtonFactory", undefined),
+  };
 }
 
 /** The installed-app resource refresh invalidates a cache and notifies subscribers of the resource. */

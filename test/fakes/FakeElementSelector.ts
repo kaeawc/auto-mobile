@@ -86,16 +86,20 @@ export class FakeElementSelector implements ElementSelector {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
     this.lastIndex = options?.index;
-    if (query.text !== undefined) {
-      this.lastText = query.text;
+    this.lastScrollableContainer = options?.scrollableContainer;
+    this.lastContainer = options?.container ?? undefined;
+    // A sibling query names its anchor in `sibling`; record that like the sibling adapters did.
+    const target = query.sibling ?? query;
+    if (target.text !== undefined) {
+      this.lastText = target.text;
       this.lastTextSelectionIntent = options?.selectionIntent;
-      this.textCalls.push(query.text);
+      this.textCalls.push(target.text);
     }
-    if (query.elementId !== undefined) {
-      this.lastResourceId = query.elementId;
+    if (target.elementId !== undefined) {
+      this.lastResourceId = target.elementId;
     }
-    if (query.testTag !== undefined) {
-      this.lastTestTag = query.testTag;
+    if (target.testTag !== undefined) {
+      this.lastTestTag = target.testTag;
     }
     return this.buildSelectionResult(options?.strategy, options?.index);
   }

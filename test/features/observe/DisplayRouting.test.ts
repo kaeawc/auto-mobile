@@ -1171,7 +1171,7 @@ describe("all-display captures", () => {
     scriptPanelApps(h);
     const collect = h.screen.collectAllData.bind(h.screen);
     h.screen.collectAllData = async (...args) => {
-      if (args[10] === 0) {
+      if (args[1]?.displayId === 0) {
         throw error;
       }
       return collect(...args);

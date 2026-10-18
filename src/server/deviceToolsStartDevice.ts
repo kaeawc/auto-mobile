@@ -10,7 +10,7 @@ import type { DeviceMatcher } from "../utils/deviceMatcher";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import { DaemonState, type DaemonStateLike } from "../daemon/daemonState";
-import { lifecycleRequester } from "./lifecycleDeviceOwnership";
+import { lifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
 import {
   isAnonymousAcquisitionSession,
   type SessionRecoveryTarget,

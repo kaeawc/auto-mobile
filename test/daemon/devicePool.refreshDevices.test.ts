@@ -10,7 +10,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { DeviceInfo, Platform } from "../../src/models";
+import { BootedDevice, DeviceInfo, Platform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
@@ -27,6 +27,7 @@ import {
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,
+  pixel8Source,
   requirePooledDevice,
   withProcessPlatform,
 } from "../helpers/devicePoolSuite";
@@ -56,6 +57,62 @@ describe("DevicePool", () => {
     sessionManager.stopCleanupTimer();
   });
 
+  /** Bind `owner-session` to a pooled Android device. */
+  const bindOwnerSession = async (device: BootedDevice, sourceImage: DeviceInfo): Promise<void> => {
+    await devicePool.bindOrReuseDeviceSession(
+      "owner-session",
+      device.deviceId,
+      "android",
+      sourceImage,
+    );
+  };
+
+  const requireShutdownReservation = async (deviceId: string) => {
+    const reservation = await devicePool.reserveDeviceForShutdown(deviceId);
+    if (!reservation) {
+      throw new Error("expected shutdown reservation");
+    }
+    return reservation;
+  };
+
+  /** Swap in a pool whose discovery blocks until released, recording device-ready ids. */
+  const poolWithDeferredDiscovery = () => {
+    const connectedDeviceIds: string[] = [];
+    const deferredDeviceManager = new DeferredDiscoveryFakeDeviceManager();
+    devicePool = makePool({
+      deviceManager: deferredDeviceManager,
+      onDeviceReady: (deviceId) => connectedDeviceIds.push(deviceId),
+    });
+    return { connectedDeviceIds, deferredDeviceManager };
+  };
+
+  /** Swap in a pool over a gated-snapshot manager, with the device added and ready ids cleared. */
+  const poolWithGatedDiscovery = async (device: BootedDevice) => {
+    const manager = new GatedSnapshotDeviceManager([], [device]);
+    const readyDeviceIds: string[] = [];
+    devicePool = makePool({
+      deviceManager: manager,
+      onDeviceReady: (readyId) => readyDeviceIds.push(readyId),
+    });
+    await devicePool.addDevice(device);
+    readyDeviceIds.length = 0;
+    return { manager, readyDeviceIds };
+  };
+
+  /** A pool whose only Android discovery source is `androidDevice`, with the given simctl fake. */
+  const makeAndroidOnlyPool = (
+    androidDevice: BootedDevice,
+    fakeSimctl: ReturnType<typeof fakeDeviceManagerSimctl>,
+  ): DevicePool => {
+    const fakeEmulator = {
+      getBootedDevices: async () => [androidDevice],
+      getBootedDevicesChecked: async () => [androidDevice],
+    } as unknown as AndroidEmulatorClient;
+    return makePool({
+      deviceManager: new MultiPlatformDeviceManager(new FakeAdbClient(), fakeSimctl, fakeEmulator),
+    });
+  };
+
   describe("device-ready notifications", () => {
     test("notifies when a boot-ready device reuses an existing serial", async () => {
       const connectedDeviceIds: string[] = [];
@@ -82,12 +139,7 @@ describe("DevicePool", () => {
     });
 
     test("notifies after binding discovery and before claiming an existing serial", async () => {
-      const connectedDeviceIds: string[] = [];
-      const deferredDeviceManager = new DeferredDiscoveryFakeDeviceManager();
-      devicePool = makePool({
-        deviceManager: deferredDeviceManager,
-        onDeviceReady: (deviceId) => connectedDeviceIds.push(deviceId),
-      });
+      const { connectedDeviceIds, deferredDeviceManager } = poolWithDeferredDiscovery();
       const device = createBootedDevice("emulator-5554");
       await devicePool.initializeWithDevices([device]);
       deferredDeviceManager.bootedDevices = [device];
@@ -219,12 +271,7 @@ describe("DevicePool", () => {
 
     test("notifies after autolock discovery and before claiming an existing serial", async () => {
       const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
-      const connectedDeviceIds: string[] = [];
-      const deferredDeviceManager = new DeferredDiscoveryFakeDeviceManager();
-      devicePool = makePool({
-        deviceManager: deferredDeviceManager,
-        onDeviceReady: (deviceId) => connectedDeviceIds.push(deviceId),
-      });
+      const { connectedDeviceIds, deferredDeviceManager } = poolWithDeferredDiscovery();
       const device = createBootedDevice("emulator-5554");
       await devicePool.initializeWithDevices([device]);
       deferredDeviceManager.bootedDevices = [device];
@@ -267,20 +314,10 @@ describe("DevicePool", () => {
     ] as const) {
       test(`does not re-add a retired ${platform} serial from a pre-removal discovery snapshot`, async () => {
         const device = createBootedDevice(deviceId, platform, name);
-        const manager = new GatedSnapshotDeviceManager([], [device]);
-        const readyDeviceIds: string[] = [];
-        devicePool = makePool({
-          deviceManager: manager,
-          onDeviceReady: (readyId) => readyDeviceIds.push(readyId),
-        });
-        await devicePool.addDevice(device);
-        readyDeviceIds.length = 0;
+        const { manager, readyDeviceIds } = await poolWithGatedDiscovery(device);
         const captured = requirePooledDevice(devicePool, deviceId);
         devicePool.markIntentionalShutdown(deviceId);
-        const reservation = await devicePool.reserveDeviceForShutdown(deviceId);
-        if (!reservation) {
-          throw new Error("expected shutdown reservation");
-        }
+        const reservation = await requireShutdownReservation(deviceId);
 
         manager.gateDiscovery = true;
         const staleRefresh = devicePool.refreshDevices();
@@ -298,14 +335,7 @@ describe("DevicePool", () => {
 
     test("re-adds a rebooted serial when discovery starts after its removal", async () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      const manager = new GatedSnapshotDeviceManager([], [device]);
-      const readyDeviceIds: string[] = [];
-      devicePool = makePool({
-        deviceManager: manager,
-        onDeviceReady: (readyId) => readyDeviceIds.push(readyId),
-      });
-      await devicePool.addDevice(device);
-      readyDeviceIds.length = 0;
+      const { readyDeviceIds } = await poolWithGatedDiscovery(device);
       const captured = requirePooledDevice(devicePool, device.deviceId);
       expect(await devicePool.retireDeviceForShutdown(captured)).toBe(true);
 
@@ -341,16 +371,7 @@ describe("DevicePool", () => {
             throw new Error("simctl should not be queried");
           },
         });
-        const fakeEmulator = {
-          getBootedDevices: async () => [androidDevice],
-          getBootedDevicesChecked: async () => [androidDevice],
-        } as unknown as AndroidEmulatorClient;
-        const manager = new MultiPlatformDeviceManager(
-          new FakeAdbClient(),
-          fakeSimctl,
-          fakeEmulator,
-        );
-        const pool = makePool({ deviceManager: manager });
+        const pool = makeAndroidOnlyPool(androidDevice, fakeSimctl);
 
         const added = await pool.refreshDevices();
 
@@ -372,16 +393,7 @@ describe("DevicePool", () => {
             throw new Error("simctl unavailable");
           },
         });
-        const fakeEmulator = {
-          getBootedDevices: async () => [androidDevice],
-          getBootedDevicesChecked: async () => [androidDevice],
-        } as unknown as AndroidEmulatorClient;
-        const manager = new MultiPlatformDeviceManager(
-          new FakeAdbClient(),
-          fakeSimctl,
-          fakeEmulator,
-        );
-        const pool = makePool({ deviceManager: manager });
+        const pool = makeAndroidOnlyPool(androidDevice, fakeSimctl);
 
         const added = await pool.refreshDevices();
 
@@ -470,14 +482,8 @@ describe("DevicePool", () => {
     test("defers refresh eviction while a shutdown reservation owns the incarnation", async () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       await devicePool.initializeWithDevices([device]);
-      const captured = devicePool.getDevice(device.deviceId);
-      if (!captured) {
-        throw new Error("expected shutdown device to be pooled");
-      }
-      const reservation = await devicePool.reserveDeviceForShutdown(captured.id);
-      if (!reservation) {
-        throw new Error("expected shutdown reservation");
-      }
+      const captured = requirePooledDevice(devicePool, device.deviceId);
+      const reservation = await requireShutdownReservation(captured.id);
       fakeDeviceManager.bootedDevices = [];
 
       try {
@@ -497,12 +503,7 @@ describe("DevicePool", () => {
       let tracker: ExecutionTracker;
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const replacement = createBootedDevice("emulator-5556", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       const branches = ["remove and add", "adopt existing"] as const;
 
       beforeEach(async () => {
@@ -520,19 +521,11 @@ describe("DevicePool", () => {
           },
         });
         await initializeLiveDevices([device]);
-        await devicePool.bindOrReuseDeviceSession(
-          "owner-session",
-          device.deviceId,
-          "android",
-          sourceImage,
-        );
+        await bindOwnerSession(device, sourceImage);
       });
 
       async function replaceDevice(branch: (typeof branches)[number], excludeExecutionId?: string) {
-        const reservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
-        if (!reservation) {
-          throw new Error("expected shutdown reservation");
-        }
+        const reservation = await requireShutdownReservation(device.deviceId);
         try {
           if (branch === "adopt existing") {
             await devicePool.addDevice(replacement, sourceImage);
@@ -620,10 +613,7 @@ describe("DevicePool", () => {
         tracker.bindDeviceExecution(recovery.id, device.deviceId);
         tracker.bindDeviceExecution(sessionlessWork.id, device.deviceId);
         tracker.bindDeviceExecution(otherDeviceWork.id, "emulator-5558");
-        const captured = devicePool.getDevice(device.deviceId);
-        if (!captured) {
-          throw new Error("expected recovery device to be pooled");
-        }
+        const captured = requirePooledDevice(devicePool, device.deviceId);
 
         const retired = await devicePool.retireDeviceAfterSystemUiAnrRecoveryFailure(captured);
 
@@ -640,33 +630,17 @@ describe("DevicePool", () => {
 
     test("keeps the existing session through a System UI recovery handoff", async () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        sourceImage,
-      );
-      const captured = devicePool.getDevice(device.deviceId);
-      if (!captured) {
-        throw new Error("expected recovery device to be pooled");
-      }
+      await bindOwnerSession(device, sourceImage);
+      const captured = requirePooledDevice(devicePool, device.deviceId);
       const readinessRelease = await devicePool.reserveDeviceForReadiness(
         device.deviceId,
         device,
         sourceImage.name,
       );
-      const shutdownReservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
-      if (!shutdownReservation) {
-        throw new Error("expected shutdown reservation");
-      }
+      const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
         fakeDeviceManager.bootedDevices = [];
@@ -712,24 +686,11 @@ describe("DevicePool", () => {
 
     test("carries the autolock owner onto the System UI recovery replacement", async () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        sourceImage,
-      );
-      const captured = devicePool.getDevice(device.deviceId);
-      if (!captured) {
-        throw new Error("expected recovery device to be pooled");
-      }
+      await bindOwnerSession(device, sourceImage);
+      const captured = requirePooledDevice(devicePool, device.deviceId);
       // Simulate an autolocked device so recovery must preserve exclusivity; an
       // unset autolockSessionId on the replacement would let any session drive it.
       captured.autolockSessionId = "owner-session";
@@ -738,10 +699,7 @@ describe("DevicePool", () => {
         device,
         sourceImage.name,
       );
-      const shutdownReservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
-      if (!shutdownReservation) {
-        throw new Error("expected shutdown reservation");
-      }
+      const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
         fakeDeviceManager.bootedDevices = [];
@@ -765,30 +723,17 @@ describe("DevicePool", () => {
 
     test("resets device-scoped session state when recovery reuses the serial", async () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       const unboundDevices: string[] = [];
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        sourceImage,
-      );
+      await bindOwnerSession(device, sourceImage);
       sessionManager.setLastHierarchy("owner-session", { hierarchy: {} });
       sessionManager.setKeepScreenAwake("owner-session", { applied: true });
       sessionManager.onSessionDeviceUnbound((_sessionId, deviceId) =>
         unboundDevices.push(deviceId),
       );
-      const shutdownReservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
-      if (!shutdownReservation) {
-        throw new Error("expected shutdown reservation");
-      }
+      const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
         fakeDeviceManager.bootedDevices = [];
@@ -812,28 +757,11 @@ describe("DevicePool", () => {
     test("adopts a matching replacement that refresh already added before handoff", async () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const replacement = createBootedDevice("emulator-5556", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       fakeDeviceManager.bootedDevices = [device, replacement];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        sourceImage,
-      );
-      const captured = devicePool.getDevice(device.deviceId);
-      if (!captured) {
-        throw new Error("expected recovery device to be pooled");
-      }
-      const shutdownReservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
-      if (!shutdownReservation) {
-        throw new Error("expected shutdown reservation");
-      }
+      await bindOwnerSession(device, sourceImage);
+      const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
         // Discovery can add the booted replacement before the recovery handoff
@@ -863,30 +791,17 @@ describe("DevicePool", () => {
     test("does not adopt a matching replacement that another session already owns", async () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const replacement = createBootedDevice("emulator-5556", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       fakeDeviceManager.bootedDevices = [device, replacement];
       await devicePool.initializeWithDevices([device, replacement]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        sourceImage,
-      );
+      await bindOwnerSession(device, sourceImage);
       await devicePool.bindOrReuseDeviceSession(
         "competing-session",
         replacement.deviceId,
         "android",
         sourceImage,
       );
-      const shutdownReservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
-      if (!shutdownReservation) {
-        throw new Error("expected shutdown reservation");
-      }
+      const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
         await expect(
@@ -908,24 +823,11 @@ describe("DevicePool", () => {
     test("does not retire a same-serial successor while cleaning up a recovery replacement", async () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const replacement = createBootedDevice("emulator-5556", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        sourceImage,
-      );
-      const shutdownReservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
-      if (!shutdownReservation) {
-        throw new Error("expected shutdown reservation");
-      }
+      await bindOwnerSession(device, sourceImage);
+      const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
         fakeDeviceManager.bootedDevices = [];
@@ -972,24 +874,11 @@ describe("DevicePool", () => {
       sessionManager = new SessionManager(fakeTimer, sessionPersistence);
       devicePool = makePool();
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        sourceImage,
-      );
-      const shutdownReservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
-      if (!shutdownReservation) {
-        throw new Error("expected shutdown reservation");
-      }
+      await bindOwnerSession(device, sourceImage);
+      const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
         fakeDeviceManager.bootedDevices = [];
@@ -1021,12 +910,7 @@ describe("DevicePool", () => {
       sessionManager = new SessionManager(fakeTimer, persistence);
       devicePool = makePool({ deviceManager: manager });
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       manager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
 
@@ -1041,10 +925,7 @@ describe("DevicePool", () => {
       await binding;
       persistence.deferNextUpsert();
 
-      const shutdownReservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
-      if (!shutdownReservation) {
-        throw new Error("expected shutdown reservation");
-      }
+      const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
         manager.bootedDevices = [];
@@ -1080,24 +961,11 @@ describe("DevicePool", () => {
       sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
       devicePool = makePool({ deviceManager: manager });
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       manager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(
-        "owner-session",
-        device.deviceId,
-        "android",
-        sourceImage,
-      );
-      const shutdownReservation = await devicePool.reserveDeviceForShutdown(device.deviceId);
-      if (!shutdownReservation) {
-        throw new Error("expected shutdown reservation");
-      }
+      await bindOwnerSession(device, sourceImage);
+      const shutdownReservation = await requireShutdownReservation(device.deviceId);
 
       try {
         manager.bootedDevices = [];
@@ -1145,12 +1013,7 @@ describe("DevicePool", () => {
           }),
         );
         const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
-        const sourceImage: DeviceInfo = {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          source: "local",
-        };
+        const sourceImage = pixel8Source();
         manager.bootedDevices = [device];
         await pool.initializeWithDevices([device]);
         await pool.bindOrReuseDeviceSession(
@@ -1300,10 +1163,7 @@ describe("DevicePool", () => {
     test("allows a replacement incarnation to acquire its own shutdown reservation", async () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
       await devicePool.initializeWithDevices([device]);
-      const captured = devicePool.getDevice(device.deviceId);
-      if (!captured) {
-        throw new Error("expected shutdown device to be pooled");
-      }
+      const captured = requirePooledDevice(devicePool, device.deviceId);
       const originalReservation = await devicePool.reserveDeviceForShutdown(captured.id);
       if (!originalReservation) {
         throw new Error("expected original shutdown reservation");

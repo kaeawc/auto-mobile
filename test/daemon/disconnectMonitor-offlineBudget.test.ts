@@ -60,7 +60,7 @@ function offlineMonitorHarness(deviceId = EMULATOR, initialRow = ROWS.device) {
       ? createExecResult(["List of devices attached", ...listing, ""].join("\n"), "")
       : createExecResult("", ""),
   );
-  const emulator = new AndroidEmulatorClient(undefined, null, timer, new FakeAdbClientFactory(adb));
+  const emulator = new AndroidEmulatorClient({ timer, adbFactory: new FakeAdbClientFactory(adb) });
   let reconnects = 0;
   class ListingManager extends FakeDeviceManager {
     override async getBootedDevicesDetailed(

@@ -141,6 +141,7 @@ import { DaemonState } from "./daemonState";
 import { canonicalizeToolCallDeviceIds, toolCallNamesDeviceId } from "./toolCallDeviceIdentity";
 import { isDeviceInventoryTool } from "./daemonMcpProxy";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
+import { isDaemonRequestEnvelope, readFramePlatformHint } from "./daemonRequestEnvelope";
 import { deviceIncarnationToken } from "../utils/deviceIncarnation";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES, OutboundWriteGuard } from "./outboundWriteGuard";
@@ -293,18 +294,6 @@ function socketRequestId(parsed: unknown): string | null {
   }
   const id = (parsed as Record<string, unknown>).id;
   return typeof id === "string" ? id : null;
-}
-
-function isDaemonSocketRequest(parsed: unknown): parsed is DaemonRequest {
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return false;
-  }
-  const request = parsed as Record<string, unknown>;
-  return (
-    typeof request.id === "string" &&
-    typeof request.method === "string" &&
-    (request.type === "mcp_request" || request.type === "daemon_request")
-  );
 }
 
 class ClientRequestCancellation extends ActionableError {}
@@ -1554,7 +1543,7 @@ export class UnixSocketServer {
         throw toActionableError(error, "Parse error in daemon socket request");
       }
       requestId = socketRequestId(parsed);
-      if (!isDaemonSocketRequest(parsed)) {
+      if (!isDaemonRequestEnvelope(parsed)) {
         errorCode = -32600;
         throw new ActionableError("Invalid daemon socket request");
       }
@@ -6405,8 +6394,8 @@ export class UnixSocketServer {
       if (explicit || !socketSessionId || !this.daemonState.isInitialized()) {
         return explicit;
       }
-      const platform = (request.params as Record<string, unknown> | undefined)?.platform;
-      if (platform !== "android" && platform !== "ios") {
+      const platform = readFramePlatformHint(request.params);
+      if (!platform) {
         return undefined;
       }
       return this.daemonState

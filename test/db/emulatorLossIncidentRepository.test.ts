@@ -19,10 +19,10 @@ describe("EmulatorLossIncidentRepository", () => {
 
   test("round-trips adopted output availability and tolerates unknown values", async () => {
     const repository = new EmulatorLossIncidentRepository(
+      db,
       new FakeTimer(),
       new CountingIdGenerator("incident"),
       50,
-      db,
     );
     const incident = await repository.open({
       deviceId: "emulator-5554",

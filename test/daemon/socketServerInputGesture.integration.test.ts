@@ -80,12 +80,7 @@ describe("UnixSocketServer input/gesture*", () => {
   test("forwards start, move, and end frames to the Android continued-gesture path", async () => {
     const { requestGestureStart, requestGestureMove, requestGestureEnd } = mockAndroidGestures();
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     // One persistent connection carries the whole drag, as the real streaming client does — so the
@@ -152,12 +147,7 @@ describe("UnixSocketServer input/gesture*", () => {
   test("cancels a still-open gesture when its owning socket disconnects mid-drag", async () => {
     const { requestGestureStart, requestGestureEnd } = mockAndroidGestures();
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const conn = await openPersistentConnection(socketPath);
@@ -183,12 +173,7 @@ describe("UnixSocketServer input/gesture*", () => {
   test("does not cancel a gesture that was already ended before the socket closed", async () => {
     const { requestGestureEnd } = mockAndroidGestures();
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const conn = await openPersistentConnection(socketPath);
@@ -218,12 +203,7 @@ describe("UnixSocketServer input/gesture*", () => {
   test("carries the cancel flag through on end", async () => {
     const { requestGestureEnd } = mockAndroidGestures();
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const end = await sendRequest(socketPath, "input/gestureEnd", {
@@ -242,12 +222,7 @@ describe("UnixSocketServer input/gesture*", () => {
 
   test("rejects iOS: streaming gestures are Android-only", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/gestureStart", {
@@ -264,12 +239,7 @@ describe("UnixSocketServer input/gesture*", () => {
 
   test("rejects a missing gestureId and non-numeric coordinates", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const noId = await sendRequest(socketPath, "input/gestureStart", {
@@ -309,12 +279,7 @@ describe("UnixSocketServer input/gesture*", () => {
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     fakeTimer.enableAutoAdvance();
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const conn = await openPersistentConnection(socketPath);

@@ -13,12 +13,12 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { ExecResult, BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { WINDOW_MANAGER_ROTATION_TIMEOUT_MS } from "../../../src/utils/android-cmdline-tools/readWindowManagerRotation";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const mirrorLandscape = readFileSync(
   join(__dirname, "..", "observe", "windowDumps", "dumpsys-window-displays-mirror-landscape.txt"),
@@ -1882,10 +1882,11 @@ describe("Rotate", () => {
       };
       (rotate as any).awaitIdle = gatedAwaitIdle;
 
-      const secondRotate = new Rotate(mockDevice, fakeAdb, fakeTimer);
-      (secondRotate as any).awaitIdle = gatedAwaitIdle;
-      (secondRotate as any).observeScreen = fakeObserveScreen;
-      (secondRotate as any).window = fakeWindow;
+      const secondRotate = new Rotate(mockDevice, fakeAdb, fakeTimer, undefined, {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: gatedAwaitIdle,
+        window: fakeWindow,
+      });
 
       const lock = (rotate as any).getRotationLock();
       // Same deviceId -> the second instance must resolve to the SAME lock.
@@ -2130,9 +2131,7 @@ describe("Rotate", () => {
       };
 
       fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any,
-      );
+      getInstanceSpy = spyOnIosClientInstance(fakeIOSCtrlProxy);
     });
 
     test("should use CtrlProxy to rotate to landscape on iOS", async () => {
@@ -2140,10 +2139,11 @@ describe("Rotate", () => {
         createObserveResult(),
         { ...createObserveResult(), rotation: 1, screenSize: { width: 874, height: 402 } },
       ]);
-      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
-      (iosRotate as any).observeScreen = fakeObserveScreen;
-      (iosRotate as any).window = fakeWindow;
-      (iosRotate as any).awaitIdle = fakeAwaitIdle;
+      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer, undefined, {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: fakeAwaitIdle,
+        window: fakeWindow,
+      });
 
       try {
         const result = await iosRotate.execute("landscape");
@@ -2236,10 +2236,11 @@ describe("Rotate", () => {
     });
 
     test("should use CtrlProxy to rotate to portrait on iOS", async () => {
-      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
-      (iosRotate as any).observeScreen = fakeObserveScreen;
-      (iosRotate as any).window = fakeWindow;
-      (iosRotate as any).awaitIdle = fakeAwaitIdle;
+      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer, undefined, {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: fakeAwaitIdle,
+        window: fakeWindow,
+      });
 
       try {
         const result = await iosRotate.execute("portrait");
@@ -2254,10 +2255,11 @@ describe("Rotate", () => {
 
     test("should throw when iOS rotate fails", async () => {
       fakeIOSCtrlProxy.setFailureMode("rotate", new Error("Rotation not supported"));
-      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
-      (iosRotate as any).observeScreen = fakeObserveScreen;
-      (iosRotate as any).window = fakeWindow;
-      (iosRotate as any).awaitIdle = fakeAwaitIdle;
+      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer, undefined, {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: fakeAwaitIdle,
+        window: fakeWindow,
+      });
 
       try {
         await expect(iosRotate.execute("landscape")).rejects.toThrow("Rotation not supported");
@@ -2267,10 +2269,11 @@ describe("Rotate", () => {
     });
 
     test("should not call ADB for iOS rotation", async () => {
-      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
-      (iosRotate as any).observeScreen = fakeObserveScreen;
-      (iosRotate as any).window = fakeWindow;
-      (iosRotate as any).awaitIdle = fakeAwaitIdle;
+      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer, undefined, {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: fakeAwaitIdle,
+        window: fakeWindow,
+      });
 
       try {
         await iosRotate.execute("landscape");

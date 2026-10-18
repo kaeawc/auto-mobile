@@ -25,6 +25,7 @@ import { FakeWebSocket } from "../../fakes/FakeWebSocket";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { createIosDelegateHarness } from "../../helpers/iosDelegateHarness";
 import { observation, setFakeTapAtWindow } from "../../helpers/tapAtCoordinate";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 type TapReply = Awaited<ReturnType<IosCoordinateTapClient["requestTapCoordinates"]>>;
 
@@ -546,9 +547,7 @@ describe("tapOn on iOS (#9971)", () => {
   function createTapOn(client: FakeIOSCtrlProxy) {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as unknown as IOSCtrlProxyClient,
-    );
+    const instance = spyOnIosClientInstance(client);
     const tapOn = new TapOnElement(IOS_DEVICE, new FakeAdbClient(), {
       timer,
       tapStrategy: new FakeTapStrategy(),

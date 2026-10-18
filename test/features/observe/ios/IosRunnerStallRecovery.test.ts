@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { IosRunnerStalledError } from "../../../../src/features/observe/ios/runnerErrorCodes";
@@ -9,6 +9,7 @@ import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
+import { spyOnIosClientInstance } from "../../../helpers/iosCtrlProxyClientSpies";
 
 const device: BootedDevice = { platform: "ios", deviceId: "stalled-runner", name: "Test iPhone" };
 type Command = { type: string; requestId?: string };
@@ -102,7 +103,7 @@ describe("iOS stalled command recovery", () => {
       timer,
       () => manager,
     );
-    const instanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+    const instanceSpy = spyOnIosClientInstance(client);
     restoreInstance = () => instanceSpy.mockRestore();
     subject = new ViewHierarchy(
       device,

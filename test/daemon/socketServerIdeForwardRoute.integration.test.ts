@@ -70,7 +70,6 @@ function createServer(): UnixSocketServer {
   sessionDevices.set("session-b", "");
   return new UnixSocketServer(
     join(tmpdir(), `ide-route-${randomUUID()}.sock`),
-    "http://localhost:0/mcp",
     createFakeDaemonState(sessionDevices),
     new FakeTimer(),
   );

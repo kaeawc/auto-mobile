@@ -1,4 +1,4 @@
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";

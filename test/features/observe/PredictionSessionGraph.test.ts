@@ -52,7 +52,7 @@ describe("prediction reads follow the device's bound session graph (#10197)", ()
     sessionDbs.push(db);
     const manager = NavigationGraphManager.createForTesting(
       new NavigationRepository(db),
-      new TestCoverageRepository(undefined, db),
+      new TestCoverageRepository(db),
       undefined,
       sessionId,
     );
@@ -171,7 +171,7 @@ describe("prediction outcomes are recorded on the graph that produced the predic
     sessionDb = await createTestDatabase();
     sessionGraph = NavigationGraphManager.createForTesting(
       new NavigationRepository(sessionDb),
-      new TestCoverageRepository(undefined, sessionDb),
+      new TestCoverageRepository(sessionDb),
       undefined,
       "session-a",
     );

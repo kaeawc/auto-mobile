@@ -186,7 +186,6 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   const timer = new FakeTimer();
   const socket = new UnixSocketServer(
     "/private/tmp/unused-6807.sock",
-    "http://localhost:0/mcp",
     DaemonState.getInstance(),
     timer,
   );

@@ -1,4 +1,5 @@
 import { holderOf } from "../daemon/deviceBinding";
+import { currentTaskContext } from "./tasks/runAsTask";
 import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
 import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
@@ -8,7 +9,7 @@ import { ActionableError, BootedDevice, DeviceInfo } from "../models";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
-import { DaemonState } from "../daemon/daemonState";
+import { DaemonState, type DaemonStateLike } from "../daemon/daemonState";
 import { lifecycleRequester } from "./lifecycleDeviceOwnership";
 import {
   isAnonymousAcquisitionSession,
@@ -273,7 +274,13 @@ async function rollbackCreatedDeviceAfterBoot(
  * passed to the bound session, so the failure rollbacks above no longer apply; a request that
  * turns out undelivered after this point is undone through the receipt instead (#11593).
  */
-function recordStartedDevice(boot: DeviceBootResult, options: BootPreparationOptions): void {
+function recordStartedDevice(
+  boot: DeviceBootResult,
+  options: BootPreparationOptions,
+  sessionId: string,
+): void {
+  // As an MCP task the caller sees the session only once the task settles: hold it until then.
+  currentTaskContext()?.holdDeviceLease(sessionId);
   const receipt = requestAcquisitionReceipt();
   if (!receipt) {
     return;
@@ -462,7 +469,7 @@ const bootAndPrepareDevice = async (
     });
   });
   state.ownershipTransferred = true;
-  recordStartedDevice(state.boot, options);
+  recordStartedDevice(state.boot, options, sessionId);
 
   refreshResourcesAfterCommittedBoot(state.boot, deps);
   return buildBootedResponse(state.boot.device, state.boot.source, perf, sessionId, {
@@ -613,7 +620,7 @@ async function reserveBootReadiness(
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
   deps: DeviceToolsDependencies,
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   { state, signal, requestedIdentity, releaseReadinessReservations }: BootPreparationOptions,
 ): Promise<void> {
   setAcquisitionStage(budgets, "reserving the device for readiness");
@@ -701,7 +708,7 @@ async function bindPreparedDevice(
     acquisitionReadinessKey,
     autolockEnabled,
   }: BootPreparationOptions & {
-    daemonState: DaemonState;
+    daemonState: DaemonStateLike;
     preparation: BootPreparationState;
     readinessResult: Awaited<ReturnType<typeof prepareStartDeviceRunnerReadiness>>;
     acquisitionReadinessKey: string;
@@ -1121,7 +1128,7 @@ export function restartResumeSessionForDevice(
  * record themselves.
  */
 function recordAcquiredSessionReadiness(
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   sessionId: string,
   achievedReadiness: DeviceReadinessLevel,
 ): void {

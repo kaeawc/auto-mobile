@@ -254,7 +254,7 @@ describe("Daemon session-release signal wiring", () => {
       "session-rebind-navigation",
       NavigationGraphManager.createForTesting(
         new NavigationRepository(db),
-        new TestCoverageRepository(undefined, db),
+        new TestCoverageRepository(db),
         undefined,
         "session-rebind-navigation",
       ),

@@ -22,6 +22,7 @@ import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/A
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 import { createIosDelegateHarness } from "../helpers/iosDelegateHarness";
+import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 
 beforeEach(() => {
   // InputText constructs observation services, but append never observes. Suppress
@@ -69,7 +70,7 @@ test.each(
   if (platform === "android") {
     spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
   } else {
-    spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+    spyOnIosClientInstance(client);
   }
   let textCalls = 0;
   const set = (_text: string, options?: { abortSignal?: AbortSignal; onDispatch?: () => void }) => {
@@ -175,8 +176,8 @@ test.each(["replace", "append", "legacy append"] as const)(
       supportedCommands: variant === "legacy append" ? ["request_set_text"] : undefined,
     });
     const delegate = new IosTextDelegate(transport.context);
-    const client = Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient;
-    spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+    const client = Object.create(IOSCtrlProxyClient.prototype);
+    spyOnIosClientInstance(client);
     spyOn(client, "requestSetText").mockImplementation(delegate.requestSetText.bind(delegate));
     spyOn(client, "requestAppendText").mockImplementation(
       delegate.requestAppendText.bind(delegate),
@@ -216,8 +217,8 @@ test("abort before dispatch releases the device key with plain cancellation and 
   const owner = new AbortController();
   let preparing = false;
   let sent = 0;
-  const client = Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient;
-  spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+  const client = Object.create(IOSCtrlProxyClient.prototype);
+  spyOnIosClientInstance(client);
   spyOn(client, "requestSetText").mockImplementation((_text, options) => {
     if (!preparing) {
       preparing = true;
@@ -299,8 +300,8 @@ test("ordinary timeout still holds the key until the dispatched request settles"
   const { handler, timer } = harness();
   const first = runner();
   let calls = 0;
-  const client = Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient;
-  spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+  const client = Object.create(IOSCtrlProxyClient.prototype);
+  spyOnIosClientInstance(client);
   spyOn(client, "requestSetText").mockImplementation((_text, options) => {
     calls++;
     if (calls === 1) {
@@ -550,8 +551,8 @@ test("abort during submit holds only the remaining caller budget", async () => {
   const first = runner();
   let calls = 0;
   let actionBudget: number | undefined;
-  const client = Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient;
-  spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+  const client = Object.create(IOSCtrlProxyClient.prototype);
+  spyOnIosClientInstance(client);
   spyOn(client, "requestSetText").mockImplementation(async (_text, options) => {
     calls++;
     options?.onDispatch?.();

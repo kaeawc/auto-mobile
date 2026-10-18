@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon/SwipeOn";
-import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { loadIosRemindersNoiseObservePair } from "../../../fixtures/observe/observeFixture";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeScrollableElementsQuery } from "../../../fakes/FakeElementTraitQueries";
 import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { FakeTalkBackSwipeExecutor } from "../../../fakes/FakeTalkBackSwipeExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { spyOnIosExistingInstance } from "../../../helpers/iosCtrlProxyClientSpies";
 
 const indeterminateError =
   "Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (Swipe timed out after 5000ms). The swipe may have been applied. Do not retry automatically.";
@@ -35,9 +35,9 @@ function harness() {
   });
   action.observedInteraction = async (run) => ({ ...(await run(observation)), observation });
   const invalidations: string[] = [];
-  existingSpy = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+  existingSpy = spyOnIosExistingInstance({
     invalidateCache: () => invalidations.push("ios"),
-  } as unknown as IOSCtrlProxyClient);
+  });
   return { action, voiceOverExecutor, invalidations };
 }
 

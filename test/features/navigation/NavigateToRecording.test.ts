@@ -83,7 +83,7 @@ describe("NavigateTo replay through navigation recording", () => {
     timer.setCurrentTime(100_000);
     manager = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       timer,
     );
     NavigationGraphManager.setInstanceForTesting(manager);

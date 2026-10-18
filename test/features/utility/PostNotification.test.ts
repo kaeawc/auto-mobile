@@ -164,7 +164,7 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({
       title: "Hello",
       body: "World",
@@ -190,7 +190,7 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({
       title: "AutoMobile Test",
       body: "Body",
@@ -210,7 +210,7 @@ describe("PostNotification", () => {
   });
 
   test("rejects invalid explicit Android appId before SDK broadcast", async () => {
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({
       title: "AutoMobile Test",
       body: "Body",
@@ -240,7 +240,7 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({
       title: "AutoMobile Test",
       body: "Body",
@@ -264,7 +264,7 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({
       title: "Fallback",
       body: "Body",
@@ -276,7 +276,7 @@ describe("PostNotification", () => {
   });
 
   test("requires imagePath for bigPicture imageType", async () => {
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({
       title: "Big",
       body: "Picture",
@@ -295,7 +295,7 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({
       title: "Fail",
       body: "Body",
@@ -621,7 +621,7 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({ title: "Missing", body: "Receiver" });
 
     expect(result.success).toBe(false);
@@ -642,7 +642,7 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({
       title: "Short form",
       body: "Receiver",
@@ -660,7 +660,7 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({ title: "Other", body: "Receiver" });
 
     expect(result).toEqual({
@@ -680,7 +680,7 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({ title: "Fail", body: "Broadcast" });
 
     expect(result).toEqual({
@@ -700,7 +700,7 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({ title: "Success", body: "Broadcast" });
 
     expect(result.success).toBe(true);
@@ -715,7 +715,7 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({ title: "Fallback", body: "Broadcast" });
 
     expect(result.success).toBe(true);
@@ -734,7 +734,7 @@ describe("PostNotification", () => {
       stderr: "",
     });
 
-    const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
+    const postNotification = new PostNotification(device, fakeAdb, fakeWindow as any);
     const result = await postNotification.execute({ title: "Fallback", body: "Broadcast" });
 
     expect(result.success).toBe(true);

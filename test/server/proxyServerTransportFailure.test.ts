@@ -1,5 +1,5 @@
 import { fakeServerContext } from "../helpers/fakeServerContext";
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client, ProtocolError } from "@modelcontextprotocol/client";
 import { InMemoryTransport, Server } from "@modelcontextprotocol/server";
 import { McpError } from "../../src/server/mcpError";
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
@@ -290,8 +290,8 @@ describe("proxy server device-control transport errors", () => {
         await request(client);
         throw new Error("expected list request to reject");
       } catch (error) {
-        expect(error).toBeInstanceOf(McpError);
-        expect((error as McpError).data).toMatchObject({
+        expect(error).toBeInstanceOf(ProtocolError);
+        expect((error as ProtocolError).data).toMatchObject({
           error: {
             code: "daemon_overloaded",
             retryable: true,

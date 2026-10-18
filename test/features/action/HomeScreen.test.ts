@@ -3,7 +3,6 @@ import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { HomeScreen } from "../../../src/features/action/HomeScreen";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import type { CtrlProxyHierarchy } from "../../../src/features/observe/ios/types";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -25,6 +24,7 @@ import { hideCapturedNode } from "../../helpers/hideCapturedNode";
 import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { drainUntil } from "../../helpers/fakeTimerStepping";
 import { IosHomeLaunchTimeoutError } from "../../../src/models/IosHomeLaunchTimeoutError";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 // Helper function to create mock ObserveResult
 // Each call creates a unique viewHierarchy object so change detection works
@@ -162,13 +162,14 @@ describe("HomeScreen", () => {
       platform: "ios",
       deviceId: options?.simulator ? "A1B2C3D4-E5F6-7890-ABCD-EF1234567890" : "ios-device",
     };
-    const action = new HomeScreen(iosDevice, fakeAdb, fakeTimer, options?.simctl);
-    (action as any).observeScreen = fakeObserveScreen;
-    (action as any).window = fakeWindow;
-    (action as any).awaitIdle = fakeAwaitIdle;
+    const action = new HomeScreen(iosDevice, fakeAdb, fakeTimer, options?.simctl, {
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+    });
 
     const client = new FakeIOSCtrlProxy(fakeTimer);
-    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as any);
+    getInstanceSpy = spyOnIosClientInstance(client);
     return { action, client };
   }
 

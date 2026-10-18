@@ -14,7 +14,6 @@ import type { VoiceOverResult } from "../../src/models/AccessibilityResult";
 import { ActionableError } from "../../src/models/ActionableError";
 import { accessibilityDetector } from "../../src/features/accessibility/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../../src/features/accessibility/IosVoiceOverDetector";
-import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -24,6 +23,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import type { ScreenReaderToggleOptions } from "../../src/models/AccessibilityResult";
+import { spyOnIosClientFactory, spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 
 const ANDROID_DEVICE = {
   name: "a",
@@ -80,7 +80,7 @@ describe("accessibilityTools", () => {
     const client = new FakeIOSCtrlProxy(new FakeTimer());
     const spies = [
       spyOn(iosVoiceOverDetector, "invalidateCache").mockImplementation(() => {}),
-      spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as IOSCtrlProxyClient),
+      spyOnIosClientInstance(client),
       spyOn(iosVoiceOverDetector, "resolveState").mockResolvedValue(null),
     ];
     try {
@@ -282,9 +282,9 @@ describe("accessibilityTools", () => {
         spyOn(iosVoiceOverDetector, "invalidateCache").mockImplementation(() => {
           calls.push("invalidate");
         }),
-        spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(() => {
+        spyOnIosClientFactory(() => {
           calls.push("client");
-          return client as IOSCtrlProxyClient;
+          return client;
         }),
         spyOn(iosVoiceOverDetector, "resolveState").mockImplementation(async () => {
           calls.push("enabled");

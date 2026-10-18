@@ -41,6 +41,7 @@ import {
   createStatelessMcpServer,
   type StatelessMcpServerBase,
 } from "./statelessMcpServerFactory";
+import { releaseDaemonTaskLeases } from "../server/tasks/daemonTaskManager";
 import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { createIosDoctorDependencies } from "../doctor/checks/ios";
 import { logger } from "../utils/logger";
@@ -1363,7 +1364,11 @@ export class Daemon {
       },
       // Subscribers to the booted-device resources learn of status and holder changes (#11413).
       onDeviceStateChanged: this.deviceStateChangeNotifier,
-      emulatorLossIncidentStore: new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
+      emulatorLossIncidentStore: new EmulatorLossIncidentRepository(
+        undefined,
+        this.timer,
+        this.idGenerator,
+      ),
       ambientExecutionIdReader,
       cancelDeviceSessionExecutions: Object.assign(
         (sessionId: string, reason: string, options?: { excludeExecutionId?: string }) =>
@@ -1813,11 +1818,9 @@ export class Daemon {
   private async bindControlSocket(): Promise<UnixSocketServer> {
     logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
     logger.info(`MCP_STREAMABLE_PATH: "${MCP_STREAMABLE_PATH}"`);
-    const mcpEndpoint = `http://${this.host}:${this.port}${MCP_STREAMABLE_PATH}`;
-    logger.info(`Creating UnixSocketServer with endpoint: "${mcpEndpoint}"`);
+    logger.info(`Creating UnixSocketServer at "${SOCKET_PATH}"`);
     this.socketServer = new UnixSocketServer(
       SOCKET_PATH,
-      mcpEndpoint,
       undefined,
       undefined,
       FeatureFlagService.getInstance(),
@@ -4558,10 +4561,8 @@ export class Daemon {
         }
 
         // Recreate socket server
-        const mcpEndpoint = `http://${this.host}:${this.port}${MCP_STREAMABLE_PATH}`;
         this.socketServer = new UnixSocketServer(
           SOCKET_PATH,
-          mcpEndpoint,
           undefined,
           undefined,
           FeatureFlagService.getInstance(),
@@ -5285,6 +5286,7 @@ export class Daemon {
     // The navigation retention monitor's in-flight pass drains via the DB
     // write-barrier stage below; here we only cancel its next scheduled tick.
     navigationRetentionMonitor?.stop();
+    releaseDaemonTaskLeases(); // running MCP tasks stop renewing their leases (#4668)
     const [heartbeatSettled, disconnectSettled] = await Promise.all([
       heartbeatMonitor ? heartbeatMonitor.stop().then(() => true) : true,
       deviceDisconnectMonitor ? deviceDisconnectMonitor.stop() : true,

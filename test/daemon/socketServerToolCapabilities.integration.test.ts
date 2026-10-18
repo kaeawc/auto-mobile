@@ -80,14 +80,9 @@ describe("UnixSocketServer exact-tool selection enforcement", () => {
         clearPreferenceStore: async () => {},
       };
     }) as typeof AndroidCtrlProxyClient.getInstance;
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createDaemonState(options),
-      new FakeTimer(),
-      null,
-      { sessionToolSelectionService: profileService },
-    );
+    server = new UnixSocketServer(socketPath, createDaemonState(options), new FakeTimer(), null, {
+      sessionToolSelectionService: profileService,
+    });
     await server.start();
   }
 

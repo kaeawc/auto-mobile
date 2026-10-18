@@ -124,12 +124,7 @@ describe("UnixSocketServer input/key", () => {
     });
     InputKey.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     server.mcpClientFactory = createMcpClient;
     await server.start();
 
@@ -168,12 +163,7 @@ describe("UnixSocketServer input/key", () => {
     }));
     InputKey.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     (server as unknown as { requireCurrentFrameContext: () => void }).requireCurrentFrameContext =
       () => {};
     await server.start();
@@ -201,12 +191,7 @@ describe("UnixSocketServer input/key", () => {
     }));
     InputKey.prototype.press = press;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const { response, frameCount } = await sendRequest(socketPath, "input/key", {
@@ -228,12 +213,7 @@ describe("UnixSocketServer input/key", () => {
       throw new Error("iOS unsupported should be reported before routing");
     });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const { response, frameCount } = await sendRequest(socketPath, "input/key", {
@@ -258,12 +238,7 @@ describe("UnixSocketServer input/key", () => {
         { ...iosDevice, deviceId: "ios-sim-2", name: "iPhone 16 Pro" },
       ]),
     );
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const { response, frameCount } = await sendRequest(socketPath, "input/key", {
@@ -283,12 +258,7 @@ describe("UnixSocketServer input/key", () => {
       throw new Error("validation should fail before routing");
     });
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const missing = await sendRequest(socketPath, "input/key", {
@@ -335,12 +305,7 @@ describe("UnixSocketServer input/key", () => {
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createDrainDaemonState(sessions),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/key", {
       platform: "android",
@@ -392,12 +357,7 @@ describe("UnixSocketServer input/key", () => {
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createDrainDaemonState(sessions),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/key", {
       platform: "android",

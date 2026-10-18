@@ -13,7 +13,6 @@ import { imeOcclusionHierarchy } from "../../fixtures/observe/imeOcclusion";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
@@ -29,6 +28,7 @@ import {
   runWithTextRequestContext,
 } from "../../../src/features/action/textTransportTimeout";
 import { drainMicrotasks, drainUntil, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("InputText.execute", () => {
   const androidDevice: BootedDevice = {
@@ -98,7 +98,7 @@ describe("InputText.execute", () => {
   });
 
   test("returns a no-text failure without invoking any transport when text is undefined", async () => {
-    const inputText = new InputText(androidDevice, fakeAdb as any);
+    const inputText = new InputText(androidDevice, fakeAdb);
     wireFakes(inputText);
 
     const result = await inputText.execute(undefined as any);
@@ -117,7 +117,7 @@ describe("InputText.execute", () => {
     serverConfig.setEventAllMarkers([]);
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
-    const inputText = new InputText(androidDevice, fakeAdb as any);
+    const inputText = new InputText(androidDevice, fakeAdb);
     wireFakes(inputText);
 
     const result = await inputText.execute("/a");
@@ -472,7 +472,7 @@ describe("InputText.execute", () => {
     serverConfig.setEventAllMarkers(["/"]);
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
 
-    const inputText = new InputText(androidDevice, fakeAdb as any);
+    const inputText = new InputText(androidDevice, fakeAdb);
     wireFakes(inputText);
 
     const result = await inputText.execute("/a");
@@ -485,11 +485,9 @@ describe("InputText.execute", () => {
   });
 
   test("routes iOS input through the CtrlProxy client and ignores Android modes", async () => {
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIosCtrlProxy as unknown as IOSCtrlProxyClient,
-    );
+    iosGetInstanceSpy = spyOnIosClientInstance(fakeIosCtrlProxy);
 
-    const inputText = new InputText(iosDevice, fakeAdb as any);
+    const inputText = new InputText(iosDevice, fakeAdb);
     wireFakes(inputText);
 
     const result = await inputText.execute("hello", undefined, false, "eventAll");
@@ -562,7 +560,7 @@ describe("InputText.execute", () => {
       );
 
       const focusCalls: unknown[] = [];
-      const inputText = new InputText(androidDevice, fakeAdb as any);
+      const inputText = new InputText(androidDevice, fakeAdb);
       wireFakes(inputText);
       (inputText as any).targetFocuser = {
         focus: async (selector: unknown) => {
@@ -591,7 +589,7 @@ describe("InputText.execute", () => {
     });
 
     test("returns the focus failure without typing when the selector cannot be focused", async () => {
-      const inputText = new InputText(androidDevice, fakeAdb as any);
+      const inputText = new InputText(androidDevice, fakeAdb);
       wireFakes(inputText);
       (inputText as any).targetFocuser = {
         focus: async () => ({ success: false, error: "no element matches text=Missing" }),
@@ -614,7 +612,7 @@ describe("InputText.execute", () => {
         fakeA11yService,
       );
 
-      const inputText = new InputText(androidDevice, fakeAdb as any);
+      const inputText = new InputText(androidDevice, fakeAdb);
       wireFakes(inputText);
       (inputText as any).targetFocuser = {
         focus: async () => ({

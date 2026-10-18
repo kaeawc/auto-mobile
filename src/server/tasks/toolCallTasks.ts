@@ -5,11 +5,12 @@ import type { TaskManager } from "./TaskManager";
 import type { TaskLeaseKeepalive } from "./taskLeaseKeepalive";
 
 /**
- * Tools whose `tools/call` may run as an MCP task (#4668). Empty until a tool opts in:
- * `startDevice` is the first (owner decision 2026-10-18), then `executePlan`, `installApp`
- * and recording start/stop. Short interaction tools stay synchronous.
+ * Tools whose `tools/call` may run as an MCP task (#4668). `startDevice` is the first (owner
+ * decision 2026-10-18): a boot can take minutes, and the session it binds is held alive until
+ * the task settles. `executePlan`, `installApp` and recording start/stop follow. Short
+ * interaction tools stay synchronous.
  */
-export const TASK_ELIGIBLE_TOOLS: ReadonlySet<string> = new Set<string>();
+export const TASK_ELIGIBLE_TOOLS: ReadonlySet<string> = new Set<string>(["startDevice"]);
 
 /** The execution scope a task's call registers under instead of its request's scope. */
 export const TASK_EXECUTION_SCOPE_PREFIX = "mcp-task:";

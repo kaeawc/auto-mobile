@@ -144,7 +144,7 @@ import { talkBackDisplayRefusal } from "../talkback/talkBackDisplayRefusal";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
 import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
-import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
+import { FeatureFlagService, type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import { createTapStrategy } from "./strategies/createTapStrategy";
 import { LongPressMetadataDetector, type LongPressMetadata } from "./LongPressMetadataDetector";
 import { RealWaitForCondition } from "../observe/WaitForCondition";
@@ -215,7 +215,7 @@ interface TapOnElementDependencies extends DisplayFenceDependencies {
   talkBackStrategy?: TalkBackTapStrategy;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   iosVoiceOverDetector?: IosVoiceOverDetector;
-  featureFlags?: FeatureFlagService;
+  featureFlags?: FeatureFlagReader;
   waitForCondition?: WaitForCondition;
   /**
    * Override the platform-specific {@link TapStrategy}. Tests use this
@@ -376,7 +376,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private viewHierarchy: ViewHierarchy;
   private hierarchyCapture: HierarchyCapture;
   private talkBackStrategy: TalkBackTapStrategy;
-  private readonly featureFlags: FeatureFlagService;
+  private readonly featureFlags: FeatureFlagReader;
   private talkBackDriverFactory: TalkBackNavigationDriverFactory;
   private iosVoiceOverDetector: IosVoiceOverDetector;
   private strategy: TapStrategy;

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT } from "../../../../src/ctrlProxy/constants";
 import { DefaultAccessibilityDetector } from "../../../../src/features/accessibility/AccessibilityDetector";
-import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../../../src/features/featureFlags/FeatureFlagService";
 import { AccessibilityStateDetector } from "../../../../src/features/observe/audits/AccessibilityStateDetector";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
 import { invalidateReadinessForDisabledAccessibility } from "../../../../src/server/observeTools";
@@ -22,9 +22,9 @@ const talkBack =
   "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService";
 const thirdParty = "com.example.reader/com.example.reader.ReaderService";
 const device: BootedDevice = { deviceId: "readiness-device", name: "Pixel", platform: "android" };
-const flags = {
+const flags: FeatureFlagReader = {
   isEnabled: (key: string) => key === "accessibility-auto-detect",
-} as FeatureFlagService;
+};
 
 function harness(featureFlags = flags) {
   const adb = new FakeAdbExecutor();
@@ -206,7 +206,7 @@ describe("observe CtrlProxy readiness regression", () => {
   });
 
   test("skipped detection, missing state and non-Android observations do not consult readiness", async () => {
-    const h = harness({ isEnabled: () => false } as FeatureFlagService);
+    const h = harness({ isEnabled: () => false });
     const read = spyOn(h.detector, "isCtrlProxyServiceEnabled");
     expect(await h.observe()).toEqual({
       enabled: false,
@@ -309,9 +309,9 @@ describe("detector CtrlProxy signal", () => {
   test("feature flags cannot synthesize evidence of CtrlProxy loss or health", async () => {
     const h = harness();
     for (const force of [false, true]) {
-      const featureFlags = {
+      const featureFlags: FeatureFlagReader = {
         isEnabled: (key: string) => key === "force-accessibility-mode" && force,
-      } as FeatureFlagService;
+      };
       expect(
         await h.detector.isCtrlProxyServiceEnabled(device.deviceId, h.adb, featureFlags),
       ).toBeNull();

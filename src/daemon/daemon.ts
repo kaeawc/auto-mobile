@@ -399,6 +399,11 @@ export {
 } from "./processWideAdbServerReset";
 export type { DaemonStartHost } from "./daemonStartHost";
 export type { DaemonTestHooks } from "./daemonTestHooks";
+export type { DeviceSessionRoutingTargets } from "./daemonRoutingTypes";
+import type {
+  CapturedDisconnectRecoveryOptions,
+  DeviceSessionRoutingTargets,
+} from "./daemonRoutingTypes";
 export type {
   DaemonDependencies,
   DaemonProcessBirthTimeProvider,
@@ -435,18 +440,6 @@ function shutdownStage(
 }
 
 /** What routing needs of a push server: its resolver slot. */
-type ResolverTarget = Pick<
-  NonNullable<ReturnType<typeof getPerformancePushServer>>,
-  "setDeviceSessionResolver"
->;
-
-export type DeviceSessionRoutingTargets = {
-  deviceDataStream: ReturnType<typeof getDeviceDataStreamServer>;
-  performancePush: ResolverTarget | null;
-  failuresPush: ResolverTarget | null;
-  telemetryPush: ResolverTarget | null;
-};
-
 /**
  * Main daemon process
  *
@@ -456,16 +449,6 @@ export type DeviceSessionRoutingTargets = {
  * - PID file management
  * - Graceful shutdown handling
  */
-
-interface CapturedDisconnectRecoveryOptions {
-  deviceId: string;
-  incidentId: string | undefined;
-  pooledDevice: PooledDevice | null | undefined;
-  sessionId: string | null | undefined;
-  session: Session | null;
-  forceGeneration: number | undefined;
-  preparation?: ReturnType<DevicePool["prepareSessionPreservingRecovery"]>;
-}
 
 /**
  * Pick the daemon's HTTP port: the preferred port first, then each higher port up to
@@ -519,7 +502,7 @@ export class Daemon {
     coreDeviceProbe: createProductionCoreDeviceProbe(),
   });
   private socketServer: UnixSocketServer | null = null;
-  private readonly exitRecordFileSystem: DaemonExitRecordFileSystem;
+  private exitRecordFileSystem: DaemonExitRecordFileSystem;
   private enteredDaemonProcess = false;
   /** The machine-touching start steps; `startOn()` replaces the process's own. */
   private startHost: DaemonStartHost = this.processStartHost();
@@ -3673,6 +3656,14 @@ export class Daemon {
       setSessionManager: (manager) => {
         this.sessionManager = manager;
       },
+      setExitRecordFileSystem: (exitRecordFileSystem) => {
+        this.exitRecordFileSystem = exitRecordFileSystem;
+      },
+      setBindingRegistry: (registry) => {
+        this.bindingRegistry = registry;
+      },
+      getAppearanceSyncTargets: () => this.getAppearanceSyncTargets(),
+      bindingJournalOwner: () => this.bindingJournalOwner(),
       setDevicePool: (pool) => {
         this.devicePool = pool;
       },

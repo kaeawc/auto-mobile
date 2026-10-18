@@ -1,5 +1,7 @@
 import type { BindingStatus, DeviceHealth } from "./deviceBinding";
-import type { DeviceInfo, Platform } from "../models";
+import type { BootedDevice, DeviceInfo, Platform } from "../models";
+import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
+import type { IosLivenessSnapshot } from "./idleDeviceReaper";
 import type { Session } from "./sessionManager";
 
 /**
@@ -185,3 +187,122 @@ export interface PooledDevice {
 
 /** A decorator over one step: receives the real step (`next`) and returns the double. */
 export type Wrapper<F> = (next: F) => F;
+
+/** Evidence belongs only to the entry captured before this target's discovery. */
+export interface TargetDeviceDiscoverySnapshot {
+  capturedEntry: PooledDevice | undefined;
+  /** addDevice already published readiness for this entry during an earlier pass. */
+  readyNotifiedEntry?: PooledDevice;
+  bootedDevices?: BootedDevice[];
+  iosLiveness?: IosLivenessSnapshot;
+  androidPresence?: BootedDeviceDiscovery;
+}
+
+export interface TargetDeviceDiscoveryOptions {
+  deviceId: string;
+  sessionId?: string;
+  readinessReservationOwners?: ReadonlySet<symbol>;
+  sourceImage?: DeviceInfo;
+  isLaunchProcessAlive?: () => boolean;
+  expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
+  unavailableMessage: string;
+  platform: Platform;
+  operation: (snapshot: TargetDeviceDiscoverySnapshot) => Promise<string | undefined>;
+}
+
+export interface TargetDeviceValidationOptions {
+  device: PooledDevice;
+  expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
+  unavailableMessage: string;
+  readinessReservationOwners?: ReadonlySet<symbol>;
+  snapshot: TargetDeviceDiscoverySnapshot;
+}
+
+/**
+ * What a FUNNEL 1 caller can tell the pool about the observation it is folding
+ * in. It carries the discovering execution plus whether discovery resolved
+ * Android emulator names.
+ *
+ * Entering the quarantine cancels every execution indexed under the bound
+ * session, and a session-bound destructive call -- `killDevice`, `deleteDevice`
+ * -- can be the very path whose own discovery reads the placeholder. Cancelling
+ * it would lose the `runWithinShutdownDeadline` signal race for the operation
+ * that is ABOUT to confirm-or-refuse on exactly the evidence it just produced,
+ * so the discovering execution is exempted while every other execution on the
+ * session is still stopped
+ * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+ */
+export interface DiscoveryReconcileOptions {
+  /**
+   * Only the disconnect-monitor tick sets this. After the membership-free FUNNEL 1
+   * pass, the pool settles membership (under the assignment mutex) for each Android
+   * observation whose RESOLVED name disagrees with the pooled entry on that serial.
+   * The caller must NOT hold the assignment mutex.
+   */
+  readonly settleMembership?: boolean;
+  /** The execution that performed this discovery; exempt from quarantine cancellation. */
+  readonly excludeExecutionId?: string;
+  /**
+   * Whether discovery resolved Android emulator names. `false` short-circuits
+   * identity resolution entirely: a serial-only listing carries no identity
+   * evidence for any entry, so interpreting its synthetic placeholders per
+   * device would quarantine healthy pooled peers that were never probed.
+   */
+  readonly namesResolved?: boolean;
+  /**
+   * A signal that is aborted once the caller's deadline/abort has already won
+   * a race this observation is racing against. Checked between devices so a
+   * stale, still-draining reconcile stops touching pooled identities the
+   * instant the caller it was deferred from has already settled — an unrelated
+   * acquisition may otherwise bind one of the remaining devices while this
+   * loop is still walking toward it (#6955 review).
+   */
+  readonly signal?: AbortSignal;
+}
+
+export interface AdbServerResetRecoveryReservation {
+  deviceId: string;
+  image: DeviceInfo;
+  cancelled: boolean;
+  settled: Promise<void>;
+  resolve(): void;
+  sessionId?: string;
+  recoveryGeneration?: number;
+}
+
+export interface AdbServerResetCohortDetachment {
+  devices: readonly PooledDevice[];
+  deferred: boolean;
+}
+
+export interface AndroidStartupLeaseRequest {
+  name?: string;
+  exactName: boolean;
+  ownsOfflineRecovery: boolean;
+}
+
+export interface SystemUiAnrRecoveryHandoff {
+  readonly preservedSessionId?: string;
+  readonly replacementDevice: PooledDevice;
+  validatePreservedSession(): Promise<void>;
+}
+
+export type AndroidEmulatorRecoveryDevice = PooledDevice & {
+  avdName: string;
+  androidImage: DeviceInfo;
+};
+
+/**
+ * Passive continuity (preserve the session, reattach when the AVD returns) only
+ * needs the emulator's runtime identity resolved. It does not need the
+ * configured image that active relaunch requires to know what to boot back;
+ * see `isAndroidEmulatorActiveRelaunchEligible` for that stricter contract (#7546).
+ */
+export type AndroidEmulatorContinuityDevice = PooledDevice & { platform: "android" };
+
+export type IOSSimulatorRecoveryDevice = PooledDevice & {
+  platform: "ios";
+  id: string;
+};
+
+export type SessionContinuityDevice = AndroidEmulatorContinuityDevice | IOSSimulatorRecoveryDevice;

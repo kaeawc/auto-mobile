@@ -1,5 +1,34 @@
 import { InMemoryDeviceTable } from "./deviceTable";
-import type { PooledDevice, Wrapper } from "./devicePoolTypes";
+import type {
+  PooledDevice,
+  Wrapper,
+  TargetDeviceDiscoverySnapshot,
+  TargetDeviceDiscoveryOptions,
+  TargetDeviceValidationOptions,
+  DiscoveryReconcileOptions,
+  AdbServerResetRecoveryReservation,
+  AdbServerResetCohortDetachment,
+  AndroidStartupLeaseRequest,
+  SystemUiAnrRecoveryHandoff,
+  AndroidEmulatorRecoveryDevice,
+  AndroidEmulatorContinuityDevice,
+  IOSSimulatorRecoveryDevice,
+  SessionContinuityDevice,
+} from "./devicePoolTypes";
+export type {
+  TargetDeviceDiscoverySnapshot,
+  TargetDeviceDiscoveryOptions,
+  TargetDeviceValidationOptions,
+  DiscoveryReconcileOptions,
+  AdbServerResetRecoveryReservation,
+  AdbServerResetCohortDetachment,
+  AndroidStartupLeaseRequest,
+  SystemUiAnrRecoveryHandoff,
+  AndroidEmulatorRecoveryDevice,
+  AndroidEmulatorContinuityDevice,
+  IOSSimulatorRecoveryDevice,
+  SessionContinuityDevice,
+} from "./devicePoolTypes";
 export type { PooledDevice } from "./devicePoolTypes";
 import {
   createAdbServerResetQuarantine,
@@ -202,7 +231,7 @@ import {
 } from "./emulatorLossIncident";
 import { EmulatorLossIncidentLedger } from "./emulatorLossIncidentLedger";
 import { AdbResetSessionRecovery } from "./adbResetSessionRecovery";
-import { IdleDeviceReaper, type IosLivenessSnapshot } from "./idleDeviceReaper";
+import { IdleDeviceReaper } from "./idleDeviceReaper";
 import {
   DeviceRecoveryCoordinator,
   type SessionPreservingRecovery,
@@ -441,36 +470,6 @@ const ANDROID_OFFLINE_PROBE_TIMEOUT_MS = 10_000;
 export const CREATE_SESSION_RELEASE_WAIT_MS =
   SESSION_RELEASE_TEARDOWN_CAP_MS + 2 * SESSION_RELEASE_PERSIST_TIMEOUT_MS + 10_000;
 
-/** Evidence belongs only to the entry captured before this target's discovery. */
-export interface TargetDeviceDiscoverySnapshot {
-  capturedEntry: PooledDevice | undefined;
-  /** addDevice already published readiness for this entry during an earlier pass. */
-  readyNotifiedEntry?: PooledDevice;
-  bootedDevices?: BootedDevice[];
-  iosLiveness?: IosLivenessSnapshot;
-  androidPresence?: BootedDeviceDiscovery;
-}
-
-export interface TargetDeviceDiscoveryOptions {
-  deviceId: string;
-  sessionId?: string;
-  readinessReservationOwners?: ReadonlySet<symbol>;
-  sourceImage?: DeviceInfo;
-  isLaunchProcessAlive?: () => boolean;
-  expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
-  unavailableMessage: string;
-  platform: Platform;
-  operation: (snapshot: TargetDeviceDiscoverySnapshot) => Promise<string | undefined>;
-}
-
-export interface TargetDeviceValidationOptions {
-  device: PooledDevice;
-  expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
-  unavailableMessage: string;
-  readinessReservationOwners?: ReadonlySet<symbol>;
-  snapshot: TargetDeviceDiscoverySnapshot;
-}
-
 interface DeviceDisconnectSessionReleaser {
   (
     sessionId: string,
@@ -504,98 +503,9 @@ export interface DeviceSessionExecutionCanceller {
   (sessionId: string, reason: string, options?: { excludeExecutionId?: string }): Promise<number>;
 }
 
-/**
- * What a FUNNEL 1 caller can tell the pool about the observation it is folding
- * in. It carries the discovering execution plus whether discovery resolved
- * Android emulator names.
- *
- * Entering the quarantine cancels every execution indexed under the bound
- * session, and a session-bound destructive call -- `killDevice`, `deleteDevice`
- * -- can be the very path whose own discovery reads the placeholder. Cancelling
- * it would lose the `runWithinShutdownDeadline` signal race for the operation
- * that is ABOUT to confirm-or-refuse on exactly the evidence it just produced,
- * so the discovering execution is exempted while every other execution on the
- * session is still stopped
- * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
- */
-export interface DiscoveryReconcileOptions {
-  /**
-   * Only the disconnect-monitor tick sets this. After the membership-free FUNNEL 1
-   * pass, the pool settles membership (under the assignment mutex) for each Android
-   * observation whose RESOLVED name disagrees with the pooled entry on that serial.
-   * The caller must NOT hold the assignment mutex.
-   */
-  readonly settleMembership?: boolean;
-  /** The execution that performed this discovery; exempt from quarantine cancellation. */
-  readonly excludeExecutionId?: string;
-  /**
-   * Whether discovery resolved Android emulator names. `false` short-circuits
-   * identity resolution entirely: a serial-only listing carries no identity
-   * evidence for any entry, so interpreting its synthetic placeholders per
-   * device would quarantine healthy pooled peers that were never probed.
-   */
-  readonly namesResolved?: boolean;
-  /**
-   * A signal that is aborted once the caller's deadline/abort has already won
-   * a race this observation is racing against. Checked between devices so a
-   * stale, still-draining reconcile stops touching pooled identities the
-   * instant the caller it was deferred from has already settled — an unrelated
-   * acquisition may otherwise bind one of the remaining devices while this
-   * loop is still walking toward it (#6955 review).
-   */
-  readonly signal?: AbortSignal;
-}
-
 export type DeviceReadinessReservation = (() => Promise<void>) & {
   readonly owner: symbol;
 };
-
-export interface AdbServerResetRecoveryReservation {
-  deviceId: string;
-  image: DeviceInfo;
-  cancelled: boolean;
-  settled: Promise<void>;
-  resolve(): void;
-  sessionId?: string;
-  recoveryGeneration?: number;
-}
-
-export interface AdbServerResetCohortDetachment {
-  devices: readonly PooledDevice[];
-  deferred: boolean;
-}
-
-export interface AndroidStartupLeaseRequest {
-  name?: string;
-  exactName: boolean;
-  ownsOfflineRecovery: boolean;
-}
-
-export interface SystemUiAnrRecoveryHandoff {
-  readonly preservedSessionId?: string;
-  readonly replacementDevice: PooledDevice;
-  validatePreservedSession(): Promise<void>;
-}
-
-export type AndroidEmulatorRecoveryDevice = PooledDevice & {
-  avdName: string;
-  androidImage: DeviceInfo;
-};
-
-/**
- * Passive continuity (preserve the session, reattach when the AVD returns) only
- * needs the emulator's runtime identity resolved. It does not need the
- * configured image that active relaunch requires to know what to boot back;
- * see `isAndroidEmulatorActiveRelaunchEligible` for that stricter contract (#7546).
- */
-export type AndroidEmulatorContinuityDevice = PooledDevice & { platform: "android" };
-
-export type IOSSimulatorRecoveryDevice = PooledDevice & {
-  platform: "ios";
-  id: string;
-};
-
-export type SessionContinuityDevice = AndroidEmulatorContinuityDevice | IOSSimulatorRecoveryDevice;
 
 /**
  * Device Pool
@@ -845,7 +755,7 @@ export class DevicePool {
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
   private readonly emulatorLossLedger: EmulatorLossIncidentLedger;
   private readonly androidRecoveryRecordLedger: AndroidRecoveryRecordLedger;
-  private readonly idleDeviceReaper: IdleDeviceReaper;
+  private idleDeviceReaper: IdleDeviceReaper;
   private readonly autolockManager: DeviceAutolockManager;
   private readonly disconnectHandler: DeviceDisconnectHandler;
   private readonly androidRebootCoordinator: AndroidRebootCoordinator;
@@ -905,8 +815,8 @@ export class DevicePool {
   }
 
   private readonly deviceHealthMarkers: DeviceHealthMarkers;
-  private readonly foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
-  private readonly iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
+  private foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
+  private iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
   private readonly managedExecutionOwnership: DevicePoolDependencies["managedExecutionOwnership"];
   private readonly bindingExclusion: BindingExclusion | undefined;
   /** Devices held for the persisted rows restart recovery is working through (#11294). */
@@ -8747,6 +8657,46 @@ export class DevicePool {
         criteriaMatcher: this.criteriaMatcher,
         onDeviceReady: this.onDeviceReady,
       },
+      deferredDeviceReleases: this.deferredDeviceReleases,
+      mcpSessionRecoveryDevices: this.mcpSessionRecoveryDevices,
+      deviceHealthMarkers: this.deviceHealthMarkers,
+      /**
+       * Swap in the device manager and foreign-ownership collaborators for a pool built by a
+       * caller that takes no injection (the Daemon); the idle-device reaper captured the old
+       * manager, so it is rebuilt over the new one.
+       */
+      replaceDeviceDiscovery: (replacement: {
+        deviceManager: PlatformDeviceManager;
+        foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
+        iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
+      }) => {
+        this.deviceManager = replacement.deviceManager;
+        this.idleDeviceReaper = this.createIdleDeviceReaper();
+        this.foreignDeviceOwnership = replacement.foreignDeviceOwnership;
+        this.iosForeignDeviceOwnership = replacement.iosForeignDeviceOwnership;
+      },
+      recoveryCoordinator: this.recoveryCoordinator,
+      androidRecoveryRecordLedger: this.androidRecoveryRecordLedger,
+      emulatorLossLedger: this.emulatorLossLedger,
+      startedDeviceProcesses: this.startedDeviceProcesses,
+      startedDeviceProcessOutput: this.startedDeviceProcessOutput,
+      releasedDeviceCaptures: this.releasedDeviceCaptures,
+      adbServerResetQuarantinedSessions: this.adbServerResetQuarantinedSessions,
+      adbServerResetRecoveryReservations: this.adbServerResetRecoveryReservations,
+      setAfterAndroidStartupRecoverySnapshot: (hook: (() => void) | undefined) => {
+        this.afterAndroidStartupRecoverySnapshot = hook;
+      },
+      startAndroidRecoveryRecord: (...args: Parameters<DevicePool["startAndroidRecoveryRecord"]>) =>
+        this.startAndroidRecoveryRecord(...args),
+      completeEmulatorLossRecovery: (
+        ...args: Parameters<DevicePool["completeEmulatorLossRecovery"]>
+      ) => this.completeEmulatorLossRecovery(...args),
+      clearDeviceSessionCache: (...args: Parameters<DevicePool["clearDeviceSessionCache"]>) =>
+        this.clearDeviceSessionCache(...args),
+      captureReleasedDevice: (...args: Parameters<DevicePool["captureReleasedDevice"]>) =>
+        this.captureReleasedDevice(...args),
+      runCoordinatedDeviceStart: (...args: Parameters<DevicePool["runCoordinatedDeviceStart"]>) =>
+        this.runCoordinatedDeviceStart(...args),
       tryAssignDevice: (...args: Parameters<DevicePool["tryAssignDevice"]>) =>
         this.tryAssignDevice(...args),
       getStartableDeviceImageCandidates: (
@@ -8800,6 +8750,11 @@ export class DevicePool {
         },
         evictMissingPooledDevice: (wrap: Wrapper<DevicePool["evictMissingPooledDevice"]>) => {
           this.evictMissingPooledDevice = wrap(this.evictMissingPooledDevice.bind(this));
+        },
+        completeEmulatorLossRecovery: (
+          wrap: Wrapper<DevicePool["completeEmulatorLossRecovery"]>,
+        ) => {
+          this.completeEmulatorLossRecovery = wrap(this.completeEmulatorLossRecovery.bind(this));
         },
         clearDeviceSessionCache: (wrap: Wrapper<DevicePool["clearDeviceSessionCache"]>) => {
           this.clearDeviceSessionCache = wrap(this.clearDeviceSessionCache.bind(this));

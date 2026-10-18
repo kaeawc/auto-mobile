@@ -1,5 +1,5 @@
 import { recoveryInternals } from "../helpers/devicePoolRecoveryInternals";
-import { markDeviceError } from "../../src/daemon/deviceBinding";
+import { markDeviceError, restoreBinding } from "../../src/daemon/deviceBinding";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { observationServiceStartHarness } from "../helpers/observationServiceStartHarness";
 import { daemonObservationServiceOwnershipGuard } from "../../src/features/observe/ObservationReadServiceStart";
@@ -39,12 +39,18 @@ test.each([
 ])("declines pooled %s state", async (kind) => {
   const h = await harness();
   const device = h.pool.getDevice(h.device.deviceId)!;
-  if (kind === "busy" || kind === "error") {
-    device.status = kind;
+  if (kind === "busy") {
+    restoreBinding(device, { sessionId: null, status: "busy" });
+  } else if (kind === "error") {
+    markDeviceError(device);
+  } else if (kind === "sessionId") {
+    restoreBinding(device, { sessionId: "owner", status: "idle" });
   } else if (kind === "identityReconcileOwner") {
     device.identityReconcileOwner = Symbol("reconcile");
+  } else if (kind === "identityUnresolved") {
+    device.identityUnresolved = true;
   } else {
-    Reflect.set(device, kind, kind === "identityUnresolved" ? true : "owner");
+    device.adbServerResetSessionId = "owner";
   }
   expect(h.safe()).toBe(false);
 });
@@ -93,8 +99,13 @@ test("declines pending cleanup and a deferred release even if pooled state says 
   pending.resolve();
   await h.sessions.getPendingDeviceCleanup(h.device.deviceId);
   expect(h.safe()).toBe(true);
-  const deferred = Reflect.get(h.pool, "deferredDeviceReleases");
-  deferred.set(h.device.deviceId, {});
+  const deferred = h.pool.testHooks.deferredDeviceReleases;
+  deferred.set(h.device.deviceId, {
+    device: h.pool.getDevice(h.device.deviceId)!,
+    sessionId: "deferred",
+    assignmentCount: 0,
+    cleanup: Promise.resolve(),
+  });
   expect(h.safe()).toBe(false);
   deferred.clear();
   expect(h.safe()).toBe(true);
@@ -102,7 +113,7 @@ test("declines pending cleanup and a deferred release even if pooled state says 
 
 test("declines while the assignment mutex is held", async () => {
   const h = await harness();
-  const release = await Reflect.get(h.pool, "assignmentMutex").acquire();
+  const release = await h.pool.testHooks.assignmentMutex.acquire();
   try {
     expect(h.safe()).toBe(false);
   } finally {
@@ -154,34 +165,49 @@ test.each([
   "recoveringSessionLosses",
 ])("declines %s transition", async (kind) => {
   const h = await harness();
-  // Coordinator and ledger state first; pool-level fields otherwise.
-  const state = Reflect.get(recoveryInternals(h.pool), kind) ?? Reflect.get(h.pool, kind);
-  if (kind === "recoveringAndroidDeviceIds") {
-    state.add(h.device.deviceId);
-  }
-  if (kind === "recoveringAndroidImages") {
-    state.set(h.device.name, { name: h.device.name, platform: "android" });
-  }
-  if (kind === "androidRecoveryHandoffOwners") {
-    state.set(h.device.deviceId, Symbol("recovery"));
-  }
-  if (kind === "adbServerResetRecoveryReservations") {
-    state.set(h.device.name, {
-      deviceId: h.device.deviceId,
-      image: { name: h.device.name, platform: "android" },
-    });
-  }
-  if (kind === "mcpSessionRecoveryDevices") {
-    state.set("client", { device: h.pool.getDevice(h.device.deviceId), token: Symbol("recovery") });
-  }
-  if (kind === "recoveringSessionLosses") {
-    state.set("session", {
-      deviceId: h.device.deviceId,
-      state: "pending",
-      reservations: new Set(["quarantine"]),
-      sessionId: "session",
-    });
-  }
+  const { deviceId, name } = h.device;
+  const recovery = recoveryInternals(h.pool);
+  const hooks = h.pool.testHooks;
+  const image = { name, platform: "android" as const, isRunning: false };
+  const seeds = {
+    recoveringAndroidDeviceIds: () => ({
+      clear: () => recovery.recoveringAndroidDeviceIds.clear(),
+      seed: () => recovery.recoveringAndroidDeviceIds.add(deviceId),
+    }),
+    recoveringAndroidImages: () => ({
+      clear: () => recovery.recoveringAndroidImages.clear(),
+      seed: () => recovery.recoveringAndroidImages.set(name, image),
+    }),
+    androidRecoveryHandoffOwners: () => ({
+      clear: () => recovery.androidRecoveryHandoffOwners.clear(),
+      seed: () => recovery.androidRecoveryHandoffOwners.set(deviceId, Symbol("recovery")),
+    }),
+    adbServerResetRecoveryReservations: () => ({
+      clear: () => hooks.adbServerResetRecoveryReservations.clear(),
+      seed: () =>
+        hooks.adbServerResetRecoveryReservations.set(name, {
+          deviceId,
+          image,
+          cancelled: false,
+          settled: Promise.resolve(),
+          resolve: () => undefined,
+        }),
+    }),
+    mcpSessionRecoveryDevices: () => ({
+      clear: () => hooks.mcpSessionRecoveryDevices.clear(),
+      seed: () =>
+        hooks.mcpSessionRecoveryDevices.set("client", {
+          device: h.pool.getDevice(deviceId)!,
+          token: Symbol("recovery"),
+        }),
+    }),
+    recoveringSessionLosses: () => ({
+      clear: () => recovery.recoveringSessionLosses.clear(),
+      seed: () => hooks.startAndroidRecoveryRecord("session", { deviceId }, ["quarantine"]),
+    }),
+  };
+  const state = seeds[kind]();
+  state.seed();
   expect(h.safe()).toBe(false);
   state.clear();
   expect(h.safe()).toBe(true);
@@ -196,7 +222,7 @@ test("declines a reverse session assignment not yet published in the pooled entr
 
 test("declines an unresolved restoration health marker", async () => {
   const h = await harness();
-  Reflect.get(h.pool, "deviceHealthMarkers").mark(
+  h.pool.testHooks.deviceHealthMarkers.mark(
     h.device.deviceId,
     h.pool.getDevice(h.device.deviceId)!.incarnation,
     "clock",

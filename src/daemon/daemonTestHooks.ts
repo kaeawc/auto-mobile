@@ -12,6 +12,10 @@ import type { ObserverSessionRegistry } from "./observerSessionRegistry";
 import type { DevicePool, PooledDevice } from "./devicePool";
 import type { Session, SessionManager } from "./sessionManager";
 import type { SingleFlightInterval } from "./SingleFlightInterval";
+import type { AppearanceSyncTarget } from "./AppearanceSyncScheduler";
+import type { DaemonExitRecordFileSystem } from "./daemonExitRecord";
+import type { BindingJournalOwner } from "./sessionBroker/registry/bindingRegistry";
+import type { SqliteBindingRegistry } from "./sessionBroker/registry/sqliteBindingRegistry";
 
 /**
  * The Daemon internals unit tests drive, as one typed view (`daemon.testHooks`) instead of casts
@@ -24,6 +28,12 @@ export interface DaemonTestHooks {
   readonly httpIngress: DaemonHttpIngressTestHooks;
   /** Replace the session manager the HTTP ingress and handlers read. */
   setSessionManager(manager: SessionManager): void;
+  /** Replace the exit-record file system (the host disk the daemon writes its exit record to). */
+  setExitRecordFileSystem(exitRecordFileSystem: DaemonExitRecordFileSystem): void;
+  /** Replace the host binding registry the daemon opens lazily. */
+  setBindingRegistry(registry: Promise<SqliteBindingRegistry>): void;
+  getAppearanceSyncTargets(): AppearanceSyncTarget[];
+  bindingJournalOwner(): BindingJournalOwner;
   /** Replace the device pool the disconnect handling reads. */
   setDevicePool(pool: DevicePool): void;
   recordAndTryRecoverCapturedDisconnect(

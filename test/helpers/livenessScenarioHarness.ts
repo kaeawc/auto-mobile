@@ -1,3 +1,5 @@
+import type { Socket } from "node:net";
+import type { AppearanceConfig } from "../../src/models";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spyOn } from "bun:test";
@@ -61,7 +63,6 @@ import { FakeTerminalReleaseJournalFileSystem } from "../fakes/FakeTerminalRelea
 import { createDaemonTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import type {
   BindingExecOwner,
-  BindingProcessIdentity,
   BindingRegistry,
 } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
 import { openSqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
@@ -197,9 +198,12 @@ export interface LivenessScenarioOptions {
   bindings?: boolean;
 }
 
-/** Drops a dead daemon's listeners on process-wide registries. Teardown only, never wiring. */
-interface DaemonProcessTeardown {
-  stopSessionTimers(): void;
+/** The appearance socket server, fed one request line at a time without a listening socket. */
+class LineDrivenAppearanceServer extends AppearanceSocketServer {
+  async driveLine(socket: Socket, line: string): Promise<void> {
+    await this.processLine(socket, line);
+    await this.pendingBySocket.get(socket);
+  }
 }
 
 interface DaemonSide {
@@ -692,31 +696,22 @@ export class LivenessScenario {
       },
     );
     const exitFiles = new FakeDaemonExitRecordFileSystem();
-    (
-      daemon as unknown as { exitRecordFileSystem: FakeDaemonExitRecordFileSystem }
-    ).exitRecordFileSystem = exitFiles;
+    daemon.testHooks.setExitRecordFileSystem(exitFiles);
     armHostTripwires(daemon);
     if (this.bindingsEnabled) {
       // The registry is a file on the host that outlives the daemon; each process finds it open.
       this.bindings ??= await openSqliteBindingRegistry({ dbPath: ":memory:", timer: this.timer });
-      (daemon as unknown as { bindingRegistry: Promise<BindingRegistry> }).bindingRegistry =
-        Promise.resolve(this.bindings);
+      daemon.testHooks.setBindingRegistry(Promise.resolve(this.bindings));
     }
     const manager = daemon.getSessionManager();
     const pool = daemon.getDevicePool();
     // The Daemon builds its pool over the real multi-platform device manager and the forwarding
     // lease files, and takes no injection; swap the fakes in before anything discovers a device.
-    const poolInternals = pool as unknown as {
-      deviceManager: unknown;
-      idleDeviceReaper: { deviceManager: unknown };
-      foreignDeviceOwnership: unknown;
-      iosForeignDeviceOwnership: unknown;
-    };
-    poolInternals.deviceManager = this.discovery;
-    // The idle-device reaper captured the pool's device manager when the pool was built.
-    poolInternals.idleDeviceReaper.deviceManager = this.discovery;
-    poolInternals.foreignDeviceOwnership = this.peerAwareOwnership(clock);
-    poolInternals.iosForeignDeviceOwnership = undefined;
+    pool.testHooks.replaceDeviceDiscovery({
+      deviceManager: this.discovery,
+      foreignDeviceOwnership: this.peerAwareOwnership(clock),
+      iosForeignDeviceOwnership: undefined,
+    });
     manager.onSessionRelease((sessionId, deviceId, reason) => {
       this.releases.push({ at: this.timer.now(), sessionId, deviceId, reason: reason ?? "" });
     });
@@ -1066,14 +1061,7 @@ export class LivenessScenario {
   /** Device-loss handoff, followed by discovery forgetting the stopped emulator. */
   async loseDevice(sessionId: string, deviceId = this.deviceIds[0]!): Promise<void> {
     const pool = this.daemon.pool;
-    const release = pool as unknown as {
-      releaseDisconnectedRecoverySessionWithRetry(
-        id: string,
-        deviceId: string,
-        reason: `device-restart:${string}`,
-      ): Promise<void>;
-    };
-    await release.releaseDisconnectedRecoverySessionWithRetry(
+    await pool.testHooks.releaseDisconnectedRecoverySessionWithRetry(
       sessionId,
       deviceId,
       `device-restart:${this.device(deviceId).name}`,
@@ -1183,23 +1171,35 @@ export class LivenessScenario {
     mode: "light" | "dark",
   ): Promise<{ response: AppearanceSocketResponse; applied: string[] }> {
     const applied: string[] = [];
-    let config = { syncWithHost: false, defaultMode: "light", applyOnConnect: true };
+    let config: AppearanceConfig = {
+      syncWithHost: false,
+      defaultMode: "light",
+      applyOnConnect: true,
+    };
     const manager = this.daemon.manager;
-    const server = new AppearanceSocketServer(
+    const server = new LineDrivenAppearanceServer(
       "unused",
       this.timer,
       new SessionScopedStreamAuthenticator(() => manager, "appearance"),
       {
-        getPooledDevices: () => this.deviceIds.map((id) => this.device(id) as never),
+        getPooledDevices: () => this.deviceIds.map((id) => this.device(id)),
         getCurrentDevice: () => undefined,
         getSessionForDevice: (deviceId) => manager.getSessionForDevice(deviceId) ?? null,
         getSessionManager: () => manager,
       },
       {
-        getConfig: async () => config as never,
+        getConfig: async () => config,
         updateConfig: async (update) => {
-          config = { ...config, ...update } as typeof config;
-          return config as never;
+          const defaultMode = update?.defaultMode;
+          config = {
+            syncWithHost: update?.syncWithHost ?? config.syncWithHost,
+            applyOnConnect: update?.applyOnConnect ?? config.applyOnConnect,
+            defaultMode:
+              defaultMode === "light" || defaultMode === "dark" || defaultMode === "auto"
+                ? defaultMode
+                : config.defaultMode,
+          };
+          return config;
         },
         resolveMode: async () => "light",
         applyToDevice: async (device, appliedMode) => {
@@ -1210,11 +1210,7 @@ export class LivenessScenario {
       },
     );
     const socket = new FakeSocket();
-    const internals = server as unknown as {
-      processLine(socket: unknown, line: string): Promise<void>;
-      pendingBySocket: Map<unknown, Promise<void>>;
-    };
-    await internals.processLine(
+    await server.driveLine(
       socket,
       JSON.stringify({
         id: "appearance",
@@ -1223,7 +1219,6 @@ export class LivenessScenario {
         params: { mode },
       }),
     );
-    await internals.pendingBySocket.get(socket);
     const response = socket.getWrittenMessages<AppearanceSocketResponse>()[0]!;
     return { response, applied };
   }
@@ -1523,9 +1518,7 @@ export class LivenessScenario {
    * hands the scheduler (`startAppearanceSyncScheduler({ getTargets })`).
    */
   appearanceSyncTargets(): AppearanceSyncTarget[] {
-    return (
-      this.daemon.daemon as unknown as { getAppearanceSyncTargets(): AppearanceSyncTarget[] }
-    ).getAppearanceSyncTargets();
+    return this.daemon.daemon.testHooks.getAppearanceSyncTargets();
   }
 
   /** Tool bodies that reached the device boundary (what actually drove a device). */
@@ -1558,8 +1551,8 @@ export class LivenessScenario {
     return this.daemonInternals().bindingJournalOwner().daemonId;
   }
 
-  private daemonInternals(): { bindingJournalOwner(): BindingProcessIdentity } {
-    return this.daemon.daemon as unknown as { bindingJournalOwner(): BindingProcessIdentity };
+  private daemonInternals(): Pick<Daemon["testHooks"], "bindingJournalOwner"> {
+    return this.daemon.daemon.testHooks;
   }
 
   /**
@@ -1609,10 +1602,7 @@ export class LivenessScenario {
 
   /** Who the host registry records as owning the slot `sessionId` executes in, if any. */
   async holdBrokerExecution(sessionId: string): Promise<void> {
-    const keeper = this.proxy as unknown as {
-      holdBrokerSession(requestId: string, sessionUuid: string): Promise<void>;
-    };
-    await keeper.holdBrokerSession(`request-${sessionId}`, sessionId);
+    await this.proxy.testHooks.holdBrokerSession(`request-${sessionId}`, sessionId);
   }
 
   async bindingOwnerOf(sessionId: string): Promise<BindingExecOwner | undefined> {
@@ -1673,7 +1663,7 @@ export class LivenessScenario {
     this.loopbackTransports.clear();
     side.socket.kill();
     side.clock.kill();
-    (side.daemon as unknown as DaemonProcessTeardown).stopSessionTimers();
+    side.daemon.stopSessionTimers();
   }
 
   async stop(): Promise<void> {

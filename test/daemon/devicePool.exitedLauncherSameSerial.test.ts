@@ -1,5 +1,4 @@
 import { makePool } from "../helpers/makePool";
-import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { ExitedChildProcess } from "../helpers/exitedChildProcess";
 import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
@@ -81,7 +80,7 @@ test("adoptOnly recovery does not relaunch an AVD still listed at the same seria
 
     // AutoMobile launched this emulator; its tracked child has since exited.
     const exitedProcess = new ExitedChildProcess();
-    poolInternals(pool).startedDeviceProcesses.set(original.deviceId, exitedProcess);
+    pool.testHooks.startedDeviceProcesses.set(original.deviceId, exitedProcess);
 
     // Fresh discovery still lists the same AVD, resolved, at the same serial.
     manager.bootedDevices = [original];
@@ -134,7 +133,7 @@ test("adoptOnly recovery relaunches an AVD that really disappeared", async () =>
     );
     const captured = pool.getDevice(original.deviceId)!;
     const exitedProcess = new ExitedChildProcess();
-    poolInternals(pool).startedDeviceProcesses.set(original.deviceId, exitedProcess);
+    pool.testHooks.startedDeviceProcesses.set(original.deviceId, exitedProcess);
 
     manager.bootedDevices = [];
     const result = await pool.recoverSessionBoundAndroidDeviceAfterLoss(

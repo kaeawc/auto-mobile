@@ -12,6 +12,7 @@ import {
 import { MCP_SESSION_KEY_HEADER } from "../../src/server/mcpSessionKey";
 import { createSdkMcpServer } from "../../src/server/sdkMcpServer";
 import type { ExecutionCancellationReason } from "../../src/server/executionTracker";
+import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -91,6 +92,8 @@ interface Harness {
   readonly endpoint: StatelessMcpHttpEndpoint;
   readonly executions: FakeScopeExecutions;
   readonly scopes: StatelessMcpRequestScope[];
+  /** The daemon-scoped binding store double: `echo` binds under the request's key. */
+  readonly store: SessionToolBindingStore;
   readonly serversClosed: () => number;
   readonly blockStarted: Promise<void>;
   closeReason: ExecutionCancellationReason;
@@ -118,6 +121,7 @@ afterEach(async () => {
 async function harness(): Promise<Harness> {
   const executions = new FakeScopeExecutions();
   const scopes: StatelessMcpRequestScope[] = [];
+  const store = new SessionToolBindingStore();
   let closed = 0;
   let markBlockStarted!: () => void;
   const blockStarted = new Promise<void>((resolve) => {
@@ -151,6 +155,8 @@ async function harness(): Promise<Harness> {
           await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
           return { content: [{ type: "text", text: "cancelled" }] };
         }
+        // Bind as createMcpServer does: under the session key, else the request scope id.
+        store.bind(scope.requestMcpSessionId ?? scope.requestScopeId, "device-session");
         return { content: [{ type: "text", text: `echo ${scope.requestMcpSessionId ?? "-"}` }] };
       });
       const close = server.close.bind(server);
@@ -161,6 +167,7 @@ async function harness(): Promise<Harness> {
       return server;
     },
     cancelScopeExecutions: (scope, reason) => executions.cancel(scope, reason),
+    forgetScopeBindings: (scope) => store.forget(scope),
     closeReason: () => state.closeReason,
   });
   const httpServer = createServer((req, res) => {
@@ -179,6 +186,7 @@ async function harness(): Promise<Harness> {
     endpoint,
     executions,
     scopes,
+    store,
     serversClosed: () => closed,
     blockStarted,
     get closeReason() {
@@ -283,6 +291,38 @@ describe("StatelessMcpHttpEndpoint (#4678)", () => {
     expect(progress).toEqual([1]);
   });
 
+  test("a keyless request's scope-keyed binding is forgotten when it closes; a keyed one stays", async () => {
+    const h = await harness();
+    const callEcho = async (headers: Record<string, string>, id: number) => {
+      const response = await fetch(h.url, {
+        method: "POST",
+        headers: { ...POST_HEADERS, ...headers },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id,
+          method: "tools/call",
+          params: { name: "echo", arguments: {} },
+        }),
+      });
+      expect(response.status).toBe(200);
+      await response.text();
+      // The request closes on the response's finish; let its teardown run.
+      for (let turn = 0; turn < 50 && h.endpoint.inFlightCount > 0; turn++) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      await new Promise((resolve) => setImmediate(resolve));
+    };
+    expect(h.store.keyCount).toBe(0);
+
+    await callEcho({}, 1);
+    expect(h.scopes.at(-1)?.requestMcpSessionId).toBeUndefined();
+    expect(h.store.keyCount).toBe(0);
+
+    await callEcho({ [MCP_SESSION_KEY_HEADER]: "desktop-session" }, 2);
+    expect(h.store.keyCount).toBe(1);
+    expect(h.store.boundSessionUuid("desktop-session")).toBe("device-session");
+  });
+
   test("GET and DELETE answer 405: there is no session stream", async () => {
     const h = await harness();
     for (const method of ["GET", "DELETE"]) {
@@ -334,6 +374,7 @@ describe("StatelessMcpHttpEndpoint (#4678)", () => {
           return { connect: async () => {}, close: async () => {} };
         },
         cancelScopeExecutions: (scope, reason) => executions.cancel(scope, reason),
+        forgetScopeBindings: () => {},
         closeReason: () => "streamable_http_onclose",
       });
       const req = new FakeRequest();

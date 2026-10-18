@@ -31,6 +31,7 @@ import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 function createBlackHoleSocket(): Duplex {
   return new Duplex({
@@ -42,7 +43,12 @@ function createBlackHoleSocket(): Duplex {
 }
 
 function createConnectedClient(fakeTimer: FakeTimer, connectionTimeout = 1000): DaemonClient {
-  const client = new DaemonClient("/fake/socket", connectionTimeout, fakeTimer);
+  const client = new DaemonClient(
+    "/fake/socket",
+    connectionTimeout,
+    fakeTimer,
+    ISOLATED_DAEMON_RECOVERY,
+  );
   client.attachSocketForTesting(createBlackHoleSocket());
   return client;
 }
@@ -75,7 +81,12 @@ function createDeferredConnectClient(
       callback();
     },
   });
-  const client = new DaemonClient("/fake/socket", connectionTimeout, fakeTimer);
+  const client = new DaemonClient(
+    "/fake/socket",
+    connectionTimeout,
+    fakeTimer,
+    ISOLATED_DAEMON_RECOVERY,
+  );
   client.connect = async (timeoutMs = 1000) => {
     connectTimeouts.push(timeoutMs);
     markConnectStarted();
@@ -540,7 +551,7 @@ describe("DaemonClient daemon deadline response precedes the backstop", () => {
   function setup() {
     const timer = new FakeTimer();
     const socket = new FakeSocket();
-    const client = new DaemonClient("/fake/socket", 1000, timer, {}, null);
+    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null);
     client.attachSocketForTesting(socket);
     const respond = (response: DaemonResponse) =>
       client.simulateIncomingDataForTesting(Buffer.from(JSON.stringify(response) + "\n"));
@@ -725,7 +736,7 @@ test.each(["timeout", "reply", "abort"])(
     timer.setTimeout = (callback, ms) =>
       scheduleFakeTimeout(callback, ms > MAX_SETTIMEOUT_DELAY_MS ? 1 : ms);
     const socket = new FakeSocket();
-    const client = new DaemonClient("/fake/socket", 1000, timer, {}, null);
+    const client = new DaemonClient("/fake/socket", 1000, timer, ISOLATED_DAEMON_RECOVERY, null);
     client.attachSocketForTesting(socket);
     const controller = new AbortController();
     const outcome = client
@@ -788,7 +799,12 @@ async function checkArgumentBudgetClientTimeout(
       callback();
     },
   });
-  const client = new DaemonClient("/fake/socket", connectionTimeout, timer);
+  const client = new DaemonClient(
+    "/fake/socket",
+    connectionTimeout,
+    timer,
+    ISOLATED_DAEMON_RECOVERY,
+  );
   client.attachSocketForTesting(socket);
   const outcome = client.callTool(tool, args).catch((error: unknown) => error);
   const expectedMs = Math.max(resolvedMs, connectionTimeout);

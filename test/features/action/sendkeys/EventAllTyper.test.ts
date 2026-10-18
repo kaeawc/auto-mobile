@@ -100,6 +100,7 @@ describe("EventAllTyper", () => {
     const { host, calls } = eventHost();
     host.getAndroidApiLevel = async () => 30;
     const text = "abcdefghij".repeat(7);
+    host.readFocusedText = () => text;
     await new EventAllTyper(host).type({ text, operation: "insert", focusedInputVerified: true });
     const plan = calls.find(
       (call): call is { plan: KeyEventPlan } =>
@@ -223,5 +224,67 @@ describe("EventAllTyper", () => {
       }),
     ).toEqual({ success: true });
     expect(calls).toContainEqual({ readSignal: signal, display: "2" });
+  });
+
+  describe("pre-API-31 delivery read-back (#12733)", () => {
+    const text = "abcdefgh";
+    function api30Host(fieldText: string | undefined) {
+      const { host, timer, calls } = eventHost();
+      timer.enableAutoAdvance();
+      host.getAndroidApiLevel = async () => 30;
+      host.readFocusedText = () => fieldText;
+      return { host, timer, calls };
+    }
+    const typeText = (
+      host: ReturnType<typeof eventHost>["host"],
+      operation: "insert" | "replace",
+    ) => new EventAllTyper(host).type({ text, operation, focusedInputVerified: true });
+
+    test("fails as partial with the committed prefix when the device dropped characters", async () => {
+      const { host, timer } = api30Host("abcdfgh");
+      const result = await typeText(host, "insert");
+      expect(result).toMatchObject({
+        success: false,
+        partialApplication: true,
+        committedGraphemes: 4,
+      });
+      expect(result.error).toContain("dropped");
+      // Bounded settle polling: three reads, two settle sleeps.
+      expect(timer.getSleepHistory()).toHaveLength(2);
+    });
+
+    test("succeeds when the field contains the typed text after existing content", async () => {
+      const { host } = api30Host("oldabcdefgh");
+      expect(await typeText(host, "insert")).toMatchObject({ success: true });
+    });
+
+    test("accepts a read that settles on the second attempt", async () => {
+      const { host } = api30Host("abcd");
+      const reads = ["abcd", "xabcdefgh"];
+      host.readFocusedText = () => reads.shift();
+      expect(await typeText(host, "replace")).toMatchObject({ success: true });
+    });
+
+    test("does not fail when the field cannot be read", async () => {
+      const { host } = api30Host(undefined);
+      expect(await typeText(host, "insert")).toMatchObject({ success: true });
+    });
+
+    test("does not fail on a case-only difference, which the letter-case check owns", async () => {
+      const { host } = api30Host("ABCDEFGH");
+      expect(await typeText(host, "insert")).toMatchObject({ success: true });
+    });
+
+    test("never reads or reports a password field's text", async () => {
+      const { host } = api30Host("abc");
+      host.session.typingPasswordField = true;
+      expect(await typeText(host, "insert")).toMatchObject({ success: true });
+    });
+
+    test("API 31+ is unchanged: no extra read-back", async () => {
+      const { host } = api30Host("abcdfgh");
+      host.getAndroidApiLevel = async () => 31;
+      expect(await typeText(host, "insert")).toMatchObject({ success: true });
+    });
   });
 });

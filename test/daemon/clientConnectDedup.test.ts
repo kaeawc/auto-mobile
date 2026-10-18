@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as net from "node:net";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 class DeferredSocket extends FakeSocket {
   constructor(private readonly onConnect: () => void) {
@@ -28,7 +29,15 @@ beforeEach(() => {
   });
   sockets.length = 0;
   timer = new FakeTimer();
-  client = new DaemonClient("/fake/socket", 1_000, timer, {}, null, undefined, "win32");
+  client = new DaemonClient(
+    "/fake/socket",
+    1_000,
+    timer,
+    ISOLATED_DAEMON_RECOVERY,
+    null,
+    undefined,
+    "win32",
+  );
 });
 
 afterEach(async () => {

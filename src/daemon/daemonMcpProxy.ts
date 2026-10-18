@@ -157,7 +157,6 @@ import {
   readDeviceSessionSuspectRefusal,
   type DeviceSessionSuspectRefusal,
   getActiveDeviceSelectionFromResult,
-  DEVICE_SESSION_ACQUISITION_TOOLS,
   isDeviceSessionAcquisitionTool,
   isDeviceBindingTool,
   readDeviceCleanupInProgressRefusal,
@@ -173,6 +172,13 @@ import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { isCreateTaskResult } from "../server/tasks/mcpTasksExtension";
 import type { TaskRelayFrame, TaskRelayMethod } from "../server/tasks/taskRelay";
 import { TaskSessionBindings } from "./proxy/TaskSessionBindings";
+import {
+  ToolCallForwarder,
+  type ForwardedResultContext,
+  type ForwardedToolCall,
+  type ToolCallForwardMode,
+  type ToolCallForwarderPort,
+} from "./proxy/ToolCallForwarder";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { type SessionReleaseSnapshot } from "./sessionManager";
@@ -202,7 +208,7 @@ import {
   type SessionBrokerReleaseResult,
   type SessionBrokerResult,
 } from "../devices/sessionBrokerResult";
-import { DeviceControlTransportError, isReplaySafeToolName } from "./deviceControlTransportFailure";
+import { DeviceControlTransportError } from "./deviceControlTransportFailure";
 import { McpOverloadError } from "./McpTimeoutError";
 import {
   getConnectedStaticToolDefinitions,
@@ -285,14 +291,6 @@ function isSuspectRefusalRetryable(
   );
 }
 
-/** How one forward of a tool call behaves. */
-interface ToolCallForwardMode {
-  /** Whether a suspect-session refusal may be retried once after recovery. */
-  readonly allowSuspectRetry: boolean;
-  /** The Tasks relay (#4668), only for a call whose client declared the extension. */
-  readonly tasks?: TaskRelayFrame;
-}
-
 /** Per-call options of {@link DaemonMcpProxy.callTool}. */
 export interface DaemonProxyToolCallOptions {
   /**
@@ -300,55 +298,6 @@ export interface DaemonProxyToolCallOptions {
    * the daemon answer with a task handle.
    */
   readonly declaresTasks?: boolean;
-}
-
-/**
- * What one forwarded tool call needs to apply its result to this proxy's session state: the same
- * whether the result arrives as the call's answer or, for a call the daemon ran as an MCP task
- * (#4668), through a later `tasks/get`.
- */
-interface ForwardedResultContext {
-  readonly name: string;
-  readonly callerArgs: Record<string, unknown>;
-  readonly forwardedArgs: Record<string, unknown>;
-  readonly forwardedSessionUuid: string | undefined;
-  readonly callReleaseEpoch: number;
-  readonly isSessionAcquisition: boolean;
-  readonly learnsResultSession: boolean;
-  readonly allowSuspectRetry: boolean;
-}
-
-/** A forwarded tool call's result, with the suspect refusal the proxy may retry it after. */
-interface ForwardedToolCall {
-  result: any;
-  forwardedSessionUuid?: string;
-  retryableSuspectRefusal?: DeviceSessionSuspectRefusal;
-}
-
-/**
- * Forward one tool call. The Tasks relay (#4668) is passed only when the client declared the
- * extension, so every other call reaches the client exactly as before.
- */
-function callDaemonTool(
-  client: DaemonClientLike,
-  call: {
-    name: string;
-    args: Record<string, unknown>;
-    progressToken: string | number | undefined;
-    onRequestId: (requestId: string) => void;
-    signal: AbortSignal | undefined;
-    tasks: TaskRelayFrame | undefined;
-  },
-): Promise<any> {
-  const { name, args, progressToken, onRequestId, signal, tasks } = call;
-  return tasks
-    ? client.callTool(name, args, progressToken, onRequestId, signal, { tasks })
-    : client.callTool(name, args, progressToken, onRequestId, signal);
-}
-
-/** The tool name when replaying it could repeat a device action, else undefined. */
-function nonIdempotentToolName(name: string): string | undefined {
-  return isReplaySafeToolName(name) || isDeviceInventoryTool(name) ? undefined : name;
 }
 
 /** Failures that give no evidence the forwarded session is still live and admitted. */
@@ -794,6 +743,7 @@ export class DaemonMcpProxy {
   private readonly stallResumeProbe: SingleFlightInterval;
   private readonly stallProbe: StallProbe;
   private readonly handoverResolution: HandoverResolution;
+  private readonly toolCallForwarder: ToolCallForwarder;
   private get pendingSessionLosses(): Map<string, LivenessHandover> {
     return this.sessionState.pendingSessionLosses;
   }
@@ -1119,6 +1069,7 @@ export class DaemonMcpProxy {
       stallProbe: this.stallProbe,
       port: this.createHandoverResolutionPort(),
     });
+    this.toolCallForwarder = this.createToolCallForwarder();
     this.stallResumeProbe = new SingleFlightInterval(
       this.timer,
       this.heartbeatIntervalMs,
@@ -3669,168 +3620,14 @@ export class DaemonMcpProxy {
         signal,
       );
     }
-    return this.forwardRoutedToolCall(name, callerArgs, progressToken, onProgress, signal, mode);
-  }
-
-  private async forwardRoutedToolCall(
-    name: string,
-    callerArgs: Record<string, unknown>,
-    progressToken: string | number | undefined,
-    onProgress: DaemonProxyProgressCallback | undefined,
-    signal: AbortSignal | undefined,
-    { allowSuspectRetry, tasks }: ToolCallForwardMode,
-  ): Promise<ForwardedToolCall> {
-    if (this.hasLivenessLifecycleFence()) {
-      await this.waitForLivenessRecovery(signal);
-    }
-    callerArgs = this.withFencedControlDeviceSession(name, callerArgs);
-    const platformSelectorArgs = callerArgs;
-    const ownSession = this.ownSessionForPlatformSelector(name, callerArgs, true);
-    if (ownSession !== undefined) {
-      callerArgs = { ...callerArgs, sessionUuid: ownSession };
-    }
-    this.refuseAmbiguousSessionSelector(name, callerArgs);
-    this.heldSessionLosses.reportPlatformLoss(name, platformSelectorArgs);
-    this.reportToolSessionLoss(name, callerArgs);
-    if (this.stallHandovers.size > 0) {
-      await this.handoverResolution.resumeStalledSessionNamedBy(callerArgs);
-    }
-    // Device-session acquisition (including booted provisionDevice) mints a NEW
-    // session in its RESULT and is never routed to — or fenced by — the connection's
-    // bound session: it must be admitted even on a terminally fenced connection so
-    // the client can recover in-band (issue #5689). Forward its raw args and bind
-    // the minted session from the result afterwards.
-    const isSessionAcquisition = isDeviceSessionAcquisitionTool(name);
-    // An omitted `sessionUuid` on the control tool means the connection profile,
-    // not the proxy's retained device-routing session. Preserve that distinction
-    // after a device has been bound.
-    const { forwardedArgs: routedArgs, allowReleasedSession } = this.prepareToolRoutingArgs(
+    return this.toolCallForwarder.forward(
       name,
       callerArgs,
-      isSessionAcquisition,
+      progressToken,
+      onProgress,
+      signal,
+      mode,
     );
-    const forwardedArgs = this.withOneShotCliMarker(this.withAcceptanceConfiguration(routedArgs));
-    const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
-    this.releaseLedger.retainReleaseEpochReference(forwardedSessionUuid);
-    // Snapshot the release epoch at forward time. If a session-released signal for
-    // the SPECIFIC forwarded UUID lands WHILE this call is in flight, that UUID's
-    // recorded epoch advances past this snapshot and the completion path below
-    // declines to resurrect the released UUID (issue #4611/#4655). A release of an
-    // UNRELATED session bumps the global epoch but not the forwarded UUID's entry,
-    // so it does not block remembering the session this call forwarded.
-    const callReleaseEpoch = this.releaseLedger.epoch;
-    const learnsResultSession = ["setActiveDevice", ...DEVICE_SESSION_ACQUISITION_TOOLS].includes(
-      name,
-    );
-    this.releaseLedger.retainAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
-    let registeredRequestId: string | undefined;
-    let registeredClient: DaemonClientLike | undefined;
-    const trackedSessionUuids = this.beginSessionCall(
-      name,
-      this.sessionsUsedByCall(forwardedSessionUuid),
-    );
-    try {
-      const forwarding = this.withRecoverableReconnect(
-        () => {
-          signal?.throwIfAborted();
-          this.throwIfForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch);
-          const client = this.requireClient();
-          return this.trackToolCallInFlight(client, () =>
-            callDaemonTool(client, {
-              name,
-              args: this.withToolSelectionProfile(forwardedArgs),
-              progressToken,
-              onRequestId: (requestId) => {
-                this.removeProgressListener(registeredClient, registeredRequestId);
-                registeredClient = client;
-                registeredRequestId = requestId;
-                if (progressToken !== undefined && onProgress) {
-                  let listeners = this.progressListeners.get(client);
-                  if (!listeners) {
-                    listeners = new Map();
-                    this.progressListeners.set(client, listeners);
-                  }
-                  listeners.set(requestId, { progressToken, listener: onProgress });
-                }
-              },
-              signal,
-              tasks,
-            }),
-          );
-        },
-        forwardedSessionUuid,
-        // Acquisition is admitted while fenced; the terminal fence is cleared once
-        // the result-minted session establishes a fresh binding.
-        allowReleasedSession,
-        true,
-        nonIdempotentToolName(name),
-        signal,
-      );
-      // Connection recovery is shared with siblings; cancel this wait and fence
-      // replay without aborting the shared connection attempt.
-      const result = await raceWithDeadline(forwarding, {
-        timer: this.timer,
-        signal,
-        label: `Daemon tool ${name}`,
-      });
-      const context: ForwardedResultContext = {
-        name,
-        callerArgs,
-        forwardedArgs,
-        forwardedSessionUuid,
-        callReleaseEpoch,
-        isSessionAcquisition,
-        learnsResultSession,
-        allowSuspectRetry,
-      };
-      if (this.deferredToTask(tasks, result, context)) {
-        return { result, forwardedSessionUuid };
-      }
-      // A result that binds nothing is applied synchronously, as the call always has been.
-      const applied = this.applyForwardedResult(context, result);
-      return applied instanceof Promise ? await applied : applied;
-    } catch (error) {
-      signal?.throwIfAborted();
-      // A fence raised while this call was in flight names the session it lost: the caller is told.
-      this.noteReleaseSurfacedBy(error);
-      // The success-only rememberSessionUuid above never runs when the handler
-      // rejects, but an admitted-then-rejected call still reached
-      // getOrCreateSession() and refreshed the LIVE daemon session. Without
-      // refreshing the replay lease here too, repeated admitted-but-failed calls
-      // let the proxy lease silently expire while the daemon session stays alive,
-      // so a later reconnect can no longer replay it (issue #4610).
-      this.sessionBinding.refreshReplayLeaseAfterAdmittedFailure(
-        name,
-        forwardedArgs,
-        error,
-        callReleaseEpoch,
-      );
-      // Do NOT clear the binding on a rejected executePlan. A plan can reject
-      // *before* the handler runs — tool-selection enforcement or schema parsing in
-      // src/server/index.ts — in which case DefaultPlanLifecycleManager
-      // .afterExecution() never runs and the daemon session stays LIVE. Forgetting
-      // it here would strand a still-live session after a reconnect. The binding is
-      // now cleared authoritatively by the daemon's session-released signal
-      // (handleDaemonNotification) whenever the session is *actually* released —
-      // whether the plan succeeded or failed inside the handler (issue #4610).
-      // withRecoverableReconnect already reconciled build identity and retried once.
-      // A still-"Unknown tool" failure means the daemon genuinely cannot provide a
-      // tool this frontend advertises — surface an actionable error naming both
-      // builds instead of the opaque -32603.
-      if (this.errorClassifier.isUnknownToolError(error)) {
-        throw await this.toolUnavailableError(
-          name,
-          errorMessage(error),
-          this.errorClassifier.isGatedToolError(error),
-        );
-      }
-      throw error;
-    } finally {
-      this.endSessionCall(trackedSessionUuids);
-      this.releaseLedger.releaseReleaseEpochReference(forwardedSessionUuid);
-      this.releaseLedger.releaseAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch);
-      this.removeProgressListener(registeredClient, registeredRequestId);
-    }
   }
 
   /**
@@ -5388,6 +5185,49 @@ export class DaemonMcpProxy {
       dropHeldSession: (...args) => this.dropHeldSession(...args),
       syncHeartbeatKeeper: () => this.latestBindingKeeper.syncHeartbeatKeeper(),
       isClosing: () => this.closing,
+    };
+  }
+
+  private createToolCallForwarder(): ToolCallForwarder {
+    return new ToolCallForwarder({
+      timer: this.timer,
+      progressListeners: this.progressListeners,
+      releaseLedger: this.releaseLedger,
+      heldSessionLosses: this.heldSessionLosses,
+      handoverResolution: this.handoverResolution,
+      sessionBinding: this.sessionBinding,
+      errorClassifier: this.errorClassifier,
+      port: this.createToolCallForwarderPort(),
+    });
+  }
+
+  private createToolCallForwarderPort(): ToolCallForwarderPort {
+    return {
+      hasStallHandovers: () => this.stallHandovers.size > 0,
+      hasLivenessLifecycleFence: (...args) => this.hasLivenessLifecycleFence(...args),
+      waitForLivenessRecovery: (...args) => this.waitForLivenessRecovery(...args),
+      withFencedControlDeviceSession: (...args) => this.withFencedControlDeviceSession(...args),
+      ownSessionForPlatformSelector: (...args) => this.ownSessionForPlatformSelector(...args),
+      refuseAmbiguousSessionSelector: (...args) => this.refuseAmbiguousSessionSelector(...args),
+      reportToolSessionLoss: (...args) => this.reportToolSessionLoss(...args),
+      prepareToolRoutingArgs: (...args) => this.prepareToolRoutingArgs(...args),
+      sessionUuidFromArgs: (...args) => this.sessionUuidFromArgs(...args),
+      withOneShotCliMarker: (...args) => this.withOneShotCliMarker(...args),
+      withAcceptanceConfiguration: (...args) => this.withAcceptanceConfiguration(...args),
+      withToolSelectionProfile: (...args) => this.withToolSelectionProfile(...args),
+      beginSessionCall: (...args) => this.beginSessionCall(...args),
+      sessionsUsedByCall: (...args) => this.sessionsUsedByCall(...args),
+      endSessionCall: (...args) => this.endSessionCall(...args),
+      throwIfForwardedSessionReleasedSince: (...args) =>
+        this.throwIfForwardedSessionReleasedSince(...args),
+      requireClient: (...args) => this.requireClient(...args),
+      trackToolCallInFlight: (...args) => this.trackToolCallInFlight(...args),
+      withRecoverableReconnect: (...args) => this.withRecoverableReconnect(...args),
+      deferredToTask: (...args) => this.deferredToTask(...args),
+      applyForwardedResult: (...args) => this.applyForwardedResult(...args),
+      noteReleaseSurfacedBy: (...args) => this.noteReleaseSurfacedBy(...args),
+      removeProgressListener: (...args) => this.removeProgressListener(...args),
+      toolUnavailableError: (...args) => this.toolUnavailableError(...args),
     };
   }
 

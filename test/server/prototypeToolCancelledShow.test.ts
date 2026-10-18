@@ -40,7 +40,7 @@ describe("a show cancelled while a capability lookup waits must never reach the 
     restore = preserveToolRegistry();
     const timer = new FakeTimer();
     client = new FakeCtrlProxy(timer);
-    client.setSupportedCommands(["prototype_display_id_v1", PROTOTYPE_SHOW_IN_PLACE_CAPABILITY]);
+    client.setSupportedCommands(["prototype_display_id_v2", PROTOTYPE_SHOW_IN_PLACE_CAPABILITY]);
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("cmd display get-displays", { stdout: BOTH_PANELS, stderr: "" });
     unsubscribe = registerPrototypeTools({

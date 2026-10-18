@@ -2,7 +2,12 @@ import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, Platform } from "../models";
-import { createJSONToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
+import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
+import {
+  getNotificationPolicyResultSchema,
+  postNotificationResultSchema,
+  setNotificationPolicyResultSchema,
+} from "./notificationToolOutputSchemas";
 import {
   addDeviceTargetingToSchema,
   platformSchema,
@@ -165,7 +170,7 @@ export function createPostNotificationHandler({
         ? `Posted notification${result.method ? ` via ${result.method}` : ""}${result.warning ? ` (warning: ${result.warning})` : ""}`
         : `Failed to post notification${result.error ? `: ${result.error}` : ""}`;
 
-      const response = createJSONToolResponse({
+      const response = createStructuredToolResponse({
         message,
         ...result,
       });
@@ -202,7 +207,7 @@ export function registerNotificationTools(deps: NotificationToolDependencies = {
     const notificationPolicy = new NotificationPolicy(device);
     const result = await notificationPolicy.getPolicy(args.appId);
 
-    const response = createJSONToolResponse({
+    const response = createStructuredToolResponse({
       message: result.success
         ? `Read notification policy for ${args.appId}`
         : (result.error ?? `Failed to read notification policy for ${args.appId}`),
@@ -220,7 +225,7 @@ export function registerNotificationTools(deps: NotificationToolDependencies = {
       policyAccess: args.policyAccess,
     });
 
-    const response = createJSONToolResponse({
+    const response = createStructuredToolResponse({
       message: result.success
         ? describeSetPolicySuccess(args, result)
         : (result.error ?? `Failed to set notification policy for ${args.appId}`),
@@ -234,7 +239,7 @@ export function registerNotificationTools(deps: NotificationToolDependencies = {
     "Post notification via Android SDK hooks or iOS Simulator simctl push.",
     postNotificationSchema,
     createPostNotificationHandler(deps),
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: postNotificationResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -243,7 +248,11 @@ export function registerNotificationTools(deps: NotificationToolDependencies = {
     getNotificationPolicySchema,
     getNotificationPolicyHandler,
     // Reads only; read-only access never requires a session (#10965).
-    { defaultEnabled: false, deviceReadOnly: true },
+    {
+      defaultEnabled: false,
+      deviceReadOnly: true,
+      outputSchema: getNotificationPolicyResultSchema,
+    },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -251,6 +260,6 @@ export function registerNotificationTools(deps: NotificationToolDependencies = {
     "Set app notification/DND policy state",
     setNotificationPolicySchema,
     setNotificationPolicyHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: setNotificationPolicyResultSchema },
   );
 }

@@ -64,6 +64,8 @@ import { AndroidAvdIdentityConflictError } from "./AndroidAvdIdentityConflictErr
 import { AndroidAvdIdentityUnresolvedError } from "./AndroidAvdIdentityUnresolvedError";
 import { DeviceBootTimeoutError } from "./DeviceBootTimeoutError";
 export { DeviceBootTimeoutError } from "./DeviceBootTimeoutError";
+import { enrichBootedDevice } from "./bootedDeviceEnrichment";
+export { enrichBootedDevice } from "./bootedDeviceEnrichment";
 export { AndroidAvdIdentityConflictError } from "./AndroidAvdIdentityConflictError";
 export { AndroidAvdIdentityUnresolvedError } from "./AndroidAvdIdentityUnresolvedError";
 export { AndroidDeviceIdentityUnresolvedError } from "./AndroidDeviceIdentityUnresolvedError";
@@ -1830,26 +1832,6 @@ export class DeviceBootService {
       context.deviceLabel ?? context.request.name ?? context.request.deviceId,
     );
   }
-}
-
-// oxlint-disable-next-line complexity -- explicit per-field fallback keeps configured-image precedence auditable.
-export function enrichBootedDevice(device: BootedDevice, image: DeviceInfo): BootedDevice {
-  return {
-    ...device,
-    iosVersion: device.iosVersion ?? image.iosVersion,
-    apiLevel: device.apiLevel ?? image.apiLevel,
-    osVersion: device.osVersion ?? image.osVersion,
-    runtimeId: device.runtimeId ?? image.runtimeId,
-    runtime: device.runtime ?? image.runtime,
-    deviceType: device.deviceType ?? image.deviceType,
-    formFactor: device.formFactor ?? image.formFactor,
-    screenWidth: device.screenWidth ?? image.screenWidth,
-    screenHeight: device.screenHeight ?? image.screenHeight,
-    screenDensity: device.screenDensity ?? image.screenDensity,
-    model: device.model ?? image.model,
-    architecture: device.architecture ?? image.architecture,
-    capabilityInventory: device.capabilityInventory ?? image.capabilityInventory,
-  };
 }
 
 function findImageForBootedDevice(

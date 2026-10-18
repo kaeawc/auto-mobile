@@ -26,7 +26,7 @@
 1456	src/db/navigationRepository.ts
 1403	src/db/navigationRetention.ts
 2518	src/devices/DeviceReadiness.ts
-1872	src/devices/deviceBootService.ts
+1855	src/devices/deviceBootService.ts
 1356	src/devices/deviceUtils.ts
 1596	src/doctor/checks/ios.ts
 1673	src/features/accessibility/ContrastChecker.ts
@@ -65,7 +65,7 @@
 1399	src/features/utility/ElementResolver.ts
 1733	src/features/video/FfmpegVideoProcessingBackend.ts
 1115	src/features/video/IosPhysicalVideoCaptureBackend.ts
-2297	src/features/webrtc/IosH264Source.ts
+2295	src/features/webrtc/IosH264Source.ts
 2236	src/features/webrtc/PersistentEncoderH264Source.ts
 1005	src/features/webrtc/WebRtcPublisher.ts
 2370	src/server/appFileService.ts
@@ -87,7 +87,7 @@
 2185	src/server/videoRecordingManager.ts
 1434	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts
-1828	src/utils/android-cmdline-tools/AdbClient.ts
+1826	src/utils/android-cmdline-tools/AdbClient.ts
 2057	src/utils/fileLock.ts
 1199	src/utils/ios-cmdline-tools/DeviceAppManager.ts
 3140	src/utils/ios-cmdline-tools/SimCtlClient.ts

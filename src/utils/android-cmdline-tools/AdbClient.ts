@@ -2,11 +2,7 @@ import {
   getNativeHelperRegistry,
   type NativeHelperTracker,
 } from "../nativeHelpers/NativeHelperRegistry";
-import {
-  DEFAULT_ADB_COMMAND_TIMEOUT_MS,
-  resolveAdbClientSettings,
-  type AdbClientDependencies,
-} from "./AdbClientDependencies";
+import { resolveAdbClientSettings, type AdbClientDependencies } from "./AdbClientDependencies";
 import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import { parseAdbDevicesList } from "./parseAdbDevicesList";
 import { parseDumpsysUsers, parsePmListUsers } from "./parseAndroidUsers";
@@ -45,6 +41,7 @@ import {
 import { runWithAbortSignal, getAbortSignal } from "../AbortContext";
 import { trackAmbient } from "../PerfContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
+import { requirePipedOutput } from "../pipedChildProcess";
 import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
 import { delayForAttempt, sequenceBackoff } from "../Backoff";
 import { TTLCache } from "../cache/Cache";
@@ -221,7 +218,6 @@ export class AdbClient implements AdbExecutor {
   private readonly nativeHelperRegistry: NativeHelperTracker | undefined;
 
   static readonly DEVICE_LIST_TIMEOUT_MS = 10_000;
-  private static readonly DEFAULT_COMMAND_TIMEOUT_MS = DEFAULT_ADB_COMMAND_TIMEOUT_MS;
   private static readonly MAX_ADB_RETRIES = 3;
   private static readonly ADB_RETRY_BACKOFF = sequenceBackoff([200, 500, 1000]);
   private static readonly MAX_MACOS_MISSING_ADB_PROBES = 3;
@@ -708,10 +704,13 @@ export class AdbClient implements AdbExecutor {
       args.join(" "),
     );
     const busyAtDispatch = this.getConsoleBusyAtDispatch();
-    const child = this.spawnFn(adbPath, fullArgs, {
-      stdio: ["ignore", "pipe", "pipe"],
-      signal: options.abortSignalScope === "startup" ? undefined : signal,
-    });
+    const child = requirePipedOutput(
+      this.spawnFn(adbPath, fullArgs, {
+        stdio: ["ignore", "pipe", "pipe"],
+        signal: options.abortSignalScope === "startup" ? undefined : signal,
+      }),
+      "the adb process",
+    );
     trackActiveAdbChild(child);
     (this.nativeHelperRegistry ?? getNativeHelperRegistry()).track(child, {
       kind: "adb",
@@ -780,8 +779,7 @@ export class AdbClient implements AdbExecutor {
       }
     });
 
-    // eslint-disable-next-line auto-mobile/no-unknown-cast -- the public interface deliberately exposes only lifecycle, stdio, and kill.
-    return child as unknown as AdbProcess;
+    return child;
   }
 
   /**

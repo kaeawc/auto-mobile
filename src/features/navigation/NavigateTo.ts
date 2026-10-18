@@ -386,12 +386,11 @@ export class NavigateTo {
       }
 
       // Report progress
-      if (progress) {
-        await awaitWhileRequestIsLive(
-          progress(i, path.length, `Navigating: ${edge.from} → ${edge.to}`),
-          signal,
-        );
-      }
+      await this.reportProgress(
+        progress,
+        [i, path.length, `Navigating: ${edge.from} → ${edge.to}`],
+        signal,
+      );
 
       logger.info(`[NAVIGATE_TO] Step ${i + 1}/${path.length}: ${edge.from} → ${edge.to}`);
 
@@ -417,20 +416,7 @@ export class NavigateTo {
       }
 
       // Wait for screen transition
-      throwIfAborted(signal);
-      let stepReached = await this.screenWaiter.waitForScreen(
-        edge.to,
-        NavigateTo.STEP_TIMEOUT_MS,
-        signal,
-      );
-      throwIfAborted(signal);
-      let observedScreen: string | null = null;
-      if (!stepReached) {
-        throwIfAborted(signal);
-        observedScreen = this.navigationManager.getCurrentScreen();
-        throwIfAborted(signal);
-        stepReached = observedScreen === edge.to;
-      }
+      const { stepReached, observedScreen } = await this.awaitStepArrival(edge, signal);
       arrivalScreen = observedScreen === targetScreen ? observedScreen : undefined;
       reached = stepReached && edge.to === targetScreen;
       if (!stepReached && arrivalScreen !== undefined) {
@@ -450,19 +436,49 @@ export class NavigateTo {
     }
 
     // Final progress update
-    if (progress) {
-      await awaitWhileRequestIsLive(
-        progress(
-          path.length,
-          path.length,
-          reached ? `Arrived at ${targetScreen}` : `Waiting for ${targetScreen}`,
-        ),
-        signal,
-      );
-    }
+    await this.reportProgress(
+      progress,
+      [
+        path.length,
+        path.length,
+        reached ? `Arrived at ${targetScreen}` : `Waiting for ${targetScreen}`,
+      ],
+      signal,
+    );
 
     throwIfAborted(signal);
     return { result: this.completedNavigationResult(arrivalScreen, reached, resultContext) };
+  }
+
+  private async reportProgress(
+    progress: ProgressCallback | undefined,
+    update: [current: number, total: number, message: string],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (progress) {
+      await awaitWhileRequestIsLive(progress(...update), signal);
+    }
+  }
+
+  /** Waits for a step's target screen, falling back to the observed screen when the wait times out. */
+  private async awaitStepArrival(
+    edge: NavigationEdge,
+    signal?: AbortSignal,
+  ): Promise<{ stepReached: boolean; observedScreen: string | null }> {
+    throwIfAborted(signal);
+    const waited = await this.screenWaiter.waitForScreen(
+      edge.to,
+      NavigateTo.STEP_TIMEOUT_MS,
+      signal,
+    );
+    throwIfAborted(signal);
+    if (waited) {
+      return { stepReached: true, observedScreen: null };
+    }
+    throwIfAborted(signal);
+    const observedScreen = this.navigationManager.getCurrentScreen();
+    throwIfAborted(signal);
+    return { stepReached: observedScreen === edge.to, observedScreen };
   }
 
   /**

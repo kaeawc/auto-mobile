@@ -2,6 +2,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { EncodedUnsupportedError } from "./EncodedUnsupportedError";
 import { basename } from "node:path";
 import type { Readable, Writable } from "node:stream";
+import { hasPipedStdio } from "../../utils/pipedChildProcess";
 import { ActionableError, toActionableError, type BootedDevice } from "../../models";
 import {
   CAPTURE_PERMISSION_PREFIX,
@@ -262,14 +263,11 @@ export interface IosFrameCaptureHelper {
   on(event: "error", listener: (error: Error) => void): this;
 }
 
-export interface IosH264EncoderProcess {
+export type IosH264EncoderProcess = FfmpegProcess & {
   stdin: Writable;
   stdout: Readable;
   stderr: Readable;
-  kill(signal?: NodeJS.Signals): boolean;
-  once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
-  once(event: "error", listener: (error: Error) => void): void;
-}
+};
 
 export type IosH264EncoderSpawner = ProcessSpawner<IosH264EncoderProcess>;
 export type IosFrameCaptureHelperFactory = (
@@ -484,10 +482,7 @@ export class IosH264Source implements H264CaptureSource {
       new DefaultFfmpegClient({
         binaryPath: this.ffmpegPath,
         spawn: options.spawner
-          ? (binaryPath, args) => {
-              // eslint-disable-next-line auto-mobile/no-unknown-cast -- The injected test spawner implements the process members FfmpegClient consumes.
-              return options.spawner!(binaryPath, args) as unknown as FfmpegProcess;
-            }
+          ? (binaryPath, args) => options.spawner!(binaryPath, args)
           : undefined,
       });
     this.commandRunner = options.commandRunner ?? defaultCommandRunner;
@@ -1571,10 +1566,13 @@ export class IosH264Source implements H264CaptureSource {
       context: "iOS WebRTC H.264 encoder",
       stdio: ["pipe", "pipe", "pipe"],
     });
-    // The argv above requests piped stdin/stdout/stderr; narrow the generic
-    // client process surface to the encoder contract used by this source.
-    // eslint-disable-next-line auto-mobile/no-unknown-cast -- The piped-stdio contract supplies every encoder process member used below.
-    const encoder = process as unknown as IosH264EncoderProcess;
+    // The argv above requests piped stdin/stdout/stderr; verify them before narrowing the
+    // generic client process surface to the encoder contract used by this source.
+    if (!hasPipedStdio<FfmpegProcess, IosH264EncoderProcess>(process)) {
+      process.kill();
+      throw new ActionableError("ffmpeg encoder started without piped stdio");
+    }
+    const encoder = process;
     this.encoder = encoder;
     this.encoderSize = size;
     this.encoderBackpressured = false;

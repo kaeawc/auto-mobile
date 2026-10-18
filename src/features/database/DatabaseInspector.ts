@@ -440,6 +440,11 @@ export class DatabaseInspector {
       return null;
     }
 
+    return this.scanBalancedJson(output, startIndex, startChar);
+  }
+
+  /** Scans from `startIndex` to the brace/bracket matching `startChar`, skipping JSON strings. */
+  private scanBalancedJson(output: string, startIndex: number, startChar: string): string | null {
     const endChar = startChar === "{" ? "}" : "]";
     let depth = 0;
     let inString = false;

@@ -13,6 +13,7 @@
 import { spyOn } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 /** Anything a test substitutes for the client: a fake or a partial method stub. */
 type IosClientStub = object;
@@ -54,4 +55,70 @@ export function spyOnIosExistingFactory(create: (deviceId: string) => IosClientS
     const stub = create(deviceId);
     return stub === null ? null : asClient(stub);
   });
+}
+
+/** The client methods the daemon input suites replace; each keeps the real signature. */
+export interface IosClientOverrides {
+  requestDrag?: IOSCtrlProxyClient["requestDrag"];
+  requestTapCoordinates?: IOSCtrlProxyClient["requestTapCoordinates"];
+  requestSetText?: IOSCtrlProxyClient["requestSetText"];
+  requestAppendText?: IOSCtrlProxyClient["requestAppendText"];
+  requestImeAction?: IOSCtrlProxyClient["requestImeAction"];
+  getScreenScaleMetadata?: IOSCtrlProxyClient["getScreenScaleMetadata"];
+  requestHierarchySyncWithoutObservationStreamPush?: IOSCtrlProxyClient["requestHierarchySyncWithoutObservationStreamPush"];
+  setPreference?: IOSCtrlProxyClient["setPreference"];
+  removePreference?: IOSCtrlProxyClient["removePreference"];
+  clearPreferenceStore?: IOSCtrlProxyClient["clearPreferenceStore"];
+}
+
+/**
+ * A real {@link IOSCtrlProxyClient} built through `createForTesting` (its socket factory
+ * refuses to connect), with the given methods replaced. Nothing is cast: the spied methods
+ * keep the class's own signatures.
+ */
+export function createIosTestClient(
+  device: BootedDevice,
+  overrides: IosClientOverrides = {},
+): IOSCtrlProxyClient {
+  const client = IOSCtrlProxyClient.createForTesting(
+    device,
+    8765,
+    () => {
+      throw new Error("Unexpected socket connection");
+    },
+    new FakeTimer(),
+  );
+  if (overrides.requestDrag) {
+    spyOn(client, "requestDrag").mockImplementation(overrides.requestDrag);
+  }
+  if (overrides.requestTapCoordinates) {
+    spyOn(client, "requestTapCoordinates").mockImplementation(overrides.requestTapCoordinates);
+  }
+  if (overrides.requestSetText) {
+    spyOn(client, "requestSetText").mockImplementation(overrides.requestSetText);
+  }
+  if (overrides.requestAppendText) {
+    spyOn(client, "requestAppendText").mockImplementation(overrides.requestAppendText);
+  }
+  if (overrides.requestImeAction) {
+    spyOn(client, "requestImeAction").mockImplementation(overrides.requestImeAction);
+  }
+  if (overrides.getScreenScaleMetadata) {
+    spyOn(client, "getScreenScaleMetadata").mockImplementation(overrides.getScreenScaleMetadata);
+  }
+  if (overrides.requestHierarchySyncWithoutObservationStreamPush) {
+    spyOn(client, "requestHierarchySyncWithoutObservationStreamPush").mockImplementation(
+      overrides.requestHierarchySyncWithoutObservationStreamPush,
+    );
+  }
+  if (overrides.setPreference) {
+    spyOn(client, "setPreference").mockImplementation(overrides.setPreference);
+  }
+  if (overrides.removePreference) {
+    spyOn(client, "removePreference").mockImplementation(overrides.removePreference);
+  }
+  if (overrides.clearPreferenceStore) {
+    spyOn(client, "clearPreferenceStore").mockImplementation(overrides.clearPreferenceStore);
+  }
+  return client;
 }

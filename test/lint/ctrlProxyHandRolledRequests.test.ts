@@ -16,7 +16,7 @@ const ALLOWANCES: Readonly<Record<string, number>> = {
   // Observation-stream screenshot: stream suppression, capture binding and rate-limit stamp.
   "src/features/observe/android/AndroidScreenshotCapture.ts": 2,
   // Hierarchy streaming path: subscription, cancellation and one-shot dispatch.
-  "src/features/observe/android/CtrlProxyHierarchy.ts": 3,
+  "src/features/observe/android/AndroidHierarchyRequestSender.ts": 3,
   // Hierarchy streaming path: deadline recompute, abort, preparation and cache shaping.
   "src/features/observe/ios/CtrlProxyHierarchy.ts": 2,
   // Mock-rules push uses sendMessage's disconnected warning and lastSendAt activity stamp.

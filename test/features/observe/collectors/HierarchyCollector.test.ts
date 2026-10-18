@@ -85,17 +85,12 @@ describe("HierarchyCollector", () => {
         calls.push("accessibilityFocus");
         return { "resource-id": "accessibility-field" };
       };
-      await collector.collect(
-        result,
-        undefined,
-        undefined,
-        false,
-        0,
-        undefined,
-        false,
-        undefined,
+      await collector.collect(result, {
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        readOnly: false,
         readOptions,
-      );
+      });
       expect(calls).toEqual(["configure", "read", "focus", "accessibilityFocus"]);
       expect(result.intentChooserDetected).toBe(false);
       expect(result.notificationPermissionDetected).toBe(false);
@@ -106,7 +101,12 @@ describe("HierarchyCollector", () => {
       const result = makeResult();
       result.updatedAt = 7;
       result.notificationPermissionDetected = true;
-      await collector.collect(result, undefined, undefined, false, 0, undefined, true, hierarchy);
+      await collector.collect(result, {
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        readOnly: true,
+        capturedHierarchy: hierarchy,
+      });
       expect(fakeViewHierarchy.getRecompositionTrackingCallCount()).toBe(0);
       expect(fakeViewHierarchy.getCallCount()).toBe(0);
       expect(result.viewHierarchy).toBe(hierarchy);
@@ -124,7 +124,12 @@ describe("HierarchyCollector", () => {
       };
       fakeViewHierarchy.configureFocusedElement({ text: "Focused" });
       const result = makeResult();
-      await collector.collect(result, undefined, undefined, false, 0, undefined, true, hierarchy);
+      await collector.collect(result, {
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        readOnly: true,
+        capturedHierarchy: hierarchy,
+      });
       expect(result.focusedElement?.text).toBe("Focused");
       expect(result.notificationPermissionDetected).toBe(true);
       expect(result.errors).toBeUndefined();
@@ -138,17 +143,12 @@ describe("HierarchyCollector", () => {
         readTimeout = args[5];
         return read(...args);
       };
-      await collector.collect(
-        makeResult(),
-        undefined,
-        undefined,
-        false,
-        0,
-        undefined,
-        false,
-        undefined,
-        750,
-      );
+      await collector.collect(makeResult(), {
+        skipWaitForFresh: false,
+        minTimestamp: 0,
+        readOnly: false,
+        readOptions: 750,
+      });
       expect(readTimeout).toBe(750);
     });
     test("populates viewHierarchy on success", async () => {

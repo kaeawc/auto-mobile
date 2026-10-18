@@ -60,18 +60,14 @@ describe("iOS screenshot with the prototype hidden (#9305)", () => {
   });
 
   function screenshotWith(client: PrototypeAgentClient | undefined): TakeScreenshot {
-    return new TakeScreenshot(
-      iosDevice(DEVICE_ID),
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
-      new FakeTimer(),
-      new CountingIdGenerator("capture"),
-      new FakeScreenshotFileWriter(),
-      undefined,
-      undefined,
-      undefined,
-      false,
-      { iosPrototypeHider: prototypeHiderFromConnections({ get: () => client }) },
-    );
+    return new TakeScreenshot(iosDevice(DEVICE_ID), {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      timer: new FakeTimer(),
+      idGenerator: new CountingIdGenerator("capture"),
+      fileWriter: new FakeScreenshotFileWriter(),
+      cleanupOnCreate: false,
+      iosPrototypeHider: prototypeHiderFromConnections({ get: () => client }),
+    });
   }
 
   test("capability present: hides around the capture, restores, and reports the prototype hidden", async () => {

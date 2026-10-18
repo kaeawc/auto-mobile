@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
-import { RestoreSnapshot } from "../../../src/features/action/RestoreSnapshot";
+import {
+  RestoreSnapshot,
+  type RestoreSnapshotDependencies,
+} from "../../../src/features/action/RestoreSnapshot";
 import { ActionableError, BootedDevice, DeviceSnapshotManifest } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -66,7 +69,11 @@ describe("RestoreSnapshot", () => {
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 
     // Create RestoreSnapshot instance with fakes
-    restoreSnapshot = new RestoreSnapshot(device, fakeAdbFactory, fakeEmulator, fakeTimer, store);
+    restoreSnapshot = new RestoreSnapshot(device, fakeAdbFactory, {
+      emulator: fakeEmulator,
+      timer: fakeTimer,
+      store,
+    });
 
     // Setup default command results
     fakeAdb.setCommandResult("shell pm clear com.example.app", "Success");
@@ -202,13 +209,11 @@ describe("RestoreSnapshot", () => {
           throw new ActionableError("timed out waiting for boot completion");
         },
       } as AndroidEmulatorClient;
-      const restoring = new RestoreSnapshot(
-        device,
-        fakeAdbFactory,
-        notReadyEmulator,
-        fakeTimer,
+      const restoring = new RestoreSnapshot(device, fakeAdbFactory, {
+        emulator: notReadyEmulator,
+        timer: fakeTimer,
         store,
-      );
+      });
 
       const restoringPromise = restoring.execute({ snapshotName, manifest, useVmSnapshot: true });
       await expect(restoringPromise).rejects.toThrow(
@@ -237,13 +242,11 @@ describe("RestoreSnapshot", () => {
           throw new Error("timed out waiting for boot completion");
         },
       } as AndroidEmulatorClient;
-      const restoring = new RestoreSnapshot(
-        device,
-        fakeAdbFactory,
-        notReadyEmulator,
-        fakeTimer,
+      const restoring = new RestoreSnapshot(device, fakeAdbFactory, {
+        emulator: notReadyEmulator,
+        timer: fakeTimer,
         store,
-      );
+      });
 
       await expect(
         restoring.execute({
@@ -413,13 +416,10 @@ describe("RestoreSnapshot", () => {
         isEmulator: false,
       };
 
-      const restorePhysical = new RestoreSnapshot(
-        physicalDevice,
-        fakeAdbFactory,
-        undefined,
-        fakeTimer,
+      const restorePhysical = new RestoreSnapshot(physicalDevice, fakeAdbFactory, {
+        timer: fakeTimer,
         store,
-      );
+      });
 
       // Create VM snapshot manifest (but can't restore on physical device)
       const manifest: DeviceSnapshotManifest = {
@@ -816,18 +816,13 @@ describe("RestoreSnapshot (iOS failure reporting)", () => {
   );
 
   function makeRestoreWithFileOperations(
-    operations: NonNullable<ConstructorParameters<typeof RestoreSnapshot>[7]>,
+    operations: NonNullable<RestoreSnapshotDependencies["iosRestoreOperations"]>,
   ): RestoreSnapshot {
-    return new RestoreSnapshot(
-      device,
-      undefined,
-      undefined,
-      undefined,
+    return new RestoreSnapshot(device, undefined, {
       store,
-      simctl as any,
-      undefined,
-      operations,
-    );
+      simctl: simctl as any,
+      iosRestoreOperations: operations,
+    });
   }
 
   it("returns the failed bundle while another iOS bundle restores", async () => {
@@ -952,18 +947,14 @@ describe("RestoreSnapshot (iOS)", () => {
   });
 
   function makeRestore(
-    operations?: ConstructorParameters<typeof RestoreSnapshot>[7],
+    operations?: RestoreSnapshotDependencies["iosRestoreOperations"],
   ): RestoreSnapshot {
-    return new RestoreSnapshot(
-      device,
-      undefined,
-      undefined,
-      new FakeTimer(),
+    return new RestoreSnapshot(device, undefined, {
+      timer: new FakeTimer(),
       store,
-      simctl as any,
-      undefined,
-      operations,
-    );
+      simctl: simctl as any,
+      iosRestoreOperations: operations,
+    });
   }
 
   // All gate version values below are synthetic.

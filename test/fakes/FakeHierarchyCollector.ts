@@ -1,5 +1,8 @@
-import type { HierarchyCollector } from "../../src/features/observe/collectors/HierarchyCollector";
-import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
+import type {
+  HierarchyCollector,
+  HierarchyCollectOptions,
+} from "../../src/features/observe/collectors/HierarchyCollector";
+import type { ObserveResult } from "../../src/models";
 import type { ActionableError } from "../../src/models/ActionableError";
 
 export class FakeHierarchyCollector implements Pick<
@@ -13,13 +16,7 @@ export class FakeHierarchyCollector implements Pick<
 
   async collect(
     result: ObserveResult,
-    _queryOptions?: Parameters<HierarchyCollector["collect"]>[1],
-    _perf?: Parameters<HierarchyCollector["collect"]>[2],
-    _skipWaitForFresh?: boolean,
-    _minTimestamp?: number,
-    _signal?: AbortSignal,
-    _readOnly?: boolean,
-    capturedHierarchy?: ViewHierarchyResult,
+    { capturedHierarchy }: HierarchyCollectOptions = {},
   ): Promise<void> {
     if (this.failure) {
       throw this.failure;

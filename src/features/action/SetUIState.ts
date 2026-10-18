@@ -2005,7 +2005,7 @@ export class SetUIState extends BaseVisualChange {
       return this.dependencies.keyboard;
     }
     const { Keyboard } = require("./Keyboard");
-    return new Keyboard(this.device, { create: () => this.adb }, undefined, this.timer);
+    return new Keyboard(this.device, { create: () => this.adb }, { timer: this.timer });
   }
 
   private getTapOnElement(): TapOnElementLike {

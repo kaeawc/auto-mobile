@@ -442,10 +442,10 @@ async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDep
       vmRetentionRetryBackoff: exponentialBackoff({ initialDelayMs: 100, maxDelayMs: 5000 }),
       now: () => new Date(),
       createCaptureProvider: (device, timer, store) => {
-        return new CaptureSnapshot(device, undefined, undefined, timer, store);
+        return new CaptureSnapshot(device, undefined, { timer, store });
       },
       createRestoreProvider: (device, timer, store) => {
-        return new RestoreSnapshot(device, undefined, undefined, timer, store);
+        return new RestoreSnapshot(device, undefined, { timer, store });
       },
       deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator(),
     };

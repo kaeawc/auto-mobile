@@ -97,19 +97,20 @@ describe("SnapshotProvider interfaces", () => {
   const captureCases: ReadonlyArray<[string, () => SnapshotCaptureProvider]> = [
     [
       "Android CaptureSnapshot",
-      () => new CaptureSnapshot(androidDevice, fakeAdbFactory, undefined, new FakeTimer(), store()),
+      () =>
+        new CaptureSnapshot(androidDevice, fakeAdbFactory, {
+          timer: new FakeTimer(),
+          store: store(),
+        }),
     ],
     [
       "iOS CaptureSnapshot",
       () =>
-        new CaptureSnapshot(
-          iosDevice,
-          undefined,
-          undefined,
-          new FakeTimer(),
-          store(),
-          new FakeSimctl(),
-        ),
+        new CaptureSnapshot(iosDevice, undefined, {
+          timer: new FakeTimer(),
+          store: store(),
+          simctl: new FakeSimctl(),
+        }),
     ],
   ];
   for (const [name, build] of captureCases) {
@@ -122,19 +123,20 @@ describe("SnapshotProvider interfaces", () => {
   const restoreCases: ReadonlyArray<[string, () => SnapshotRestoreProvider]> = [
     [
       "Android RestoreSnapshot",
-      () => new RestoreSnapshot(androidDevice, fakeAdbFactory, undefined, new FakeTimer(), store()),
+      () =>
+        new RestoreSnapshot(androidDevice, fakeAdbFactory, {
+          timer: new FakeTimer(),
+          store: store(),
+        }),
     ],
     [
       "iOS RestoreSnapshot",
       () =>
-        new RestoreSnapshot(
-          iosDevice,
-          undefined,
-          undefined,
-          new FakeTimer(),
-          store(),
-          new FakeSimctl(),
-        ),
+        new RestoreSnapshot(iosDevice, undefined, {
+          timer: new FakeTimer(),
+          store: store(),
+          simctl: new FakeSimctl(),
+        }),
     ],
   ];
   for (const [name, build] of restoreCases) {

@@ -23,10 +23,9 @@ describe("TakeScreenshot Android cancellation", function () {
         }),
     })) as typeof AndroidCtrlProxyClient.getInstance;
     try {
-      const screenshot = new TakeScreenshot(
-        androidDevice("android-cancel-device"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-      );
+      const screenshot = new TakeScreenshot(androidDevice("android-cancel-device"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      });
       const resultPromise = screenshot.execute({ format: "jpeg" }, controller.signal);
       await Promise.resolve();
       controller.abort();
@@ -58,13 +57,12 @@ describe("TakeScreenshot Android cancellation", function () {
     })) as typeof AndroidCtrlProxyClient.getInstance;
     const writer = new FakeScreenshotFileWriter(() => controller.abort());
     try {
-      const screenshot = new TakeScreenshot(
-        androidDevice("android-late-cancel"),
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-        new FakeTimer(),
-        new CountingIdGenerator("capture"),
-        writer,
-      );
+      const screenshot = new TakeScreenshot(androidDevice("android-late-cancel"), {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("capture"),
+        fileWriter: writer,
+      });
       const result = await screenshot.execute({ format: "jpeg" }, controller.signal);
       expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
       expect(writer.written).toHaveLength(1);

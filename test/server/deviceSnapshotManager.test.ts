@@ -1005,20 +1005,16 @@ describe("deviceSnapshotManager", () => {
       }
       const adb = new FakeAdbClient();
       adb.setCommandResult(`emu avd snapshot load ${manifest.snapshotName}`, "OK");
-      const emulator = new DeferredEmulator({
-        timer: fakeTimer,
-        adbFactory: { create: () => adb },
-      });
+      const adbFactory = { create: () => adb };
+      const emulator = new DeferredEmulator({ timer: fakeTimer, adbFactory });
       await setDeviceSnapshotManagerDependencies({
         deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator([listener]),
         createRestoreProvider: () =>
-          new RestoreSnapshot(
-            device,
-            { create: () => adb },
+          new RestoreSnapshot(device, adbFactory, {
             emulator,
-            fakeTimer,
-            new DeviceSnapshotStore(path.join(os.tmpdir(), "settlement-test-unused")),
-          ),
+            timer: fakeTimer,
+            store: new DeviceSnapshotStore(path.join(os.tmpdir(), "settlement-test-unused")),
+          }),
       });
       const restore = restoreDeviceSnapshot(device, { snapshotName: manifest.snapshotName });
       // Attach rejection handling before rejecting the deferred readiness promise.

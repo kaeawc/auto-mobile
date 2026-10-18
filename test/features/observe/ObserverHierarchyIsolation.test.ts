@@ -931,18 +931,14 @@ test("Android observer JPEG screenshot uses ADB while the real owner client stay
   try {
     expect(await client.ensureConnected()).toBe(true);
     AndroidCtrlProxyClient.registerForTesting(client, device.deviceId);
-    const screenshot = new TakeScreenshot(
-      device,
-      new FakeAdbClientFactory(adb),
+    const screenshot = new TakeScreenshot(device, {
+      adbFactory: new FakeAdbClientFactory(adb),
       timer,
-      new CountingIdGenerator("observer"),
-      writer,
-      undefined,
-      undefined,
-      undefined,
-      false,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+      idGenerator: new CountingIdGenerator("observer"),
+      fileWriter: writer,
+      cleanupOnCreate: false,
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
     const result = await screenshot.executeObservationRead({ format: "jpeg" });
     expect(result.success).toBe(true);
     expect(writer.written).toHaveLength(1);
@@ -986,18 +982,14 @@ test.each([true, false])(
     );
     const writer = new FakeScreenshotFileWriter();
     try {
-      const screenshot = new TakeScreenshot(
-        device,
-        new FakeAdbClientFactory(new FakeAdbExecutor()),
-        new FakeTimer(),
-        new CountingIdGenerator("observer"),
-        writer,
-        undefined,
-        undefined,
-        undefined,
-        false,
-        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-      );
+      const screenshot = new TakeScreenshot(device, {
+        adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        idGenerator: new CountingIdGenerator("observer"),
+        fileWriter: writer,
+        cleanupOnCreate: false,
+        pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+      });
       expect((await screenshot.executeObservationRead({ format: "png" })).success).toBe(true);
       expect(captures).toEqual([hasObservedPanel ? "primary-1" : "cover-1"]);
       expect(displayTransitions.revision(device.deviceId)).toBe(revision);
@@ -1020,18 +1012,14 @@ test("aborted iOS simulator observer removes its frame and never pushes to the s
     readFileSync("test/fixtures/screenshots/black-on-white.png"),
   );
   try {
-    const screenshot = new TakeScreenshot(
-      device,
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
-      new FakeTimer(),
-      new CountingIdGenerator("observer"),
-      writer,
-      undefined,
-      undefined,
-      undefined,
-      false,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+    const screenshot = new TakeScreenshot(device, {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      timer: new FakeTimer(),
+      idGenerator: new CountingIdGenerator("observer"),
+      fileWriter: writer,
+      cleanupOnCreate: false,
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
     let pushes = 0;
     Reflect.set(screenshot, "pushScreenshotToStream", () => {
       pushes++;
@@ -1063,18 +1051,14 @@ test("iOS observer screenshot uses the real open client without reconnect or str
     expect(await client.ensureConnected()).toBe(true);
     IOSCtrlProxyClient.registerForTesting(client, device.deviceId);
     const reconnect = spyOn(client, "ensureConnected");
-    const screenshot = new TakeScreenshot(
-      device,
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
+    const screenshot = new TakeScreenshot(device, {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
       timer,
-      new CountingIdGenerator("observer"),
-      writer,
-      undefined,
-      undefined,
-      undefined,
-      false,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+      idGenerator: new CountingIdGenerator("observer"),
+      fileWriter: writer,
+      cleanupOnCreate: false,
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
     let pushes = 0;
     Reflect.set(screenshot, "pushScreenshotToStream", () => {
       pushes++;
@@ -1160,18 +1144,14 @@ test("unowned physical iOS screenshot uses and closes a real transient client", 
   const close = spyOn(client, "close");
   const writer = new FakeScreenshotFileWriter();
   try {
-    const screenshot = new TakeScreenshot(
-      device,
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
+    const screenshot = new TakeScreenshot(device, {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
       timer,
-      new CountingIdGenerator("observer"),
-      writer,
-      undefined,
-      undefined,
-      undefined,
-      false,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+      idGenerator: new CountingIdGenerator("observer"),
+      fileWriter: writer,
+      cleanupOnCreate: false,
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
     const pending = screenshot.executeObservationRead({ format: "png" });
     await new Promise<void>((resolve) => setImmediate(resolve));
     const requestId = await sentRequestId(sockets.socket(), "request_screenshot");
@@ -1207,18 +1187,14 @@ test("owned physical iOS screenshot does not create a replacement client", async
   Reflect.set(daemon, "deviceSessionRegistry", {});
   const factory = spyOn(IOSCtrlProxyClient, "createForObservationRead");
   try {
-    const screenshot = new TakeScreenshot(
-      device,
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
+    const screenshot = new TakeScreenshot(device, {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
       timer,
-      new CountingIdGenerator("observer"),
-      new FakeScreenshotFileWriter(),
-      undefined,
-      undefined,
-      undefined,
-      false,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+      idGenerator: new CountingIdGenerator("observer"),
+      fileWriter: new FakeScreenshotFileWriter(),
+      cleanupOnCreate: false,
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
     expect(await screenshot.executeObservationRead({ format: "png" })).toMatchObject({
       success: false,
       error: "Owned iOS device has no connected screenshot service",

@@ -231,8 +231,7 @@ test.each(["open", "close", "detect", "close follow-up detect"] as const)(
       new Keyboard(
         ios,
         { create: () => new FakeAdbExecutor() },
-        new FakeKeyboardHierarchyProvider(),
-        h.timer,
+        { hierarchyProvider: new FakeKeyboardHierarchyProvider(), timer: h.timer },
       );
     const controller = new AbortController();
     const pending = handler("keyboard")(

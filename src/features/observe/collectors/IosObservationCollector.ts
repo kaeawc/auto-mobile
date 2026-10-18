@@ -34,19 +34,16 @@ export class DefaultIosObservationCollector implements IosObservationCollector {
     readOptions,
   }: PlatformCollectionContext): Promise<void> {
     perf.serial("ios_collect");
-    await this.deps
-      .hierarchyCollector()
-      .collect(
-        result,
-        queryOptions,
-        perf,
-        skipWaitForFresh,
-        minTimestamp,
-        signal,
-        readOnly,
-        capturedHierarchy,
-        readOptions,
-      );
+    await this.deps.hierarchyCollector().collect(result, {
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      readOnly,
+      capturedHierarchy,
+      readOptions,
+    });
 
     this.applyIosScreenMetadata(result);
     this.applyIosInsetsAndRotation(result);

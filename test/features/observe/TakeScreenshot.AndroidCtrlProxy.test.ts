@@ -20,15 +20,10 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
 
   test("tracks WebP metadata when requested", async function () {
     const fakeAdb = new FakeAdbExecutor();
-    const screenshot = new TakeScreenshot(
-      mockDevice,
-      new FakeAdbClientFactory(fakeAdb),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => cacheDir,
-    );
+    const screenshot = new TakeScreenshot(mockDevice, {
+      adbFactory: new FakeAdbClientFactory(fakeAdb),
+      cacheDirResolver: () => cacheDir,
+    });
     const originalGetInstance = AndroidCtrlProxyClient.getInstance;
     AndroidCtrlProxyClient.getInstance = (() => ({
       requestScreenshot: async () => ({ success: false, error: "CtrlProxy unavailable" }),
@@ -50,15 +45,10 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
 
   test("persists native Android CtrlProxy JPEG as jpg with metadata", async () => {
     const fakeAdb = new FakeAdbExecutor();
-    const screenshot = new TakeScreenshot(
-      mockDevice,
-      new FakeAdbClientFactory(fakeAdb),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => cacheDir,
-    );
+    const screenshot = new TakeScreenshot(mockDevice, {
+      adbFactory: new FakeAdbClientFactory(fakeAdb),
+      cacheDirResolver: () => cacheDir,
+    });
     const originalGetInstance = AndroidCtrlProxyClient.getInstance;
     AndroidCtrlProxyClient.getInstance = (() => ({
       requestScreenshot: async () => ({
@@ -81,16 +71,13 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
 
   test("captures requested PNG on the selected Android display through screencap", async () => {
     const fakeAdb = new FakeAdbExecutor();
-    const screenshot = new TakeScreenshot(
-      mockDevice,
-      new FakeAdbClientFactory(fakeAdb),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => cacheDir,
-      new FakeAndroidPhysicalDisplayIdResolver(new Map([[2, "4619827259835644673"]])),
-    );
+    const screenshot = new TakeScreenshot(mockDevice, {
+      adbFactory: new FakeAdbClientFactory(fakeAdb),
+      cacheDirResolver: () => cacheDir,
+      physicalDisplayIdResolver: new FakeAndroidPhysicalDisplayIdResolver(
+        new Map([[2, "4619827259835644673"]]),
+      ),
+    });
     const originalGetInstance = AndroidCtrlProxyClient.getInstance;
     let ctrlProxyCalled = false;
     AndroidCtrlProxyClient.getInstance = (() => ({
@@ -119,15 +106,10 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
 
   test("keeps the ADB fallback as PNG", async () => {
     const fakeAdb = new FakeAdbExecutor();
-    const screenshot = new TakeScreenshot(
-      mockDevice,
-      new FakeAdbClientFactory(fakeAdb),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => cacheDir,
-    );
+    const screenshot = new TakeScreenshot(mockDevice, {
+      adbFactory: new FakeAdbClientFactory(fakeAdb),
+      cacheDirResolver: () => cacheDir,
+    });
     const originalGetInstance = AndroidCtrlProxyClient.getInstance;
     AndroidCtrlProxyClient.getInstance = (() => ({
       requestScreenshot: async () => ({ success: false, error: "CtrlProxy unavailable" }),
@@ -153,15 +135,10 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
       stdout: readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
       stderr: "",
     });
-    const screenshot = new TakeScreenshot(
-      mockDevice,
-      new FakeAdbClientFactory(testFakeAdb),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      () => cacheDir,
-    );
+    const screenshot = new TakeScreenshot(mockDevice, {
+      adbFactory: new FakeAdbClientFactory(testFakeAdb),
+      cacheDirResolver: () => cacheDir,
+    });
     (screenshot as any).window = { getActiveHash: async () => "mock-hash" };
     const result = await screenshot.execute();
     const executedCommands = testFakeAdb.getExecutedCommands();
@@ -181,15 +158,10 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
     ) => {
       const fakeAdb = new FakeAdbExecutor();
       fakeAdb.setDefaultResponse({ stdout: pngFixture().toString("base64"), stderr: "" });
-      const screenshot = new TakeScreenshot(
-        mockDevice,
-        new FakeAdbClientFactory(fakeAdb),
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        () => cacheDir,
-      );
+      const screenshot = new TakeScreenshot(mockDevice, {
+        adbFactory: new FakeAdbClientFactory(fakeAdb),
+        cacheDirResolver: () => cacheDir,
+      });
       const calls: unknown[][] = [];
       const originalGetInstance = AndroidCtrlProxyClient.getInstance;
       AndroidCtrlProxyClient.getInstance = (() => ({

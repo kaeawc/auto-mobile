@@ -27,6 +27,17 @@ export interface HierarchyCollectorOptions {
   ) => Pick<AndroidCtrlProxy, "requestHierarchySync" | "invalidateCache">;
 }
 
+export interface HierarchyCollectOptions {
+  queryOptions?: ViewHierarchyQueryOptions;
+  perf?: PerformanceTracker;
+  skipWaitForFresh?: boolean;
+  minTimestamp?: number;
+  signal?: AbortSignal;
+  readOnly?: boolean;
+  capturedHierarchy?: ViewHierarchyResult;
+  readOptions?: number | HierarchyReadOptions;
+}
+
 /**
  * Collects view hierarchy + raw view hierarchy data into an ObserveResult.
  * Encapsulates Android/iOS branching and structured error reporting.
@@ -61,14 +72,16 @@ export class HierarchyCollector {
    */
   async collect(
     result: ObserveResult,
-    queryOptions?: ViewHierarchyQueryOptions,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
-    signal?: AbortSignal,
-    readOnly: boolean = false,
-    capturedHierarchy?: ViewHierarchyResult,
-    readOptions?: number | HierarchyReadOptions,
+    {
+      queryOptions,
+      perf = new NoOpPerformanceTracker(),
+      skipWaitForFresh = false,
+      minTimestamp = 0,
+      signal,
+      readOnly = false,
+      capturedHierarchy,
+      readOptions,
+    }: HierarchyCollectOptions = {},
   ): Promise<void> {
     const { device, viewHierarchy, adb, timer } = this.opts;
     try {

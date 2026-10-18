@@ -49,6 +49,14 @@ import {
 
 export const VM_SNAPSHOT_SAVE_DISPATCHED = "isVmSnapshotSaveDispatched";
 
+export interface CaptureSnapshotDependencies {
+  emulator?: AndroidEmulatorClient;
+  timer?: Timer;
+  store?: DeviceSnapshotStore;
+  simctl?: IosSnapshotBackendDeps["simctl"];
+  consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
+}
+
 /**
  * Capture device state snapshot, dispatching on device platform.
  *
@@ -62,16 +70,20 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
   private emulator: AndroidEmulatorClient;
   private store: DeviceSnapshotStore;
   private iosSnapshotBackend: IosSnapshotBackend;
+  private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
 
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    emulator?: AndroidEmulatorClient,
-    _timer: Timer = defaultTimer,
-    store: DeviceSnapshotStore = new DeviceSnapshotStore(),
-    simctl?: IosSnapshotBackendDeps["simctl"],
-    private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
+    {
+      emulator,
+      timer: _timer = defaultTimer,
+      store = new DeviceSnapshotStore(),
+      simctl,
+      consoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
+    }: CaptureSnapshotDependencies = {},
   ) {
+    this.consoleBusyRegistry = consoleBusyRegistry;
     this.device = device;
     this.adb = adbFactory.create(device);
     this.emulator = emulator || new AndroidEmulatorClient();

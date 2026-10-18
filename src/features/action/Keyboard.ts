@@ -128,6 +128,15 @@ function sameBounds(a: ElementBounds[] | undefined, b: ElementBounds[]): boolean
   );
 }
 
+export interface KeyboardDependencies {
+  hierarchyProvider?: KeyboardHierarchyProvider;
+  timer?: Timer;
+  parser?: ElementParser;
+  geometry?: ElementGeometry;
+  finder?: FocusedInputQuery;
+  openClient?: KeyboardOpenClient;
+}
+
 export class Keyboard {
   private static readonly INPUT_METHOD_WINDOW_TYPE = 2;
   // The IME show/hide animation runs ~200-400ms on typical devices, so a single
@@ -151,12 +160,14 @@ export class Keyboard {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    hierarchyProvider?: KeyboardHierarchyProvider,
-    timer: Timer = defaultTimer,
-    parser: ElementParser = new DefaultElementParser(),
-    geometry: ElementGeometry = new DefaultElementGeometry(),
-    finder: FocusedInputQuery = new DefaultFocusedInputQuery(),
-    openClient?: KeyboardOpenClient,
+    {
+      hierarchyProvider,
+      timer = defaultTimer,
+      parser = new DefaultElementParser(),
+      geometry = new DefaultElementGeometry(),
+      finder = new DefaultFocusedInputQuery(),
+      openClient,
+    }: KeyboardDependencies = {},
   ) {
     this.device = device;
     this.adbFactory = adbFactory;

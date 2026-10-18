@@ -48,18 +48,15 @@ function createScreenshot(
   timer: FakeTimer,
   displayRevision: (deviceId: string) => number = () => 0,
 ): TakeScreenshot {
-  return new TakeScreenshot(
-    androidDevice("display-test-device"),
-    new FakeAdbClientFactory(adb),
+  return new TakeScreenshot(androidDevice("display-test-device"), {
+    adbFactory: new FakeAdbClientFactory(adb),
     timer,
-    undefined,
-    screenshotWriter,
-    new FakeFileSystem(),
-    () => "/screenshots/cache",
-    new AndroidPhysicalDisplayIdResolver({ timer, displayRevision }),
-    undefined,
-    { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-  );
+    fileWriter: screenshotWriter,
+    fileSystem: new FakeFileSystem(),
+    cacheDirResolver: () => "/screenshots/cache",
+    physicalDisplayIdResolver: new AndroidPhysicalDisplayIdResolver({ timer, displayRevision }),
+    pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+  });
 }
 
 describe("TakeScreenshot Android physical display selection", function () {
@@ -150,18 +147,15 @@ describe("TakeScreenshot Android physical display selection", function () {
       },
       async remove(): Promise<void> {},
     };
-    const screenshot = new TakeScreenshot(
-      androidDevice("concurrent-capture-device"),
-      new FakeAdbClientFactory(adb),
-      new FakeTimer(),
-      new FakeIdGenerator(["capture-one", "capture-two"]),
-      writer,
-      new FakeFileSystem(),
-      () => "/screenshots/cache",
-      undefined,
-      undefined,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+    const screenshot = new TakeScreenshot(androidDevice("concurrent-capture-device"), {
+      adbFactory: new FakeAdbClientFactory(adb),
+      timer: new FakeTimer(),
+      idGenerator: new FakeIdGenerator(["capture-one", "capture-two"]),
+      fileWriter: writer,
+      fileSystem: new FakeFileSystem(),
+      cacheDirResolver: () => "/screenshots/cache",
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
 
     await Promise.all([
       captureBase64(screenshot, "/screenshots/one.png"),
@@ -208,18 +202,15 @@ describe("TakeScreenshot Android physical display selection", function () {
       },
       async remove(): Promise<void> {},
     };
-    const screenshot = new TakeScreenshot(
-      androidDevice("warning-output-device"),
-      new FakeAdbClientFactory(adb),
-      new FakeTimer(),
-      new FakeIdGenerator(["warning"]),
-      writer,
-      new FakeFileSystem(),
-      () => "/screenshots/cache",
-      undefined,
-      undefined,
-      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
-    );
+    const screenshot = new TakeScreenshot(androidDevice("warning-output-device"), {
+      adbFactory: new FakeAdbClientFactory(adb),
+      timer: new FakeTimer(),
+      idGenerator: new FakeIdGenerator(["warning"]),
+      fileWriter: writer,
+      fileSystem: new FakeFileSystem(),
+      cacheDirResolver: () => "/screenshots/cache",
+      pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
+    });
 
     await captureBase64(screenshot, "/screenshots/warning.png");
 

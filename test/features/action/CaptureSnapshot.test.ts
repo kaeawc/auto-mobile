@@ -47,7 +47,7 @@ describe("CaptureSnapshot", () => {
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 
     // Create CaptureSnapshot instance with fakes
-    captureSnapshot = new CaptureSnapshot(device, fakeAdbFactory, undefined, fakeTimer, store);
+    captureSnapshot = new CaptureSnapshot(device, fakeAdbFactory, { timer: fakeTimer, store });
 
     // Setup default command results
     fakeAdb.setCommandResult("shell settings list global", "airplane_mode_on=0");
@@ -92,15 +92,11 @@ describe("CaptureSnapshot", () => {
     it("holds the injected console-busy marker for a VM save", async () => {
       const snapshotName = "console-fenced";
       const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
-      const capture = new CaptureSnapshot(
-        device,
-        fakeAdbFactory,
-        undefined,
-        fakeTimer,
+      const capture = new CaptureSnapshot(device, fakeAdbFactory, {
+        timer: fakeTimer,
         store,
-        undefined,
-        consoleBusy,
-      );
+        consoleBusyRegistry: consoleBusy,
+      });
       fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "OK");
 
       await capture.execute({ snapshotName, includeSettings: false, useVmSnapshot: true });
@@ -314,13 +310,10 @@ describe("CaptureSnapshot", () => {
         isEmulator: false,
       };
 
-      const capturePhysical = new CaptureSnapshot(
-        physicalDevice,
-        fakeAdbFactory,
-        undefined,
-        fakeTimer,
+      const capturePhysical = new CaptureSnapshot(physicalDevice, fakeAdbFactory, {
+        timer: fakeTimer,
         store,
-      );
+      });
       fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       const result = await capturePhysical.execute({
@@ -412,13 +405,10 @@ describe("CaptureSnapshot", () => {
         platform: "android",
         isEmulator: false,
       };
-      const capturePhysical = new CaptureSnapshot(
-        physicalDevice,
-        fakeAdbFactory,
-        undefined,
-        fakeTimer,
+      const capturePhysical = new CaptureSnapshot(physicalDevice, fakeAdbFactory, {
+        timer: fakeTimer,
         store,
-      );
+      });
       fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       const result = await capturePhysical.execute({
@@ -618,7 +608,7 @@ describe("CaptureSnapshot (iOS)", () => {
   });
 
   function makeCapture(): CaptureSnapshot {
-    return new CaptureSnapshot(device, undefined, undefined, undefined, store, simctl as any);
+    return new CaptureSnapshot(device, undefined, { store, simctl: simctl as any });
   }
 
   test("returns installed bundle IDs through strict simctl listing", async () => {
@@ -628,14 +618,11 @@ describe("CaptureSnapshot (iOS)", () => {
       { CFBundleIdentifier: "com.apple.Preferences" },
       { CFBundleIdentifier: "com.example.app" },
     ]);
-    const capture = new CaptureSnapshot(
-      device,
-      undefined,
-      undefined,
-      new FakeTimer(),
+    const capture = new CaptureSnapshot(device, undefined, {
+      timer: new FakeTimer(),
       store,
-      transport,
-    );
+      simctl: transport,
+    });
     expect(await capture["getInstalledIosBundleIds"]()).toEqual(
       new Set(["com.example.app", "com.apple.Preferences"]),
     );
@@ -646,14 +633,11 @@ describe("CaptureSnapshot (iOS)", () => {
   test("wraps a strict simctl listing failure with the existing actionable context", async () => {
     const transport = new FakeSimctl();
     transport.setListAppsError(new Error("listing unavailable"));
-    const capture = new CaptureSnapshot(
-      device,
-      undefined,
-      undefined,
-      new FakeTimer(),
+    const capture = new CaptureSnapshot(device, undefined, {
+      timer: new FakeTimer(),
       store,
-      transport,
-    );
+      simctl: transport,
+    });
     await expect(capture["getInstalledIosBundleIds"]()).rejects.toThrow(
       "Failed to list installed iOS apps to validate appBundleIds",
     );
@@ -1092,7 +1076,7 @@ describe("CaptureSnapshot snapshotName path-traversal rejection (#5705)", () => 
 
   for (const badName of ["../traversal_x", "a/b", "/etc/passwd"]) {
     it(`rejects '${badName}' before any adb snapshot-save command`, async () => {
-      const capture = new CaptureSnapshot(device, fakeAdbFactory, undefined, fakeTimer, store);
+      const capture = new CaptureSnapshot(device, fakeAdbFactory, { timer: fakeTimer, store });
       await expect(capture.execute({ snapshotName: badName, useVmSnapshot: true })).rejects.toThrow(
         /invalid snapshot name/i,
       );

@@ -84,6 +84,15 @@ interface IosRestoreOperations {
   cp(source: string, destination: string, options: { recursive: true }): Promise<void>;
 }
 
+export interface RestoreSnapshotDependencies {
+  emulator?: AndroidEmulatorClient;
+  timer?: Timer;
+  store?: DeviceSnapshotStore;
+  simctl?: IosSnapshotBackendDeps["simctl"];
+  consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
+  iosRestoreOperations?: IosRestoreOperations;
+}
+
 const RESTORABLE_SETTINGS_NAMESPACES = new Set<string>(["global", "secure", "system"]);
 
 function isSettingsNamespace(value: string): value is SettingsNamespace {
@@ -126,17 +135,21 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
   private timer: Timer;
   private iosSnapshotBackend: IosSnapshotBackend;
   private iosRestoreOperations: IosRestoreOperations;
+  private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
 
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    emulator?: AndroidEmulatorClient,
-    timer: Timer = defaultTimer,
-    store: DeviceSnapshotStore = new DeviceSnapshotStore(),
-    simctl?: IosSnapshotBackendDeps["simctl"],
-    private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
-    iosRestoreOperations?: IosRestoreOperations,
+    {
+      emulator,
+      timer = defaultTimer,
+      store = new DeviceSnapshotStore(),
+      simctl,
+      consoleBusyRegistry = defaultEmulatorConsoleBusyRegistry,
+      iosRestoreOperations,
+    }: RestoreSnapshotDependencies = {},
   ) {
+    this.consoleBusyRegistry = consoleBusyRegistry;
     this.device = device;
     this.adb = adbFactory.create(device);
     this.emulator = emulator || new AndroidEmulatorClient();

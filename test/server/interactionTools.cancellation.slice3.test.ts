@@ -204,7 +204,7 @@ test.each(devices)("real commands receive pre-aborted requests on %s", async (ta
   const launcher = new FakeDeviceUrlLauncher();
   const simctl = new FakeSimctl();
   interactionDeps.keyboardFactory = () =>
-    new Keyboard(target, { create: () => adb }, hierarchy, timer);
+    new Keyboard(target, { create: () => adb }, { hierarchyProvider: hierarchy, timer });
   interactionDeps.openUrlFactory = () =>
     new UnobservedOpenURL(target, adb, simctl, launcher, timer);
   let gestures = 0;
@@ -261,7 +261,7 @@ test("keyboard cancels a pending hierarchy read without dispatch or rollback", a
   });
   restores.push(() => read.mockRestore());
   interactionDeps.keyboardFactory = () =>
-    new Keyboard(device, { create: () => adb }, hierarchy, timer);
+    new Keyboard(device, { create: () => adb }, { hierarchyProvider: hierarchy, timer });
   const controller = new AbortController();
   const pending = handler("keyboard")(device, { action: "open" }, undefined, controller.signal);
   expect(timer.getPendingSleeps()).toEqual([100]);

@@ -453,7 +453,7 @@ export class SendKeys {
       platform: () => this.device.platform,
       focuser: this.focuser,
       keyboard: () =>
-        this.keyboard ?? new Keyboard(this.device, this.adbFactory, undefined, this.timer),
+        this.keyboard ?? new Keyboard(this.device, this.adbFactory, { timer: this.timer }),
       observer: { execute: (options) => this.observer.execute(options) },
     });
     this.targetFocus = new TargetFocus({

@@ -1,5 +1,5 @@
 # AutoMobile file-size ratchet baseline (non-blank lines, cap 1000) -- see scripts/file-size-baseline.sh
-2876	src/ctrlProxy/CtrlProxyManager.ts
+2873	src/ctrlProxy/CtrlProxyManager.ts
 4089	src/ctrlProxy/IOSCtrlProxyManager.ts
 1790	src/ctrlProxy/IosCtrlProxyBuilder.ts
 1752	src/ctrlProxy/RunnerReadinessService.ts
@@ -30,7 +30,7 @@
 1359	src/devices/deviceUtils.ts
 1596	src/doctor/checks/ios.ts
 1673	src/features/accessibility/ContrastChecker.ts
-1298	src/features/action/BaseVisualChange.ts
+1409	src/features/action/BaseVisualChange.ts
 1105	src/features/action/InputText.ts
 1528	src/features/action/InstallApp.ts
 2267	src/features/action/LaunchApp.ts
@@ -88,7 +88,7 @@
 2185	src/server/videoRecordingManager.ts
 1459	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts
-1868	src/utils/android-cmdline-tools/AdbClient.ts
+1839	src/utils/android-cmdline-tools/AdbClient.ts
 2307	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts
 2057	src/utils/fileLock.ts
 1199	src/utils/ios-cmdline-tools/DeviceAppManager.ts

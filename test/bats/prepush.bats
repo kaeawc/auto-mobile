@@ -49,6 +49,12 @@ set_paths() { printf '%s\n' "$@" > "$PREPUSH_CHANGED_FILES_FILE"; }
   [ "$status" -eq 0 ]; ! grep -q 'bun run format' "$LOG"
 }
 
+@test "agent benchmark suites and prompts select the node lane" {
+  set_paths benchmark/agent/suites/bug-repro.yml benchmark/agent/prompts/bug-repro.txt
+  run bash scripts/prepush.sh --list
+  [ "$status" -eq 0 ]; [ "$output" = node ]
+}
+
 @test "shell-only runs formatter" {
   set_paths scripts/x.sh
   run bash scripts/prepush.sh

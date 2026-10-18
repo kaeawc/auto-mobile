@@ -11,6 +11,7 @@ import { errorMessage } from "../describeUnknownError";
 import { existsSync } from "node:fs";
 import { extname, resolve, isAbsolute } from "node:path";
 import type { FileSystem } from "../filesystem/DefaultFileSystem";
+import { AMBIENT_ENV, ENV, readEnvRaw } from "../../config/env";
 import { logger } from "../logger";
 import { testOverrides } from "../testOverrides";
 import { runExecSeam } from "../ExecSeam";
@@ -36,7 +37,7 @@ import { trackAmbient } from "../PerfContext";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import { BunPortAvailabilityChecker, type PortAvailabilityChecker } from "../PortManager";
 import type { AvdConfig, AvdConfigReader } from "./AvdConfigReader";
-import { FileAvdConfigReader, MIN_AVD_RAM_MB } from "./AvdConfigReader";
+import { FileAvdConfigReader, validateAvdMemory } from "./AvdConfigReader";
 import type { RunningAvdAdvertisementReader } from "./RunningAvdAdvertisementReader";
 import { TmpdirRunningAvdAdvertisementReader } from "./RunningAvdAdvertisementReader";
 import { androidProfileFormFactor } from "../../models/formFactor";
@@ -74,7 +75,6 @@ import {
   isUnknownEmulatorName,
   readinessDiagnostic,
   unknownEmulatorName,
-  type TargetReadinessState,
 } from "./emulatorReadinessEvaluation";
 import {
   DefaultEmulatorReadinessPoller,
@@ -125,7 +125,6 @@ interface EmulatorKillOptions {
   deadlineMs?: number;
 }
 
-const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
 const ACCEL_CHECK_TIMEOUT_MS = 3_000;
 // A freshly-provisioned AVD's first cold boot can land its serial in ADB
 // `offline` and stay there. This bounds a single re-detect recovery while
@@ -542,8 +541,6 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       throwLaunchError: (error) => this.throwLaunchError(error),
       getLaunchTargetDeviceId: (cp) => this.getLaunchTargetDeviceId(cp),
       captureLaunchTargetDeviceId: (cp, output) => this.captureLaunchTargetDeviceId(cp, output),
-      clearOfflineTracker: (tracker) => this.clearOfflineTracker(tracker),
-      detectOfflineFailure: (...args) => this.detectOfflineFailure(...args),
       maybeRecoverFreshOffline: (...args) => this.maybeRecoverFreshOffline(...args),
       nextPollingDelayMs: (...args) => this.nextPollingDelayMs(...args),
       getBootedDevicesWithDiagnostics: (...args) => this.getBootedDevicesWithDiagnostics(...args),
@@ -612,7 +609,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       sandboxFailure: (output) => this.sandboxFailure(output),
       throwIfLaunchCancelled: (avdName, isCancelled) =>
         this.throwIfLaunchCancelled(avdName, isCancelled),
-      validateAvdMemory: (avdName, avdConfig) => this.validateAvdMemory(avdName, avdConfig),
+      validateAvdMemory,
     };
   }
 
@@ -682,7 +679,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     }
 
     // 2. Check standard macOS Android SDK location
-    const homeDir = process.env.HOME || process.env.USERPROFILE;
+    const homeDir = readEnvRaw(AMBIENT_ENV.HOME) || readEnvRaw(AMBIENT_ENV.USERPROFILE);
     if (homeDir) {
       potentialPaths.push(path.join(homeDir, "Library/Android/sdk/emulator/emulator"));
       potentialPaths.push(path.join(homeDir, ".android/emulator/emulator"));
@@ -841,10 +838,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     const unset = "<unset>";
     return [
       `  resolved emulator path: ${this.emulatorPath || unset}`,
-      `  ANDROID_HOME=${process.env.ANDROID_HOME ?? unset}`,
-      `  ANDROID_SDK_ROOT=${process.env.ANDROID_SDK_ROOT ?? unset}`,
-      `  ANDROID_SDK_HOME=${process.env.ANDROID_SDK_HOME ?? unset}`,
-      `  PATH=${process.env.PATH ?? unset}`,
+      ...(["ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_SDK_HOME", "PATH"] as const).map(
+        (key) => `  ${key}=${readEnvRaw(AMBIENT_ENV[key]) ?? unset}`,
+      ),
     ].join("\n");
   }
 
@@ -973,97 +969,6 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         .filter(Boolean)
         .join("\n\n"),
     );
-  }
-
-  private validateAvdMemory(avdName: string, avdConfig: AvdConfig | null): void {
-    if (!avdConfig) {
-      return;
-    }
-    const isModernPlayImage =
-      avdConfig.tag?.toLowerCase().includes("play") &&
-      (avdConfig.apiLevel ?? 0) >= MODERN_PLAY_IMAGE_MIN_API_LEVEL;
-    if (isModernPlayImage && avdConfig.ramSizeInvalid) {
-      throw new ActionableError(
-        `Cannot start AVD '${avdName}': hw.ramSize is invalid. Use a whole number in MB or a K, M, or G size suffix and retry.`,
-      );
-    }
-    if (
-      isModernPlayImage &&
-      avdConfig.ramSizeMb !== undefined &&
-      avdConfig.ramSizeMb < MIN_AVD_RAM_MB
-    ) {
-      throw new ActionableError(
-        `Cannot start AVD '${avdName}': hw.ramSize is ${avdConfig.ramSizeMb} MB, below the minimum ${MIN_AVD_RAM_MB} MB needed for a modern system image. Increase hw.ramSize in the AVD config and retry.`,
-      );
-    }
-  }
-
-  /**
-   * Clear only the CURRENT OBSERVATION on the offline tracker (device serial,
-   * offline-since, and last observed state). Used when there is no target serial
-   * and when a device-state probe rejects/omits the target, so a stale offline
-   * reading cannot drive recovery off out-of-date data (#7054).
-   *
-   * `recoveryAttempted` is deliberately NOT reset: it is MONOTONIC for the
-   * lifetime of a single `waitForEmulatorReady` invocation. A probe gap after
-   * the one-shot `adb -s <serial> reconnect` has been dispatched must not wipe that
-   * history, or a later re-confirmed offline would issue a SECOND reconnect.
-   */
-  private clearOfflineTracker(tracker: OfflineTracker): void {
-    tracker.deviceId = null;
-    tracker.since = null;
-    tracker.state = undefined;
-  }
-
-  private async detectOfflineFailure(
-    deviceId: string | undefined,
-    tracker: OfflineTracker,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-    observedStates?: AdbDeviceState[],
-  ): Promise<ActionableError | null> {
-    let states: AdbDeviceState[];
-    try {
-      states =
-        observedStates ??
-        (await this.adbFactory.create(null).getDeviceStates?.({ timeoutMs, signal })) ??
-        [];
-    } catch (error) {
-      throwIfReadinessAborted(signal);
-      // Auxiliary diagnostic probe; a failure here must not block readiness polling.
-      logger.debug(
-        `Offline-state probe unavailable during emulator readiness: ${errorMessage(error)}`,
-      );
-      // A rejected probe is NOT a current offline observation. Clear the tracker
-      // so both the reconnect dispatch and the fail-fast wait for a fresh,
-      // successful observation that still shows offline; a run of failed probes
-      // must not by itself satisfy the offline-failure threshold (#7054).
-      this.clearOfflineTracker(tracker);
-      return null;
-    }
-    if (!deviceId) {
-      this.clearOfflineTracker(tracker);
-      return null;
-    }
-    const targetState = states.find((state: AdbDeviceState) => state.deviceId === deviceId);
-    tracker.state = this.targetReadinessState(targetState);
-    if (targetState?.state !== "offline") {
-      tracker.deviceId = null;
-      tracker.since = null;
-      return null;
-    }
-    if (tracker.deviceId !== targetState.deviceId) {
-      // Refresh the current observation for a (re-)observed offline serial.
-      // Recovery history stays monotonic for the invocation, so a re-confirmed
-      // offline after the one-shot reconnect keeps advancing toward the
-      // fail-fast instead of resurrecting a second reconnect (#7054).
-      tracker.deviceId = targetState.deviceId;
-      tracker.since = this.timer.now();
-    }
-    // An offline ADB state is transient during normal emulator startup. Keep
-    // tracking it for diagnostics, but wait for the caller's readiness deadline
-    // unless the emulator process provides definitive failure evidence.
-    return null;
   }
 
   /**
@@ -1283,13 +1188,6 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       }),
     );
     throwIfReadinessAborted(options.signal);
-  }
-
-  private targetReadinessState(targetState: AdbDeviceState | undefined): TargetReadinessState {
-    if (targetState?.state === "offline") {
-      return "offline";
-    }
-    return targetState === undefined ? "absent" : "not-ready";
   }
 
   /**
@@ -1969,7 +1867,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   }
 
   private emulatorAudioArguments(): string[] {
-    return process.env.AUTOMOBILE_EMULATOR_AUDIO === "false" ? ["-no-audio"] : [];
+    return readEnvRaw(ENV.EMULATOR_AUDIO) === "false" ? ["-no-audio"] : [];
   }
 
   /**

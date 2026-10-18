@@ -4,6 +4,7 @@
 import "./runtime/bunRuntimeGuard";
 import "./daemon/processEntry";
 import "./runtime/reflectMetadata";
+import { ENV, readEnvRaw } from "./config/env";
 import { errorMessage } from "./utils/describeUnknownError";
 import { bootstrapEnvironment } from "./utils/envBootstrap";
 import { resolveAutomobileLogSink, writeEmergencyLog } from "./utils/loggingConfig";
@@ -414,8 +415,7 @@ async function main() {
     if (
       process.platform === "darwin" &&
       process.env[WEBRTC_ENV.WHIP_ENDPOINT]?.trim() &&
-      !process.env.AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER &&
-      !process.env.AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER
+      !readEnvRaw(ENV.IOS_SCREEN_CAPTURE_HELPER)
     ) {
       void ScreenCaptureHelperProvider.getInstance()
         .ensure()

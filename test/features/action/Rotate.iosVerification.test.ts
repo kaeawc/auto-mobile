@@ -156,6 +156,9 @@ describe("iOS observed rotation verification (#8778)", () => {
       [createObserveResult(1), createObserveResult(1), "landscape", "landscape"],
       [createObserveResult(0), createObserveResult(undefined, false), "portrait", "landscape"],
     ] as const) {
+      // Start each case with a cold cache: a cache read replays the last execute, so the
+      // previous case's "after" must not stand in for this case's "before".
+      observe.clearHistory();
       observe.setObserveResult((index) => (index % 2 === 0 ? before : after));
       const result = await rotate.execute("landscape");
       expect(result.success).toBe(false);

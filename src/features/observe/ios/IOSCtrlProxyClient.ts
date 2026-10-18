@@ -697,6 +697,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     fingerSpacing?: number,
     signal?: AbortSignal,
     onDispatch?: () => void,
+    beforeSend?: () => void,
   ): Promise<IOSDispatchResult<CtrlProxySwipeResult>>;
 
   clearCache(): void;
@@ -4285,31 +4286,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   async requestMultiFingerSwipe(
-    x1: number,
-    y1: number,
-    x2: number,
-    y2: number,
-    fingerCount: number,
-    duration?: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    fingerSpacing?: number,
-    signal?: AbortSignal,
-    onDispatch?: () => void,
+    ...args: Parameters<CtrlProxyGestures["requestMultiFingerSwipe"]>
   ): Promise<IOSDispatchResult<CtrlProxySwipeResult>> {
-    return this.gestures.requestMultiFingerSwipe(
-      x1,
-      y1,
-      x2,
-      y2,
-      fingerCount,
-      duration,
-      timeoutMs,
-      perf,
-      fingerSpacing,
-      signal,
-      onDispatch,
-    );
+    return this.gestures.requestMultiFingerSwipe(...args);
   }
 
   // ===========================================================================

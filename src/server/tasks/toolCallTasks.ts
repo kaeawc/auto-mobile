@@ -8,12 +8,14 @@ import type { TaskLeaseKeepalive } from "./taskLeaseKeepalive";
  * Tools whose `tools/call` may run as an MCP task (#4668). `startDevice` is the first (owner
  * decision 2026-10-18): a boot can take minutes, and the session it binds is held alive until
  * the task settles. `executePlan` follows (#13088): a plan holds each session it runs on, and
- * `tasks/cancel` aborts it through its execution like a cancelled request. `installApp` and
- * recording start/stop follow. Short interaction tools stay synchronous.
+ * `tasks/cancel` aborts it through its execution like a cancelled request. `installApp` follows
+ * (#13089): a large transfer can outlast a client's request timeout. Recording start/stop follow.
+ * Short interaction tools stay synchronous.
  */
 export const TASK_ELIGIBLE_TOOLS: ReadonlySet<string> = new Set<string>([
   "startDevice",
   "executePlan",
+  "installApp",
 ]);
 
 /** The execution scope a task's call registers under instead of its request's scope. */

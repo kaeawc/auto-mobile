@@ -24,7 +24,10 @@ import {
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
+import {
+  AndroidEmulatorClient,
+  type AndroidEmulator,
+} from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
   buildVmSnapshotCommand,
   evaluateVmSnapshotResult,
@@ -59,14 +62,14 @@ export const VM_SNAPSHOT_SAVE_DISPATCHED = "isVmSnapshotSaveDispatched";
 export class CaptureSnapshot implements SnapshotCaptureProvider {
   private device: BootedDevice;
   private adb: AdbExecutor;
-  private emulator: AndroidEmulatorClient;
+  private emulator: AndroidEmulator;
   private store: DeviceSnapshotStore;
   private iosSnapshotBackend: IosSnapshotBackend;
 
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    emulator?: AndroidEmulatorClient,
+    emulator?: AndroidEmulator,
     _timer: Timer = defaultTimer,
     store: DeviceSnapshotStore = new DeviceSnapshotStore(),
     simctl?: IosSnapshotBackendDeps["simctl"],

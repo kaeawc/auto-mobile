@@ -48,7 +48,7 @@ import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientF
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { getAndroidAppMetadataViaAdb } from "../features/observe/GetAppMetadata";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
-import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
+import { IOSCtrlProxyManager, type CtrlProxyIosManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import type { ForcedRestartSnapshot } from "../ctrlProxy/ForcedRestartBudget";
 import {
   NotifyutilIosLockStateProbe,
@@ -1847,7 +1847,7 @@ function iosRunnerCommandsComplete(
 }
 
 interface IosServiceStatusProbe {
-  manager: IOSCtrlProxyManager;
+  manager: CtrlProxyIosManager;
   installed: boolean;
   health: CtrlProxyHealthCheckResult;
   version: CtrlProxyVersionInfo | undefined;

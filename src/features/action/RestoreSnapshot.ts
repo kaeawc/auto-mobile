@@ -28,7 +28,10 @@ import {
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
+import {
+  AndroidEmulatorClient,
+  type AndroidEmulator,
+} from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
   buildVmSnapshotCommand,
   evaluateVmSnapshotResult,
@@ -121,7 +124,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
   windowCacheInvalidator: DeviceWindowCacheInvalidator = new DefaultDeviceWindowCacheInvalidator();
   private device: BootedDevice;
   private adb: AdbExecutor;
-  private emulator: AndroidEmulatorClient;
+  private emulator: Pick<AndroidEmulator, "waitForEmulatorReady">;
   private store: DeviceSnapshotStore;
   private timer: Timer;
   private iosSnapshotBackend: IosSnapshotBackend;
@@ -130,7 +133,7 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    emulator?: AndroidEmulatorClient,
+    emulator?: Pick<AndroidEmulator, "waitForEmulatorReady">,
     timer: Timer = defaultTimer,
     store: DeviceSnapshotStore = new DeviceSnapshotStore(),
     simctl?: IosSnapshotBackendDeps["simctl"],

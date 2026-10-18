@@ -1,6 +1,7 @@
 import type { DaemonManagerLike } from "../../src/daemon/manager";
 import type { DbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
+import type { McpTaskStore } from "../../src/db/mcpTaskRepository";
 import type { InstalledAppsStore } from "../../src/db/installedAppsRepository";
 import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { AwaitIdle } from "../../src/features/observe/interfaces/AwaitIdle";
@@ -21,6 +22,7 @@ import type { FakeDeviceUtils } from "./FakeDeviceUtils";
 import type { FakeGuestInputAdb } from "./FakeGuestInputAdb";
 import type { FakeIdGenerator } from "./FakeIdGenerator";
 import type { FakeInstalledAppsRepository } from "./FakeInstalledAppsRepository";
+import type { FakeMcpTaskStore } from "./FakeMcpTaskStore";
 import type { FakeObserveScreen } from "./FakeObserveScreen";
 import type { FakeTimer } from "./FakeTimer";
 
@@ -47,5 +49,6 @@ export type SharedFakeConformanceChecks = [
   Assert<Conforms<FakeDaemonManager, DaemonManagerLike>>,
   Assert<Conforms<FakeDbWriteBarrier, DbWriteBarrier>>,
   Assert<Conforms<FakeIdGenerator, IdGenerator>>,
+  Assert<Conforms<FakeMcpTaskStore, McpTaskStore>>,
   Assert<Conforms<FakeTimer, Timer>>,
 ];

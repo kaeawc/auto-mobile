@@ -73,6 +73,8 @@ export function rootAsyncScope(name: string): AsyncScope {
 /** A forward's context, plus the socket session key that names its caller. */
 export interface InProcessMcpForward extends McpForwardRequestContext {
   readonly sessionKey?: string;
+  /** The stdio proxy that owns the forward's MCP tasks (#4668), when it relays the extension. */
+  readonly taskOwnerKey?: string;
 }
 
 interface InFlightForward {
@@ -119,6 +121,7 @@ export class InProcessMcpDispatcher {
     const scope: StatelessMcpRequestScope = {
       requestScopeId: this.deps.idGenerator.next(),
       requestMcpSessionId: forward.sessionKey,
+      ...(forward.taskOwnerKey !== undefined && { taskOwnerKey: forward.taskOwnerKey }),
     };
     const enterRoot = <T>(fn: () => T): T => this.root.run(fn);
     const server = enterRoot(() => this.deps.createServer(buildMcpRequestContext(forward), scope));

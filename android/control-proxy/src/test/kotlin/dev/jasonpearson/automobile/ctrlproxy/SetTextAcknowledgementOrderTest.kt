@@ -121,13 +121,19 @@ class SetTextAcknowledgementOrderTest {
     val serviceSource = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     for (signature in
       listOf(
-        "private suspend fun performNodeAction(",
         "private fun performGlobalActionRequest(",
         "override suspend fun requestCommitText(",
         "override suspend fun requestClickFocusedInput(",
       )) {
       assertTrue("$signature clears caret", functionBody(serviceSource, signature).contains(forget))
     }
+    val nodeActionSource =
+      KotlinSourceScan.maskLiteralsAndComments(locateSource("NodeActionController.kt").readText())
+    assertTrue(
+      "performNodeAction clears caret",
+      functionBody(nodeActionSource, "suspend fun performNodeAction(")
+        .contains("host.forgetRememberedInsert()"),
+    )
     // Gestures reach the caret through GestureController.Host, which the service wires to it.
     assertTrue(serviceSource.contains("override fun forgetRememberedInsert() = $forget"))
     val gestureSource = KotlinSourceScan.maskLiteralsAndComments(readGestureSource())

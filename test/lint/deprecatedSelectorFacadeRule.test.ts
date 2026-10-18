@@ -35,14 +35,14 @@ describe("auto-mobile/no-deprecated-selector-facade", () => {
     ).toBe(true);
   });
 
-  test("allows the adapter itself and the two tap actions that still use it", () => {
+  test("allows only the adapter itself; the tap actions moved to select()", () => {
+    expect(lint(call, "src/features/utility/ResolverElementSelector.ts")).toBe(false);
     for (const file of [
-      "src/features/utility/ResolverElementSelector.ts",
       "src/features/action/TapOnElement.ts",
       "src/features/action/TapAnyElement.ts",
       "src/features/action/tapElementFinder.ts",
     ]) {
-      expect(lint(call, file)).toBe(false);
+      expect(lint(call, file)).toBe(true);
     }
   });
 

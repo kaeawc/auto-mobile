@@ -60,6 +60,13 @@ export interface GestureTimingResult extends BaseResult {
    * gestures. See issue #2910.
    */
   pinchPath?: string;
+  /**
+   * Single-finger iOS swipe: the dispatch route the runner took ("xcuiCoordinate",
+   * "unpinnedSynthesized" or "lockScreenSynthesized") and the stroke duration it really used.
+   * Absent from older runners and other gestures (#13145).
+   */
+  swipeRoute?: string;
+  effectiveDurationMs?: number;
 }
 
 /**

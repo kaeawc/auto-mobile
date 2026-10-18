@@ -26,6 +26,10 @@ import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 export class AndroidTapStrategy implements TapStrategy {
   readonly longPressDurationMs = 500;
   readonly retryTapIfNoChange = true;
+  readonly warnsOnDisabledElement = true;
+  readonly settlesPostTapChange = true;
+  readonly verifiesRefreshedDisplay = true;
+  readonly promotesClickableAncestor = true;
 
   constructor(
     private readonly device: BootedDevice,

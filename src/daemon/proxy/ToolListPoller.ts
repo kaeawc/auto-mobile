@@ -58,6 +58,11 @@ export class ToolListPoller {
   private interval: NodeJS.Timeout | null = null;
   private tickInFlight = false;
   private reconcileOnNextConnection = false;
+  /** Bumped by every subscription verdict, drop and stop; a stale verdict must not start polling. */
+  private connectionEpoch = 0;
+  private readSequence = 0;
+  /** The newest read sequence whose result (or invalidation) was applied, per list kind. */
+  private readonly appliedSequence = new Map<ListChangedKind, number>();
 
   constructor(deps: ToolListPollerDependencies) {
     this.timer = deps.timer;
@@ -73,11 +78,13 @@ export class ToolListPoller {
   /** Record a list the proxy fetched for its client, without emitting. */
   observe(kind: ListChangedKind, list: unknown): void {
     this.baselines.set(kind, hashList(list));
+    this.fenceInFlightReads(kind);
   }
 
   /** The proxy announced a change itself; the next read is the new baseline. */
   noteEmitted(kind: ListChangedKind): void {
     this.baselines.delete(kind);
+    this.fenceInFlightReads(kind);
   }
 
   /**
@@ -98,19 +105,26 @@ export class ToolListPoller {
    * reconnect behaves as before; while polling, the next connection compares once.
    */
   markDropped(): void {
+    this.connectionEpoch++;
     this.reconcileOnNextConnection ||= this.isPolling();
     this.stopInterval();
   }
 
   /** Push works on this connection: stop polling after any pending comparison. */
   async onSubscriptionAcknowledged(): Promise<void> {
+    this.connectionEpoch++;
     this.stopInterval();
     await this.reconcileIfDropped();
   }
 
   /** Push is unavailable on this connection: poll until it is acknowledged. */
   async onSubscriptionUnavailable(): Promise<void> {
+    const epoch = ++this.connectionEpoch;
     await this.reconcileIfDropped();
+    // A newer acknowledgement, drop or stop arrived while the comparison was pending.
+    if (epoch !== this.connectionEpoch) {
+      return;
+    }
     if (this.interval) {
       return;
     }
@@ -123,9 +137,15 @@ export class ToolListPoller {
   }
 
   stop(): void {
+    this.connectionEpoch++;
     this.stopInterval();
     this.reconcileOnNextConnection = false;
     this.baselines.clear();
+  }
+
+  /** Reads already in flight predate this baseline change; their results are discarded. */
+  private fenceInFlightReads(kind: ListChangedKind): void {
+    this.appliedSequence.set(kind, ++this.readSequence);
   }
 
   private stopInterval(): void {
@@ -167,6 +187,7 @@ export class ToolListPoller {
 
   /** Read one list and announce it if its hash changed. False when it could not be read. */
   private async pollKind(kind: ListChangedKind): Promise<boolean> {
+    const sequence = ++this.readSequence;
     let list: unknown;
     try {
       list = await this.fetchList(kind);
@@ -179,6 +200,12 @@ export class ToolListPoller {
     if (list === undefined) {
       return false;
     }
+    // Reads can overlap (interval tick vs push); an older read that finishes last
+    // must not overwrite the newer baseline and re-announce a list already seen.
+    if (sequence < (this.appliedSequence.get(kind) ?? 0)) {
+      return true;
+    }
+    this.appliedSequence.set(kind, sequence);
     const hash = hashList(list);
     const previous = this.baselines.get(kind);
     this.baselines.set(kind, hash);

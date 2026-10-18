@@ -61,7 +61,7 @@ function createTapOnElement(waitForCondition?: WaitForCondition): TapOnElement {
   timer.enableAutoAdvance();
   return new TapOnElement(
     { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
-    new FakeAdbClient() as any,
+    new FakeAdbClient(),
     { timer, waitForCondition },
   );
 }
@@ -86,7 +86,7 @@ function createTapWithSettleSequence(settleFrames: ObserveResult[]): TapOnElemen
   };
   return new TapOnElement(
     { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
-    new FakeAdbClient() as any,
+    new FakeAdbClient(),
     { timer, waitForCondition },
   );
 }
@@ -104,10 +104,10 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
       makeObservation({ updatedAt: 50, viewHierarchy: makeHierarchy("B") }),
     ]);
 
-    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(previous, transientA);
+    const postTap = await tap.deriveTapEffectAfterPostTapObservation(previous, transientA);
 
     expect(postTap.effect).toEqual({ screenChanged: true, basis: "viewHierarchy changed" });
-    expect((postTap.observation.viewHierarchy.hierarchy.node as any).marker).toBe("B");
+    expect((postTap.observation.viewHierarchy?.hierarchy.node as any).marker).toBe("B");
   });
 
   test("a transient A that persists BEYOND one poll interval before B still reaches B (#6284 P1)", async () => {
@@ -126,10 +126,10 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
       makeObservation({ updatedAt: 60, viewHierarchy: makeHierarchy("B") }),
     ]);
 
-    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(previous, transientA);
+    const postTap = await tap.deriveTapEffectAfterPostTapObservation(previous, transientA);
 
     expect(postTap.effect).toEqual({ screenChanged: true, basis: "viewHierarchy changed" });
-    expect((postTap.observation.viewHierarchy.hierarchy.node as any).marker).toBe("B");
+    expect((postTap.observation.viewHierarchy?.hierarchy.node as any).marker).toBe("B");
   });
 
   test("waits through a routine delayed transition before accepting a quiet hierarchy", async () => {
@@ -145,9 +145,9 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
       makeObservation({ updatedAt: 50, viewHierarchy: makeHierarchy("B") }),
     ]);
 
-    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(previous, transientA);
+    const postTap = await tap.deriveTapEffectAfterPostTapObservation(previous, transientA);
 
-    expect((postTap.observation.viewHierarchy.hierarchy.node as any).marker).toBe("B");
+    expect((postTap.observation.viewHierarchy?.hierarchy.node as any).marker).toBe("B");
   });
 
   test("a same-activity dialog (activeWindow unchanged) settles and is reported changed (#6151)", async () => {
@@ -159,10 +159,10 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
       makeObservation({ updatedAt: 30, viewHierarchy: makeHierarchy("time-picker") }),
     ]);
 
-    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(previous, dialog);
+    const postTap = await tap.deriveTapEffectAfterPostTapObservation(previous, dialog);
 
     expect(postTap.effect).toEqual({ screenChanged: true, basis: "viewHierarchy changed" });
-    expect((postTap.observation.viewHierarchy.hierarchy.node as any).marker).toBe("time-picker");
+    expect((postTap.observation.viewHierarchy?.hierarchy.node as any).marker).toBe("time-picker");
   });
 
   test("a transient flip that reverts to baseline reports no screen change", async () => {
@@ -175,7 +175,7 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
       makeObservation({ updatedAt: 40, viewHierarchy: makeHierarchy("baseline") }),
     ]);
 
-    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(previous, transientA);
+    const postTap = await tap.deriveTapEffectAfterPostTapObservation(previous, transientA);
 
     expect(postTap.effect?.screenChanged).toBe(false);
   });
@@ -196,7 +196,7 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
       }),
     ]);
 
-    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(previous, transientA);
+    const postTap = await tap.deriveTapEffectAfterPostTapObservation(previous, transientA);
 
     expect(postTap.effect).toEqual({ screenChanged: true, basis: "viewHierarchy changed" });
     expect(postTap.observation.wakefulness).toBe("Asleep");
@@ -223,7 +223,7 @@ describe("deriveTapEffectAfterPostTapObservation settles hierarchy-only changes 
     };
     const tap = createTapOnElement(waitForCondition);
 
-    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(previous, navigated);
+    const postTap = await tap.deriveTapEffectAfterPostTapObservation(previous, navigated);
 
     expect(waitCalls).toBe(0);
     expect(postTap.effect).toEqual({ screenChanged: true, basis: "activeWindow changed" });
@@ -360,7 +360,7 @@ describe("enforceFreshnessConsistencyWithEffect and the screen-off terminal (#62
       observation: asleep,
     };
 
-    (tap as any).enforceFreshnessConsistencyWithEffect(previous, result);
+    tap.enforceFreshnessConsistencyWithEffect(previous, result);
 
     // The screen-off capture is the real post-tap state, not a stale pre-tap
     // tree — its freshness must be left intact.
@@ -379,10 +379,10 @@ describe("enforceFreshnessConsistencyWithEffect and the screen-off terminal (#62
     });
     const tap = createTapWithSettleSequence([staleAsleep]);
 
-    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(previous, transientA);
+    const postTap = await tap.deriveTapEffectAfterPostTapObservation(previous, transientA);
 
     expect(postTap.observation.wakefulness).not.toBe("Asleep");
-    expect((postTap.observation.viewHierarchy.hierarchy.node as any).marker).toBe("A");
+    expect((postTap.observation.viewHierarchy?.hierarchy.node as any).marker).toBe("A");
   });
 
   test("still retracts freshness on a live-hierarchy observation that predates the transition", () => {
@@ -399,7 +399,7 @@ describe("enforceFreshnessConsistencyWithEffect and the screen-off terminal (#62
       }),
     };
 
-    (tap as any).enforceFreshnessConsistencyWithEffect(previous, result);
+    tap.enforceFreshnessConsistencyWithEffect(previous, result);
 
     expect(result.observation.freshness?.isFresh).toBe(false);
     expect(result.observation.freshness?.verified).toBe(false);

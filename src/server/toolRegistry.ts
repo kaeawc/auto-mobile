@@ -843,6 +843,11 @@ export class ToolRegistryClass {
     this.tools.clear();
   }
 
+  /** Test-only: put a previously captured tool back under its own name, replacing any current one. */
+  setRegisteredToolForTesting(tool: RegisteredTool): void {
+    this.tools.set(tool.name, tool);
+  }
+
   /** Test-only: unregister one tool by name; a no-op when it was never registered. */
   removeToolForTesting(name: string): void {
     this.removalEpoch++;
@@ -889,6 +894,11 @@ export class ToolRegistryClass {
         );
       }
     }
+  }
+
+  /** Test-only: how many session-binding release handlers are live, so suites can prove none leak. */
+  sessionBindingReleaseHandlerCountForTesting(): number {
+    return this.sessionBindingReleaseHandlers.size;
   }
 
   // Test-only: drop registered session-binding release handlers so suites sharing

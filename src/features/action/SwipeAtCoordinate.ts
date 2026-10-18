@@ -204,9 +204,11 @@ export class SwipeAtCoordinate extends BaseVisualChange {
         display,
         this.observeScreen,
         this.adb,
-        this.lastRenderedObservation,
-        signal,
-        this.displayTransitionReader,
+        {
+          lastRenderedObservation: this.lastRenderedObservation,
+          signal,
+          transitions: this.displayTransitionReader,
+        },
       );
     } catch (error) {
       if (
@@ -312,8 +314,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
         to.x,
         to.y,
         { duration, displayFence: { assertCurrent: target.assertCurrent } },
-        perf,
-        signal,
+        { perf, signal },
       );
     }
     if (await supportsCtrlProxyGestureDisplay(this.androidClient, displayId)) {
@@ -491,8 +492,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
                     // A display change since the pre-dispatch read refuses just before the finger goes down.
                     displayFence: fence,
                   },
-                  perf,
-                  signal,
+                  { perf, signal },
                 ),
           );
           if (this.device.platform === "ios" && result.success) {

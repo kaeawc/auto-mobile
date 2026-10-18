@@ -101,15 +101,13 @@ export class RealToolCallPath {
         },
       }),
     );
-    for (const [field, fake] of [
-      ["deviceSessionManager", this.deviceSessionManager],
-      ["toolCallRepository", { async recordToolCall(): Promise<void> {} }],
-      ["navigationToolCallRecorder", { record: () => undefined }],
-    ] as const) {
-      const original = Reflect.get(ToolRegistry, field);
-      Reflect.set(ToolRegistry, field, fake);
-      this.restorers.push(() => Reflect.set(ToolRegistry, field, original));
-    }
+    const originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    this.restorers.push(() => ToolRegistry.setCollaboratorsForTesting(originalCollaborators));
+    ToolRegistry.setCollaboratorsForTesting({
+      deviceSessionManager: this.deviceSessionManager,
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+      navigationToolCallRecorder: { record: () => undefined },
+    });
     const ctrlProxy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
       bindSession: () => undefined,
       getScreenScaleMetadata: () => null,

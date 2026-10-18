@@ -46,7 +46,8 @@ import { registerToolOutputResources } from "./toolOutputResources";
 import { registerObserveAppResource } from "./observeAppResource";
 import { registerBootedDeviceResources } from "./bootedDeviceResources";
 import { registerDeviceImageResources } from "./deviceImageResources";
-import { registerAppResources } from "./appResources";
+import { registerAppResources, syncInstalledAppResources } from "./appResources";
+import { registerInstalledAppResourceListRefresher } from "./installedAppResourceResync";
 import { registerNavigationResources } from "./navigationResources";
 import { registerTestTimingResources } from "./testTimingResources";
 import { registerTestRunResources } from "./testRunResources";
@@ -210,6 +211,7 @@ function registerAllResources(iosDependencies: IosDoctorDependencies): void {
   registerBootedDeviceResources();
   registerDeviceImageResources();
   registerAppResources();
+  registerInstalledAppResourceListRefresher(() => syncInstalledAppResources());
   registerNavigationResources();
   registerTestTimingResources();
   registerTestRunResources();

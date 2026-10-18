@@ -33,6 +33,14 @@ import {
 import { throwIfAborted } from "../utils/toolUtils";
 import { holdDispatchedRequest } from "./dispatchedRequestHold";
 import { idleReleaseField } from "./releaseReasons";
+import {
+  applyResourceSubscription,
+  broadcastListChanged as fanOutListChanged,
+  broadcastResourceUpdated as fanOutResourceUpdated,
+  broadcastSessionReleased as fanOutSessionReleased,
+  pushProgressNotification as fanOutProgress,
+  type NotificationTransport,
+} from "./socketServer/notificationFanOut";
 import { shapeToolCallError } from "../server/shapeToolCallError";
 import type { SessionRecoveryAssignmentDetails } from "../models/SessionRecoveryAssignmentError";
 import { readToolEnvelopePayload } from "../server/toolEnvelopePayload";
@@ -66,7 +74,6 @@ import {
   DaemonNotification,
   DaemonRequest,
   DaemonResponse,
-  PROGRESS_NOTIFICATION_METHOD,
   RESOURCE_SUBSCRIBE_METHOD,
   RESOURCE_UNSUBSCRIBE_METHOD,
   SessionContext,
@@ -119,15 +126,10 @@ import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../utils/fileLock
 import {
   ListChangedBroadcaster,
   ResourceUpdatedBroadcaster,
-  RESOURCE_UPDATED_NOTIFICATION_METHOD,
   type ResourceUpdateTargets,
-  LIST_CHANGED_NOTIFICATION_METHODS,
   type ListChangedKind,
 } from "../server/listChangedBroadcast";
-import {
-  SessionReleaseBroadcaster,
-  SESSION_RELEASED_NOTIFICATION_METHOD,
-} from "../server/sessionReleaseBroadcast";
+import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
 import {
   toolSelectionProfileUuidFromResponse,
   IDE_SET_SESSION_TOOL_ENABLED_METHOD,
@@ -1687,63 +1689,29 @@ export class UnixSocketServer {
     return !signal.aborted && socket !== undefined && !socket.destroyed;
   }
 
-  /**
-   * Push a list-changed notification frame to every subscribed client socket
-   * (issue #3223). Best-effort per socket: a dead/mid-teardown socket is
-   * skipped or destroyed by the write helper, never thrown.
-   */
-  private broadcastListChanged(kind: ListChangedKind): void {
-    const notification: DaemonNotification = {
-      type: "daemon_notification",
-      method: LIST_CHANGED_NOTIFICATION_METHODS[kind],
+  /** The fan-out's view of the live client sockets (#11815). */
+  private get notificationTransport(): NotificationTransport {
+    return {
+      hasSocket: (sessionId) => this.clientSockets.has(sessionId),
+      write: (sessionId, frame, onFlushed) => {
+        const socket = this.clientSockets.get(sessionId);
+        if (socket) {
+          this.writeFrame(socket, sessionId, frame, onFlushed);
+        }
+      },
     };
-    for (const sessionId of this.notificationSubscribers) {
-      const socket = this.clientSockets.get(sessionId);
-      if (!socket) {
-        continue;
-      }
-      this.writeFrame(socket, sessionId, notification);
-    }
+  }
+
+  private broadcastListChanged(kind: ListChangedKind): void {
+    fanOutListChanged(this.notificationSubscribers, this.notificationTransport, kind);
   }
 
   private broadcastResourceUpdated(resolveTargets: ResourceUpdateTargets): void {
-    for (const [sessionId, subscriptions] of this.resourceSubscriptions) {
-      const socket = this.clientSockets.get(sessionId);
-      if (!socket) {
-        continue;
-      }
-      for (const uri of resolveTargets(subscriptions)) {
-        this.writeFrame(socket, sessionId, {
-          type: "daemon_notification",
-          method: RESOURCE_UPDATED_NOTIFICATION_METHOD,
-          uri,
-        });
-      }
-    }
+    fanOutResourceUpdated(this.resourceSubscriptions, this.notificationTransport, resolveTargets);
   }
 
   private handleResourceSubscription(sessionId: string, request: DaemonRequest): DaemonResponse {
-    const uri = request.params?.uri;
-    if (typeof uri !== "string" || uri.length === 0) {
-      return {
-        id: request.id,
-        type: "mcp_response",
-        success: false,
-        error: "Resource subscription requires params.uri",
-      };
-    }
-    if (request.method === RESOURCE_SUBSCRIBE_METHOD) {
-      const subscriptions = this.resourceSubscriptions.get(sessionId) ?? new Set<string>();
-      subscriptions.add(uri);
-      this.resourceSubscriptions.set(sessionId, subscriptions);
-    } else {
-      const subscriptions = this.resourceSubscriptions.get(sessionId);
-      subscriptions?.delete(uri);
-      if (subscriptions?.size === 0) {
-        this.resourceSubscriptions.delete(sessionId);
-      }
-    }
-    return { id: request.id, type: "mcp_response", success: true, result: {} };
+    return applyResourceSubscription(this.resourceSubscriptions, sessionId, request);
   }
 
   /**
@@ -1760,51 +1728,15 @@ export class UnixSocketServer {
     release?: DaemonNotification["release"],
     recordingIds?: string[],
   ): void {
-    const notification: DaemonNotification = {
-      type: "daemon_notification",
-      method: SESSION_RELEASED_NOTIFICATION_METHOD,
-      sessionId: releasedSessionId,
-      ...(reason !== undefined ? { reason } : {}),
-      ...idleReleaseField(reason),
-      ...(release !== undefined ? { release } : {}),
-      ...(recordingIds && recordingIds.length > 0 ? { recordingIds } : {}),
-    };
-    for (const sessionId of this.notificationSubscribers) {
-      const socket = this.clientSockets.get(sessionId);
-      if (!socket) {
-        continue;
-      }
-      const pending = Promise.withResolvers<void>();
-      this.pendingSessionReleaseWrites.add(pending.promise);
-      this.writeFrame(socket, sessionId, notification, () => {
-        this.pendingSessionReleaseWrites.delete(pending.promise);
-        pending.resolve();
-      });
-    }
+    fanOutSessionReleased(
+      this.notificationSubscribers,
+      this.notificationTransport,
+      this.pendingSessionReleaseWrites,
+      { releasedSessionId, reason, release, recordingIds },
+    );
   }
 
-  /**
-   * Push one `notifications/progress` tick to the SINGLE socket session that
-   * requested it (issue #6205), carrying the SAME `progressToken` that
-   * session's `tools/call` request declared. Unlike the broadcast helpers
-   * above, this targets exactly one socket rather than every subscriber — the
-   * request id identifies the originating call even if another call on the
-   * same connection uses the same token.
-   *
-   * Deliberately NOT gated on the opt-in general-notification subscription
-   * (unlike the broadcast helpers above). A progress tick is a directed reply
-   * to something THIS session explicitly asked for by putting a
-   * `progressToken` on its OWN in-flight request -- that is itself the
-   * opt-in, independent of whether `daemon/subscribe-notifications` was ever
-   * sent or whether it succeeded. `DaemonMcpProxy.doConnect` deliberately
-   * continues without a subscription when it fails (best-effort degradation),
-   * and gating progress on it too would silently strand a long-running
-   * progress-emitting call: the daemon keeps applying work under its own
-   * extended deadline while the client's independent local timer -- which
-   * only extends on a progress tick it actually receives -- times out
-   * underneath it, a split-brain where the daemon succeeds but the client
-   * reports failure (#6222 review, P2). Only a torn-down socket is skipped.
-   */
+  /** Pushes one progress tick to the single socket that requested it (#6205); see the fan-out. */
   private pushProgressNotification(
     sessionId: string,
     requestId: string,
@@ -1813,20 +1745,13 @@ export class UnixSocketServer {
     total?: number,
     message?: string,
   ): void {
-    const socket = this.clientSockets.get(sessionId);
-    if (!socket) {
-      return;
-    }
-    const notification: DaemonNotification = {
-      type: "daemon_notification",
-      method: PROGRESS_NOTIFICATION_METHOD,
+    fanOutProgress(this.notificationTransport, sessionId, {
       requestId,
       progressToken,
       progress,
-      ...(total !== undefined ? { total } : {}),
-      ...(message !== undefined ? { message } : {}),
-    };
-    this.writeFrame(socket, sessionId, notification);
+      total,
+      message,
+    });
   }
 
   private writeFrame(

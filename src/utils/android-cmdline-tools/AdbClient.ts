@@ -4,6 +4,7 @@ import {
 } from "../nativeHelpers/NativeHelperRegistry";
 import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import { parseAdbDevicesList } from "./parseAdbDevicesList";
+import { parseDeviceLock } from "./parseDeviceLock";
 import { parseDumpsysUsers, parsePmListUsers } from "./parseAndroidUsers";
 import { isDeviceLossCancellationReason } from "../deviceLossCancellationReason";
 import { copyAndroidTransportId, type AndroidTransportRouting } from "../androidSerial";
@@ -1731,26 +1732,7 @@ export class AdbClient implements AdbExecutor {
       return null;
     }
 
-    // Lowercase, boundary-anchored tokens: the KeyguardServiceDelegate fields are
-    // `showing=`/`occluded=`/`secure=`, which do not collide with the CamelCase
-    // siblings in the same dump (`mKeyguardOccluded=`, `mSimSecure=`, `mIsShowing=`).
-    const keyguardShowing = AdbClient.matchBool(policy, /(?:^|\s)showing=(true|false)/);
-    if (keyguardShowing === null) {
-      return null;
-    }
-    const occluded = AdbClient.matchBool(policy, /(?:^|\s)occluded=(true|false)/) ?? false;
-    const secure = AdbClient.matchBool(policy, /(?:^|\s)secure=(true|false)/);
-    return {
-      locked: keyguardShowing && !occluded,
-      keyguardShowing,
-      secure: secure ?? undefined,
-    };
-  }
-
-  /** First `<field>=true|false` match as a boolean, or null when the field is absent. */
-  private static matchBool(haystack: string, pattern: RegExp): boolean | null {
-    const match = haystack.match(pattern);
-    return match ? match[1] === "true" : null;
+    return parseDeviceLock(policy);
   }
 
   /**

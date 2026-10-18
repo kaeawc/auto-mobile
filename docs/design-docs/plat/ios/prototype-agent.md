@@ -523,7 +523,8 @@ tree cannot be rebuilt for within the show's limits is refused like any other.
 
 A refused write changes nothing, emits nothing and does not stop the rest of the action list. An
 accepted write bumps the shown id's data revision (monotonic per id, never rewound by a re-show, as
-event sequences are) and emits one `change` event whose `name` is the written `/data/...` path (the
+event sequences are; every show is itself one revision, so the first show reports 1, as on Android,
+#13040) and emits one `change` event whose `name` is the written `/data/...` path (the
 array for an append) and whose payload is `{op, value?, revision}`. The value always travels. The agent
 shares that counter with `prototype_patch_v1` (#11675): device state writes and accepted patches take the next revision too.
 

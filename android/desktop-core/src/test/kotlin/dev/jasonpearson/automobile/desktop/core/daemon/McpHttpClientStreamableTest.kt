@@ -71,13 +71,27 @@ class McpHttpClientStreamableTest {
   }
 
   @Test
-  fun `default session keys are distinct per client instance`() {
+  fun `clients built in the same app session share one default session key`() {
     val server = FakeStreamable()
     server.client().listTools()
     server.client().listTools()
 
     val keys =
       server.requests.map { it.headers.firstValue("x-auto-mobile-mcp-session-id").get() }.toSet()
+    assertEquals(setOf(McpSessionKeyProvider.appSession.key), keys)
+  }
+
+  @Test
+  fun `different app sessions get different session keys`() {
+    val first = McpSessionKeyProvider()
+    val second = McpSessionKeyProvider()
+    val server = FakeStreamable()
+    server.client(mcpSessionKey = first.key).listTools()
+    server.client(mcpSessionKey = second.key).listTools()
+
+    val keys =
+      server.requests.map { it.headers.firstValue("x-auto-mobile-mcp-session-id").get() }.toSet()
+    assertEquals(setOf(first.key, second.key), keys)
     assertEquals(2, keys.size)
   }
 

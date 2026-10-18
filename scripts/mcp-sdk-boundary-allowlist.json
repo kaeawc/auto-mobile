@@ -1,6 +1,1 @@
-{
-  "src/daemon/daemon.ts": {
-    "sessionContext.sessionId": 1,
-    "sessionIdGenerator": 1
-  }
-}
+{}

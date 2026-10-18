@@ -174,6 +174,11 @@ const RUN_SHAPING_CLAUDE_PREFIXES = [
  */
 const RUN_SHAPING_TIMEOUT = /^(?:CLAUDE_|API_|MCP_|BASH_)\w*TIMEOUT(?:_MS|_SECONDS)?$/;
 /**
+ * Streaming watchdog toggles (CLAUDE_ENABLE_STREAM_WATCHDOG, CLAUDE_ENABLE_BYTE_WATCHDOG,
+ * CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK, ...): they turn the deadlines above on or off.
+ */
+const RUN_SHAPING_WATCHDOG = /^CLAUDE_\w*WATCHDOG\w*$/;
+/**
  * API beta controls (ANTHROPIC_BETAS, CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS, ...): they add or
  * remove beta request headers and tool-schema fields.
  */
@@ -183,6 +188,7 @@ export function isRunShapingClaudeVariable(key: string): boolean {
   return (
     RUN_SHAPING_CLAUDE_VARIABLES.has(key) ||
     RUN_SHAPING_TIMEOUT.test(key) ||
+    RUN_SHAPING_WATCHDOG.test(key) ||
     RUN_SHAPING_BETAS.test(key) ||
     RUN_SHAPING_CLAUDE_PREFIXES.some((prefix) => key.startsWith(prefix))
   );
@@ -445,6 +451,8 @@ const PROVIDER_ACCOUNTS = [
   "AWS_DEFAULT_PROFILE",
   // The role the AWS credential chain assumes; its ARN names the target account.
   "AWS_ROLE_ARN",
+  // The Anthropic-on-AWS workspace, sent on every request; workspaces differ in quota.
+  "ANTHROPIC_AWS_WORKSPACE_ID",
 ];
 const PROXY_BYPASS = ["NO_PROXY", "no_proxy"];
 // The adb server the measured MCP server reaches (MCP_PASSTHROUGH_VARIABLES): a remote adb

@@ -355,6 +355,10 @@ describe("agent benchmark provider identity", () => {
     expect(providerIdentity({ AWS_ROLE_ARN: "arn:aws:iam::123:role/r" })).toBe(
       `AWS_ROLE_ARN=sha256:${pathDigest("arn:aws:iam::123:role/r")}`,
     );
+    // The Anthropic-on-AWS workspace selects the account's quota.
+    expect(providerIdentity({ ANTHROPIC_AWS_WORKSPACE_ID: "wrkspc_1" })).toBe(
+      `ANTHROPIC_AWS_WORKSPACE_ID=sha256:${pathDigest("wrkspc_1")}`,
+    );
     // The AWS profile picks Bedrock's account through the credential chain.
     expect(
       providerIdentity(
@@ -371,6 +375,10 @@ describe("agent benchmark provider identity", () => {
       "CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS",
       "CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS",
       "CLAUDE_CODE_GLOB_TIMEOUT_SECONDS",
+      // The toggles that turn those deadlines on or off.
+      "CLAUDE_ENABLE_STREAM_WATCHDOG",
+      "CLAUDE_ENABLE_BYTE_WATCHDOG",
+      "CLAUDE_ENABLE_BYTE_WATCHDOG_BEDROCK",
     ]) {
       expect({ key, scrubbed: isRunShapingClaudeVariable(key) }).toEqual({ key, scrubbed: true });
     }

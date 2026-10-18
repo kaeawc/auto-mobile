@@ -165,9 +165,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonObjectBuilder
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 
@@ -569,33 +566,6 @@ internal const val PACKAGE_EVENT_USER_ID_RANGE = 100_000
 internal fun packageEventUserId(uid: Int): Int =
   if (uid >= 0) uid / PACKAGE_EVENT_USER_ID_RANGE else 0
 
-/**
- * The `package_event` payload. `userId` is the Android user id; `uid` carries the raw package uid
- * when known and doubles as the marker that `userId` is a real user id: APKs that predate #10067
- * sent the uid in `userId` and no `uid`, which the host converts itself.
- */
-internal fun packageEventJson(
-  action: String,
-  packageName: String,
-  userId: Int,
-  uid: Int?,
-  isSystem: Boolean?,
-  removedForAllUsers: Boolean,
-): JsonObject = buildJsonObject {
-  put("action", action)
-  put("packageName", packageName)
-  put("userId", userId)
-  if (uid != null) {
-    put("uid", uid)
-  }
-  if (isSystem != null) {
-    put("isSystem", isSystem)
-  }
-  if (removedForAllUsers) {
-    put("removedForAllUsers", true)
-  }
-}
-
 internal fun crashEventTimestamp(reportedMs: Long, nowMs: Long): Long =
   if (reportedMs > 0) reportedMs else nowMs
 
@@ -975,27 +945,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     encodeDefaults = true
   }
   private val jsonLenient = Json { ignoreUnknownKeys = true }
-
-  private fun webSocketFrameJson(
-    type: String,
-    timestamp: Long = System.currentTimeMillis(),
-    requestId: String? = null,
-    perfTiming: JsonElement? = null,
-    buildContent: JsonObjectBuilder.() -> Unit,
-  ): String =
-    jsonCompact.encodeToString(
-      buildJsonObject {
-        put("type", type)
-        put("timestamp", timestamp)
-        if (requestId != null) {
-          put("requestId", requestId)
-        }
-        buildContent()
-        if (perfTiming != null) {
-          put("perfTiming", perfTiming)
-        }
-      },
-    )
 
   private val perfProvider = PerfProvider.instance
   private val timeProvider: TimeProvider = SystemTimeProvider()
@@ -1550,18 +1499,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           }
 
           override suspend fun broadcastWithPerfSync(
-            type: String,
-            requestId: String?,
-            buildContent: JsonObjectBuilder.() -> Unit,
+            messageBuilder: (perfTiming: JsonElement?) -> String,
           ) {
-            webSocketServer.broadcastWithPerfSync { perfTiming ->
-              webSocketFrameJson(
-                type,
-                requestId = requestId,
-                perfTiming = perfTiming,
-                buildContent = buildContent,
-              )
-            }
+            webSocketServer.broadcastWithPerfSync(messageBuilder = messageBuilder)
           }
 
           override fun connectionCount() = webSocketServer.getConnectionCount()
@@ -1621,18 +1561,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
 
           override suspend fun broadcastWithPerfSync(
-            type: String,
-            requestId: String?,
-            buildContent: JsonObjectBuilder.() -> Unit,
+            messageBuilder: (perfTiming: JsonElement?) -> String,
           ) {
-            webSocketServer.broadcastWithPerfSync { perfTiming ->
-              webSocketFrameJson(
-                type,
-                requestId = requestId,
-                perfTiming = perfTiming,
-                buildContent = buildContent,
-              )
-            }
+            webSocketServer.broadcastWithPerfSync(messageBuilder = messageBuilder)
           }
 
           override suspend fun broadcastSetKeyboardProfileResult(
@@ -3352,12 +3283,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     try {
       val timestamp = timeProvider.currentTimeMillis()
       val message =
-        webSocketFrameJson("package_event", timestamp = timestamp) {
-          put(
-            "event",
-            packageEventJson(action, packageName, userId, uid, isSystem, removedForAllUsers),
-          )
-        }
+        packageEventFrame(timestamp, action, packageName, userId, uid, isSystem, removedForAllUsers)
       webSocketServer.broadcast(message)
       Log.d(TAG, "Broadcasted package event to ${webSocketServer.getConnectionCount()} clients")
     } catch (e: CancellationException) {

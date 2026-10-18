@@ -196,4 +196,92 @@ class TypedResultWireTest {
       text(SelectAllResult(timestamp = 1, success = true, totalTimeMs = 2)),
     )
   }
+
+  @Test
+  fun `text, ime and event frames keep the hand-built field order`() {
+    val ordered = Json {
+      classDiscriminator = "type"
+      encodeDefaults = true
+      explicitNulls = false
+    }
+    fun text(response: WebSocketResponse) = ordered.encodeToString<WebSocketResponse>(response)
+    assertEquals(
+      """{"type":"commit_text_result","timestamp":1,"requestId":"r","success":false,"totalTimeMs":2,"partialApplication":true,"committedUnits":3,"insertedText":"t","editorConsumed":true,"trace":["a"],"error":"e","perfTiming":{"a":1}}""",
+      text(
+        CommitTextResult(
+          timestamp = 1,
+          requestId = "r",
+          success = false,
+          totalTimeMs = 2,
+          partialApplication = true,
+          committedUnits = 3,
+          insertedText = "t",
+          editorConsumed = true,
+          trace = listOf("a"),
+          error = "e",
+          perfTiming = """{"a":1}""",
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"commit_text_result","timestamp":1,"success":true,"totalTimeMs":2}""",
+      text(CommitTextResult(timestamp = 1, success = true, totalTimeMs = 2)),
+    )
+    assertEquals(
+      """{"type":"insert_text_result","timestamp":1,"success":true,"totalTimeMs":2,"warning":"w","caretPlaced":false,"resultingTextLength":4,"partialApplication":true}""",
+      text(
+        InsertTextResult(
+          timestamp = 1,
+          success = true,
+          totalTimeMs = 2,
+          warning = "w",
+          caretPlaced = false,
+          resultingTextLength = 4,
+          partialApplication = true,
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"cancel_ime_commit_result","timestamp":1,"success":true,"targetRequestId":"t","partialApplication":false}""",
+      text(CancelImeCommitResult(timestamp = 1, targetRequestId = "t", partialApplication = false)),
+    )
+    assertEquals(
+      """{"type":"screenshot_error","timestamp":1,"requestId":"r","error":"e","displayId":2,"panelUniqueId":"p"}""",
+      text(
+        ScreenshotErrorResult(
+          timestamp = 1,
+          requestId = "r",
+          error = "e",
+          displayId = 2,
+          panelUniqueId = "p",
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"display_transition","timestamp":1,"change":"rotation","displayId":0,"panelFingerprint":{"width":1,"height":2},"width":3,"rotation":1}""",
+      text(
+        DisplayTransitionEvent(
+          timestamp = 1,
+          change = "rotation",
+          displayId = 0,
+          panelFingerprint = DisplayPanelFingerprint(1, 2),
+          width = 3,
+          rotation = 1,
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"package_event","timestamp":1,"event":{"action":"added","packageName":"p","userId":10,"uid":5,"removedForAllUsers":true}}""",
+      text(
+        PackageEvent(
+          timestamp = 1,
+          event = PackageEventData("added", "p", 10, uid = 5, removedForAllUsers = true),
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"interaction_event","timestamp":1,"event":{"type":"tap","packageName":null}}""",
+      text(InteractionEvent(timestamp = 1, event = """{"type":"tap","packageName":null}""")),
+    )
+  }
 }

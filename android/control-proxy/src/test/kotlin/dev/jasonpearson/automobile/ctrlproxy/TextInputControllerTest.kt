@@ -18,13 +18,10 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -174,26 +171,13 @@ class TextInputControllerTest {
     }
 
     override suspend fun broadcastWithPerfSync(
-      type: String,
-      requestId: String?,
-      buildContent: JsonObjectBuilder.() -> Unit,
+      messageBuilder: (perfTiming: JsonElement?) -> String,
     ) {
+      val frame = Json.parseToJsonElement(messageBuilder(null)).jsonObject
+      val type = frame.getValue("type").jsonPrimitive.content
       syncTypes += type
-      record(type, requestId, buildContent)
-    }
-
-    private fun record(
-      type: String,
-      requestId: String?,
-      buildContent: JsonObjectBuilder.() -> Unit,
-    ) {
       events += "frame:$type"
-      frames +=
-        type to
-          buildJsonObject {
-            if (requestId != null) put("requestId", requestId)
-            buildContent()
-          }
+      frames += type to JsonObject(frame - setOf("type", "timestamp", "perfTiming"))
     }
 
     override fun connectionCount() = 1

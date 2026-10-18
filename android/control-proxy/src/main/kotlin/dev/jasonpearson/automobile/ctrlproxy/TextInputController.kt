@@ -14,9 +14,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObjectBuilder
-import kotlinx.serialization.json.encodeToJsonElement
-import kotlinx.serialization.json.put
 
 /**
  * Accessibility-driven text input: set text, insert text at the caret, IME actions and select all,
@@ -70,11 +67,7 @@ internal class TextInputController(
 
     suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String)
 
-    suspend fun broadcastWithPerfSync(
-      type: String,
-      requestId: String?,
-      buildContent: JsonObjectBuilder.() -> Unit,
-    )
+    suspend fun broadcastWithPerfSync(messageBuilder: (perfTiming: JsonElement?) -> String)
 
     fun connectionCount(): Int
   }
@@ -123,9 +116,8 @@ internal class TextInputController(
           node?.recycle()
         }
       resultBroadcaster.guard(requestId, "insert_text_state_result") {
-        responseSender.broadcastWithPerfSync("insert_text_state_result", requestId) {
-          put("success", true)
-          if (state != null) put("state", jsonCompact.encodeToJsonElement(state))
+        responseSender.broadcastWithPerfSync { perfTiming ->
+          insertTextStateResultFrame(requestId, state, perfTiming)
         }
       }
     }
@@ -955,12 +947,8 @@ internal class TextInputController(
     }
 
     resultBroadcaster.guard(requestId, "set_text_result") {
-      responseSender.broadcastWithPerfSync("set_text_result", requestId) {
-        put("success", success)
-        put("totalTimeMs", totalTimeMs)
-        if (error != null) {
-          put("error", error)
-        }
+      responseSender.broadcastWithPerfSync { perfTiming ->
+        setTextResultFrame(requestId, success, error, totalTimeMs, perfTiming)
       }
       Log.d(TAG, "Broadcasted set text result to ${responseSender.connectionCount()} clients")
     }
@@ -983,17 +971,18 @@ internal class TextInputController(
     }
 
     resultBroadcaster.guard(requestId, "insert_text_result") {
-      responseSender.broadcastWithPerfSync("insert_text_result", requestId) {
-        InsertTextResultBody(
-            success = success,
-            totalTimeMs = totalTimeMs,
-            error = error,
-            warning = warning,
-            caretPlaced = caretPlaced,
-            resultingTextLength = resultingTextLength,
-            partialApplication = partialApplication,
-          )
-          .putInto(this)
+      responseSender.broadcastWithPerfSync { perfTiming ->
+        insertTextResultFrame(
+          requestId,
+          success,
+          error,
+          totalTimeMs,
+          warning,
+          caretPlaced,
+          resultingTextLength,
+          partialApplication,
+          perfTiming,
+        )
       }
     }
   }

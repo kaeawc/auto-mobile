@@ -36,8 +36,6 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboa
 import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
-import dev.jasonpearson.automobile.ctrlproxy.models.InteractionElement
-import dev.jasonpearson.automobile.ctrlproxy.models.InteractionEvent
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
@@ -508,9 +506,9 @@ internal fun accessibilityEventWorkFor(
   }
 
 /**
- * Debounced-scroll accumulation ([CtrlProxy.pendingScrollDeltaX] / `Y` / package name) tagged with
- * the [WebSocketServer.observerSessionGeneration] it was accumulated under, modeled as an immutable
- * value so the cross-session discard is unit-testable.
+ * Debounced-scroll accumulation (pending scroll X / Y / package name in
+ * [InteractionEventController]) tagged with the [WebSocketServer.observerSessionGeneration] it was
+ * accumulated under, modeled as an immutable value so the cross-session discard is unit-testable.
  */
 internal data class PendingScroll(
   val deltaX: Int,
@@ -808,8 +806,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     /**
      * `notificationTimeout` coalesces bursts of same-type events at the OS boundary before
-     * delivery. 100 ms matches the tightest interaction debounce the handler already applies
-     * ([inputTextDebounceMs]) and sits well under the scroll debounce (300 ms) and hierarchy
+     * delivery. 100 ms matches the tightest interaction debounce the handler already applies (see
+     * [InteractionEventController]) and sits well under the scroll debounce (300 ms) and hierarchy
      * broadcast interval (250 ms), so it collapses event floods without adding perceptible latency
      * to the interaction/telemetry or hierarchy-refresh paths the debouncers rely on.
      */
@@ -1319,6 +1317,33 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       timeProvider = timeProvider,
     )
   }
+  private val interactionEventController by lazy {
+    InteractionEventController(
+      host =
+        object : InteractionEventController.Host {
+          override fun connectionCount() =
+            if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 0
+
+          override fun observerSessionGeneration() =
+            if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration() else 0
+
+          override fun isServerRunning() =
+            ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcast(message: String) {
+            webSocketServer.broadcast(message)
+          }
+
+          override fun lastWindowClassName() = this@CtrlProxy.lastWindowClassName
+
+          override fun launchInServiceScope(block: suspend CoroutineScope.() -> Unit) {
+            serviceScope.launch(block = block)
+          }
+        },
+      timeProvider = timeProvider,
+      jsonCompact = jsonCompact,
+    )
+  }
   private val nodeActionController by lazy {
     NodeActionController(
       host =
@@ -1594,28 +1619,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   // Not an AccessibilityServiceInfo flag — read directly by extractHierarchyDirect/extractHierarchy
   // when calling into ViewHierarchyExtractor. Set via setAccessibilityFlags (--no-occlusion).
   @Volatile private var occlusionEnabled: Boolean = true
-
-  // Debounce timestamps — @Volatile since interaction events may trigger coroutines
-  @Volatile private var lastInputTextBroadcastMs: Long = 0
-  private val inputTextDebounceMs: Long = 100
-
-  @Volatile private var lastA11yFocusTapMs: Long = 0
-  private val a11yFocusTapDebounceMs: Long = 200
-
-  // Debounce for scroll events — accumulate delta and emit once per gesture.
-  // Store extracted fields instead of the raw AccessibilityEvent because
-  // Android recycles events after onAccessibilityEvent returns.
-  private var lastScrollBroadcastMs: Long = 0
-  private val scrollDebounceMs: Long = 300
-  @Volatile private var pendingScrollDeltaX: Int = 0
-  @Volatile private var pendingScrollDeltaY: Int = 0
-  private var pendingScrollPackageName: String? = null
-
-  // The WebSocketServer.observerSessionGeneration the pending scroll deltas were accumulated under.
-  // A change means the observer set emptied and a new session began since the last sample (issue
-  // #5470 review); the next scroll discards the stale accumulation instead of combining across
-  // sessions. A concurrent client joining does NOT change it, so an in-flight scroll is preserved.
-  @Volatile private var pendingScrollSessionGeneration: Int = 0
 
   // Job for collecting hierarchy flow results
   private var hierarchyFlowJob: Job? = null
@@ -3565,37 +3568,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
       // Broadcast interaction events for telemetry tracking. Classification is routed through the
       // shared [interactionDispatchFor] so the subscribed event-type mask (derived from the same
-      // classifier) can never drift from what this `when` actually acts on.
-      when (work.interaction) {
-        InteractionDispatch.TAP -> recordInteractionEvent(event, "tap")
-        InteractionDispatch.LONG_PRESS -> recordInteractionEvent(event, "longPress")
-        // Compose doesn't fire TYPE_VIEW_CLICKED — detect taps via content changes
-        // on clickable elements. CONTENT_CHANGE_TYPE_STATE_DESCRIPTION (64) fires
-        // when Compose state changes (e.g., button click updates counter).
-        // CONTENT_CHANGE_TYPE_CONTENT_DESCRIPTION (4) fires on many Compose interactions.
-        InteractionDispatch.CONTENT_CHANGED -> {
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val ct = event.contentChangeTypes
-            // State description change = likely user interaction (Compose state update)
-            if (ct and AccessibilityEvent.CONTENT_CHANGE_TYPE_STATE_DESCRIPTION != 0) {
-              recordDebouncedInteraction(event, "stateChange")
-            }
-          }
-        }
-        InteractionDispatch.NAVIGATE -> recordInteractionEvent(event, "navigate")
-        InteractionDispatch.SELECT -> recordInteractionEvent(event, "select")
-        InteractionDispatch.INPUT_TEXT -> {
-          val now = System.currentTimeMillis()
-          if (now - lastInputTextBroadcastMs >= inputTextDebounceMs) {
-            lastInputTextBroadcastMs = now
-            recordInteractionEvent(event, "inputText")
-          }
-        }
-        // frameContext already advanced above (unconditionally); here we only do the gated,
-        // expensive scroll recording, which runs solely when observed.
-        InteractionDispatch.SCROLL -> recordDebouncedScroll(event)
-        null -> {} // event type this service does not act on
-      }
+      // classifier) can never drift from what the controller actually acts on.
+      work.interaction?.let { interactionEventController.record(event, it) }
 
       // Delegate to the smart debouncer for content/window changes (same shared classifier). The
       // debouncer uses structural hash comparison to detect animation vs real changes. Gated on an
@@ -3614,179 +3588,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun onInterrupt() {
     Log.w(TAG, "Accessibility service interrupted")
-  }
-
-  private fun recordInteractionEvent(event: AccessibilityEvent, type: String) {
-    // Observer gate (issue #5470): early-return BEFORE reading event.source / getBoundsInScreen /
-    // allocating when nobody is connected. onAccessibilityEvent already gates dispatch on the same
-    // count; this is the defensive backstop for the scroll/debounced callers, and
-    // getConnectionCount
-    // > 0 also implies the server is running.
-    if (!::webSocketServer.isInitialized || webSocketServer.getConnectionCount() <= 0) {
-      return
-    }
-
-    val source =
-      try {
-        event.source
-      } catch (_: Exception) {
-        null
-      }
-    val bounds = source?.let {
-      try {
-        val rect = Rect()
-        it.getBoundsInScreen(rect)
-        ElementBounds(rect)
-      } catch (_: Exception) {
-        null
-      }
-    }
-    // Build element from source node, falling back to event-level data
-    val element =
-      if (source != null) {
-        InteractionElement(
-          text = source.text?.toString(),
-          contentDescription = source.contentDescription?.toString(),
-          resourceId = source.viewIdResourceName,
-          className = source.className?.toString(),
-          bounds = bounds,
-        )
-      } else {
-        // Fallback: extract what we can from the AccessibilityEvent itself
-        val eventText = event.text?.joinToString("") { it.toString() }?.takeIf { it.isNotEmpty() }
-        val eventDesc = event.contentDescription?.toString()
-        val eventClass = event.className?.toString()
-        if (eventText != null || eventDesc != null || eventClass != null) {
-          InteractionElement(
-            text = eventText,
-            contentDescription = eventDesc,
-            resourceId = null,
-            className = eventClass,
-            bounds = null,
-          )
-        } else null
-      }
-    try {
-      source?.recycle()
-    } catch (_: Exception) {
-      /* already recycled */
-    }
-
-    val textValue =
-      if (type == "inputText") {
-        val textList = event.text
-        if (textList.isNullOrEmpty()) null
-        else textList.joinToString(separator = "") { it.toString() }
-      } else {
-        null
-      }
-
-    val scrollDeltaX =
-      if (type == "scroll" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        pendingScrollDeltaX.takeIf { it != 0 } ?: event.scrollDeltaX
-      } else {
-        null
-      }
-    val scrollDeltaY =
-      if (type == "scroll" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        pendingScrollDeltaY.takeIf { it != 0 } ?: event.scrollDeltaY
-      } else {
-        null
-      }
-
-    val interaction =
-      InteractionEvent(
-        type = type,
-        timestamp = System.currentTimeMillis(),
-        packageName = event.packageName?.toString(),
-        screenClassName = lastWindowClassName,
-        element = element,
-        text = textValue,
-        scrollDeltaX = scrollDeltaX,
-        scrollDeltaY = scrollDeltaY,
-      )
-
-    serviceScope.launch {
-      try {
-        broadcastInteractionEvent(interaction)
-      } catch (e: CancellationException) {
-        // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3130).
-        throw e
-      } catch (e: Exception) {
-        Log.e(TAG, "Error broadcasting interaction event", e)
-      }
-    }
-  }
-
-  /**
-   * Debounce scroll events — accumulate deltas and emit once scrolling stops. TYPE_VIEW_SCROLLED
-   * fires many times per scroll gesture (every frame).
-   */
-  private fun recordDebouncedScroll(event: AccessibilityEvent) {
-    val now = System.currentTimeMillis()
-    // Only observed events reach here (the onAccessibilityEvent gate), so observerSessionGeneration
-    // reflects the current session. Fold this sample in through accumulatePendingScroll, which
-    // discards any accumulation tagged with a prior session first — closing the event-free-gap hole
-    // where a disconnect+reconnect between samples would otherwise let stale deltas combine with
-    // the
-    // first post-reconnect scroll (issue #5470 review). The generation is stable while any client
-    // stays connected, so a concurrent client joining mid-scroll does not drop the in-flight
-    // deltas.
-    // Store extracted fields, not the event reference (Android recycles it).
-    val sampleDeltaX = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) event.scrollDeltaX else 0
-    val sampleDeltaY = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) event.scrollDeltaY else 0
-    val currentGeneration =
-      if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration() else 0
-    val accumulated =
-      accumulatePendingScroll(
-        PendingScroll(
-          pendingScrollDeltaX,
-          pendingScrollDeltaY,
-          pendingScrollPackageName,
-          pendingScrollSessionGeneration,
-        ),
-        sampleDeltaX,
-        sampleDeltaY,
-        event.packageName?.toString(),
-        currentGeneration,
-      )
-    pendingScrollDeltaX = accumulated.deltaX
-    pendingScrollDeltaY = accumulated.deltaY
-    pendingScrollPackageName = accumulated.packageName
-    pendingScrollSessionGeneration = accumulated.sessionGeneration
-
-    if (now - lastScrollBroadcastMs >= scrollDebounceMs) {
-      lastScrollBroadcastMs = now
-      recordInteractionEvent(event, "scroll")
-      pendingScrollDeltaX = 0
-      pendingScrollDeltaY = 0
-      pendingScrollPackageName = null
-    }
-  }
-
-  /**
-   * Record an interaction event with debouncing to avoid duplicates. Used for
-   * TYPE_VIEW_ACCESSIBILITY_FOCUSED which fires alongside TYPE_VIEW_CLICKED.
-   */
-  private fun recordDebouncedInteraction(event: AccessibilityEvent, type: String) {
-    val now = System.currentTimeMillis()
-    if (now - lastA11yFocusTapMs >= a11yFocusTapDebounceMs) {
-      lastA11yFocusTapMs = now
-      recordInteractionEvent(event, type)
-    }
-  }
-
-  private suspend fun broadcastInteractionEvent(interaction: InteractionEvent) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping interaction event broadcast")
-      return
-    }
-
-    webSocketServer.broadcast(
-      webSocketFrameJson("interaction_event", timestamp = interaction.timestamp) {
-        put("event", jsonCompact.encodeToJsonElement(interaction))
-      },
-    )
   }
 
   private fun resolveSystemApp(packageName: String): Boolean? {

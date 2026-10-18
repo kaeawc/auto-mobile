@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -104,7 +104,7 @@ describe("exportPlan from a connection that does not hold the recording's device
     restore();
   });
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     spies = [
@@ -144,7 +144,19 @@ describe("exportPlan from a connection that does not hold the recording's device
     recorderStops = 0;
     const started = await record(held, "recording", HOLDER);
     recordingId = started.recordingId;
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(async () => {
     if (getDeviceGestureRecordingStatus()) {
@@ -167,34 +179,43 @@ describe("exportPlan from a connection that does not hold the recording's device
     }
   });
 
-  test("precondition: the holder's session owns the live recording on the device it holds", () => {
-    expect(manager.getSessionForDevice(held.deviceId)).toBe(HOLDER);
-    expect(pool.isSessionOwnedByOtherConnection(HOLDER, OTHER)).toBe(true);
-    expect(isDeviceGestureRecordingOwnedBy(HOLDER, held.deviceId)).toBe(true);
-    expect(getDeviceGestureRecordingStatus()?.recordingId).toBe(recordingId);
-  });
+  arranged(
+    "precondition: the holder's session owns the live recording on the device it holds",
+    () => {
+      expect(manager.getSessionForDevice(held.deviceId)).toBe(HOLDER);
+      expect(pool.isSessionOwnedByOtherConnection(HOLDER, OTHER)).toBe(true);
+      expect(isDeviceGestureRecordingOwnedBy(HOLDER, held.deviceId)).toBe(true);
+      expect(getDeviceGestureRecordingStatus()?.recordingId).toBe(recordingId);
+    },
+  );
 
-  test("naming its own session, another connection does not stop the holder's recording", async () => {
-    const result = await exportPlan(OTHER, STRANGER);
+  arranged(
+    "naming its own session, another connection does not stop the holder's recording",
+    async () => {
+      const result = await exportPlan(OTHER, STRANGER);
 
-    expect(recorderStops).toBe(0);
-    expect(getDeviceGestureRecordingStatus()?.recordingId).toBe(recordingId);
-    expect(JSON.stringify(result)).not.toContain("planContent");
-    expect(result.isError).toBe(true);
-    expect(JSON.stringify(result)).toContain(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-  });
+      expect(recorderStops).toBe(0);
+      expect(getDeviceGestureRecordingStatus()?.recordingId).toBe(recordingId);
+      expect(JSON.stringify(result)).not.toContain("planContent");
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result)).toContain(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    },
+  );
 
-  test("a sessionless call from another connection does not stop the holder's recording", async () => {
-    const result = await exportPlan(OTHER);
+  arranged(
+    "a sessionless call from another connection does not stop the holder's recording",
+    async () => {
+      const result = await exportPlan(OTHER);
 
-    expect(recorderStops).toBe(0);
-    expect(getDeviceGestureRecordingStatus()?.recordingId).toBe(recordingId);
-    expect(JSON.stringify(result)).not.toContain("planContent");
-    expect(result.isError).toBe(true);
-    expect(JSON.stringify(result)).toContain(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-  });
+      expect(recorderStops).toBe(0);
+      expect(getDeviceGestureRecordingStatus()?.recordingId).toBe(recordingId);
+      expect(JSON.stringify(result)).not.toContain("planContent");
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result)).toContain(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    },
+  );
 
-  test("control: the holder's own connection exports its recording", async () => {
+  arranged("control: the holder's own connection exports its recording", async () => {
     const result = await exportPlan(OWNER, HOLDER);
 
     expect(result.isError).not.toBe(true);
@@ -203,24 +224,30 @@ describe("exportPlan from a connection that does not hold the recording's device
     expect(getDeviceGestureRecordingStatus()).toBeNull();
   });
 
-  test("the connection that acquired the holding session exports without naming it", async () => {
-    const result = await exportPlan(OWNER);
+  arranged(
+    "the connection that acquired the holding session exports without naming it",
+    async () => {
+      const result = await exportPlan(OWNER);
 
-    expect(result.isError).not.toBe(true);
-    expect(recorderStops).toBe(1);
-    expect(JSON.stringify(result)).toContain(recordingId);
-  });
+      expect(result.isError).not.toBe(true);
+      expect(recorderStops).toBe(1);
+      expect(JSON.stringify(result)).toContain(recordingId);
+    },
+  );
 
-  test("a call with no session and no connection identity is refused, and is not offered force", async () => {
-    const result = await fixture!.client.callTool({ name: "exportPlan", arguments: {} });
+  arranged(
+    "a call with no session and no connection identity is refused, and is not offered force",
+    async () => {
+      const result = await fixture!.client.callTool({ name: "exportPlan", arguments: {} });
 
-    expect(recorderStops).toBe(0);
-    expect(result.isError).toBe(true);
-    expect(JSON.stringify(result)).toContain(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    expect(JSON.stringify(result)).not.toContain("force");
-  });
+      expect(recorderStops).toBe(0);
+      expect(result.isError).toBe(true);
+      expect(JSON.stringify(result)).toContain(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(JSON.stringify(result)).not.toContain("force");
+    },
+  );
 
-  test("a recording on a device no session holds stays exportable by any caller", async () => {
+  arranged("a recording on a device no session holds stays exportable by any caller", async () => {
     await stopDeviceGestureRecording(undefined, undefined, timer);
     recorderStops = 0;
     expect(manager.getSessionForDevice(unheld.deviceId)).toBeNull();
@@ -233,18 +260,21 @@ describe("exportPlan from a connection that does not hold the recording's device
     expect(JSON.stringify(result)).toContain(started.recordingId);
   });
 
-  test("an ownerless recording on a held device is exported only by the device's holder", async () => {
-    await stopDeviceGestureRecording(undefined, undefined, timer);
-    recorderStops = 0;
-    const started = await record(held, "ownerless");
+  arranged(
+    "an ownerless recording on a held device is exported only by the device's holder",
+    async () => {
+      await stopDeviceGestureRecording(undefined, undefined, timer);
+      recorderStops = 0;
+      const started = await record(held, "ownerless");
 
-    const refused = await exportPlan(OTHER, STRANGER);
-    expect(refused.isError).toBe(true);
-    expect(JSON.stringify(refused)).toContain(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
-    expect(recorderStops).toBe(0);
+      const refused = await exportPlan(OTHER, STRANGER);
+      expect(refused.isError).toBe(true);
+      expect(JSON.stringify(refused)).toContain(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(recorderStops).toBe(0);
 
-    const exported = await exportPlan(OWNER, HOLDER);
-    expect(exported.isError).not.toBe(true);
-    expect(JSON.stringify(exported)).toContain(started.recordingId);
-  });
+      const exported = await exportPlan(OWNER, HOLDER);
+      expect(exported.isError).not.toBe(true);
+      expect(JSON.stringify(exported)).toContain(started.recordingId);
+    },
+  );
 });

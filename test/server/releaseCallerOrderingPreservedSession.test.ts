@@ -36,8 +36,12 @@ describe("deviceTools preserved-session release caller ordering", () => {
     const finished = new Error("callback exercised");
     const failure = new Error("release failed");
     let live = !scenario.startsWith("missing");
-    const manager: Pick<SessionManager, "getSession" | "hasSession" | "releaseSessionIfOwned"> = {
+    const manager: Pick<
+      SessionManager,
+      "getSession" | "findSession" | "hasSession" | "releaseSessionIfOwned"
+    > = {
       getSession: () => (scenario.startsWith("missing") ? null : session),
+      findSession: () => (scenario.startsWith("missing") ? null : session),
       hasSession: () => live,
       releaseSessionIfOwned: async (...args) => {
         events.push(["session.releaseSessionIfOwned", ...args]);

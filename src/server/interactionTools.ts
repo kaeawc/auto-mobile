@@ -57,6 +57,8 @@ import {
   PINCH_SCALE_EXCLUSIVE_MIN,
   PINCH_DURATION_MIN_MS,
   PINCH_DURATION_MAX_MS,
+  PINCH_ROTATION_MAX_DEGREES,
+  PINCH_ROTATION_MIN_DEGREES,
 } from "../features/action/PinchOn";
 import { Shake } from "../features/action/Shake";
 import {
@@ -994,9 +996,11 @@ export const pinchOnSchema = withJsonSchemaOverride(
           ),
         rotationDegrees: z
           .number()
+          .min(PINCH_ROTATION_MIN_DEGREES)
+          .max(PINCH_ROTATION_MAX_DEGREES)
           .optional()
           .describe(
-            "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.",
+            `Degrees (${PINCH_ROTATION_MIN_DEGREES} to ${PINCH_ROTATION_MAX_DEGREES}) the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.`,
           ),
         includeSystemInsets: z
           .boolean()

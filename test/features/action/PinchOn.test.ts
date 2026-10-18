@@ -215,6 +215,17 @@ describe("PinchOn", () => {
     },
   );
 
+  test.each([360.01, -361, 450, 3600, 1e300, Infinity, -Infinity, NaN])(
+    "rejects out-of-range rotationDegrees %s before dispatch",
+    async (rotationDegrees) => {
+      await expect(pinchOn.execute({ direction: "in", scale: 1, rotationDegrees })).rejects.toThrow(
+        ActionableError,
+      );
+      expect(fakeA11yService.getPinchHistory()).toEqual([]);
+      expect(fakeIosService.getPinchHistory()).toEqual([]);
+    },
+  );
+
   test.each([1, 10000, undefined])("preserves accepted/default duration %s", async (duration) => {
     const result = await pinchOn.execute({ direction: "in", autoTarget: false, duration });
     expect(result.success).toBe(true);
@@ -729,7 +740,7 @@ describe("PinchOn", () => {
       }
     });
 
-    test.each([-90, 450, 720, 0.5])(
+    test.each([-90, 360, -360, 0.5])(
       "forwards rotation %p unchanged without changing the distance",
       async (rotationDegrees) => {
         await pinchOn.execute({ direction: "out", container, scale: 1, rotationDegrees });

@@ -2,7 +2,7 @@ import { warmedTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { InstalledImeKeySession } from "../../src/features/action/InstalledImeKeySession";
-import { KeyboardOpenIndeterminateError } from "../../src/features/action/Keyboard";
+import { KeyboardOpenIndeterminateError } from "../../src/features/action/KeyboardOpenIndeterminateError";
 import {
   type InteractionToolDependencies,
   registerInteractionTools,

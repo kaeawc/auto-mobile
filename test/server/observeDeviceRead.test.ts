@@ -23,7 +23,7 @@ import {
 import toolDefinitions from "../../schemas/tool-definitions.json";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
-import { ObserverPendingRequestTimeoutError } from "../../src/features/observe/DeviceServiceClient";
+import { ObserverPendingRequestTimeoutError } from "../../src/features/observe/ObserverPendingRequestTimeoutError";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";

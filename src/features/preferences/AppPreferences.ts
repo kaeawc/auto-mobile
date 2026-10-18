@@ -5,10 +5,8 @@ import {
 } from "./IosPreferenceTypes";
 import { parseIosUserDefaultsPlist, plistReal } from "./IosUserDefaultsPlist";
 import { join } from "node:path";
-import {
-  CtrlProxyServicePortChangedError,
-  IOSCtrlProxyClient,
-} from "../observe/ios/IOSCtrlProxyClient";
+import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
+import { CtrlProxyServicePortChangedError } from "../observe/ios/CtrlProxyServicePortChangedError";
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { toActionableError } from "../../models/ActionableError";

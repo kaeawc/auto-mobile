@@ -6,7 +6,7 @@ import {
   InstalledImeKeySession,
   tapFrameBoundImeKey,
 } from "../../../src/features/action/InstalledImeKeySession";
-import { KeyboardOpenIndeterminateError } from "../../../src/features/action/Keyboard";
+import { KeyboardOpenIndeterminateError } from "../../../src/features/action/KeyboardOpenIndeterminateError";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeMultiUserImeAdb } from "../../fakes/FakeMultiUserImeAdb";

@@ -47,7 +47,7 @@ export interface VisionFallbackResult {
 
 export interface VisionFallbackConfig {
   enabled: boolean;
-  provider: "claude" | "local"; // "local" is declared but has no implementation yet
+  provider: "claude"; // Only Claude for now, can add 'local' later
   confidenceThreshold: "high" | "medium" | "low";
   maxCostUsd: number;
   cacheResults: boolean;

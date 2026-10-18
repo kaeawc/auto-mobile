@@ -1,6 +1,6 @@
 import type { Kysely } from "kysely";
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await db.transaction().execute(async (trx) => {
     await trx.schema
       .alterTable("device_sessions")
@@ -22,7 +22,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   });
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.alterTable("device_sessions").dropColumn("pre_cli_session_timeout_ms").execute();
   await db.schema
     .alterTable("device_sessions")

@@ -36,14 +36,7 @@ describe("testTag selector falls back to an untagged node's exact resource-id (#
       new FakeAdbClient() as never,
       { timer: new FakeTimer() },
     );
-    const lookup = (
-      tapOn as unknown as {
-        findElementInHierarchy(
-          options: { testTag: string; action: "tap" },
-          hierarchy: ViewHierarchyResult,
-        ): { selection: { element: HierarchyNode | null } };
-      }
-    ).findElementInHierarchy({ testTag: "A_edit3", action: "tap" }, prototype());
+    const lookup = tapOn.findElementInHierarchy({ testTag: "A_edit3", action: "tap" }, prototype());
     expect(lookup.selection.element?.["resource-id"]).toBe("A_edit3");
   });
 

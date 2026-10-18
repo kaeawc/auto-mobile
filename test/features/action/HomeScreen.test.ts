@@ -1417,7 +1417,7 @@ describe("HomeScreen", () => {
       controller.abort();
 
       await expect(
-        runWithAbortSignal(controller.signal, () => (homeScreen as any).executeAndroidHome()),
+        runWithAbortSignal(controller.signal, () => homeScreen.testHooks.executeAndroidHome()),
       ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
 
       const keyeventCall = fakeAdb.getCommandCalls().find((c) => c.command.includes("keyevent 3"));

@@ -1,7 +1,6 @@
 import { describe, it, expect } from "bun:test";
-import type { Database as BunDatabase } from "bun:sqlite";
 import { CompiledQuery } from "kysely";
-import { BunSqliteConnectionState } from "../../src/db/bunSqliteDialect";
+import { BunSqliteConnectionState, type BunSqliteHandle } from "../../src/db/bunSqliteDialect";
 import { fixedBackoff } from "../../src/utils/Backoff";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { Random } from "../../src/utils/Random";
@@ -36,7 +35,7 @@ interface StatementScript {
  * The script drives what each prepared-statement invocation does.
  */
 function fakeDatabase(script: StatementScript): {
-  db: BunDatabase;
+  db: BunSqliteHandle;
   invocations: () => number;
 } {
   let calls = 0;
@@ -58,11 +57,11 @@ function fakeDatabase(script: StatementScript): {
     get: (..._params: unknown[]) => ({ schema_version: 0 }),
     finalize: () => {},
   });
-  const db = {
+  const db: BunSqliteHandle = {
     prepare: (_sql: string) => makeStatement(),
     exec: (_sql: string) => {},
     close: () => {},
-  } as unknown as BunDatabase;
+  };
   return { db, invocations: () => calls };
 }
 

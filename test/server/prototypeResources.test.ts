@@ -59,18 +59,14 @@ describe("automobile:prototype resource", () => {
 
   test("mentions every node type, action type and theme role in the contract", () => {
     const guide = renderPrototypeGuide();
-    const defs = contract.definitions as unknown as Record<
-      string,
-      { variants?: Record<string, unknown>; values?: string[] }
-    >;
-    for (const type of [
-      ...Object.keys(defs.node.variants ?? {}),
-      ...Object.keys(defs.action.variants ?? {}),
-    ]) {
+    const defs = contract.definitions;
+    const variantNames = [...Object.keys(defs.node.variants), ...Object.keys(defs.action.variants)];
+    for (const type of variantNames) {
       expect(guide).toContain(`\`${type}\``);
     }
-    expect(defs.colorRole.values?.length).toBeGreaterThan(0);
-    for (const role of defs.colorRole.values ?? []) {
+    const roles = defs.colorRole.values;
+    expect(roles.length).toBeGreaterThan(0);
+    for (const role of roles) {
       expect(guide).toContain(`\`${role}\``);
     }
   });

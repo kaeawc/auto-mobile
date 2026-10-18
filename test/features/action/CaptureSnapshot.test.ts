@@ -38,7 +38,7 @@ describe("CaptureSnapshot", () => {
 
     // Create fakes
     fakeAdb = new FakeAdbClient();
-    fakeAdbFactory = { create: () => fakeAdb as any };
+    fakeAdbFactory = { create: () => fakeAdb };
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
 
@@ -618,7 +618,7 @@ describe("CaptureSnapshot (iOS)", () => {
   });
 
   function makeCapture(): CaptureSnapshot {
-    return new CaptureSnapshot(device, undefined, undefined, undefined, store, simctl as any);
+    return new CaptureSnapshot(device, undefined, undefined, undefined, store, simctl);
   }
 
   test("returns installed bundle IDs through strict simctl listing", async () => {
@@ -1074,7 +1074,7 @@ describe("CaptureSnapshot snapshotName path-traversal rejection (#5705)", () => 
       isEmulator: true,
     };
     fakeAdb = new FakeAdbClient();
-    fakeAdbFactory = { create: () => fakeAdb as any };
+    fakeAdbFactory = { create: () => fakeAdb };
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-traversal-test-"));

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { DeviceSnapshotRecord } from "../../src/db/deviceSnapshotRepository";
 import {
   resetDeviceSnapshotManagerDependencies,
@@ -65,9 +65,9 @@ describe("deviceSnapshotResources", () => {
     await configRepository.setConfig({ maxArchiveSizeMb: 500 } as never);
 
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as any,
-      configRepository: configRepository as any,
-      snapshotStore: new FakeDeviceSnapshotStore() as any,
+      snapshotRepository: repository,
+      configRepository: configRepository,
+      snapshotStore: new FakeDeviceSnapshotStore(),
       avdSnapshots: new FakeAvdSnapshotService(),
       timer: new FakeTimer(),
       now: () => new Date(0),
@@ -122,9 +122,9 @@ describe("deviceSnapshotResources", () => {
     avdSnapshots.setVmSnapshot("am-api34", "emulator-5554_2026-08-11_23-05-15-803Z", 17_300);
 
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as any,
-      configRepository: new FakeDeviceSnapshotConfigRepository() as any,
-      snapshotStore: new FakeDeviceSnapshotStore() as any,
+      snapshotRepository: repository,
+      configRepository: new FakeDeviceSnapshotConfigRepository(),
+      snapshotStore: new FakeDeviceSnapshotStore(),
       avdSnapshots,
       timer: new FakeTimer(),
       now: () => new Date(0),
@@ -153,9 +153,9 @@ describe("deviceSnapshotResources", () => {
 
   test("getSnapshotArchive returns an empty envelope when there are no snapshots", async () => {
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: new FakeDeviceSnapshotRepository() as any,
-      configRepository: new FakeDeviceSnapshotConfigRepository() as any,
-      snapshotStore: new FakeDeviceSnapshotStore() as any,
+      snapshotRepository: new FakeDeviceSnapshotRepository(),
+      configRepository: new FakeDeviceSnapshotConfigRepository(),
+      snapshotStore: new FakeDeviceSnapshotStore(),
       avdSnapshots: new FakeAvdSnapshotService(),
       timer: new FakeTimer(),
       now: () => new Date(0),
@@ -169,14 +169,12 @@ describe("deviceSnapshotResources", () => {
   });
 
   test("getSnapshotArchive returns an error payload when listing snapshots fails", async () => {
+    const failingRepository = new FakeDeviceSnapshotRepository();
+    spyOn(failingRepository, "listSnapshots").mockRejectedValue(new Error("db unavailable"));
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: {
-        listSnapshots: async () => {
-          throw new Error("db unavailable");
-        },
-      } as any,
-      configRepository: new FakeDeviceSnapshotConfigRepository() as any,
-      snapshotStore: new FakeDeviceSnapshotStore() as any,
+      snapshotRepository: failingRepository,
+      configRepository: new FakeDeviceSnapshotConfigRepository(),
+      snapshotStore: new FakeDeviceSnapshotStore(),
       avdSnapshots: new FakeAvdSnapshotService(),
       timer: new FakeTimer(),
       now: () => new Date(0),

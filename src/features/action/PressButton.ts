@@ -49,6 +49,17 @@ export class PressButton extends BaseVisualChange {
     this.device = device;
   }
 
+  /** Typed test view so home-verification tests can drive the deadline gate without a full press. */
+  get testHooks(): {
+    verifyAndroidHomeForeground: (
+      options?: Parameters<BaseVisualChange["verifyAndroidHomeForeground"]>[0],
+    ) => Promise<boolean>;
+  } {
+    return {
+      verifyAndroidHomeForeground: (options = {}) => this.verifyAndroidHomeForeground(options),
+    };
+  }
+
   private assertHeldRequestLive(signal?: AbortSignal): void {
     if (this.holdRequest) {
       throwIfAborted(signal);
@@ -200,7 +211,7 @@ export class PressButton extends BaseVisualChange {
   // before we fall back to ADB keyevent.
   private static readonly GLOBAL_ACTION_TIMEOUT_MS = 3000;
 
-  private async executeAndroidButtonPress(
+  async executeAndroidButtonPress(
     button: string,
     timeoutMs?: number,
     frameContext?: string,
@@ -460,7 +471,7 @@ export class PressButton extends BaseVisualChange {
    * @param button - Button name to press
    * @returns Result of the button press operation
    */
-  private async executeiOSButtonPress(
+  async executeiOSButtonPress(
     button: string,
     timeoutMs?: number,
     frameContext?: string,

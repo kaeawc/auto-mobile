@@ -1,21 +1,13 @@
 import { type Kysely, sql } from "kysely";
 
-// Keep raw migrations independent of app modules that are not shipped beside them.
-interface SqliteCatalogSchema {
-  sqlite_master: { type: string; name: string };
+async function tableExists<DB>(db: Kysely<DB>, tableName: string): Promise<boolean> {
+  const result = await sql<{ name: string }>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${tableName}
+  `.execute(db);
+  return result.rows.length > 0;
 }
 
-async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
-  const result = await (db as Kysely<SqliteCatalogSchema>)
-    .selectFrom("sqlite_master")
-    .select("name")
-    .where("type", "=", "table")
-    .where("name", "=", tableName)
-    .execute();
-  return result.length > 0;
-}
-
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await createFailureGroups(db);
   await createFailureOccurrences(db);
   await createFailureOccurrenceScreens(db);
@@ -23,7 +15,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await createFailureNotifications(db);
 }
 
-async function createFailureGroups(db: Kysely<unknown>): Promise<void> {
+async function createFailureGroups<DB>(db: Kysely<DB>): Promise<void> {
   // Main failure groups table - groups similar failures by signature
   if (!(await tableExists(db, "failure_groups"))) {
     await db.schema
@@ -68,7 +60,7 @@ async function createFailureGroups(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-async function createFailureOccurrences(db: Kysely<unknown>): Promise<void> {
+async function createFailureOccurrences<DB>(db: Kysely<DB>): Promise<void> {
   // Individual failure occurrences
   if (!(await tableExists(db, "failure_occurrences"))) {
     await db.schema
@@ -123,7 +115,7 @@ async function createFailureOccurrences(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-async function createFailureOccurrenceScreens(db: Kysely<unknown>): Promise<void> {
+async function createFailureOccurrenceScreens<DB>(db: Kysely<DB>): Promise<void> {
   // Screens visited during a failure occurrence
   if (!(await tableExists(db, "failure_occurrence_screens"))) {
     await db.schema
@@ -147,7 +139,7 @@ async function createFailureOccurrenceScreens(db: Kysely<unknown>): Promise<void
   }
 }
 
-async function createFailureCaptures(db: Kysely<unknown>): Promise<void> {
+async function createFailureCaptures<DB>(db: Kysely<DB>): Promise<void> {
   // Captures (screenshots/videos) associated with failures
   if (!(await tableExists(db, "failure_captures"))) {
     await db.schema
@@ -173,7 +165,7 @@ async function createFailureCaptures(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-async function createFailureNotifications(db: Kysely<unknown>): Promise<void> {
+async function createFailureNotifications<DB>(db: Kysely<DB>): Promise<void> {
   // Notifications for real-time streaming - tracks which occurrences are new
   if (!(await tableExists(db, "failure_notifications"))) {
     await db.schema
@@ -208,7 +200,7 @@ async function createFailureNotifications(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("failure_notifications").ifExists().execute();
   await db.schema.dropTable("failure_captures").ifExists().execute();
   await db.schema.dropTable("failure_occurrence_screens").ifExists().execute();

@@ -1,6 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import type { Database as BunDatabase } from "bun:sqlite";
-import { BunSqliteConnectionState } from "../../src/db/bunSqliteDialect";
+import { BunSqliteConnectionState, type BunSqliteHandle } from "../../src/db/bunSqliteDialect";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 
@@ -16,9 +15,9 @@ import { logger } from "../../src/utils/logger";
 
 // Minimal fake of the bun:sqlite surface the connection touches. Records every
 // `exec()` SQL; optionally makes `exec` throw to exercise the best-effort path.
-function makeFakeDb(opts: { execThrows?: boolean } = {}): { db: BunDatabase; execs: string[] } {
+function makeFakeDb(opts: { execThrows?: boolean } = {}): { db: BunSqliteHandle; execs: string[] } {
   const execs: string[] = [];
-  const db = {
+  const db: BunSqliteHandle = {
     prepare: (_sql: string) => ({
       all: () => [],
       run: () => ({ changes: 0, lastInsertRowid: 0 }),
@@ -32,7 +31,7 @@ function makeFakeDb(opts: { execThrows?: boolean } = {}): { db: BunDatabase; exe
       }
     },
     close: () => {},
-  } as unknown as BunDatabase;
+  };
   return { db, execs };
 }
 
@@ -81,7 +80,7 @@ describe("periodic PRAGMA optimize (#3497)", () => {
   test("does not force-open a lazy connection", () => {
     const timer = new FakeTimer();
     let opened = false;
-    const source = (): BunDatabase => {
+    const source = (): BunSqliteHandle => {
       opened = true;
       return makeFakeDb().db;
     };

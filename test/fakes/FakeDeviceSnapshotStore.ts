@@ -1,25 +1,12 @@
 import * as os from "os";
 import * as path from "path";
-import { DeviceSnapshotStore, type SnapshotPathOptions } from "../../src/utils/DeviceSnapshotStore";
-
-type DeviceSnapshotStoreContract = Pick<
+import {
   DeviceSnapshotStore,
-  | "getBasePath"
-  | "getSnapshotPath"
-  | "getSnapshotPathWithOptions"
-  | "recoverSnapshotData"
-  | "discardSnapshotArtifacts"
-  | "listLeftoverSnapshotJournals"
-  | "generateSnapshotName"
-  | "snapshotDirectoryExists"
-  | "getSnapshotSizeBytes"
-  | "getDirectorySize"
-  | "listSubdirectoryNames"
-  | "deleteSnapshotData"
-  | "replaceSnapshotData"
->;
+  type DeviceSnapshotStorePort,
+  type SnapshotPathOptions,
+} from "../../src/utils/DeviceSnapshotStore";
 
-export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
+export class FakeDeviceSnapshotStore implements DeviceSnapshotStorePort {
   private basePath: string;
   private sizes = new Map<string, number | null>();
   /** Sizes scripted for one scope, keyed by the scoped path; they win over the name-keyed size. */
@@ -57,6 +44,25 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
 
   getSnapshotPathWithOptions(snapshotName: string, options?: SnapshotPathOptions): string {
     return new DeviceSnapshotStore(this.basePath).getSnapshotPathWithOptions(snapshotName, options);
+  }
+
+  async ensureSnapshotsDirectory(): Promise<void> {}
+
+  getSettingsPath(snapshotName: string, options?: SnapshotPathOptions): string {
+    return new DeviceSnapshotStore(this.basePath).getSettingsPath(snapshotName, options);
+  }
+
+  getMetadataPath(snapshotName: string, options?: SnapshotPathOptions): string {
+    return new DeviceSnapshotStore(this.basePath).getMetadataPath(snapshotName, options);
+  }
+
+  getAppDataPath(snapshotName: string, options?: SnapshotPathOptions): string {
+    return new DeviceSnapshotStore(this.basePath).getAppDataPath(snapshotName, options);
+  }
+
+  /** The fake has no real directories, so a directory listing is always "unknown". */
+  async listFileNames(): Promise<string[] | null> {
+    return null;
   }
 
   queueRecoveryFailure(error: Error): void {

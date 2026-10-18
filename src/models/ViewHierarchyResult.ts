@@ -291,6 +291,8 @@ export type ViewHierarchyNode = {
   "resource-id"?: string;
   "content-desc"?: string;
   clickable?: boolean | string;
+  text?: string;
+  class?: string;
   checked?: boolean | string;
   extras?: Record<string, string>;
 };

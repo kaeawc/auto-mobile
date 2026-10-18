@@ -1,6 +1,6 @@
 import { type Kysely, sql } from "kysely";
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   // Create memory_thresholds table for per-app threshold configuration
   await db.schema
     .createTable("memory_thresholds")
@@ -113,7 +113,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("memory_audit_results").execute();
   await db.schema.dropTable("memory_baselines").execute();
   await db.schema.dropTable("memory_thresholds").execute();

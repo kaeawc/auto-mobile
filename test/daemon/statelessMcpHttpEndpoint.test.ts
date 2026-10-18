@@ -362,6 +362,8 @@ describe("StatelessMcpHttpEndpoint (#4678)", () => {
     expect(result.content).toEqual([{ type: "text", text: "echo socket-session" }]);
     await client.close();
     expect(h.scopes.every((scope) => scope.requestMcpSessionId === "socket-session")).toBeTrue();
+    // An HTTP client is never a trusted forwarder: its in-band id cannot override the header (#13315).
+    expect(h.scopes.some((scope) => scope.trustedForwarder === true)).toBeFalse();
   });
 
   test("progress notifications arrive on the POST's own SSE stream", async () => {

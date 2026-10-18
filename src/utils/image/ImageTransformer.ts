@@ -177,7 +177,7 @@ export class Image {
   }
 
   public static fromBuffer(
-    buffer: Buffer,
+    buffer: unknown,
     timer: Timer = defaultTimer,
     backend: ImageBackend = resolveImageBackend(),
   ): Image {

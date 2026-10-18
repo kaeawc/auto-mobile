@@ -305,6 +305,13 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     this.savedPrototypeRestorer = restorer;
   }
 
+  /** Typed view of the internals that tests need to drive directly. */
+  public get testHooks(): { getExpectedChecksum(useSharedCache?: boolean): Promise<string> } {
+    return {
+      getExpectedChecksum: (useSharedCache) => this.getExpectedChecksum(useSharedCache),
+    };
+  }
+
   // Shared utilities for download and checksum
   private fileDownloader: FileDownloader;
   private checksumCalculator: ChecksumCalculator;

@@ -12,8 +12,6 @@
 4	test/daemon/socketServerSessionIdGenerator.test.ts
 25	test/doctor/ios.test.ts
 1	test/fakes/FakeDeviceUtils.ts
-15	test/features/action/PinchOn.test.ts
-1	test/features/action/PinchOn.visionFallback.test.ts
 5	test/features/action/TapOnElement.documentsUiTap.test.ts
 1	test/features/action/TapOnElement.effectBasisFallthrough.test.ts
 11	test/features/action/TapOnElement.ensureChecked.test.ts

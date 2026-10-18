@@ -235,6 +235,22 @@ describe("pen contacts", () => {
     expect(gestures[0].toolType).toBe("eraser");
   });
 
+  test("an explicit MT finger stays a finger while an eraser is in range", () => {
+    const lines = [
+      "[  1.0] EV_KEY    BTN_TOOL_RUBBER      DOWN",
+      "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+      "[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     00000000",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+      "[  1.1] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+      "[  1.1] EV_SYN    SYN_REPORT           00000000",
+    ];
+    const { frames, gestures } = run(lines);
+    expect(frames[0].activeSlots[0].toolType).toBeUndefined();
+    expect(gestures[0].toolType).toBeUndefined();
+  });
+
   test("single-touch axes are ignored on a multitouch node", () => {
     const { frames } = run(PEN_STROKE);
     expect(frames.every((frame) => frame.activeSlots.length === 0)).toBe(true);

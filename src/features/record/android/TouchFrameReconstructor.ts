@@ -41,6 +41,8 @@ export class TouchFrameReconstructor {
   private releasedSlots = new Set<number>();
   /** Pen tool in range (BTN_TOOL_PEN / BTN_TOOL_RUBBER); node-wide, applied to active slots. */
   private nodeTool: PointerToolType | undefined;
+  /** Slots whose last ABS_MT_TOOL_TYPE was MT_TOOL_FINGER; the kernel only re-sends it on change. */
+  private readonly explicitFingerSlots = new Set<number>();
   private readonly heldButtons = new Set<StylusButton>();
 
   constructor(private readonly options: { singleTouch?: boolean } = {}) {}
@@ -131,11 +133,14 @@ export class TouchFrameReconstructor {
   private handlePenAbsEvent(evCode: string, value: number): void {
     switch (evCode) {
       case "ABS_MT_TOOL_TYPE":
-        // MT_TOOL_FINGER (0) is the default and stays absent; MT_TOOL_PEN (1) is a stylus.
+        // MT_TOOL_FINGER (0) is the default and stays absent from the slot; MT_TOOL_PEN (1) is a
+        // stylus. An explicit finger is remembered so a node-wide pen tool cannot relabel it.
         if (value === 1) {
           this.getOrCreateSlot().toolType = "stylus";
+          this.explicitFingerSlots.delete(this.currentSlot);
         } else {
           delete this.getOrCreateSlot().toolType;
+          this.explicitFingerSlots.add(this.currentSlot);
         }
         break;
 
@@ -269,6 +274,7 @@ export class TouchFrameReconstructor {
     // explicit finger identity (no toolType) only takes the node tool when nothing else is known.
     if (
       this.nodeTool &&
+      !this.explicitFingerSlots.has(slot.slotId) &&
       (!slot.toolType || (slot.toolType === "stylus" && this.nodeTool === "eraser"))
     ) {
       slot.toolType = this.nodeTool;

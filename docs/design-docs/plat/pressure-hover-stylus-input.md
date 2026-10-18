@@ -97,20 +97,24 @@ Whether the emulator exposes a stylus-capable input device to apps (an
 
 ### What the recorder sees
 
-`recordDeviceGestures` reads kernel events with `getevent`. The reconstruction
-(`TouchFrameReconstructor.ts`) keeps position and `ABS_MT_PRESSURE` per slot, and
-nothing else: it ignores `ABS_MT_TOOL_TYPE`, `BTN_TOOL_PEN`, `BTN_STYLUS`,
-`ABS_TILT_X`/`ABS_TILT_Y`, and `ABS_DISTANCE`/`ABS_MT_DISTANCE` (hover distance).
-The pressure it keeps is not used by the gesture classifier. A recorded stylus stroke is therefore
-exported as an ordinary finger swipe, and hover is invisible.
+`recordDeviceGestures` reads kernel events with `getevent`. Since #13101 the recorder
+also reads pen data (**Source**):
 
-Two structural limits sit underneath that, and extending the axes alone does not
-remove them (**Source**):
+- **Pen nodes.** `InputNodeDiscovery.ts` finds the touch node and any separate
+  single-touch pen node (`ABS_X`/`ABS_Y` plus `BTN_TOOL_PEN` or `BTN_TOOL_RUBBER`), and
+  `GetEventReader` runs one `getevent -lt` process per node.
+- **Pen state.** `TouchFrameReconstructor.ts` tracks `ABS_MT_TOOL_TYPE`, `BTN_TOOL_PEN`/
+  `BTN_TOOL_RUBBER`, `BTN_TOUCH`, `BTN_STYLUS`/`BTN_STYLUS2`, `ABS_TILT_X`/`ABS_TILT_Y` and
+  `ABS_DISTANCE`/`ABS_MT_DISTANCE`. A pen in range without contact is hover and never
+  becomes a tap or swipe.
+- **Gesture fields.** `GestureEvent` carries optional `toolType` (`stylus`/`eraser`),
+  `pressure` (min, max and mean, normalized when the axis range is known) and `buttons`.
+  Exported plan steps are unchanged, so a recorded stylus stroke still replays as a finger
+  gesture; hover events, stroke paths and replay are #13102.
 
-- **One event node.** `TouchNodeDiscovery.ts` selects only a node that exposes
-  `ABS_MT_POSITION_X`/`ABS_MT_POSITION_Y`, and `GetEventReader` reads only that node.
-  A pen that reports through a separate tablet-style node, commonly with `ABS_X`/`ABS_Y`
-  plus `BTN_TOOL_PEN` and `BTN_TOUCH`, is never seen.
+One structural limit remains, and extending the axes alone does not remove it
+(**Source**):
+
 - **No drag event.** `GestureEventType` has no drag, and `DualTrackRecorder` maps a
   moving single-contact gesture to `swipeAt` or `swipeOn`, which keep only the
   endpoints. A drawn stroke loses its path.
@@ -169,13 +173,13 @@ platforms), so there is no iOS recorder representation to extend.
 
 ## Capability matrix
 
-| Capability                          | Android emulator                                    | Android device                                     | iOS simulator                                                                       | iOS device                  |
-| ----------------------------------- | --------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------- |
-| Stylus tool type, constant pressure | Supported via `adb shell input stylus` (**Source**) | Same (**Source**)                                  | Unverified (no stylus selector in the header)                                       | Unverified                  |
-| Pressure curve                      | Unverified (`uinput`/console)                       | Unverified (`UiAutomation`; `uinput` is root-only) | Unverified (private `pressDownWithPressure`; **Reported** no effect through Appium) | Unverified                  |
-| Tilt, eraser, barrel button         | Unverified                                          | Unverified (`UiAutomation`; `uinput` is root-only) | Impossible via known paths (**Source**)                                             | Impossible without a Pencil |
-| Hover                               | Unverified (evdev only)                             | Unverified (`UiAutomation`; `uinput` is root-only) | Unverified (mouse path)                                                             | Unverified                  |
-| Records the above                   | No (**Source**)                                     | No (**Source**)                                    | No (**Source**, Android-only recorder)                                              | No (**Source**)             |
+| Capability                          | Android emulator                                                                | Android device                                     | iOS simulator                                                                       | iOS device                  |
+| ----------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------- |
+| Stylus tool type, constant pressure | Supported via `adb shell input stylus` (**Source**)                             | Same (**Source**)                                  | Unverified (no stylus selector in the header)                                       | Unverified                  |
+| Pressure curve                      | Unverified (`uinput`/console)                                                   | Unverified (`UiAutomation`; `uinput` is root-only) | Unverified (private `pressDownWithPressure`; **Reported** no effect through Appium) | Unverified                  |
+| Tilt, eraser, barrel button         | Unverified                                                                      | Unverified (`UiAutomation`; `uinput` is root-only) | Impossible via known paths (**Source**)                                             | Impossible without a Pencil |
+| Hover                               | Unverified (evdev only)                                                         | Unverified (`UiAutomation`; `uinput` is root-only) | Unverified (mouse path)                                                             | Unverified                  |
+| Records the above                   | Partly: tool type, pressure, buttons (#13101); not hover or replay (**Source**) | Same (**Source**)                                  | No (**Source**, Android-only recorder)                                              | No (**Source**)             |
 
 "Supported" means a documented path exists in source. Nothing in the table other
 than the `adb shell input stylus` cells has been demonstrated.

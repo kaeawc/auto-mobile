@@ -37,7 +37,7 @@ export interface ReverseDependencies {
 }
 
 /** The slice of the tool arguments the reverse steps read. */
-export interface ReverseArgs {
+export interface ReverseInput {
   action: string;
   spec?: unknown;
   id?: string;
@@ -48,7 +48,7 @@ export interface ReverseArgs {
 export function reverseLifecycle(
   dependencies: ReverseDependencies,
   device: BootedDevice,
-  args: ReverseArgs & { action: PrototypeMutation },
+  args: ReverseInput & { action: PrototypeMutation },
   target: { id?: string; all?: true },
 ) {
   // The show's new ports are claimed before the send but kept apart from the earlier claims until
@@ -124,7 +124,7 @@ export function withReverseReport<T extends { success: boolean }>(
 export async function reverseLoopbackPorts(
   dependencies: ReverseDependencies,
   device: BootedDevice,
-  args: ReverseArgs,
+  args: ReverseInput,
   target: { id?: string },
   refusals: readonly (PrototypeResult | undefined)[],
 ): Promise<StagedReverses | undefined> {
@@ -182,7 +182,7 @@ export function patchReverseStaging(
 export async function withSavedReverses<T extends { success: boolean }>(
   dependencies: ReverseDependencies,
   device: BootedDevice,
-  args: ReverseArgs,
+  args: ReverseInput,
   dispatch: () => Promise<T>,
 ): Promise<T> {
   const id = savedId(args);
@@ -207,7 +207,7 @@ export async function withSavedReverses<T extends { success: boolean }>(
   }
 }
 
-function savedId(args: ReverseArgs): string | undefined {
+function savedId(args: ReverseInput): string | undefined {
   const id = args.action === "save" ? (args.spec as { id?: unknown } | undefined)?.id : args.id;
   return typeof id === "string" ? id : undefined;
 }

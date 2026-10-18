@@ -3,7 +3,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -31,8 +31,7 @@ const displays = {
 };
 
 describe("ToolRegistry display inventory resolution", () => {
-  let originalManager: unknown;
-  let originalRepository: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let restoreInventory: () => void;
   let ctrlProxyStub: CtrlProxySetupStub;
   let sessionManager: SessionManager | undefined;
@@ -41,17 +40,17 @@ describe("ToolRegistry display inventory resolution", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     fakeManager = new FakeDeviceSessionManager();
-    originalManager = Reflect.get(ToolRegistry, "deviceSessionManager");
-    originalRepository = Reflect.get(ToolRegistry, "toolCallRepository");
-    Reflect.set(ToolRegistry, "deviceSessionManager", fakeManager);
-    Reflect.set(ToolRegistry, "toolCallRepository", { recordToolCall: async () => {} });
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeManager });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
     ctrlProxyStub = stubCtrlProxySetup();
   });
 
   afterEach(() => {
     restoreInventory?.();
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalManager);
-    Reflect.set(ToolRegistry, "toolCallRepository", originalRepository);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager?.stopCleanupTimer();

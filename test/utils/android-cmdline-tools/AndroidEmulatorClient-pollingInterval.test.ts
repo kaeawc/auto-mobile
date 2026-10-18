@@ -32,9 +32,13 @@ async function observePollingInterval(value: string | undefined): Promise<number
   }
 
   const timer = new FakeTimer();
-  const client = new AndroidEmulatorClient(async () => result, null, timer, {
-    create: () => new FakeAdbExecutor(),
-  } as AdbClientFactory);
+  const client = new AndroidEmulatorClient({
+    execAsync: async () => result,
+    timer,
+    adbFactory: {
+      create: () => new FakeAdbExecutor(),
+    } as AdbClientFactory,
+  });
   const controller = new AbortController();
   const readiness = client.waitForEmulatorReady(
     "Missing",

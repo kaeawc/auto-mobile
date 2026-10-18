@@ -147,7 +147,7 @@ describe("IOSCtrlProxyManager unresponsive runner relaunch (#10649)", () => {
       .getSpawnedProcesses()
       .map((spawned) => spawned.process.pid);
     expect(harness.terminated).toEqual([firstPid!]);
-    expect(harness.manager["xcTestProcessId"]).toBe(secondPid!);
+    expect(harness.manager.diagnostics.xcTestProcessId).toBe(secondPid!);
   });
 
   test("a retired runner's exit event does not abort the relaunch or schedule a supervisor restart (#10653)", async () => {
@@ -161,10 +161,10 @@ describe("IOSCtrlProxyManager unresponsive runner relaunch (#10649)", () => {
       .getSpawnedProcesses()
       .map((spawned) => spawned.process.pid);
     expect(harness.terminated).toEqual([firstPid!]);
-    expect(harness.manager["xcTestProcessId"]).toBe(secondPid!);
+    expect(harness.manager.diagnostics.xcTestProcessId).toBe(secondPid!);
     // The deliberate retirement must not leave a duplicate supervisor restart racing
     // the in-setup relaunch.
-    expect(harness.manager["processSupervisor"].isRestartPending()).toBe(false);
+    expect(harness.manager.diagnostics.processSupervisor.isRestartPending()).toBe(false);
   });
 
   test("fails with an actionable health-check error before the caller deadline when every launch stays frozen", async () => {
@@ -187,7 +187,7 @@ describe("IOSCtrlProxyManager unresponsive runner relaunch (#10649)", () => {
     expect(harness.terminated).toEqual(
       harness.executor.getSpawnedProcesses().map((spawned) => spawned.process.pid!),
     );
-    expect(harness.manager["xcTestProcessId"]).toBeNull();
+    expect(harness.manager.diagnostics.xcTestProcessId).toBeNull();
     const elapsedMs = harness.timer.now() - startedAt;
     expect(elapsedMs).toBeGreaterThanOrEqual(FIRST_LAUNCH_WINDOW_MS + 2 * WINDOW_MS);
     expect(elapsedMs).toBeLessThan(ACQUISITION_BUDGET_MS);

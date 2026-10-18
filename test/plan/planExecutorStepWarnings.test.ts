@@ -20,13 +20,12 @@ import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ActionableError } from "../../src/models";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  resetTapOnElementFactory,
-  setTapOnElementFactory,
-  tapOnHandler,
 } from "../../src/server/interactionTools";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
 
+const interactionDeps: InteractionToolDependencies = {};
 describe("PlanExecutor — real tapOn warnings inside criticalSection", () => {
   const warning = "The matched element is disabled; the tap may have no effect.";
   const device = { platform: "android" as const, deviceId: "fake-device", name: "Fake" };
@@ -39,9 +38,9 @@ describe("PlanExecutor — real tapOn warnings inside criticalSection", () => {
 
   beforeAll(() => {
     restoreSuiteTools = preserveToolRegistry();
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     registerCriticalSectionTools();
-    expect(ToolRegistry.getToolForPlan("tapOn")?.deviceAwareHandler).toBe(tapOnHandler);
+    expect(ToolRegistry.getToolForPlan("tapOn")?.deviceAwareHandler).toBeDefined();
   });
 
   afterAll(() => restoreSuiteTools());
@@ -51,7 +50,7 @@ describe("PlanExecutor — real tapOn warnings inside criticalSection", () => {
     executor = new DefaultPlanExecutor(new FakeTimer());
     coordinator = CriticalSectionCoordinator.createForTesting(new FakeTimer());
     restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(coordinator);
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async (params) => ({
         success: params.text !== "Missing",
         action: "tap",
@@ -63,7 +62,7 @@ describe("PlanExecutor — real tapOn warnings inside criticalSection", () => {
         ...(params.text === "Disabled" ? { warnings: [warning] } : {}),
         ...(params.text === "Missing" ? { error: "Element not found" } : {}),
       }),
-    }));
+    });
     const tap = ToolRegistry.getToolForPlan("tapOn")!;
     const section = ToolRegistry.getToolForPlan("criticalSection")!;
     // Replace only device acquisition/auditing; retain real handlers, internal
@@ -81,7 +80,7 @@ describe("PlanExecutor — real tapOn warnings inside criticalSection", () => {
 
   afterEach(() => {
     restoreHandlers();
-    resetTapOnElementFactory();
+    delete interactionDeps.tapOnElementFactory;
     coordinator.reset();
     restoreCoordinator();
     restoreTools();

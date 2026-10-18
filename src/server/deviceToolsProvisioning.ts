@@ -286,7 +286,7 @@ function capacityExhaustedProvisionError(
 export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
   const { bindBootedDeviceSession, ensureCtrlProxyReady, executeDeleteDevice } = hooks;
   const provisionDeviceHandler = async (
-    input: ProvisionDeviceArgs,
+    input: Partial<ProvisionDeviceArgs>,
     _progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
@@ -2596,7 +2596,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
 
   return {
     provisionDeviceHandler: (
-      input: ProvisionDeviceArgs,
+      input: Partial<ProvisionDeviceArgs>,
       progress?: ProgressCallback,
       signal?: AbortSignal,
     ) =>

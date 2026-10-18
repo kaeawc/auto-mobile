@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  type InteractionToolDependencies,
   setPostureSchema,
   setPostureHandler,
-  setSetPostureFactory,
-  resetSetPostureFactory,
 } from "../../src/server/interactionTools";
 import { setPostureResultSchema } from "../../src/server/toolOutputSchemas";
 import { z } from "zod/v4";
@@ -21,8 +20,11 @@ import {
   INTERNAL_TOOL_PARAM_NAMES,
 } from "../../src/daemon/constants";
 
+const interactionDeps: InteractionToolDependencies = {};
 describe("setPosture hinge angle contract", () => {
-  afterEach(resetSetPostureFactory);
+  afterEach(() => {
+    delete interactionDeps.setPostureFactory;
+  });
   const device: BootedDevice = { name: "Fold", platform: "android", deviceId: "emulator-5554" };
   const serverMetadata = {
     [INTERNAL_EXECUTION_ID_PARAM]: "exec",
@@ -49,7 +51,7 @@ describe("setPosture hinge angle contract", () => {
       posture: "opened" as const,
       display: { key: "inner", role: "inner" as const, posture: "opened" as const, generation: 1 },
     };
-    setSetPostureFactory((receivedDevice) => {
+    interactionDeps.setPostureFactory = (receivedDevice) => {
       expect(receivedDevice).toBe(device);
       return {
         execute: async (...args) => {
@@ -61,7 +63,7 @@ describe("setPosture hinge angle contract", () => {
           return { ...result, hingeAngle: args[0] };
         },
       };
-    });
+    };
     const postureArgs = Object.freeze({
       posture: "opened" as const,
       displayPreset: "tablet" as const,
@@ -69,7 +71,7 @@ describe("setPosture hinge angle contract", () => {
     });
     const angleArgs = Object.freeze({ hingeAngle: 90, ...metadata });
     const args = selector === "posture" ? postureArgs : angleArgs;
-    await setPostureHandler(device, args, undefined, signal);
+    await setPostureHandler(device, args, undefined, signal, interactionDeps);
     expect(calls).toEqual(
       selector === "posture"
         ? [["opened", "tablet", signal]]
@@ -81,11 +83,17 @@ describe("setPosture hinge angle contract", () => {
     "handler rejects neither/both with an actionable message: %j",
     async (args) => {
       let created = false;
-      setSetPostureFactory(() => {
+      interactionDeps.setPostureFactory = () => {
         created = true;
         throw new Error("Unexpected action");
-      });
-      const promise = setPostureHandler(device, { ...args, ...serverMetadata });
+      };
+      const promise = setPostureHandler(
+        device,
+        { ...args, ...serverMetadata },
+        undefined,
+        undefined,
+        interactionDeps,
+      );
       await expect(promise).rejects.toBeInstanceOf(ActionableError);
       await expect(promise).rejects.toMatchObject({
         message: "Specify exactly one of posture or hingeAngle.",
@@ -94,14 +102,20 @@ describe("setPosture hinge angle contract", () => {
     },
   );
   test("handler rejects displayPreset with hingeAngle before creating the action", async () => {
-    setSetPostureFactory(() => {
+    interactionDeps.setPostureFactory = () => {
       throw new Error("Unexpected action");
-    });
-    const promise = setPostureHandler(device, {
-      hingeAngle: 90,
-      displayPreset: "phone",
-      ...serverMetadata,
-    });
+    };
+    const promise = setPostureHandler(
+      device,
+      {
+        hingeAngle: 90,
+        displayPreset: "phone",
+        ...serverMetadata,
+      },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
     await expect(promise).rejects.toBeInstanceOf(ActionableError);
     await expect(promise).rejects.toMatchObject({
       message: "displayPreset requires posture and cannot be combined with hingeAngle.",
@@ -109,17 +123,23 @@ describe("setPosture hinge angle contract", () => {
   });
   test("handler preserves an actionable device error without wrapping it again", async () => {
     const error = new ActionableError("Unsupported posture on this device.");
-    setSetPostureFactory(() => ({
+    interactionDeps.setPostureFactory = () => ({
       execute: async () => {
         throw error;
       },
       executeHingeAngle: async () => {
         throw error;
       },
-    }));
-    await expect(setPostureHandler(device, { posture: "opened", ...serverMetadata })).rejects.toBe(
-      error,
-    );
+    });
+    await expect(
+      setPostureHandler(
+        device,
+        { posture: "opened", ...serverMetadata },
+        undefined,
+        undefined,
+        interactionDeps,
+      ),
+    ).rejects.toBe(error);
   });
   test("schema omits and strictly rejects obsolete observation controls", () => {
     const json = z.toJSONSchema(setPostureSchema);
@@ -187,7 +207,7 @@ describe("setPosture hinge angle contract", () => {
   });
   test("handler forwards the angle and signal and describes the device read-back", async () => {
     const calls: unknown[] = [];
-    setSetPostureFactory(() => ({
+    interactionDeps.setPostureFactory = () => ({
       execute: async () => {
         throw new Error("Unexpected posture request");
       },
@@ -200,10 +220,16 @@ describe("setPosture hinge angle contract", () => {
           display: { key: "inner", role: "inner", posture: "half_opened", generation: 2 },
         };
       },
-    }));
+    });
     const signal = new AbortController().signal;
     const device: BootedDevice = { name: "Fold", platform: "android", deviceId: "emulator-5554" };
-    const response = await setPostureHandler(device, { hingeAngle: 90 }, undefined, signal);
+    const response = await setPostureHandler(
+      device,
+      { hingeAngle: 90 },
+      undefined,
+      signal,
+      interactionDeps,
+    );
     expect(calls).toEqual([[90, { displayPreset: undefined, signal }]]);
     expect(response.structuredContent).toMatchObject({
       message: "Set hinge angle to 90 degrees; device reports posture half_opened",
@@ -215,7 +241,7 @@ describe("setPosture hinge angle contract", () => {
   test.each([180, undefined])(
     "handler describes an unverified angle %s as requested",
     async (actual) => {
-      setSetPostureFactory(() => ({
+      interactionDeps.setPostureFactory = () => ({
         execute: async () => {
           throw new Error("Unexpected posture request");
         },
@@ -230,8 +256,14 @@ describe("setPosture hinge angle contract", () => {
           posture: "opened",
           display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
         }),
-      }));
-      const response = await setPostureHandler(device, { hingeAngle: 120 });
+      });
+      const response = await setPostureHandler(
+        device,
+        { hingeAngle: 120 },
+        undefined,
+        undefined,
+        interactionDeps,
+      );
       expect(response.structuredContent).toMatchObject({
         message:
           actual === undefined

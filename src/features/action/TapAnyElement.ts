@@ -911,13 +911,17 @@ export class TapAnyElement extends BaseVisualChange {
       iosMultiPanel: this.iosMultiPanel,
     };
     const effectiveScreenSize = screenSizeForOffscreenCheck(viewHierarchy, screenSizeOptions);
-    const selection = this.elementSelector.selectClickable(viewHierarchy, {
-      screenSizeOptions,
-      container: options.container,
-      strategy: options.selectionStrategy,
-      intentAction: options.action === "longPress" ? "long-press" : "tap",
-      scrollableContainer: options.scrollableContainer,
-    });
+    const selection = this.elementSelector.select(
+      viewHierarchy,
+      {},
+      {
+        screenSizeOptions,
+        container: options.container,
+        strategy: options.selectionStrategy,
+        intentAction: options.action === "longPress" ? "long-press" : "tap",
+        scrollableContainer: options.scrollableContainer,
+      },
+    );
     if (selection.element && !hasVisibleScreenPart(selection.element.bounds, effectiveScreenSize)) {
       return { element: null, containerFound };
     }

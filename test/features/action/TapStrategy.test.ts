@@ -10,7 +10,6 @@ import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
 import type { TapStrategy } from "../../../src/utils/interfaces/TapStrategy";
-import type { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
 
 /**
  * Sanity-check the platform-agnostic TapStrategy contract. Tests
@@ -213,10 +212,10 @@ describe("TapStrategy", () => {
   });
 
   // Regression guard for #3925: the tap strategies must forward the injected
-  // FeatureFlagService to detection so `force-accessibility-mode` /
+  // FeatureFlagReader to detection so `force-accessibility-mode` /
   // `accessibility-auto-detect` apply to tapOn exactly as they do to observe.
   describe("force-accessibility-mode feature flag threading (#3925)", () => {
-    const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
+    const sentinelFlags = { __sentinel: true, isEnabled: () => false };
 
     it("AndroidTapStrategy forwards featureFlags to detectMethod", async () => {
       const detector = new FakeAccessibilityDetector();

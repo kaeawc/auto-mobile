@@ -162,11 +162,20 @@ export function buildAndroidInputTextCommand(text: string): string {
 export const ANDROID_INPUT_TEXT_CHUNK_CHARS = 32;
 
 /**
+ * Longest `input text` command on API 30 and older. The host `adb shell` process types, so a
+ * cancel needs no short commands, but one adb argv element must stay far below the OS argument
+ * limit (about 128 KiB per argument on Linux, smaller on some adb transports); single-quote
+ * escaping can quadruple the length, so 4096 characters stays well under it (#13141).
+ */
+export const ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS = 4096;
+
+/**
  * Plan for a run of printable ASCII.
  *
  * On API 30 and older the host `adb shell` process is the one typing, so killing the host
  * client stops typing immediately and one `input text` command per run is enough (#12733).
- * Chunking there only adds per-process overhead. On API 31+ (and when the level is unknown)
+ * Chunking there only adds per-process overhead, so it is bounded only by
+ * {@link ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS} to keep each argv below OS limits. On API 31+ (and when the level is unknown)
  * the host `cmd` client exits once the events are handed to the system, long before the app
  * consumes them, so only a short command bounds how much typing a cancel can leave behind:
  * one command per {@link ANDROID_INPUT_TEXT_CHUNK_CHARS} characters.
@@ -175,13 +184,15 @@ export const ANDROID_INPUT_TEXT_CHUNK_CHARS = 32;
  */
 export function buildAndroidInputTextPlan(text: string, apiLevel: number | null): KeyEventPlan {
   if (apiLevel !== null && apiLevel <= 30) {
-    return { commands: [buildAndroidInputTextCommand(text)], textLength: text.length };
+    return chunkedInputTextPlan(text, ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS);
   }
+  return chunkedInputTextPlan(text, ANDROID_INPUT_TEXT_CHUNK_CHARS);
+}
+
+function chunkedInputTextPlan(text: string, chunkChars: number): KeyEventPlan {
   const commands: string[] = [];
-  for (let start = 0; start < text.length; start += ANDROID_INPUT_TEXT_CHUNK_CHARS) {
-    commands.push(
-      buildAndroidInputTextCommand(text.slice(start, start + ANDROID_INPUT_TEXT_CHUNK_CHARS)),
-    );
+  for (let start = 0; start < text.length; start += chunkChars) {
+    commands.push(buildAndroidInputTextCommand(text.slice(start, start + chunkChars)));
   }
-  return { commands, textLength: Math.min(text.length, ANDROID_INPUT_TEXT_CHUNK_CHARS) };
+  return { commands, textLength: Math.min(text.length, chunkChars) };
 }

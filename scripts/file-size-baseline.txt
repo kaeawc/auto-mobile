@@ -21,7 +21,7 @@
 10195	src/daemon/sessionManager.ts
 7113	src/daemon/socketServer.ts
 1808	src/daemon/videoStreamSocketServer.ts
-1147	src/db/deviceSessionRepository.ts
+1145	src/db/deviceSessionRepository.ts
 1089	src/db/failureAnalyticsRepository.ts
 1456	src/db/navigationRepository.ts
 1403	src/db/navigationRetention.ts
@@ -36,11 +36,11 @@
 2267	src/features/action/LaunchApp.ts
 2033	src/features/action/Rotate.ts
 1915	src/features/action/SetUIState.ts
-1891	src/features/action/TapAnyElement.ts
-1424	src/features/action/TapAtCoordinate.ts
-3788	src/features/action/TapOnElement.ts
+1893	src/features/action/TapAnyElement.ts
+1426	src/features/action/TapAtCoordinate.ts
+3790	src/features/action/TapOnElement.ts
 1423	src/features/action/swipeon/ScrollUntilVisible.ts
-1836	src/features/action/swipeon/SwipeOn.ts
+1838	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
 5887	src/features/deviceLifecycle/deviceLifecycleCore.ts
 1429	src/features/navigation/Explore.ts
@@ -87,7 +87,7 @@
 2185	src/server/videoRecordingManager.ts
 1434	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts
-1839	src/utils/android-cmdline-tools/AdbClient.ts
+1822	src/utils/android-cmdline-tools/AdbClient.ts
 2057	src/utils/fileLock.ts
 1199	src/utils/ios-cmdline-tools/DeviceAppManager.ts
 3180	src/utils/ios-cmdline-tools/SimCtlClient.ts

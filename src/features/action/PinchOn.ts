@@ -578,9 +578,11 @@ export class PinchOn extends BaseVisualChange {
       options.display!,
       this.observeScreen,
       this.adb,
-      this.lastRenderedObservation,
-      signal,
-      this.displayTransitionReader,
+      {
+        lastRenderedObservation: this.lastRenderedObservation,
+        signal,
+        transitions: this.displayTransitionReader,
+      },
     );
 
     throwIfAborted(signal);

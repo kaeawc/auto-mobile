@@ -105,6 +105,53 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
         logger.warn(`[IOSCtrlProxy] Failed to restart iproxy: ${errorMessage(error)}`),
     });
   }
+  /** Live view of the tunnel's process bookkeeping (tests, doctor). */
+  get diagnostics(): {
+    readonly processId: number | null;
+    readonly process: ChildProcess | null;
+    readonly devicePort: number | null;
+    readonly localPort: number | null;
+    readonly supervisor: DefaultProcessSupervisor;
+  } {
+    const self = this;
+    return {
+      get processId() {
+        return self.iproxyProcessId;
+      },
+      get process() {
+        return self.iproxyProcess;
+      },
+      get devicePort() {
+        return self.iproxyDevicePort;
+      },
+      get localPort() {
+        return self.iproxyLocalPort;
+      },
+      supervisor: self.iproxySupervisor,
+    };
+  }
+
+  /** Seed tunnel bookkeeping a test would otherwise reach only through a real start. */
+  setStateForTesting(state: {
+    processId?: number | null;
+    process?: ChildProcess | null;
+    devicePort?: number | null;
+    localPort?: number | null;
+  }): void {
+    if (state.processId !== undefined) {
+      this.iproxyProcessId = state.processId;
+    }
+    if (state.process !== undefined) {
+      this.iproxyProcess = state.process;
+    }
+    if (state.devicePort !== undefined) {
+      this.iproxyDevicePort = state.devicePort;
+    }
+    if (state.localPort !== undefined) {
+      this.iproxyLocalPort = state.localPort;
+    }
+  }
+
   get localPort(): number | null {
     return this.iproxyLocalPort;
   }

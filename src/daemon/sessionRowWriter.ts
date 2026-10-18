@@ -1,7 +1,10 @@
 import {
   DeviceSessionRowNotReleasableError,
+  type DeviceSessionActivityUpdate,
   type DeviceSessionPersistence,
+  type DeviceSessionRecord,
   type MarkReleasedOptions,
+  type UpsertActiveSessionOptions,
 } from "../db/deviceSessionRepository";
 import type { BackoffPolicy } from "../utils/Backoff";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -10,6 +13,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import { releasedRowStatus } from "./releaseReasons";
 import type { SessionReleaseSnapshot } from "./sessionManager";
+import { SupersededRowReasserts } from "./supersededRowReasserts";
 
 /** In-process refusal; unlike a SQL miss it needs no peer/generation reclassification. */
 export class TerminalReleaseGenerationRefusedError extends DeviceSessionRowNotReleasableError {}
@@ -44,7 +48,25 @@ export interface ReleaseRowLanded {
   refused: boolean;
 }
 
-export interface SessionRowWriter {
+/**
+ * Live-row statements (create, rebind, activity). W3 adapter: the writer issues the statement and
+ * returns the persistence promise unchanged, so callers keep their await sequence and the
+ * statement-level guards (`unlessTerminal`, rewrite-over-release) stay in SQL. Per-UUID
+ * serialization of these writes is not added here.
+ */
+export interface LiveRowWrites {
+  upsertLive(
+    record: DeviceSessionRecord,
+    nowMs: number,
+    options?: UpsertActiveSessionOptions,
+  ): Promise<number | void>;
+  recordLiveActivity(uuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
+  replaceLiveOwnership(uuid: string, ownerToken: string | null): Promise<void>;
+}
+
+export interface SessionRowWriter extends LiveRowWrites {
+  /** Superseded-row rewrite state and owed-rewrite scheduling (#11799 W3). */
+  readonly superseded: SupersededRowReasserts;
   desire(uuid: string, desired: DesiredReleaseRow): void;
   noteLive(uuid: string): void;
   noteRelease(snapshot: SessionReleaseSnapshot): void;
@@ -171,6 +193,7 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
   });
   private desireSeq = 0;
   private draining = false;
+  readonly superseded: SupersededRowReasserts;
 
   constructor(
     private readonly persistence: DeviceSessionPersistence,
@@ -178,7 +201,14 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
     private backoff: BackoffPolicy,
     private readonly logger: Pick<Logger, "warn" | "debug">,
     private readonly options: SessionRowWriterOptions,
-  ) {}
+  ) {
+    this.superseded = new SupersededRowReasserts({
+      timer,
+      logger,
+      draining: () => this.draining,
+      trackDrainWrite: (write) => this.trackDrainWrite(write),
+    });
+  }
 
   /** W2 adapter: register once, including first attempts whose promise timing stays in the manager. */
   noteRelease(snapshot: SessionReleaseSnapshot): void {
@@ -204,6 +234,22 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
     if (row) {
       row.liveSeq = seq;
     }
+  }
+
+  upsertLive(
+    record: DeviceSessionRecord,
+    nowMs: number,
+    options?: UpsertActiveSessionOptions,
+  ): Promise<number | void> {
+    return this.persistence.upsertActiveSession(record, nowMs, options);
+  }
+
+  recordLiveActivity(uuid: string, update: DeviceSessionActivityUpdate): Promise<void> {
+    return this.persistence.recordActivity(uuid, update);
+  }
+
+  replaceLiveOwnership(uuid: string, ownerToken: string | null): Promise<void> {
+    return this.persistence.replaceLivenessOwnership(uuid, ownerToken);
   }
 
   canIssueRelease(snapshot: SessionReleaseSnapshot): boolean {

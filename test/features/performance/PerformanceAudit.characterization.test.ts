@@ -4,15 +4,6 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 
 type PerformanceMetrics = Awaited<ReturnType<PerformanceAudit["collectMetrics"]>>;
-type AuditCollectors = {
-  collectGfxMetrics: PerformanceAudit["collectGfxMetrics"];
-  collectCpuMetrics: PerformanceAudit["collectCpuMetrics"];
-  checkForAnr: PerformanceAudit["checkForAnr"];
-  calculateFrameRate: PerformanceAudit["calculateFrameRate"];
-  measureTouchLatency: PerformanceAudit["measureTouchLatency"];
-  measureTimeToFirstFrame: PerformanceAudit["measureTimeToFirstFrame"];
-  measureTimeToInteractive: PerformanceAudit["measureTimeToInteractive"];
-};
 
 const emptyMetrics: PerformanceMetrics = {
   p50Ms: null,
@@ -54,7 +45,7 @@ describe("PerformanceAudit metric assembly", () => {
   for (const populated of [false, true]) {
     test(`preserves ${populated ? "zero and false" : "missing"} collector values and collection order`, async () => {
       const audit = makeAudit();
-      const collectors = audit as unknown as AuditCollectors;
+      const collectors = audit;
       const order: string[] = [];
       const gfx = populated
         ? {
@@ -130,7 +121,7 @@ describe("PerformanceAudit metric assembly", () => {
 
   test("TTI is skipped when TTFF is absent, even when requested", async () => {
     const audit = makeAudit();
-    const collectors = audit as unknown as AuditCollectors;
+    const collectors = audit;
     const spies = [
       spyOn(collectors, "collectGfxMetrics").mockResolvedValue({}),
       spyOn(collectors, "collectCpuMetrics").mockResolvedValue({}),

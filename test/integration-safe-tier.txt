@@ -125,6 +125,7 @@ test/db/installedAppsProfileTypeMigration.integration.test.ts | safe | in-memory
 test/db/installedAppsRepository.integration.test.ts | safe | in-memory DB
 test/db/keyedJsonConfigRepository.integration.test.ts | safe | in-memory DB
 test/db/layoutEventRepository.integration.test.ts | safe | in-memory DB
+test/db/memoryAuditResultRepository.integration.test.ts | safe | createTestDatabase in-memory
 test/db/memoryBaselineRepository.integration.test.ts | safe | in-memory DB
 test/db/migrationDatetimeDefaults.integration.test.ts | safe | in-memory or temp DB
 test/db/migrationLock.integration.test.ts | safe | mkdtemp lock files, fake pids and isProcessRunning stubs L85/L312
@@ -146,6 +147,7 @@ test/db/performanceAuditRepository.integration.test.ts | safe | in-memory DB
 test/db/performanceLiveMetricsMigration.integration.test.ts | safe | in-memory DB
 test/db/predictionHistoryRepository.integration.test.ts | safe | in-memory DB
 test/db/provisionedDeviceTransportTombstoneRepository.integration.test.ts | safe | in-memory DB
+test/db/recompositionMetricsRepository.integration.test.ts | safe | createTestDatabase in-memory
 test/db/repairDatetimeNowDefaultsMigration.integration.test.ts | safe | in-memory BunDatabase and createTestDatabase L28/L205
 test/db/repairUpdatedAtDefaultsMigration.integration.test.ts | safe | in-memory BunDatabase and createTestDatabase L29/L387
 test/db/rowCapRetention.integration.test.ts | safe | pure retention-wrapper logic, no I/O

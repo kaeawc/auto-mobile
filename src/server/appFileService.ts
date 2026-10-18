@@ -1836,7 +1836,7 @@ interface IosWrittenFile {
   preexisting: boolean;
 }
 
-class IosSimulatorAppFileProvider
+export class IosSimulatorAppFileProvider
   implements AppFileWriteProvider, AppFileListProvider, AppFileReadProvider
 {
   readonly platform = "ios" as const;

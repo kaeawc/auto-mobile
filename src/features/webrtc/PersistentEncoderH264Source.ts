@@ -13,10 +13,8 @@ import {
   type BackoffInput,
   type BackoffPolicy,
 } from "../../utils/Backoff";
-import {
-  defaultAdbClientFactory,
-  type AdbClientFactory,
-} from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { VideoSourceAdb, VideoSourceAdbFactory } from "./videoSourceAdb";
 import type { AdbProcess } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   VideoServerJarProvider,
@@ -323,7 +321,7 @@ export interface PersistentEncoderH264SourceOptions {
    * verifies downloads with.
    */
   jarIntegrityProvider?: JarIntegrityProbe;
-  adbFactory?: AdbClientFactory;
+  adbFactory?: VideoSourceAdbFactory;
   connector?: SocketConnector;
   timer?: Timer;
   /**
@@ -583,7 +581,7 @@ function parseLeaseFileListing(output: string): {
  */
 export class PersistentEncoderH264Source implements H264CaptureSource {
   private readonly options: PersistentEncoderH264SourceOptions;
-  private readonly adbFactory: AdbClientFactory;
+  private readonly adbFactory: VideoSourceAdbFactory;
   private readonly connector: SocketConnector;
   private readonly timer: Timer;
   private readonly readyTimeoutMs: number;
@@ -855,9 +853,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     await this.connectToServer(server, port);
   }
 
-  private async prepareSession(
-    adb: ReturnType<AdbClientFactory["create"]>,
-  ): Promise<number | null> {
+  private async prepareSession(adb: VideoSourceAdb): Promise<number | null> {
     if (!this.running) {
       return null;
     }
@@ -910,7 +906,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
    * (the happy path hashes the remote once). Bounded by the launch-command
    * timeout (issue #4741) like every other launch-path ADB call.
    */
-  private async ensureRemoteJar(adb: ReturnType<AdbClientFactory["create"]>): Promise<void> {
+  private async ensureRemoteJar(adb: VideoSourceAdb): Promise<void> {
     const expected = await this.resolveExpectedJarIntegrity();
     const remote = await this.statAndHashRemoteJar(adb);
     if (remote !== null && remote.size === expected.size && remote.sha256 === expected.sha256) {
@@ -950,9 +946,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
    * handshake graceful-degrade — it logs and proceeds rather than regressing every
    * such device to screenrecord.
    */
-  private async verifyRemoteJarBeforeLaunch(
-    adb: ReturnType<AdbClientFactory["create"]>,
-  ): Promise<void> {
+  private async verifyRemoteJarBeforeLaunch(adb: VideoSourceAdb): Promise<void> {
     if (this.remoteJarVerified) {
       return;
     }
@@ -998,9 +992,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
    * by the launch-command timeout. A missing jar, absent tooling, or a timeout
    * yields `null` — the callers treat that as "push"/"refuse", never as a match.
    */
-  private async statAndHashRemoteJar(
-    adb: ReturnType<AdbClientFactory["create"]>,
-  ): Promise<VideoServerJarIntegrity | null> {
+  private async statAndHashRemoteJar(adb: VideoSourceAdb): Promise<VideoServerJarIntegrity | null> {
     const probe =
       `sha256sum ${VIDEO_SERVER_REMOTE_JAR_PATH} 2>/dev/null; ` +
       `wc -c < ${VIDEO_SERVER_REMOTE_JAR_PATH} 2>/dev/null`;
@@ -1023,9 +1015,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
   }
 
-  private async spawnAndWaitForServer(
-    adb: ReturnType<AdbClientFactory["create"]>,
-  ): Promise<AdbProcess | null> {
+  private async spawnAndWaitForServer(adb: VideoSourceAdb): Promise<AdbProcess | null> {
     await this.verifyRemoteJarBeforeLaunch(adb);
     if (!this.running) {
       return null;
@@ -1943,7 +1933,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
   }
 
-  private async reconcileExpiredLeases(adb: ReturnType<AdbClientFactory["create"]>): Promise<void> {
+  private async reconcileExpiredLeases(adb: VideoSourceAdb): Promise<void> {
     let leases: VideoServerLease[];
     try {
       const leaseListCommand =
@@ -2045,7 +2035,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
    * mtime) are swept, so a file mid-rename by a live server is left alone.
    */
   private async sweepOrphanLeaseFiles(
-    adb: ReturnType<AdbClientFactory["create"]>,
+    adb: VideoSourceAdb,
     knownLeaseFileNames: ReadonlySet<string>,
   ): Promise<void> {
     let listing: { nowEpochMs: number | null; files: { name: string; mtimeMs: number }[] };
@@ -2114,7 +2104,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
    * so a port reused by an unrelated service is never touched.
    */
   private async sweepOrphanForwards(
-    adb: ReturnType<AdbClientFactory["create"]>,
+    adb: VideoSourceAdb,
     leaseBackedSocketNames: ReadonlySet<string>,
   ): Promise<void> {
     let stdout: string;
@@ -2202,7 +2192,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   }
 
   private async removeOwnedForward(
-    adb: ReturnType<AdbClientFactory["create"]>,
+    adb: VideoSourceAdb,
     port: number | null,
     socketName: string,
     exceptPort?: number,
@@ -2213,7 +2203,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   }
 
   private async readLease(
-    adb: ReturnType<AdbClientFactory["create"]>,
+    adb: VideoSourceAdb,
     socketName: string,
   ): Promise<VideoServerLease | null> {
     try {
@@ -2232,7 +2222,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   }
 
   private async terminateProcessIfMatching(
-    adb: ReturnType<AdbClientFactory["create"]>,
+    adb: VideoSourceAdb,
     lease: VideoServerLease,
   ): Promise<void> {
     try {
@@ -2274,7 +2264,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
   }
 
   private async removeForwardIfMatching(
-    adb: ReturnType<AdbClientFactory["create"]>,
+    adb: VideoSourceAdb,
     port: number,
     socketName: string,
   ): Promise<void> {
@@ -2306,10 +2296,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     }
   }
 
-  private async removeLeaseIfMatching(
-    adb: ReturnType<AdbClientFactory["create"]>,
-    lease: VideoServerLease,
-  ): Promise<void> {
+  private async removeLeaseIfMatching(adb: VideoSourceAdb, lease: VideoServerLease): Promise<void> {
     const current = await this.readLease(adb, lease.socketName);
     if (
       current?.socketName !== lease.socketName ||
@@ -2363,9 +2350,7 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
     this.sawStreamingStarted = false;
   }
 
-  private async readDeviceElapsedRealtimeMs(
-    adb: ReturnType<AdbClientFactory["create"]>,
-  ): Promise<number | null> {
+  private async readDeviceElapsedRealtimeMs(adb: VideoSourceAdb): Promise<number | null> {
     try {
       const result = await this.withTimeout(
         adb.executeCommand("shell cat /proc/uptime"),

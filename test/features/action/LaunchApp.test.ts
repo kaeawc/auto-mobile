@@ -21,7 +21,6 @@ import {
   BootedDevice,
   ExecResult,
   ObserveResult,
-  ViewHierarchyResult,
 } from "../../../src/models";
 import {
   DefaultPerformanceTracker,
@@ -38,6 +37,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { createExecResult } from "../../../src/utils/execResult";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
 import { PortManager } from "../../../src/utils/PortManager";
@@ -78,10 +78,24 @@ describe("LaunchApp", () => {
     updatedAt: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: appId ? ({ node: {}, packageName: appId } as any) : { node: {} },
+    viewHierarchy: appId
+      ? { hierarchy: { node: {} }, packageName: appId }
+      : { hierarchy: { node: {} } },
     activeWindow: appId ? { appId, activityName: "MainActivity", layoutSeqSum: 1 } : undefined,
     backStack,
   });
+
+  /** Real manager over fakes; only the bundle-id hand-off is observed. */
+  const stubIosManager = (
+    device: BootedDevice,
+    onTargetBundleId: (id: string) => unknown = () => {},
+  ) => {
+    const manager = IOSCtrlProxyManager.createForTesting(device, new FakeTimer());
+    spyOn(manager, "setTargetBundleId").mockImplementation((id) => {
+      onTargetBundleId(id);
+    });
+    return spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue(manager);
+  };
 
   const configureInstalledApp = () => {
     fakeAdb.setCommandResponse("shell pm list packages --user 0", {
@@ -2375,8 +2389,8 @@ describe("LaunchApp", () => {
       ...createObserveResult(packageName),
       viewHierarchy: {
         packageName,
-        hierarchy: { node: { marker } },
-      } as unknown as ViewHierarchyResult,
+        hierarchy: { node: { $: { marker } } },
+      },
     });
     fakeObserveScreen.setObserveSequence([
       frame("launch"),
@@ -2402,8 +2416,8 @@ describe("LaunchApp", () => {
       ...createObserveResult(packageName),
       viewHierarchy: {
         packageName,
-        hierarchy: { node: { marker: index } },
-      } as unknown as ViewHierarchyResult,
+        hierarchy: { node: { $: { marker: index } } },
+      },
     }));
 
     const result = await launchApp.execute(packageName, { clearAppData: true, coldBoot: false });
@@ -2803,7 +2817,7 @@ describe("LaunchApp", () => {
             node: [{ text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } }],
           },
         },
-      } as any,
+      },
       // Stale identity that survived on the wire even though the tree itself
       // has collapsed to status-bar-only content.
       activeWindow: { appId: staleAppPackageName, activityName: "MainActivity", layoutSeqSum: 1 },
@@ -2836,9 +2850,9 @@ describe("LaunchApp", () => {
     const wrongAppObservation: ObserveResult = {
       ...createObserveResult(undefined),
       viewHierarchy: {
-        node: {},
+        hierarchy: { node: {} },
         foregroundActivity: `${wrongAppPackageName}/.MainActivity`,
-      } as any,
+      },
     };
 
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
@@ -2869,11 +2883,12 @@ describe("LaunchApp", () => {
     const laggedObservation: ObserveResult = {
       ...createObserveResult(packageName),
       viewHierarchy: {
-        ...createObserveResult(packageName).viewHierarchy,
+        hierarchy: { node: {} },
+        packageName,
         // Raw accessibility signal still names the PREVIOUS app A, even
         // though activeWindow/viewHierarchy.packageName already settled on B.
         foregroundActivity: `${previousPackageName}/.MainActivity`,
-      } as any,
+      },
     };
 
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
@@ -2897,9 +2912,9 @@ describe("LaunchApp", () => {
     const rightAppObservation: ObserveResult = {
       ...createObserveResult(undefined),
       viewHierarchy: {
-        node: {},
+        hierarchy: { node: {} },
         foregroundActivity: `${packageName}/.MainActivity`,
-      } as any,
+      },
     };
 
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
@@ -3137,9 +3152,9 @@ describe("LaunchApp", () => {
     const timings = perfTracker.getTimings();
     expect(Array.isArray(timings)).toBe(true);
 
-    const launchEntry = (timings as any[]).find((entry) => entry.name === "launchApp");
+    const launchEntry = timings.find((entry) => entry.name === "launchApp");
     expect(launchEntry).toBeDefined();
-    const childNames = (launchEntry.children as any[]).map((entry) => entry.name);
+    const childNames = (launchEntry?.children ?? []).map((entry) => entry.name);
     expect(childNames).toContain("detectTargetUser");
     expect(childNames).toContain("checkInstalled");
   });
@@ -3159,7 +3174,7 @@ describe("LaunchApp", () => {
       updatedAt: Date.now(),
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      viewHierarchy: { hierarchy: { node: {} }, packageName: systemBundleId } as any,
+      viewHierarchy: { hierarchy: { node: {} }, packageName: systemBundleId },
     };
 
     const iosFakeObserveScreen = new FakeObserveScreen();
@@ -3222,16 +3237,14 @@ describe("LaunchApp", () => {
       const ctrlProxySpy = spyOnIosClientInstance(fakeCtrlProxy);
 
       const targetBundleIdCalls: string[] = [];
-      const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-        setTargetBundleId: (id: string) => targetBundleIdCalls.push(id),
-      } as unknown as IOSCtrlProxyManager);
+      const managerSpy = stubIosManager(iosDevice, (id) => targetBundleIdCalls.push(id));
 
       const iosObserveScreen = new FakeObserveScreen();
       iosObserveScreen.setObserveResult({
         updatedAt: Date.now(),
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-        viewHierarchy: { hierarchy: { node: {} }, packageName: opts.bundleId } as any,
+        viewHierarchy: { hierarchy: { node: {} }, packageName: opts.bundleId },
       });
 
       const iosWindow = new FakeWindow();
@@ -3505,9 +3518,9 @@ describe("LaunchApp", () => {
       const callOrder: string[] = [];
 
       const ctrlProxySpy = spyOnIosClientInstance(new FakeIOSCtrlProxy());
-      const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-        setTargetBundleId: (id: string) => callOrder.push(`setTargetBundleId:${id}`),
-      } as unknown as IOSCtrlProxyManager);
+      const managerSpy = stubIosManager(iosDevice, (id) =>
+        callOrder.push(`setTargetBundleId:${id}`),
+      );
 
       const fakeSimctl = {
         launchApp: async () => {
@@ -3522,7 +3535,7 @@ describe("LaunchApp", () => {
         updatedAt: Date.now(),
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-        viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId } as any,
+        viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId },
       });
       const iosWindow = new FakeWindow();
       iosWindow.configureCachedActiveWindow({
@@ -3706,20 +3719,18 @@ describe("LaunchApp", () => {
           updatedAt: Date.now(),
           screenSize: { width: 1080, height: 1920 },
           systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-          viewHierarchy: { hierarchy: { node: {} }, packageName: previousBundleId } as any,
+          viewHierarchy: { hierarchy: { node: {} }, packageName: previousBundleId },
         },
         {
           updatedAt: Date.now(),
           screenSize: { width: 1080, height: 1920 },
           systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-          viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId } as any,
+          viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId },
         },
       ];
 
       const ctrlProxySpy = spyOnIosClientInstance(new FakeIOSCtrlProxy());
-      const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-        setTargetBundleId: () => {},
-      } as unknown as IOSCtrlProxyManager);
+      const managerSpy = stubIosManager(iosDevice);
       const fakeSimctl = {
         launchApp: async () => ({ success: true, pid: 123 }),
         terminateApp: async () => {},
@@ -3731,7 +3742,7 @@ describe("LaunchApp", () => {
             updatedAt: Date.now(),
             screenSize: { width: 1080, height: 1920 },
             systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-            viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId } as any,
+            viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId },
           },
       );
       const iosWindow = new FakeWindow();
@@ -3849,9 +3860,7 @@ describe("LaunchApp", () => {
       };
       const fakeCtrlProxy = new FakeIOSCtrlProxy();
       const ctrlProxySpy = spyOnIosClientInstance(fakeCtrlProxy);
-      const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-        setTargetBundleId: () => {},
-      } as unknown as IOSCtrlProxyManager);
+      const managerSpy = stubIosManager(iosDevice);
 
       const simctlCalls: string[] = [];
       const terminateCalls: Array<{ bundleId: string; deviceId: string | undefined }> = [];
@@ -3897,7 +3906,7 @@ describe("LaunchApp", () => {
         updatedAt: Date.now(),
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-        viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId } as any,
+        viewHierarchy: { hierarchy: { node: {} }, packageName: userBundleId },
       });
       const iosWindow = new FakeWindow();
       iosWindow.configureCachedActiveWindow({
@@ -4405,9 +4414,7 @@ describe("LaunchApp", () => {
       const fakeCtrlProxy = new FakeIOSCtrlProxy();
 
       const ctrlProxySpy = spyOnIosClientInstance(fakeCtrlProxy);
-      const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-        setTargetBundleId: () => {},
-      } as unknown as IOSCtrlProxyManager);
+      const managerSpy = stubIosManager(iosDevice);
 
       // get_app_container returns this path (empty → clear fails as "not installed").
       const containerPath = opts.containerPath ?? "";
@@ -4423,24 +4430,12 @@ describe("LaunchApp", () => {
         executeCommand: async (command: string) => {
           calls.push(`exec:${command}`);
           const stdout = command.startsWith("get_app_container") ? containerPath : "";
-          return {
-            stdout,
-            stderr: "",
-            trim: () => stdout.trim(),
-            toString: () => stdout,
-            includes: (s: string) => stdout.includes(s),
-          } as any;
+          return createExecResult(stdout, "");
         },
         executeCommandArgs: async (args: string[]) => {
           calls.push(`exec:${args.join(" ")}`);
           const stdout = args[0] === "get_app_container" ? containerPath : "";
-          return {
-            stdout,
-            stderr: "",
-            trim: () => stdout.trim(),
-            toString: () => stdout,
-            includes: (s: string) => stdout.includes(s),
-          } as any;
+          return createExecResult(stdout, "");
         },
       };
 
@@ -4449,7 +4444,7 @@ describe("LaunchApp", () => {
         updatedAt: Date.now(),
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-        viewHierarchy: { hierarchy: { node: {} }, packageName: bundleId } as any,
+        viewHierarchy: { hierarchy: { node: {} }, packageName: bundleId },
       });
       const iosWindow = new FakeWindow();
       iosWindow.configureCachedActiveWindow({

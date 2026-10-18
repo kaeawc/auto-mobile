@@ -101,10 +101,18 @@ export interface McpServerOptions {
   /**
    * The request's session key (#4678): the `MCP_SESSION_KEY_HEADER` value the
    * daemon's HTTP endpoint read for this request. Session-tool bindings are keyed
-   * on it (an in-band `__mcpSessionId` on a daemon `tools/call` takes precedence),
-   * so a binding survives across per-request servers that present the same key.
+   * on it, so a binding survives across per-request servers that present the same key.
+   * The header wins over an in-band `__mcpSessionId` unless {@link trustForwardedMcpSessionId}
+   * is set (#13315).
    */
   requestMcpSessionId?: string;
+  /**
+   * The server answers the daemon's own in-process forward (stdio proxy / socket-forwarded
+   * calls): the in-band `__mcpSessionId` it carries names the originating client and takes
+   * precedence over {@link requestMcpSessionId}, the connection key. Never set for direct HTTP
+   * clients, whose in-band id is only a fallback when they sent no header (#13315).
+   */
+  trustForwardedMcpSessionId?: boolean;
   /**
    * The server answers a single request and is closed after it (#4678). Keyed
    * bindings then live in the daemon-scoped {@link daemonSessionToolBindingStore}

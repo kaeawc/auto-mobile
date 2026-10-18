@@ -1,5 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
@@ -76,9 +76,9 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
     spiedSessionIds.push(sessionId);
     const manager = NavigationGraphManager.getInstanceForSession(sessionId);
     const captured: ScrollPosition[] = [];
-    (manager as any).updateScrollPosition = (scrollPosition: ScrollPosition) => {
+    spyOn(manager, "updateScrollPosition").mockImplementation((scrollPosition: ScrollPosition) => {
       captured.push(scrollPosition);
-    };
+    });
     return captured;
   }
 

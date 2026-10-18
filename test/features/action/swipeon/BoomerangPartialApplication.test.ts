@@ -52,7 +52,11 @@ type Boomerang = (
 ) => Promise<SwipeResult>;
 
 function androidBoomerang(): Boomerang {
-  const device = { platform: "android", deviceId: "emulator-5554" } as unknown as BootedDevice;
+  const device: BootedDevice = {
+    name: "emulator",
+    platform: "android",
+    deviceId: "emulator-5554",
+  };
   return (gesture, timer, signal) => {
     const proxy = new FakeCtrlProxy();
     spyOn(proxy, "getAccessibilityHierarchy").mockResolvedValue({
@@ -61,7 +65,7 @@ function androidBoomerang(): Boomerang {
     const executor = new TalkBackSwipeExecutor(
       device,
       gesture,
-      proxy as unknown as ConstructorParameters<typeof TalkBackSwipeExecutor>[2],
+      proxy,
       new FakeAccessibilityDetector(),
       new FakeAdbClient(),
       timer,
@@ -80,12 +84,12 @@ function androidBoomerang(): Boomerang {
 }
 
 function iosBoomerang(): Boomerang {
-  const device = { platform: "ios", deviceId: "ios-sim" } as unknown as BootedDevice;
+  const device: BootedDevice = { name: "ios-sim", platform: "ios", deviceId: "ios-sim" };
   return (gesture, timer, signal) => {
     const executor = new VoiceOverSwipeExecutor(
       device,
       gesture,
-      new FakeIOSCtrlProxy() as unknown as ConstructorParameters<typeof VoiceOverSwipeExecutor>[2],
+      new FakeIOSCtrlProxy(),
       new FakeIosVoiceOverDetector(),
       timer,
     );

@@ -45,74 +45,46 @@ import { resetScreenshotStateStore } from "../../../src/features/observe/screens
 import { CtrlProxyHierarchy } from "../../../src/features/observe/ios/CtrlProxyHierarchy";
 import { RequestManager } from "../../../src/utils/RequestManager";
 import type { HierarchyCollector } from "../../../src/features/observe/collectors/HierarchyCollector";
-import type { DeviceStateCollector } from "../../../src/features/observe/collectors/DeviceStateCollector";
-import type { PerformanceAuditor } from "../../../src/features/observe/audits/PerformanceAuditor";
-import type { AccessibilityAuditor } from "../../../src/features/observe/audits/AccessibilityAuditor";
-import type { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
 import type { HierarchyPlatformValidator } from "../../../src/features/observe/HierarchyPlatformValidator";
-import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import type {
   CtrlProxyCachedHierarchy,
   HierarchyDelegateContext,
   XCTestHierarchy,
 } from "../../../src/features/observe/ios/types";
+import { FakeDeviceStateCollector } from "../../fakes/FakeDeviceStateCollector";
+import { noopObserveAudits } from "../../fakes/noopObserveAudits";
 
 // ---------------------------------------------------------------------------
 // Shared no-op fakes so `execute()` completes without touching a real device.
 // ---------------------------------------------------------------------------
 
-class NoOpAuditor implements Pick<
-  PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector,
-  "run"
-> {
-  async run(): Promise<void> {}
-}
-
-class FakeDeviceStateCollector implements Pick<
-  DeviceStateCollector,
-  | "collectBackStack"
-  | "collectWakefulness"
-  | "collectDeviceLock"
-  | "collectActiveWindow"
-  | "collectForegroundIdentity"
-> {
-  async collectBackStack(): Promise<void> {}
-  async collectWakefulness(result: ObserveResult): Promise<void> {
-    result.wakefulness = "Awake";
-  }
-  async collectDeviceLock(): Promise<void> {}
-  async collectActiveWindow(): Promise<void> {}
-  async collectForegroundIdentity(): Promise<string | undefined> {
-    return undefined;
-  }
-}
+type ScriptedHierarchy = Pick<
+  ViewHierarchyResult,
+  "hierarchy" | "updatedAt" | "receivedAt" | "fresh"
+>;
 
 /** Hands `execute()` a caller-controlled `result.viewHierarchy` directly. */
 class ScriptedHierarchyCollector implements Pick<
   HierarchyCollector,
   "collect" | "collectRaw" | "extractScreenSize" | "reconcileScreenDimensions"
 > {
-  constructor(
-    private viewHierarchy: {
-      hierarchy: unknown;
-      updatedAt?: number;
-      receivedAt?: number;
-      fresh?: boolean;
-    },
-  ) {}
+  constructor(private viewHierarchy: ScriptedHierarchy) {}
   async collect(result: ObserveResult): Promise<void> {
     result.viewHierarchy = {
       screenWidth: 1080,
       screenHeight: 1920,
       wakefulness: "Awake",
       ...this.viewHierarchy,
-    } as any;
+    };
   }
   async collectRaw(): Promise<void> {}
   extractScreenSize(): { width: number; height: number } | null {
     return { width: 1080, height: 1920 };
   }
-  reconcileScreenDimensions(viewHierarchy: unknown): unknown {
+  reconcileScreenDimensions(
+    viewHierarchy: ObserveResult["viewHierarchy"],
+  ): ObserveResult["viewHierarchy"] {
     return viewHierarchy;
   }
 }
@@ -121,7 +93,7 @@ const device: BootedDevice = { deviceId: "test-device", name: "Test Device", pla
 
 function createObserveScreen(
   fakeTimer: FakeTimer,
-  viewHierarchy: { hierarchy: unknown; updatedAt?: number; receivedAt?: number; fresh?: boolean },
+  viewHierarchy: ScriptedHierarchy,
   platformValidator?: HierarchyPlatformValidator,
 ) {
   const observeScreen = new RealObserveScreen(
@@ -131,13 +103,9 @@ function createObserveScreen(
       cacheStore: new FakeObserveCacheStore(fakeTimer),
       screenshotStateStore: new FakeScreenshotStateStore(fakeTimer),
       screenshotRecorder: new FakeScreenshotRecorder(),
-      hierarchyCollector: new ScriptedHierarchyCollector(
-        viewHierarchy,
-      ) as unknown as HierarchyCollector,
-      deviceStateCollector: new FakeDeviceStateCollector() as unknown as DeviceStateCollector,
-      performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
-      accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
-      accessibilityStateDetector: new NoOpAuditor() as unknown as AccessibilityStateDetector,
+      hierarchyCollector: new ScriptedHierarchyCollector(viewHierarchy),
+      deviceStateCollector: new FakeDeviceStateCollector(false),
+      ...noopObserveAudits(),
       platformValidator,
     },
     fakeTimer,
@@ -158,7 +126,7 @@ describe("freshness regression repro (glance path, ObserveScreen.execute)", () =
     const STALE_MS = 216_000;
     const fakeTimer = new FakeTimer();
     const { observeScreen } = createObserveScreen(fakeTimer, {
-      hierarchy: { text: "frozen-tree" },
+      hierarchy: {},
       updatedAt: fakeTimer.now() - STALE_MS,
     });
 
@@ -177,7 +145,7 @@ describe("freshness regression repro (glance path, ObserveScreen.execute)", () =
     // against the device on this call" must win regardless of age.
     const fakeTimer = new FakeTimer();
     const { observeScreen } = createObserveScreen(fakeTimer, {
-      hierarchy: { text: "unverified-tree" },
+      hierarchy: {},
       updatedAt: fakeTimer.now() - 1,
       fresh: false,
     });
@@ -196,7 +164,7 @@ describe("freshness regression repro (glance path, ObserveScreen.execute)", () =
     const SKEW_MS = 25_000;
     const fakeTimer = new FakeTimer();
     const { observeScreen } = createObserveScreen(fakeTimer, {
-      hierarchy: { text: "Wifi" },
+      hierarchy: {},
       updatedAt: fakeTimer.now() - SKEW_MS, // device domain, skewed behind host
       receivedAt: fakeTimer.now() - 200, // host domain, freshly received
       fresh: true, // delegate verified against the device on this call

@@ -12,7 +12,7 @@ import { INTERNAL_MCP_SESSION_PARAM } from "./constants";
  *
  * Every POST gets its own MCP server and transport, closed when its response closes.
  * There is no transport map, no idle reaper and no transport session header: the caller's
- * session key ({@link readMcpSessionKey}, else the in-band `__mcpSessionId`) is the
+ * session key ({@link readMcpSessionKey}; only without a header, the in-band `__mcpSessionId`) is the
  * only thing that links one request to the next. GET and DELETE answer 405 because
  * there is no session stream to open or terminate.
  *
@@ -67,6 +67,13 @@ export interface StatelessMcpRequestScope {
   readonly requestScopeId: string;
   /** The caller's session key: the header, else the in-band `__mcpSessionId` argument. */
   readonly requestMcpSessionId: string | undefined;
+  /**
+   * True only for the daemon's own in-process forward (stdio proxy / socket-forwarded tool
+   * calls, #13315): its in-band `__mcpSessionId` names the originating client and outranks
+   * `requestMcpSessionId` (the connection key). The HTTP endpoint never sets it, so a direct
+   * client's in-band id can never override its session-key header.
+   */
+  readonly trustedForwarder?: boolean;
   /**
    * Who owns the request's MCP tasks (#4668), when not its session key: a control-socket forward
    * from the stdio proxy names the proxy. The HTTP endpoint never sets it.

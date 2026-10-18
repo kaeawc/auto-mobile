@@ -512,7 +512,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
   test("does not tap a hierarchy refresh that returns at the search deadline", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
-    const hierarchy = createObserveResult().viewHierarchy;
+    const hierarchy = createObserveResult().viewHierarchy ?? null;
     spyOn(fakeElementSelector, "select")
       .mockImplementationOnce(() => ({
         element: null,

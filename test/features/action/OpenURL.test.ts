@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { OpenURL } from "../../../src/features/action/OpenURL";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
-import { LaunchApp, type LaunchAppResult } from "../../../src/features/action/LaunchApp";
+import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
-import type { BootedDevice, ObserveResult } from "../../../src/models";
+import type { BootedDevice, LaunchAppResult, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeDeviceUrlLauncher } from "../../fakes/FakeDeviceUrlLauncher";
@@ -365,6 +365,7 @@ describe("OpenURL package: delegation is unchanged", () => {
   test("(f) package: URL delegates to LaunchApp on iOS without touching simctl/devicectl", async () => {
     const launchSpy = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({
       success: true,
+      packageName: "com.example.MyApp",
     } satisfies LaunchAppResult);
     restores.push(() => launchSpy.mockRestore());
 
@@ -510,6 +511,7 @@ describe("OpenURL trims the dispatched URL (issue #4166)", () => {
   test("package: URL with surrounding whitespace still delegates to LaunchApp", async () => {
     const launchSpy = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({
       success: true,
+      packageName: "com.example.MyApp",
     } satisfies LaunchAppResult);
     restores.push(() => launchSpy.mockRestore());
 

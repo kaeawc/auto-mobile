@@ -1,5 +1,5 @@
 import { DeviceUnhealthyError } from "../../src/daemon/DeviceUnhealthyError";
-import { SessionOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
+import { SessionOutsideBoundSessionError } from "../../src/server/SessionOutsideBoundSessionError";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import {

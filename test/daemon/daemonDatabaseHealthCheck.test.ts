@@ -9,7 +9,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 import { logger } from "../../src/utils/logger";
 
-import { DatabaseHealthProbeTimeoutError } from "../../src/db/DatabaseHealthProbe";
+import { DatabaseHealthProbeTimeoutError } from "../../src/db/DatabaseHealthProbeTimeoutError";
 
 const HEALTH_CHECK_INTERVAL_MS = 30_000;
 const MAX_FAILED_CHECKS = 3;

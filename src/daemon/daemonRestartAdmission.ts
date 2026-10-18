@@ -1,4 +1,5 @@
 import { DaemonUnavailableError } from "./client";
+import { DaemonRestartPendingError } from "./DaemonRestartPendingError";
 
 export const DAEMON_REPUBLISH_IDENTITY_METHOD = "ide/republishIdentity";
 export const DAEMON_PREPARE_RESTART_METHOD = "ide/prepareRestart";
@@ -103,17 +104,6 @@ export class DaemonRestartDeferredError extends DaemonUnavailableError {
         "only after confirming that no device operation is active.",
     );
     this.name = "DaemonRestartDeferredError";
-  }
-}
-
-/** A provision request lost the atomic admission race to an accepted restart. */
-export class DaemonRestartPendingError extends DaemonUnavailableError {
-  readonly code = "daemon_restart_pending";
-  readonly retryable = true;
-
-  constructor() {
-    super("Daemon restart is pending; retry provisionDevice after the replacement becomes ready.");
-    this.name = "DaemonRestartPendingError";
   }
 }
 

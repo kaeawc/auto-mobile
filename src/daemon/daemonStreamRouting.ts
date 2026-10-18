@@ -21,7 +21,7 @@ import {
 } from "./navigationGraphRequestHandler";
 import type { ObservationStreamIosClient } from "./observationInitialFrame";
 import { DeviceAssignedToBindingError } from "./sessionBroker/provisioning/refusal";
-import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "./ObserverAdmittingStreamAuthenticator";
 
 /**
  * Observation-stream routing split out of daemon.ts (#11808): the navigation-graph push bridge, the

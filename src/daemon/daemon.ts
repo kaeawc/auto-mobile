@@ -62,22 +62,21 @@ import {
   sessionExecutionProbe,
   subscribeToolCallEndActivity,
 } from "./toolCallActivity";
-import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "./ObserverAdmittingStreamAuthenticator";
 import { createDaemonHealthCheck, type HealthFailureKind } from "./daemonHealthCheck";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
 import { SingleFlightInterval } from "./SingleFlightInterval";
-import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "./deviceDisconnectHandler";
+import { type PlanDeviceLossPort } from "./deviceDisconnectHandler";
+import { PlanDeviceLossMonitor } from "./PlanDeviceLossMonitor";
 import { DevicePool, type PooledDevice } from "./devicePool";
 import { ForwardLeaseForeignDeviceOwnership } from "./foreignDeviceOwnership";
 import {
   createForeignCtrlProxyForwardEvidence,
   type ForeignCtrlProxyForwardEvidence,
 } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
-import {
-  OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
-  OwnerDisconnectExecutionVeto,
-} from "./ownerDisconnectRelease";
+import { OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS } from "./OwnerDisconnectExecutionVeto";
+import { OwnerDisconnectExecutionVeto } from "./OwnerDisconnectExecutionVeto";
 import type { SessionExecutionProbe } from "./unsettledExecutionVeto";
 import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
@@ -191,8 +190,6 @@ import { clearSessionAppearanceConfig } from "../server/appearanceManager";
 import { resolveAppearanceSessionKey } from "../server/appearanceSessionKey";
 import { recordDeviceSettingDefaultsBeforeChange } from "../features/utility/DeviceSettingDefaults";
 import { NetworkState } from "../server/NetworkState";
-import {} from "../server/networkStateSessionCleanup";
-import {} from "../server/recordingSessionCleanup";
 import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownRedrive";
 import { HybridVideoCaptureBackend } from "../features/video/HybridVideoCaptureBackend";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
@@ -288,10 +285,10 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import {
-  BackgroundBindingRegistryUpgrade,
   LegacySlotDeviceRetirement,
   prepareBindingRegistryForStartup,
 } from "./sessionBroker/registry/legacySlotDeviceRetirement";
+import { BackgroundBindingRegistryUpgrade } from "./sessionBroker/registry/BackgroundBindingRegistryUpgrade";
 import { ProcessTableReader } from "../features/bootAdmission/processTableRetry";
 import { nodeProcFs } from "../features/bootAdmission/procProcessTable";
 import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";

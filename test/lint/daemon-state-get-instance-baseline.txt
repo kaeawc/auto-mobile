@@ -1,4 +1,5 @@
 src/daemon/AppearanceSyncScheduler.ts	1
+src/daemon/ObserverAdmittingStreamAuthenticator.ts	2
 src/daemon/appearanceSocketServer.ts	3
 src/daemon/daemon.ts	6
 src/daemon/daemonContext.ts	3
@@ -7,7 +8,6 @@ src/daemon/deviceGestureRecordingStartAdmission.ts	1
 src/daemon/discoveryReconcile.ts	1
 src/daemon/manager.ts	1
 src/daemon/socketServer.ts	1
-src/daemon/streamSocketAuth.ts	2
 src/daemon/videoStreamSocketServer.ts	1
 src/daemon/webrtcStreamSocketServer.ts	1
 src/features/deviceLifecycle/deviceLifecycleCore.ts	17

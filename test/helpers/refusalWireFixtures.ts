@@ -3,7 +3,7 @@ import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidd
 import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
 import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
-import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureService";
+import { StageSessionDownloadsRefusal } from "../../src/server/StageSessionDownloadsRefusal";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { SessionConfigError } from "../../src/devices/sessionConfig";
@@ -11,10 +11,8 @@ import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/Bo
 import { DeviceShutdownTimeoutError } from "../../src/models/DeviceShutdownTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../src/models/IosHomeLaunchTimeoutError";
 import { SharedDaemonNamespaceError } from "../../src/daemon/sharedNamespaceGuard";
-import {
-  deviceSessionErrorFields,
-  DeviceSessionSupersededByRestoreError,
-} from "../../src/daemon/deviceSessionResolver";
+import { deviceSessionErrorFields } from "../../src/daemon/deviceSessionResolver";
+import { DeviceSessionSupersededByRestoreError } from "../../src/daemon/DeviceSessionSupersededByRestoreError";
 import { DeviceGestureRecordingStartUnheldError } from "../../src/daemon/deviceGestureRecordingStartAdmission";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 import { DaemonCommandRefusal } from "../../src/daemon/cli/runDaemonCommand";
@@ -38,13 +36,13 @@ import {
   MCP_OVERLOAD_ERROR_CODE,
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
   McpTimeoutError,
-  McpOverloadError,
 } from "../../src/daemon/McpTimeoutError";
+import { McpOverloadError } from "../../src/daemon/McpOverloadError";
 import {
   DaemonRestartDeferredError,
-  DaemonRestartPendingError,
   daemonRestartPendingToolResult,
 } from "../../src/daemon/daemonRestartAdmission";
+import { DaemonRestartPendingError } from "../../src/daemon/DaemonRestartPendingError";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
@@ -57,7 +55,8 @@ import {
   DaemonRequestNotDeliveredError,
 } from "../../src/daemon/client";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
-import { ToolUnavailableError, UnknownToolError } from "../../src/server/toolUnavailableError";
+import { ToolUnavailableError } from "../../src/server/toolUnavailableError";
+import { UnknownToolError } from "../../src/server/UnknownToolError";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
 import {
@@ -108,10 +107,8 @@ import { BindingDiscoveryIncompleteError } from "../../src/daemon/sessionBroker/
 import { BindingOwnershipLostError } from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipLostError";
 import { BindingOwnershipUnconfirmedError } from "../../src/daemon/sessionBroker/provisioning/BindingOwnershipUnconfirmedError";
 import { BindingRegistrySchemaUnsupportedError } from "../../src/daemon/sessionBroker/provisioning/BindingRegistrySchemaUnsupportedError";
-import {
-  DeviceOutsideBoundSessionError,
-  SessionOutsideBoundSessionError,
-} from "../../src/server/deviceOutsideBoundSessionRefusal";
+import { DeviceOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
+import { SessionOutsideBoundSessionError } from "../../src/server/SessionOutsideBoundSessionError";
 import { PlanExecutionInProgressError } from "../../src/server/planExecutionInProgressRefusal";
 import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";

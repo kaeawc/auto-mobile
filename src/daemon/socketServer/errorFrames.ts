@@ -11,11 +11,8 @@ import {
   unknownToolWireName,
 } from "../../server/toolUnavailableError";
 import { errorMessage } from "../../utils/describeUnknownError";
-import {
-  McpOverloadError,
-  McpTimeoutError,
-  MCP_QUEUE_TIMEOUT_ERROR_CODE,
-} from "../McpTimeoutError";
+import { McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "../McpTimeoutError";
+import { McpOverloadError } from "../McpOverloadError";
 import { idleReleaseField } from "../releaseReasons";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../sessionReleasedDuringCall";
 import {

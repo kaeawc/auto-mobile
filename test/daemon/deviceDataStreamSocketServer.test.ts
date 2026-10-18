@@ -1,5 +1,5 @@
 import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
-import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/ObserverAdmittingStreamAuthenticator";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import type { ObserverReleaseSource } from "../../src/daemon/observerReleaseBroadcast";
 import { describe, it, expect, beforeAll, beforeEach, afterEach, spyOn } from "bun:test";

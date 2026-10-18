@@ -67,6 +67,11 @@ import * as sdkTooOld from "../../src/models/SdkTooOldError";
 import * as appNotRunning from "../../src/models/AppNotRunningError";
 import * as daemonClient from "../../src/daemon/client";
 import * as controlTransport from "../../src/daemon/deviceControlTransportFailure";
+import * as stageDownloadsRefusal from "../../src/server/StageSessionDownloadsRefusal";
+import * as sessionOutsideBound from "../../src/server/SessionOutsideBoundSessionError";
+import * as unknownToolErrorModule from "../../src/server/UnknownToolError";
+import * as supersededByRestore from "../../src/daemon/DeviceSessionSupersededByRestoreError";
+import * as restartPending from "../../src/daemon/DaemonRestartPendingError";
 import * as toolUnavailable from "../../src/server/toolUnavailableError";
 import * as deviceLifecycleCore from "../../src/features/deviceLifecycle/deviceLifecycleCore";
 import * as sessionRecovery from "../../src/models/deviceSessionRecovery";
@@ -75,10 +80,8 @@ import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDe
 import { planRefusalFields } from "../../src/server/planExecutionOrchestrator";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import {
-  DaemonRestartDeferredError,
-  DaemonRestartPendingError,
-} from "../../src/daemon/daemonRestartAdmission";
+import { DaemonRestartDeferredError } from "../../src/daemon/daemonRestartAdmission";
+import { DaemonRestartPendingError } from "../../src/daemon/DaemonRestartPendingError";
 import {
   EXTERNALLY_CAPTURED_SURFACE_FIXTURES,
   EXEMPT_REFUSAL_ERROR_CLASSES,
@@ -161,6 +164,11 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "features/prototype/prototypeSuspended": prototypeSuspended,
   "daemon/client": daemonClient,
   "daemon/deviceControlTransportFailure": controlTransport,
+  "server/StageSessionDownloadsRefusal": stageDownloadsRefusal,
+  "server/SessionOutsideBoundSessionError": sessionOutsideBound,
+  "server/UnknownToolError": unknownToolErrorModule,
+  "daemon/DeviceSessionSupersededByRestoreError": supersededByRestore,
+  "daemon/DaemonRestartPendingError": restartPending,
   "server/toolUnavailableError": toolUnavailable,
   "features/deviceLifecycle/deviceLifecycleCore": deviceLifecycleCore,
 };

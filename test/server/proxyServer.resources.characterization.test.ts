@@ -13,7 +13,7 @@ import {
   DaemonRestartDeferredError,
 } from "../../src/daemon/daemonMcpProxy";
 import { DaemonShuttingDownError } from "../../src/daemon/client";
-import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
+import { McpOverloadError } from "../../src/daemon/McpOverloadError";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 
 function createHarness() {

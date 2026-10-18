@@ -1,4 +1,4 @@
-import { ActionableError, type BootedDevice, type DeviceInfo } from "../models";
+import { type BootedDevice, type DeviceInfo } from "../models";
 import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
 import type { ChildProcess, PlatformDeviceManager } from "../devices/deviceUtils";
 import { waitForDeviceReadyOrCancel } from "../devices/deviceUtils";
@@ -10,6 +10,7 @@ import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
 import type { PooledDevice, DeviceRecoveryPolicy } from "./devicePool";
 import type { Session } from "./sessionManager";
 import type { AndroidRecoveryRecordLedger } from "./androidRecoveryRecordLedger";
+import { UnconfirmedRecoveryShutdownError } from "./UnconfirmedRecoveryShutdownError";
 
 interface SameAvdRecoveryContext {
   device: PooledDevice;
@@ -32,15 +33,6 @@ function trackLateShutdowns(retainLeaseUntil: (settlement: Promise<unknown>) => 
     settledWhen: (retained: boolean): Promise<unknown> | undefined =>
       retained ? Promise.allSettled(settlements) : undefined,
   };
-}
-
-export class UnconfirmedRecoveryShutdownError extends ActionableError {
-  constructor(avdName: string, cause: unknown) {
-    super(
-      `Shutdown of Android emulator '${avdName}' is unconfirmed; recovery ownership remains quarantined`,
-      { cause },
-    );
-  }
 }
 
 export interface AndroidEmulatorRecoveryOptions {

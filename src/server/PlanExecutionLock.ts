@@ -1,7 +1,7 @@
 import type { PlanExecutionLockScope } from "../utils/ServerConfig";
 import type { ExecutionTracker } from "./executionTracker";
 import { executionTracker } from "./executionTracker";
-import { serverConfig } from "../utils/ServerConfig";
+import { ServerConfigPlanExecutionLockScopeProvider } from "./ServerConfigPlanExecutionLockScopeProvider";
 
 // Observation may inspect a running plan without driving its device. Every other read is exempted
 // by the caller's `readOnly` classification (#11351).
@@ -30,12 +30,6 @@ export interface PlanExecutionLock {
 
 export interface PlanExecutionLockScopeProvider {
   getScope(): PlanExecutionLockScope;
-}
-
-class ServerConfigPlanExecutionLockScopeProvider implements PlanExecutionLockScopeProvider {
-  getScope(): PlanExecutionLockScope {
-    return serverConfig.getPlanExecutionLockScope();
-  }
 }
 
 export class ExecutionTrackerPlanExecutionLock implements PlanExecutionLock {

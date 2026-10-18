@@ -3,7 +3,7 @@ import {
   InputDeviceOwnedError,
 } from "../../src/daemon/inputDeviceOwnership";
 import { SessionNoLongerOwnsDeviceError } from "../../src/daemon/sessionNoLongerOwnsDevice";
-import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/ObserverAdmittingStreamAuthenticator";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { describe, expect, test } from "bun:test";

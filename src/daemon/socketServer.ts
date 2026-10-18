@@ -59,13 +59,13 @@ import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissio
 import type { Client } from "@modelcontextprotocol/client";
 import { dropToolCallRecording } from "../server/toolCallRecordingManager";
 import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
-import {} from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
 import type { RefusedOwnedSessionRestore } from "./devicePool";
 import { GestureOwnershipRegistry } from "./gestureOwnership";
 import { resolveMcpRequestTimeoutMsOnce, ProgressExtendableDeadline } from "./mcpRequestTimeout";
 import { createRequestContext, type RequestContext } from "./requestContext";
-import { McpOverloadError, McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
+import { McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
+import { McpOverloadError } from "./McpOverloadError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isDebugModeEnabled } from "../utils/debug";

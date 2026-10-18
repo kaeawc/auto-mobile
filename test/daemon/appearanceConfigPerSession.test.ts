@@ -11,10 +11,10 @@ import {
 } from "../../src/daemon/appearanceSocketServer";
 import type { AppearanceSocketResponse } from "../../src/daemon/appearanceSocketTypes";
 import {
-  ObserverAdmittingStreamAuthenticator,
   SessionScopedStreamAuthenticator,
   type StreamAuthSessionManager,
 } from "../../src/daemon/streamSocketAuth";
+import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/ObserverAdmittingStreamAuthenticator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 

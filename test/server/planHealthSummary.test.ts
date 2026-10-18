@@ -3,9 +3,9 @@ import {
   buildPlanHealthSummary,
   reportPlanHealth,
   planHealthWriterFromEnv,
-  FilePlanHealthWriter,
   PLAN_HEALTH_DIR_ENV,
 } from "../../src/server/planHealthSummary";
+import { FilePlanHealthWriter } from "../../src/server/FilePlanHealthWriter";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakePlanHealthWriter } from "../fakes/FakePlanHealthWriter";
 

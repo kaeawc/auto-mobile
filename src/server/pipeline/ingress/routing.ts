@@ -11,14 +11,15 @@ import {
 } from "../../../features/toolSelection/selectionSessionResolver";
 import { getRemovedToolHint } from "../../../models/removedTools";
 import { assertBrokerConnectionPlainToolCall } from "../../brokerConnectionToolGate";
-import { SessionOutsideBoundSessionError } from "../../deviceOutsideBoundSessionRefusal";
+import { SessionOutsideBoundSessionError } from "../../SessionOutsideBoundSessionError";
 import { isDeviceInventoryTool } from "../../../daemon/daemonMcpProxy";
 import { isDeviceSessionAcquisitionTool } from "../../deviceSessionResult";
 import { resolveDirectSessionDevice } from "../../directSessionDeviceRegistry";
 import type { McpServerOptions } from "../../index";
 import type { SessionToolBinding } from "../../SessionToolBinding";
 import { ToolRegistry } from "../../toolRegistry";
-import { ToolUnavailableError, UnknownToolError } from "../../toolUnavailableError";
+import { ToolUnavailableError } from "../../toolUnavailableError";
+import { UnknownToolError } from "../../UnknownToolError";
 import {
   assertUserConfigurableToolNames,
   requestedToolNamesFromSetToolEnabledArgs,

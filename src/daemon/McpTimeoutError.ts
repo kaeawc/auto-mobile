@@ -42,17 +42,6 @@ export interface McpOverloadFailure {
   remainingTimeoutMs: number;
 }
 
-/** A live daemon rejected queued work before its caller's deadline expired. */
-export class McpOverloadError extends Error {
-  constructor(
-    message: string,
-    readonly failure: McpOverloadFailure,
-  ) {
-    super(message);
-    this.name = "McpOverloadError";
-  }
-}
-
 function isNonNegativeFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }

@@ -165,12 +165,10 @@ import type { DaemonManagerOptions } from "./managerOptions";
 export {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
   PsDaemonProcessFinder,
-  WindowsDaemonProcessFinder,
   createDefaultDaemonProcessFinder,
   parseBusyBoxDaemonProcessTable,
   parseDaemonProcessTable,
   parseDarwinDaemonProcessTable,
-  parseWindowsDaemonProcessTable,
 } from "./processTable";
 export type {
   DaemonProcessFinder,

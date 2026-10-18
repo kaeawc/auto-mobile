@@ -1,8 +1,6 @@
 import { nonBlankSessionUuid } from "./planCallerIdentity";
-import {
-  DeviceOutsideBoundSessionError,
-  SessionOutsideBoundSessionError,
-} from "./deviceOutsideBoundSessionRefusal";
+import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
+import { SessionOutsideBoundSessionError } from "./SessionOutsideBoundSessionError";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import {
   SessionToolBindingStore,

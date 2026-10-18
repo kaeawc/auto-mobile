@@ -8,8 +8,8 @@ import {
   PROXY_STALLED_CODE,
   runWithoutDaemonLifecycle,
   type LivenessRecovery,
-  type TickLatenessClock,
 } from "../proxyLivenessRecovery";
+import { type TickLatenessClock } from "../TickLatenessClock";
 import { LifecycleConnectionInFlightError } from "./daemonErrors";
 import { heartbeatRequestTimeoutMs } from "./heartbeatCadence";
 import type { LatestHeartbeatAsk, ProxySessionState } from "./ProxySessionState";

@@ -1,9 +1,7 @@
 import { SocketServerSingleton } from "./socketServerSingleton";
 import { errorMessage } from "../utils/describeUnknownError";
-import {
-  createDefaultStreamSocketAuthenticator,
-  type StreamSocketAuthenticator,
-} from "./streamSocketAuth";
+import { type StreamSocketAuthenticator } from "./streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "./ObserverAdmittingStreamAuthenticator";
 import type { Socket } from "node:net";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models/ActionableError";

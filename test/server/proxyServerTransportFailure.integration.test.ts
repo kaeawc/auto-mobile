@@ -17,7 +17,8 @@ import {
   type DeviceControlTransportFailure,
 } from "../../src/daemon/deviceControlTransportFailure";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
-import { McpOverloadError, McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
+import { McpOverloadError } from "../../src/daemon/McpOverloadError";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

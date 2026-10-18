@@ -45,7 +45,8 @@ import {
   resolveMcpRequestTimeoutMs,
   ProgressExtendableDeadline,
 } from "./mcpRequestTimeout";
-import { McpOverloadError, McpTimeoutError, sanitizeMcpOverloadFailure } from "./McpTimeoutError";
+import { McpTimeoutError, sanitizeMcpOverloadFailure } from "./McpTimeoutError";
+import { McpOverloadError } from "./McpOverloadError";
 import { DaemonDisconnectError } from "./DaemonDisconnectError";
 import { type Timer, defaultTimer, MAX_SETTIMEOUT_DELAY_MS } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -57,11 +58,8 @@ import {
 import { readPidFileDataSync, isProcessRunning } from "./daemonFiles";
 import { isDaemonHandshakeFailure, type DaemonHandshakeFailure } from "./daemonHandshake";
 import type { DaemonOptions, DaemonStatus } from "./types";
-import {
-  DAEMON_CLIENT_MAX_FRAME_BYTES,
-  DaemonFrameTooLargeError,
-  LineFramer,
-} from "./socketServer/LineFramer";
+import { DAEMON_CLIENT_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
+import { DaemonFrameTooLargeError } from "./socketServer/DaemonFrameTooLargeError";
 
 export const daemonOptionsSchema = z.object({
   port: z.number().finite().optional(),

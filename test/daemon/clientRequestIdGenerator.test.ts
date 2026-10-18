@@ -3,7 +3,7 @@ import { Duplex } from "node:stream";
 import { DaemonClient, DaemonShuttingDownError } from "../../src/daemon/client";
 import { DAEMON_SHUTTING_DOWN_ERROR_CODE } from "../../src/daemon/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
-import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
+import { McpOverloadError } from "../../src/daemon/McpOverloadError";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";

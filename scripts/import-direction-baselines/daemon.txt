@@ -22,7 +22,7 @@ src/daemon/daemon.ts -> src/server/videoRecordingManager
 src/daemon/daemonDependencies.ts -> src/server/toolSelectionProfileRegistry
 src/daemon/daemonHttpIngress.ts -> src/server/daemonSessionToolBindingStore
 src/daemon/daemonHttpIngress.ts -> src/server/executionTracker
-src/daemon/daemonMcpProxy.ts -> src/server/deviceOutsideBoundSessionRefusal
+src/daemon/daemonMcpProxy.ts -> src/server/SessionOutsideBoundSessionError
 src/daemon/daemonMcpProxy.ts -> src/server/deviceReadOnlyArgShapes
 src/daemon/daemonMcpProxy.ts -> src/server/deviceSessionResult
 src/daemon/daemonMcpProxy.ts -> src/server/listChangedBroadcast

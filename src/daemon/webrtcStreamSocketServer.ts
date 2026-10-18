@@ -43,10 +43,10 @@ import type { WebRtcStreamingOverrides } from "../features/webrtc";
 import { assertWhipOverrideAllowed } from "../features/webrtc/webrtcStreamingConfig";
 import {
   authorizeResolvedDevice,
-  createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
   streamAuthRefusalFields,
 } from "./streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "./ObserverAdmittingStreamAuthenticator";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { resolveStreamDevice } from "./streamDeviceResolver";
 import { DaemonState } from "./daemonState";

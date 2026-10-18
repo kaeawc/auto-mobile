@@ -33,6 +33,7 @@ import {
   type BrokerResourceRecord,
   type DestructionTicket,
 } from "./store";
+import { CommittedReceiptReadError } from "./CommittedReceiptReadError";
 
 export interface SessionBrokerOptions {
   store: SqliteSessionBrokerStore;
@@ -85,21 +86,6 @@ function failedResult(config: SessionConfig, failure: SessionBrokerFailure): Ses
     cleanupPending: false,
     failure,
   };
-}
-
-/**
- * Reading or assembling the receipt failed after activation committed. The active grant stays
- * intact and is not routed through acquisition rollback; the caller receives an RPC error and a
- * replay of the same request identity reads the committed receipt.
- */
-class CommittedReceiptReadError extends ActionableError {
-  constructor(requestId: string, cause: unknown) {
-    super(
-      `Session request ${requestId} committed its session, but its receipt could not be read ` +
-        `(${errorMessage(cause)}); replay the same request ID to recover it`,
-      { cause },
-    );
-  }
 }
 
 function sameProcess(left: BindingProcessIdentity, right: BindingProcessIdentity): boolean {

@@ -49,10 +49,10 @@ import { VIDEO_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { BaseSocketServer, getSocketPath } from "./socketServer/index";
 import {
   authorizeResolvedDevice,
-  createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
   streamAuthRefusalFields,
 } from "./streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "./ObserverAdmittingStreamAuthenticator";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { resolveStreamDevice } from "./streamDeviceResolver";
 import { DaemonState } from "./daemonState";

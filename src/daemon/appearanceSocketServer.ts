@@ -37,10 +37,8 @@ import type {
   BootedDevice,
 } from "../models";
 import { APPEARANCE_SOCKET_CONFIG } from "./daemonFiles";
-import {
-  createDefaultStreamSocketAuthenticator,
-  type StreamSocketAuthenticator,
-} from "./streamSocketAuth";
+import { type StreamSocketAuthenticator } from "./streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "./ObserverAdmittingStreamAuthenticator";
 
 const VALID_MODES = new Set(["light", "dark", "auto"]);
 const AUTOMATIC_SYNC_DISABLED_WARNING =

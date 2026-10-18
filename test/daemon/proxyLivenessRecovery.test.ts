@@ -12,7 +12,6 @@ import {
   REACQUIRE_LOST_SESSIONS_ACTION,
   RECOVERY_SAFETY_MARGIN_MS,
   RESTART_DAEMON_THEN_RESUME_ACTION,
-  TickLatenessClock,
   daemonLifecycleAllowed,
   livenessBudgetMs,
   livenessHandoverMessage,
@@ -25,6 +24,7 @@ import {
   type LivenessStallCode,
   type RecoveryAttemptOutcome,
 } from "../../src/daemon/proxyLivenessRecovery";
+import { TickLatenessClock } from "../../src/daemon/TickLatenessClock";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // #10053: per-session liveness recovery, driven entirely by a fake timer against a scripted daemon.

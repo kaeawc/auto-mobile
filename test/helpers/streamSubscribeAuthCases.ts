@@ -1,8 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import {
-  ObserverAdmittingStreamAuthenticator,
-  type StreamSocketAuthenticator,
-} from "../../src/daemon/streamSocketAuth";
+import { type StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
+import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/ObserverAdmittingStreamAuthenticator";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";

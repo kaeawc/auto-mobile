@@ -1,6 +1,6 @@
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
-import type { TickLatenessClock } from "../proxyLivenessRecovery";
+import type { TickLatenessClock } from "../TickLatenessClock";
 import type { SingleFlightInterval } from "../SingleFlightInterval";
 import type { BoundSessionHeartbeat } from "./BoundSessionHeartbeat";
 import type { ProxySessionState } from "./ProxySessionState";

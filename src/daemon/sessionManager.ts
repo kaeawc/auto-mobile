@@ -1,10 +1,10 @@
 import { createLegacyLifecycleView } from "./legacyLifecycleView";
 import {
   SerializedSessionRowWriter,
-  TerminalReleaseGenerationRefusedError,
   type SessionRowWriter,
   type ReleaseRowRetry,
 } from "./sessionRowWriter";
+import { TerminalReleaseGenerationRefusedError } from "./TerminalReleaseGenerationRefusedError";
 import type {
   OwedSupersededRowReassert,
   OwedSupersededRowReassertCallbacks,
@@ -32,7 +32,6 @@ import {
   SessionDeviceStateRestore,
   type IosAppNetworkRuleSessionState,
 } from "./sessionDeviceStateRestore";
-import {} from "./deviceStateRestoreQueue";
 import {
   DeviceCleanupQuarantine,
   type AbandonablePendingDeviceCleanup,
@@ -190,11 +189,8 @@ import {
 } from "./releaseReasons";
 import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
-import {
-  NoopTerminalReleaseJournal,
-  type TerminalReleaseIntent,
-  type TerminalReleaseJournal,
-} from "./terminalReleaseJournal";
+import { type TerminalReleaseIntent, type TerminalReleaseJournal } from "./terminalReleaseJournal";
+import { NoopTerminalReleaseJournal } from "./NoopTerminalReleaseJournal";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured

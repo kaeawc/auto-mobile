@@ -11,10 +11,10 @@ import { heartbeatRequestTimeoutMs } from "../../../src/daemon/proxy/heartbeatCa
 import {
   DAEMON_STALLED_CODE,
   PROXY_STALLED_CODE,
-  TickLatenessClock,
   daemonLifecycleAllowed,
   type LivenessStallCode,
 } from "../../../src/daemon/proxyLivenessRecovery";
+import { TickLatenessClock } from "../../../src/daemon/TickLatenessClock";
 import { FakeDaemonManager } from "../../fakes/FakeDaemonManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";

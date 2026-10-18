@@ -2,12 +2,12 @@ import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
-  OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
   OWNER_DISCONNECT_GRACE_MS,
   OWNER_DISCONNECTED_RELEASE_REASON,
-  OwnerDisconnectExecutionVeto,
   OwnerDisconnectRelease,
 } from "../../src/daemon/ownerDisconnectRelease";
+import { OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS } from "../../src/daemon/OwnerDisconnectExecutionVeto";
+import { OwnerDisconnectExecutionVeto } from "../../src/daemon/OwnerDisconnectExecutionVeto";
 import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettledExecutionVeto";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";

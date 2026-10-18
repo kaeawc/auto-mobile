@@ -18,11 +18,8 @@ import {
   DeviceGestureRecordingResponse,
 } from "./deviceGestureRecordingSocketTypes";
 import { DEVICE_GESTURE_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
-import {
-  authorizeResolvedDevice,
-  createDefaultStreamSocketAuthenticator,
-  type StreamSocketAuthenticator,
-} from "./streamSocketAuth";
+import { authorizeResolvedDevice, type StreamSocketAuthenticator } from "./streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "./ObserverAdmittingStreamAuthenticator";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 import { assertInputNotOnForeignBindingDevice } from "./inputDeviceOwnership";

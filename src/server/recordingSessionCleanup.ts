@@ -30,6 +30,8 @@ import {
   stopVideoRecordingUnattended,
 } from "./videoRecordingManager";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
+import { FinalizeCapExceeded } from "./FinalizeCapExceeded";
+import { RecordingTeardownRetryBudgetExceeded } from "./RecordingTeardownRetryBudgetExceeded";
 
 export const RECORDING_TEARDOWN_RETRY_BUDGET_MS = 25_000;
 
@@ -272,8 +274,6 @@ export function takeRecordingIdsFinalizedByRelease(sessionId: string): string[] 
   return ids;
 }
 
-class FinalizeCapExceeded extends Error {}
-
 async function attempt(description: string, work: () => Promise<void>): Promise<void> {
   try {
     await work();
@@ -505,8 +505,6 @@ interface RecordingTeardownRetryState {
   deviceGestureRecordingId: string | undefined;
   attempts: number;
 }
-
-class RecordingTeardownRetryBudgetExceeded extends Error {}
 
 /** The retry sleep has a cancellation handle so reaching the budget leaves no loop timer. */
 async function waitForTeardownRetry(

@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
-  BackgroundBindingRegistryUpgrade,
   LegacySlotDeviceRetirement,
   type LegacySlotRetirementStore,
   type LegacySlotSnapshot,
   type LegacySlotDeviceStopper,
 } from "../../../../src/daemon/sessionBroker/registry/legacySlotDeviceRetirement";
+import { BackgroundBindingRegistryUpgrade } from "../../../../src/daemon/sessionBroker/registry/BackgroundBindingRegistryUpgrade";
 import type { DeviceInfo } from "../../../../src/models/DeviceInfo";
 import { logger } from "../../../../src/utils/logger";
 import { fixedBackoff, sequenceBackoff } from "../../../../src/utils/Backoff";

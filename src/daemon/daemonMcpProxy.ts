@@ -92,7 +92,7 @@ export {
   mergeDaemonOptions,
 } from "./proxy/startupOptions";
 import { anyDeviceReadOnlyArgShapeMatches } from "../server/deviceReadOnlyArgShapes";
-import { SessionOutsideBoundSessionError } from "../server/deviceOutsideBoundSessionRefusal";
+import { SessionOutsideBoundSessionError } from "../server/SessionOutsideBoundSessionError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolListPoller } from "./proxy/ToolListPoller";
 import { getRemovedToolHint } from "../models/removedTools";
@@ -209,7 +209,7 @@ import {
   type SessionBrokerResult,
 } from "../devices/sessionBrokerResult";
 import { DeviceControlTransportError } from "./deviceControlTransportFailure";
-import { McpOverloadError } from "./McpTimeoutError";
+import { McpOverloadError } from "./McpOverloadError";
 import {
   getConnectedStaticToolDefinitions,
   getStaticToolDefinitions,
@@ -226,7 +226,6 @@ import {
   DAEMON_STALLED_CODE,
   LivenessRecovery,
   PROXY_STALLED_CODE,
-  TickLatenessClock,
   daemonLifecycleAllowed,
   runWithoutDaemonLifecycle,
   livenessHandoverMessage,
@@ -238,6 +237,7 @@ import {
   type LivenessHandover,
   type RecoveryAttemptOutcome,
 } from "./proxyLivenessRecovery";
+import { TickLatenessClock } from "./TickLatenessClock";
 
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 const CLI_SESSION_FINALIZATION_TIMEOUT_MS = 2_000;

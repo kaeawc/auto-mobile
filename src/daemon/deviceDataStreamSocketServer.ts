@@ -25,11 +25,8 @@ import type {
 import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { ObserverReleaseBroadcaster, type ObserverReleaseSource } from "./observerReleaseBroadcast";
 import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
-import {
-  createDefaultStreamSocketAuthenticator,
-  type StreamSocketAuthenticator,
-  streamAuthRefusalFields,
-} from "./streamSocketAuth";
+import { type StreamSocketAuthenticator, streamAuthRefusalFields } from "./streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "./ObserverAdmittingStreamAuthenticator";
 import type { ScreenshotMetadata } from "../features/observe/ScreenshotMetadata";
 import { annotateHierarchyDiff, type HierarchyDiffSummary } from "./hierarchyStreamDiff";
 import { readImageHeaderDimensions } from "../utils/screenshot/imageHeaderDimensions";

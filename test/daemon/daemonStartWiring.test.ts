@@ -5,7 +5,7 @@ import type { BootedDevice } from "../../src/models";
 import type { ChildProcess } from "node:child_process";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { NoopTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
+import { NoopTerminalReleaseJournal } from "../../src/daemon/NoopTerminalReleaseJournal";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
 import * as buildIdentity from "../../src/daemon/buildIdentity";

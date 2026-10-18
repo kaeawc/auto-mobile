@@ -2,10 +2,10 @@ import { createTestDatabase } from "../db/testDbHelper";
 import { PerformanceAuditRepository } from "../../src/db/performanceAuditRepository";
 import { beforeAll, afterAll, describe, it, test, expect } from "bun:test";
 import {
-  createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
   type StreamAuthorizeInput,
 } from "../../src/daemon/streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "../../src/daemon/ObserverAdmittingStreamAuthenticator";
 import {
   PerformanceStreamSocketServer,
   type PerformanceStreamRepository,

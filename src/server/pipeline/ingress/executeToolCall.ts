@@ -5,10 +5,8 @@ import {
   subscribeLiveDeadline,
 } from "../../../daemon/liveDeadlineRegistry";
 import { DaemonState } from "../../../daemon/daemonState";
-import {
-  DaemonRestartPendingError,
-  daemonRestartPendingToolResult,
-} from "../../../daemon/daemonRestartAdmission";
+import { daemonRestartPendingToolResult } from "../../../daemon/daemonRestartAdmission";
+import { DaemonRestartPendingError } from "../../../daemon/DaemonRestartPendingError";
 import { TextRequestState } from "../../../features/action/textTransportTimeout";
 import { ActionableError } from "../../../models";
 import { logger } from "../../../utils/logger";

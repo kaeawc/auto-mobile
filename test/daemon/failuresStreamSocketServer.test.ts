@@ -2,10 +2,10 @@ import { createTestDatabase } from "../db/testDbHelper";
 import { FailureAnalyticsRepository } from "../../src/db/failureAnalyticsRepository";
 import { beforeAll, afterAll, describe, expect, test } from "bun:test";
 import {
-  createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
   type StreamAuthorizeInput,
 } from "../../src/daemon/streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "../../src/daemon/ObserverAdmittingStreamAuthenticator";
 import { FakeFailuresStreamRepository } from "../fakes/FakeFailuresStreamRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FailuresStreamSocketServer } from "../../src/daemon/failuresStreamSocketServer";

@@ -3,6 +3,8 @@ import { getDatabasePath, getMigrationsError } from "./database";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { logger } from "../utils/logger";
+import { DatabaseHealthProbeTimeoutError } from "./DatabaseHealthProbeTimeoutError";
+import { DatabaseHealthProbeInitTimeoutError } from "./DatabaseHealthProbeInitTimeoutError";
 
 const DATABASE_HEALTH_PROBE_TIMEOUT_MS = 1_000;
 const DATABASE_HEALTH_PROBE_INIT_TIMEOUT_MS = 10_000;
@@ -27,27 +29,6 @@ const SQLITE_PROBE_WORKER_SOURCE = `
   });
   parentPort.postMessage({ type: "ready" });
 `;
-
-export class DatabaseHealthProbeTimeoutError extends Error {
-  constructor(
-    readonly timeoutMs: number,
-    readonly phase: "init" | "query" = "query",
-    readonly startupMs?: number,
-  ) {
-    super(`Database health probe timed out after ${timeoutMs}ms`);
-    this.name = "DatabaseHealthProbeTimeoutError";
-  }
-}
-
-export class DatabaseHealthProbeInitTimeoutError extends DatabaseHealthProbeTimeoutError {
-  declare readonly phase: "init";
-
-  constructor(timeoutMs: number) {
-    super(timeoutMs, "init", 0);
-    this.name = "DatabaseHealthProbeInitTimeoutError";
-    this.message = `Database health probe worker did not become ready within ${timeoutMs}ms`;
-  }
-}
 
 export interface DatabaseHealthProbe {
   check(): Promise<void>;

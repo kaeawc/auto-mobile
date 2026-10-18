@@ -3,8 +3,12 @@ import { execSync } from "node:child_process";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS } from "./constants";
-import { isDaemonEntryScriptPath } from "./DaemonLauncher";
+import { isAutoMobileDaemonCommand, isShellCommandWrapper } from "./daemonCommandMatch";
+import {
+  DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+  MIN_PROCESS_TABLE_SCAN_TIMEOUT_MS,
+  boundedProcessTableScanTimeout,
+} from "./processTableLimits";
 import { isProcessRunning as isDaemonProcessRunning } from "./daemonFiles";
 import {
   DARWIN_PS_LSTART_ENV,
@@ -12,6 +16,7 @@ import {
   readDarwinProcessGenerationToken,
   readLinuxProcessGenerationToken,
 } from "./processGeneration";
+import { WindowsDaemonProcessFinder } from "./WindowsDaemonProcessFinder";
 
 /**
  * Darwin process-table scan. Runs under the same pinned locale and UTC zone as
@@ -91,95 +96,11 @@ export interface DaemonProcessFinder {
    */
   findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[];
 }
-export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
-/**
- * Floor the process-table scan timeout is clamped to (issue #6140 review). Node's
- * (and Bun's) `execSync` treats `timeout: 0` as "no timeout" — i.e. UNBOUNDED, the
- * opposite of "expire immediately" — not a short/immediate bound. A computed
- * remaining budget can legitimately be exactly `0`, so `boundedProcessTableScanTimeout`
- * must never forward that value as-is: doing so would silently remove the bound
- * this scan exists to enforce. Callers with zero budget remaining should skip the
- * scan entirely (as `tryJoinPeerDaemonAfterSpawnExit` already does); this floor is
- * defense-in-depth for any other caller of `findDaemonProcesses`/
- * `findLiveDaemonProcesses` that does not pre-check for a zero budget.
- */
-const MIN_PROCESS_TABLE_SCAN_TIMEOUT_MS = 1;
-
-type ProcessTableCommandRunner = (
+export type ProcessTableCommandRunner = (
   command: string,
   options: { encoding: "utf-8"; maxBuffer: number; timeout: number },
 ) => string;
-
-function normalizeProcessCommand(command: string): string {
-  return command.replace(/\\/g, "/").replace(/\/+/g, "/");
-}
-
-function invokedCommand(command: string): string {
-  if (!isShellCommandWrapper(command)) {
-    return command.trim();
-  }
-
-  const shellInvocation = command
-    .trim()
-    .match(/(?:^|\s)(?:-c|\/c|-(?:command|encodedcommand|c|ec))\s+["']?(.+)$/i);
-  return shellInvocation?.[1].trim() ?? command.trim();
-}
-
-function isAutoMobileDaemonCommand(
-  command: string,
-  activeEntryScript: string | undefined = process.argv[1],
-): boolean {
-  const normalizedCommand = normalizeProcessCommand(command);
-  const invocation = invokedCommand(normalizedCommand);
-  if (!/(?:^|\s)--daemon-mode(?:\s|["']|$)/.test(invocation)) {
-    return false;
-  }
-
-  // Runtime flags are allowed only in the contiguous run immediately after the
-  // anchored executable. Bare separators, the daemon marker, and non-flag values
-  // are not skipped, so the next token remains the sole entry-script candidate.
-  const runtimeEntrypoint = invocation.match(
-    /^(?:(?:"?(?:env|\/usr\/bin\/env)"?)\s+)?(?:"(?:[^"]*\/)?(?:bun|node)(?:\.exe)?"|(?:(?:[A-Za-z]:\/[^"']*\/|[^"'\s]*\/)?(?:bun|node)(?:\.exe)?))\s+(?:(?!--daemon-mode(?:\s|$))-{1,2}[A-Za-z0-9][^\s"']*\s+)*(?:"([^"]+)"|'([^']+)'|([^\s"']+))/i,
-  );
-  const runsBundledEntrypoint =
-    runtimeEntrypoint !== null &&
-    isDaemonEntryScriptPath(
-      runtimeEntrypoint[1] ?? runtimeEntrypoint[2] ?? runtimeEntrypoint[3],
-      activeEntryScript,
-    );
-  const runsPublishedPackage =
-    /^(?:"?[^"'\s]*\/)?(?:bunx|npx)(?:\.exe)?\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(
-      invocation,
-    ) ||
-    /^(?:"?[^"'\s]*\/)?bun(?:\.exe)?\s+x\s+(?:(?:-y|--yes|--bun|--no-cache)\s+)*@kaeawc\/auto-mobile(?:@[^\s"']+)?(?:\s|["']|$)/.test(
-      invocation,
-    );
-  const runsStandaloneBinary = /^(?:"?[^"'\s]*\/)?auto-mobile(?:\.exe)?(?:\s|$)/i.test(invocation);
-
-  return runsBundledEntrypoint || runsPublishedPackage || runsStandaloneBinary;
-}
-
-export function isShellCommandWrapper(command: string): boolean {
-  const normalizedCommand = normalizeProcessCommand(command);
-  const trimmedCommand = normalizedCommand.trim();
-  const executable = trimmedCommand.startsWith('"')
-    ? trimmedCommand.slice(1, trimmedCommand.indexOf('"', 1))
-    : (trimmedCommand.split(/\s+/, 1)[0] ?? "");
-
-  if (/(^|\/)(?:ba|da|z)?sh$/.test(executable) && normalizedCommand.includes(" -c ")) {
-    return true;
-  }
-
-  if (/(^|\/)cmd(?:\.exe)?$/i.test(executable) && /(?:^|\s)\/c(?:\s|$)/i.test(normalizedCommand)) {
-    return true;
-  }
-
-  return (
-    /(^|\/)(?:powershell|pwsh)(?:\.exe)?$/i.test(executable) &&
-    /(?:^|\s)-(?:command|encodedcommand|c|ec)(?:\s|$)/i.test(normalizedCommand)
-  );
-}
 
 export function parseDaemonProcessTable(
   psOutput: string,
@@ -371,73 +292,6 @@ export function parseDarwinDaemonProcessTable(
   return records;
 }
 
-interface WindowsProcessTableEntry {
-  ProcessId?: unknown;
-  ParentProcessId?: unknown;
-  CommandLine?: unknown;
-  StartedAt?: unknown;
-}
-
-function parseWindowsProcessId(value: unknown): number | undefined {
-  if (typeof value !== "number" && typeof value !== "string") {
-    return undefined;
-  }
-
-  const parsed = typeof value === "number" ? value : parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function parseWindowsProcessTableEntry(
-  entry: WindowsProcessTableEntry,
-  activeEntryScript?: string,
-): DaemonProcessRecord | undefined {
-  const pid = parseWindowsProcessId(entry.ProcessId);
-  const ppid = parseWindowsProcessId(entry.ParentProcessId);
-  const command = entry.CommandLine;
-
-  if (
-    pid === undefined ||
-    ppid === undefined ||
-    typeof command !== "string" ||
-    !isAutoMobileDaemonCommand(command, activeEntryScript)
-  ) {
-    return undefined;
-  }
-
-  const startedAt =
-    typeof entry.StartedAt === "number" && Number.isFinite(entry.StartedAt)
-      ? entry.StartedAt
-      : undefined;
-  return {
-    pid,
-    ppid,
-    command,
-    ...(startedAt === undefined ? {} : { startedAt }),
-  };
-}
-
-export function parseWindowsDaemonProcessTable(
-  processTableJson: string,
-  activeEntryScript?: string,
-): DaemonProcessRecord[] {
-  const parsed: unknown = JSON.parse(processTableJson);
-  const entries = Array.isArray(parsed) ? parsed : [parsed];
-  const records: DaemonProcessRecord[] = [];
-
-  for (const entry of entries) {
-    if (!entry || typeof entry !== "object") {
-      continue;
-    }
-
-    const record = parseWindowsProcessTableEntry(entry, activeEntryScript);
-    if (record) {
-      records.push(record);
-    }
-  }
-
-  return records;
-}
-
 export interface DaemonProcessLivenessChecker {
   isProcessRunning(pid: number): boolean;
   /**
@@ -451,15 +305,6 @@ export interface DaemonProcessLivenessChecker {
 
 export interface DaemonProcessSignaler {
   signal(pid: number, signal: NodeJS.Signals): void;
-}
-function boundedProcessTableScanTimeout(timeoutMs: number | undefined): number {
-  return Math.max(
-    MIN_PROCESS_TABLE_SCAN_TIMEOUT_MS,
-    Math.min(
-      timeoutMs ?? DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
-      DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
-    ),
-  );
 }
 
 function isUnsupportedGnuProcessTableFormat(error: unknown): boolean {
@@ -541,37 +386,13 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder, DaemonProcess
   }
 }
 
-export class WindowsDaemonProcessFinder
-  implements DaemonProcessFinder, DaemonProcessLivenessChecker
-{
-  constructor(
-    private readonly runCommand: ProcessTableCommandRunner = execSync,
-    private readonly activeEntryScript: string | undefined = process.argv[1],
-  ) {}
-
-  findDaemonProcesses(timeoutMs?: number): DaemonProcessRecord[] {
-    // CIM returns local DateTime values. Publish absolute UTC birth times so
-    // neither the host time zone nor PowerShell startup/scan latency shifts them.
-    const processTableJson = this.runCommand(
-      "powershell.exe -NoProfile -NonInteractive -Command \"Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,@{Name='StartedAt';Expression={([DateTimeOffset]$_.CreationDate.ToUniversalTime()).ToUnixTimeMilliseconds()}} | ConvertTo-Json -Compress\"",
-      {
-        encoding: "utf-8",
-        maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-        timeout: boundedProcessTableScanTimeout(timeoutMs),
-      },
-    );
-    return parseWindowsDaemonProcessTable(processTableJson, this.activeEntryScript);
-  }
-
-  isProcessRunning(pid: number): boolean {
-    return isDaemonProcessRunning(pid, { debugLog: logger.debug });
-  }
-}
-
 export function createDefaultDaemonProcessFinder(
   platform: NodeJS.Platform = process.platform,
 ): DaemonProcessFinder & DaemonProcessLivenessChecker {
   return platform === "win32"
-    ? new WindowsDaemonProcessFinder()
+    ? new WindowsDaemonProcessFinder(execSync)
     : new PsDaemonProcessFinder(undefined, platform);
 }
+
+export { DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES };
+export { isShellCommandWrapper };

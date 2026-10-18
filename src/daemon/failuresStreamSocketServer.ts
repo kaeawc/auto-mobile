@@ -1,7 +1,5 @@
-import {
-  createDefaultStreamSocketAuthenticator,
-  type StreamSocketAuthenticator,
-} from "./streamSocketAuth";
+import { type StreamSocketAuthenticator } from "./streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "./ObserverAdmittingStreamAuthenticator";
 import { SocketServerSingleton } from "./socketServerSingleton";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";

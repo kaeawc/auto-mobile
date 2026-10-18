@@ -3,7 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { DaemonClient, DaemonShuttingDownError } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
-import { McpOverloadError } from "../../src/daemon/McpTimeoutError";
+import { McpOverloadError } from "../../src/daemon/McpOverloadError";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";

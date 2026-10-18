@@ -17,6 +17,7 @@ import { freshStartAlreadyBoundError } from "./deviceAcquisitionRefusals";
 import type { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import type { Session, SessionExecutionMetadata, SessionManager } from "./sessionManager";
 import { mintedSession, receiptOrNew, type AcquisitionReceipt } from "./acquisitionReceipt";
+import { McpSessionRecoveryInProgressError } from "./McpSessionRecoveryInProgressError";
 
 /**
  * Result of attaching an autolock session to an MCP session (#11129). `attached-not-persisted`
@@ -38,14 +39,6 @@ export type AutolockClient = {
   /** A one-shot `--cli` caller: anonymous, so it may act only on anonymous sessions (#11096). */
   oneShotCli?: boolean;
 };
-
-export class McpSessionRecoveryInProgressError extends ActionableError {
-  constructor(mcpSessionId: string) {
-    super(
-      `MCP session '${mcpSessionId}' is recovering a device and cannot remap until recovery finishes.`,
-    );
-  }
-}
 
 type ExpectedIdentity = Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
 

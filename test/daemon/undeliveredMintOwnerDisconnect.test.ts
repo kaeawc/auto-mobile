@@ -4,10 +4,10 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { AcquisitionReceipt } from "../../src/daemon/acquisitionReceipt";
 import {
-  OwnerDisconnectExecutionVeto,
   OWNER_DISCONNECT_GRACE_MS,
   OWNER_DISCONNECTED_RELEASE_REASON,
 } from "../../src/daemon/ownerDisconnectRelease";
+import { OwnerDisconnectExecutionVeto } from "../../src/daemon/OwnerDisconnectExecutionVeto";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
-import { PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS } from "../../src/daemon/deviceDisconnectHandler";
+import { PLAN_DEVICE_LOSS_CONFIRMATION_WINDOW_MS } from "../../src/daemon/PlanDeviceLossMonitor";
 import type { PooledDevice } from "../../src/daemon/devicePool";
 import type { BootedDeviceDiscoveryOptions } from "../../src/devices/deviceUtils";
 import {

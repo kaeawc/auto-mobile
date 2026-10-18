@@ -6,10 +6,8 @@ import {
   updateVideoRecordingConfig,
 } from "../server/videoRecordingManager";
 import { VIDEO_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
-import {
-  createDefaultStreamSocketAuthenticator,
-  type StreamSocketAuthenticator,
-} from "./streamSocketAuth";
+import { type StreamSocketAuthenticator } from "./streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "./ObserverAdmittingStreamAuthenticator";
 import type { VideoRecordingConfig, VideoRecordingConfigInput } from "../models";
 
 interface VideoRecordingSocketServerDependencies {

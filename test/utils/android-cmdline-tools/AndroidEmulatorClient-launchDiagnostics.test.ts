@@ -1,4 +1,4 @@
-import { EmulatorProcessOutputTail } from "../../../src/daemon/emulatorProcessLifecycle";
+import { EmulatorProcessOutputTail } from "../../../src/daemon/EmulatorProcessOutputTail";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";

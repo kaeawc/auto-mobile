@@ -252,7 +252,16 @@ describe("WhipClient.patchCandidate", () => {
 describe("WhipClient construction", () => {
   test("requires an endpoint", () => {
     expect(
-      () => new WhipClient({ endpoint: "", fetchImpl: (async () => ({})) as unknown as FetchLike }),
+      () =>
+        new WhipClient({
+          endpoint: "",
+          fetchImpl: async () => ({
+            status: 201,
+            ok: true,
+            headers: { get: () => null },
+            text: async () => "",
+          }),
+        }),
     ).toThrow(/endpoint/);
   });
 });

@@ -7,8 +7,8 @@ import {
   FEATURE_FLAG_DEFINITIONS,
   TOOL_DEFINITION_AFFECTING_FLAGS,
 } from "./FeatureFlagDefinitions";
-import type { FeatureFlagRepository } from "./FeatureFlagRepository";
-import { SqliteFeatureFlagRepository } from "./FeatureFlagRepository";
+import type { FeatureFlagRepository } from "../../db/featureFlagRepository";
+import { SqliteFeatureFlagRepository } from "../../db/featureFlagRepository";
 import type { FeatureFlagApplier } from "./FeatureFlagApplier";
 import { DefaultFeatureFlagApplier } from "./FeatureFlagApplier";
 import type { ToolListChangedNotifier } from "./ToolListChangedNotifier";

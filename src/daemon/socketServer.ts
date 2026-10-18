@@ -229,7 +229,6 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
-import { indeterminateTapError } from "../features/action/coordinateTapDispatch";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
 import type {
   KeyValueType,
@@ -264,6 +263,8 @@ import {
   mcpRequestFailureDetails,
   requestFailureCause,
 } from "./socketServer/errorFrames";
+import type { UnixSocketServerTestHooks } from "./socketServer/unixSocketServerTestHooks";
+import { indeterminateInputError } from "./socketServer/forwardFailures";
 import { isTaskRelayMethod, parseTaskRelayFrame } from "../server/tasks/taskRelay";
 import {
   callForwardedTool,
@@ -629,7 +630,7 @@ const MCP_FORWARD_DEVICE_KEY_PREFIX = "device:";
 /** How long a closed socket's late executions may still write bindings that are then forgotten. */
 const LATE_BINDING_FORGET_WINDOW_MS = 15 * 60 * 1000;
 
-interface McpForwardRoute {
+export interface McpForwardRoute {
   /** Serializes work that targets the same physical device or session. */
   executionKey: string;
   /** Owns the loopback MCP transport and its session-local tool-selection profile. */
@@ -6381,7 +6382,7 @@ export class UnixSocketServer {
       return result;
     } catch (error) {
       if (dispatched && signal?.aborted) {
-        throw this.indeterminateInputError(method, error);
+        throw indeterminateInputError(method, error);
       }
       // Keep the existing plain cancellation for an unlabelled caller abort.
       if (signal?.reason instanceof DOMException && signal.reason.name === "AbortError") {
@@ -6390,34 +6391,6 @@ export class UnixSocketServer {
       signal?.throwIfAborted();
       throw error;
     }
-  }
-
-  private indeterminateInputError(method: string, error: unknown): Error {
-    const label =
-      method === "input/key"
-        ? "Key"
-        : method === "input/tap"
-          ? "Tap"
-          : method === "input/swipe"
-            ? "Swipe"
-            : "Button press";
-    if (
-      error instanceof Error &&
-      (("requestDispatched" in error && error.requestDispatched === true) ||
-        error.message.startsWith(`${label} outcome is indeterminate:`))
-    ) {
-      return Object.assign(error, { requestDispatched: true });
-    }
-    const reason = errorMessage(error);
-    const failure =
-      method === "input/key"
-        ? InputKey.indeterminateError(error)
-        : method === "input/tap"
-          ? indeterminateTapError(reason)
-          : new ActionableError(
-              `${method === "input/swipe" ? "Swipe" : "Button press"} outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). Do not retry automatically.`,
-            );
-    return Object.assign(failure, { requestDispatched: true });
   }
 
   private dispatchFencedInput<T>(
@@ -7366,6 +7339,18 @@ export class UnixSocketServer {
       logger.debug(`src/daemon/socketServer.ts fallback failed: ${error}`, error);
       return null;
     }
+  }
+
+  /** Typed access to the MCP forward-routing internals for daemon integration tests. */
+  get testHooks(): UnixSocketServerTestHooks {
+    return {
+      restoreSelectorSessions: (args, id) => this.restoreSelectorSessions(args, id),
+      getMcpForwardRoute: (request, id) => this.getMcpForwardRoute(request, id),
+      withSocketSessionAutolockKey: (args, id, timeoutMs) =>
+        this.withSocketSessionAutolockKey(args, id, timeoutMs),
+      recordBoundMcpClientKey: (request, id, route, active, response) =>
+        this.recordBoundMcpClientKey(request, id, route, active, response),
+    };
   }
 
   private isOwnedSocketFile(): boolean {

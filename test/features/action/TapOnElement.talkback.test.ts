@@ -854,7 +854,9 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
   describe("screen-reader-navigation feature flag (global opt-in)", () => {
     const makeFlaggedTapOnElement = (flagEnabled: boolean) => {
       const featureFlags: FeatureFlagReader = {
-        isEnabled: (key: string) => flagEnabled && key === "screen-reader-navigation",
+        isEnabled: (key: string) =>
+          key === "accessibility-auto-detect" ||
+          (flagEnabled && key === "screen-reader-navigation"),
       };
       const tap = new TapOnElement(
         { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
@@ -1157,7 +1159,9 @@ describe("TapOnElement screen-reader navigation result", () => {
           }),
         },
         featureFlags: {
-          isEnabled: (key: string) => !coordinate && key === "screen-reader-navigation",
+          isEnabled: (key: string) =>
+            key === "accessibility-auto-detect" ||
+            (!coordinate && key === "screen-reader-navigation"),
         },
       },
     );

@@ -2,9 +2,10 @@ import type {
   AccessibilityDetector,
   AccessibilityService,
   AndroidAccessibilityState,
+  TalkBackStateConfirmation,
 } from "../../src/features/accessibility/interfaces/AccessibilityDetector";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../src/features/featureFlags/FeatureFlagService";
 
 /**
  * Fake implementation of AccessibilityDetector for testing
@@ -19,9 +20,18 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
 
   async isCtrlProxyServiceEnabled(
     deviceId: string,
-    _adb?: AdbExecutor,
-    _featureFlags?: FeatureFlagService,
+    adb?: AdbExecutor,
+    featureFlags?: FeatureFlagReader,
   ): Promise<boolean | null> {
+    // Like the real detector, an auto-detect-disabled flag withholds CtrlProxy evidence.
+    if (featureFlags && !featureFlags.isEnabled("accessibility-auto-detect")) {
+      return null;
+    }
+    if (adb) {
+      return this.readState(deviceId)?.ctrlProxyEnabled ?? null;
+    }
+    // The real detector consumes only its cache without an adb; this fake has no cache
+    // (the TTL is deliberately unmodelled) so it reports the seeded value.
     return this.ctrlProxyResults.get(deviceId) ?? null;
   }
 
@@ -42,14 +52,14 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   public readonly detectMethodAdbArgs: Array<AdbExecutor | null | undefined> = [];
 
   /** Records the `featureFlags` argument passed to each detectMethod call (regression guard for #3925). */
-  public readonly detectMethodFeatureFlagsArgs: Array<FeatureFlagService | undefined> = [];
+  public readonly detectMethodFeatureFlagsArgs: Array<FeatureFlagReader | undefined> = [];
 
   /**
    * Configure the detection result for a specific device
    */
   setDetectionResult(
     deviceId: string,
-    enabled: boolean,
+    enabled: boolean | null,
     service: AccessibilityService = "talkback",
   ): void {
     this.detectionResults.set(deviceId, { enabled, service });
@@ -124,20 +134,44 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
     this.detectMethodQueue.length = 0;
   }
 
+  /** Evidence from the configured result. Not cached: tests flip device state mid-test. */
+  private readState(deviceId: string): AndroidAccessibilityState | null {
+    const result = this.detectionResults.get(deviceId) ?? this.defaultResult;
+    if (result.enabled === null) {
+      return null;
+    }
+    return {
+      enabled: result.service === "talkback" || result.enabled,
+      service: result.service,
+      ctrlProxyEnabled: this.ctrlProxyResults.get(deviceId) ?? null,
+    };
+  }
+
+  /** Feature-flag short circuits shared by every real detection entry point. */
+  private flagState(featureFlags?: FeatureFlagReader): AndroidAccessibilityState | undefined {
+    if (featureFlags?.isEnabled("force-accessibility-mode")) {
+      return { enabled: true, service: "talkback", ctrlProxyEnabled: null };
+    }
+    if (featureFlags && !featureFlags.isEnabled("accessibility-auto-detect")) {
+      return { enabled: false, service: "unknown", ctrlProxyEnabled: null };
+    }
+    return undefined;
+  }
+
   async isAccessibilityEnabled(
     deviceId: string,
     _adb: AdbExecutor,
-    _featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<boolean> {
     this.detectionCallCount++;
-    const result = this.detectionResults.get(deviceId) || this.defaultResult;
-    return result.enabled ?? false;
+    const state = this.flagState(featureFlags) ?? this.readState(deviceId);
+    return state?.enabled ?? false;
   }
 
   async detectMethod(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<AccessibilityService> {
     this.detectMethodAdbArgs.push(adb);
     this.detectMethodFeatureFlagsArgs.push(featureFlags);
@@ -145,39 +179,53 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
       this.invalidationCountAtFirstDetection = this.invalidatedDevices.length;
     }
     this.detectionCallCount++;
+    const forced = this.flagState(featureFlags);
+    if (forced) {
+      return forced.service;
+    }
     if (this.detectMethodQueue.length > 0) {
       return this.detectMethodQueue.shift()!;
     }
-    const result = this.detectionResults.get(deviceId) || this.defaultResult;
-    return result.service;
+    return this.readState(deviceId)?.service ?? "unknown";
   }
 
   async resolveState(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<AndroidAccessibilityState | null> {
+    const forced = this.flagState(featureFlags);
     const service = await this.detectMethod(deviceId, adb, featureFlags);
-    const result = this.detectionResults.get(deviceId) ?? this.defaultResult;
-    if (result.enabled === null) {
+    if (forced) {
+      return forced;
+    }
+    const state = this.readState(deviceId);
+    if (state === null) {
       return null;
     }
-    return {
-      enabled: service === "talkback" || result.enabled,
-      service,
-      ctrlProxyEnabled: this.ctrlProxyResults.get(deviceId) ?? null,
-    };
+    return { ...state, enabled: service === "talkback" || state.enabled, service };
   }
 
   async resolveTalkBackState(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<boolean | null> {
+    return (await this.resolveTalkBackStateWithConfirmation(deviceId, adb, featureFlags)).talkBack;
+  }
+
+  async resolveTalkBackStateWithConfirmation(
+    deviceId: string,
+    adb: AdbExecutor,
+    featureFlags?: FeatureFlagReader,
+  ): Promise<TalkBackStateConfirmation> {
     const state =
       (await this.resolveState(deviceId, adb, featureFlags)) ??
       (await this.resolveState(deviceId, adb, featureFlags));
-    return state === null ? null : state.service === "talkback";
+    return {
+      talkBack: state === null ? null : state.service === "talkback",
+      unconfirmed: state === null || state.unconfirmed === true,
+    };
   }
 
   invalidateCache(deviceId: string): void {
@@ -185,7 +233,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   }
 
   clearAllCache(): void {
-    this.ctrlProxyResults.clear();
-    this.detectionResults.clear();
+    // The fake holds no evidence cache (the real TTL is unmodelled), and clearing a
+    // cache never changes what the device reports, so keep the configured results.
   }
 }

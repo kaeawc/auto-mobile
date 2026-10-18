@@ -98,6 +98,7 @@ export class FakeAdbExecutor implements AdbExecutor {
     return {
       stdout,
       stderr,
+      ...(response.error === undefined ? {} : { error: response.error }),
       toString:
         typeof response.toString === "function" && response.toString !== Object.prototype.toString
           ? response.toString.bind(response)

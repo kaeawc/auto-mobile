@@ -149,6 +149,7 @@ describe("socket loopback through the real stateless MCP endpoint", () => {
         },
         cancelScopeExecutions: (scope, reason) =>
           executionTracker.cancelSessionExecutions(scope, reason),
+        forgetScopeBindings: (scope) => store.forget(scope),
         closeReason: () => "streamable_http_onclose",
       });
     let endpoint = makeEndpoint();

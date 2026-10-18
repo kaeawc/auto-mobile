@@ -33,19 +33,12 @@
 1	test/features/action/InputText.execute.test.ts
 3	test/features/action/Keyboard.test.ts
 15	test/features/action/LaunchApp.test.ts
-21	test/features/action/OpenURL.test.ts
 15	test/features/action/PinchOn.test.ts
 2	test/features/action/PinchOn.visionFallback.test.ts
-24	test/features/action/PressButton.android.test.ts
-24	test/features/action/PressButton.test.ts
 1	test/features/action/RecentApps.test.ts
 3	test/features/action/RestoreSnapshot.test.ts
 2	test/features/action/Rotate.test.ts
-18	test/features/action/SetUIState.test.ts
 1	test/features/action/SnapshotProvider.test.ts
-8	test/features/action/TapAnyElement.ios.test.ts
-4	test/features/action/TapAnyElement.iosBudget.test.ts
-16	test/features/action/TapAnyElement.test.ts
 9	test/features/action/TapOnElement.documentsUiTap.test.ts
 5	test/features/action/TapOnElement.effectBasisFallthrough.test.ts
 19	test/features/action/TapOnElement.ensureChecked.test.ts
@@ -62,7 +55,6 @@
 2	test/features/action/UninstallApp.test.ts
 6	test/features/action/androidCoordinateTapPolicy.test.ts
 2	test/features/action/appIdShellInjection.test.ts
-7	test/features/action/openUrlShellInjection.test.ts
 2	test/features/action/swipeon/AutoTargetSelector.test.ts
 1	test/features/action/swipeon/OverlayDetector.property.test.ts
 12	test/features/action/swipeon/OverlayDetector.test.ts

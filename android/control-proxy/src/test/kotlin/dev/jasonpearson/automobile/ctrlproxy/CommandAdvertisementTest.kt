@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeDisplayRouting
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.TestScope
@@ -76,7 +77,7 @@ class CommandAdvertisementTest {
 
   @Test
   fun `complete advertisement contains every sealed request on each supported API`() {
-    for (sdk in listOf(29, 30, 36)) {
+    for (sdk in listOf(29, 30, 31, 32, 33, 34, 35, 36)) {
       val commands = WebSocketServer(port = 0, scope = scope, sdkInt = { sdk }).supportedCommands()
       assertTrue("All sealed requests on API $sdk", commands.containsAll(sealedRequestTypes))
       assertTrue(commands.contains("full_command_set_v1"))
@@ -135,7 +136,7 @@ class CommandAdvertisementTest {
         commands.contains("gesture_display_id_v1"),
       )
       assertEquals(
-        sdk >= GestureDisplayRouting.DISPLAY_API,
+        sdk >= PrototypeDisplayRouting.DISPLAY_API,
         commands.contains("prototype_display_id_v1"),
       )
     }

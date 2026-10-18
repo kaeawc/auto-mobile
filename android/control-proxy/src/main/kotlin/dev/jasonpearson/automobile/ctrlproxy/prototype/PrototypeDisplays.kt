@@ -10,6 +10,25 @@ import android.view.WindowManager
 /** Narrow seam over DisplayManager: can this logical display host a prototype window right now? */
 fun interface PrototypeDisplayProvider {
   fun isAvailable(displayId: Int): Boolean
+
+  /** Why this device cannot host a prototype on [displayId] at all; null when it can. */
+  fun unsupportedReason(displayId: Int): String? = null
+}
+
+/**
+ * API floor for showing a prototype on a non-default display. The accessibility-overlay window
+ * context created from a display context carries no usable token below it: API 30 throws
+ * SecurityException (MANAGE_APP_TOKENS) from createWindowContext and API 31 gets a
+ * BadTokenException on addView (#9934). The default display works on every API level.
+ */
+object PrototypeDisplayRouting {
+  const val DISPLAY_API = 32
+
+  fun error(displayId: Int, sdkInt: Int): String? =
+    if (displayId != Display.DEFAULT_DISPLAY && sdkInt < DISPLAY_API)
+      "Prototype display routing requires Android 12L (API $DISPLAY_API); " +
+        "this device is API $sdkInt, so only the default display is supported"
+    else null
 }
 
 /**
@@ -50,6 +69,9 @@ class AndroidPrototypeDisplays(
 
   override fun isAvailable(displayId: Int): Boolean =
     displayId == Display.DEFAULT_DISPLAY || display(displayId) != null
+
+  override fun unsupportedReason(displayId: Int): String? =
+    PrototypeDisplayRouting.error(displayId, sdkInt)
 
   @TargetApi(Build.VERSION_CODES.R)
   override fun open(displayId: Int, layer: PrototypeWindowLayer): PrototypeDisplayWindow? {

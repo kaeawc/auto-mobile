@@ -50,7 +50,7 @@ import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { DeviceShutdownTimeoutError } from "../../models/DeviceShutdownTimeoutError";
 import { fixedBackoff } from "../../utils/Backoff";
 import { DaemonState, type DaemonStateLike } from "../../daemon/daemonState";
-import { defaultDaemonContext } from "../../daemon/daemonContext";
+import { defaultDaemonContext, type DevicePoolReads } from "../../daemon/daemonContext";
 import { type Session, type SessionManager } from "../../daemon/sessionManager";
 import { reconcileDiscoveryObservation } from "../../daemon/discoveryReconcile";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
@@ -891,16 +891,12 @@ export function projectAndroidTransportDescription(
 }
 
 export function initializedDeviceSessionUuid(deviceId: string): string | undefined {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
-    return undefined;
-  }
-  return daemonState.getDeviceSessionRegistry().getByDeviceId(deviceId)?.deviceSessionUuid;
+  return defaultDaemonContext.deviceSessionRegistry()?.getByDeviceId(deviceId)?.deviceSessionUuid;
 }
 
 export function listDevicePayloads(
   booted: BootedDevice[],
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
   configuredImages: ReadonlyMap<string, StableConfiguredDeviceImage>,
   aliasesForDevice: (deviceId: string) => string[] = (deviceId) =>
     devicePool?.getAndroidTransportAliases(deviceId) ?? [],
@@ -1545,7 +1541,7 @@ export function isUnknownAndroidRuntimeName(device: BootedDevice): boolean {
  */
 export function getPooledAndroidEntryForIdentityCheck(
   device: BootedDevice,
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
 ): PooledDevice | undefined {
   if (device.platform !== "android" || !isUnknownAndroidRuntimeName(device)) {
     return undefined;
@@ -1595,7 +1591,7 @@ export function getPooledAndroidEntryForIdentityCheck(
  */
 export function getValidatedPooledAndroidEntry(
   device: BootedDevice,
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
 ): PooledDevice | undefined {
   if (devicePool?.isPooledIdentityUnresolved(device.deviceId)) {
     return undefined;
@@ -1605,14 +1601,14 @@ export function getValidatedPooledAndroidEntry(
 
 export function getValidatedPooledAndroidAvdName(
   device: BootedDevice,
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
 ): string | undefined {
   return getValidatedPooledAndroidEntry(device, devicePool)?.avdName;
 }
 
 export function resolveKillDeviceStableTarget(
   device: BootedDevice,
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
 ): StableDeviceTarget | undefined {
   if (device.platform === "ios") {
     return { platform: "ios", stableId: device.deviceId };
@@ -1730,7 +1726,7 @@ export interface PooledAvdNameProbeBudget {
  */
 export function capturePooledAvdIdentity(
   device: BootedDevice,
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
   budget: PooledAvdNameProbeBudget,
 ): PooledAvdCaptureResult {
   const pooled = getPooledAndroidEntryForIdentityCheck(device, devicePool);
@@ -1943,7 +1939,7 @@ export function pooledAvdNameRefusalMessage(
  */
 export function getBootedAndroidStableName(
   device: BootedDevice,
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
 ): string {
   const pooledAvdName = getValidatedPooledAndroidAvdName(device, devicePool);
   return pooledAvdName ?? device.name;
@@ -1971,7 +1967,7 @@ export function getBootedAndroidStableName(
  */
 export function getBootedAndroidTeardownStableName(
   device: BootedDevice,
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
 ): string {
   return getPooledAndroidEntryForIdentityCheck(device, devicePool)?.avdName ?? device.name;
 }
@@ -1992,7 +1988,7 @@ export function matchesIosTeardownIdentity(
 export function matchesTeardownStableId(
   device: BootedDevice,
   stableId: string,
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
 ): boolean {
   // The name-or-UDID fallback is an iOS-only concern (#6250 delete-by-name).
   // Branching explicitly on platform keeps a physical Android device whose
@@ -2073,7 +2069,7 @@ export function createTeardownFailureResponse(
 export function findMatchingBootedTeardownDevices(
   discovery: BootedDeviceDiscovery,
   args: TeardownDeviceArgs,
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
 ): BootedDevice[] {
   return discovery.devices.filter(
     (device) =>
@@ -2085,7 +2081,7 @@ export function findMatchingBootedTeardownDevices(
 export function createBootedTeardownTarget(
   device: BootedDevice,
   args: TeardownDeviceArgs,
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
 ): { target?: TeardownResolvedTarget; conflict?: string; unsupported?: string } {
   const stableName =
     device.platform === "android"
@@ -2119,7 +2115,7 @@ export function createBootedTeardownTarget(
 export function findBootedTeardownTarget(
   discovery: BootedDeviceDiscovery,
   args: TeardownDeviceArgs,
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
 ): { target?: TeardownResolvedTarget; conflict?: string; unsupported?: string } {
   const matchingId = findMatchingBootedTeardownDevices(discovery, args, devicePool);
   if (matchingId.length > 1) {
@@ -2326,7 +2322,7 @@ export function teardownProbeBudget(context: TeardownContext): {
 
 export function captureTeardownInitialAndroidScan(
   booted: BootedDeviceDiscovery,
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
 ): TeardownInitialAndroidScan {
   return {
     serials: new Set(
@@ -2419,7 +2415,7 @@ export async function readTeardownBootedDiscovery(
  */
 export async function readTeardownTargetDiscovery(
   context: TeardownContext,
-  devicePool: DevicePool | undefined,
+  devicePool: DevicePoolReads | undefined,
 ): Promise<BootedDeviceDiscovery> {
   if (context.mode !== "serial-only" || context.args.target.platform !== "android") {
     return await readTeardownBootedDiscovery(context);
@@ -2566,7 +2562,7 @@ export async function finalizeTeardownEviction(
 }
 
 export function findAbsentTeardownPooledDevices(
-  devicePool: DevicePool,
+  devicePool: Pick<DevicePool, "getAllDevices">,
   target: TeardownDeviceArgs["target"],
 ): PooledDevice[] {
   return devicePool
@@ -3302,7 +3298,7 @@ export async function retireTeardownPooledOwnership(
   expectedPooledDevice: PooledDevice,
   name: string,
 ): Promise<void> {
-  const devicePool = DaemonState.getInstance().getDevicePool();
+  const devicePool = defaultDaemonContext.requireDevicePoolWrites();
   const reservation = await runWithinShutdownDeadline(
     context.deadlineDevice,
     context.dependencies.timer,
@@ -3389,14 +3385,11 @@ export async function retireTeardownPooledOwnership(
 }
 
 export async function retireAbsentTeardownOwnership(context: TeardownContext): Promise<void> {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const devicePool = defaultDaemonContext.devicePool();
+  if (!devicePool) {
     return;
   }
-  const expectedPooledDevices = findAbsentTeardownPooledDevices(
-    daemonState.getDevicePool(),
-    context.args.target,
-  );
+  const expectedPooledDevices = findAbsentTeardownPooledDevices(devicePool, context.args.target);
   for (const expectedPooledDevice of expectedPooledDevices) {
     await retireTeardownPooledOwnership(
       context,
@@ -3425,9 +3418,9 @@ export async function resolveAbsentTeardownTarget(
       ),
     };
   }
-  const daemonState = DaemonState.getInstance();
-  const runtimeId = daemonState.isInitialized()
-    ? findAbsentTeardownPooledDevices(daemonState.getDevicePool(), context.args.target)[0]?.id
+  const absentDevicePool = defaultDaemonContext.devicePool();
+  const runtimeId = absentDevicePool
+    ? findAbsentTeardownPooledDevices(absentDevicePool, context.args.target)[0]?.id
     : undefined;
   const androidManager =
     context.args.target.platform === "android" && runtimeId
@@ -3568,8 +3561,7 @@ export async function finalizeIosNameResolvedTeardownTarget(
 }
 
 export async function resolveTeardownTarget(context: TeardownContext): Promise<TeardownResolution> {
-  const daemonState = DaemonState.getInstance();
-  const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  const devicePool = defaultDaemonContext.devicePool();
   const booted = await readTeardownTargetDiscovery(context, devicePool);
   context.initialScan = captureTeardownInitialAndroidScan(booted, devicePool);
   // A booted emulator only matches this teardown by its POOLED AVD name when its
@@ -3666,7 +3658,7 @@ export async function resolveTeardownTarget(context: TeardownContext): Promise<T
 }
 
 export function findStoppedTeardownPooledDevices(
-  devicePool: DevicePool,
+  devicePool: Pick<DevicePool, "getAllDevices">,
   target: TeardownResolvedTarget,
 ): PooledDevice[] {
   return devicePool
@@ -3684,14 +3676,11 @@ export async function retireStoppedTeardownOwnership(
   context: TeardownContext,
   target: TeardownResolvedTarget,
 ): Promise<void> {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const devicePool = defaultDaemonContext.devicePool();
+  if (!devicePool) {
     return;
   }
-  const expectedPooledDevices = findStoppedTeardownPooledDevices(
-    daemonState.getDevicePool(),
-    target,
-  );
+  const expectedPooledDevices = findStoppedTeardownPooledDevices(devicePool, target);
   for (const expectedPooledDevice of expectedPooledDevices) {
     await retireTeardownPooledOwnership(context, expectedPooledDevice, target.device.name);
   }
@@ -3862,8 +3851,7 @@ export async function checkForRestartedTeardownTarget(
       target.device,
     );
   }
-  const daemonState = DaemonState.getInstance();
-  const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  const devicePool = defaultDaemonContext.devicePool();
   const newlyAppearedUnresolvedRuntime = booted.devices.find(
     (device) =>
       device.platform === "android" &&
@@ -4047,10 +4035,7 @@ export function clearDeletedAndroidAvdRebootBudget(target: TeardownResolvedTarge
   if (target.device.platform !== "android") {
     return;
   }
-  const daemonState = DaemonState.getInstance();
-  if (daemonState.isInitialized()) {
-    daemonState.getDevicePool().clearAndroidRebootBudgetForDeletedAvd(target.device);
-  }
+  defaultDaemonContext.devicePoolWrites()?.clearAndroidRebootBudgetForDeletedAvd(target.device);
 }
 
 export async function verifyTeardownAbsence(
@@ -4386,12 +4371,13 @@ export async function runProvisionDeviceWithinDeadline<T>(
  * session a request minted or moved is taken back by that request's undo, not kept.
  */
 export function liveHolderOtherThanThisRequest(deviceId: string): string | undefined {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const devicePool = defaultDaemonContext.devicePool();
+  const sessionManager = defaultDaemonContext.sessionManager();
+  if (!devicePool || !sessionManager) {
     return undefined;
   }
-  const holder = holderOf(daemonState.getDevicePool().getDevice(deviceId));
-  if (!holder || !daemonState.getSessionManager().findSession(holder)) {
+  const holder = holderOf(devicePool.getDevice(deviceId));
+  if (!holder || !sessionManager.findSession(holder)) {
     return undefined;
   }
   const receipt = requestAcquisitionReceipt();
@@ -4422,8 +4408,7 @@ export function stopUnownedColdBoot(boot: DeviceBootResult | undefined): Promise
   if (boot?.source !== "cold-boot" || !boot.processHandle) {
     return undefined;
   }
-  const daemonState = DaemonState.getInstance();
-  const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  const devicePool = defaultDaemonContext.devicePool();
   if (devicePool?.hasStartedDeviceProcess(boot.device.deviceId, boot.processHandle)) {
     // The pool tracks an Android emulator's process from the bind on. That alone is not
     // ownership: only a session holding the device keeps the emulator this call booted alive,
@@ -4435,7 +4420,7 @@ export function stopUnownedColdBoot(boot: DeviceBootResult | undefined): Promise
       return undefined;
     }
     // Unnamed: cancelling an unowned cold boot is not the session giving the device up.
-    devicePool.markIntentionalShutdown(boot.device.deviceId);
+    defaultDaemonContext.devicePoolWrites()?.markIntentionalShutdown(boot.device.deviceId);
   }
   const termination = terminateColdBootProcess(
     boot.processHandle,
@@ -4819,11 +4804,11 @@ export async function validatePooledDeviceMapping(
   requestedIdentity: string,
   options: { signal?: AbortSignal; totalDeadlineMs?: number } = {},
 ): Promise<void> {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const devicePool = defaultDaemonContext.devicePool();
+  const poolWrites = defaultDaemonContext.devicePoolWrites();
+  if (!devicePool || !poolWrites) {
     return;
   }
-  const devicePool = daemonState.getDevicePool();
   let pooled = devicePool.getDevice(device.deviceId);
   // Delegate to the pool's own predicate rather than re-deriving it, so this
   // validator cannot reject a pairing the pool tolerates: a physical iPhone's
@@ -4831,7 +4816,7 @@ export async function validatePooledDeviceMapping(
   // placeholder (#10603) are both judged exactly as the pool judges them.
   if (pooled && !devicePool.matchesRuntimeIdentity(pooled, device)) {
     if (devicePool.hasReusableSerial(pooled)) {
-      await devicePool.settlePooledRuntimeIdentity(device.deviceId, {
+      await poolWrites.settlePooledRuntimeIdentity(device.deviceId, {
         ...options,
         platform: device.platform,
       });
@@ -4935,16 +4920,14 @@ export function clearColdBootShutdownMarker(
   source: "booted" | "cold-boot",
   deviceId: string,
 ): void {
-  const daemonState = DaemonState.getInstance();
-  if (source === "cold-boot" && daemonState.isInitialized()) {
-    daemonState.getDevicePool().clearIntentionalShutdown(deviceId);
+  if (source === "cold-boot") {
+    defaultDaemonContext.devicePoolWrites()?.clearIntentionalShutdown(deviceId);
   }
 }
 
 export function publishWarmDeviceReady(source: "booted" | "cold-boot", deviceId: string): void {
-  const daemonState = DaemonState.getInstance();
-  if (source === "booted" && daemonState.isInitialized()) {
-    daemonState.getDevicePool().notifyDeviceReady(deviceId);
+  if (source === "booted") {
+    defaultDaemonContext.devicePoolWrites()?.notifyDeviceReady(deviceId);
   }
 }
 
@@ -5889,9 +5872,7 @@ export function assertAndroidBootDidNotEnterRecovery(
   if (args.platform !== "android") {
     return;
   }
-  const recoveryTargets = getStartDevicePool(
-    DaemonState.getInstance(),
-  )?.getRecoveringAndroidTargets();
+  const recoveryTargets = defaultDaemonContext.devicePool()?.getRecoveringAndroidTargets();
   if (
     recoveryTargets?.serials.has(boot.device.deviceId) ||
     recoveryTargets?.names.has(boot.device.name)
@@ -6010,8 +5991,7 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
     return { platform: "android", stableId: imageMatches[0].name };
   }
 
-  const daemonState = DaemonState.getInstance();
-  const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  const devicePool = defaultDaemonContext.devicePool();
   const stableIds = new Set(
     bootedMatches.map((device) => getBootedAndroidStableName(device, devicePool)),
   );

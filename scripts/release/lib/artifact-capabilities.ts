@@ -107,6 +107,16 @@ export function formatGaps(version: string, gaps: CapabilityGap[]): string {
 }
 
 /** Throws a readable error when a manifest is not the expected shape. */
+/** Records `version` first; re-recording an existing version replaces its entry. */
+export function recordRelease(
+  manifest: CapabilityManifest,
+  version: string,
+  advertised: ArtifactCapabilities,
+): CapabilityManifest {
+  const others = Object.entries(manifest.releases).filter(([existing]) => existing !== version);
+  return { ...manifest, releases: { [version]: advertised, ...Object.fromEntries(others) } };
+}
+
 export function parseManifest(raw: string): CapabilityManifest {
   const value: unknown = JSON.parse(raw);
   if (typeof value !== "object" || value === null || !("releases" in value)) {

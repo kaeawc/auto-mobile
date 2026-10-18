@@ -8,6 +8,7 @@ import {
   parseIosRunnerAdvertised,
   parseManifest,
   parsePrototypeAgentAdvertised,
+  recordRelease,
 } from "../../scripts/release/lib/artifact-capabilities";
 import manifestJson from "../../scripts/release/artifact-capabilities.json";
 import { RELEASE_CHECKSUM_REGISTRY } from "../../src/constants/release";
@@ -97,5 +98,15 @@ describe("manifest", () => {
   test("checked-in manifest is well formed and records the newest pinned release", () => {
     const manifest = parseManifest(JSON.stringify(manifestJson));
     expect(Object.keys(manifest.releases)).toContain(RELEASE_CHECKSUM_REGISTRY[0].version);
+  });
+});
+
+describe("recordRelease", () => {
+  test("re-recording an existing version replaces its stale entry and keeps newest-first order", () => {
+    const stale: ArtifactCapabilities = { ...advertised, "ios-runner": ["old_v1"] };
+    const manifest = { releases: { "1.0.0": advertised, "0.9.0": stale } };
+    const next = recordRelease(manifest, "0.9.0", advertised);
+    expect(next.releases["0.9.0"]).toEqual(advertised);
+    expect(Object.keys(next.releases)).toEqual(["0.9.0", "1.0.0"]);
   });
 });

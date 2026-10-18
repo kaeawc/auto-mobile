@@ -183,21 +183,33 @@ export const ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS = 4096;
  * @param apiLevel - Device API level, or null when it could not be read.
  */
 export function buildAndroidInputTextPlan(text: string, apiLevel: number | null): KeyEventPlan {
-  if (apiLevel !== null && apiLevel <= 30) {
-    return chunkedInputTextPlan(text, ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS);
-  }
-  return chunkedInputTextPlan(text, ANDROID_INPUT_TEXT_CHUNK_CHARS);
+  const chunks = splitAndroidInputText(text, apiLevel);
+  return {
+    commands: chunks.map(buildAndroidInputTextCommand),
+    textLength: Math.min(text.length, androidInputTextChunkChars(apiLevel)),
+  };
 }
 
-function chunkedInputTextPlan(text: string, chunkChars: number): KeyEventPlan {
-  const commands: string[] = [];
+/**
+ * The `input text` chunks {@link buildAndroidInputTextPlan} sends, in order. A caller that
+ * dispatches them one at a time knows exactly how many characters a failed run had delivered.
+ */
+export function splitAndroidInputText(text: string, apiLevel: number | null): string[] {
+  const chunkChars = androidInputTextChunkChars(apiLevel);
+  const chunks: string[] = [];
   let start = 0;
   while (start < text.length) {
     const end = chunkEnd(text, start, chunkChars);
-    commands.push(buildAndroidInputTextCommand(text.slice(start, end)));
+    chunks.push(text.slice(start, end));
     start = end;
   }
-  return { commands, textLength: Math.min(text.length, chunkChars) };
+  return chunks;
+}
+
+function androidInputTextChunkChars(apiLevel: number | null): number {
+  return apiLevel !== null && apiLevel <= 30
+    ? ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS
+    : ANDROID_INPUT_TEXT_CHUNK_CHARS;
 }
 
 /**

@@ -3643,22 +3643,35 @@ describe("SetUIState post-success observation refresh is bounded by the result d
 });
 
 describe("SetUIState stale synthetic selector errors", () => {
-  test("unmatched synthetic ids require re-observe while plain ids keep their error", () => {
-    const command = new SetUIState({ name: "test", platform: "android", deviceId: "test" }, null, {
-      timer: new FakeTimer(),
+  test("unmatched synthetic ids require re-observe while plain ids keep their error", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observe = new FakeObserveScreenForSetUIState();
+    observe.setResult({
+      updatedAt: 0,
+      screenSize: { width: 1080, height: 1920 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: { hierarchy: {} },
     });
-    const results = command["collectResults"](
-      [],
-      [
+    const command = new SetUIState({ name: "test", platform: "android", deviceId: "test" }, null, {
+      timer,
+      observeScreen: observe,
+      tapOnElement: new FakeTapOnElement(),
+      inputText: new FakeInputText(),
+      clearText: new FakeClearText(),
+      swipeOn: new FakeSwipeOn(),
+      fieldTypeDetector: new FakeFieldTypeDetector(),
+    });
+    const result = await command.execute({
+      fields: [
         { selector: { elementId: "s2-3340048129449c01-2" }, value: "test" },
         { selector: { elementId: "example:id/missing" }, value: "test" },
       ],
-      new Set(),
-    );
-    expect(results[0].error).toBe(
+    });
+    expect(result.fields[0].error).toBe(
       "Element id 's2-3340048129449c01-2' is stale; re-observe and use the id from the new observation.",
     );
-    expect(results[1].error).toBe('Element not found: elementId="example:id/missing"');
+    expect(result.fields[1].error).toBe('Element not found: elementId="example:id/missing"');
   });
 });
 
@@ -3670,7 +3683,7 @@ describe("SetUIState resolver lookups on captured hierarchies (#10269)", () => {
       readFileSync(new URL(`../../fixtures/${path}`, import.meta.url), "utf8"),
     );
     const action = new SetUIState({ name: "capture", deviceId: "capture", platform }, null, {});
-    return action["findElement"](
+    return action.findElement(
       {
         ...selector,
         screenSizeOptions: {

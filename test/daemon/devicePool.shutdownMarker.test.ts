@@ -6,7 +6,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { BootedDevice, DeviceInfo } from "../../src/models";
+import { BootedDevice } from "../../src/models";
 
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
 import {
@@ -16,8 +16,10 @@ import {
   createBootedDevice,
   createDevicePoolSuite,
   devicePoolSuiteActions,
-  enableRebootOnDeath,
+  pixel8Source,
+  registryDeviceHooks,
   requirePooledDevice,
+  withRebootOnDeath,
 } from "../helpers/devicePoolSuite";
 
 useSessionIdleWindowForSuite();
@@ -46,21 +48,7 @@ describe("DevicePool", () => {
   });
 
   describe("intentional-shutdown marker incarnation scoping", () => {
-    const androidImage = {
-      name: "Pixel 8",
-      platform: "android" as const,
-      isRunning: false,
-      source: "local" as const,
-    };
-
-    const withRebootOnDeath = async (run: () => Promise<void>): Promise<void> => {
-      const restore = enableRebootOnDeath();
-      try {
-        await run();
-      } finally {
-        restore();
-      }
-    };
+    const androidImage = pixel8Source();
 
     test("a stale disconnect does not remove an intentionally-stopped device that is still booted", async () => {
       await withRebootOnDeath(async () => {
@@ -163,17 +151,7 @@ describe("DevicePool", () => {
       const transportAwareDeviceManager = new TransportAwareFakeDeviceManager();
       fakeDeviceManager = transportAwareDeviceManager;
       devicePool = makePool({
-        onDeviceReady: (deviceId) => {
-          const pooled = devicePool.getDevice(deviceId);
-          if (pooled) {
-            registry.onDeviceConnected({
-              deviceId: pooled.id,
-              platform: pooled.platform,
-              incarnation: pooled.incarnation,
-            });
-          }
-        },
-        onDeviceRemoved: (deviceId) => registry.onDeviceDisconnected(deviceId),
+        ...registryDeviceHooks(registry, () => devicePool),
       });
       const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const reconnected = { ...firstConnection };
@@ -213,17 +191,7 @@ describe("DevicePool", () => {
       );
       fakeDeviceManager = new TransportAwareFakeDeviceManager();
       devicePool = makePool({
-        onDeviceReady: (deviceId) => {
-          const pooled = devicePool.getDevice(deviceId);
-          if (pooled) {
-            registry.onDeviceConnected({
-              deviceId: pooled.id,
-              platform: pooled.platform,
-              incarnation: pooled.incarnation,
-            });
-          }
-        },
-        onDeviceRemoved: (deviceId) => registry.onDeviceDisconnected(deviceId),
+        ...registryDeviceHooks(registry, () => devicePool),
       });
       const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const reconnected = { ...firstConnection, name: "Pixel 9" };
@@ -265,12 +233,7 @@ describe("DevicePool", () => {
     });
 
     test("preserves AutoMobile-owned emulator metadata across a same-serial rediscovery", async () => {
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const reconnected = { ...firstConnection };
       await devicePool.addDevice(firstConnection, sourceImage);
@@ -287,12 +250,7 @@ describe("DevicePool", () => {
     });
 
     test("does not transfer AutoMobile-owned metadata to a different AVD with the same serial", async () => {
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const replacement = { ...firstConnection, name: "Pixel 9" };
       await devicePool.addDevice(firstConnection, sourceImage);
@@ -306,12 +264,7 @@ describe("DevicePool", () => {
     });
 
     test("keeps AutoMobile-owned metadata when emulator name discovery is unknown", async () => {
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const rediscoveredWithUnknownName = {
         ...firstConnection,
@@ -339,12 +292,7 @@ describe("DevicePool", () => {
     // publish pool-derived epoch information must therefore not treat it as a
     // match.
     test("does not claim a pooled entry describes a placeholder-named runtime", async () => {
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
       await devicePool.addDevice(firstConnection, sourceImage);
 
@@ -360,12 +308,7 @@ describe("DevicePool", () => {
     });
 
     test("does not transfer ownership from an unknown-name emulator to a different known AVD", async () => {
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       const firstConnection = createBootedDevice("emulator-5554", "android", "Pixel 8");
       const rediscoveredWithUnknownName = {
         ...firstConnection,
@@ -443,12 +386,7 @@ describe("DevicePool", () => {
     });
 
     test("adopts the started AVD name once discovery replaces the unknown-name placeholder", async () => {
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       const started = createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)");
       await devicePool.addDevice(started, sourceImage);
       const incarnation = devicePool.getDevice(started.deviceId)?.incarnation;
@@ -464,12 +402,7 @@ describe("DevicePool", () => {
     });
 
     test("does not adopt a resolved name that contradicts the AVD this pool started", async () => {
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       const started = createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)");
       await devicePool.addDevice(started, sourceImage);
       const incarnation = devicePool.getDevice(started.deviceId)?.incarnation;
@@ -646,48 +579,35 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice(secondPhone.deviceId)?.incarnation).toBe(secondIncarnation);
     });
 
-    test("reserves a verified AVD name when the running emulator lacks AVD metadata", async () => {
+    /** Pool an unnamed emulator plus a "Pixel 8" one, then hold the first's readiness reservation. */
+    const reserveUnknownNamedOriginal = async () => {
       const original = createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)");
       const replacement = createBootedDevice("emulator-5556", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       await initializeLiveDevices([original, replacement]);
-      const releaseReservation = await devicePool.reserveDeviceForReadiness(
+      const reservation = await devicePool.reserveDeviceForReadiness(
         original.deviceId,
         original,
         sourceImage.name,
         sourceImage.name,
       );
+      return { replacement, sourceImage, reservation };
+    };
+
+    test("reserves a verified AVD name when the running emulator lacks AVD metadata", async () => {
+      const { replacement, reservation } = await reserveUnknownNamedOriginal();
 
       try {
         expect(devicePool.getIdleDevices().map((device) => device.id)).not.toContain(
           replacement.deviceId,
         );
       } finally {
-        await releaseReservation();
+        await reservation();
       }
     });
 
     test("rejects direct binding to an AVD reserved for recovery readiness", async () => {
-      const original = createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)");
-      const replacement = createBootedDevice("emulator-5556", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
-      await initializeLiveDevices([original, replacement]);
-      const releaseReservation = await devicePool.reserveDeviceForReadiness(
-        original.deviceId,
-        original,
-        sourceImage.name,
-        sourceImage.name,
-      );
+      const { replacement, sourceImage, reservation } = await reserveUnknownNamedOriginal();
 
       try {
         await expect(
@@ -700,26 +620,12 @@ describe("DevicePool", () => {
         ).rejects.toThrow("not available");
         expect(sessionManager.getSession("competing-session")).toBeNull();
       } finally {
-        await releaseReservation();
+        await reservation();
       }
     });
 
     test("allows the readiness reservation owner to bind its recovered AVD", async () => {
-      const original = createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)");
-      const replacement = createBootedDevice("emulator-5556", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
-      await initializeLiveDevices([original, replacement]);
-      const reservation = await devicePool.reserveDeviceForReadiness(
-        original.deviceId,
-        original,
-        sourceImage.name,
-        sourceImage.name,
-      );
+      const { replacement, sourceImage, reservation } = await reserveUnknownNamedOriginal();
 
       try {
         await expect(
@@ -744,12 +650,7 @@ describe("DevicePool", () => {
 
     test("keeps a same-serial recovery replacement reserved for its readiness owner", async () => {
       const original = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       fakeDeviceManager.bootedDevices = [original];
       await devicePool.addDevice(original, sourceImage);
       const reservation = await devicePool.reserveDeviceForReadiness(
@@ -799,12 +700,7 @@ describe("DevicePool", () => {
 
     test("allows concurrent readiness owners to reuse their exact same AVD", async () => {
       const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      const sourceImage: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
+      const sourceImage = pixel8Source();
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.addDevice(device, sourceImage);
       const firstReservation = await devicePool.reserveDeviceForReadiness(

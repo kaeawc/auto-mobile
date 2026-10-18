@@ -167,6 +167,11 @@ export class FakeDaemonClient implements DaemonClientLike {
     return new Promise<T>((resolve, reject) => {
       const abort = () => reject(onAbort(signal.reason));
       signal.addEventListener("abort", abort, { once: true });
+      // An abort that fired before the listener existed never calls it (the real client
+      // rechecks `signal.aborted` after listening, client.ts ~L1457); reject now or hang forever.
+      if (signal.aborted) {
+        abort();
+      }
       pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
     });
   }
@@ -291,10 +296,14 @@ export class FakeDaemonClient implements DaemonClientLike {
     };
   }
 
+  /**
+   * Like the real `handleSocketClosed` (client.ts ~L990), handlers run directly: a throwing one
+   * propagates to the caller and the handlers after it are not run (unlike notification handlers).
+   */
   emitConnectionClosed(): void {
     this.connected = false;
     for (const handler of [...this.connectionClosedHandlers]) {
-      this.runHandler(handler);
+      handler();
     }
   }
 

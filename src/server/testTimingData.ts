@@ -9,7 +9,7 @@ const DEFAULT_TEST_TIMING_LIMIT = 1000;
 const DEFAULT_TEST_TIMING_MIN_SAMPLES = 1;
 export const TEST_TIMING_LIMIT_MAX = 5000;
 
-export interface TestTimingQueryArgs {
+export interface TestTimingQueryParams {
   lookbackDays?: number;
   limit?: number;
   minSamples?: number;
@@ -68,7 +68,7 @@ const testExecutionRepository = new TestExecutionRepository();
 
 function appendTestTimingDeviceFilters(
   filters: Record<string, unknown>,
-  args: TestTimingQueryArgs,
+  args: TestTimingQueryParams,
 ): void {
   if (args.deviceId) {
     filters.deviceId = args.deviceId;
@@ -84,7 +84,7 @@ function appendTestTimingDeviceFilters(
   }
 }
 
-function buildTestTimingFilters(args: TestTimingQueryArgs): Record<string, unknown> {
+function buildTestTimingFilters(args: TestTimingQueryParams): Record<string, unknown> {
   const filters: Record<string, unknown> = {};
   if (args.testClass) {
     filters.testClass = args.testClass;
@@ -121,7 +121,7 @@ function buildTestTimingFilters(args: TestTimingQueryArgs): Record<string, unkno
 }
 
 export async function buildTestTimingResponse(
-  args: TestTimingQueryArgs,
+  args: TestTimingQueryParams,
   repository: TestExecutionRepository = testExecutionRepository,
 ): Promise<TestTimingResponse> {
   const lookbackDays = args.lookbackDays ?? DEFAULT_TEST_TIMING_LOOKBACK_DAYS;

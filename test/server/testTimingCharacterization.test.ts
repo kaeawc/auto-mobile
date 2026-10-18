@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { TestExecutionRepository } from "../../src/db/testExecutionRepository";
-import { buildTestTimingResponse, type TestTimingQueryArgs } from "../../src/server/testTimingData";
+import {
+  buildTestTimingResponse,
+  type TestTimingQueryParams,
+} from "../../src/server/testTimingData";
 import { registerTestTimingResources } from "../../src/server/testTimingResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-const filters: TestTimingQueryArgs = {
+const filters: TestTimingQueryParams = {
   testClass: "Login Test",
   testMethod: "test+login",
   deviceId: "device/one",

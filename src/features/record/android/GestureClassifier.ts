@@ -223,7 +223,8 @@ export class GestureClassifier {
     if (pressureCount > 0) {
       const range = this.pressureRange;
       const scale = (raw: number): number =>
-        range ? Math.round(clamp01((raw - range.min) / (range.max - range.min)) * 1e4) / 1e4 : raw;
+        Math.round((range ? clamp01((raw - range.min) / (range.max - range.min)) : raw) * 1e4) /
+        1e4;
       fields.pressure = {
         min: scale(pressureMin),
         max: scale(pressureMax),

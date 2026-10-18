@@ -98,8 +98,13 @@ export class TouchFrameReconstructor {
             slot.trackingId = -1;
           }
         } else {
-          // New or continuing contact
-          this.getOrCreateSlot().trackingId = value;
+          // New or continuing contact; a new tracking id starts a fresh contact, so pen state
+          // from the slot's previous occupant must not carry over to it.
+          const slot = this.getOrCreateSlot();
+          if (slot.trackingId !== value) {
+            clearPenState(slot);
+          }
+          slot.trackingId = value;
         }
         break;
 
@@ -127,6 +132,8 @@ export class TouchFrameReconstructor {
         // MT_TOOL_FINGER (0) is the default and stays absent; MT_TOOL_PEN (1) is a stylus.
         if (value === 1) {
           this.getOrCreateSlot().toolType = "stylus";
+        } else {
+          delete this.getOrCreateSlot().toolType;
         }
         break;
 
@@ -195,6 +202,10 @@ export class TouchFrameReconstructor {
       this.nodeTool = tool;
     } else if (this.nodeTool === tool) {
       this.nodeTool = undefined;
+      // A pen leaving range ends its contact even if the driver sent no BTN_TOUCH UP.
+      if (this.options.singleTouch) {
+        this.handleSingleTouchContact(false);
+      }
     }
   }
 
@@ -283,4 +294,12 @@ export class TouchFrameReconstructor {
       delete slot.unknownAxes;
     }
   }
+}
+
+function clearPenState(slot: TouchSlot): void {
+  delete slot.toolType;
+  delete slot.buttons;
+  delete slot.tiltX;
+  delete slot.tiltY;
+  delete slot.distance;
 }

@@ -22,7 +22,7 @@ interface DeviceInfo {
 }
 
 export interface InputNodes {
-  /** First multitouch node, as discoverTouchNode picks. */
+  /** First multitouch node (the one recording uses). */
   touch: TouchInputNode | null;
   /** Nodes with single-touch ABS_X/Y plus a pen tool (BTN_TOOL_PEN / BTN_TOOL_RUBBER). */
   pen: TouchInputNode[];
@@ -39,32 +39,42 @@ export async function discoverInputNodes(adb: AdbExecutor): Promise<InputNodes> 
 }
 
 /**
- * Pure parser exposed for unit testing. Handles `getevent -p` (hex codes) and
- * `getevent -pl` (named codes). A node that reports ABS_MT_POSITION_X/Y is a
- * touch node (and is the only one returned as `touch`, the first); a node
- * without them that reports ABS_X/ABS_Y and a pen tool key is a pen node.
- * Accelerometers and the like report ABS_X/Y but no pen tool, so they are
- * not mistaken for a digitizer. Pressure ranges (ABS_MT_PRESSURE for touch,
- * ABS_PRESSURE for pen) are attached when the device reports them.
+ * Pure parser exposed for unit testing; the single `getevent -p` parser in the
+ * repo. Handles `getevent -p` (hex codes) and `getevent -lp` (named codes),
+ * including the first axis that real output prints on the `ABS (0003):` line.
+ * `touch` is the first node that reports ABS_MT_POSITION_X/Y; `pen` holds nodes
+ * without them that report ABS_X/ABS_Y and a pen tool key. Accelerometers
+ * report ABS_X/Y but no pen tool, so they are not mistaken for a digitizer.
  */
 export function parseInputNodes(output: string): InputNodes {
-  const devices = splitDevices(output);
-  let touch: TouchInputNode | null = null;
-  const pen: TouchInputNode[] = [];
-  for (const device of devices) {
+  const nodes = parseNodes(output);
+  return {
+    touch: nodes.find((node) => node.kind === "touch") ?? null,
+    pen: nodes.filter((node) => node.kind === "pen"),
+  };
+}
+
+/** Every multitouch node in `output`, in order (a capture may list the same node twice). */
+export function parseTouchNodes(output: string): TouchInputNode[] {
+  return parseNodes(output).filter((node) => node.kind === "touch");
+}
+
+function parseNodes(output: string): TouchInputNode[] {
+  const nodes: TouchInputNode[] = [];
+  for (const device of splitDevices(output)) {
     const mtX = device.abs.get(ABS_MT_POSITION_X);
     const mtY = device.abs.get(ABS_MT_POSITION_Y);
     if (mtX && mtY) {
-      touch ??= toNode(device, mtX, mtY, device.abs.get(ABS_MT_PRESSURE), "touch");
+      nodes.push(toNode(device, mtX, mtY, device.abs.get(ABS_MT_PRESSURE), "touch"));
       continue;
     }
     const x = device.abs.get(ABS_X);
     const y = device.abs.get(ABS_Y);
     if (x && y && device.hasPenTool) {
-      pen.push(toNode(device, x, y, device.abs.get(ABS_PRESSURE), "pen"));
+      nodes.push(toNode(device, x, y, device.abs.get(ABS_PRESSURE), "pen"));
     }
   }
-  return { touch, pen };
+  return nodes;
 }
 
 function toNode(
@@ -90,41 +100,77 @@ function toNode(
 
 // BTN_TOOL_PEN = 0x140, BTN_TOOL_RUBBER = 0x141
 const PEN_TOOL_KEY = /\b(?:BTN_TOOL_PEN|BTN_TOOL_RUBBER|0140|0141)\b/;
-// absinfo: "    0035  : value 0, min 0, max 1079, ..." or "    ABS_MT_POSITION_X (0035): value ..."
+const NAME_TO_CODE: Record<string, number> = {
+  ABS_X: ABS_X,
+  ABS_Y: ABS_Y,
+  ABS_PRESSURE: ABS_PRESSURE,
+  ABS_MT_POSITION_X: ABS_MT_POSITION_X,
+  ABS_MT_POSITION_Y: ABS_MT_POSITION_Y,
+  ABS_MT_PRESSURE: ABS_MT_PRESSURE,
+};
+// One absinfo entry, with an optional leading "ABS (0003):" block header (real output prints the
+// first axis there) and either a hex code or an ABS_* name (optionally followed by "(hex)"):
+//   "    ABS (0003): 0000  : value 0, min 0, max 32767, ..."
+//   "                0035  : value 0, ..."
+//   "    ABS (0003): ABS_X                 : value 0, ..."
+//   "    ABS_MT_POSITION_X (0035): value 0, ..."
 const ABSINFO =
-  /^\s*(?:ABS_\w+\s+\()?([0-9a-f]{4})\)?\s*:\s+value\s+-?\d+,\s*min\s+(-?\d+),\s*max\s+(-?\d+)/;
+  /^\s*(?:ABS\s*\(0003\):\s*)?(?:(ABS_\w+)(?:\s+\(([0-9a-f]{4})\))?|([0-9a-f]{4}))\s*:\s+value\s+-?\d+,\s*min\s+(-?\d+),\s*max\s+(-?\d+)/;
+// An event-type block header such as "    KEY (0001): ..." or "    SW  (0005): ...".
+const BLOCK_HEADER = /^\s+(\w+)\s*\([0-9a-f]{4}\):(.*)$/;
+
+function absCode(match: RegExpMatchArray): number | undefined {
+  const hex = match[2] ?? match[3];
+  return hex ? parseInt(hex, 16) : NAME_TO_CODE[match[1]];
+}
 
 function splitDevices(output: string): DeviceInfo[] {
   const devices: DeviceInfo[] = [];
   let current: DeviceInfo | null = null;
+  const state = { inKeyBlock: false };
   for (const line of output.split("\n")) {
     const deviceMatch = line.match(/^add device \d+:\s+(.+)/);
     if (deviceMatch) {
       const path = deviceMatch[1].trim();
       current = { path, name: path, abs: new Map(), hasPenTool: false };
       devices.push(current);
-      continue;
-    }
-    if (!current) {
-      continue;
-    }
-    const nameMatch = line.match(/^\s+name:\s+"(.+)"/);
-    if (nameMatch) {
-      current.name = nameMatch[1];
-      continue;
-    }
-    const absMatch = line.match(ABSINFO);
-    if (absMatch) {
-      current.abs.set(parseInt(absMatch[1], 16), {
-        min: parseInt(absMatch[2], 10),
-        max: parseInt(absMatch[3], 10),
-      });
-      continue;
-    }
-    // Event-capability lines never contain "value"; absinfo lines were handled above.
-    if (!line.includes("value") && PEN_TOOL_KEY.test(line)) {
-      current.hasPenTool = true;
+      state.inKeyBlock = false;
+    } else if (current) {
+      applyLine(current, line, state);
     }
   }
   return devices;
+}
+
+function applyLine(device: DeviceInfo, line: string, state: { inKeyBlock: boolean }): void {
+  const nameMatch = line.match(/^\s+name:\s+"(.+)"/);
+  if (nameMatch) {
+    device.name = nameMatch[1];
+    state.inKeyBlock = false;
+    return;
+  }
+  const absMatch = line.match(ABSINFO);
+  if (absMatch) {
+    const code = absCode(absMatch);
+    if (code !== undefined) {
+      device.abs.set(code, { min: parseInt(absMatch[4], 10), max: parseInt(absMatch[5], 10) });
+    }
+    state.inKeyBlock = false;
+    return;
+  }
+  const header = line.match(BLOCK_HEADER);
+  if (header) {
+    state.inKeyBlock = header[1] === "KEY" || header[1] === "EV_KEY";
+    if (state.inKeyBlock && PEN_TOOL_KEY.test(header[2])) {
+      device.hasPenTool = true;
+    }
+    return;
+  }
+  // Continuation lines of the KEY block hold only key codes or names.
+  const codesOnly = /^\s+[\w ]+$/.test(line);
+  if (state.inKeyBlock && codesOnly && PEN_TOOL_KEY.test(line)) {
+    device.hasPenTool = true;
+  } else if (!codesOnly) {
+    state.inKeyBlock = false;
+  }
 }

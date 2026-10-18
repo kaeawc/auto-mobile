@@ -216,7 +216,6 @@
 1	src/features/prototype/ios/prototypeViewerAttach.ts	eslint(max-classes-per-file)
 1	src/features/prototype/prototypeTextTarget.ts	eslint(max-classes-per-file)
 1	src/features/prototype/savedPrototypeLayout.ts	eslint(max-classes-per-file)
-1	src/features/record/android/TouchNodeDiscovery.ts	eslint(complexity)
 1	src/features/screen-stream/IosSimulatorCaptureHelperPool.ts	eslint(max-classes-per-file)
 1	src/features/storage/AndroidSharedPreferencesKeyValueFile.ts	eslint(max-params)
 1	src/features/systemTray/systemTrayHelpers.ts	oxlint-disable(complexity)

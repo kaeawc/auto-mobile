@@ -14,6 +14,7 @@ export type StylusButton = "stylusPrimary" | "stylusSecondary";
 /**
  * Pressure over a contact. `normalized` means min/max/mean are 0..1 fractions of
  * the axis range from `getevent -p`; otherwise they are raw digitizer units.
+ * Zero-pressure samples are excluded (a zero means "not reported" or "no force").
  */
 export interface GesturePressure {
   min: number;

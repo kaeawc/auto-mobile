@@ -9,13 +9,12 @@ import type { TouchInputNode } from "./TouchNodeDiscovery";
 import type { GestureScaler } from "./AxisRanges";
 import { TouchFrameReconstructor } from "./TouchFrameReconstructor";
 import { GestureClassifier, type PressureRange } from "./GestureClassifier";
-import { splitDeviceLine } from "./GetEventLine";
 
 interface GetEventReaderOptions {
   adb: AdbExecutor;
   touchNode: TouchInputNode;
   /**
-   * Additional pen digitizer nodes read by the same `getevent` process. Each has
+   * Additional pen digitizer nodes read by their own `getevent` process each. Each has
    * its own axis ranges, so it needs its own scaler.
    */
   penNodes?: ReadonlyArray<{ node: TouchInputNode; scaler: GestureScaler }>;
@@ -26,26 +25,23 @@ interface GetEventReaderOptions {
   timer?: Timer;
 }
 
-interface NodePipeline {
-  reconstructor: TouchFrameReconstructor;
-  classifier: GestureClassifier;
-}
-
 /**
- * Spawns `adb shell getevent -lt <touchNode.path> [<pen paths>...]` through
- * AdbClient and pipes the output through TouchFrameReconstructor →
- * GestureClassifier, one pair per node. With several paths getevent prefixes
- * each line with its device path, which attributes the line to a node; lines
- * without a prefix belong to `touchNode`.
+ * Spawns one `adb shell getevent -lt <path>` process per input node through
+ * AdbClient (the touch node first, then one per pen node) and pipes each
+ * process's output through its own TouchFrameReconstructor → GestureClassifier.
+ * One process per node keeps every line attributed to its node without parsing
+ * device-path prefixes, and the touch process is exactly what it was before pen
+ * support. A pen process that fails is logged and dropped; finger recording
+ * continues. A touch process failure is reported through `onError`.
  *
  * Implements GestureEmitter so it can be replaced with a fake in tests.
  */
 export class GetEventReader implements GestureEmitter {
-  private child: AdbProcess | null = null;
+  private children = new Set<AdbProcess>();
   private starting = false;
 
   private generation = 0;
-  private cleanupChild: (() => void) | null = null;
+  private cleanups = new Set<() => void>();
   private readonly timer: Timer;
 
   constructor(private readonly opts: GetEventReaderOptions) {
@@ -53,36 +49,38 @@ export class GetEventReader implements GestureEmitter {
   }
 
   start(onGesture: (event: GestureEvent) => void, onError?: (err: Error) => void): void {
-    if (this.child || this.starting) {
+    if (this.children.size > 0 || this.starting) {
       return;
     } // already running
     this.starting = true;
-    void this.startProcess(++this.generation, onGesture, onError);
+    const generation = ++this.generation;
+    void this.startProcess(generation, this.opts.touchNode, this.opts.scaler, onGesture, onError);
+    for (const { node, scaler } of this.opts.penNodes ?? []) {
+      void this.startProcess(generation, node, scaler, onGesture, (error) =>
+        logger.warn(
+          `[GetEventReader] pen node ${node.path} stopped; finger recording continues: ${error.message}`,
+          error,
+        ),
+      );
+    }
   }
 
   private async startProcess(
     generation: number,
+    node: TouchInputNode,
+    scaler: GestureScaler,
     onGesture: (event: GestureEvent) => void,
     onError?: (err: Error) => void,
   ): Promise<void> {
-    const primaryNode = this.opts.touchNode;
-    const pipelines = new Map<string, NodePipeline>();
-    pipelines.set(primaryNode.path, this.createPipeline(primaryNode, this.opts.scaler));
-    for (const { node, scaler } of this.opts.penNodes ?? []) {
-      pipelines.set(node.path, this.createPipeline(node, scaler));
-    }
+    const reconstructor = new TouchFrameReconstructor({ singleTouch: node.kind === "pen" });
+    const classifier = new GestureClassifier(scaler, this.opts.density, pressureRangeOf(node));
 
-    const args = ["shell", "getevent", "-lt", ...pipelines.keys()];
+    const args = ["shell", "getevent", "-lt", node.path];
 
     logger.debug(`[GetEventReader] Spawning: ${args.join(" ")}`);
+    let child: AdbProcess;
     try {
-      const child = await this.opts.adb.spawn(args);
-      if (!this.starting || generation !== this.generation) {
-        child.on("error", () => {});
-        child.kill();
-        return;
-      }
-      this.child = child;
+      child = await this.opts.adb.spawn(args);
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error));
       logger.error(`[GetEventReader] spawn error: ${normalized.message}`);
@@ -92,11 +90,13 @@ export class GetEventReader implements GestureEmitter {
       }
       return;
     }
-    this.starting = false;
-    const child = this.child;
-    if (!child) {
+    if (generation !== this.generation) {
+      child.on("error", () => {});
+      child.kill();
       return;
     }
+    this.children.add(child);
+    this.starting = false;
 
     let lineBuffer = "";
     let stderrTail = "";
@@ -112,13 +112,7 @@ export class GetEventReader implements GestureEmitter {
           continue;
         }
         const arrivedAt = this.timer.now();
-        const { path, line: eventLine } = splitDeviceLine(line);
-        const pipeline = pipelines.get(path ?? primaryNode.path);
-        if (!pipeline) {
-          continue;
-        }
-        const { reconstructor, classifier } = pipeline;
-        const result = reconstructor.feedLine(eventLine, arrivedAt);
+        const result = reconstructor.feedLine(line, arrivedAt);
         if (!result) {
           continue;
         }
@@ -148,10 +142,8 @@ export class GetEventReader implements GestureEmitter {
       child.on("error", ignoreError);
       child.off("error", onChildError);
       child.off("exit", onExit);
-      if (this.child === child) {
-        this.child = null;
-        this.cleanupChild = null;
-      }
+      this.children.delete(child);
+      this.cleanups.delete(cleanup);
     };
     const ignoreError = (): void => {};
     const onChildError = (err: Error): void => {
@@ -177,35 +169,34 @@ export class GetEventReader implements GestureEmitter {
       onError?.(error);
     };
 
-    this.cleanupChild = cleanup;
+    this.cleanups.add(cleanup);
     child.stdout.on("data", onData);
     child.stderr.on("data", onStderr);
     child.on("error", onChildError);
     child.on("exit", onExit);
   }
 
-  private createPipeline(node: TouchInputNode, scaler: GestureScaler): NodePipeline {
-    const pressureRange: PressureRange | undefined =
-      node.pressureMin !== undefined && node.pressureMax !== undefined
-        ? { min: node.pressureMin, max: node.pressureMax }
-        : undefined;
-    return {
-      reconstructor: new TouchFrameReconstructor({ singleTouch: node.kind === "pen" }),
-      classifier: new GestureClassifier(scaler, this.opts.density, pressureRange),
-    };
-  }
-
   stop(): void {
     this.starting = false;
     ++this.generation;
-    const child = this.child;
-    this.cleanupChild?.();
-    if (child && !child.killed) {
-      logger.debug("[GetEventReader] Stopping getevent process");
-      child.kill();
+    const children = [...this.children];
+    for (const cleanup of [...this.cleanups]) {
+      cleanup();
     }
-    this.child = null;
+    for (const child of children) {
+      if (!child.killed) {
+        logger.debug("[GetEventReader] Stopping getevent process");
+        child.kill();
+      }
+    }
+    this.children.clear();
   }
+}
+
+function pressureRangeOf(node: TouchInputNode): PressureRange | undefined {
+  return node.pressureMin !== undefined && node.pressureMax !== undefined
+    ? { min: node.pressureMin, max: node.pressureMax }
+    : undefined;
 }
 
 function isRawTouchFrame(

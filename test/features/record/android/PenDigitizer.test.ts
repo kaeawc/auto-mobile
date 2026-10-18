@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
+import { readdirSync } from "node:fs";
+import { readTouchNodeCapture } from "../../../helpers/touchNodeCaptures";
 import { buildScaler } from "../../../../src/features/record/android/AxisRanges";
 import { GestureClassifier } from "../../../../src/features/record/android/GestureClassifier";
 import { GetEventReader } from "../../../../src/features/record/android/GetEventReader";
-import { splitDeviceLine } from "../../../../src/features/record/android/GetEventLine";
-import { parseInputNodes } from "../../../../src/features/record/android/InputNodeDiscovery";
+import {
+  parseInputNodes,
+  parseTouchNodes,
+} from "../../../../src/features/record/android/InputNodeDiscovery";
 import { TouchFrameReconstructor } from "../../../../src/features/record/android/TouchFrameReconstructor";
 import type { GestureEvent, RawTouchFrame } from "../../../../src/features/record/android/types";
 import type { AdbProcess } from "../../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -11,46 +15,61 @@ import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeAdbProcess } from "../../../fakes/FakeAdbProcess";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
-// Hand-written `getevent -p` / `-lt` probes in the shape the parsers expect (not device captures).
-const PEN_ONLY_P = `
-add device 1: /dev/input/event5
+// Hand-written fixtures in the exact layout real `getevent -p` / `-lp` print (see
+// test/fixtures/android-touch-node/getevent-p-touch-node-emulator-5600.txt): the first axis shares the
+// `ABS (0003):` line and the rest are indented continuation lines.
+const PEN_ONLY_P = `add device 1: /dev/input/event5
   name:     "Wacom Pen"
   events:
-    KEY (0001): 0140  0141  0145  014a  014b
-    ABS (0003): 0000  0001  0018  001a  001b
-  absinfo:
-    0000  : value 0, min 0, max 20000, fuzz 0, flat 0, resolution 100
-    0001  : value 0, min 0, max 30000, fuzz 0, flat 0, resolution 100
-    0018  : value 0, min 0, max 4095, fuzz 0, flat 0, resolution 0
-    001a  : value 0, min -90, max 90, fuzz 0, flat 0, resolution 0
-    001b  : value 0, min -90, max 90, fuzz 0, flat 0, resolution 0
+    KEY (0001): 0140  0141  0145  014a  014b 
+    ABS (0003): 0000  : value 0, min 0, max 20000, fuzz 0, flat 0, resolution 100
+                0001  : value 0, min 0, max 30000, fuzz 0, flat 0, resolution 100
+                0018  : value 0, min 0, max 4095, fuzz 0, flat 0, resolution 0
+                001a  : value 0, min -90, max 90, fuzz 0, flat 0, resolution 0
+                001b  : value 0, min -90, max 90, fuzz 0, flat 0, resolution 0
+  input props:
+    <none>
 `;
 
-const TOUCH_AND_PEN_PL = `
-add device 1: /dev/input/event0
+const PEN_ONLY_LP = `add device 1: /dev/input/event5
+  name:     "Wacom Pen"
+  events:
+    KEY (0001): BTN_TOOL_PEN          BTN_TOOL_RUBBER      BTN_TOUCH            BTN_STYLUS           BTN_STYLUS2          
+    ABS (0003): ABS_X                 : value 0, min 0, max 20000, fuzz 0, flat 0, resolution 100
+                ABS_Y                 : value 0, min 0, max 30000, fuzz 0, flat 0, resolution 100
+                ABS_PRESSURE          : value 0, min 0, max 4095, fuzz 0, flat 0, resolution 0
+  input props:
+    <none>
+`;
+
+const TOUCH_AND_PEN_P = `add device 1: /dev/input/event0
   name:     "accelerometer"
   events:
-    ABS (0003): ABS_X (0000)  ABS_Y (0001)  ABS_Z (0002)
-  absinfo:
-    ABS_X (0000): value 0, min -100, max 100, fuzz 0, flat 0, resolution 0
-    ABS_Y (0001): value 0, min -100, max 100, fuzz 0, flat 0, resolution 0
+    ABS (0003): 0000  : value 0, min -100, max 100, fuzz 0, flat 0, resolution 0
+                0001  : value 0, min -100, max 100, fuzz 0, flat 0, resolution 0
+                0002  : value 0, min -100, max 100, fuzz 0, flat 0, resolution 0
+  input props:
+    <none>
 add device 2: /dev/input/event3
   name:     "touchscreen"
   events:
-    ABS (0003): ABS_MT_SLOT (002f)  ABS_MT_POSITION_X (0035)  ABS_MT_POSITION_Y (0036)
-  absinfo:
-    ABS_MT_POSITION_X (0035): value 0, min 0, max 1079, fuzz 0, flat 0, resolution 0
-    ABS_MT_POSITION_Y (0036): value 0, min 0, max 1919, fuzz 0, flat 0, resolution 0
-    ABS_MT_PRESSURE (003a): value 0, min 0, max 255, fuzz 0, flat 0, resolution 0
+    KEY (0001): 014a 
+    ABS (0003): 002f  : value 0, min 0, max 9, fuzz 0, flat 0, resolution 0
+                0035  : value 0, min 0, max 1079, fuzz 0, flat 0, resolution 0
+                0036  : value 0, min 0, max 1919, fuzz 0, flat 0, resolution 0
+                0039  : value 0, min 0, max 65535, fuzz 0, flat 0, resolution 0
+                003a  : value 0, min 0, max 255, fuzz 0, flat 0, resolution 0
+  input props:
+    <none>
 add device 3: /dev/input/event5
   name:     "pen"
   events:
-    KEY (0001): BTN_TOOL_PEN  BTN_TOUCH  BTN_STYLUS
-    ABS (0003): ABS_X (0000)  ABS_Y (0001)  ABS_PRESSURE (0018)
-  absinfo:
-    ABS_X (0000): value 0, min 0, max 2159, fuzz 0, flat 0, resolution 0
-    ABS_Y (0001): value 0, min 0, max 3839, fuzz 0, flat 0, resolution 0
-    ABS_PRESSURE (0018): value 0, min 0, max 1000, fuzz 0, flat 0, resolution 0
+    KEY (0001): 0140  014a  014b 
+    ABS (0003): 0000  : value 0, min 0, max 2159, fuzz 0, flat 0, resolution 0
+                0001  : value 0, min 0, max 3839, fuzz 0, flat 0, resolution 0
+                0018  : value 0, min 0, max 1000, fuzz 0, flat 0, resolution 0
+  input props:
+    <none>
 `;
 
 const PEN_STROKE = [
@@ -124,7 +143,7 @@ describe("InputNodeDiscovery.parseInputNodes", () => {
   });
 
   test("separates touch and pen nodes and ignores an accelerometer", () => {
-    const { touch, pen } = parseInputNodes(TOUCH_AND_PEN_PL);
+    const { touch, pen } = parseInputNodes(TOUCH_AND_PEN_P);
     expect(touch).toMatchObject({
       path: "/dev/input/event3",
       kind: "touch",
@@ -225,16 +244,75 @@ describe("pen contacts", () => {
   });
 });
 
-describe("splitDeviceLine", () => {
-  test("strips the device prefix and leaves unprefixed lines alone", () => {
-    expect(
-      splitDeviceLine("[  77.5] /dev/input/event2: EV_ABS       ABS_X                00000123"),
-    ).toEqual({
-      path: "/dev/input/event2",
-      line: "[  77.5] EV_ABS       ABS_X                00000123",
-    });
-    const plain = "[  1.0] EV_SYN    SYN_REPORT           00000000";
-    expect(splitDeviceLine(plain)).toEqual({ path: null, line: plain });
+describe("parser parity and real layouts", () => {
+  test("the named -lp layout parses to the same pen node as the hex -p layout", () => {
+    expect(parseInputNodes(PEN_ONLY_LP)).toEqual(parseInputNodes(PEN_ONLY_P));
+  });
+
+  test("parseInputNodes().touch is parseTouchNodes()[0] for every captured getevent -p", () => {
+    const captures = readdirSync(`${__dirname}/../../../fixtures/android-touch-node`).filter(
+      (name) => name.startsWith("getevent-p-"),
+    );
+    expect(captures.length).toBeGreaterThan(0);
+    for (const name of captures) {
+      const text = readTouchNodeCapture(name);
+      expect(parseInputNodes(text).touch).toEqual(parseTouchNodes(text)[0] ?? null);
+    }
+  });
+
+  test("a pen tool key outside the KEY block does not make an accelerometer a pen", () => {
+    const text = `add device 1: /dev/input/event0
+  name:     "accel 0140"
+  events:
+    ABS (0003): 0000  : value 0, min 0, max 100, fuzz 0, flat 0, resolution 0
+                0001  : value 0, min 0, max 100, fuzz 0, flat 0, resolution 0
+`;
+    expect(parseInputNodes(text).pen).toEqual([]);
+  });
+});
+
+describe("a slot reused by a pen then a finger", () => {
+  test("pen state does not leak into the finger contact", () => {
+    const lines = [
+      "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+      "[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     00000001",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+      "[  1.0] EV_ABS    ABS_TILT_X           0000000a",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+      "[  1.1] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+      "[  1.1] EV_SYN    SYN_REPORT           00000000",
+      "[  2.0] EV_ABS    ABS_MT_TRACKING_ID   00000002",
+      "[  2.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+      "[  2.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+      "[  2.0] EV_SYN    SYN_REPORT           00000000",
+      "[  2.1] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+      "[  2.1] EV_SYN    SYN_REPORT           00000000",
+    ];
+    const { frames, gestures } = run(lines);
+    expect(frames[0].activeSlots[0].toolType).toBe("stylus");
+    expect(Object.keys(frames[2].activeSlots[0]).sort()).toEqual(
+      ["pressure", "slotId", "trackingId", "x", "y"].sort(),
+    );
+    expect(gestures[0].toolType).toBe("stylus");
+    expect(gestures[1].toolType).toBeUndefined();
+  });
+
+  test("an explicit finger tool type clears a pen tool type", () => {
+    const lines = [
+      "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+      "[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     00000001",
+      "[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     00000000",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+    ];
+    expect(run(lines).frames[0].activeSlots[0].toolType).toBeUndefined();
+  });
+
+  test("a pen leaving range ends a single-touch contact without BTN_TOUCH UP", () => {
+    const lines = PEN_STROKE.filter((line) => !line.includes("BTN_TOUCH            UP"));
+    expect(run(lines, { singleTouch: true }).gestures).toHaveLength(1);
   });
 });
 
@@ -244,54 +322,70 @@ class ReaderAdb extends FakeAdbExecutor {
 
 afterEach(() => mock.restore());
 
-describe("GetEventReader with touch and pen nodes", () => {
-  test("reads both paths in one process and attributes lines per node", async () => {
-    const adb = new ReaderAdb();
-    const proc = new FakeAdbProcess();
-    adb.spawn.mockResolvedValue(proc);
-    const timer = new FakeTimer();
-    timer.advanceTime(1000);
-    const { touch, pen } = parseInputNodes(TOUCH_AND_PEN_PL);
-    const scaler = (xMax: number, yMax: number, w: number, h: number) =>
-      buildScaler({
-        xMin: 0,
-        xMax,
-        yMin: 0,
-        yMax,
-        displayWidth: w,
-        displayHeight: h,
-        rotation: 0,
-      });
-    const reader = new GetEventReader({
-      adb,
-      timer,
-      density: 1,
-      touchNode: touch!,
-      scaler: scaler(1079, 1919, 1080, 1920),
-      penNodes: [{ node: pen[0], scaler: scaler(2159, 3839, 1080, 1920) }],
+function penReader() {
+  const adb = new ReaderAdb();
+  const procs = new Map<string, FakeAdbProcess>([
+    ["/dev/input/event3", new FakeAdbProcess()],
+    ["/dev/input/event5", new FakeAdbProcess()],
+  ]);
+  adb.spawn.mockImplementation(async (args) => procs.get(args[args.length - 1])!);
+  const timer = new FakeTimer();
+  timer.advanceTime(1000);
+  const { touch, pen } = parseInputNodes(TOUCH_AND_PEN_P);
+  const scaler = (xMax: number, yMax: number) =>
+    buildScaler({
+      xMin: 0,
+      xMax,
+      yMin: 0,
+      yMax,
+      displayWidth: 1080,
+      displayHeight: 1920,
+      rotation: 0,
     });
-    const onGesture = mock<(event: GestureEvent) => void>();
+  const reader = new GetEventReader({
+    adb,
+    timer,
+    density: 1,
+    touchNode: touch!,
+    scaler: scaler(1079, 1919),
+    penNodes: [{ node: pen[0], scaler: scaler(2159, 3839) }],
+  });
+  const onGesture = mock<(event: GestureEvent) => void>();
+  const onError = mock<(error: Error) => void>();
+  return {
+    adb,
+    touchProc: procs.get("/dev/input/event3")!,
+    penProc: procs.get("/dev/input/event5")!,
+    reader,
+    onGesture,
+    onError,
+  };
+}
+
+const emitLines = (proc: FakeAdbProcess, lines: string[]): void => {
+  proc.stdout.emit("data", Buffer.from(lines.join("\n") + "\n"));
+};
+
+describe("GetEventReader with touch and pen nodes", () => {
+  test("spawns one single-path process per node and attributes events per process", async () => {
+    const { adb, penProc, touchProc, reader, onGesture } = penReader();
     reader.start(onGesture);
     await Promise.resolve();
-    expect(adb.spawn).toHaveBeenCalledWith([
-      "shell",
-      "getevent",
-      "-lt",
-      "/dev/input/event3",
-      "/dev/input/event5",
+    await Promise.resolve();
+    expect(adb.spawn.mock.calls.map(([args]) => args)).toEqual([
+      ["shell", "getevent", "-lt", "/dev/input/event3"],
+      ["shell", "getevent", "-lt", "/dev/input/event5"],
     ]);
-    const p = "/dev/input/event5: ";
-    const lines = [
-      `[  1.0] ${p}EV_KEY    BTN_TOOL_PEN         DOWN`,
-      `[  1.0] ${p}EV_ABS    ABS_X                00000438`,
-      `[  1.0] ${p}EV_ABS    ABS_Y                000005dc`,
-      `[  1.0] ${p}EV_ABS    ABS_PRESSURE         000001f4`,
-      `[  1.0] ${p}EV_KEY    BTN_TOUCH            DOWN`,
-      `[  1.0] ${p}EV_SYN    SYN_REPORT           00000000`,
-      `[  1.1] ${p}EV_KEY    BTN_TOUCH            UP`,
-      `[  1.1] ${p}EV_SYN    SYN_REPORT           00000000`,
-    ];
-    proc.stdout.emit("data", Buffer.from(lines.join("\n") + "\n"));
+    emitLines(penProc, [
+      "[  1.0] EV_KEY    BTN_TOOL_PEN         DOWN",
+      "[  1.0] EV_ABS    ABS_X                00000438",
+      "[  1.0] EV_ABS    ABS_Y                000005dc",
+      "[  1.0] EV_ABS    ABS_PRESSURE         000001f4",
+      "[  1.0] EV_KEY    BTN_TOUCH            DOWN",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+      "[  1.1] EV_KEY    BTN_TOUCH            UP",
+      "[  1.1] EV_SYN    SYN_REPORT           00000000",
+    ]);
     expect(onGesture).toHaveBeenCalledTimes(1);
     expect(onGesture.mock.calls[0][0]).toMatchObject({
       type: "tap",
@@ -300,6 +394,58 @@ describe("GetEventReader with touch and pen nodes", () => {
       toolType: "stylus",
       pressure: { min: 0.5, max: 0.5, mean: 0.5, normalized: true },
     });
+    emitLines(touchProc, [
+      "[  2.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+      "[  2.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+      "[  2.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+      "[  2.0] EV_SYN    SYN_REPORT           00000000",
+      "[  2.1] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+      "[  2.1] EV_SYN    SYN_REPORT           00000000",
+    ]);
+    expect(onGesture).toHaveBeenCalledTimes(2);
+    expect(onGesture.mock.calls[1][0].toolType).toBeUndefined();
     reader.stop();
+  });
+
+  test("a pen process failure is logged and the touch process keeps recording", async () => {
+    const { touchProc, penProc, reader, onGesture, onError } = penReader();
+    reader.start(onGesture, onError);
+    await Promise.resolve();
+    await Promise.resolve();
+    penProc.emit("error", new Error("pen node vanished"));
+    expect(onError).not.toHaveBeenCalled();
+    expect(touchProc.killed).toBe(false);
+    emitLines(touchProc, [
+      "[  2.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+      "[  2.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+      "[  2.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+      "[  2.0] EV_SYN    SYN_REPORT           00000000",
+      "[  2.1] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+      "[  2.1] EV_SYN    SYN_REPORT           00000000",
+    ]);
+    expect(onGesture).toHaveBeenCalledTimes(1);
+    reader.stop();
+  });
+
+  test("a touch process failure is reported", async () => {
+    const { touchProc, reader, onGesture, onError } = penReader();
+    reader.start(onGesture, onError);
+    await Promise.resolve();
+    await Promise.resolve();
+    touchProc.emit("error", new Error("touch gone"));
+    expect(onError).toHaveBeenCalledTimes(1);
+    reader.stop();
+  });
+
+  test("stop() kills every child", async () => {
+    const { touchProc, penProc, reader, onGesture } = penReader();
+    reader.start(onGesture);
+    await Promise.resolve();
+    await Promise.resolve();
+    reader.stop();
+    expect(touchProc.killed).toBe(true);
+    expect(penProc.killed).toBe(true);
+    expect(touchProc.stdout.listenerCount("data")).toBe(0);
+    expect(penProc.stdout.listenerCount("data")).toBe(0);
   });
 });

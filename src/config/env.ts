@@ -199,9 +199,60 @@ export const ENV = {
     default: "unset",
     doc: "Select settled screenshot mode with true or 1.",
   },
+  EMULATOR_AUDIO: {
+    name: "AUTOMOBILE_EMULATOR_AUDIO",
+    kind: "string",
+    default: "audio on",
+    doc: "Exact false adds -no-audio to emulator launches; other values keep audio.",
+  },
+} as const satisfies Record<string, EnvVarSpec>;
+
+/**
+ * Ambient variables owned by the OS or the Android toolchain, not by AutoMobile. They are
+ * declared and read through the same readers, but kept apart from {@link ENV} because the
+ * product-variable conformance checks (AUTOMOBILE_ prefix, path classification) do not apply.
+ */
+export const AMBIENT_ENV = {
+  ANDROID_HOME: {
+    name: "ANDROID_HOME",
+    kind: "path",
+    default: "unset",
+    doc: "Android SDK root; ambient Android toolchain variable, read for emulator resolution.",
+  },
+  ANDROID_SDK_ROOT: {
+    name: "ANDROID_SDK_ROOT",
+    kind: "path",
+    default: "unset",
+    doc: "Android SDK root (deprecated by Google); ambient, read for emulator resolution.",
+  },
+  ANDROID_SDK_HOME: {
+    name: "ANDROID_SDK_HOME",
+    kind: "path",
+    default: "unset",
+    doc: "Android user-data home; ambient, reported in emulator-not-found diagnostics.",
+  },
+  HOME: {
+    name: "HOME",
+    kind: "path",
+    default: "unset",
+    doc: "POSIX home directory; ambient, used to probe the default Android SDK locations.",
+  },
+  USERPROFILE: {
+    name: "USERPROFILE",
+    kind: "path",
+    default: "unset",
+    doc: "Windows home directory; ambient, fallback when HOME is unset or empty.",
+  },
+  PATH: {
+    name: "PATH",
+    kind: "string",
+    default: "unset",
+    doc: "Executable search path; ambient, reported in emulator-not-found diagnostics.",
+  },
 } as const satisfies Record<string, EnvVarSpec>;
 
 export const ENV_REGISTRY: readonly EnvVarSpec[] = Object.values(ENV);
+export const AMBIENT_ENV_REGISTRY: readonly EnvVarSpec[] = Object.values(AMBIENT_ENV);
 
 /**
  * Raw value of a variable: the canonical name wins whenever it is set (even to

@@ -1318,6 +1318,13 @@ for (const name of ["observe", "tapOn", "tapAny", "swipeOn"]) {
   }
 }
 
+/** What the real provider reports when nothing could be read: no panels and an unreadable outcome. */
+function unreadableInventoryProvider(): FakeDisplayInventoryProvider {
+  const provider = new FakeDisplayInventoryProvider();
+  provider.outcome = { kind: "unreadable", reason: "no inventory" };
+  return provider;
+}
+
 for (const outcome of ["throws", "no inventory", "degraded", "degraded panels"] as const) {
   test(`setting a pin with ${outcome} fails retryably and preserves the old pin`, async () => {
     sessions.setDisplayPin("one", "cover");
@@ -1335,7 +1342,7 @@ for (const outcome of ["throws", "no inventory", "degraded", "degraded panels"] 
     }
     const inventory =
       outcome === "no inventory"
-        ? new FakeDisplayInventoryProvider()
+        ? unreadableInventoryProvider()
         : new CachingDisplayInventoryProvider(source, source, timer);
     const handler = createSetActiveDeviceHandler({
       displayInventory: inventory,

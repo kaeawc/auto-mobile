@@ -171,6 +171,8 @@ export class ToolRegistryClass {
   private readonly isResponseFailure = (response: unknown): boolean =>
     isToolResponseFailure(response);
   private toolDefinitionSchemaCache: Map<string, CachedToolDefinitionSchemas> = new Map();
+  private toolDefinitionSchemaBuilds = 0;
+  private removalEpoch = 0;
 
   constructor(timer: Timer = defaultTimer, loggerInstance: Logger = logger) {
     this.deviceSessionManager = DeviceReadiness.getInstance();
@@ -301,6 +303,7 @@ export class ToolRegistryClass {
   /** Remove one test-only or dynamically registered tool without disturbing the registry. */
   unregister(name: string): void {
     this.invalidateToolDefinitionSchemaCache();
+    this.removalEpoch++;
     if (this === ToolRegistry) {
       setToolTransportRecovery(name, undefined);
     }
@@ -806,6 +809,16 @@ export class ToolRegistryClass {
     };
   }
 
+  /**
+   * Stop tracking a server without waiting for its transport to close. A server
+   * closed before it ever connected has no transport, so the SDK never fires its
+   * `onclose` and the prune hook installed by `trackServer` would not run.
+   */
+  untrackServer(server: McpServer): void {
+    this.servers.delete(server);
+    this.ephemeralServers.delete(server);
+  }
+
   // Test-only: drop tracked servers so suites sharing the singleton stay hermetic.
   clearServersForTesting(): void {
     this.servers.clear();
@@ -819,12 +832,28 @@ export class ToolRegistryClass {
 
   /** Test-only: forget every registered tool so a suite can register just the tools it exercises. */
   clearToolsForTesting(): void {
+    this.removalEpoch++;
     this.tools.clear();
   }
 
   /** Test-only: unregister one tool by name; a no-op when it was never registered. */
   removeToolForTesting(name: string): void {
+    this.removalEpoch++;
     this.tools.delete(name);
+  }
+
+  /**
+   * Counts every removal from the registry. A caller that registered a fixed tool
+   * set once (see `registerMcpTools`) re-registers only when this has moved,
+   * since a removal is the one way that set can stop being present.
+   */
+  get removalEpochForRegistration(): number {
+    return this.removalEpoch;
+  }
+
+  /** Test-only: how many per-tool schema builds `getToolDefinitions` has performed. */
+  schemaBuildCountForTesting(): number {
+    return this.toolDefinitionSchemaBuilds;
   }
 
   // Register a per-transport server-side session-binding teardown handler (issue
@@ -1035,6 +1064,7 @@ export class ToolRegistryClass {
   ): { inputSchema: Record<string, unknown>; outputSchema: Record<string, unknown> | undefined } {
     let cached = this.toolDefinitionSchemaCache.get(tool.name);
     if (!cached) {
+      this.toolDefinitionSchemaBuilds++;
       cached = {
         inputSchema: toAdvertisedJsonSchema(tool.schema, {
           constrainAppIds: true,
@@ -1132,6 +1162,7 @@ export class ToolRegistryClass {
   // Clear all registered tools (for testing)
   clearTools(): void {
     this.invalidateToolDefinitionSchemaCache();
+    this.removalEpoch++;
     this.tools.clear();
     if (this === ToolRegistry) {
       clearToolTransportRecovery();

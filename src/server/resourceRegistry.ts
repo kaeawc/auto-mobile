@@ -397,6 +397,18 @@ class ResourceRegistryClass {
     };
   }
 
+  /**
+   * Stop tracking a server without waiting for its transport to close. A server
+   * closed before it ever connected has no transport, so the SDK never fires its
+   * `onclose` and the prune hook installed by `trackServer` would not run.
+   */
+  untrackServer(server: McpServer): void {
+    this.servers.delete(server);
+    this.ephemeralServers.delete(server);
+    this.subscriptions.delete(server);
+    this.readContexts.delete(server);
+  }
+
   // Register all resources with an MCP server
   registerWithServer(
     server: McpServer,

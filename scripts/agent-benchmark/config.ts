@@ -115,7 +115,12 @@ const suiteSchema = z
   .object({
     name: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "use lowercase letters, digits, and dashes"),
     platform: z.literal("android"),
-    prompt: z.string().min(1),
+    prompt: z
+      .string()
+      .min(1)
+      // CI classifies a Markdown-only change as docs and skips the Node tests, so a .md prompt
+      // could change without the committed-suite guard ever loading it.
+      .refine((path) => !/\.md$/i.test(path), "use a .txt prompt, not .md"),
     app: z
       .object({
         // Interpolated into adb shell commands, so it must be a real package name.
@@ -190,7 +195,7 @@ export interface LoadedSuite {
   definition: SuiteDefinition;
   /** Absolute path of the suite YAML. */
   suitePath: string;
-  /** Absolute path of the prompt Markdown, resolved relative to the suite file. */
+  /** Absolute path of the prompt file, resolved relative to the suite file. */
   promptPath: string;
   prompt: string;
   /** Absolute APK path, resolved relative to the repository root. */

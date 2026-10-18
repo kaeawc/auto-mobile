@@ -33,7 +33,7 @@ function suite(claude: Record<string, unknown> = {}) {
     {
       name: "demo",
       platform: "android",
-      prompt: "p.md",
+      prompt: "p.txt",
       app: { packageName: "dev.example" },
       verify: { answerIncludes: ["DONE"], screenIncludes: ["Done"] },
       claude,

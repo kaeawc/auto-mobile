@@ -13,7 +13,7 @@ const REPO_ROOT = resolve(import.meta.dir, "../../..");
 const MINIMAL = {
   name: "demo",
   platform: "android",
-  prompt: "../prompts/demo.md",
+  prompt: "../prompts/demo.txt",
   app: { packageName: "com.example" },
   verify: { answerIncludes: ["DONE"], screenIncludes: ["Done"] },
 };
@@ -84,10 +84,10 @@ describe("agent benchmark suite config", () => {
   test("loadSuite resolves the prompt beside the suite and the APK from the repo root", () => {
     const root = resolve("/repo");
     const suitePath = join(root, "benchmark", "agent", "suites", "demo.yml");
-    const promptPath = join(root, "benchmark", "agent", "prompts", "demo.md");
+    const promptPath = join(root, "benchmark", "agent", "prompts", "demo.txt");
     const files: Record<string, string> = {
       [suitePath]:
-        "name: demo\nplatform: android\nprompt: ../prompts/demo.md\napp:\n  packageName: com.example\n  apkPath: build/app.apk\nverify:\n  answerIncludes: [DONE]\n  screenIncludes: [Done]\n",
+        "name: demo\nplatform: android\nprompt: ../prompts/demo.txt\napp:\n  packageName: com.example\n  apkPath: build/app.apk\nverify:\n  answerIncludes: [DONE]\n  screenIncludes: [Done]\n",
       [promptPath]: "Do the thing.\n",
     };
     const fs = { readFile: (path: string) => files[path] ?? "" };
@@ -169,11 +169,11 @@ describe("agent benchmark suite config", () => {
     const fs = {
       readFile: (path: string) =>
         path.endsWith(".yml")
-          ? "name: demo\nplatform: android\nprompt: p.md\napp:\n  packageName: com.example\nverify:\n  answerIncludes: [DONE]\n  screenIncludes: [Done]\n"
+          ? "name: demo\nplatform: android\nprompt: p.txt\napp:\n  packageName: com.example\nverify:\n  answerIncludes: [DONE]\n  screenIncludes: [Done]\n"
           : "  \n",
     };
     expect(() => loadSuite(resolve("/s/demo.yml"), resolve("/repo"), fs)).toThrow(
-      `prompt ${resolve("/s/p.md")} is empty`,
+      `prompt ${resolve("/s/p.txt")} is empty`,
     );
   });
 
@@ -215,6 +215,12 @@ describe("agent benchmark suite config", () => {
     ).toThrow(/must not be blank/);
     expect(() => parseSuiteDefinition({ ...MINIMAL, failurePatterns: ["\t"] }, "demo.yml")).toThrow(
       /must not be blank/,
+    );
+  });
+
+  test("a Markdown prompt is rejected, since CI skips tests on docs-only changes", () => {
+    expect(() => parseSuiteDefinition({ ...MINIMAL, prompt: "p.md" }, "demo.yml")).toThrow(
+      /use a \.txt prompt/,
     );
   });
 

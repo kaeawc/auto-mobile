@@ -2,7 +2,7 @@
 # Exercises tapOn, switch toggling, and reading state back from observe.
 name: bug-repro
 platform: android
-prompt: ../prompts/bug-repro.md
+prompt: ../prompts/bug-repro.txt
 app:
   packageName: dev.jasonpearson.automobile.playground
 preflight:

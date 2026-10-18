@@ -294,13 +294,18 @@ export function missingFromAnswer(answer: string, needles: string[]): string[] {
     .map(normalizeReportLine)
     .filter((line) => line !== "" && !FENCE_LINE.test(line));
   const tail = keyed.length === 0 ? [] : lines.slice(-keyed.length);
-  // Matched in order, so a repeated key (DISPLAYED_COUNT: 2 then DISPLAYED_COUNT: 3) fails.
+  // Matched by position, so a repeated key (DISPLAYED_COUNT: 2 then DISPLAYED_COUNT: 3) fails
+  // and a needle listed twice must appear on two lines.
   const offset = tail.length - keyed.length;
-  return needles.filter((needle) =>
-    KEYED_NEEDLE.test(needle)
-      ? tail[keyed.indexOf(needle) + offset] !== normalizeReportLine(needle)
-      : !containsBounded(answer, needle),
-  );
+  let position = offset;
+  return needles.filter((needle) => {
+    if (!KEYED_NEEDLE.test(needle)) {
+      return !containsBounded(answer, needle);
+    }
+    const line = tail[position];
+    position += 1;
+    return line !== normalizeReportLine(needle);
+  });
 }
 
 function verifyChecks(audit: TranscriptAudit, outcome: RunOutcome, verify: VerifySpec) {

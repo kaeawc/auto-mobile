@@ -2,7 +2,7 @@
 # Exercises finding an entry point on a list screen and multi-step navigation.
 name: ux-flow
 platform: android
-prompt: ../prompts/ux-flow.md
+prompt: ../prompts/ux-flow.txt
 app:
   packageName: dev.jasonpearson.automobile.playground
 preflight:

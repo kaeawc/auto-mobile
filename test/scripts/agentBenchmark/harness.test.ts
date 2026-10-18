@@ -61,7 +61,7 @@ function loadedSuite(overrides: Record<string, unknown> = {}): LoadedSuite {
       {
         name: "demo",
         platform: "android",
-        prompt: "p.md",
+        prompt: "p.txt",
         app: { packageName: "dev.example" },
         preflight: { launchUri: "example:start", settleSeconds: 3 },
         claude: { model: "suite-model", timeoutSeconds: 60 },
@@ -71,7 +71,7 @@ function loadedSuite(overrides: Record<string, unknown> = {}): LoadedSuite {
       "demo.yml",
     ),
     suitePath: "/suites/demo.yml",
-    promptPath: "/prompts/p.md",
+    promptPath: "/prompts/p.txt",
     prompt: "Do it on {deviceSerial}.",
   };
 }

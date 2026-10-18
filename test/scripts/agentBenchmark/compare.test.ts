@@ -276,6 +276,11 @@ describe("verification text matching", () => {
     );
     // Inline backticks, case, spacing, and a trailing period do not matter.
     expect(missingFromAnswer("`expected_count:  3`\nDISPLAYED_COUNT: 2.", needles)).toEqual([]);
+    // A needle listed twice needs two lines; the second here is UNRELATED.
+    expect(missingFromAnswer("COUNT: 3\nUNRELATED", ["COUNT: 3", "COUNT: 3"])).toEqual([
+      "COUNT: 3",
+    ]);
+    expect(missingFromAnswer("COUNT: 3\nCOUNT: 3", ["COUNT: 3", "COUNT: 3"])).toEqual([]);
     // The period may sit outside or inside the backticks.
     expect(missingFromAnswer("`EXPECTED_COUNT: 3`.\n`DISPLAYED_COUNT: 2.`", needles)).toEqual([]);
     // Non-keyed needles search the whole answer.

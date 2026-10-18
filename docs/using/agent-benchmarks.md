@@ -163,13 +163,13 @@ permission denials. They are reported, not scored.
 
 ## Suite format
 
-Suites live in `benchmark/agent/suites/*.yml`, and prompts in `benchmark/agent/prompts/*.md`.
+Suites live in `benchmark/agent/suites/*.yml`, and prompts in `benchmark/agent/prompts/*.txt` (not `.md`: CI treats a Markdown-only change as docs and skips the tests that load suites, so `loadSuite` rejects a `.md` prompt).
 Unknown keys fail validation, so a typo cannot silently change what a run measures.
 
 ```yaml
 name: bug-repro # must match the file name
 platform: android
-prompt: ../prompts/bug-repro.md # relative to this file
+prompt: ../prompts/bug-repro.txt # relative to this file
 app:
   packageName: dev.jasonpearson.automobile.playground
   # apkPath: path/to/app.apk        # optional, relative to the repo root

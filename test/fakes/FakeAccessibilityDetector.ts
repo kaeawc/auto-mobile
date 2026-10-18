@@ -4,7 +4,7 @@ import type {
   AndroidAccessibilityState,
 } from "../../src/features/accessibility/interfaces/AccessibilityDetector";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../src/features/featureFlags/FeatureFlagService";
 
 /**
  * Fake implementation of AccessibilityDetector for testing
@@ -20,7 +20,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   async isCtrlProxyServiceEnabled(
     deviceId: string,
     _adb?: AdbExecutor,
-    _featureFlags?: FeatureFlagService,
+    _featureFlags?: FeatureFlagReader,
   ): Promise<boolean | null> {
     return this.ctrlProxyResults.get(deviceId) ?? null;
   }
@@ -42,7 +42,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   public readonly detectMethodAdbArgs: Array<AdbExecutor | null | undefined> = [];
 
   /** Records the `featureFlags` argument passed to each detectMethod call (regression guard for #3925). */
-  public readonly detectMethodFeatureFlagsArgs: Array<FeatureFlagService | undefined> = [];
+  public readonly detectMethodFeatureFlagsArgs: Array<FeatureFlagReader | undefined> = [];
 
   /**
    * Configure the detection result for a specific device
@@ -127,7 +127,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   async isAccessibilityEnabled(
     deviceId: string,
     _adb: AdbExecutor,
-    _featureFlags?: FeatureFlagService,
+    _featureFlags?: FeatureFlagReader,
   ): Promise<boolean> {
     this.detectionCallCount++;
     const result = this.detectionResults.get(deviceId) || this.defaultResult;
@@ -137,7 +137,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   async detectMethod(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<AccessibilityService> {
     this.detectMethodAdbArgs.push(adb);
     this.detectMethodFeatureFlagsArgs.push(featureFlags);
@@ -155,7 +155,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   async resolveState(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<AndroidAccessibilityState | null> {
     const service = await this.detectMethod(deviceId, adb, featureFlags);
     const result = this.detectionResults.get(deviceId) ?? this.defaultResult;
@@ -172,7 +172,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   async resolveTalkBackState(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService,
+    featureFlags?: FeatureFlagReader,
   ): Promise<boolean | null> {
     const state =
       (await this.resolveState(deviceId, adb, featureFlags)) ??

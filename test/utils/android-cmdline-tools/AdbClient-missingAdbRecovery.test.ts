@@ -7,17 +7,6 @@ import { clearDetectionCache } from "../../../src/utils/android-cmdline-tools/de
 import type { ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-type AdbClientInternals = {
-  isTestMode: boolean;
-  execWithSignal: (
-    file: string,
-    args: string[],
-    maxBuffer?: number,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-  ) => Promise<ExecResult>;
-};
-
 function result(stdout = ""): ExecResult {
   return {
     stdout,
@@ -68,10 +57,9 @@ describe.serial("AdbClient missing ADB recovery", () => {
     const client = new AdbClient(null, null, null, undefined, new FakeTimer(), () => {
       throw new Error("SDK detection unavailable");
     });
-    const internals = client as unknown as AdbClientInternals;
-    internals.isTestMode = false;
+    client["isTestMode"] = false;
     let whichCalls = 0;
-    internals.execWithSignal = async (file, args) => {
+    client["execWithSignal"] = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         whichCalls++;
         return result(whichCalls === 1 ? "" : "/sdk/platform-tools/adb\n");
@@ -90,11 +78,10 @@ describe.serial("AdbClient missing ADB recovery", () => {
     const client = new AdbClient(null, null, null, undefined, timer, () => {
       throw new Error("SDK detection unavailable");
     });
-    const internals = client as unknown as AdbClientInternals;
-    internals.isTestMode = false;
+    client["isTestMode"] = false;
     let resolvedPath = false;
     let deviceCalls = 0;
-    internals.execWithSignal = async (file, args) => {
+    client["execWithSignal"] = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         return result(resolvedPath ? "/sdk/platform-tools/adb\n" : "");
       }
@@ -131,10 +118,9 @@ describe.serial("AdbClient missing ADB recovery", () => {
     const client = new AdbClient(null, null, null, undefined, new FakeTimer(), () => {
       throw new Error("SDK detection unavailable");
     });
-    const internals = client as unknown as AdbClientInternals;
-    internals.isTestMode = false;
+    client["isTestMode"] = false;
     let deviceCalls = 0;
-    internals.execWithSignal = async (file, args) => {
+    client["execWithSignal"] = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         return result("");
       }
@@ -166,10 +152,9 @@ describe.serial("AdbClient missing ADB recovery", () => {
     const client = new AdbClient(null, null, null, undefined, timer, () => {
       throw new Error("SDK detection unavailable");
     });
-    const internals = client as unknown as AdbClientInternals;
-    internals.isTestMode = false;
+    client["isTestMode"] = false;
     let deviceCalls = 0;
-    internals.execWithSignal = async (file, args) => {
+    client["execWithSignal"] = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         return result("");
       }

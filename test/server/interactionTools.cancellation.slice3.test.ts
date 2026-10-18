@@ -13,14 +13,7 @@ import { FakeKeyboardHierarchyProvider } from "../fakes/FakeKeyboardHierarchyPro
 import { FakeDeviceUrlLauncher } from "../fakes/FakeDeviceUrlLauncher";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { DeepLinkManager } from "../../src/features/utility/DeepLinkManager";
-import {
-  resetKeyboardFactory,
-  resetOpenUrlFactory,
-  resetOpenLinkChooserFactory,
-  setKeyboardFactory,
-  setOpenUrlFactory,
-  setOpenLinkChooserFactory,
-} from "../../src/server/interactionTools";
+import { type InteractionToolDependencies } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetSystemTrayDependencies,
@@ -32,6 +25,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { ActionCall } from "../../src/features/action/ActionCall";
 
+const interactionDeps: InteractionToolDependencies = {};
 const device: BootedDevice = { platform: "android", deviceId: "test", name: "Test" };
 const captured = JSON.parse(
   readFileSync(
@@ -49,15 +43,15 @@ const observation: ObserveResult = {
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
 };
 const restores: Array<() => void> = [];
-const handler = cancellationHandlers(["keyboard", "openLink", "systemTray"]);
+const handler = cancellationHandlers(["keyboard", "openLink", "systemTray"], interactionDeps);
 
 const test = cancellationTests(() => {
   for (const restore of restores.splice(0)) {
     restore();
   }
-  resetKeyboardFactory();
-  resetOpenUrlFactory();
-  resetOpenLinkChooserFactory();
+  delete interactionDeps.keyboardFactory;
+  delete interactionDeps.openUrlFactory;
+  delete interactionDeps.openLinkChooserFactory;
   resetSystemTrayDependencies();
   ToolRegistry.clearTools();
 });
@@ -209,8 +203,10 @@ test.each(devices)("real commands receive pre-aborted requests on %s", async (ta
   const hierarchy = new FakeKeyboardHierarchyProvider();
   const launcher = new FakeDeviceUrlLauncher();
   const simctl = new FakeSimctl();
-  setKeyboardFactory(() => new Keyboard(target, { create: () => adb }, hierarchy, timer));
-  setOpenUrlFactory(() => new UnobservedOpenURL(target, adb, simctl, launcher, timer));
+  interactionDeps.keyboardFactory = () =>
+    new Keyboard(target, { create: () => adb }, hierarchy, timer);
+  interactionDeps.openUrlFactory = () =>
+    new UnobservedOpenURL(target, adb, simctl, launcher, timer);
   let gestures = 0;
   setSystemTrayDependencies({
     timer,
@@ -264,7 +260,8 @@ test("keyboard cancels a pending hierarchy read without dispatch or rollback", a
     return observation.viewHierarchy ?? null;
   });
   restores.push(() => read.mockRestore());
-  setKeyboardFactory(() => new Keyboard(device, { create: () => adb }, hierarchy, timer));
+  interactionDeps.keyboardFactory = () =>
+    new Keyboard(device, { create: () => adb }, hierarchy, timer);
   const controller = new AbortController();
   const pending = handler("keyboard")(device, { action: "open" }, undefined, controller.signal);
   expect(timer.getPendingSleeps()).toEqual([100]);
@@ -285,9 +282,8 @@ test("openLink does not launch after physical iOS URL availability resolution ab
     return true;
   });
   restores.push(() => availability.mockRestore());
-  setOpenUrlFactory(
-    () => new UnobservedOpenURL(target, new FakeAdbExecutor(), null, launcher, timer),
-  );
+  interactionDeps.openUrlFactory = () =>
+    new UnobservedOpenURL(target, new FakeAdbExecutor(), null, launcher, timer);
   await expect(
     handler("openLink")(target, { url: "https://example.com" }, undefined, controller.signal),
   ).rejects.toThrow("Operation cancelled");
@@ -301,52 +297,50 @@ test("openLink chooser cancels during handler metadata resolution before any cho
   let labels = 0;
   let reads = 0;
   let received: AbortSignal | undefined;
-  setOpenUrlFactory(() => ({
+  interactionDeps.openUrlFactory = () => ({
     execute: async (url, call) => {
       received = (call as ActionCall | undefined)?.signal;
       return { success: true, url };
     },
-  }));
-  setOpenLinkChooserFactory(
-    () =>
-      new UnobservedChooser(
-        device,
-        null,
-        (signal) => {
-          expect(signal).toBe(controller.signal);
-          const manager = new DeepLinkManager(
-            device,
-            adb,
-            null,
-            null,
-            undefined,
-            undefined,
-            {
-              getActivityLabel: async (_device, _package, _url, _adb, metadataSignal) => {
-                expect(metadataSignal).toBe(signal);
-                controller.abort();
-                return { kind: "none" };
-              },
-              getLabel: async () => {
-                labels++;
-                return "Example";
-              },
-              getFreshHierarchy: async () => {
-                reads++;
-                return observation.viewHierarchy!;
-              },
+  });
+  interactionDeps.openLinkChooserFactory = () =>
+    new UnobservedChooser(
+      device,
+      null,
+      (signal) => {
+        expect(signal).toBe(controller.signal);
+        const manager = new DeepLinkManager(
+          device,
+          adb,
+          null,
+          null,
+          undefined,
+          undefined,
+          {
+            getActivityLabel: async (_device, _package, _url, _adb, metadataSignal) => {
+              expect(metadataSignal).toBe(signal);
+              controller.abort();
+              return { kind: "none" };
             },
-            timer,
-            signal,
-          );
-          // Detection is outside this test's metadata/dispatch boundary; use the captured hierarchy unchanged.
-          const detected = spyOn(manager, "detectIntentChooser").mockReturnValue(true);
-          restores.push(() => detected.mockRestore());
-          return manager;
-        },
-        timer,
-      ),
-  );
+            getLabel: async () => {
+              labels++;
+              return "Example";
+            },
+            getFreshHierarchy: async () => {
+              reads++;
+              return observation.viewHierarchy!;
+            },
+          },
+          timer,
+          signal,
+        );
+        // Detection is outside this test's metadata/dispatch boundary; use the captured hierarchy unchanged.
+        const detected = spyOn(manager, "detectIntentChooser").mockReturnValue(true);
+        restores.push(() => detected.mockRestore());
+        return manager;
+      },
+      timer,
+    );
   await expect(
     handler("openLink")(
       device,
@@ -364,14 +358,14 @@ test("openLink chooser cancels during handler metadata resolution before any cho
 test("keyboard forwards the exact request signal", async () => {
   const controller = new AbortController();
   let received: AbortSignal | undefined;
-  setKeyboardFactory(() => ({
+  interactionDeps.keyboardFactory = () => ({
     execute: async (_action, call) => {
       const signal = (call as ActionCall | undefined)?.signal;
       received = signal;
       throwIfAborted(signal);
       return { success: true, open: false, message: "closed" };
     },
-  }));
+  });
   await handler("keyboard")(device, { action: "detect" }, undefined, controller.signal);
   expect(received).toBe(controller.signal);
 });
@@ -390,7 +384,7 @@ test("openLink cancels iOS foreground confirmation without waiting or rolling ba
   observe.setObserveResult(observation);
   const open = new UnobservedOpenURL(target, new FakeAdbExecutor(), simctl, null, timer);
   open.observeScreen = observe;
-  setOpenUrlFactory(() => open);
+  interactionDeps.openUrlFactory = () => open;
   const controller = new AbortController();
   const pending = handler("openLink")(
     target,

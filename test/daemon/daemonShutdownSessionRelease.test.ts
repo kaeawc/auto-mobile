@@ -415,9 +415,10 @@ describe("Daemon shutdown session release (issue #5303)", () => {
         const result = daemon.cancelAndReleaseSession(
           "release-session",
           branch === "ordinary" ? "daemon-shutdown" : "device-disconnected:release-device",
-          false,
-          branch === "owned" ? session : undefined,
-          branch === "conditional" ? () => true : undefined,
+          {
+            expectedSession: branch === "owned" ? session : undefined,
+            shouldCommit: branch === "conditional" ? () => true : undefined,
+          },
         );
         if (branch === "ordinary") {
           // Shutdown is non-terminal: the manager logs failed persistence and
@@ -474,13 +475,10 @@ describe("Daemon shutdown session release (issue #5303)", () => {
           throw new Error("expected session");
         }
         expect(
-          await daemon.cancelAndReleaseSession(
-            "release-session",
-            "explicit-release",
-            false,
-            branch === "owned" ? session : undefined,
-            branch === "conditional" ? () => true : undefined,
-          ),
+          await daemon.cancelAndReleaseSession("release-session", "explicit-release", {
+            expectedSession: branch === "owned" ? session : undefined,
+            shouldCommit: branch === "conditional" ? () => true : undefined,
+          }),
         ).toBe(true);
         expect(manager.hasSession("release-session")).toBe(false);
         expect(pool.getDevice(device.deviceId)).toMatchObject({ sessionId: null, status: "idle" });

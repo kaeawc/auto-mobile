@@ -4,9 +4,8 @@ import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants"
 import { WakeAndUnlock } from "../../src/features/action/WakeAndUnlock";
 import type { BootedDevice } from "../../src/models";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  setWakeAndUnlockFactory,
-  resetWakeAndUnlockFactory,
 } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -15,9 +14,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { IosLockScreenUnlocker } from "../../src/features/action/IosLockScreenUnlocker";
 import { getStructuredPayload } from "../../src/utils/toolUtils";
 
-const handler = cancellationHandlers(["wakeAndUnlock"]);
+const interactionDeps: InteractionToolDependencies = {};
+const handler = cancellationHandlers(["wakeAndUnlock"], interactionDeps);
 const test = warmedTests(() => {
-  resetWakeAndUnlockFactory();
+  delete interactionDeps.wakeAndUnlockFactory;
   ToolRegistry.clearTools();
 });
 
@@ -30,32 +30,30 @@ test("wakeAndUnlock renders the no-swipe-needed message after a post-wake unlock
     platform: "ios",
     name: "Fake",
   };
-  setWakeAndUnlockFactory(
-    () =>
-      new WakeAndUnlock(device, new FakeAdbExecutor(), {
-        timer,
-        iosLockStateProbe: {
-          async read() {
-            calls.push("read");
-            return { locked: ++reads === 1 };
+  interactionDeps.wakeAndUnlockFactory = () =>
+    new WakeAndUnlock(device, new FakeAdbExecutor(), {
+      timer,
+      iosLockStateProbe: {
+        async read() {
+          calls.push("read");
+          return { locked: ++reads === 1 };
+        },
+      },
+      iosUnlocker: new IosLockScreenUnlocker(
+        device,
+        {
+          async pressHome() {
+            calls.push("home");
+            return { success: true };
+          },
+          async swipeUp() {
+            calls.push("swipe");
+            return { success: false };
           },
         },
-        iosUnlocker: new IosLockScreenUnlocker(
-          device,
-          {
-            async pressHome() {
-              calls.push("home");
-              return { success: true };
-            },
-            async swipeUp() {
-              calls.push("swipe");
-              return { success: false };
-            },
-          },
-          timer,
-        ),
-      }),
-  );
+        timer,
+      ),
+    });
   const response = await handler("wakeAndUnlock")(device, {});
   expect(calls).toEqual(["read", "home", "read"]);
   expect(getStructuredPayload(response)).toMatchObject({
@@ -90,7 +88,7 @@ test("wakeAndUnlock handler forwards the daemon's absolute transport deadline", 
     };
   });
   try {
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     expect(handler).toBeDefined();
     const device: BootedDevice = { deviceId: "fake-unlock", platform: "android", name: "Fake" };
     await handler!(device, { pin: "1234", [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 123_000 });

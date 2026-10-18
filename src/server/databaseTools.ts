@@ -27,11 +27,7 @@ const sqlQuerySchema = withAppIdAliases(
 );
 
 // Type interface for tool arguments
-interface SqlQueryArgs {
-  appId: string;
-  databasePath: string;
-  query: string;
-}
+type SqlQueryArgs = z.output<typeof sqlQuerySchema>;
 
 /**
  * Extract table names from SQL query for notification purposes.

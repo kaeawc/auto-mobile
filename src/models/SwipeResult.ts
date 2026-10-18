@@ -14,6 +14,8 @@ export interface SwipeResult extends BaseActionResult {
   velocityPxPerSecond?: number;
   /** iOS XCUICoordinate route: the stroke duration actually run after the runner's velocity clamp (#12987). */
   effectiveDurationMs?: number;
+  /** iOS: the dispatch route the runner reported for this swipe (#13145); absent from older runners. */
+  dispatchRoute?: string;
   /** TalkBack semantic scroll: `duration` is nominal because the scroll has no timed stroke (#12987). */
   durationIgnored?: boolean;
   easing?: "linear" | "decelerate" | "accelerate" | "accelerateDecelerate";

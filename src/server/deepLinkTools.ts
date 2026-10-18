@@ -18,9 +18,7 @@ export const getDeepLinksSchema = withAppIdAliases(
 );
 
 // Type definitions for better TypeScript support
-export interface GetDeepLinksArgs {
-  appId: string;
-}
+export type GetDeepLinksArgs = z.output<typeof getDeepLinksSchema>;
 
 export interface GetDeepLinksExecutor {
   execute(appId: string): Promise<DeepLinkResult>;

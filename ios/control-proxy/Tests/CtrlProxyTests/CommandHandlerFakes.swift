@@ -104,6 +104,8 @@ final class FakeGesturePerformer: GesturePerforming {
     var lockScreenSwipeCalls = 0
     var swipeCalls = 0
     var onSwipe: (() -> Void)?
+    /// Route report handed back by the `*ReportingRoute` swipes; nil models an older performer.
+    var swipeReport: SwipeDispatchReport?
     var onPressKey: (() -> Void)?
     var multiFingerSwipeCalls = 0
     var pinchCalls = 0
@@ -177,6 +179,24 @@ final class FakeGesturePerformer: GesturePerforming {
     {
         lockScreenSwipeCalls += 1
         onSwipe?()
+    }
+
+    func swipeReportingRoute(
+        startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval
+    )
+        throws -> SwipeDispatchReport?
+    {
+        try swipe(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
+        return swipeReport
+    }
+
+    func lockScreenSwipeReportingRoute(
+        startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval
+    )
+        throws -> SwipeDispatchReport?
+    {
+        try lockScreenSwipe(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
+        return swipeReport
     }
 
     func multiFingerSwipe(

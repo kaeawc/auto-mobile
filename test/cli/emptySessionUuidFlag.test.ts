@@ -1,13 +1,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import {
-  parseCliArgs,
-  runCliCommand,
-  setDaemonProxyFactoryForTesting,
-  resetDaemonProxyFactoryForTesting,
-} from "../../src/cli";
+import { parseCliArgs, runCliCommand, type CliRuntime } from "../../src/cli";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+// Per-file collaborators handed to runCliCommand; reset in afterEach.
+let runtime: CliRuntime = {};
 
 isolateToolRegistry();
 
@@ -22,7 +20,7 @@ describe("an explicit but empty --session-uuid is not silently dropped", () => {
 
   beforeEach(() => {
     isolated = isolateCliDataDir("cli-empty-session-uuid-");
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async (toolName: string, params: Record<string, unknown>): Promise<any> => {
         calls.push({ toolName, params });
         return toolName === "setToolEnabled"
@@ -38,12 +36,12 @@ describe("an explicit but empty --session-uuid is not silently dropped", () => {
       },
       adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async (): Promise<void> => {},
-    }));
+    });
   });
 
   afterEach(() => {
     calls.length = 0;
-    resetDaemonProxyFactoryForTesting();
+    runtime = {};
     isolated.restore();
   });
 
@@ -60,7 +58,7 @@ describe("an explicit but empty --session-uuid is not silently dropped", () => {
     const err = spyOn(console, "error").mockImplementation(() => {});
     const out = spyOn(console, "log").mockImplementation(() => {});
     try {
-      await runCliCommand(args).catch((error: unknown) => {
+      await runCliCommand(args, undefined, undefined, runtime).catch((error: unknown) => {
         if (error !== stop) {
           throw error;
         }

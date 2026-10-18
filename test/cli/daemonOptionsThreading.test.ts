@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { DaemonOptions } from "../../src/daemon/types";
-import {
-  runCliCommand,
-  setDaemonProxyFactoryForTesting,
-  resetDaemonProxyFactoryForTesting,
-} from "../../src/cli";
+import { runCliCommand, type CliRuntime } from "../../src/cli";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
+
+// Per-file collaborators handed to runCliCommand; reset in afterEach.
+let runtime: CliRuntime = {};
 
 /**
  * Regression test for issue #4247: the CLI parses `--embedded-sdk` and
@@ -14,7 +13,7 @@ import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDi
  *
  * `runCliCommand` routes tool execution through `DaemonMcpProxy`, constructing it
  * with the `daemonOptions` it receives. This test injects a fake proxy via the
- * `setDaemonProxyFactoryForTesting` seam — deliberately NOT `mock.module`, which
+ * `CliRuntime.daemonProxyFactory` seam — deliberately NOT `mock.module`, which
  * is global in Bun and would replace the real DaemonMcpProxy module for every
  * other suite in the run (breaking daemonMcpProxy.test.ts's import of the real
  * error classes). The fake records the options it is constructed with, then the
@@ -30,12 +29,12 @@ describe("runCliCommand daemon-option threading (issue #4247)", () => {
 
   afterEach(() => {
     constructedWith.length = 0;
-    resetDaemonProxyFactoryForTesting();
+    runtime = {};
     isolatedCliDataDir.restore();
   });
 
   test("forwards embeddedSdk and networkMockable into the DaemonMcpProxy", async () => {
-    setDaemonProxyFactoryForTesting((config): any => {
+    runtime.daemonProxyFactory = (config): any => {
       constructedWith.push(config.daemonOptions);
       return {
         callTool: async (): Promise<any> => ({ success: true }),
@@ -44,12 +43,17 @@ describe("runCliCommand daemon-option threading (issue #4247)", () => {
           // no-op fake
         },
       };
-    });
+    };
 
-    await runCliCommand(["listApps", "--platform", "android"], {
-      embeddedSdk: true,
-      networkMockable: true,
-    });
+    await runCliCommand(
+      ["listApps", "--platform", "android"],
+      {
+        embeddedSdk: true,
+        networkMockable: true,
+      },
+      undefined,
+      runtime,
+    );
 
     expect(constructedWith).toHaveLength(1);
     expect(constructedWith[0]?.embeddedSdk).toBe(true);
@@ -59,7 +63,7 @@ describe("runCliCommand daemon-option threading (issue #4247)", () => {
   // #11096: the daemon treats this connection's acquisitions as anonymous only when marked.
   test("constructs the proxy as a one-shot CLI connection", async () => {
     const oneShot: Array<boolean | undefined> = [];
-    setDaemonProxyFactoryForTesting((config): any => {
+    runtime.daemonProxyFactory = (config): any => {
       oneShot.push(config.oneShotCli);
       return {
         callTool: async (): Promise<any> => ({ success: true }),
@@ -68,9 +72,9 @@ describe("runCliCommand daemon-option threading (issue #4247)", () => {
           // no-op fake
         },
       };
-    });
+    };
 
-    await runCliCommand(["listApps", "--platform", "android"]);
+    await runCliCommand(["listApps", "--platform", "android"], undefined, undefined, runtime);
 
     expect(oneShot).toEqual([true]);
   });

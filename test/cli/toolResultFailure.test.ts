@@ -1,12 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DaemonVersionMismatchError } from "../../src/daemon/daemonMcpProxy";
-import {
-  isCliToolFailure,
-  resetDaemonProxyFactoryForTesting,
-  runCliCommand,
-  setDaemonProxyFactoryForTesting,
-} from "../../src/cli";
+import { isCliToolFailure, runCliCommand, type CliRuntime } from "../../src/cli";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
+
+// Per-file collaborators handed to runCliCommand; reset in afterEach.
+let runtime: CliRuntime = {};
 
 let isolatedCliDataDir: IsolatedCliDataDir;
 
@@ -25,7 +23,7 @@ describe("isCliToolFailure (issue #6017)", () => {
   afterEach(() => {
     process.exit = originalProcessExit;
     console.error = originalConsoleError;
-    resetDaemonProxyFactoryForTesting();
+    runtime = {};
   });
 
   test("reports version skew as preflight rather than an interrupted tool", async () => {
@@ -34,7 +32,7 @@ describe("isCliToolFailure (issue #6017)", () => {
     console.error = (...args: unknown[]) => {
       messages.push(args.join(" "));
     };
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async () => {
         throw new DaemonVersionMismatchError({
           clientVersion: "0.0.70",
@@ -45,8 +43,8 @@ describe("isCliToolFailure (issue #6017)", () => {
       },
       adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async () => {},
-    }));
-    await runCliCommand(["listDevices"]);
+    });
+    await runCliCommand(["listDevices"], undefined, undefined, runtime);
     expect(messages.join("\n")).toContain("Daemon preflight failed; no device operation started");
     expect(messages.join("\n")).toContain("daemon=0.0.68, client=0.0.70");
     expect(messages.join("\n")).not.toContain("became unavailable during tool execution");
@@ -105,7 +103,7 @@ describe("isCliToolFailure (issue #6017)", () => {
     console.error = ((...args: unknown[]) => {
       errorMessages.push(args);
     }) as typeof console.error;
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async () => ({
         content: [{ type: "text", text: "MCP error -32001: Request timed out" }],
         isError: true,
@@ -114,9 +112,9 @@ describe("isCliToolFailure (issue #6017)", () => {
       close: async (): Promise<void> => {
         // no-op fake
       },
-    }));
+    });
 
-    await runCliCommand(["executePlan"]);
+    await runCliCommand(["executePlan"], undefined, undefined, runtime);
 
     expect(exitCodes).toEqual([1]);
     expect(errorMessages).toEqual([["MCP error -32001: Request timed out"]]);
@@ -132,7 +130,7 @@ describe("handleToolResult null/non-object payload guard (issue #6086)", () => {
     process.exit = originalProcessExit;
     console.error = originalConsoleError;
     console.log = originalConsoleLog;
-    resetDaemonProxyFactoryForTesting();
+    runtime = {};
   });
 
   function runWithEnvelope(envelope: unknown): {
@@ -150,13 +148,13 @@ describe("handleToolResult null/non-object payload guard (issue #6086)", () => {
     console.log = (() => {
       // silence structured stdout dump
     }) as typeof console.log;
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async () => envelope,
       adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async (): Promise<void> => {
         // no-op fake
       },
-    }));
+    });
     return { exitCodes, errorMessages };
   }
 
@@ -166,7 +164,7 @@ describe("handleToolResult null/non-object payload guard (issue #6086)", () => {
       isError: true,
     });
 
-    await runCliCommand(["someTool"]);
+    await runCliCommand(["someTool"], undefined, undefined, runtime);
 
     expect(exitCodes).toEqual([1]);
     expect(errorMessages).toEqual([["null"]]);
@@ -178,7 +176,7 @@ describe("handleToolResult null/non-object payload guard (issue #6086)", () => {
       isError: true,
     });
 
-    await runCliCommand(["someTool"]);
+    await runCliCommand(["someTool"], undefined, undefined, runtime);
 
     expect(exitCodes).toEqual([1]);
     expect(errorMessages).toEqual([["42"]]);
@@ -187,7 +185,7 @@ describe("handleToolResult null/non-object payload guard (issue #6086)", () => {
   test("isError envelope with a missing content payload exits non-zero without throwing", async () => {
     const { exitCodes, errorMessages } = runWithEnvelope({ isError: true });
 
-    await runCliCommand(["someTool"]);
+    await runCliCommand(["someTool"], undefined, undefined, runtime);
 
     expect(exitCodes).toEqual([1]);
     expect(errorMessages).toEqual([]);

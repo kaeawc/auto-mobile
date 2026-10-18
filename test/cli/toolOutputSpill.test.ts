@@ -8,13 +8,7 @@ import {
   writeAllSync,
   type BlockingByteWriter,
 } from "../../src/cli/toolOutput";
-import {
-  resetCliOutputSinksForTesting,
-  resetDaemonProxyFactoryForTesting,
-  runCliCommand,
-  setCliOutputSinksForTesting,
-  setDaemonProxyFactoryForTesting,
-} from "../../src/cli";
+import { runCliCommand, type CliRuntime } from "../../src/cli";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -27,6 +21,9 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
+
+// Per-file collaborators handed to runCliCommand; reset in afterEach.
+let runtime: CliRuntime = {};
 
 let isolatedCliDataDir: IsolatedCliDataDir;
 
@@ -135,26 +132,24 @@ describe("CLI tool output never emits truncated JSON (#6870)", () => {
   test("runCliCommand writes complete, parseable JSON for an oversized result", async () => {
     const toolOutputsDir = mkdtempSync(path.join(tmpdir(), "automobile-cli-toolout-"));
     const written: string[] = [];
-    setCliOutputSinksForTesting({
+    runtime.outputSinks = {
       stdout: { write: (text) => written.push(text) },
-      stderr: { write: () => {} },
-    });
-    setDaemonProxyFactoryForTesting((): any => ({
+    };
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async (): Promise<any> => oversizedResult(),
       adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async (): Promise<void> => {},
-    }));
+    });
     serverConfig.setToolOutputsDir(toolOutputsDir);
 
     try {
-      await runCliCommand(["tapOn"]);
+      await runCliCommand(["tapOn"], undefined, undefined, runtime);
 
       const parsed = JSON.parse(written[0]);
       expect(parsed.artifact.path).toStartWith(toolOutputsDir);
       expect(existsSync(parsed.artifact.path)).toBe(true);
     } finally {
-      resetDaemonProxyFactoryForTesting();
-      resetCliOutputSinksForTesting();
+      runtime = {};
       serverConfig.setToolOutputsDir(undefined);
       rmSync(toolOutputsDir, { recursive: true, force: true });
     }

@@ -1,21 +1,18 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import fs from "node:fs";
-import {
-  runCliCommand,
-  setDaemonProxyFactoryForTesting,
-  resetDaemonProxyFactoryForTesting,
-} from "../../src/cli";
+import { runCliCommand, type CliRuntime } from "../../src/cli";
 import {
   cliToolSelectionProfilePath,
   ensureCliToolSelectionProfileStoreWritable,
-  resetCliToolSelectionProfileLockOptionsForTesting,
   persistCliToolSelectionProfile,
-  setCliToolSelectionProfileLockOptionsForTesting,
   withCliToolSelectionProfileLock,
 } from "../../src/cli/cliToolSelectionProfile";
 import { ActionableError } from "../../src/models";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+// Per-file collaborators handed to runCliCommand; reset in afterEach.
+let runtime: CliRuntime = {};
 
 /**
  * A `--cli` invocation is a trusted local operator action and must NEVER require a
@@ -31,8 +28,7 @@ describe("CLI transparently enables gated tools", () => {
   });
 
   afterEach(() => {
-    resetDaemonProxyFactoryForTesting();
-    resetCliToolSelectionProfileLockOptionsForTesting();
+    runtime = {};
     isolatedCliDataDir.restore();
   });
 
@@ -41,7 +37,7 @@ describe("CLI transparently enables gated tools", () => {
     callToolOverride?: (name: string, params: Record<string, unknown>) => Promise<any>,
     callOrder?: Array<{ kind: "callTool" | "setProfile"; value?: unknown }>,
   ) {
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async (name: string, params: unknown): Promise<any> => {
         calls.push({ name, params });
         callOrder?.push({ kind: "callTool", value: { name, params } });
@@ -68,7 +64,7 @@ describe("CLI transparently enables gated tools", () => {
       },
       adoptCliSessionLiveness: async (): Promise<string | undefined> => "session-cli",
       close: async (): Promise<void> => {},
-    }));
+    });
   }
 
   // CI's per-test time excludes only beforeAll: pay the first gated runCliCommand's one-time
@@ -77,10 +73,14 @@ describe("CLI transparently enables gated tools", () => {
     const warmDir = isolateCliDataDir("cli-tool-selection-warm-");
     try {
       recordProxy([]);
-      await runCliCommand(["deleteDevice", "--deviceId", "emulator-5554"]);
+      await runCliCommand(
+        ["deleteDevice", "--deviceId", "emulator-5554"],
+        undefined,
+        undefined,
+        runtime,
+      );
     } finally {
-      resetDaemonProxyFactoryForTesting();
-      resetCliToolSelectionProfileLockOptionsForTesting();
+      runtime = {};
       warmDir.restore();
     }
   });
@@ -89,15 +89,20 @@ describe("CLI transparently enables gated tools", () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);
 
-    await runCliCommand([
-      "deleteDevice",
-      "--mode",
-      "destroy",
-      "--verifyAbsence",
-      "true",
-      "--target",
-      JSON.stringify({ platform: "android", isVirtual: true, stableId: "does-not-exist" }),
-    ]);
+    await runCliCommand(
+      [
+        "deleteDevice",
+        "--mode",
+        "destroy",
+        "--verifyAbsence",
+        "true",
+        "--target",
+        JSON.stringify({ platform: "android", isVirtual: true, stableId: "does-not-exist" }),
+      ],
+      undefined,
+      undefined,
+      runtime,
+    );
 
     const names = calls.map((c) => c.name);
     expect(names).toContain("setToolEnabled");
@@ -112,17 +117,22 @@ describe("CLI transparently enables gated tools", () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);
 
-    await runCliCommand([
-      "--session-uuid",
-      "11111111-1111-4111-8111-111111111111",
-      "deleteDevice",
-      "--mode",
-      "destroy",
-      "--verifyAbsence",
-      "true",
-      "--target",
-      JSON.stringify({ platform: "android", isVirtual: true, stableId: "does-not-exist" }),
-    ]);
+    await runCliCommand(
+      [
+        "--session-uuid",
+        "11111111-1111-4111-8111-111111111111",
+        "deleteDevice",
+        "--mode",
+        "destroy",
+        "--verifyAbsence",
+        "true",
+        "--target",
+        JSON.stringify({ platform: "android", isVirtual: true, stableId: "does-not-exist" }),
+      ],
+      undefined,
+      undefined,
+      runtime,
+    );
 
     expect(calls.find((call) => call.name === "deleteDevice")?.params).toMatchObject({
       sessionUuid: "11111111-1111-4111-8111-111111111111",
@@ -133,15 +143,20 @@ describe("CLI transparently enables gated tools", () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);
 
-    await runCliCommand([
-      "provisionDevice",
-      "--device",
-      JSON.stringify({
-        platform: "android",
-        name: "test-avd",
-        spec: { runtime: "android-35", deviceType: "pixel_6" },
-      }),
-    ]);
+    await runCliCommand(
+      [
+        "provisionDevice",
+        "--device",
+        JSON.stringify({
+          platform: "android",
+          name: "test-avd",
+          spec: { runtime: "android-35", deviceType: "pixel_6" },
+        }),
+      ],
+      undefined,
+      undefined,
+      runtime,
+    );
 
     const names = calls.map((c) => c.name);
     expect(names).toContain("setToolEnabled");
@@ -155,13 +170,18 @@ describe("CLI transparently enables gated tools", () => {
     const callsWithoutSession: Array<{ name: string; params: unknown }> = [];
     recordProxy(callsWithoutSession);
 
-    await runCliCommand([
-      "getIosSimulatorCapabilities",
-      "--deviceType",
-      "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
-      "--runtime",
-      "iOS-18-0",
-    ]);
+    await runCliCommand(
+      [
+        "getIosSimulatorCapabilities",
+        "--deviceType",
+        "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+        "--runtime",
+        "iOS-18-0",
+      ],
+      undefined,
+      undefined,
+      runtime,
+    );
 
     const namesWithoutSession = callsWithoutSession.map((call) => call.name);
     expect(namesWithoutSession.indexOf("setToolEnabled")).toBeLessThan(
@@ -177,15 +197,20 @@ describe("CLI transparently enables gated tools", () => {
 
     const callsWithSession: Array<{ name: string; params: unknown }> = [];
     recordProxy(callsWithSession);
-    await runCliCommand([
-      "--session-uuid",
-      "11111111-1111-4111-8111-111111111111",
-      "getIosSimulatorCapabilities",
-      "--deviceType",
-      "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
-      "--runtime",
-      "iOS-18-0",
-    ]);
+    await runCliCommand(
+      [
+        "--session-uuid",
+        "11111111-1111-4111-8111-111111111111",
+        "getIosSimulatorCapabilities",
+        "--deviceType",
+        "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+        "--runtime",
+        "iOS-18-0",
+      ],
+      undefined,
+      undefined,
+      runtime,
+    );
 
     const namesWithSession = callsWithSession.map((call) => call.name);
     expect(namesWithSession.indexOf("setToolEnabled")).toBeLessThan(
@@ -204,15 +229,20 @@ describe("CLI transparently enables gated tools", () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);
 
-    await runCliCommand([
-      "resetAppLogs",
-      "--appId",
-      "com.example.app",
-      "--paths",
-      JSON.stringify(["logs/app.log"]),
-      "--platform",
-      "android",
-    ]);
+    await runCliCommand(
+      [
+        "resetAppLogs",
+        "--appId",
+        "com.example.app",
+        "--paths",
+        JSON.stringify(["logs/app.log"]),
+        "--platform",
+        "android",
+      ],
+      undefined,
+      undefined,
+      runtime,
+    );
 
     const names = calls.map((c) => c.name);
     expect(names).toContain("setToolEnabled");
@@ -226,15 +256,20 @@ describe("CLI transparently enables gated tools", () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);
 
-    await runCliCommand([
-      "stageSessionDownloads",
-      "--sessionUuid",
-      "00000000-0000-4000-8000-000000000abc",
-      "--directory",
-      "fixtures",
-      "--files",
-      JSON.stringify([{ destinationPath: "hello.txt", contentText: "hello" }]),
-    ]);
+    await runCliCommand(
+      [
+        "stageSessionDownloads",
+        "--sessionUuid",
+        "00000000-0000-4000-8000-000000000abc",
+        "--directory",
+        "fixtures",
+        "--files",
+        JSON.stringify([{ destinationPath: "hello.txt", contentText: "hello" }]),
+      ],
+      undefined,
+      undefined,
+      runtime,
+    );
 
     const names = calls.map((c) => c.name);
     expect(names).toContain("setToolEnabled");
@@ -251,14 +286,14 @@ describe("CLI transparently enables gated tools", () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);
 
-    await runCliCommand(["listDevices", "--platform", "android"]);
+    await runCliCommand(["listDevices", "--platform", "android"], undefined, undefined, runtime);
     expect(calls[0]).toMatchObject({ name: "setToolEnabled", params: { toolName: "listDevices" } });
     expect(calls[0].params).not.toHaveProperty("sessionUuid");
     expect(calls[1].name).toBe("listDevices");
 
     const secondCalls: Array<{ name: string; params: unknown }> = [];
     recordProxy(secondCalls);
-    await runCliCommand(["listDevices", "--platform", "android"]);
+    await runCliCommand(["listDevices", "--platform", "android"], undefined, undefined, runtime);
 
     expect(secondCalls[0]).toMatchObject({
       name: "setToolEnabled",
@@ -272,12 +307,12 @@ describe("CLI transparently enables gated tools", () => {
 
   test("concurrent first CLI invocations mint one profile and reaffirm it", async () => {
     const timer = new FakeTimer();
-    setCliToolSelectionProfileLockOptionsForTesting({ timer, pollIntervalMs: 1, timeoutMs: 10 });
+    runtime.profileLockOptions = { timer, pollIntervalMs: 1, timeoutMs: 10 };
     const mintStarted = Promise.withResolvers<void>();
     const allowMint = Promise.withResolvers<void>();
     let minted = 0;
     const calls: Array<{ name: string; params: Record<string, unknown> }> = [];
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async (name: string, params: Record<string, unknown>): Promise<any> => {
         calls.push({ name, params });
         if (name !== "setToolEnabled") {
@@ -315,11 +350,21 @@ describe("CLI transparently enables gated tools", () => {
       },
       adoptCliSessionLiveness: async (): Promise<string | undefined> => "session-cli",
       close: async (): Promise<void> => {},
-    }));
+    });
 
-    const first = runCliCommand(["listDevices", "--platform", "android"]);
+    const first = runCliCommand(
+      ["listDevices", "--platform", "android"],
+      undefined,
+      undefined,
+      runtime,
+    );
     await mintStarted.promise;
-    const second = runCliCommand(["listDevices", "--platform", "android"]);
+    const second = runCliCommand(
+      ["listDevices", "--platform", "android"],
+      undefined,
+      undefined,
+      runtime,
+    );
     expect(timer.getPendingSleeps()).toEqual([1]);
 
     allowMint.resolve();
@@ -346,7 +391,7 @@ describe("CLI transparently enables gated tools", () => {
 
   test("does not mint an unlocked profile when the profile lock wait times out", async () => {
     const timer = new FakeTimer();
-    setCliToolSelectionProfileLockOptionsForTesting({ timer, pollIntervalMs: 1, timeoutMs: 3 });
+    runtime.profileLockOptions = { timer, pollIntervalMs: 1, timeoutMs: 3 };
     const releaseHeldLock = Promise.withResolvers<void>();
     const heldLock = withCliToolSelectionProfileLock(async () => {
       await releaseHeldLock.promise;
@@ -355,7 +400,12 @@ describe("CLI transparently enables gated tools", () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);
 
-    const command = runCliCommand(["listDevices", "--platform", "android"]);
+    const command = runCliCommand(
+      ["listDevices", "--platform", "android"],
+      undefined,
+      undefined,
+      runtime,
+    );
     await Promise.resolve();
     expect(timer.getPendingSleeps()).toEqual([1]);
     timer.advanceTime(3);
@@ -368,11 +418,11 @@ describe("CLI transparently enables gated tools", () => {
 
   test("does not mint a second profile when a concurrent first mint outlives the lock wait", async () => {
     const timer = new FakeTimer();
-    setCliToolSelectionProfileLockOptionsForTesting({ timer, pollIntervalMs: 1, timeoutMs: 3 });
+    runtime.profileLockOptions = { timer, pollIntervalMs: 1, timeoutMs: 3 };
     const mintStarted = Promise.withResolvers<void>();
     const releaseMint = Promise.withResolvers<void>();
     const calls: Array<{ name: string; params: Record<string, unknown> }> = [];
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async (name: string, params: Record<string, unknown>): Promise<any> => {
         calls.push({ name, params });
         if (name !== "setToolEnabled") {
@@ -394,11 +444,21 @@ describe("CLI transparently enables gated tools", () => {
       },
       adoptCliSessionLiveness: async (): Promise<string | undefined> => "session-cli",
       close: async (): Promise<void> => {},
-    }));
+    });
 
-    const first = runCliCommand(["listDevices", "--platform", "android"]);
+    const first = runCliCommand(
+      ["listDevices", "--platform", "android"],
+      undefined,
+      undefined,
+      runtime,
+    );
     await mintStarted.promise;
-    const second = runCliCommand(["listDevices", "--platform", "android"]);
+    const second = runCliCommand(
+      ["listDevices", "--platform", "android"],
+      undefined,
+      undefined,
+      runtime,
+    );
     expect(timer.getPendingSleeps()).toEqual([1]);
 
     timer.advanceTime(3);
@@ -414,7 +474,7 @@ describe("CLI transparently enables gated tools", () => {
     const calls: Array<{ name: string; params: unknown }> = [];
     recordProxy(calls);
 
-    await runCliCommand(["startDevice", "--platform", "android"]);
+    await runCliCommand(["startDevice", "--platform", "android"], undefined, undefined, runtime);
 
     expect(calls.map((call) => call.name)).toEqual(["startDevice"]);
   });
@@ -443,7 +503,7 @@ describe("CLI transparently enables gated tools", () => {
       return { content: [{ type: "text", text: "{}" }] };
     });
 
-    await runCliCommand(["listDevices", "--platform", "android"]);
+    await runCliCommand(["listDevices", "--platform", "android"], undefined, undefined, runtime);
 
     const names = calls.map((c) => c.name);
     expect(names).toEqual(["setToolEnabled", "listDevices"]);
@@ -465,7 +525,7 @@ describe("CLI transparently enables gated tools", () => {
     }) as typeof process.exit;
     console.error = (() => {}) as typeof console.error;
     try {
-      await runCliCommand(["listDevices", "--platform", "android"]);
+      await runCliCommand(["listDevices", "--platform", "android"], undefined, undefined, runtime);
     } finally {
       process.exit = originalProcessExit;
       console.error = originalConsoleError;
@@ -502,7 +562,7 @@ describe("CLI transparently enables gated tools", () => {
       callOrder,
     );
 
-    await runCliCommand(["listDevices", "--platform", "android"]);
+    await runCliCommand(["listDevices", "--platform", "android"], undefined, undefined, runtime);
 
     expect(calls[0]).toMatchObject({
       name: "setToolEnabled",
@@ -559,7 +619,7 @@ describe("CLI transparently enables gated tools", () => {
       callOrder,
     );
 
-    await runCliCommand(["listDevices", "--platform", "android"]);
+    await runCliCommand(["listDevices", "--platform", "android"], undefined, undefined, runtime);
 
     expect(calls.map((call) => call.name)).toEqual([
       "setToolEnabled",
@@ -608,7 +668,7 @@ describe("CLI transparently enables gated tools", () => {
       return { content: [{ type: "text", text: "{}" }] };
     });
 
-    await runCliCommand(["listDevices", "--platform", "android"]);
+    await runCliCommand(["listDevices", "--platform", "android"], undefined, undefined, runtime);
 
     expect(calls.map((call) => call.name)).toEqual(["setToolEnabled", "listDevices"]);
     expect(calls[0].params).not.toHaveProperty("sessionUuid");

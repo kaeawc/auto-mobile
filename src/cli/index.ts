@@ -30,7 +30,7 @@ import { JsonToolOutputArtifactWriter } from "../server/toolOutputArtifactWriter
 import type { ObservationArtifactWriter } from "../server/finalizeToolResponse";
 import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
 import { serverConfig } from "../utils/ServerConfig";
-import { cliStderr, cliStdout, renderCliToolOutput, type CliByteSink } from "./toolOutput";
+import { cliStdout, renderCliToolOutput, type CliByteSink } from "./toolOutput";
 import type { CliTerminationRequest } from "./termination";
 import { cliDeviceOwnershipHint } from "./deviceOwnershipHint";
 import { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS } from "../daemon/constants";
@@ -39,6 +39,7 @@ import {
   loadPersistedCliToolSelectionProfile,
   persistCliToolSelectionProfile,
   withCliToolSelectionProfileLock,
+  type CliToolSelectionProfileLockOptions,
 } from "./cliToolSelectionProfile";
 
 type CliHelpSchemaShape = Record<string, any> | undefined;
@@ -171,17 +172,21 @@ export interface CliDaemonProxy {
   close(): Promise<void>;
 }
 
-let daemonProxyFactory: (config: DaemonMcpProxyConfig) => CliDaemonProxy = (config) =>
+const defaultDaemonProxyFactory = (config: DaemonMcpProxyConfig): CliDaemonProxy =>
   new DaemonMcpProxy(config);
 
-export function setDaemonProxyFactoryForTesting(
-  factory: (config: DaemonMcpProxyConfig) => CliDaemonProxy,
-): void {
-  daemonProxyFactory = factory;
-}
-
-export function resetDaemonProxyFactoryForTesting(): void {
-  daemonProxyFactory = (config) => new DaemonMcpProxy(config);
+/**
+ * Collaborators of one CLI invocation. Every field defaults to the production
+ * implementation, so callers (tests) override only what they need instead of
+ * mutating module state.
+ */
+export interface CliRuntime {
+  /** Builds the daemon proxy a tool call runs through. */
+  daemonProxyFactory?: (config: DaemonMcpProxyConfig) => CliDaemonProxy;
+  /** Byte sinks for tool output. Defaults to blocking process-stream writes (#6870). */
+  outputSinks?: { stdout: CliByteSink };
+  /** Timer and lock seam for the tool-selection profile lock. */
+  profileLockOptions?: CliToolSelectionProfileLockOptions;
 }
 
 /**
@@ -196,7 +201,11 @@ export function resetDaemonProxyFactoryForTesting(): void {
  * This is CLI-only: a remote MCP client never runs this path, so it opens no
  * tool-gating bypass for non-CLI callers.
  */
-async function ensureCliToolEnabled(proxy: CliDaemonProxy, toolName: string): Promise<void> {
+async function ensureCliToolEnabled(
+  proxy: CliDaemonProxy,
+  toolName: string,
+  lockOptions?: CliToolSelectionProfileLockOptions,
+): Promise<void> {
   if (toolName === SET_TOOL_ENABLED_TOOL_NAME) {
     return;
   }
@@ -206,17 +215,23 @@ async function ensureCliToolEnabled(proxy: CliDaemonProxy, toolName: string): Pr
   const persistedProfileUuid = loadPersistedCliToolSelectionProfile();
 
   if (!persistedProfileUuid) {
-    await mintOrReaffirmCliToolSelectionProfile(proxy, toolName);
+    await mintOrReaffirmCliToolSelectionProfile(proxy, toolName, lockOptions);
     return;
   }
 
-  await reaffirmPersistedCliToolSelectionProfile(proxy, toolName, persistedProfileUuid);
+  await reaffirmPersistedCliToolSelectionProfile(
+    proxy,
+    toolName,
+    persistedProfileUuid,
+    lockOptions,
+  );
 }
 
 async function reaffirmPersistedCliToolSelectionProfile(
   proxy: CliDaemonProxy,
   toolName: string,
   persistedProfileUuid: string,
+  lockOptions?: CliToolSelectionProfileLockOptions,
 ): Promise<void> {
   let result: Awaited<ReturnType<CliDaemonProxy["callTool"]>>;
   try {
@@ -256,7 +271,7 @@ async function reaffirmPersistedCliToolSelectionProfile(
       proxy.setToolSelectionProfileUuid?.(undefined);
     }
     await mintCliToolSelectionProfile(proxy, toolName);
-  });
+  }, lockOptions);
   if (locked) {
     return;
   }
@@ -271,6 +286,7 @@ async function reaffirmPersistedCliToolSelectionProfile(
 async function mintOrReaffirmCliToolSelectionProfile(
   proxy: CliDaemonProxy,
   toolName: string,
+  lockOptions?: CliToolSelectionProfileLockOptions,
 ): Promise<void> {
   const locked = await withCliToolSelectionProfileLock(async () => {
     const persistedProfileUuid = loadPersistedCliToolSelectionProfile();
@@ -286,7 +302,7 @@ async function mintOrReaffirmCliToolSelectionProfile(
       proxy.setToolSelectionProfileUuid?.(undefined);
     }
     await mintCliToolSelectionProfile(proxy, toolName);
-  });
+  }, lockOptions);
   if (!locked) {
     const profileUuidAfterLockTimeout = loadPersistedCliToolSelectionProfile();
     // This lock never spans the caller's own daemon start before pre-enable; any daemon start
@@ -341,16 +357,17 @@ async function runToolViaDaemon(
   toolName: string,
   params: Record<string, any>,
   daemonOptions?: DaemonOptions,
+  runtime: CliRuntime = {},
 ): Promise<any> {
   // One-shot: the daemon treats this connection's acquisitions as anonymous (#11096).
-  const proxy = daemonProxyFactory({
+  const proxy = (runtime.daemonProxyFactory ?? defaultDaemonProxyFactory)({
     daemonOptions,
     oneShotCli: true,
     lifecycleNamespaceEnv: process.env,
   });
 
   try {
-    await ensureCliToolEnabled(proxy, toolName);
+    await ensureCliToolEnabled(proxy, toolName, runtime.profileLockOptions);
     const result = await proxy.callTool(toolName, params);
     if (result === null) {
       throw new ActionableError(
@@ -405,6 +422,8 @@ interface DoctorCommandOptions {
   runDoctor?: typeof import("../doctor").runDoctor;
   formatConsoleOutput?: typeof import("../doctor").formatConsoleOutput;
   writeOutput?: (output: string) => void;
+  /** Sink for `--json` reports. Defaults to blocking process-stream writes. */
+  outputSinks?: { stdout: CliByteSink };
   exit?: (code: number) => void;
 }
 
@@ -424,7 +443,7 @@ export async function runDoctorCommand(
     ios: params.ios,
   });
   if (params.json === true) {
-    writeCliToolOutput(report, "doctor");
+    writeCliToolOutput(report, "doctor", options.outputSinks);
   } else {
     (options.writeOutput ?? console.log)(
       (options.formatConsoleOutput ?? doctor.formatConsoleOutput)(
@@ -470,20 +489,10 @@ export function isCliToolFailure(result: any): boolean {
  * defaults are blocking writes to the process streams so `process.exit()` after
  * a command cannot cut the JSON in half (issue #6870).
  */
-let cliOutputSinks: { stdout: CliByteSink; stderr: CliByteSink } = {
-  stdout: cliStdout,
-  stderr: cliStderr,
-};
+const defaultCliOutputSinks = { stdout: cliStdout };
 
-export function setCliOutputSinksForTesting(sinks: {
-  stdout: CliByteSink;
-  stderr: CliByteSink;
-}): void {
-  cliOutputSinks = sinks;
-}
-
-export function resetCliOutputSinksForTesting(): void {
-  cliOutputSinks = { stdout: cliStdout, stderr: cliStderr };
+function outputSinksOf(runtime: CliRuntime | undefined): { stdout: CliByteSink } {
+  return runtime?.outputSinks ?? defaultCliOutputSinks;
 }
 
 /**
@@ -507,10 +516,14 @@ function createCliArtifactWriter(): ObservationArtifactWriter | undefined {
   }
 }
 
-function writeCliToolOutput(result: unknown, toolName: string): void {
+function writeCliToolOutput(
+  result: unknown,
+  toolName: string,
+  sinks: { stdout: CliByteSink } = defaultCliOutputSinks,
+): void {
   // Count the bytes BEFORE writing: an oversized result is spilled to an
   // artifact and replaced by its envelope rather than emitted and cut (#6870).
-  cliOutputSinks.stdout.write(
+  sinks.stdout.write(
     renderCliToolOutput(result, {
       tool: toolName,
       artifactWriter: createCliArtifactWriter(),
@@ -534,8 +547,12 @@ function formatCliToolError(error: unknown): unknown {
   return typeof nextAction === "string" ? `${message}\nNext: ${nextAction}` : message;
 }
 
-function handleToolResult(result: any, toolName: string): void {
-  writeCliToolOutput(result, toolName);
+function handleToolResult(
+  result: any,
+  toolName: string,
+  sinks: { stdout: CliByteSink } = defaultCliOutputSinks,
+): void {
+  writeCliToolOutput(result, toolName, sinks);
 
   // MCP tool errors use the top-level `isError` flag, while older daemon
   // responses encode their failure in the JSON payload.
@@ -596,6 +613,7 @@ export async function runCliCommand(
   args: string[],
   daemonOptions?: DaemonOptions,
   helpOutput: CliOutput = console,
+  runtime?: CliRuntime,
 ): Promise<CliTerminationRequest | undefined> {
   try {
     if (args.length === 0) {
@@ -634,13 +652,13 @@ export async function runCliCommand(
 
     // Doctor is a local CLI diagnostic, separate from daemon tool execution.
     if (toolName === "doctor") {
-      return await runDoctorCommand(params);
+      return await runDoctorCommand(params, runtime);
     }
 
     // All tool execution goes through daemon (mandatory)
     logger.debug(`Executing tool via daemon: ${toolName}`);
-    const daemonResult = await runToolViaDaemon(toolName, params, daemonOptions);
-    handleToolResult(daemonResult, toolName);
+    const daemonResult = await runToolViaDaemon(toolName, params, daemonOptions, runtime);
+    handleToolResult(daemonResult, toolName, outputSinksOf(runtime));
 
     // Note: Session cleanup for executePlan now happens automatically on the daemon side
     // See toolRegistry.ts registerDeviceAware() finally block

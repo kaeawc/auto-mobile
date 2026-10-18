@@ -1,10 +1,9 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import {
-  runCliCommand,
-  setDaemonProxyFactoryForTesting,
-  resetDaemonProxyFactoryForTesting,
-} from "../../src/cli";
+import { runCliCommand, type CliRuntime } from "../../src/cli";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
+
+// Per-file collaborators handed to runCliCommand; reset in afterEach.
+let runtime: CliRuntime = {};
 
 /**
  * Root-cause regression for issue #6222's reopen. PR #6237 made a
@@ -40,16 +39,16 @@ describe("runCliCommand never requests progress relay (issue #6222 reopen)", () 
   beforeAll(async () => {
     const warmupDataDir = isolateCliDataDir();
     try {
-      setDaemonProxyFactoryForTesting((): any => ({
+      runtime.daemonProxyFactory = (): any => ({
         callTool: async (): Promise<any> => ({ success: true, fields: [], totalAttempts: 0 }),
         adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
         close: async (): Promise<void> => {
           // no-op fake
         },
-      }));
-      await runCliCommand(["setUIState", "--fields", "[]"]);
+      });
+      await runCliCommand(["setUIState", "--fields", "[]"], undefined, undefined, runtime);
     } finally {
-      resetDaemonProxyFactoryForTesting();
+      runtime = {};
       warmupDataDir.restore();
     }
   });
@@ -59,13 +58,13 @@ describe("runCliCommand never requests progress relay (issue #6222 reopen)", () 
   });
 
   afterEach(() => {
-    resetDaemonProxyFactoryForTesting();
+    runtime = {};
     isolatedCliDataDir.restore();
   });
 
   test("setUIState is forwarded with no progressToken and no onProgress callback", async () => {
     const calls: unknown[][] = [];
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async (...args: unknown[]): Promise<any> => {
         calls.push(args);
         return { success: true, fields: [], totalAttempts: 0 };
@@ -74,17 +73,22 @@ describe("runCliCommand never requests progress relay (issue #6222 reopen)", () 
       close: async (): Promise<void> => {
         // no-op fake
       },
-    }));
+    });
 
-    await runCliCommand([
-      "setUIState",
-      "--fields",
-      JSON.stringify([
-        { selector: { text: "First name" }, value: "Grace" },
-        { selector: { text: "Last name" }, value: "Hopper" },
-        { selector: { text: "Phone" }, value: "5125550199" },
-      ]),
-    ]);
+    await runCliCommand(
+      [
+        "setUIState",
+        "--fields",
+        JSON.stringify([
+          { selector: { text: "First name" }, value: "Grace" },
+          { selector: { text: "Last name" }, value: "Hopper" },
+          { selector: { text: "Phone" }, value: "5125550199" },
+        ]),
+      ],
+      undefined,
+      undefined,
+      runtime,
+    );
 
     expect(calls).toHaveLength(2);
     const [toolName, , progressToken, onProgress] = calls[1];

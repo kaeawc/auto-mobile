@@ -1,10 +1,6 @@
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import {
-  runCliCommand,
-  setDaemonProxyFactoryForTesting,
-  resetDaemonProxyFactoryForTesting,
-} from "../../src/cli";
+import { runCliCommand, type CliRuntime } from "../../src/cli";
 import { runDaemonCommand } from "../../src/daemon/manager";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, type DaemonClientLike } from "../../src/daemon/client";
@@ -30,6 +26,9 @@ import { daemonHeartbeatHandler } from "../helpers/daemonHeartbeatHandler";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
+
+// Per-file collaborators handed to runCliCommand; reset in afterEach.
+let runtime: CliRuntime = {};
 
 const ENV_KEYS = [
   "AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
@@ -236,7 +235,7 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
     sessionManager.stopCleanupTimer();
     isAvailableSpy?.mockRestore();
     isAvailableSpy = null;
-    resetDaemonProxyFactoryForTesting();
+    runtime = {};
     isolatedCliDataDir.restore();
     clearEnv();
   });
@@ -843,39 +842,44 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
 
   test("runCliCommand declares the policy once per invocation", async () => {
     const declarations: number[] = [];
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async (): Promise<any> => ({ success: true }),
       adoptCliSessionLiveness: async (): Promise<string | undefined> => {
         declarations.push(1);
         return "session-abc";
       },
       close: async (): Promise<void> => {},
-    }));
+    });
 
-    await runCliCommand(["--session-uuid", "session-abc", "observe"]);
+    await runCliCommand(
+      ["--session-uuid", "session-abc", "observe"],
+      undefined,
+      undefined,
+      runtime,
+    );
 
     expect(declarations).toHaveLength(1);
   });
 
   test("runCliCommand does not declare ownership after listDevices", async () => {
     const declarations: number[] = [];
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async (): Promise<any> => ({ success: true }),
       adoptCliSessionLiveness: async (): Promise<string | undefined> => {
         declarations.push(1);
         return "awaiting-owner-session";
       },
       close: async (): Promise<void> => {},
-    }));
+    });
 
-    await runCliCommand(["listDevices"]);
+    await runCliCommand(["listDevices"], undefined, undefined, runtime);
 
     expect(declarations).toEqual([]);
   });
 
   test("runCliCommand still declares the policy when the tool call throws", async () => {
     const declarations: number[] = [];
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async (): Promise<any> => {
         throw new Error("tool blew up");
       },
@@ -884,12 +888,17 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
         return undefined;
       },
       close: async (): Promise<void> => {},
-    }));
+    });
 
     const exitSpy = spyOn(process, "exit").mockImplementation((() => undefined) as never);
     const errorSpy = spyOn(console, "error").mockImplementation(() => {});
     try {
-      await runCliCommand(["--session-uuid", "session-abc", "observe"]);
+      await runCliCommand(
+        ["--session-uuid", "session-abc", "observe"],
+        undefined,
+        undefined,
+        runtime,
+      );
     } finally {
       errorSpy.mockRestore();
       exitSpy.mockRestore();

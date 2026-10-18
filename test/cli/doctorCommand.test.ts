@@ -3,18 +3,15 @@ import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import {
-  runCliCommand,
-  parseCliArgs,
-  runDoctorCommand,
-  resetCliOutputSinksForTesting,
-  setCliOutputSinksForTesting,
-} from "../../src/cli";
+import { runCliCommand, parseCliArgs, runDoctorCommand, type CliRuntime } from "../../src/cli";
 import { CLI_OUTPUT_INLINE_MAX_BYTES } from "../../src/cli/toolOutput";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { DaemonClient } from "../../src/daemon/client";
 
 import type { DoctorReport } from "../../src/doctor/types";
+
+// Per-file collaborators handed to runCliCommand; reset in afterEach.
+let runtime: CliRuntime = {};
 
 function report(failed = 0): DoctorReport {
   return {
@@ -63,11 +60,12 @@ describe("runDoctorCommand", () => {
       throw new Error("doctor must not connect to the daemon");
     });
     const localOptions: unknown[] = [];
-    setCliOutputSinksForTesting({ stdout: { write: () => {} }, stderr: { write: () => {} } });
+    runtime.outputSinks = { stdout: { write: () => {} } };
     try {
       await runDoctorCommand(
         { ios: true, android: false, json: true },
         {
+          outputSinks: runtime.outputSinks,
           runDoctor: async (options) => {
             localOptions.push(options);
             return report();
@@ -80,7 +78,7 @@ describe("runDoctorCommand", () => {
     } finally {
       diagnosis.mockRestore();
       connect.mockRestore();
-      resetCliOutputSinksForTesting();
+      runtime = {};
     }
   });
 
@@ -118,15 +116,17 @@ describe("runDoctorCommand", () => {
 
   test("renders a normal doctor report as pretty JSON", async () => {
     const written: string[] = [];
-    setCliOutputSinksForTesting({
+    runtime.outputSinks = {
       stdout: { write: (text) => written.push(text) },
-      stderr: { write: () => {} },
-    });
+    };
 
     try {
-      await runDoctorCommand({ json: true }, { runDoctor: async () => report() });
+      await runDoctorCommand(
+        { json: true },
+        { runDoctor: async () => report(), outputSinks: runtime.outputSinks },
+      );
     } finally {
-      resetCliOutputSinksForTesting();
+      runtime = {};
     }
 
     expect(JSON.parse(written[0])).toEqual(report());
@@ -137,16 +137,16 @@ describe("runDoctorCommand", () => {
     const toolOutputsDir = mkdtempSync(path.join(tmpdir(), "automobile-cli-doctor-"));
     const originalToolOutputsDir = serverConfig.getToolOutputsDir();
     const written: string[] = [];
-    setCliOutputSinksForTesting({
+    runtime.outputSinks = {
       stdout: { write: (text) => written.push(text) },
-      stderr: { write: () => {} },
-    });
+    };
     serverConfig.setToolOutputsDir(toolOutputsDir);
 
     try {
       await runDoctorCommand(
         { json: true },
         {
+          outputSinks: runtime.outputSinks,
           runDoctor: async () => ({
             ...report(),
             details: "x".repeat(CLI_OUTPUT_INLINE_MAX_BYTES + 1_024),
@@ -163,7 +163,7 @@ describe("runDoctorCommand", () => {
         expect(existsSync(parsed.artifact.path)).toBe(true);
       }
     } finally {
-      resetCliOutputSinksForTesting();
+      runtime = {};
       serverConfig.setToolOutputsDir(originalToolOutputsDir);
       rmSync(toolOutputsDir, { recursive: true, force: true });
     }

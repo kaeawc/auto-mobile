@@ -1,13 +1,11 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import {
-  runCliCommand,
-  setDaemonProxyFactoryForTesting,
-  resetDaemonProxyFactoryForTesting,
-  type CliOutput,
-} from "../../src/cli";
+import { runCliCommand, type CliOutput, type CliRuntime } from "../../src/cli";
 import { DEVICE_SESSION_ACQUISITION_TOOLS } from "../../src/server/deviceSessionResult";
 import { DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS } from "../../src/daemon/constants";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
+
+// Per-file collaborators handed to runCliCommand; reset in afterEach.
+let runtime: CliRuntime = {};
 
 /**
  * `--session-uuid` is advertised as a universal CLI option, but the acquisition
@@ -27,12 +25,12 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
 
   afterEach(() => {
     calls.length = 0;
-    resetDaemonProxyFactoryForTesting();
+    runtime = {};
     isolatedCliDataDir.restore();
   });
 
   const installFakeProxy = (): void => {
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async (toolName: string, params: Record<string, unknown>): Promise<any> => {
         calls.push({ toolName, params });
         return toolName === "setToolEnabled"
@@ -50,7 +48,7 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
       close: async (): Promise<void> => {
         // no-op fake
       },
-    }));
+    });
   };
 
   // CI's per-test time excludes only beforeAll: pay the first runCliCommand's one-time cost
@@ -59,10 +57,15 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
     const warmDir = isolateCliDataDir("cli-acquisition-warm-");
     try {
       installFakeProxy();
-      await runCliCommand(["--session-uuid", "session-abc", "observe"]);
+      await runCliCommand(
+        ["--session-uuid", "session-abc", "observe"],
+        undefined,
+        undefined,
+        runtime,
+      );
     } finally {
       calls.length = 0;
-      resetDaemonProxyFactoryForTesting();
+      runtime = {};
       warmDir.restore();
     }
   });
@@ -71,7 +74,12 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
     "does not inject sessionUuid into %s params",
     async (toolName) => {
       installFakeProxy();
-      await runCliCommand(["--session-uuid", "session-abc", toolName]);
+      await runCliCommand(
+        ["--session-uuid", "session-abc", toolName],
+        undefined,
+        undefined,
+        runtime,
+      );
       if (toolName !== "startDevice") {
         expect(calls).toHaveLength(2);
         expect(calls[0].toolName).toBe("setToolEnabled");
@@ -86,7 +94,12 @@ describe("CLI --session-uuid with device-session acquisition tools", () => {
 
   test("still injects sessionUuid for a non-acquisition tool", async () => {
     installFakeProxy();
-    await runCliCommand(["--session-uuid", "session-abc", "observe"]);
+    await runCliCommand(
+      ["--session-uuid", "session-abc", "observe"],
+      undefined,
+      undefined,
+      runtime,
+    );
     expect(calls).toHaveLength(2);
     expect(calls[0].toolName).toBe("setToolEnabled");
     expect(calls[1].toolName).toBe("observe");

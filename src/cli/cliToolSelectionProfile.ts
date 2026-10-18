@@ -31,8 +31,6 @@ export interface CliToolSelectionProfileLockOptions {
   ownerToken?: string;
 }
 
-let cliToolSelectionProfileLockOptionsForTesting: CliToolSelectionProfileLockOptions | undefined;
-
 export function cliToolSelectionProfilePath(env: NodeJS.ProcessEnv): string {
   return path.join(ensureSecureTempDirSync("cli", env), CLI_TOOL_SELECTION_PROFILE_FILE);
 }
@@ -42,28 +40,15 @@ export function cliToolSelectionProfileLockPath(env: NodeJS.ProcessEnv): string 
 }
 
 /**
- * Test-only timer and lock seam. Production callers retain the short bounded
- * wait below; tests use FakeTimer so contention never relies on wall-clock time.
- */
-export function setCliToolSelectionProfileLockOptionsForTesting(
-  options: CliToolSelectionProfileLockOptions,
-): void {
-  cliToolSelectionProfileLockOptionsForTesting = options;
-}
-
-export function resetCliToolSelectionProfileLockOptionsForTesting(): void {
-  cliToolSelectionProfileLockOptionsForTesting = undefined;
-}
-
-/**
  * Serialize CLI profile mint/re-mint decisions across CLI processes sharing a
  * data directory. The normal, already-persisted reaffirm path does not call this.
  */
 export async function withCliToolSelectionProfileLock(
   operation: () => Promise<void>,
+  options: CliToolSelectionProfileLockOptions = {},
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<boolean> {
-  const lock = cliToolSelectionProfileLock(env, cliToolSelectionProfileLockOptionsForTesting ?? {});
+  const lock = cliToolSelectionProfileLock(env, options);
   if (!(await lock.acquire())) {
     return false;
   }

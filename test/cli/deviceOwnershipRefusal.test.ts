@@ -1,11 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  resetCliOutputSinksForTesting,
-  resetDaemonProxyFactoryForTesting,
-  runCliCommand,
-  setCliOutputSinksForTesting,
-  setDaemonProxyFactoryForTesting,
-} from "../../src/cli";
+import { runCliCommand, type CliRuntime } from "../../src/cli";
 import { cliDeviceOwnershipHint } from "../../src/cli/deviceOwnershipHint";
 import { InputDeviceOwnedError, TOOL_CALL_REMEDY } from "../../src/daemon/inputDeviceOwnership";
 import {
@@ -23,6 +17,9 @@ import {
 } from "../../src/daemon/sessionManager";
 import { readDeviceCleanupInProgressRefusal } from "../../src/server/deviceSessionResult";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
+
+// Per-file collaborators handed to runCliCommand; reset in afterEach.
+let runtime: CliRuntime = {};
 
 describe("cliDeviceOwnershipHint (#10743, #10783, #10785)", () => {
   test("returns undefined for failures that are not a held-device refusal", () => {
@@ -195,23 +192,22 @@ describe("--cli surfaces a held-device refusal", () => {
     console.error = ((...args: unknown[]) => {
       stderr.push(args.join(" "));
     }) as typeof console.error;
-    setCliOutputSinksForTesting({ stdout: { write: () => {} }, stderr: { write: () => {} } });
+    runtime.outputSinks = { stdout: { write: () => {} } };
   });
 
   afterEach(() => {
     process.exit = originalProcessExit;
     console.error = originalConsoleError;
-    resetCliOutputSinksForTesting();
-    resetDaemonProxyFactoryForTesting();
+    runtime = {};
     isolatedCliDataDir.restore();
   });
 
   function respondWith(envelope: unknown): void {
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async () => envelope,
       adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async (): Promise<void> => {},
-    }));
+    });
   }
 
   test("a sessionless tool call prints the daemon's remedy and the CLI hint, then exits 1", async () => {
@@ -222,7 +218,7 @@ describe("--cli surfaces a held-device refusal", () => {
       ),
     );
 
-    await runCliCommand(["rotate", "--deviceId", "emulator-5554"]);
+    await runCliCommand(["rotate", "--deviceId", "emulator-5554"], undefined, undefined, runtime);
 
     expect(exitCodes).toEqual([1]);
     expect(stderr[0]).toContain("device 'emulator-5554' is held by another session");
@@ -239,11 +235,12 @@ describe("--cli surfaces a held-device refusal", () => {
       ),
     );
 
-    await runCliCommand([
-      "killDevice",
-      "--device",
-      '{"name":"x","deviceId":"emulator-5554","platform":"android"}',
-    ]);
+    await runCliCommand(
+      ["killDevice", "--device", '{"name":"x","deviceId":"emulator-5554","platform":"android"}'],
+      undefined,
+      undefined,
+      runtime,
+    );
 
     expect(exitCodes).toEqual([1]);
     expect(stderr[0]).toContain(LIFECYCLE_TOOL_REMEDY);
@@ -263,7 +260,7 @@ describe("--cli surfaces a held-device refusal", () => {
       ),
     );
 
-    await runCliCommand(["deleteDevice"]);
+    await runCliCommand(["deleteDevice"], undefined, undefined, runtime);
 
     expect(exitCodes).toEqual([1]);
     expect(stderr[0]).toContain("held by another session");
@@ -284,19 +281,18 @@ describe("--cli prints structured session errors (#11148)", () => {
     console.error = ((...args: unknown[]) => {
       stderr.push(...args);
     }) as typeof console.error;
-    setCliOutputSinksForTesting({ stdout: { write: () => {} }, stderr: { write: () => {} } });
+    runtime.outputSinks = { stdout: { write: () => {} } };
   });
 
   afterEach(() => {
     process.exit = originalProcessExit;
     console.error = originalConsoleError;
-    resetCliOutputSinksForTesting();
-    resetDaemonProxyFactoryForTesting();
+    runtime = {};
     isolatedCliDataDir.restore();
   });
 
   test("an object error prints its message and nextAction as text, not an object", async () => {
-    setDaemonProxyFactoryForTesting((): any => ({
+    runtime.daemonProxyFactory = (): any => ({
       callTool: async () => ({
         success: false,
         error: {
@@ -307,9 +303,9 @@ describe("--cli prints structured session errors (#11148)", () => {
       }),
       adoptCliSessionLiveness: async (): Promise<string | undefined> => undefined,
       close: async (): Promise<void> => {},
-    }));
+    });
 
-    await runCliCommand(["rotate"]);
+    await runCliCommand(["rotate"], undefined, undefined, runtime);
 
     expect(typeof stderr[0]).toBe("string");
     expect(stderr[0]).toContain("Session lost");

@@ -281,10 +281,11 @@ bottom edge for home, so a very-near-edge swipe there may be taken by the system
 than the app; prefer the default content-edge mode or a larger `edgeInset` when that
 happens. Named system gestures ("system back") are not provided. Edge-anchored swipes
 are a `swipeOn` option only: `swipeAt` does not take `fromEdge`, `edgeInset`, or `at`.
-For a coordinate swipe that starts at an edge, pass a `from` point at the edge (for
-example `x: 0` with `coordinateSpace: "normalized"` for the left edge). The far edges
-are exclusive, so a normalized `1` (or an absolute value equal to the screen size) is
-rejected as out of bounds; use a value just inside, such as `0.999` or `width - 1`.
+For a coordinate swipe that starts at an edge, pass a `from` point at the edge with
+`coordinateSpace: "normalized"`: `0` is the left or top edge, and `1` resolves to the
+last pixel of the right or bottom edge. In absolute coordinates the far edges are
+exclusive, so use `width - 1` or `height - 1`; a value equal to the screen size is
+rejected as out of bounds.
 
 `pinchOn` requires positive `scale`, `distanceStart`, and `distanceEnd` when
 supplied; nonpositive values are rejected before gesture dispatch. Its optional

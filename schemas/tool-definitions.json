@@ -34132,7 +34132,7 @@
           "enum": ["slow", "normal", "fast"]
         },
         "durationMs": {
-          "description": "Forward-stroke duration in ms (integer 1-3000); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total). Android may quantize very short strokes.",
+          "description": "Forward-stroke duration in ms (integer 1-3000); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total). Android may quantize very short strokes. Limits: the TalkBack semantic-scroll route has no timed stroke and ignores it (durationIgnored + warnings); the iOS XCUICoordinate route clamps velocity to 100-10000 pt/s (effectiveDurationMs + warnings).",
           "type": "integer",
           "minimum": 1,
           "maximum": 3000

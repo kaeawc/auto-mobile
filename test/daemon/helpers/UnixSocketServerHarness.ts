@@ -2,6 +2,7 @@ import type { Socket } from "node:net";
 import { UnixSocketServer } from "../../../src/daemon/socketServer";
 import type { ProgressExtendableDeadline } from "../../../src/daemon/mcpRequestTimeout";
 import type { DaemonNotification, DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
+import type { ResourceUpdateTargets } from "../../../src/server/listChangedBroadcast";
 import { fakeBindLock, unreachableMcpDispatcher } from "../../helpers/createTestUnixSocketServer";
 
 /**
@@ -50,6 +51,44 @@ export class UnixSocketServerHarness extends UnixSocketServer {
   /** Skip the device-stream frame-context check (no stream server runs in these tests). */
   stubFrameContextCheck(): void {
     this.requireCurrentFrameContext = () => {};
+  }
+
+  /** Run the real request handler for one request, bypassing frame parsing. */
+  dispatchRequest(
+    sessionId: string,
+    socket: Socket,
+    request: DaemonRequest,
+    receivedAtMs: number,
+  ): Promise<DaemonResponse | undefined> {
+    return this.handleRequest(sessionId, socket, request, receivedAtMs);
+  }
+
+  /** Run the real local (non-forwarded) handler for one request. */
+  dispatchLocalRequest(request: DaemonRequest): Promise<unknown> {
+    return this.handleLocalSocketRequest(request);
+  }
+
+  releaseSocket(sessionId: string, socket: Socket): void {
+    this.releaseSocketSession(sessionId, socket);
+  }
+
+  broadcastResourceUpdated(resolveTargets: ResourceUpdateTargets): void {
+    super.broadcastResourceUpdated(resolveTargets);
+  }
+
+  /** Live views of the connection and subscription registries. */
+  get state(): {
+    clientSockets: Map<string, Socket>;
+    resourceSubscriptions: Map<string, Set<string>>;
+    notificationSubscribers: Set<string>;
+    activeRequestHandlers: Set<Promise<void>>;
+  } {
+    return {
+      clientSockets: this.clientSockets,
+      resourceSubscriptions: this.resourceSubscriptions,
+      notificationSubscribers: this.notificationSubscribers,
+      activeRequestHandlers: this.activeRequestHandlers,
+    };
   }
 
   get pendingRequestCount(): number {

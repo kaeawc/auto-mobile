@@ -106,7 +106,7 @@ function boundBackfillTextFields(
   return bounded;
 }
 
-interface TelemetryFilter {
+export interface TelemetryFilter {
   category: string | null; // "network", "log", "os", "navigation", "crash", "anr", "nonfatal", "storage", "layout", or null for all
   /**
    * Primary device routing key (epic #5256). `null` matches every device.
@@ -267,7 +267,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       });
   }
 
-  private async backfillRecentEvents(
+  protected async backfillRecentEvents(
     subscriptionId: string,
     filter: TelemetryFilter,
     socket: Socket,

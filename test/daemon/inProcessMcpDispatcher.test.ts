@@ -99,8 +99,8 @@ describe("InProcessMcpDispatcher (#11820)", () => {
     const second = await h.dispatcher.connect({ releasedSessionUuid: "released" });
 
     expect(h.built.map((record) => record.scope)).toEqual([
-      { requestScopeId: "scope-1", requestMcpSessionId: "socket-1" },
-      { requestScopeId: "scope-2", requestMcpSessionId: undefined },
+      { requestScopeId: "scope-1", requestMcpSessionId: "socket-1", trustedForwarder: true },
+      { requestScopeId: "scope-2", requestMcpSessionId: undefined, trustedForwarder: true },
     ]);
     expect(h.built[0].context).toEqual({ initialSessionToolBinding: "bound" });
     expect(h.built[1].context).toEqual({ initialReleasedSession: "released" });

@@ -18,6 +18,7 @@ import { createTestDatabase } from "./testDbHelper";
 import {
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SessionManager,
+  type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
@@ -1331,11 +1332,12 @@ describe("DeviceSessionRepository", () => {
         timeoutMs: 60_000,
         heartbeatTimeoutMs: 60_000,
       });
-      await sessionManager.rehydratePersistedSessions({
-        assignSessionToDevice: async () => {
+      const noRowsToAssign: SessionDeviceAssigner = {
+        assignDeviceToSession: async () => {
           throw new Error("no rows to assign");
         },
-      } as unknown as Parameters<SessionManager["rehydratePersistedSessions"]>[0]);
+      };
+      await sessionManager.rehydratePersistedSessions(noRowsToAssign);
       // Stamps cross the process boundary as wall ms (#11162), and the prune and expiry judgements
       // are handed "now" in that same frame (#11129).
       expect(seen.createdAt).toBe(wallClock);

@@ -77,4 +77,53 @@ describe("parseCallContext", () => {
     expect(context.requestMcpSessionId).toBeUndefined();
     expect(context.requestOneShotCli).toBe(false);
   });
+
+  describe("session identity precedence (#13315)", () => {
+    const inBand = { [INTERNAL_MCP_SESSION_PARAM]: "in-band" };
+    const parse = (options: { sessionKey?: string; trustForwardedSessionId?: boolean }) =>
+      parseCallContext(inBand, {
+        daemonMode: true,
+        acceptanceDiscoveryCapability: undefined,
+        ...options,
+      }).requestMcpSessionId;
+
+    test("a direct request's session-key header wins over a conflicting in-band id", () => {
+      expect(parse({ sessionKey: "header-key" })).toBe("header-key");
+    });
+
+    test("a trusted forwarder's in-band id wins over the connection key", () => {
+      expect(parse({ sessionKey: "connection-key", trustForwardedSessionId: true })).toBe(
+        "in-band",
+      );
+    });
+
+    test("a header-less direct request still uses the in-band id", () => {
+      expect(parse({})).toBe("in-band");
+    });
+
+    test("a call with no in-band id keeps the key as the binding key, not a context id", () => {
+      for (const trustForwardedSessionId of [true, false]) {
+        const context = parseCallContext(
+          {},
+          {
+            daemonMode: true,
+            acceptanceDiscoveryCapability: undefined,
+            sessionKey: "key",
+            trustForwardedSessionId,
+          },
+        );
+        expect(context.requestMcpSessionId).toBeUndefined();
+      }
+    });
+
+    test("outside daemon mode neither carrier is honoured", () => {
+      expect(
+        parseCallContext(inBand, {
+          daemonMode: false,
+          acceptanceDiscoveryCapability: undefined,
+          sessionKey: "header-key",
+        }).requestMcpSessionId,
+      ).toBeUndefined();
+    });
+  });
 });

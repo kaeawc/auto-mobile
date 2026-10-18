@@ -1,8 +1,8 @@
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
 
-async function columnExists(
-  db: Kysely<unknown>,
+async function columnExists<DB>(
+  db: Kysely<DB>,
   tableName: string,
   columnName: string,
 ): Promise<boolean> {
@@ -12,14 +12,14 @@ async function columnExists(
   return result.rows.length > 0;
 }
 
-async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
+async function tableExists<DB>(db: Kysely<DB>, tableName: string): Promise<boolean> {
   const result = await sql<{ name: string }>`
     SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${tableName}
   `.execute(db);
   return result.rows.length > 0;
 }
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   // Extend tool_calls table with failure tracking columns
   if (!(await columnExists(db, "tool_calls", "status"))) {
     await db.schema
@@ -195,7 +195,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("anrs").ifExists().execute();
   await db.schema.dropTable("crashes").ifExists().execute();
 

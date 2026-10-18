@@ -32,7 +32,7 @@ import { sql, type Kysely } from "kysely";
  * records; flagged unknown, they are re-measured at their real location before
  * the next budget pass (#6891 review).
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await db.transaction().execute(async (trx) => {
     await trx.schema
       .alterTable("device_snapshots")
@@ -54,7 +54,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   });
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.transaction().execute(async (trx) => {
     await trx.schema.alterTable("device_snapshots").dropColumn("pending_reclaim_reason").execute();
     await trx.schema.alterTable("device_snapshots").dropColumn("pending_reclaim").execute();

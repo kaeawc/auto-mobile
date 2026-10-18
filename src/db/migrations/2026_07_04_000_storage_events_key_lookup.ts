@@ -46,7 +46,7 @@ import type { Kysely } from "kysely";
  * migration on an empty DB) in unusual orders. Sorts after
  * `2026_07_03_*`, so `storage_events` exists when it runs during a full replay.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema
     .createIndex("idx_storage_events_key_lookup")
     .ifNotExists()
@@ -55,6 +55,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropIndex("idx_storage_events_key_lookup").ifExists().execute();
 }

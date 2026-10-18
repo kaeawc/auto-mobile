@@ -45,7 +45,7 @@ interface LegacyCapabilityRow {
   updated_at: string;
 }
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema
     .createTable("session_tool_overrides")
     .ifNotExists()
@@ -92,7 +92,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema.dropTable("session_tool_capabilities").execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema
     .createTable("session_tool_capabilities")
     .ifNotExists()

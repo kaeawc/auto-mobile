@@ -1,6 +1,6 @@
 import { type Kysely, sql } from "kysely";
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await createNavigationApps(db);
   await createNavigationNodes(db);
   await createNavigationEdges(db);
@@ -11,7 +11,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await createScrollPositions(db);
 }
 
-async function createNavigationApps(db: Kysely<unknown>): Promise<void> {
+async function createNavigationApps<DB>(db: Kysely<DB>): Promise<void> {
   // Create navigation_apps table
   await db.schema
     .createTable("navigation_apps")
@@ -22,7 +22,7 @@ async function createNavigationApps(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-async function createNavigationNodes(db: Kysely<unknown>): Promise<void> {
+async function createNavigationNodes<DB>(db: Kysely<DB>): Promise<void> {
   // Create navigation_nodes table
   await db.schema
     .createTable("navigation_nodes")
@@ -50,7 +50,7 @@ async function createNavigationNodes(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-async function createNavigationEdges(db: Kysely<unknown>): Promise<void> {
+async function createNavigationEdges<DB>(db: Kysely<DB>): Promise<void> {
   // Create navigation_edges table
   await db.schema
     .createTable("navigation_edges")
@@ -90,7 +90,7 @@ async function createNavigationEdges(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-async function createUIElements(db: Kysely<unknown>): Promise<void> {
+async function createUIElements<DB>(db: Kysely<DB>): Promise<void> {
   // Create ui_elements table
   await db.schema
     .createTable("ui_elements")
@@ -123,7 +123,7 @@ async function createUIElements(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-async function createEdgeUIElements(db: Kysely<unknown>): Promise<void> {
+async function createEdgeUIElements<DB>(db: Kysely<DB>): Promise<void> {
   // Create edge_ui_elements junction table
   await db.schema
     .createTable("edge_ui_elements")
@@ -147,7 +147,7 @@ async function createEdgeUIElements(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-async function createNodeModals(db: Kysely<unknown>): Promise<void> {
+async function createNodeModals<DB>(db: Kysely<DB>): Promise<void> {
   // Create node_modals table
   await db.schema
     .createTable("node_modals")
@@ -170,7 +170,7 @@ async function createNodeModals(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-async function createEdgeModals(db: Kysely<unknown>): Promise<void> {
+async function createEdgeModals<DB>(db: Kysely<DB>): Promise<void> {
   // Create edge_modals table
   await db.schema
     .createTable("edge_modals")
@@ -194,7 +194,7 @@ async function createEdgeModals(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-async function createScrollPositions(db: Kysely<unknown>): Promise<void> {
+async function createScrollPositions<DB>(db: Kysely<DB>): Promise<void> {
   // Create scroll_positions table
   await db.schema
     .createTable("scroll_positions")
@@ -211,7 +211,7 @@ async function createScrollPositions(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("scroll_positions").execute();
   await db.schema.dropTable("edge_modals").execute();
   await db.schema.dropTable("node_modals").execute();

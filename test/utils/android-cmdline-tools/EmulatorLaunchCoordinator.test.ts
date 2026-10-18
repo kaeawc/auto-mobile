@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { describe, expect, test } from "bun:test";
@@ -199,7 +200,7 @@ describe("DefaultEmulatorLaunchCoordinator.launchEmulator", () => {
         avdName: "P",
         cameraPosterPath: "/tmp/poster.png",
       }),
-    ).rejects.toThrow("Camera poster image does not exist: /tmp/poster.png");
+    ).rejects.toThrow(`Camera poster image does not exist: ${resolve("/tmp/poster.png")}`);
   });
 
   test("a poster is refused when the launch adopted an existing process", async () => {

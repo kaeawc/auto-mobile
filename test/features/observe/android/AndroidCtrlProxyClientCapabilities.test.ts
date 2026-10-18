@@ -224,7 +224,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       webSocketFactory: (url) => {
         socket = new FakeWebSocket(url, "none", 0, fakeTimer);
-        return socket as unknown as WebSocket;
+        return socket;
       },
       timer: fakeTimer,
     });
@@ -258,7 +258,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       webSocketFactory: (url) => {
         socket = new FakeWebSocket(url, "none", 0, fakeTimer);
-        return socket as unknown as WebSocket;
+        return socket;
       },
       timer: fakeTimer,
     });
@@ -338,7 +338,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       webSocketFactory: (url) => {
         socket = new FakeWebSocket(url, "none", 0, fakeTimer);
-        return socket as unknown as WebSocket;
+        return socket;
       },
       timer: fakeTimer,
     });
@@ -382,7 +382,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
       const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
         webSocketFactory: (url) => {
           socket = new FakeWebSocket(url, "none", 0, fakeTimer);
-          return socket as unknown as WebSocket;
+          return socket;
         },
         timer: fakeTimer,
       });
@@ -456,7 +456,7 @@ describe("AndroidCtrlProxyClient node action selector capabilities", function ()
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       webSocketFactory: (url) => {
         socket = new FakeWebSocket(url, "none", 0, fakeTimer);
-        return socket as unknown as WebSocket;
+        return socket;
       },
       timer: fakeTimer,
     });

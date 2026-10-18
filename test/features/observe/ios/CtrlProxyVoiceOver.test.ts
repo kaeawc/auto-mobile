@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
-import { CtrlProxyServicePortChangedError } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { CtrlProxyServicePortChangedError } from "../../../../src/features/observe/ios/CtrlProxyServicePortChangedError";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import type { CtrlProxyActionResult, IOSCtrlProxy } from "../../../../src/features/observe/ios";
 import type { BootedDevice } from "../../../../src/models";

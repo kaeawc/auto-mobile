@@ -4,7 +4,6 @@ import {
   TextRequestState,
 } from "../../../../src/features/action/textTransportTimeout";
 import { describe, expect, spyOn, test } from "bun:test";
-import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import {
   CtrlProxyText,
@@ -253,7 +252,7 @@ describe("Android CtrlProxyText", () => {
     await waitForSocketOpen(socket);
     const requestManager = new RequestManager(timer);
     const context: DelegateContext = {
-      getWebSocket: () => socket as unknown as WebSocket,
+      getWebSocket: () => socket,
       requestManager,
       timer,
       ensureConnected: async () => true,
@@ -392,7 +391,7 @@ describe("Android CtrlProxyText", () => {
       await waitForSocketOpen(socket);
       const manager = new RequestManager(timer);
       const context: DelegateContext = {
-        getWebSocket: () => socket as unknown as WebSocket,
+        getWebSocket: () => socket,
         requestManager: manager,
         timer,
         ensureConnected: async () => true,
@@ -805,7 +804,7 @@ test("sends expectedSuffix only when provided and resolves insert metadata", asy
   await waitForSocketOpen(socket);
   const requestManager = new RequestManager(timer);
   const context: DelegateContext = {
-    getWebSocket: () => socket as unknown as WebSocket,
+    getWebSocket: () => socket,
     requestManager,
     timer,
     ensureConnected: async () => true,
@@ -904,7 +903,7 @@ test("insert caret-warning acceptance defaults on and can explicitly opt out for
   await waitForSocketOpen(socket);
   const requestManager = new RequestManager(timer);
   const delegate = new CtrlProxyText({
-    getWebSocket: () => socket as unknown as WebSocket,
+    getWebSocket: () => socket,
     requestManager,
     timer,
     ensureConnected: async () => true,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
-import type { ViewHierarchyNode } from "../../../../src/models/ViewHierarchyResult";
+import { createObserveResultForTest, type FlatHierarchyNode } from "../flatHierarchyBuilders";
 import {
   applyObserveScopeExperiments,
   buildObserveScopeConfig,
@@ -17,16 +17,16 @@ import {
  * suite stays well under the 100ms budget.
  */
 
-interface Node {
+interface NodeFields {
   "resource-id"?: string;
   text?: string;
   class?: string;
   "content-desc"?: string;
   scrollable?: boolean | string;
   clickable?: boolean | string;
-  bounds?: { left: number; top: number; right: number; bottom: number } | number[];
-  node?: Node[];
 }
+
+type Node = FlatHierarchyNode & NodeFields;
 
 const SYSUI = "com.android.systemui";
 const APP = "com.example.app";
@@ -85,32 +85,32 @@ function androidFixture(): ObserveResult {
     ],
   };
 
-  return {
+  return createObserveResultForTest({
     updatedAt: 0,
     screenSize: { width: 1080, height: 2400 },
     systemInsets: { top: 80, bottom: 100, left: 0, right: 0 },
-    activeWindow: { appId: APP } as ObserveResult["activeWindow"],
+    activeWindow: { appId: APP, activityName: "", layoutSeqSum: 0 },
     viewHierarchy: {
       packageName: APP,
-      hierarchy: { node: root as unknown as ViewHierarchyNode },
+      hierarchy: { node: root },
     },
     elements: {
       clickable: [
-        { "resource-id": HEADER, bounds: { left: 0, top: 80, right: 1080, bottom: 200 } } as never,
+        { "resource-id": HEADER, bounds: { left: 0, top: 80, right: 1080, bottom: 200 } },
       ],
       scrollable: [
-        { "resource-id": LIST, bounds: { left: 0, top: 200, right: 1080, bottom: 2200 } } as never,
+        { "resource-id": LIST, bounds: { left: 0, top: 200, right: 1080, bottom: 2200 } },
       ],
       text: [
         {
           "resource-id": `${SYSUI}:id/clock`,
           bounds: { left: 0, top: 0, right: 1080, bottom: 80 },
-        } as never, // chrome
-        { bounds: { left: 0, top: 400, right: 1080, bottom: 600 } } as never, // Item 2 (app, no id)
+        }, // chrome
+        { bounds: { left: 0, top: 400, right: 1080, bottom: 600 } }, // Item 2 (app, no id)
       ],
       media: [],
     },
-  };
+  });
 }
 
 function toNodeArray(node: unknown): Node[] {
@@ -318,15 +318,14 @@ describe("scopeToFocus", () => {
         },
       ],
     };
-    const obs = {
+    const obs = createObserveResultForTest({
       updatedAt: 0,
       screenSize: { width: 400, height: 800 },
-      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: {
         packageName: "com.example.iosapp",
-        hierarchy: { node: iosRoot as unknown as ViewHierarchyNode },
+        hierarchy: { node: iosRoot },
       },
-    } as ObserveResult;
+    });
     const before = countNodes(roots(obs));
     const { result, focus } = scopeToFocus(obs);
     expect(focus.matched).toBe(false); // undotted prefixes are never foreign
@@ -430,7 +429,9 @@ describe("scopeToRegion", () => {
   test("reads compacted-tuple bounds", () => {
     const obs = androidFixture();
     const statusBar = roots(obs)[0].node![0];
-    statusBar.bounds = [0, 0, 1080, 80]; // compact form
+    // Compact form, carried in the `$` attribute bag (read through `attr`'s fallback).
+    delete statusBar.bounds;
+    statusBar.$ = { bounds: [0, 0, 1080, 80] };
     const { result } = scopeToRegion(obs, { x1: 0, y1: 0, x2: 1, y2: 0.5 });
     expect(resourceIds(result)).toContain(STATUS_BAR);
   });
@@ -453,7 +454,7 @@ describe("toOverview", () => {
     expect(ids).toContain(HEADER);
     const list = findById(result, LIST)!;
     expect(list.node).toBeUndefined(); // both leaf items collapsed
-    expect((list as unknown as { omittedDescendants?: number }).omittedDescendants).toBe(2);
+    expect(list.omittedDescendants).toBe(2);
     // the anonymous `View` leaf under the app root has no id/children -> dropped.
     expect(result.elements).toBeUndefined();
   });
@@ -657,7 +658,9 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
   test("matches against compacted-tuple node bounds", () => {
     const obs = androidFixture();
     // NAV_BAR node in compact tuple form; the warning element also compacted.
-    roots(obs)[0].node![2].bounds = [0, 2300, 1080, 2400];
+    const navBar = roots(obs)[0].node![2];
+    delete navBar.bounds;
+    navBar.$ = { bounds: [0, 2300, 1080, 2400] };
     obs.layoutWarnings = { scope: "full", warnings: [warningAt([0, 2300, 1080, 2400])] };
     // Full-screen region keeps everything, so the tuple-bounds warning survives.
     const result = applyObserveScopeExperiments(obs, {

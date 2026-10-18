@@ -1,7 +1,6 @@
 import { cancellationHandlers, cancellationTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
-import type WebSocket from "ws";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import { Keyboard } from "../../src/features/action/Keyboard";
 import { HomeScreen } from "../../src/features/action/HomeScreen";
@@ -173,7 +172,7 @@ function delayedConnection() {
   const context: DelegateContext = {
     timer,
     requestManager: manager,
-    getWebSocket: () => socket as WebSocket,
+    getWebSocket: () => socket,
     ensureConnected: () => {
       started.resolve();
       return connected.promise;

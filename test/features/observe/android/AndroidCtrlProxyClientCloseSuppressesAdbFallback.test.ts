@@ -50,8 +50,7 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
 
   function createClient(): AndroidCtrlProxyClient {
     return AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
-      webSocketFactory: (url) =>
-        new FakeWebSocket(url, "none", 0, fakeTimer) as unknown as WebSocket,
+      webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, fakeTimer),
       timer: fakeTimer,
       idGenerator: new FakeIdGenerator(["ctrlproxy-fallback"]),
     });

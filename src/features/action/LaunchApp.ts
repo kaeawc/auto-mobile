@@ -66,8 +66,12 @@ import {
   parseLauncherActivitiesFromPackageDump,
   resolveComponentActivity,
 } from "./launcherActivityParsing";
-import { OBSERVED_INTERACTION_PROFILES } from "./observedInteractionProfiles";
 import type { ActionCall } from "./ActionCall";
+import {
+  LaunchPackageRemovedError,
+  PACKAGE_NOT_INSTALLED_ERROR,
+} from "./LaunchPackageRemovedError";
+import { OBSERVED_INTERACTION_PROFILES } from "./observedInteractionProfiles";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -89,15 +93,6 @@ export function amStartReportedFailure(stdout: string, stderr: string): boolean 
     /^Error(?::| type \d+)/m.test(`${stdout}\n${stderr}`) ||
     /does not exist/i.test(`${stdout}\n${stderr}`)
   );
-}
-
-const PACKAGE_NOT_INSTALLED_ERROR = "App is not installed";
-
-/** Raised inside the launch action when a live read shows the package was removed (#10192). */
-class LaunchPackageRemovedError extends ActionableError {
-  constructor() {
-    super(PACKAGE_NOT_INSTALLED_ERROR);
-  }
 }
 
 export interface TargetUserDetector {

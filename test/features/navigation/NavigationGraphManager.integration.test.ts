@@ -13,6 +13,7 @@ import type { Kysely } from "kysely";
 import {
   NavigationGraphManager,
   NavigationEvent,
+  type IncomingNavigationEvent,
 } from "../../../src/features/navigation/NavigationGraphManager";
 import { runMigrations } from "../../helpers/database";
 import { createTestDatabase } from "../../db/testDbHelper";
@@ -256,13 +257,13 @@ describe("NavigationGraphManager", () => {
 
     test("should handle event with missing timestamp by using timer fallback", async () => {
       // Simulate WebSocket message where timestamp is on the outer message, not the event
-      const event = {
+      const event: IncomingNavigationEvent = {
         destination: "HomeScreen",
         source: "COMPOSE_NAVIGATION",
         arguments: {},
         metadata: {},
         sequenceNumber: 0,
-      } as unknown as NavigationEvent;
+      };
       // event.timestamp is undefined, simulating the real WebSocket scenario
 
       await manager.recordNavigationEvent(event);

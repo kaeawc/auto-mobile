@@ -178,11 +178,8 @@ import {
   serializeCtrlProxyRequest,
 } from "./ctrlProxyProtocol";
 import type { StorageSubscription } from "../../storage/storageTypes";
-import {
-  ObserverPendingRequestTimeoutError,
-  WebSocketFactory,
-  defaultWebSocketFactory,
-} from "../DeviceServiceClient";
+import { WebSocketFactory, defaultWebSocketFactory } from "../DeviceServiceClient";
+import { ObserverPendingRequestTimeoutError } from "../ObserverPendingRequestTimeoutError";
 import {
   observationStreamDeviceConnectionLostNotifier,
   type DeviceConnectionLostNotifier,

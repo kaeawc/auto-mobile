@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { FeatureFlagDefinition } from "../../src/features/featureFlags/FeatureFlagDefinitions";
-import type { FeatureFlagRepository } from "../../src/features/featureFlags/FeatureFlagRepository";
+import type { FeatureFlagRepository } from "../../src/db/featureFlagRepository";
 
 const definition = (
   key: FeatureFlagDefinition["key"],

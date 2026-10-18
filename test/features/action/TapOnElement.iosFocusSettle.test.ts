@@ -70,6 +70,10 @@ async function focusOnIos(
     clipNavigationTapBounds: (...args) => iosClip.clipNavigationTapBounds(...args),
     shouldRunPreTapStability: () => false,
     retryTapIfNoChange: false,
+    warnsOnDisabledElement: false,
+    settlesPostTapChange: false,
+    verifiesRefreshedDisplay: false,
+    promotesClickableAncestor: false,
     longPressDurationMs: 1000,
   };
   const device: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "sim" };

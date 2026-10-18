@@ -9,7 +9,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DEFAULT_MAX_INTERACTIONS, Explore } from "../../src/features/navigation/Explore";
 import { NavigateTo } from "../../src/features/navigation/NavigateTo";
-import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
+import {
+  NavigationGraphManager,
+  type NavigationGraphService,
+} from "../../src/features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import {
   exploreSchema,
@@ -37,14 +40,22 @@ describe("navigation tool session graph selection", () => {
   };
 
   let adbFactorySpy: ReturnType<typeof spyOn>;
+  let activeGraph: NavigationGraphService;
+  let resolvedSessions: Array<string | undefined>;
+  const navigationManagerFactory = (sessionUuid?: string): NavigationGraphService => {
+    resolvedSessions.push(sessionUuid);
+    return activeGraph;
+  };
   beforeEach(() => {
+    activeGraph = new FakeNavigationGraphManager();
+    resolvedSessions = [];
     const fakeAdbFactory = new FakeAdbClientFactory();
     adbFactorySpy = spyOn(defaultAdbClientFactory, "create").mockImplementation((selectedDevice) =>
       fakeAdbFactory.create(selectedDevice),
     );
     ToolRegistry.clearTools();
     setDebugModeEnabled(true);
-    registerNavigationTools();
+    registerNavigationTools({ navigationManagerFactory });
   });
 
   afterEach(() => {
@@ -64,9 +75,7 @@ describe("navigation tool session graph selection", () => {
         executeIosDetailedResult: async () => ({ successful: true, apps: [] }),
       };
       registerNavigationTools({ installedAppsFactory: () => list });
-      const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-        new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
-      );
+      activeGraph = new FakeNavigationGraphManager();
       const execute = spyOn(Explore.prototype, "execute").mockRejectedValue(
         new Error("must not start exploration"),
       );
@@ -76,10 +85,9 @@ describe("navigation tool session graph selection", () => {
           handler({ ...device, platform }, { packageName: "com.nope.missing" }),
         ).rejects.toThrow("Package not installed: com.nope.missing");
         expect(execute).not.toHaveBeenCalled();
-        expect(graphSpy).not.toHaveBeenCalled();
+        expect(resolvedSessions).toEqual([]);
       } finally {
         execute.mockRestore();
-        graphSpy.mockRestore();
       }
     },
   );
@@ -88,6 +96,7 @@ describe("navigation tool session graph selection", () => {
     "explore rejects an inconclusive %s inventory",
     async (platform) => {
       registerNavigationTools({
+        navigationManagerFactory,
         installedAppsFactory: () => ({
           executeDetailedResult: async () => ({
             successful: false,
@@ -96,9 +105,7 @@ describe("navigation tool session graph selection", () => {
           executeIosDetailedResult: async () => ({ successful: false, apps: [] }),
         }),
       });
-      const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-        new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
-      );
+      activeGraph = new FakeNavigationGraphManager();
       const execute = spyOn(Explore.prototype, "execute").mockRejectedValue(
         new Error("must not start exploration"),
       );
@@ -113,7 +120,6 @@ describe("navigation tool session graph selection", () => {
         expect(execute).not.toHaveBeenCalled();
       } finally {
         execute.mockRestore();
-        graphSpy.mockRestore();
       }
     },
   );
@@ -123,6 +129,7 @@ describe("navigation tool session graph selection", () => {
     async (listing) => {
       const cause = new Error("work profile listing failed");
       registerNavigationTools({
+        navigationManagerFactory,
         installedAppsFactory: () => ({
           executeDetailedResult: async () => ({
             successful: listing === "complete",
@@ -139,9 +146,7 @@ describe("navigation tool session graph selection", () => {
           executeIosDetailedResult: async () => ({ successful: false, apps: [] }),
         }),
       });
-      const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-        new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
-      );
+      activeGraph = new FakeNavigationGraphManager();
       const execute = spyOn(Explore.prototype, "execute").mockRejectedValue(
         new Error("must not start exploration"),
       );
@@ -157,10 +162,9 @@ describe("navigation tool session graph selection", () => {
           ...(listing === "incomplete" ? { cause } : {}),
         });
         expect(execute).not.toHaveBeenCalled();
-        expect(graphSpy).not.toHaveBeenCalled();
+        expect(resolvedSessions).toEqual([]);
       } finally {
         execute.mockRestore();
-        graphSpy.mockRestore();
       }
     },
   );
@@ -175,6 +179,7 @@ describe("navigation tool session graph selection", () => {
         recent: false,
       };
       registerNavigationTools({
+        navigationManagerFactory,
         installedAppsFactory: () => ({
           executeDetailedResult: async () => ({
             successful: false,
@@ -186,9 +191,7 @@ describe("navigation tool session graph selection", () => {
           executeIosDetailedResult: async () => ({ successful: false, apps: [] }),
         }),
       });
-      const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-        new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
-      );
+      activeGraph = new FakeNavigationGraphManager();
       const result = {
         success: true as const,
         cancelled: false,
@@ -213,7 +216,6 @@ describe("navigation tool session graph selection", () => {
         expect(execute).toHaveBeenCalledTimes(1);
       } finally {
         execute.mockRestore();
-        graphSpy.mockRestore();
       }
     },
   );
@@ -223,6 +225,7 @@ describe("navigation tool session graph selection", () => {
     async (platform) => {
       let listings = 0;
       registerNavigationTools({
+        navigationManagerFactory,
         installedAppsFactory: () => {
           listings++;
           return {
@@ -242,9 +245,7 @@ describe("navigation tool session graph selection", () => {
           };
         },
       });
-      const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-        new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
-      );
+      activeGraph = new FakeNavigationGraphManager();
       const normal = {
         success: true as const,
         cancelled: false,
@@ -293,7 +294,6 @@ describe("navigation tool session graph selection", () => {
         expect(listings).toBe(1);
       } finally {
         execute.mockRestore();
-        graphSpy.mockRestore();
       }
     },
   );
@@ -489,9 +489,7 @@ describe("navigation tool session graph selection", () => {
       }),
       exportGraphForApp: async () => ({ nodes: [], edges: [] }),
     });
-    const graphSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      graph as unknown as NavigationGraphManager,
-    );
+    activeGraph = graph;
     const exploreSpy = spyOn(Explore.prototype, "execute").mockResolvedValue({
       success: true,
       interactionsPerformed: 0,
@@ -499,6 +497,7 @@ describe("navigation tool session graph selection", () => {
       coverage: { explored: 0, total: 0, percentage: 0 },
     } as Awaited<ReturnType<Explore["execute"]>>);
     registerNavigationTools({
+      navigationManagerFactory,
       navigateToFactory: () => ({
         execute: async () => ({
           success: true,
@@ -530,7 +529,6 @@ describe("navigation tool session graph selection", () => {
     } finally {
       restorePipelineOverrides();
       ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: originalDevices });
-      graphSpy.mockRestore();
       exploreSpy.mockRestore();
     }
   });
@@ -539,10 +537,7 @@ describe("navigation tool session graph selection", () => {
     const sessionGraph = new FakeNavigationGraphManager();
     const usedManagers: unknown[] = [];
     const usedSessions: unknown[] = [];
-    const sessionManagerSpy = spyOn(
-      NavigationGraphManager,
-      "getInstanceForSession",
-    ).mockReturnValue(sessionGraph as unknown as NavigationGraphManager);
+    activeGraph = sessionGraph;
     PortManager.setPortAvailabilityCheckerForTesting({
       isPortAvailable: () => true,
     });
@@ -591,12 +586,10 @@ describe("navigation tool session graph selection", () => {
         sessionUuid: "session-123:B",
       });
 
-      expect(sessionManagerSpy).toHaveBeenCalledTimes(2);
-      expect(sessionManagerSpy).toHaveBeenCalledWith("session-123:B");
+      expect(resolvedSessions).toEqual(["session-123:B", "session-123:B"]);
       expect(usedManagers).toEqual([sessionGraph, sessionGraph]);
       expect(usedSessions).toEqual(["session-123:B", "session-123:B"]);
     } finally {
-      sessionManagerSpy.mockRestore();
       navigateExecuteSpy.mockRestore();
       exploreExecuteSpy.mockRestore();
       PortManager.reset();
@@ -652,9 +645,7 @@ describe("navigation tool session graph selection", () => {
         };
       },
     });
-    const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      staleGraph as unknown as NavigationGraphManager,
-    );
+    activeGraph = staleGraph;
     const observationSpy = spyOn(
       RealObserveScreen,
       "getRecentCachedResultForDevice",
@@ -691,7 +682,6 @@ describe("navigation tool session graph selection", () => {
       });
     } finally {
       observationSpy.mockRestore();
-      managerSpy.mockRestore();
     }
   });
 
@@ -732,9 +722,7 @@ describe("navigation tool session graph selection", () => {
         };
       },
     });
-    const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      graph as unknown as NavigationGraphManager,
-    );
+    activeGraph = graph;
     // A concurrent hierarchy update marked SpringBoard current.
     const observationSpy = spyOn(
       RealObserveScreen,
@@ -769,7 +757,6 @@ describe("navigation tool session graph selection", () => {
       });
     } finally {
       observationSpy.mockRestore();
-      managerSpy.mockRestore();
     }
   });
 
@@ -799,9 +786,7 @@ describe("navigation tool session graph selection", () => {
         return { appId, currentScreen: null, nodes: [], edges: [] };
       },
     });
-    const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      staleGraph as unknown as NavigationGraphManager,
-    );
+    activeGraph = staleGraph;
     const observationSpy = spyOn(
       RealObserveScreen,
       "getRecentCachedResultForDevice",
@@ -826,7 +811,6 @@ describe("navigation tool session graph selection", () => {
       });
     } finally {
       observationSpy.mockRestore();
-      managerSpy.mockRestore();
     }
   });
 
@@ -862,9 +846,7 @@ describe("navigation tool session graph selection", () => {
         };
       },
     });
-    const managerSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      graph as unknown as NavigationGraphManager,
-    );
+    activeGraph = graph;
     const observationSpy = spyOn(
       RealObserveScreen,
       "getRecentCachedResultForDevice",
@@ -887,7 +869,6 @@ describe("navigation tool session graph selection", () => {
       });
     } finally {
       observationSpy.mockRestore();
-      managerSpy.mockRestore();
     }
   });
 });

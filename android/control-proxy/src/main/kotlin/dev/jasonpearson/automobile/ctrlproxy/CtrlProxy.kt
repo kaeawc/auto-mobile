@@ -14,18 +14,13 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
-import android.graphics.Bitmap
-import android.graphics.Point
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
-import android.text.Spanned
-import android.text.style.ClickableSpan
 import android.util.Base64
-import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
 import android.view.View
@@ -45,8 +40,6 @@ import dev.jasonpearson.automobile.ctrlproxy.models.InteractionElement
 import dev.jasonpearson.automobile.ctrlproxy.models.InteractionEvent
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
-import dev.jasonpearson.automobile.ctrlproxy.models.SystemBarsInsetsInfo
-import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
@@ -157,14 +150,12 @@ import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Collections
 import java.util.IdentityHashMap
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.coroutines.resume
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -180,7 +171,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -1293,6 +1283,99 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
+  private val displayController by lazy {
+    DisplayController(
+      host =
+        object : DisplayController.Host {
+          override fun displayManager() =
+            getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+
+          override fun windowManager() = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+
+          private val insetsProvider by lazy { createDisplayInsetsProvider(this@CtrlProxy) }
+
+          override fun displayInsetsProvider() = insetsProvider
+
+          override fun frameworkDimenPx(name: String): Int {
+            val id = resources.getIdentifier(name, "dimen", "android")
+            return if (id > 0) resources.getDimensionPixelSize(id) else 0
+          }
+
+          override fun densityDpi() = resources.displayMetrics.densityDpi
+        },
+    )
+  }
+  private val screenshotController by lazy {
+    ScreenshotController(
+      host =
+        object : ScreenshotController.Host {
+          override fun takeScreenshot(displayId: Int, callback: TakeScreenshotCallback) {
+            this@CtrlProxy.takeScreenshot(displayId, mainExecutor, callback)
+          }
+
+          override fun rotationProvenance() = this@CtrlProxy.rotationProvenance
+        },
+      displayController = displayController,
+      timeProvider = timeProvider,
+    )
+  }
+  private val nodeActionController by lazy {
+    NodeActionController(
+      host =
+        object : NodeActionController.Host {
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) {
+            this@CtrlProxy.launchRequestScope(requestId, block)
+          }
+
+          override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
+
+          override fun findNodeInDisplayWindows(
+            find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
+          ) = this@CtrlProxy.findNodeInDisplayWindows(find)
+
+          override fun screenDimensions(displayId: Int) =
+            displayController.getScreenDimensions(displayId)
+
+          override fun createView() = View(this@CtrlProxy)
+
+          override suspend fun publishSettledHierarchy() {
+            val freshHierarchy =
+              hierarchyDebouncer.extractAfterQuiescenceSuspending(
+                quiescenceMs = HierarchyQuiescence.POLL_MS,
+                maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
+                pollIntervalMs = 10L,
+              )
+            if (freshHierarchy != null) {
+              broadcastHierarchyUpdate(freshHierarchy, sync = true)
+            }
+          }
+
+          override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
+
+          override suspend fun sendActionResult(
+            requestId: String?,
+            action: String,
+            success: Boolean,
+            error: String?,
+            totalTimeMs: Long,
+            alreadySatisfied: Boolean,
+          ) =
+            this@CtrlProxy.broadcastActionResult(
+              requestId,
+              action,
+              success,
+              error,
+              totalTimeMs,
+              alreadySatisfied,
+            )
+        },
+      perfProvider = perfProvider,
+      timeProvider = timeProvider,
+    )
+  }
   private val focusController by lazy {
     FocusController(
       host =
@@ -1314,7 +1397,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun extractTraversalOrder(): TraversalOrderResult? {
             val allWindows = windows
             val rootNode = rootInActiveWindow
-            val screenDimensions = getScreenDimensions()
+            val screenDimensions = displayController.getScreenDimensions()
             if (allWindows.isNullOrEmpty() && rootNode == null) return null
             return if (!allWindows.isNullOrEmpty()) {
               viewHierarchyExtractor.extractTraversalOrderFromAllWindows(
@@ -1372,7 +1455,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
 
-          override fun screenDimensions(displayId: Int) = getScreenDimensions(displayId)
+          override fun screenDimensions(displayId: Int) =
+            displayController.getScreenDimensions(displayId)
 
           override fun hideSoftKeyboard() {
             softKeyboardController.setShowMode(AccessibilityService.SHOW_MODE_HIDDEN)
@@ -1532,36 +1616,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   // #5470 review); the next scroll discards the stale accumulation instead of combining across
   // sessions. A concurrent client joining does NOT change it, so an in-flight scroll is preserved.
   @Volatile private var pendingScrollSessionGeneration: Int = 0
-
-  private data class ScreenshotCapturePayload(
-    val base64Image: String,
-    val rotation: Int?,
-    val displayId: Int,
-    val panelUniqueId: String?,
-    val captureDurationMs: Long,
-    val encodeDurationMs: Long,
-    val byteLength: Int,
-    val base64Length: Int,
-  )
-
-  /**
-   * Raw result of the platform takeScreenshot callback, carrying the failure code (issue #4927).
-   */
-  private sealed interface ScreenshotCallbackResult {
-    data class Captured(val bitmap: Bitmap, val rotation: Int?) : ScreenshotCallbackResult
-
-    data class Failed(val errorCode: Int?) : ScreenshotCallbackResult
-  }
-
-  /**
-   * Outcome of [takeScreenshotAsync]: an encoded payload, or a failure that retains the platform
-   * error code so the broadcast can surface a rate limit distinctly instead of a generic failure.
-   */
-  private sealed interface ScreenshotCaptureOutcome {
-    data class Success(val payload: ScreenshotCapturePayload) : ScreenshotCaptureOutcome
-
-    data class Failure(val errorCode: Int?) : ScreenshotCaptureOutcome
-  }
 
   // Job for collecting hierarchy flow results
   private var hierarchyFlowJob: Job? = null
@@ -1767,7 +1821,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         DeviceStateTransitions.register(this) { state ->
           displaySignal.emitDeviceState(state)
         }
-      overlayDrawer = OverlayDrawer(screenDimensionsProvider = { getScreenDimensions() })
+      overlayDrawer =
+        OverlayDrawer(screenDimensionsProvider = { displayController.getScreenDimensions() })
       overlayManager =
         OverlayManager(this, viewFactory = { HighlightOverlayView(it, overlayDrawer) })
       overlayDrawer.attachOverlayManager(overlayManager)
@@ -2887,7 +2942,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override suspend fun requestClickFocusedInput(requestId: String?) {
     textInputController.forgetRememberedInsert()
     val startTime = System.currentTimeMillis()
-    // Like performNodeAction, stay on the inbound command queue until settling and replying.
+    // Like NodeActionController.performNodeAction, stay on the inbound command queue until settling
+    // and replying.
     try {
       val outcome =
         clickFocusedInput(
@@ -2899,7 +2955,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
           },
           recycle = { node -> node.recycle() },
-          settleAfterClick = ::refreshHierarchyAfterNodeAction,
+          settleAfterClick = nodeActionController::refreshHierarchyAfterNodeAction,
         )
       broadcastActionResult(
         requestId,
@@ -2927,14 +2983,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     action: String,
     resourceId: String?,
     selector: NodeSelector?,
-  ) = performNodeAction(requestId, action, resourceId, selector)
+  ) = nodeActionController.performNodeAction(requestId, action, resourceId, selector)
 
   override suspend fun requestActivateAccessibilityLink(
     requestId: String?,
     text: String,
     occurrence: Int,
     selector: NodeSelector?,
-  ) = performAccessibilityLinkActivation(requestId, text, occurrence, selector)
+  ) = nodeActionController.performAccessibilityLinkActivation(requestId, text, occurrence, selector)
 
   override suspend fun requestClipboard(requestId: String?, action: String, text: String?) =
     clipboardController.performClipboard(requestId, action, text)
@@ -3402,7 +3458,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /** The keyboard's reach up from [displayId]'s bottom edge, from its accessibility window. */
   private fun prototypeImeLiftPx(displayId: Int): Int {
-    val screen = getScreenDimensions(displayId) ?: return 0
+    val screen = displayController.getScreenDimensions(displayId) ?: return 0
     val windows =
       viewHierarchyExtractor.windowsForDisplay(this, displayId).map {
         val bounds = Rect()
@@ -3776,129 +3832,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  /** Get current screen dimensions for offscreen filtering. */
-  @Suppress("DEPRECATION")
-  private fun getScreenDimensions(displayId: Int = Display.DEFAULT_DISPLAY): ScreenDimensions? {
-    return try {
-      if (displayId != Display.DEFAULT_DISPLAY && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        val displayManager =
-          getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
-        val display = displayManager?.getDisplay(displayId) ?: return null
-        val size = Point()
-        display.getRealSize(size)
-        return ScreenDimensions(size.x, size.y)
-      }
-      val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-      if (windowManager != null) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-          val bounds = windowManager.currentWindowMetrics.bounds
-          ScreenDimensions(bounds.width(), bounds.height())
-        } else {
-          val displayMetrics = DisplayMetrics()
-          windowManager.defaultDisplay.getRealMetrics(displayMetrics)
-          ScreenDimensions(displayMetrics.widthPixels, displayMetrics.heightPixels)
-        }
-      } else {
-        null
-      }
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to get screen dimensions", e)
-      null
-    }
-  }
-
   private fun activeDisplayId(): Int = viewHierarchyExtractor.selectDisplayWindows(this).displayId
-
-  private fun panelUniqueId(displayId: Int): String? =
-    (getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager)
-      ?.getDisplay(displayId)
-      .let(::panelUniqueIdOf)
-
-  private fun panelFingerprint(
-    displayId: Int,
-  ): dev.jasonpearson.automobile.ctrlproxy.models.PanelFingerprintInfo? =
-    (getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager)
-      ?.getDisplay(displayId)
-      .let(::panelFingerprintOf)
-      ?.let {
-        dev.jasonpearson.automobile.ctrlproxy.models.PanelFingerprintInfo(it.width, it.height)
-      }
-
-  /** Get current display rotation. Returns 0=portrait, 1=landscape90, 2=reverse, 3=landscape270. */
-  @Suppress("DEPRECATION")
-  private fun getRotation(): Int {
-    return getRotationOrNull() ?: 0
-  }
-
-  /**
-   * Read the display rotation without inventing portrait when the display is unavailable.
-   * Screenshot capture provenance uses this nullable form: an unknown rotation must make desktop
-   * control fail closed, unlike the older diagnostic hierarchy/device-info fields that retain their
-   * 0 fallback.
-   */
-  @Suppress("DEPRECATION")
-  private fun getRotationOrNull(displayId: Int = Display.DEFAULT_DISPLAY): Int? {
-    return try {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        // Use DisplayManager for AccessibilityService context (can't use context.display)
-        val displayManager =
-          getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
-        displayManager?.getDisplay(displayId)?.rotation
-      } else {
-        val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-        windowManager?.defaultDisplay?.rotation
-      }
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to get rotation", e)
-      null
-    }
-  }
-
-  /** Supplies each requested display's inset categories and [SystemChromeInfo] visibility. */
-  private val displayInsetsProvider: DisplayInsetsProvider by lazy {
-    createDisplayInsetsProvider(this)
-  }
-
-  /** Get typed current-window inset metadata for coordinate and layout inspection. */
-  @Suppress("DEPRECATION")
-  private fun getObservationInsets(
-    screenDimensions: ScreenDimensions?,
-    displayId: Int = Display.DEFAULT_DISPLAY,
-  ): ObservationInsetsInfo {
-    if (displayId != Display.DEFAULT_DISPLAY) {
-      return displayInsetsProvider.insetsFor(displayId, screenDimensions)
-    }
-    return try {
-      val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-      if (windowManager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        val metrics = windowManager.currentWindowMetrics
-        val windowInsets = metrics.windowInsets
-        observationInsetsFromWindowInsets(windowInsets, screenDimensions)
-      } else {
-        // API 24-29 cannot provide the typed WindowInsets categories from this service context.
-        val statusBarId = resources.getIdentifier("status_bar_height", "dimen", "android")
-        val navBarId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
-        val statusBarHeight =
-          if (statusBarId > 0) resources.getDimensionPixelSize(statusBarId) else 0
-        val navBarHeight = if (navBarId > 0) resources.getDimensionPixelSize(navBarId) else 0
-        val bars =
-          SystemInsetsInfo(top = statusBarHeight, bottom = navBarHeight, left = 0, right = 0)
-        ObservationInsetsInfo(
-          source = "android-resource-fallback",
-          systemBars = SystemBarsInsetsInfo(visible = bars, stable = bars),
-          displayCutoutInfo = DisplayCutoutInfo.unknown(),
-        )
-      }
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to get system insets", e)
-      ObservationInsetsInfo(
-        available = false,
-        source = "unavailable",
-        units = "unknown",
-        displayCutoutInfo = DisplayCutoutInfo.unknown(),
-      )
-    }
-  }
 
   /** Get device wakefulness state: "Awake", "Asleep", or "Dozing". */
   private fun getWakefulness(): String {
@@ -3962,16 +3896,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     className.startsWith("android.widget.") ||
       className.startsWith("android.view.") ||
       className.endsWith("DecorView")
-
-  /** Get display density in DPI. */
-  private fun getDensity(): Int {
-    return try {
-      resources.displayMetrics.densityDpi
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to get density", e)
-      0
-    }
-  }
 
   /** Check if running on an emulator. */
   /**
@@ -4042,7 +3966,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   /** Handle a request_device_info WebSocket message. */
   private fun performDeviceInfoRequest(requestId: String?) {
     val startTime = System.currentTimeMillis()
-    val screenDimensions = getScreenDimensions()
+    val screenDimensions = displayController.getScreenDimensions()
     val foreground = getForegroundActivity()
     val totalTimeMs = System.currentTimeMillis() - startTime
     asyncActionRunner.launch(requestId, "request_device_info") {
@@ -4053,8 +3977,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           success = true,
           screenWidth = screenDimensions?.width,
           screenHeight = screenDimensions?.height,
-          density = getDensity(),
-          rotation = getRotation(),
+          density = displayController.getDensity(),
+          rotation = displayController.getRotation(),
           sdkInt = Build.VERSION.SDK_INT,
           deviceModel = Build.MODEL,
           isEmulator = getIsEmulator(),
@@ -4080,7 +4004,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val selected = viewHierarchyExtractor.selectDisplayWindows(this, snapshotOptions.displayId)
     val targetDisplayId = selected.displayId
     val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
-    val rotationAtCaptureStart = getRotationOrNull(targetDisplayId)
+    val rotationAtCaptureStart = displayController.getRotationOrNull(targetDisplayId)
     val allWindows = selected.windows
     val rootNode =
       viewHierarchyExtractor.rootForDisplay(rootInActiveWindow, allWindows, targetDisplayId)
@@ -4088,8 +4012,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // where the app state changes between hierarchy extraction and getForegroundActivity()
     val capturedRootPackage = rootNode?.packageName?.toString()
     val capturedWindowClass = lastWindowClassName
-    val screenDimensions = getScreenDimensions(targetDisplayId)
-    val insets = getObservationInsets(screenDimensions, targetDisplayId)
+    val screenDimensions = displayController.getScreenDimensions(targetDisplayId)
+    val insets = displayController.getObservationInsets(screenDimensions, targetDisplayId)
 
     if (allWindows.isNullOrEmpty() && rootNode == null) {
       Log.w(TAG, "No windows or root node available for extraction")
@@ -4114,7 +4038,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           occlusionEnabled,
           snapshotOptions = snapshotOptions,
           displayId = targetDisplayId,
-          panelUniqueId = panelUniqueId(targetDisplayId),
+          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
         )
       } else {
         viewHierarchyExtractor.extractFromActiveWindow(
@@ -4125,7 +4049,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           disableAllFiltering,
           snapshotOptions = snapshotOptions,
           displayId = targetDisplayId,
-          panelUniqueId = panelUniqueId(targetDisplayId),
+          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
         )
       }
 
@@ -4139,7 +4063,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       rotationProvenance.rotationIfUnchanged(
         rotationCapture,
         rotationAtCaptureStart,
-        getRotationOrNull(targetDisplayId),
+        displayController.getRotationOrNull(targetDisplayId),
         targetDisplayId,
       )
     // Bounding rectangles are only meaningful relative to the same orientation
@@ -4155,14 +4079,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // Add device metadata to the hierarchy (eliminates need for dumpsys calls on client)
     val wakefulness = getWakefulness()
     val foreground = getForegroundActivity(capturedRootPackage, capturedWindowClass)
-    val density = getDensity()
+    val density = displayController.getDensity()
     val enriched =
       HierarchyMetadataBuilder.enrich(
         hierarchy,
         HierarchyMetadata(
           displayId = targetDisplayId,
-          panelUniqueId = panelUniqueId(targetDisplayId),
-          panelFingerprint = panelFingerprint(targetDisplayId),
+          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+          panelFingerprint = displayController.panelFingerprint(targetDisplayId),
           screenWidth = screenDimensions?.width,
           screenHeight = screenDimensions?.height,
           rotation = rotation,
@@ -4380,14 +4304,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val selected = viewHierarchyExtractor.selectDisplayWindows(this)
     val targetDisplayId = selected.displayId
     val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
-    val rotationAtCaptureStart = getRotationOrNull(targetDisplayId)
+    val rotationAtCaptureStart = displayController.getRotationOrNull(targetDisplayId)
     val allWindows = selected.windows
     val rootNode =
       viewHierarchyExtractor.rootForDisplay(rootInActiveWindow, allWindows, targetDisplayId)
     val capturedRootPackage = rootNode?.packageName?.toString()
     val capturedWindowClass = lastWindowClassName
-    val screenDimensions = getScreenDimensions(targetDisplayId)
-    val insets = getObservationInsets(screenDimensions, targetDisplayId)
+    val screenDimensions = displayController.getScreenDimensions(targetDisplayId)
+    val insets = displayController.getObservationInsets(screenDimensions, targetDisplayId)
 
     if (allWindows.isNullOrEmpty() && rootNode == null) {
       return null
@@ -4409,7 +4333,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           disableAllFiltering,
           occlusionEnabled,
           displayId = targetDisplayId,
-          panelUniqueId = panelUniqueId(targetDisplayId),
+          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
         )
       } else {
         viewHierarchyExtractor.extractFromActiveWindow(
@@ -4419,14 +4343,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           true,
           disableAllFiltering,
           displayId = targetDisplayId,
-          panelUniqueId = panelUniqueId(targetDisplayId),
+          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
         )
       }
     val rotation =
       rotationProvenance.rotationIfUnchanged(
         rotationCapture,
         rotationAtCaptureStart,
-        getRotationOrNull(targetDisplayId),
+        displayController.getRotationOrNull(targetDisplayId),
         targetDisplayId,
       )
     val captureInsets =
@@ -4436,8 +4360,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         hierarchy,
         HierarchyMetadata(
           displayId = targetDisplayId,
-          panelUniqueId = panelUniqueId(targetDisplayId),
-          panelFingerprint = panelFingerprint(targetDisplayId),
+          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
+          panelFingerprint = displayController.panelFingerprint(targetDisplayId),
           screenWidth = screenDimensions?.width,
           screenHeight = screenDimensions?.height,
           rotation = rotation,
@@ -4445,7 +4369,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           insets = captureInsets,
           wakefulness = getWakefulness(),
           foregroundActivity = getForegroundActivity(capturedRootPackage, capturedWindowClass),
-          density = getDensity(),
+          density = displayController.getDensity(),
           sdkInt = Build.VERSION.SDK_INT,
           deviceModel = Build.MODEL,
           isEmulator = getIsEmulator(),
@@ -4601,340 +4525,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     } catch (e: Exception) {
       Log.e(TAG, "Error cleaning up UUID hierarchy files", e)
       // Don't let cleanup errors prevent the main operation
-    }
-  }
-
-  /**
-   * Takes a screenshot and returns it as a base64-encoded JPEG plus capture diagnostics. Requires
-   * Android R (API 30) or higher. Runs on IO dispatcher to avoid blocking the main thread.
-   */
-  private suspend fun takeScreenshotAsync(
-    targetDisplayId: Int,
-    quality: Int = 80,
-  ): ScreenshotCaptureOutcome {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-      Log.w(TAG, "Screenshot API requires Android R (API 30) or higher")
-      return ScreenshotCaptureOutcome.Failure(null)
-    }
-
-    return withContext(Dispatchers.IO) {
-      try {
-        val startTime = System.currentTimeMillis()
-
-        // Use suspendCancellableCoroutine to bridge callback-based API
-        val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
-        val rotationAtCaptureStart = getRotationOrNull(targetDisplayId)
-        val captured =
-          suspendCancellableCoroutine<ScreenshotCallbackResult> { continuation ->
-            takeScreenshot(
-              targetDisplayId,
-              mainExecutor,
-              object : TakeScreenshotCallback {
-                override fun onSuccess(screenshot: ScreenshotResult) {
-                  val hardwareBitmap =
-                    Bitmap.wrapHardwareBuffer(
-                      screenshot.hardwareBuffer,
-                      screenshot.colorSpace,
-                    )
-                  screenshot.hardwareBuffer.close()
-                  if (hardwareBitmap == null) {
-                    continuation.resume(ScreenshotCallbackResult.Failed(null))
-                    return
-                  }
-                  // A display change makes the pixels' orientation ambiguous. Preserve that
-                  // ambiguity as null so desktop control fails closed rather than guessing.
-                  val rotation =
-                    rotationProvenance.rotationIfUnchanged(
-                      rotationCapture,
-                      rotationAtCaptureStart,
-                      getRotationOrNull(targetDisplayId),
-                      targetDisplayId,
-                    )
-                  continuation.resume(ScreenshotCallbackResult.Captured(hardwareBitmap, rotation))
-                }
-
-                override fun onFailure(errorCode: Int) {
-                  // Retain the platform error code so the broadcast can distinguish a rate limit
-                  // (ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) from a real failure (issue #4927).
-                  Log.e(TAG, "Screenshot failed with error code: $errorCode")
-                  continuation.resume(ScreenshotCallbackResult.Failed(errorCode))
-                }
-              },
-            )
-          }
-
-        if (captured is ScreenshotCallbackResult.Failed) {
-          Log.e(TAG, "Failed to capture screenshot bitmap (errorCode=${captured.errorCode})")
-          return@withContext ScreenshotCaptureOutcome.Failure(captured.errorCode)
-        }
-
-        val (bitmap, rotation) = captured as ScreenshotCallbackResult.Captured
-
-        val screenshotTime = System.currentTimeMillis() - startTime
-        Log.d(TAG, "Screenshot captured in ${screenshotTime}ms (${bitmap.width}x${bitmap.height})")
-
-        // Convert to JPEG bytes on IO thread
-        val encodeStart = System.currentTimeMillis()
-        val outputStream = ByteArrayOutputStream()
-
-        // Convert hardware bitmap to software bitmap for compression
-        val softwareBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
-        bitmap.recycle()
-
-        softwareBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
-        softwareBitmap.recycle()
-
-        val jpegBytes = outputStream.toByteArray()
-        val base64String = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
-
-        val encodeTime = System.currentTimeMillis() - encodeStart
-        val totalTime = System.currentTimeMillis() - startTime
-
-        Log.d(
-          TAG,
-          "Screenshot encoded: ${jpegBytes.size} bytes -> ${base64String.length} base64 chars in ${encodeTime}ms (total: ${totalTime}ms)",
-        )
-
-        ScreenshotCaptureOutcome.Success(
-          ScreenshotCapturePayload(
-            base64Image = base64String,
-            rotation = rotation,
-            displayId = targetDisplayId,
-            panelUniqueId = panelUniqueId(targetDisplayId),
-            captureDurationMs = screenshotTime,
-            encodeDurationMs = encodeTime,
-            byteLength = jpegBytes.size,
-            base64Length = base64String.length,
-          ),
-        )
-      } catch (e: CancellationException) {
-        // The awaiting caller is being cancelled — rethrow instead of converting the cancellation
-        // into a null screenshot (#3191).
-        throw e
-      } catch (e: Exception) {
-        Log.e(TAG, "Error taking screenshot", e)
-        ScreenshotCaptureOutcome.Failure(null)
-      }
-    }
-  }
-
-  /**
-   * Perform an accessibility action on a node selected from observed stable fields. Resource ID is
-   * preserved as the legacy selector; newer clients can additionally use test tags, Android unique
-   * IDs, and collection coordinates.
-   */
-  private fun performAccessibilityLinkActivation(
-    requestId: String?,
-    text: String,
-    occurrence: Int,
-    selector: NodeSelector?,
-  ) {
-    val startTime = System.currentTimeMillis()
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-      launchRequestScope(requestId) {
-        broadcastActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          "Semantic accessibility links require Android API 26 or later",
-          System.currentTimeMillis() - startTime,
-        )
-      }
-      return
-    }
-    if (text.isBlank() || occurrence < 0) {
-      launchRequestScope(requestId) {
-        broadcastActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          "Link text must be non-blank and occurrence must be non-negative",
-          System.currentTimeMillis() - startTime,
-        )
-      }
-      return
-    }
-
-    try {
-      val root = rootInActiveWindow
-      val owner = selector?.let { sel -> findNodeInDisplayWindows { findNodeBySelector(it, sel) } }
-      if (selector != null && owner == null) {
-        throw IllegalStateException("Selected link owner is no longer present")
-      }
-      var matched = 0
-      var activated = false
-      var activationError: String? = null
-      fun visit(node: AccessibilityNodeInfo?) {
-        if (node == null || activated) return
-        val nodeText = node.text as? Spanned
-        if (nodeText != null) {
-          nodeText
-            .getSpans(0, nodeText.length, ClickableSpan::class.java)
-            .sortedBy { nodeText.getSpanStart(it) }
-            .forEach { span ->
-              if (activated) return@forEach
-              val start = nodeText.getSpanStart(span)
-              val end = nodeText.getSpanEnd(span)
-              val spanText = nodeText.subSequence(start, end).toString()
-              if (spanText.equals(text, ignoreCase = true)) {
-                if (matched++ == occurrence) {
-                  try {
-                    // Accessibility exposes ClickableSpan only from API 26. Invoke its public
-                    // contract; no coordinate, reflection, or whole-node fallback is permitted.
-                    span.onClick(View(this))
-                    activated = true
-                  } catch (error: Exception) {
-                    activationError = error.message ?: error.javaClass.simpleName
-                  }
-                }
-              }
-            }
-        }
-        for (index in 0 until node.childCount) {
-          node.getChild(index)?.let { child ->
-            try {
-              visit(child)
-            } finally {
-              child.recycle()
-            }
-          }
-        }
-      }
-      visit(owner ?: root)
-      owner?.recycle()
-
-      val error =
-        when {
-          activated -> null
-          activationError != null -> "Semantic link activation failed: $activationError"
-          else -> "No actionable semantic link matching '$text' at occurrence $occurrence"
-        }
-      launchRequestScope(requestId) {
-        broadcastActionResult(
-          requestId,
-          "activate_accessibility_link",
-          activated,
-          error,
-          System.currentTimeMillis() - startTime,
-        )
-      }
-    } catch (error: Exception) {
-      Log.w(TAG, "Semantic accessibility link activation failed", error)
-      launchRequestScope(requestId) {
-        broadcastActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          error.message ?: error.javaClass.simpleName,
-          System.currentTimeMillis() - startTime,
-        )
-      }
-    }
-  }
-
-  /** Settle and publish a fresh hierarchy before acknowledging a successful node action. */
-  private suspend fun refreshHierarchyAfterNodeAction() {
-    val freshHierarchy =
-      hierarchyDebouncer.extractAfterQuiescenceSuspending(
-        quiescenceMs = HierarchyQuiescence.POLL_MS,
-        maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-        pollIntervalMs = 10L,
-      )
-    if (freshHierarchy != null) {
-      broadcastHierarchyUpdate(freshHierarchy, sync = true)
-    }
-  }
-
-  private suspend fun performNodeAction(
-    requestId: String?,
-    action: String,
-    resourceId: String?,
-    selector: NodeSelector?,
-  ) {
-    textInputController.forgetRememberedInsert()
-    val startTime = System.currentTimeMillis()
-    val effectiveSelector = selector?.takeIf { it.hasCriteria() }
-    val targetDescription = effectiveSelector?.toString() ?: "resource-id: $resourceId"
-    Log.d(TAG, "performAction: action='$action', target='$targetDescription'")
-    perfProvider.serial("performAction")
-
-    try {
-      if (effectiveSelector == null && resourceId.isNullOrEmpty()) {
-        perfProvider.end()
-        val errorTime = System.currentTimeMillis()
-        val error = "A resource-id or stable node selector is required for accessibility actions"
-        Log.w(TAG, error)
-        launchRequestScope(requestId) {
-          broadcastActionResult(requestId, action, false, error, errorTime - startTime)
-        }
-        return
-      }
-
-      perfProvider.startOperation("findNode")
-      val targetNode = findNodeInDisplayWindows { root ->
-        if (effectiveSelector != null) {
-          findNodeBySelector(root, effectiveSelector)
-        } else if (resourceId != null) {
-          findNodeByResourceIdOnRootDisplay(root, resourceId, ::getScreenDimensions)
-        } else {
-          null
-        }
-      }
-      perfProvider.endOperation("findNode")
-
-      if (targetNode == null) {
-        perfProvider.end()
-        val errorTime = System.currentTimeMillis()
-        val error = "Element not found with $targetDescription"
-        Log.w(TAG, error)
-        launchRequestScope(requestId) {
-          broadcastActionResult(requestId, action, false, error, errorTime - startTime)
-        }
-        return
-      }
-
-      perfProvider.startOperation("executeAction")
-      val decision =
-        decideNodeAction(
-          action,
-          targetNode.isAccessibilityFocused,
-          targetNode.actionList?.map { it.id },
-        )
-      val alreadySatisfied = decision is NodeActionDecision.AlreadySatisfied
-      val actionError = (decision as? NodeActionDecision.Refused)?.message
-      val success =
-        alreadySatisfied ||
-          (decision is NodeActionDecision.Perform && targetNode.performAction(decision.actionId))
-      perfProvider.endOperation("executeAction")
-
-      targetNode.recycle()
-      perfProvider.end()
-
-      Log.d(TAG, "Action completed: success=$success")
-
-      // Wait for UI to settle after click/long_click/scroll, then extract fresh hierarchy
-      if (success && action in listOf("click", "long_click", "scroll_forward", "scroll_backward")) {
-        refreshHierarchyAfterNodeAction()
-      }
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "Action total time: ${totalTime}ms")
-
-      broadcastActionResult(
-        requestId,
-        action,
-        success,
-        if (success) null else actionError ?: "performAction returned false",
-        totalTime,
-        alreadySatisfied,
-      )
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing action", e)
-      broadcastActionResult(requestId, action, false, e.message, errorTime - startTime)
     }
   }
 
@@ -5150,7 +4740,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           capture.value
         } else {
           prototypesHidden = null
-          takeScreenshotAsync(targetDisplayId)
+          screenshotController.takeScreenshotAsync(targetDisplayId)
         }
       val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
       when (outcome) {
@@ -5180,7 +4770,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           // rather than a generic capture failure (issue #4927).
           val error = CtrlProxyScreenshotWire.errorMessageForCode(outcome.errorCode)
           webSocketServer.broadcast(
-            screenshotErrorFrame(requestId, error, targetDisplayId, panelUniqueId(targetDisplayId)),
+            screenshotErrorFrame(
+              requestId,
+              error,
+              targetDisplayId,
+              displayController.panelUniqueId(targetDisplayId),
+            ),
           )
         }
       }
@@ -5195,8 +4790,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     targetDisplayId: Int,
   ): PrototypeHiddenCapture<ScreenshotCaptureOutcome> =
     if (::prototypeController.isInitialized)
-      prototypeController.withHiddenForCapture { takeScreenshotAsync(targetDisplayId) }
-    else PrototypeHiddenCapture(takeScreenshotAsync(targetDisplayId), prototypeExcluded = true)
+      prototypeController.withHiddenForCapture {
+        screenshotController.takeScreenshotAsync(targetDisplayId)
+      }
+    else
+      PrototypeHiddenCapture(
+        screenshotController.takeScreenshotAsync(targetDisplayId),
+        prototypeExcluded = true,
+      )
 
   /** Broadcast navigation event to WebSocket clients using typed protocol */
   private suspend fun broadcastNavigationEvent(

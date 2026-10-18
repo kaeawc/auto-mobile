@@ -30,8 +30,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
-import dev.jasonpearson.automobile.ctrlproxy.ime.awaitImeServiceReady
-import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.KeyboardProfiles
+import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
@@ -96,8 +95,7 @@ import dev.jasonpearson.automobile.protocol.DeviceInfo
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
-import dev.jasonpearson.automobile.protocol.KeyboardProfileBehaviorInfo
-import dev.jasonpearson.automobile.protocol.KeyboardProfileInfo
+import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.LifecycleEventData
 import dev.jasonpearson.automobile.protocol.LifecycleEventResponse
 import dev.jasonpearson.automobile.protocol.NavigationEventData
@@ -149,11 +147,9 @@ import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import java.io.File
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -172,7 +168,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 
@@ -897,15 +892,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   // so tests can supply a deterministic queue before onCreate, without a real HandlerThread.
   internal var gestureThreadFactory: () -> GestureThread = ::HandlerGestureThread
 
-  private class ImeCommitState {
-    val cancelled = AtomicBoolean(false)
-    val finished = CompletableDeferred<ImeCommitResult>()
-  }
-
-  // Cancelled IDs remain tombstoned until service shutdown. Request IDs are UUIDs; retaining a
-  // cancellation prevents a delayed request from starting after its cancellation was acknowledged.
-  private val imeCommitStates = java.util.concurrent.ConcurrentHashMap<String, ImeCommitState>()
-
   /**
    * Launches request-correlated raw work with [RequestIdContext] attached so [serviceScopeGuard]
    * can emit a correlated error frame if the launch throws before a guarded result helper runs.
@@ -1608,6 +1594,84 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun connectionCount() = webSocketServer.getConnectionCount()
         },
     )
+  /** CtrlProxyIme commitText, its cancellation tombstones, and the keyboard profile requests. */
+  private val imeController by lazy {
+    ImeController(
+      host =
+        object : ImeController.Host {
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) {
+            this@CtrlProxy.launchRequestScope(requestId, block)
+          }
+
+          override fun currentIme(): ImeController.ImeTarget? =
+            CtrlProxyIme.current()?.let { ime ->
+              object : ImeController.ImeTarget {
+                override fun commitText(
+                  text: String,
+                  priorImeId: String?,
+                  isCancelled: () -> Boolean,
+                  delivery: ImeTextDelivery,
+                  timeoutMs: Long?,
+                  requestDeadlineMs: Long,
+                  trace: Boolean,
+                  onResult: (ImeCommitResult) -> Unit,
+                ) =
+                  ime.commitText(
+                    text,
+                    priorImeId,
+                    isCancelled,
+                    delivery,
+                    timeoutMs,
+                    requestDeadlineMs,
+                    trace,
+                    onResult,
+                  )
+              }
+            }
+
+          override fun setActiveProfile(id: String, onComplete: (Boolean) -> Unit) =
+            CtrlProxyIme.setActiveProfile(id, onComplete)
+
+          override fun keyboardProfileStore(): KeyboardProfileStore =
+            SharedPreferencesKeyboardProfileStore(this@CtrlProxy)
+
+          override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
+        },
+      timeProvider = timeProvider,
+      resultBroadcaster = resultBroadcaster,
+      jsonCompact = jsonCompact,
+      responseSender =
+        object : ImeController.ResponseSender {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcastWithPerfSync(
+            type: String,
+            requestId: String?,
+            buildContent: JsonObjectBuilder.() -> Unit,
+          ) {
+            webSocketServer.broadcastWithPerfSync { perfTiming ->
+              webSocketFrameJson(
+                type,
+                requestId = requestId,
+                perfTiming = perfTiming,
+                buildContent = buildContent,
+              )
+            }
+          }
+
+          override suspend fun broadcastSetKeyboardProfileResult(
+            build: (perfTiming: String?) -> SetKeyboardProfileResult,
+          ) {
+            webSocketServer.broadcastTypedWithPerf(build)
+          }
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+        },
+    )
+  }
   /**
    * Tap, swipe, multi-finger, pinch, drag and streamed gestures plus their result frames, and the
    * dedicated gesture thread their callbacks run on.
@@ -2666,211 +2730,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
 
-  override suspend fun requestCommitText(request: RequestCommitText) {
-    val requestId = request.requestId
-    val text = request.text
-    val priorImeId = request.priorImeId
-    val delivery = request.delivery
-    val timeoutMs = request.timeoutMs
-    val trace = request.trace
+  override suspend fun requestCommitText(request: RequestCommitText) =
+    imeController.requestCommitText(request)
 
-    textInputController.forgetRememberedInsert()
-    val start = System.currentTimeMillis()
-    val requestDeadlineMs =
-      timeoutMs?.let { android.os.SystemClock.uptimeMillis() + it.coerceAtLeast(0) }
-        ?: Long.MAX_VALUE
-    val state = requestId?.let { imeCommitStates.computeIfAbsent(it) { ImeCommitState() } }
-    if (state?.cancelled?.get() == true) {
-      launchRequestScope(requestId) {
-        broadcastCommitTextResult(requestId, false, "IME commit cancelled", 0L, false)
-      }
-      return
-    }
-    launchRequestScope(requestId) {
-      fun finish(result: ImeCommitResult) {
-        state?.finished?.complete(result)
-        if (state?.cancelled?.get() == false) imeCommitStates.remove(requestId, state)
-      }
-      // `ime set` can return before Android creates the InputMethodService. Give activation a
-      // bounded window; the IME separately waits for its editor binding.
-      val ime =
-        awaitImeServiceReady(
-          nowMs = android.os.SystemClock::uptimeMillis,
-          delayMs = {
-            kotlinx.coroutines.delay(
-              minOf(it, requestDeadlineMs - android.os.SystemClock.uptimeMillis()).coerceAtLeast(0),
-            )
-          },
-          probe = {
-            CtrlProxyIme.current()?.takeIf {
-              android.os.SystemClock.uptimeMillis() < requestDeadlineMs
-            }
-          },
-          isCancelled = {
-            state?.cancelled?.get() == true ||
-              android.os.SystemClock.uptimeMillis() >= requestDeadlineMs
-          },
-        )
-      if (state?.cancelled?.get() == true) {
-        finish(ImeCommitResult(success = false, error = null))
-        broadcastCommitTextResult(
-          requestId,
-          false,
-          "IME commit cancelled",
-          System.currentTimeMillis() - start,
-          false,
-        )
-        return@launchRequestScope
-      }
-      if (ime == null) {
-        finish(ImeCommitResult(success = false, error = null))
-        broadcastCommitTextResult(
-          requestId,
-          false,
-          "IME service did not start within timeout",
-          System.currentTimeMillis() - start,
-          false,
-        )
-        return@launchRequestScope
-      }
-      ime.commitText(
-        text,
-        priorImeId,
-        { state?.cancelled?.get() == true },
-        delivery,
-        timeoutMs,
-        requestDeadlineMs,
-        trace,
-      ) { result ->
-        finish(result)
-        launchRequestScope(requestId) {
-          broadcastCommitTextResult(
-            requestId,
-            result.success,
-            result.error,
-            System.currentTimeMillis() - start,
-            result.partialApplication,
-            result.committedUnits,
-            result.insertedText,
-            if (trace) result.trace else null,
-            editorConsumed = result.editorConsumed,
-          )
-        }
-      }
-    }
-  }
+  override suspend fun requestCancelImeCommit(requestId: String?, targetRequestId: String) =
+    imeController.requestCancelImeCommit(requestId, targetRequestId)
 
-  override suspend fun requestCancelImeCommit(requestId: String?, targetRequestId: String) {
-    val tombstone =
-      ImeCommitState().apply {
-        cancelled.set(true)
-        finished.complete(ImeCommitResult(success = false, error = null))
-      }
-    val state = imeCommitStates.putIfAbsent(targetRequestId, tombstone) ?: tombstone
-    state.cancelled.set(true)
-    // An absent target is a tombstone: the original frame may still be queued on another socket.
-    launchRequestScope(requestId) {
-      val result = state.finished.await()
-      resultBroadcaster.guard(requestId, "cancel_ime_commit_result") {
-        webSocketServer.broadcastWithPerfSync { perfTiming ->
-          webSocketFrameJson(
-            "cancel_ime_commit_result",
-            requestId = requestId,
-            perfTiming = perfTiming,
-          ) {
-            put("success", true)
-            put("targetRequestId", targetRequestId)
-            put("partialApplication", result.partialApplication)
-            if (result.committedUnits > 0) put("committedUnits", result.committedUnits)
-          }
-        }
-      }
-    }
-  }
-
-  override suspend fun requestSetKeyboardProfile(requestId: String?, profileId: String) {
-    val profile = KeyboardProfiles.byId(profileId)
-    if (profile == null) {
-      val expected = KeyboardProfiles.all.joinToString(", ") { it.id }
-      launchRequestScope(requestId) {
-        broadcastSetKeyboardProfileResult(
-          requestId,
-          false,
-          error = "Unknown keyboard profile '$profileId'; expected one of: $expected",
-        )
-      }
-      return
-    }
-
-    val store = SharedPreferencesKeyboardProfileStore(this)
-    val previous = store.activeProfileId()
-    val applied = CompletableDeferred<Boolean>()
-    val live = CtrlProxyIme.setActiveProfile(profile.id) { applied.complete(it) }
-    if (!live) {
-      store.setActiveProfileId(profile.id)
-      applied.complete(true)
-    }
-    launchRequestScope(requestId) {
-      val success = applied.await()
-      broadcastSetKeyboardProfileResult(
-        requestId,
-        success,
-        if (success) profile.id else null,
-        if (success) previous else null,
-        if (success) null else "Failed to apply keyboard profile",
-      )
-    }
-  }
+  override suspend fun requestSetKeyboardProfile(requestId: String?, profileId: String) =
+    imeController.requestSetKeyboardProfile(requestId, profileId)
 
   override suspend fun requestListKeyboardProfiles(
     requestId: String?,
     supportedCatalogVersions: List<Int>,
-  ) {
-    val catalogVersion = KeyboardProfiles.negotiateCatalogVersion(supportedCatalogVersions)
-    if (catalogVersion == null) {
-      launchRequestScope(requestId) {
-        broadcastKeyboardProfileCatalog(
-          requestId = requestId,
-          success = false,
-          supportedCatalogVersions = KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS,
-          error =
-            "No mutually supported keyboard profile catalog version; device supports " +
-              KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS.joinToString(", "),
-        )
-      }
-      return
-    }
-    val profiles =
-      KeyboardProfiles.all.map { profile ->
-        KeyboardProfileInfo(
-          id = profile.id,
-          displayName = profile.displayName,
-          version = profile.version,
-          evidenceStatus = profile.evidenceStatus,
-          evidenceNote = profile.evidenceNote,
-          behavior =
-            KeyboardProfileBehaviorInfo(
-              composeWords = profile.behavior.composeWords,
-              enterStrategy = profile.behavior.enterStrategy.name,
-              backspaceStrategy = profile.behavior.backspaceStrategy.name,
-              recomposeOnCursorMove = profile.behavior.recomposeOnCursorMove,
-              recomposeOnBackspaceIntoWord = profile.behavior.recomposeOnBackspaceIntoWord,
-              batchEdits = profile.behavior.batchEdits,
-            ),
-        )
-      }
-    val activeProfileId = SharedPreferencesKeyboardProfileStore(this).activeProfileId()
-    launchRequestScope(requestId) {
-      broadcastKeyboardProfileCatalog(
-        requestId = requestId,
-        success = true,
-        catalogVersion = catalogVersion,
-        supportedCatalogVersions = KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS,
-        activeProfileId = activeProfileId,
-        profiles = profiles,
-      )
-    }
-  }
+  ) = imeController.requestListKeyboardProfiles(requestId, supportedCatalogVersions)
 
   override suspend fun requestImeAction(request: RequestImeAction) {
     val requestId = request.requestId
@@ -3865,108 +3737,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       Log.w(TAG, "Failed to enumerate display windows for node lookup", e)
       emptyList()
     }
-
-  private suspend fun broadcastCommitTextResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    partialApplication: Boolean,
-    committedUnits: Int = 0,
-    insertedText: String? = null,
-    trace: List<String>? = null,
-    editorConsumed: Boolean = false,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping commit text result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "commit_text_result") {
-      webSocketServer.broadcastWithPerfSync { perfTiming ->
-        webSocketFrameJson("commit_text_result", requestId = requestId, perfTiming = perfTiming) {
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (partialApplication) put("partialApplication", true)
-          if (committedUnits > 0) put("committedUnits", committedUnits)
-          if (insertedText != null) put("insertedText", insertedText)
-          if (editorConsumed) put("editorConsumed", true)
-          if (trace != null) put("trace", Json.encodeToJsonElement(trace))
-          if (error != null) {
-            put("error", error)
-          }
-        }
-      }
-      Log.d(
-        TAG,
-        "Broadcasted commit text result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastSetKeyboardProfileResult(
-    requestId: String?,
-    success: Boolean,
-    activeProfileId: String? = null,
-    previousProfileId: String? = null,
-    error: String? = null,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping keyboard profile result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "set_keyboard_profile_result") {
-      webSocketServer.broadcastTypedWithPerf { perfTiming ->
-        SetKeyboardProfileResult(
-          timestamp = System.currentTimeMillis(),
-          requestId = requestId,
-          success = success,
-          activeProfileId = activeProfileId,
-          previousProfileId = previousProfileId,
-          error = error,
-          perfTiming = perfTiming,
-        )
-      }
-      Log.d(
-        TAG,
-        "Broadcasted keyboard profile result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastKeyboardProfileCatalog(
-    requestId: String?,
-    success: Boolean,
-    catalogVersion: Int? = null,
-    supportedCatalogVersions: List<Int>,
-    activeProfileId: String? = null,
-    profiles: List<KeyboardProfileInfo> = emptyList(),
-    error: String? = null,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping keyboard profile catalog response")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "keyboard_profiles_result") {
-      webSocketServer.broadcastWithPerfSync { perfTiming ->
-        webSocketFrameJson(
-          "keyboard_profiles_result",
-          requestId = requestId,
-          perfTiming = perfTiming,
-        ) {
-          put("success", success)
-          put("catalogId", "automobile_behavior_profiles")
-          if (catalogVersion != null) put("catalogVersion", catalogVersion)
-          put("supportedCatalogVersions", jsonCompact.encodeToJsonElement(supportedCatalogVersions))
-          if (activeProfileId != null) put("activeProfileId", activeProfileId)
-          if (success) put("profiles", jsonCompact.encodeToJsonElement(profiles))
-          if (error != null) put("error", error)
-        }
-      }
-    }
-  }
 
   /** Broadcast accessibility action result to WebSocket clients */
   private suspend fun broadcastActionResult(

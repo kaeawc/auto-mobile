@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { expireIfDue } from "../helpers/expireIfDue";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/sessionLivenessWindows";
 import {
@@ -114,10 +115,11 @@ describe("idle-expiry release cancels the executions it overrides (#10820)", () 
     const idleDeadline = startHungCall();
 
     timer.setCurrentTime(idleDeadline + UNSETTLED_EXECUTION_VETO_CEILING_MS - 1);
-    expect(manager.getSession(SESSION)).not.toBeNull();
+    expect(expireIfDue(manager, SESSION)).not.toBeNull();
     expect(hung!.abortController.signal.aborted).toBe(false);
 
     timer.setCurrentTime(idleDeadline + UNSETTLED_EXECUTION_VETO_CEILING_MS);
+    expect(expireIfDue(manager, SESSION)).toBeNull();
     expect(manager.getSession(SESSION)).toBeNull();
     expect(hung!.abortController.signal.aborted).toBe(true);
     await settle();
@@ -129,7 +131,7 @@ describe("idle-expiry release cancels the executions it overrides (#10820)", () 
   // refusal a call arriving after the release gets, not a generic abort.
   for (const [path, reason, expire] of [
     ["sweep", "cleanup-expired", () => manager.cleanupExpiredSessions()],
-    ["lazy lookup", "cleanup-expired", () => manager.getSession(SESSION)],
+    ["lazy expiry", "cleanup-expired", () => expireIfDue(manager, SESSION)],
   ] as const) {
     it(`${path}: the call it cuts is aborted with the typed terminal release`, async () => {
       const idleDeadline = startHungCall();

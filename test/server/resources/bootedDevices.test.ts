@@ -1537,12 +1537,10 @@ describe("MCP Booted Device Resources", () => {
             )
           : createExecResult("", ""),
       );
-      const emulator = new AndroidEmulatorClient(
-        undefined,
-        null,
-        fakeTimer,
-        new FakeAdbClientFactory(adb),
-      );
+      const emulator = new AndroidEmulatorClient({
+        timer: fakeTimer,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
       (fakeDeviceUtils as PlatformDeviceManager).getAndroidListedDeviceStates = (ids) =>
         emulator.getListedNonDeviceStatesAmong(ids);
@@ -1593,12 +1591,10 @@ describe("MCP Booted Device Resources", () => {
             )
           : createExecResult("", ""),
       );
-      const emulator = new AndroidEmulatorClient(
-        undefined,
-        null,
-        fakeTimer,
-        new FakeAdbClientFactory(adb),
-      );
+      const emulator = new AndroidEmulatorClient({
+        timer: fakeTimer,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
       (fakeDeviceUtils as PlatformDeviceManager).getAndroidListedDeviceStates = (ids) =>
         emulator.getListedNonDeviceStatesAmong(ids);

@@ -20,6 +20,8 @@ export const TIER_RULES: readonly TierRule[] = [
   { tier: "devices", allowed: ["devices", "ctrlProxy", "db", "models", "utils", ...LEAF] },
   { tier: "ctrlProxy", allowed: ["ctrlProxy", "devices", "db", "models", "utils", ...LEAF] },
   { tier: "features", forbidden: ["server"] },
+  // daemon must not reach up into the MCP server tier (#11790); sub-package rules follow the moves.
+  { tier: "daemon", forbidden: ["server"] },
 ];
 
 export function baselinePath(tier: string): string {

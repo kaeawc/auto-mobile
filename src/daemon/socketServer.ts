@@ -145,7 +145,7 @@ import { deviceIncarnationToken } from "../utils/deviceIncarnation";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES, OutboundWriteGuard } from "./outboundWriteGuard";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
-import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
+import type { FeatureFlagAdmin } from "../features/featureFlags/FeatureFlagService";
 import {
   getSessionToolSelectionService,
   type SessionToolSelectionService,
@@ -991,7 +991,7 @@ export class UnixSocketServer {
   private readonly socketOwnerLiveness: SocketOwnerLiveness;
   /** Cross-process lock serializing the reclaim → bind sequence against a concurrent binder (issue #6232, W5). */
   private readonly socketReclaimLock: SocketReclaimLock;
-  private featureFlagService: FeatureFlagService | null;
+  private featureFlagService: FeatureFlagAdmin | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
   private readonly identityStartedAt: number;
@@ -1084,7 +1084,7 @@ export class UnixSocketServer {
     socketPath: string = SOCKET_PATH,
     daemonState: SocketDaemonStateAccess = DaemonState.getInstance(),
     timer: Timer = defaultTimer,
-    featureFlagService: FeatureFlagService | null = null,
+    featureFlagService: FeatureFlagAdmin | null = null,
     handshakeConfig: {
       identity?: DaemonSelfIdentity;
       identityStartedAt?: number;
@@ -4090,7 +4090,7 @@ export class UnixSocketServer {
     }
   }
 
-  private requireFeatureFlagService(): FeatureFlagService {
+  private requireFeatureFlagService(): FeatureFlagAdmin {
     if (!this.featureFlagService) {
       throw new Error("Feature flag service not available");
     }

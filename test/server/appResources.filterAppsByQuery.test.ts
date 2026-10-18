@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { extractIosApplicationType, toQueryIosApp } from "../../src/server/iosInstalledAppFacts";
 import {
-  extractIosApplicationType,
   filterAppsByQuery,
   parseAppsQueryParams,
-  toQueryIosApp,
   type AppsQueryAppInfo,
 } from "../../src/server/appResources";
 

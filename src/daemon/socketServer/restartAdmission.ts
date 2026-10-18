@@ -221,7 +221,6 @@ export class RestartAdmission {
     }
   }
 
-  // eslint-disable-next-line complexity -- each refusal is a distinct security fence for this one-shot control RPC.
   restartAcceptanceSession(
     params: Record<string, unknown>,
     ownerSessionId: string | undefined,
@@ -251,27 +250,9 @@ export class RestartAdmission {
     ) {
       return { accepted: false, reason: "acceptance_capability_invalid" };
     }
-    const sessions = this.deps.getAllSessions();
-    if (!sessions) {
-      return { accepted: false, reason: "session_not_found" };
-    }
-    const session = sessions.find((candidate) => candidate.sessionId === scope.sessionUuid);
-    if (!session) {
-      return { accepted: false, reason: "session_not_found" };
-    }
-    if (
-      session.platform !== scope.platform ||
-      session.stableDeviceId !== scope.stableDeviceId ||
-      sessions.length !== 1
-    ) {
-      return {
-        accepted: false,
-        reason:
-          sessions.length !== 1 &&
-          sessions.some((candidate) => candidate.sessionId !== scope.sessionUuid)
-            ? "unrelated_sessions"
-            : "session_identity_mismatch",
-      };
+    const sessionRefusal = this.acceptanceSessionRefusal(scope);
+    if (sessionRefusal) {
+      return { accepted: false, reason: sessionRefusal };
     }
     const admission = executionTracker.prepareForDaemonRestart();
     if (admission !== "accepted") {
@@ -383,26 +364,41 @@ export class RestartAdmission {
     this.acceptanceRestartAdmissionExpiryTimer = undefined;
   }
 
-  // eslint-disable-next-line complexity -- validate every untrusted scope field before HMAC authorization.
+  /** Why the live sessions cannot satisfy `scope`, or undefined when exactly its session is live. */
+  private acceptanceSessionRefusal(
+    scope: AcceptanceSessionRestartScope,
+  ): NonNullable<DaemonAcceptanceSessionRestart["reason"]> | undefined {
+    const sessions = this.deps.getAllSessions();
+    const session = sessions?.find((candidate) => candidate.sessionId === scope.sessionUuid);
+    if (!sessions || !session) {
+      return "session_not_found";
+    }
+    if (
+      session.platform === scope.platform &&
+      session.stableDeviceId === scope.stableDeviceId &&
+      sessions.length === 1
+    ) {
+      return undefined;
+    }
+    return sessions.length !== 1 &&
+      sessions.some((candidate) => candidate.sessionId !== scope.sessionUuid)
+      ? "unrelated_sessions"
+      : "session_identity_mismatch";
+  }
+
   private acceptanceSessionRestartScope(value: unknown): AcceptanceSessionRestartScope | undefined {
     if (!value || typeof value !== "object" || Array.isArray(value)) {
       return undefined;
     }
     const scope = value as Partial<AcceptanceSessionRestartScope>;
-    const controls = scope.controls;
+    const controls = acceptanceScopeControls(scope.controls);
     if (
-      typeof scope.sessionUuid !== "string" ||
-      scope.sessionUuid.length === 0 ||
-      (scope.platform !== "android" && scope.platform !== "ios") ||
-      typeof scope.stableDeviceId !== "string" ||
-      scope.stableDeviceId.length === 0 ||
-      typeof scope.expiresAt !== "number" ||
-      !Number.isFinite(scope.expiresAt) ||
       !controls ||
-      typeof controls !== "object" ||
-      typeof controls.androidSiblingAvdName !== "string" ||
-      typeof controls.androidDuplicateSerial !== "string" ||
-      typeof controls.iosSameNameSiblingUdid !== "string"
+      !isNonEmptyString(scope.sessionUuid) ||
+      (scope.platform !== "android" && scope.platform !== "ios") ||
+      !isNonEmptyString(scope.stableDeviceId) ||
+      typeof scope.expiresAt !== "number" ||
+      !Number.isFinite(scope.expiresAt)
     ) {
       return undefined;
     }
@@ -410,12 +406,31 @@ export class RestartAdmission {
       sessionUuid: scope.sessionUuid,
       platform: scope.platform,
       stableDeviceId: scope.stableDeviceId,
-      controls: {
-        androidSiblingAvdName: controls.androidSiblingAvdName,
-        androidDuplicateSerial: controls.androidDuplicateSerial,
-        iosSameNameSiblingUdid: controls.iosSameNameSiblingUdid,
-      },
+      controls,
       expiresAt: scope.expiresAt,
     };
   }
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function acceptanceScopeControls(
+  controls: Partial<AcceptanceSessionRestartScope>["controls"],
+): AcceptanceSessionRestartScope["controls"] | undefined {
+  if (
+    !controls ||
+    typeof controls !== "object" ||
+    typeof controls.androidSiblingAvdName !== "string" ||
+    typeof controls.androidDuplicateSerial !== "string" ||
+    typeof controls.iosSameNameSiblingUdid !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    androidSiblingAvdName: controls.androidSiblingAvdName,
+    androidDuplicateSerial: controls.androidDuplicateSerial,
+    iosSameNameSiblingUdid: controls.iosSameNameSiblingUdid,
+  };
 }

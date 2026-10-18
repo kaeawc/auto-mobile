@@ -99,7 +99,6 @@ const externalValueFlags = [
 /** Parses daemon options from explicit argument tokens, rather than process.argv. */
 // The existing option surface is intentionally preserved during this extraction.
 // A declarative parser migration is separate behavior-changing work.
-// eslint-disable-next-line complexity
 export function parseArgs(
   args: string[],
   log: ParseLogger,
@@ -128,21 +127,15 @@ export function parseArgs(
   const { enabledTools, disabledTools } = parseToolDefaults(values, environment);
   const cliMode = hasFlag("cli");
   const daemonMode = hasFlag("daemon-mode");
-  const noProxy = hasFlag("no-proxy") || hasFlag("direct");
+  const noProxy = readNoProxy(hasFlag);
   const noDaemon = hasFlag("no-daemon");
-  const daemonCommandIndex = args.indexOf("--daemon");
-  const daemonRequested = daemonCommandIndex >= 0;
-  const daemonCommand =
-    daemonCommandIndex >= 0 ? args[daemonCommandIndex + 1] || undefined : undefined;
-  const daemonArgs = daemonCommandIndex >= 0 ? args.slice(daemonCommandIndex + 2) : [];
-  const debugPerf =
-    hasFlag("debug-perf") || hasFlag("ui-perf-debug") || process.env.AUTOMOBILE_DEBUG_PERF === "1";
-  const debug = hasFlag("debug") || process.env.AUTOMOBILE_DEBUG === "1";
+  const { daemonRequested, daemonCommand, daemonArgs } = parseDaemonCommand(args);
+  const { debugPerf, debug } = readDebugFlags(hasFlag);
   const strictPort = hasFlag("strict-port");
   const uiPerfMode = !hasFlag("no-ui-perf-mode");
   const memPerfAuditMode = hasFlag("mem-perf-audit");
   const a11yAuditMode = hasFlag("accessibility-audit");
-  const predictiveUi = hasFlag("predictive") || hasFlag("predictive-ui");
+  const predictiveUi = readPredictiveUi(hasFlag);
   const rawElementSearch = hasFlag("raw-element-search");
   const skipCtrlProxyDownload = shouldSkipCtrlProxyDownload(args);
   const embeddedSdk = hasFlag("embedded-sdk");
@@ -163,19 +156,7 @@ export function parseArgs(
     process.env,
     resolveDaemonLaunchWorkingDirectory(),
   );
-  const runnerReadinessEnv =
-    environment[RUNNER_READINESS_TIMEOUT_ENV] ??
-    environment.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS;
-  const parsedRunnerReadinessEnv = parseRunnerReadinessTimeout(runnerReadinessEnv);
-  // Undefined means this client has no opinion about a running daemon's
-  // readiness budget. The daemon's ServerConfig owns the product default.
-  const runnerReadinessTimeoutMs = parsedRunnerReadinessEnv;
-  if (runnerReadinessEnv !== undefined && parsedRunnerReadinessEnv === undefined) {
-    log.warn(
-      `Invalid ${RUNNER_READINESS_TIMEOUT_ENV}: ${runnerReadinessEnv}; expected an integer ` +
-        `from ${MIN_RUNNER_READINESS_TIMEOUT_MS} to ${MAX_RUNNER_READINESS_TIMEOUT_MS}`,
-    );
-  }
+  const runnerReadinessTimeoutMs = parseRunnerReadinessEnvironment(environment, log);
   const video = createVideoRecordingDefaults(log);
   const { videoRecordingDefaults } = video;
 
@@ -240,6 +221,63 @@ export function parseArgs(
     enabledTools,
     disabledTools,
   };
+}
+
+type FlagReader = (name: string) => boolean;
+
+function readNoProxy(hasFlag: FlagReader): boolean {
+  return hasFlag("no-proxy") || hasFlag("direct");
+}
+
+function readPredictiveUi(hasFlag: FlagReader): boolean {
+  return hasFlag("predictive") || hasFlag("predictive-ui");
+}
+
+function readDebugFlags(hasFlag: FlagReader): { debugPerf: boolean; debug: boolean } {
+  return {
+    debugPerf:
+      hasFlag("debug-perf") ||
+      hasFlag("ui-perf-debug") ||
+      process.env.AUTOMOBILE_DEBUG_PERF === "1",
+    debug: hasFlag("debug") || process.env.AUTOMOBILE_DEBUG === "1",
+  };
+}
+
+function parseDaemonCommand(args: string[]): {
+  daemonRequested: boolean;
+  daemonCommand: string | undefined;
+  daemonArgs: string[];
+} {
+  const daemonCommandIndex = args.indexOf("--daemon");
+  if (daemonCommandIndex < 0) {
+    return { daemonRequested: false, daemonCommand: undefined, daemonArgs: [] };
+  }
+  return {
+    daemonRequested: true,
+    daemonCommand: args[daemonCommandIndex + 1] || undefined,
+    daemonArgs: args.slice(daemonCommandIndex + 2),
+  };
+}
+
+/**
+ * Undefined means this client has no opinion about a running daemon's readiness budget. The
+ * daemon's ServerConfig owns the product default.
+ */
+function parseRunnerReadinessEnvironment(
+  environment: NodeJS.ProcessEnv,
+  log: ParseLogger,
+): number | undefined {
+  const raw =
+    environment[RUNNER_READINESS_TIMEOUT_ENV] ??
+    environment.AUTO_MOBILE_RUNNER_READINESS_TIMEOUT_MS;
+  const parsed = parseRunnerReadinessTimeout(raw);
+  if (raw !== undefined && parsed === undefined) {
+    log.warn(
+      `Invalid ${RUNNER_READINESS_TIMEOUT_ENV}: ${raw}; expected an integer ` +
+        `from ${MIN_RUNNER_READINESS_TIMEOUT_MS} to ${MAX_RUNNER_READINESS_TIMEOUT_MS}`,
+    );
+  }
+  return parsed;
 }
 
 function parseToolDefaults(

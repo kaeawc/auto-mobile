@@ -24,31 +24,36 @@ type ObjectSchema = z.ZodObject<z.ZodRawShape, z.core.$ZodObjectConfig>;
 /** `input` made strict (#6712): an undeclared caller argument is rejected, not deleted. */
 type StrictInput<I extends ObjectSchema> = ReturnType<I["strict"]>;
 
+/** The schema a device tool with raw shape `S` advertises and parses: strict, plus device targeting. */
+type DeviceToolSchemaOf<S extends z.ZodRawShape> = ReturnType<
+  typeof addDeviceTargetingToSchema<S, z.core.$strict>
+>;
+
 /** The schema a device-aware tool advertises and parses: strict, plus device targeting. */
 export type DeviceToolSchema<I extends ObjectSchema> =
-  StrictInput<I> extends z.ZodObject<infer S, infer C>
-    ? ReturnType<typeof addDeviceTargetingToSchema<S, C>>
+  StrictInput<I> extends z.ZodObject<infer S, z.core.$ZodObjectConfig>
+    ? DeviceToolSchemaOf<S>
     : never;
 
-/** The handler of a device tool defined with {@link defineDeviceTool}. */
-export type DeviceToolHandler<I extends ObjectSchema> = (
+/** The handler of a device tool with raw shape `S`, defined with {@link defineDeviceTool}. */
+type DeviceToolHandlerOf<S extends z.ZodRawShape> = (
   device: BootedDevice,
-  args: z.output<DeviceToolSchema<I>>,
+  args: z.output<DeviceToolSchemaOf<S>>,
   progress?: ProgressCallback,
   signal?: AbortSignal,
 ) => Promise<unknown>;
 
-export interface DeviceToolDefinition<I extends ObjectSchema> {
+interface DeviceToolDefinition<S extends z.ZodRawShape> {
   readonly name: string;
   readonly description: string;
   /** The tool's own arguments. Strictness and device targeting are applied by the helper. */
-  readonly input: I;
+  readonly input: z.ZodObject<S, z.core.$ZodObjectConfig>;
   /**
    * Omit when the handler is built from dependencies at registration time; pass it to
    * `register(registry, handler)` instead. The schema is still defined once, at module scope.
    */
-  readonly handler?: DeviceToolHandler<I>;
-  readonly options?: DeviceAwareToolOptions<z.output<DeviceToolSchema<I>>>;
+  readonly handler?: DeviceToolHandlerOf<S>;
+  readonly options?: DeviceAwareToolOptions<z.output<DeviceToolSchemaOf<S>>>;
 }
 
 export type PlainToolHandler<I extends ObjectSchema> = (
@@ -86,20 +91,18 @@ function requireHandler<H>(name: string, handler: H | undefined): H {
  * Define a device-aware tool. The helper applies `.strict()` and device
  * targeting itself, so a definition cannot forget either.
  */
-export function defineDeviceTool<I extends ObjectSchema>(
-  definition: DeviceToolDefinition<I>,
-): DefinedTool<DeviceToolSchema<I>, DeviceToolHandler<I>> {
-  const strict: z.ZodObject<z.ZodRawShape, z.core.$ZodObjectConfig> = definition.input.strict();
-  // oxlint-disable-next-line auto-mobile/no-unknown-cast -- TypeScript cannot resolve the conditional DeviceToolSchema<I> for a generic I; the runtime value is exactly addDeviceTargetingToSchema(strict).
-  const schema = addDeviceTargetingToSchema(strict) as unknown as DeviceToolSchema<I>;
+export function defineDeviceTool<S extends z.ZodRawShape>(
+  definition: DeviceToolDefinition<S>,
+): DefinedTool<DeviceToolSchemaOf<S>, DeviceToolHandlerOf<S>> {
+  const schema = addDeviceTargetingToSchema(definition.input.strict());
   return {
     name: definition.name,
     schema,
     register: (registry = ToolRegistry, handler = definition.handler) => {
-      registry.registerDeviceAware<ZodType<z.output<DeviceToolSchema<I>>>>(
+      registry.registerDeviceAware<ZodType<z.output<DeviceToolSchemaOf<S>>>>(
         definition.name,
         definition.description,
-        erased<ZodType<z.output<DeviceToolSchema<I>>>>(schema),
+        erased<ZodType<z.output<DeviceToolSchemaOf<S>>>>(schema),
         requireHandler(definition.name, handler),
         definition.options,
       );

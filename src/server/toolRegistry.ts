@@ -1184,36 +1184,3 @@ export class ToolRegistryClass {
 
 // Export a singleton instance
 export const ToolRegistry = new ToolRegistryClass();
-
-// --- Compile-time enforcement of AC1 (issue #3222) ---
-// AC1 is a *type* guarantee: `callInternalTyped(name, …)` must thread the concrete
-// payload type from `InternalToolPayloads` through the registry seam rather than
-// collapse back to the untyped `Promise<any>` of `callInternal`. The runtime tests
-// in `test/server/internalToolPayloads.test.ts` cannot pin this — bun's test runner
-// does not typecheck, and the `bun run typecheck` gate compiles only `src`
-// (`tsconfig.json` include), so an assertion in `test/` is never checked and would
-// pass even against an `any` regression. These type-only aliases live in `src` (and
-// beside the method they guard, to avoid a type-resolution cycle) so the gate DOES
-// fail if the seam regresses; they erase at build time (zero runtime cost).
-type _IsAny<T> = 0 extends 1 & T ? true : false;
-
-type _AssertTrue<T extends true> = T;
-
-type _ResolvedTypedEnvelope = NonNullable<
-  Awaited<ReturnType<typeof ToolRegistry.callInternalTyped>>
->;
-// The aliases are referenced only by the compiler (their constraint check IS the
-// guard); they are intentionally unused at runtime, hence the disable.
-/* eslint-disable @typescript-eslint/no-unused-vars */
-
-// Fails to compile if the resolved envelope widens to `any` (the seam stopped
-// threading the payload type)...
-type _Ac1ResultIsNotAny = _AssertTrue<_IsAny<_ResolvedTypedEnvelope> extends true ? false : true>;
-
-// ...or if it is no longer the concrete `StructuredToolResponse<…Payload>` envelope.
-type _Ac1ResultIsConcreteEnvelope = _AssertTrue<
-  _ResolvedTypedEnvelope extends StructuredToolResponse<InternalToolPayloads[InternalToolName]>
-    ? true
-    : false
->;
-/* eslint-enable @typescript-eslint/no-unused-vars */

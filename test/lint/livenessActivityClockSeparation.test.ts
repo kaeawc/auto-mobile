@@ -460,9 +460,14 @@ const WRITE_INVENTORY: Readonly<Record<string, Classified>> = {
     writes: 1,
     reason: "Retained screenshot file-protection expiry, unrelated to device sessions.",
   },
-  "src/server/snapshotOfTools.ts registerSnapshotOfTools": {
+  "src/server/snapshotOfTools.ts createSnapshotOfCrop": {
     writes: 1,
     reason: "Retained screenshot file-protection expiry in a tool response, not a session clock.",
+  },
+  "src/server/snapshotOfTools.ts persistCroppedSnapshot": {
+    writes: 1,
+    reason:
+      "Retained screenshot file-protection expiry returned to its caller, not a session clock.",
   },
   "src/server/snapshotOfToolOutputSchemas.ts <module>": {
     writes: 1,

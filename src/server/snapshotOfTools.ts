@@ -92,73 +92,95 @@ function resolveRequestedBounds(
   return resolution.chosen.bounds;
 }
 
+async function captureSnapshotInputs(
+  device: BootedDevice,
+  args: SnapshotOfArgs,
+  dependencies: SnapshotOfDependencies,
+) {
+  const capture =
+    dependencies.hierarchyCaptureFactory?.(device) ?? createDeviceHierarchyCapture(device);
+  // A watcher's read (#10830) uses the isolated observer capture: on a held device it only
+  // connects to the running hierarchy service and leaves the holder's client untouched.
+  const snapshot = await capture.capture({
+    freshness: "fresh",
+    ...(isSessionlessDeviceRead() ? { observerMode: true } : {}),
+  });
+  const { screenWidth: width, screenHeight: height } = snapshot.hierarchy;
+  if (!width || !height) {
+    throw new ActionableError("snapshotOf requires screen dimensions from a fresh hierarchy");
+  }
+  const requestedBounds = resolveRequestedBounds(args, snapshot);
+  const screenshot = await (
+    dependencies.screenshotFactory?.(device) ?? new TakeScreenshot(device)
+  ).execute({ format: "png" });
+  if (!screenshot.success || !screenshot.path) {
+    throw new ActionableError(
+      `snapshotOf screenshot capture failed: ${screenshot.error ?? "no path"}`,
+    );
+  }
+  const source = await (dependencies.readFile ?? fs.readFile)(screenshot.path);
+  return { snapshot, screenSize: { width, height }, requestedBounds, source };
+}
+
+async function persistCroppedSnapshot(png: Buffer, dependencies: SnapshotOfDependencies) {
+  const outputDirectory =
+    dependencies.outputDirectory?.() ?? ensureSecureTempDirSync(TEMP_SUBDIRS.SCREENSHOTS);
+  const outputPath = path.join(
+    outputDirectory,
+    `snapshot-of-${(dependencies.ids ?? defaultIdGenerator).next()}.png`,
+  );
+  const protection = dependencies.pathProtection ?? screenshotPathProtection;
+  await writeRetainedScreenshot(outputPath, png, dependencies);
+  const expiresAt = await protection.protect(outputPath);
+  return { outputPath, expiresAt };
+}
+
+async function createSnapshotOfCrop(
+  device: BootedDevice,
+  args: SnapshotOfArgs,
+  dependencies: SnapshotOfDependencies,
+) {
+  const { snapshot, screenSize, requestedBounds, source } = await captureSnapshotInputs(
+    device,
+    args,
+    dependencies,
+  );
+  const cropped = await cropSnapshot(
+    source,
+    requestedBounds,
+    {
+      platform: device.platform,
+      screenSize,
+      rotation: snapshot.hierarchy.rotation,
+      nativeScale: snapshot.hierarchy.nativeScale,
+    },
+    dependencies.imageBackend ?? resolveImageBackend(),
+  );
+  const { outputPath, expiresAt } = await persistCroppedSnapshot(cropped.png, dependencies);
+  return createStructuredToolResponse({
+    path: outputPath,
+    expiresAt,
+    unit: device.platform === "ios" ? "points" : "pixels",
+    requestedBounds: cropped.requestedBounds,
+    clippedBounds: cropped.clippedBounds,
+    screenSize: cropped.screenSize,
+    imageSize: cropped.imageSize,
+    pixelsPerNativeUnit: cropped.pixelsPerNativeUnit,
+    scaleProvenance: cropped.scaleProvenance,
+    clipped: cropped.clipped,
+    rasterBounds: cropped.rasterBounds,
+    screenshotOrientation: cropped.screenshotOrientation,
+  });
+}
+
 export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {}): void {
   ToolRegistry.registerDeviceAware(
     "snapshotOf",
     "Save a PNG crop of one exposed element or a platform-native screen rectangle; return path and geometry metadata only.",
     snapshotOfSchema,
-    // oxlint-disable-next-line complexity -- acquisition, injected seams, and metadata publication share one operation boundary.
     async (device: BootedDevice, args: SnapshotOfArgs) => {
       try {
-        const capture =
-          dependencies.hierarchyCaptureFactory?.(device) ?? createDeviceHierarchyCapture(device);
-        // A watcher's read (#10830) uses the isolated observer capture: on a held device it only
-        // connects to the running hierarchy service and leaves the holder's client untouched.
-        const snapshot = await capture.capture({
-          freshness: "fresh",
-          ...(isSessionlessDeviceRead() ? { observerMode: true } : {}),
-        });
-        const screenSize = {
-          width: snapshot.hierarchy.screenWidth,
-          height: snapshot.hierarchy.screenHeight,
-        };
-        if (!screenSize.width || !screenSize.height) {
-          throw new ActionableError("snapshotOf requires screen dimensions from a fresh hierarchy");
-        }
-        const requestedBounds = resolveRequestedBounds(args, snapshot);
-        const screenshot = await (
-          dependencies.screenshotFactory?.(device) ?? new TakeScreenshot(device)
-        ).execute({ format: "png" });
-        if (!screenshot.success || !screenshot.path) {
-          throw new ActionableError(
-            `snapshotOf screenshot capture failed: ${screenshot.error ?? "no path"}`,
-          );
-        }
-        const source = await (dependencies.readFile ?? fs.readFile)(screenshot.path);
-        const cropped = await cropSnapshot(
-          source,
-          requestedBounds,
-          {
-            platform: device.platform,
-            screenSize: { width: screenSize.width, height: screenSize.height },
-            rotation: snapshot.hierarchy.rotation,
-            nativeScale: snapshot.hierarchy.nativeScale,
-          },
-          dependencies.imageBackend ?? resolveImageBackend(),
-        );
-        const outputDirectory =
-          dependencies.outputDirectory?.() ?? ensureSecureTempDirSync(TEMP_SUBDIRS.SCREENSHOTS);
-        const outputPath = path.join(
-          outputDirectory,
-          `snapshot-of-${(dependencies.ids ?? defaultIdGenerator).next()}.png`,
-        );
-        const protection = dependencies.pathProtection ?? screenshotPathProtection;
-        await writeRetainedScreenshot(outputPath, cropped.png, dependencies);
-        const expiresAt = await protection.protect(outputPath);
-        return createStructuredToolResponse({
-          path: outputPath,
-          expiresAt,
-          unit: device.platform === "ios" ? "points" : "pixels",
-          requestedBounds: cropped.requestedBounds,
-          clippedBounds: cropped.clippedBounds,
-          screenSize: cropped.screenSize,
-          imageSize: cropped.imageSize,
-          pixelsPerNativeUnit: cropped.pixelsPerNativeUnit,
-          scaleProvenance: cropped.scaleProvenance,
-          clipped: cropped.clipped,
-          rasterBounds: cropped.rasterBounds,
-          screenshotOrientation: cropped.screenshotOrientation,
-        });
+        return await createSnapshotOfCrop(device, args, dependencies);
       } catch (error) {
         throw toActionableError(error, "Failed to create snapshotOf crop");
       }

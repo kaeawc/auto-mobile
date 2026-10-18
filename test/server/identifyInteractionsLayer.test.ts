@@ -1,6 +1,5 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../src/models";
 import { identifyInteractionsSchema, registerObserveTools } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -23,11 +22,9 @@ isolateToolRegistry();
 async function identify(result: ObserveResult, args: Record<string, unknown>) {
   const screen = new FakeObserveScreen();
   screen.setObserveResult(result);
-  const navigation = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-    new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
-  );
   try {
     registerObserveTools({
+      navigationManagerFactory: () => new FakeNavigationGraphManager(),
       timer: new FakeTimer(),
       createScreen: () => ({
         execute: screen.execute.bind(screen),
@@ -43,7 +40,6 @@ async function identify(result: ObserveResult, args: Record<string, unknown>) {
       { includeContext: { navigationGraph: false }, ...args },
     );
   } finally {
-    navigation.mockRestore();
     ToolRegistry.clearTools();
   }
 }

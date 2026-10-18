@@ -20,7 +20,10 @@ import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { BootedDevice, ObserveResult } from "../models";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
-import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
+import {
+  NavigationGraphManager,
+  type NavigationGraphService,
+} from "../features/navigation/NavigationGraphManager";
 import {
   IdentifyInteractions,
   IdentifyInteractionsOptions,
@@ -342,6 +345,12 @@ export async function invalidateReadinessForDisabledAccessibility(
   }
 }
 
+function defaultNavigationManager(sessionUuid?: string): NavigationGraphService {
+  return sessionUuid
+    ? NavigationGraphManager.getInstanceForSession(sessionUuid)
+    : NavigationGraphManager.getInstance();
+}
+
 export function registerObserveTools(dependencies: ObserveToolDependencies = {}) {
   // Observe handler
   const observeHandler = async (
@@ -465,9 +474,9 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
         : await readObservationForInteractions(
             dependencies.createScreen?.(device) ?? new RealObserveScreen(device),
           );
-      const navigationGraph = args.sessionUuid
-        ? NavigationGraphManager.getInstanceForSession(args.sessionUuid)
-        : NavigationGraphManager.getInstance();
+      const navigationGraph = (dependencies.navigationManagerFactory ?? defaultNavigationManager)(
+        args.sessionUuid,
+      );
       const currentScreen = navigationGraph.getCurrentScreen();
       const navigationEdges =
         args.includeContext?.navigationGraph !== false && currentScreen

@@ -22,7 +22,10 @@ import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
 import type { ObserveScreen } from "../features/observe/interfaces/ObserveScreen";
 import { createStructuredToolResponse, StructuredToolResponse } from "../utils/toolUtils";
 import { BootedDevice, ObserveResult, ObserveToolPayload } from "../models";
-import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
+import {
+  NavigationGraphManager,
+  type NavigationGraphService,
+} from "../features/navigation/NavigationGraphManager";
 import {
   hasOwnPrototype,
   scopeHierarchyForSelector,
@@ -61,6 +64,8 @@ export interface ObserveToolDependencies {
   deviceReadAccess?: DeviceObservationAccess;
   /** Whether the device can hide its own prototype for a capture (#9305); defaults to CtrlProxy's. */
   hidesPrototypeForScreenshot?: (device: BootedDevice) => Promise<boolean>;
+  /** Resolves the navigation graph for an optional session; defaults to the real singleton. */
+  navigationManagerFactory?: (sessionUuid?: string) => NavigationGraphService;
 }
 
 /**

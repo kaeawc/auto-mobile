@@ -3201,9 +3201,8 @@ Unset or other env values express no preference and use the daemon's effective s
 
 AutoMobile implements the [MCP Tasks extension](https://modelcontextprotocol.io/extensions/tasks/overview)
 (`io.modelcontextprotocol/tasks`, #4668) on the daemon's MCP endpoint. A tool that opts in can
-answer a `tools/call` with a task handle instead of blocking; no tool opts in yet
-(`startDevice` is the first, then `executePlan`, `installApp` and recording start and stop).
-Short interaction tools stay synchronous.
+answer a `tools/call` with a task handle instead of blocking. `startDevice` opts in; `executePlan`,
+`installApp` and recording start and stop follow. Short interaction tools stay synchronous.
 
 To opt in, a client declares the extension on **every request** that may return a task, and on
 every `tasks/*` request, in the per-request capabilities:
@@ -3237,14 +3236,24 @@ every `tasks/*` request, in the per-request capabilities:
   to answer with `tasks/update` (`{"taskId": …, "inputResponses": {…}}`).
 - `tasks/cancel` is cooperative: it is acknowledged at once and the running tool is aborted;
   the task then reports `cancelled`, or `completed` if the tool had already finished.
+- While a `startDevice` task is `working`, the daemon heartbeats the session it bound, so the
+  client need not heartbeat a session it has not seen yet. Once the task is terminal, the
+  client heartbeats that session as after a synchronous `startDevice`. Cancelling during the
+  boot stops it and leaves no session bound, as cancelling a synchronous call does.
 - A finished task stays readable for 10 minutes (its `ttlMs` is then set, counted from
   creation); afterwards `tasks/get` answers `-32602` "Task has expired" or "Task not found".
 - Tasks survive a daemon restart: a restarted daemon still answers `tasks/get`, and a task that
   was running when the daemon stopped reports `failed` with an "interrupted" error.
 - `tasks/*` requests without the per-request declaration answer `-32021` (Missing Required
   Client Capability). Progress ticks of a task become its `statusMessage`; no
-  `notifications/progress` is sent for a task. Calls through the stdio proxy do not create tasks
-  yet.
+  `notifications/progress` is sent for a task.
+- The stdio proxy relays the extension: it advertises it to a client whose `initialize` declared
+  it, forwards each request's declaration and the `tasks/*` requests to the daemon, and answers
+  with the daemon's results and errors unchanged. Its tasks belong to the proxy process rather
+  than to one daemon connection, so polling keeps working after the proxy reconnects. A
+  device-binding call (`startDevice`, `getAndroid`, `getApple`, `provisionDevice`,
+  `setActiveDevice`) stays synchronous through the proxy for now: the proxy binds the device
+  session from that call's result.
 
 ## Checks
 

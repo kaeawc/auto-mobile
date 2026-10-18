@@ -1,7 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { InMemoryTransport, type JSONRPCMessage } from "@modelcontextprotocol/server";
 import { z } from "zod/v4";
-import { createMcpServer } from "../../../src/server/index";
 import {
   DefaultTaskManager,
   TASK_INTERRUPTED_MESSAGE,
@@ -16,6 +14,7 @@ import { FakeMcpTaskStore } from "../../fakes/FakeMcpTaskStore";
 import { FakeTaskManager } from "../../fakes/FakeTaskManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
+import { connect } from "../../helpers/mcpTaskWire";
 
 /*
  * MCP Tasks extension wire contract (#4668), asserted on the raw frames our server sends: a
@@ -27,73 +26,10 @@ const ECHO = "__task_echo__";
 const WAIT = "__task_wait__";
 const UNKNOWN = "__task_unregistered__";
 const ELIGIBLE = new Set([ECHO, WAIT, UNKNOWN]);
-const DECLARED_META = {
-  "io.modelcontextprotocol/clientCapabilities": { extensions: { [TASKS_EXTENSION_ID]: {} } },
-};
 
 let releaseWait: (() => void) | undefined;
 const leaseHolds: TaskLeaseHoldRequest[] = [];
 const leaseReleases: string[] = [];
-
-type Frame = Record<string, any>;
-
-class RawWire {
-  private readonly waiters = new Map<string | number, (frame: Frame) => void>();
-  private nextId = 1;
-
-  constructor(private readonly transport: InMemoryTransport) {
-    transport.onmessage = (frame) => {
-      const id = "id" in frame ? frame.id : undefined;
-      if (id !== undefined && ("result" in frame || "error" in frame)) {
-        this.waiters.get(id)?.(frame as Frame);
-      }
-    };
-  }
-
-  async request(method: string, params?: Record<string, unknown>): Promise<Frame> {
-    const id = this.nextId++;
-    const answered = new Promise<Frame>((resolve) => this.waiters.set(id, resolve));
-    await this.transport.send({
-      jsonrpc: "2.0",
-      id,
-      method,
-      ...(params && { params }),
-    } as JSONRPCMessage);
-    return answered;
-  }
-
-  call(name: string, args: Record<string, unknown>, declared: boolean): Promise<Frame> {
-    return this.request("tools/call", {
-      name,
-      arguments: args,
-      ...(declared && { _meta: DECLARED_META }),
-    });
-  }
-
-  task(method: "tasks/get" | "tasks/cancel" | "tasks/update", taskId: string, extra = {}) {
-    return this.request(method, { taskId, ...extra, _meta: DECLARED_META });
-  }
-
-  async settled(taskId: string): Promise<Frame> {
-    for (let turn = 0; turn < 200; turn++) {
-      const frame = await this.task("tasks/get", taskId);
-      const status = frame.result?.status;
-      if (status && status !== "working" && status !== "input_required") {
-        return frame;
-      }
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-    throw new Error(`task ${taskId} never settled`);
-  }
-}
-
-async function connect(options: Parameters<typeof createMcpServer>[0]) {
-  const server = createMcpServer(options);
-  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
-  await server.connect(serverTransport);
-  await clientTransport.start();
-  return { wire: new RawWire(clientTransport), close: () => server.close() };
-}
 
 describe("Tasks extension over the wire (#4668)", () => {
   let restoreHermeticServer: () => void;

@@ -128,6 +128,12 @@ export interface AndroidColdBootAction {
  * relaunch (terminate + fresh process); there is no standalone device terminate
  * here because devicectl cannot reliably resolve a PID by bundle id (deferred).
  */
+/** The narrow simctl surface LaunchApp consumes; lets tests pass a typed fake (#11865). */
+export type LaunchAppSimctl = Pick<
+  SimCtlClient,
+  "launchApp" | "terminateApp" | "executeCommandArgs" | "listAppsOrThrow"
+>;
+
 export interface DeviceAppLauncher {
   launchApp(
     deviceUdid: string,
@@ -143,7 +149,7 @@ interface LaunchAppDependencies {
   installedAppsCacheStaleMarker?: InstalledAppsCacheStaleMarker;
   performanceTrackerFactory?: () => PerformanceTracker;
   deviceAppLauncher?: DeviceAppLauncher;
-  clearAppDataFactory?: (device: BootedDevice, simctl: SimCtlClient) => IosClearAppDataRunner;
+  clearAppDataFactory?: (device: BootedDevice, simctl: LaunchAppSimctl) => IosClearAppDataRunner;
   createAndroidClearAppData?: (device: BootedDevice) => AndroidClearAppDataAction;
   createAndroidColdBoot?: (device: BootedDevice) => AndroidColdBootAction;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
@@ -215,7 +221,7 @@ type LaunchAppPositionalTail = [
 ];
 
 export class LaunchApp extends BaseVisualChange {
-  private simctl: SimCtlClient;
+  readonly simctl: LaunchAppSimctl;
   private deviceAppLauncher: DeviceAppLauncher;
   private targetUserDetector: TargetUserDetector;
   private installedAppsProvider: InstalledAppsProvider;
@@ -223,7 +229,7 @@ export class LaunchApp extends BaseVisualChange {
   private performanceTrackerFactory: () => PerformanceTracker;
   private clearAppDataFactory: (
     device: BootedDevice,
-    simctl: SimCtlClient,
+    simctl: LaunchAppSimctl,
   ) => IosClearAppDataRunner;
   private createAndroidClearAppData: (device: BootedDevice) => AndroidClearAppDataAction;
   private createAndroidColdBoot: (device: BootedDevice) => AndroidColdBootAction;
@@ -239,7 +245,7 @@ export class LaunchApp extends BaseVisualChange {
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
-    simctl: SimCtlClient | null = null,
+    simctl: LaunchAppSimctl | null = null,
     timer: Timer = defaultTimer,
     dependencies: LaunchAppDependencies = {},
   ) {
@@ -863,7 +869,8 @@ export class LaunchApp extends BaseVisualChange {
     }
   }
 
-  private async waitForIosHierarchyReady(
+  /** Waits for the iOS CtrlProxy hierarchy to be ready via push or sync. Public test seam (#11865). */
+  async waitForIosHierarchyReady(
     timeoutMs: number = 5000,
     expectedPackageName?: string,
     signal?: AbortSignal,
@@ -1564,7 +1571,8 @@ export class LaunchApp extends BaseVisualChange {
     }
   }
 
-  private async ensureLaunchObservationMatchesPackage(
+  /** Polls until the observed foreground matches the launched package or the observation timeout elapses. Public test seam (#11865). */
+  async ensureLaunchObservationMatchesPackage(
     result: LaunchAppResult,
     expectedPackageName: string,
     timeoutMs: number = LAUNCH_OBSERVATION_TIMEOUT_MS,
@@ -2267,7 +2275,8 @@ export class LaunchApp extends BaseVisualChange {
     }
   }
 
-  private async performLaunch(
+  /** Android launch step: intent launch, then monkey/activity fallback. Public test seam (#11865). */
+  async performLaunch(
     packageName: string,
     activityName: string | undefined,
     userId: number,

@@ -4,6 +4,7 @@ import {
 } from "../daemon/sessionBroker/provisioning/executionLiveness";
 import { sql, type ExpressionBuilder, type Kysely } from "kysely";
 import { getDatabase } from "./database";
+import { nowIso } from "./nowIso";
 import type { Database, DeviceSession, DeviceSessionStatus, NewDeviceSession } from "./types";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
@@ -608,10 +609,6 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
     return this.db ?? getDatabase();
   }
 
-  private nowIso(): string {
-    return new Date(this.timer.now()).toISOString();
-  }
-
   async upsertActiveSession(
     record: DeviceSessionRecord,
     nowMs: number = this.timer.now(),
@@ -627,7 +624,7 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
     let written: { stable_identity_generation?: number } | undefined;
     try {
       const db = await this.getDb();
-      const now = this.nowIso();
+      const now = nowIso(this.timer);
       const row = newActiveSessionRow(record, now);
 
       written = await db
@@ -737,7 +734,7 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
           // clears this contract only when an older binary updates legacy
           // liveness columns without advancing this generation.
           liveness_contract_generation: sql`liveness_contract_generation + 1`,
-          updated_at: this.nowIso(),
+          updated_at: nowIso(this.timer),
         })
         .where("session_uuid", "=", sessionUuid)
         .where("status", "=", "active")
@@ -761,7 +758,7 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
         .updateTable("device_sessions")
         .set({
           expires_at_ms: sql<number>`max(expires_at_ms, ${activityAtMs} + session_timeout_ms)`,
-          updated_at: this.nowIso(),
+          updated_at: nowIso(this.timer),
         })
         .where("session_uuid", "=", sessionUuid)
         .where("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}%`)
@@ -786,7 +783,7 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
         .set({
           daemon_session_id: daemonSessionId,
           stable_identity_generation: sql`stable_identity_generation + 1`,
-          updated_at: this.nowIso(),
+          updated_at: nowIso(this.timer),
         })
         .where("session_uuid", "=", sessionUuid)
         .where("status", "!=", "active")
@@ -817,7 +814,7 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
         .set({
           daemon_session_id: previousOwner,
           stable_identity_generation: sql`stable_identity_generation + 1`,
-          updated_at: this.nowIso(),
+          updated_at: nowIso(this.timer),
         })
         .where("session_uuid", "=", sessionUuid)
         .where("status", "!=", "active")
@@ -845,7 +842,7 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
         .updateTable("device_sessions")
         .set({
           liveness_owner_token: ownerToken,
-          updated_at: this.nowIso(),
+          updated_at: nowIso(this.timer),
         })
         .where("session_uuid", "=", sessionUuid)
         .where("status", "=", "active")
@@ -897,7 +894,7 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
           ),
           released_at_ms: null,
           release_reason: null,
-          updated_at: this.nowIso(),
+          updated_at: nowIso(this.timer),
         })
         .where("session_uuid", "=", sessionUuid)
         // Like activity refresh, delayed autolock metadata may only update a
@@ -931,7 +928,7 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
           released_at_ms: releasedAtMs,
           release_reason: reason,
           ...(shouldRetainLivenessOwner(reason) ? {} : { liveness_owner_token: null }),
-          updated_at: this.nowIso(),
+          updated_at: nowIso(this.timer),
         })
         .where("session_uuid", "=", sessionUuid)
         // A terminal reason is never replaced by a weaker one (a stronger or equal one may).
@@ -1056,7 +1053,7 @@ export class DeviceSessionRepository implements DeviceSessionPersistence {
         released_at_ms: releasedAtMs,
         release_reason: reason,
         ...(shouldRetainLivenessOwner(reason) ? {} : { liveness_owner_token: null }),
-        updated_at: this.nowIso(),
+        updated_at: nowIso(this.timer),
       })
       .where("status", "=", "active")
       .where((eb) => {

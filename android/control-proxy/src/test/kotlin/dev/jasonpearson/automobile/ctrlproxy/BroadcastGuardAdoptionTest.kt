@@ -906,6 +906,7 @@ class BroadcastGuardAdoptionTest {
         "StorageController.kt",
         "ClipboardController.kt",
         "FocusController.kt",
+        "TextInputController.kt",
         "FailureReceivers.kt",
         "PackageScreenReceivers.kt",
         "CommandReceivers.kt",

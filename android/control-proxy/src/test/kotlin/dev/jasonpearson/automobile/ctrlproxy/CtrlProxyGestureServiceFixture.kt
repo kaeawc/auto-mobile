@@ -63,13 +63,17 @@ internal class CtrlProxyGestureServiceFixture {
 
   fun seedCaret(): Any {
     // The field's erased type is Pair. These gesture paths only clear it, never read its contents;
-    // an identity sentinel avoids constructing the service's private text-input implementation.
+    // an identity sentinel avoids constructing the controller's private remembered-caret types.
     val sentinel = Unit to Unit
-    ReflectionHelpers.setField(service, "rememberedInsert", sentinel)
+    ReflectionHelpers.setField(textInputController(), "rememberedInsert", sentinel)
     return sentinel
   }
 
-  fun rememberedCaret(): Any? = ReflectionHelpers.getField(service, "rememberedInsert")
+  fun rememberedCaret(): Any? =
+    ReflectionHelpers.getField(textInputController(), "rememberedInsert")
+
+  private fun textInputController(): TextInputController =
+    ReflectionHelpers.getField(service, "textInputController")
 
   fun completeLastStroke() {
     val dispatch = shadow.gesturesDispatched.last()

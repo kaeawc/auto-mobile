@@ -3,6 +3,9 @@ import { registerMcpTools } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../../src/utils/debug";
+import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * Registration is the expensive step (12-30 ms), so each configuration is

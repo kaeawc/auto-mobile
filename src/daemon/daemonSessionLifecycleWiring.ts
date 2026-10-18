@@ -33,7 +33,7 @@ import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { DeviceSessionManager } from "../devices/DeviceSessionManager";
+import { DeviceReadiness } from "../devices/DeviceReadiness";
 import { syncAppearanceForDevice } from "./AppearanceSyncScheduler";
 import type { Timer } from "../utils/SystemTimer";
 import type { SessionManager } from "./sessionManager";
@@ -178,7 +178,7 @@ export function wireSessionLifecycle(
     if (options?.upgradeOnly) {
       return;
     }
-    DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
+    DeviceReadiness.getInstance().clearExplicitDevicePin(deviceId);
     // Only this session's own manager: the lookup with fallback returns the global manager for
     // an already-released session, and dropping it would silence its listeners (#10825).
     const navigationManager = NavigationGraphManager.findInstanceForSession(sessionId);
@@ -207,7 +207,7 @@ export function wireSessionLifecycle(
   // the old device and must not follow it to the new one.
   sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
     host.socketServer()?.liftStrokesHeldByOn(sessionId, deviceId);
-    DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
+    DeviceReadiness.getInstance().clearExplicitDevicePin(deviceId);
     const previousNavigationManager = NavigationGraphManager.getInstanceForSession(sessionId);
     NavigationGraphManager.resetSession(sessionId);
     host.navigationGraphListenerManagers.delete(previousNavigationManager);

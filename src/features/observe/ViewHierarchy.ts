@@ -19,7 +19,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { ViewHierarchyQueryOptions } from "../../models";
 import { AndroidCtrlProxyClient, type ViewHierarchyAndroidCtrlProxy } from "./android";
 import { IOSCtrlProxyClient, type IOSCtrlProxy } from "./ios";
-import { IosRunnerStalledError } from "./ios/runnerErrorCodes";
+import { IosRunnerStalledError } from "./ios/IosRunnerStalledError";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../utility/viewHierarchySearch";

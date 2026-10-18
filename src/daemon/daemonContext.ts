@@ -23,6 +23,7 @@ export type DevicePoolReads = Pick<
   | "assertNotPreparedForOtherRequest"
   | "assertDeviceCleanupComplete"
   | "assertAutolockAccess"
+  | "isSafeForObservationServiceStart"
 >;
 
 /**

@@ -29,11 +29,12 @@ import {
   findGaps,
   formatGaps,
   parseAndroidAdvertised,
-  parseHostGated,
   parseIosRunnerAdvertised,
   parseManifest,
   parsePrototypeAgentAdvertised,
+  gatedByScans,
   recordRelease,
+  scanHostGates,
 } from "./lib/artifact-capabilities";
 
 const REPO_ROOT = path.resolve(import.meta.dir, "../..");
@@ -59,12 +60,19 @@ function listTsFiles(target: string): string[] {
 }
 
 function collectHostGated(): Record<ArtifactId, string[]> {
+  const scansByArtifact = {} as Record<ArtifactId, ReturnType<typeof scanHostGates>[]>;
+  const declared: Record<string, string> = {};
+  for (const artifact of ARTIFACTS) {
+    const files = HOST_GATE_SOURCES[artifact].flatMap(listTsFiles);
+    scansByArtifact[artifact] = files.map((file) => {
+      const scan = scanHostGates(readFileSync(file, "utf8"));
+      Object.assign(declared, scan.declared);
+      return scan;
+    });
+  }
   const result = {} as Record<ArtifactId, string[]>;
   for (const artifact of ARTIFACTS) {
-    const names = HOST_GATE_SOURCES[artifact]
-      .flatMap(listTsFiles)
-      .flatMap((file) => parseHostGated(readFileSync(file, "utf8")));
-    result[artifact] = [...new Set(names)].sort();
+    result[artifact] = gatedByScans(scansByArtifact[artifact], declared);
   }
   return result;
 }

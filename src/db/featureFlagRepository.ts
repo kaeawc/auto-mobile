@@ -1,9 +1,11 @@
 import type { Kysely } from "kysely";
 import { z } from "zod";
 import { ensureMigrations, getDatabase } from "./database";
+import { nowIso } from "./nowIso";
 import type { Database } from "./types";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger, type Logger } from "../utils/logger";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import type {
   FeatureFlagConfig,
   FeatureFlagDefinition,
@@ -56,7 +58,11 @@ export class SqliteFeatureFlagRepository implements FeatureFlagRepository {
   private readonly injectedDb: Kysely<Database> | null;
   private readonly logger: Logger;
 
-  constructor(db?: Kysely<Database>, log?: Logger) {
+  constructor(
+    db?: Kysely<Database>,
+    private readonly timer: Timer = defaultTimer,
+    log?: Logger,
+  ) {
     this.injectedDb = db ?? null;
     this.logger = log ?? logger;
   }
@@ -77,7 +83,7 @@ export class SqliteFeatureFlagRepository implements FeatureFlagRepository {
       return;
     }
     const db = this.getDb();
-    const now = new Date().toISOString();
+    const now = nowIso(this.timer);
 
     await db
       .insertInto("feature_flags")
@@ -116,7 +122,7 @@ export class SqliteFeatureFlagRepository implements FeatureFlagRepository {
   ): Promise<void> {
     await this.ensureReady();
     const db = this.getDb();
-    const now = new Date().toISOString();
+    const now = nowIso(this.timer);
     const configJson = config ? JSON.stringify(config) : null;
 
     await db

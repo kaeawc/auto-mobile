@@ -22,7 +22,7 @@ import {
   type HierarchyCaptureRequest,
 } from "./HierarchyCapture";
 import { ViewHierarchyCaptureReader } from "./ViewHierarchyCaptureReader";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import {
   filterOffscreenNodes,
   normalizeIosHierarchy,
@@ -176,10 +176,8 @@ function resolveHierarchyClient(
       owned: false,
     };
   }
-  const daemon = DaemonState.getInstance();
-  const owned = daemon.isInitialized()
-    ? !!holderOf(daemon.getDevicePool().getDevice(device.deviceId))
-    : false;
+  const pool = defaultDaemonContext.devicePool();
+  const owned = pool ? !!holderOf(pool.getDevice(device.deviceId)) : false;
   if (owned && !existing?.isConnected()) {
     throw new ActionableError(
       `Device ${device.deviceId} is session-owned and has no connected hierarchy service: the owning session's hierarchy client is disconnected. Run a session observe as the owner to reconnect it; a deviceId read only connects to an already-running service.`,

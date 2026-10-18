@@ -165,7 +165,7 @@ import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/too
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { deleteInternalToolParams } from "../daemon/constants";
-import { getRemovedToolActionHint } from "../models/removedTools";
+import { getRemovedToolActionHint } from "../utils/removedTools";
 import {
   nodePrototypeAssetFileReader,
   preparePrototypeAssets,
@@ -432,7 +432,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .string()
         .optional()
         .describe(
-          "show only: panel key, role, or active to show the prototype on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising prototype_display_id_v1; a disconnected panel is refused. Ignored, with a warning, by a same-id show without reset, which keeps the display the prototype is on.",
+          "show only: panel key, role, or active to show the prototype on. Precedence: explicit display, then the session display pin, then the default display. Needs a CtrlProxy advertising prototype_display_id_v2; a disconnected panel is refused. Ignored, with a warning, by a same-id show without reset, which keeps the display the prototype is on.",
         ),
       replaceOthers: z
         .boolean()

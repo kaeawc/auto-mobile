@@ -38,7 +38,7 @@ import { FakePrototypeEventLifecycle } from "../fakes/FakePrototypeEventLifecycl
 import { event } from "../helpers/prototypeTestEvent";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { PROTOTYPE_EVENT_BUFFER_CAPACITY } from "../../src/features/prototype/PrototypeEventBuffer";
-import { getRemovedToolActionHint } from "../../src/models/removedTools";
+import { getRemovedToolActionHint } from "../../src/utils/removedTools";
 import { FakeDeviceWindowCacheInvalidator } from "../fakes/FakeDeviceWindowCacheInvalidator";
 
 const device: BootedDevice = { deviceId: "fake-prototype", platform: "android", name: "Fake" };
@@ -1169,6 +1169,15 @@ describe("prototype discovery over MCP", () => {
     );
     // First listing builds every tool's schema and the client's validators; keep it out of the test.
     await fixture.client.listTools();
+    // Enabling a tool rebuilds the listing with its schemas and the client validates them; run the
+    // same enable, list, disable cycle once so the test measures steady state.
+    for (const enabled of [true, false]) {
+      await fixture.client.callTool({
+        name: "setToolEnabled",
+        arguments: { toolName: "prototype", enabled },
+      });
+      await fixture.client.listTools();
+    }
   });
   afterAll(async () => {
     unsubscribe();

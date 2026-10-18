@@ -1,15 +1,9 @@
+import type { SnapshotGeometry } from "../../../models/SnapshotGeometry";
 import { ActionableError } from "../../../models/ActionableError";
 import type { ImagePixelDimensions } from "../../../utils/screenshot/imageHeaderDimensions";
 import { RASTER_SCALE_TOLERANCE } from "./rasterGeometry";
 
-export interface SnapshotGeometry {
-  platform: "android" | "ios";
-  screenSize: { width: number; height: number };
-  rotation?: number;
-  nativeScale?: number;
-  /** Known capture orientation; absent preserves the snapshotOf framebuffer mapping. */
-  rasterOrientation?: "native" | "display";
-}
+export type { SnapshotGeometry };
 
 /** Shared full-raster scale and framebuffer orientation; never guesses from nativeScale. */
 export function snapshotRasterGeometry(

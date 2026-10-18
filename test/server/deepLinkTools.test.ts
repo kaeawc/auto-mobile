@@ -6,6 +6,9 @@ import {
 } from "../../src/server/deepLinkTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, DeepLinkResult } from "../../src/models";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const emptyDeepLinks = {
   schemes: [],

@@ -1,8 +1,6 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
-import {
-  runWithTextRequestContext,
-  TextIndeterminateError,
-} from "../../../src/features/action/textTransportTimeout";
+import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
+import { TextIndeterminateError } from "../../../src/features/action/TextIndeterminateError";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
@@ -2283,7 +2281,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       const executor = new DefaultSendKeysCommandExecutor(
         androidDevice,
         createAdbFactory(adb),
-        createObserver(focusedAndroidObservation()),
+        createObserver(focusedAndroidObservation(longRun)),
         { textClient: createTextClient().client, timer },
       );
 

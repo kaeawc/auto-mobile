@@ -243,7 +243,7 @@ interface SourceIndex {
   source: ts.SourceFile;
   bindings: Map<string, ts.Node>;
   imports: Map<string, { file: string; name: string }>;
-  registrations: Array<{ name: string; handler: ts.Expression }>;
+  registrations: Array<{ name: string; handler: ts.Expression; nonDeviceHandler?: ts.Expression }>;
 }
 const serverDirectory = path.resolve(import.meta.dir, "../../src/server");
 // Handlers delegate response building to helpers that moved out of src/server
@@ -346,7 +346,13 @@ function indexSource(
             ts.isPropertyAssignment(property) && property.name.getText(ast) === "outputSchema",
         )
       ) {
-        index.registrations.push({ name: name.text, handler });
+        // Tools registered with `shouldEnsureDevice: () => false` do their work in
+        // `nonDeviceHandler`, so the audit must follow it as well as the positional handler.
+        const nonDeviceHandler = options.properties.find(
+          (property): property is ts.PropertyAssignment =>
+            ts.isPropertyAssignment(property) && property.name.getText(ast) === "nonDeviceHandler",
+        )?.initializer;
+        index.registrations.push({ name: name.text, handler, nonDeviceHandler });
       }
     }
     if (
@@ -440,6 +446,13 @@ function auditHandler(
       ts.isIdentifier(node) &&
       (node === handler ||
         (ts.isCallExpression(node.parent) && node.parent.expression === node) ||
+        // `{ hook: handlers.prepareDevice }` passed into a factory: follow the object that built
+        // the handler set, since a hook injected at construction (#11827) is no longer defined
+        // inside the factory body the audit walks.
+        (ts.isPropertyAccessExpression(node.parent) &&
+          node.parent.expression === node &&
+          ts.isPropertyAssignment(node.parent.parent) &&
+          node.parent.parent.initializer === node.parent) ||
         (ts.isVariableDeclaration(node.parent) && node.parent.initializer === node) ||
         (ts.isShorthandPropertyAssignment(node.parent) &&
           ts.isObjectLiteralExpression(node.parent.parent) &&
@@ -494,10 +507,16 @@ beforeAll(() => {
     }
   }
   sourceAudit = [...indexes].flatMap(([file, index]) =>
-    index.registrations.map(({ name, handler }) => ({
-      name,
-      ...auditHandler(indexes, file, handler),
-    })),
+    index.registrations.map(({ name, handler, nonDeviceHandler }) => {
+      const audits = [handler, ...(nonDeviceHandler ? [nonDeviceHandler] : [])].map((target) =>
+        auditHandler(indexes, file, target),
+      );
+      return {
+        name,
+        structured: audits.some((audit) => audit.structured),
+        offenders: audits.flatMap((audit) => audit.offenders),
+      };
+    }),
   );
 });
 test("every schema registration reaches a structured builder and no text-only builder", () => {
@@ -527,6 +546,21 @@ test("source guard detects helper and raw text envelopes while exempting error e
     offenders: [],
   });
   expect(auditHandler(indexes, file, index.bindings.get("error")!).offenders).toEqual([]);
+});
+
+test("source guard captures nonDeviceHandler so session-resolved tools are audited", () => {
+  const file = path.join(serverDirectory, "nonDevice.ts");
+  const index = indexSource(
+    file,
+    `ToolRegistry.registerDeviceAware("viaNonDevice", "", schema, async () => { throw new Error("x"); }, {
+  outputSchema: schema,
+  nonDeviceHandler: async () => createJSONToolResponse({ success: true }),
+});`,
+  );
+  const indexes = new Map([[sourceKey(file), index]]);
+  const [registration] = index.registrations;
+  expect(registration?.nonDeviceHandler).toBeDefined();
+  expect(auditHandler(indexes, file, registration!.nonDeviceHandler!).offenders).toHaveLength(1);
 });
 
 test("source guard follows factory helpers returned through object shorthand", () => {
@@ -566,6 +600,34 @@ export function createMixedHandlers() { return { mixed }; }`,
     { name: "bad", structured: false, offenders: [`${handlerFile}:2`] },
     { name: "mixed", structured: true, offenders: [`${handlerFile}:2`] },
   ]);
+});
+
+test("follows a hook injected into a handler factory from a sibling handler set (#11827)", () => {
+  const registrationFile = path.join(serverDirectory, "injectedRegistrations.ts");
+  const handlerFile = path.join(serverDirectory, "injectedHandlers.ts");
+  const registrationIndex = indexSource(
+    registrationFile,
+    `import { createBase, createStart } from "./injectedHandlers";
+const base = createBase();
+const { start } = createStart({ prepare: base.prepare });
+ToolRegistry.register("start", "", schema, (args) => start(args), { outputSchema: schema });`,
+  );
+  const handlerIndex = indexSource(
+    handlerFile,
+    `function ready() { return createStructuredToolResponse({ success: true }); }
+export function createBase() { return { prepare: () => ready() }; }
+export function createStart(hooks) { const start = (args) => hooks.prepare(args); return { start }; }`,
+  );
+  const indexes = new Map([
+    [sourceKey(registrationFile), registrationIndex],
+    [sourceKey(handlerFile), handlerIndex],
+  ]);
+  expect(
+    registrationIndex.registrations.map(({ name, handler }) => ({
+      name,
+      ...auditHandler(indexes, registrationFile, handler),
+    })),
+  ).toEqual([{ name: "start", structured: true, offenders: [] }]);
 });
 
 test("source paths use Windows containment and canonical keys", () => {

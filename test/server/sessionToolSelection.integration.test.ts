@@ -30,6 +30,9 @@ import {
 } from "../../src/server/directSessionDeviceRegistry";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 function acquisitionPayload(
   sessionUuid: string,

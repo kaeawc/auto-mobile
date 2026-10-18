@@ -7,6 +7,7 @@ import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../../observe/DeviceHierarchy
 import { hasWrongWindowEvidence } from "../../observe/observationFreshness";
 import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./androidSearchDrag";
 import { DispatchedObservationError } from "../../../models/DispatchedObservationError";
+import { SETTLE_BUDGET_MS } from "../observedInteractionProfiles";
 import { inputDurationArgument } from "../touchscreenInput";
 import { usesScopedSwipeContainer } from "./swipeSelectorScopes";
 import { runBoomerangReturnLeg, throwIfAbortedKeepingForwardNote } from "./boomerangReturnLeg";
@@ -254,7 +255,7 @@ export class SwipeOn extends BaseVisualChange {
   private executeGesture!: GestureExecutor;
   private scrollables!: ScrollableElementsQuery;
   private geometry!: ElementGeometry;
-  private accessibilityService!: AndroidCtrlProxyClient;
+  private accessibilityService!: import("./types").SwipeOnCtrlProxy;
   private accessibilityDetector!: AccessibilityDetector;
   private featureFlags!: FeatureFlagReader;
   private overlayDetector: OverlayDetector;
@@ -962,7 +963,7 @@ export class SwipeOn extends BaseVisualChange {
             },
             {
               changeExpected: false,
-              timeoutMs: 500,
+              timeoutMs: SETTLE_BUDGET_MS.brief,
               display,
               previousObservation,
               progress,
@@ -1122,9 +1123,11 @@ export class SwipeOn extends BaseVisualChange {
           options.display,
           this.observeScreen,
           this.adb,
-          this.lastRenderedObservation,
-          signal,
-          this.displayTransitionReader,
+          {
+            lastRenderedObservation: this.lastRenderedObservation,
+            signal,
+            transitions: this.displayTransitionReader,
+          },
         );
         throwIfAborted(signal);
         if (this.device.platform === "android") {
@@ -1748,7 +1751,7 @@ export class SwipeOn extends BaseVisualChange {
         usesObservationForResolution: false,
         changeExpected: false,
         display: options.display,
-        timeoutMs: 500,
+        timeoutMs: SETTLE_BUDGET_MS.brief,
         progress,
         perf,
         signal,
@@ -1878,7 +1881,7 @@ export class SwipeOn extends BaseVisualChange {
               },
         changeExpected: false,
         display: options.display,
-        timeoutMs: 500,
+        timeoutMs: SETTLE_BUDGET_MS.brief,
         progress,
         perf,
         signal,

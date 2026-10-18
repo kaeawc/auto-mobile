@@ -1200,6 +1200,11 @@ describe("runAutoMobileChecks", () => {
       status: "pass" as const,
       message: "No CtrlProxy forwarding leases held by other processes",
     }),
+    checkDeviceOwnership: async () => ({
+      name: "Device Ownership Agreement",
+      status: "pass" as const,
+      message: "Device ownership stores agree",
+    }),
   };
 
   test("skips Android CtrlProxy diagnostics during iOS-only doctor runs", async () => {

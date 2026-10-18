@@ -20,6 +20,7 @@ import { SearchableHierarchy } from "../../../src/features/utility/SearchableNod
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { resolveViewHierarchyForSearch } from "../../../src/features/utility/viewHierarchySearch";
 import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
+import { noopObserveAudits } from "../../fakes/noopObserveAudits";
 import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
 
 describe("ObserveScreen", function () {
@@ -106,9 +107,7 @@ describe("ObserveScreen", function () {
           viewHierarchy: hierarchy,
           daemonState: { isInitialized: () => true, getSessionManager: () => manager },
           cacheStore: new FakeObserveCacheStore(timer),
-          performanceAuditor: { run: async () => undefined } as any,
-          accessibilityAuditor: { run: async () => undefined } as any,
-          accessibilityStateDetector: { run: async () => undefined } as any,
+          ...noopObserveAudits(),
         });
 
         await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -174,15 +173,13 @@ describe("ObserveScreen", function () {
             ],
           },
         },
-      } as any);
+      });
 
       try {
         const screen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb), {
           viewHierarchy,
           cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-          performanceAuditor: { run: async () => undefined } as any,
-          accessibilityAuditor: { run: async () => undefined } as any,
-          accessibilityStateDetector: { run: async () => undefined } as any,
+          ...noopObserveAudits(),
         });
 
         const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -226,9 +223,7 @@ describe("ObserveScreen", function () {
           const screen = new RealObserveScreen(device, new FakeAdbClientFactory(fakeAdb), {
             viewHierarchy: hierarchy,
             cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-            performanceAuditor: { run: async () => undefined } as any,
-            accessibilityAuditor: { run: async () => undefined } as any,
-            accessibilityStateDetector: { run: async () => undefined } as any,
+            ...noopObserveAudits(),
           });
           const observation = await screen.execute({ skipScreenshot: true, skipBackStack: true });
           const output = sanitizeObserveResult(observation, {
@@ -258,7 +253,7 @@ describe("ObserveScreen", function () {
             node: [{ text: "Ready", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
           },
         },
-      } as any);
+      });
 
       const cacheStore = new FakeObserveCacheStore(new FakeTimer());
       // Simulate a concurrent terminate invalidating the device cache the instant
@@ -271,9 +266,7 @@ describe("ObserveScreen", function () {
         const screen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb), {
           viewHierarchy,
           cacheStore,
-          performanceAuditor: { run: async () => undefined } as any,
-          accessibilityAuditor: { run: async () => undefined } as any,
-          accessibilityStateDetector: { run: async () => undefined } as any,
+          ...noopObserveAudits(),
         });
 
         await screen.execute({ skipScreenshot: true, skipBackStack: true });
@@ -298,9 +291,7 @@ describe("ObserveScreen", function () {
         const screen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb), {
           viewHierarchy: hierarchy,
           cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-          performanceAuditor: { run: async () => undefined } as any,
-          accessibilityAuditor: { run: async () => undefined } as any,
-          accessibilityStateDetector: { run: async () => undefined } as any,
+          ...noopObserveAudits(),
         });
         const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
         expect(result.freshness?.category).toBe("unavailable");
@@ -408,7 +399,7 @@ describe("ObserveScreen", function () {
         screenHeight: 1920,
         wakefulness: "Awake",
         hierarchy: { node: { bounds: { left: 0, top: 0, right: 1080, bottom: 1920 } } },
-      } as any);
+      });
       class RecordingObserveScreen extends RealObserveScreen {
         recompositionCalls = 0;
 
@@ -424,9 +415,7 @@ describe("ObserveScreen", function () {
           {
             cacheStore,
             viewHierarchy,
-            performanceAuditor: { run: async () => undefined } as any,
-            accessibilityAuditor: { run: async () => undefined } as any,
-            accessibilityStateDetector: { run: async () => undefined } as any,
+            ...noopObserveAudits(),
           },
           timer,
         );
@@ -546,7 +535,7 @@ describe("ObserveScreen", function () {
             ],
           },
         },
-      } as any);
+      });
 
       try {
         const screen = new RealObserveScreen(
@@ -555,9 +544,7 @@ describe("ObserveScreen", function () {
           {
             viewHierarchy,
             cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-            performanceAuditor: { run: async () => undefined } as any,
-            accessibilityAuditor: { run: async () => undefined } as any,
-            accessibilityStateDetector: { run: async () => undefined } as any,
+            ...noopObserveAudits(),
           },
         );
 
@@ -623,7 +610,7 @@ describe("ObserveScreen", function () {
         screenWidth: 402,
         screenHeight: 874,
         hierarchy: { node: { $: { class: "XCUIApplication" } } },
-      } as any);
+      });
       viewHierarchy.configureScreenIdentity({
         platform: "ios",
         source: "sdk",
@@ -642,9 +629,7 @@ describe("ObserveScreen", function () {
           {
             viewHierarchy,
             cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-            performanceAuditor: { run: async () => undefined } as any,
-            accessibilityAuditor: { run: async () => undefined } as any,
-            accessibilityStateDetector: { run: async () => undefined } as any,
+            ...noopObserveAudits(),
           },
         );
 
@@ -678,7 +663,7 @@ describe("ObserveScreen", function () {
             ],
           },
         },
-      } as any);
+      });
       viewHierarchy.configureScreenIdentity({
         platform: "ios",
         source: "sdk",
@@ -694,9 +679,7 @@ describe("ObserveScreen", function () {
           {
             viewHierarchy,
             cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-            performanceAuditor: { run: async () => undefined } as any,
-            accessibilityAuditor: { run: async () => undefined } as any,
-            accessibilityStateDetector: { run: async () => undefined } as any,
+            ...noopObserveAudits(),
           },
         );
 
@@ -723,7 +706,7 @@ describe("ObserveScreen", function () {
             node: [{ $: { class: "UINavigationBar", text: "New Reminder" } }],
           },
         },
-      } as any);
+      });
       viewHierarchy.getScreenIdentity = () => {
         throw new Error("SDK refresh unavailable");
       };
@@ -735,9 +718,7 @@ describe("ObserveScreen", function () {
           {
             viewHierarchy,
             cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-            performanceAuditor: { run: async () => undefined } as any,
-            accessibilityAuditor: { run: async () => undefined } as any,
-            accessibilityStateDetector: { run: async () => undefined } as any,
+            ...noopObserveAudits(),
           },
         );
 
@@ -764,7 +745,7 @@ describe("ObserveScreen", function () {
             node: [{ $: { class: "UINavigationBar", text: "New Reminder" } }],
           },
         },
-      } as any);
+      });
       viewHierarchy.configureScreenIdentity({
         platform: "ios",
         source: "sdk",
@@ -780,9 +761,7 @@ describe("ObserveScreen", function () {
           {
             viewHierarchy,
             cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-            performanceAuditor: { run: async () => undefined } as any,
-            accessibilityAuditor: { run: async () => undefined } as any,
-            accessibilityStateDetector: { run: async () => undefined } as any,
+            ...noopObserveAudits(),
           },
         );
 
@@ -810,7 +789,7 @@ describe("ObserveScreen", function () {
       };
       const fakeAdb = new FakeAdbExecutor();
       const observeScreen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb));
-      viewHierarchy = (observeScreen as any).viewHierarchy;
+      viewHierarchy = observeScreen["viewHierarchy"];
     });
 
     test("should detect focused element from view hierarchy", function () {
@@ -1172,7 +1151,7 @@ describe("ObserveScreen", function () {
     });
 
     const extract = (viewHierarchy: any) =>
-      (observeScreen as any).extractScreenSizeFromHierarchy(viewHierarchy);
+      observeScreen.extractScreenSizeFromHierarchy(viewHierarchy);
 
     test("should extract from Android-style object bounds", function () {
       const result = extract({

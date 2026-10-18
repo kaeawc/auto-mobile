@@ -14,18 +14,13 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
-import android.graphics.Bitmap
-import android.graphics.Point
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
-import android.text.Spanned
-import android.text.style.ClickableSpan
 import android.util.Base64
-import android.util.DisplayMetrics
 import android.util.Log
 import android.view.Display
 import android.view.View
@@ -38,15 +33,10 @@ import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
 import dev.jasonpearson.automobile.ctrlproxy.ime.awaitImeServiceReady
 import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.KeyboardProfiles
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
-import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
-import dev.jasonpearson.automobile.ctrlproxy.models.InteractionElement
-import dev.jasonpearson.automobile.ctrlproxy.models.InteractionEvent
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions
-import dev.jasonpearson.automobile.ctrlproxy.models.SystemBarsInsetsInfo
-import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
@@ -157,14 +147,10 @@ import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
-import java.io.ByteArrayOutputStream
 import java.io.File
-import java.util.Collections
-import java.util.IdentityHashMap
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.coroutines.resume
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -175,12 +161,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -518,9 +501,9 @@ internal fun accessibilityEventWorkFor(
   }
 
 /**
- * Debounced-scroll accumulation ([CtrlProxy.pendingScrollDeltaX] / `Y` / package name) tagged with
- * the [WebSocketServer.observerSessionGeneration] it was accumulated under, modeled as an immutable
- * value so the cross-session discard is unit-testable.
+ * Debounced-scroll accumulation (pending scroll X / Y / package name in
+ * [InteractionEventController]) tagged with the [WebSocketServer.observerSessionGeneration] it was
+ * accumulated under, modeled as an immutable value so the cross-session discard is unit-testable.
  */
 internal data class PendingScroll(
   val deltaX: Int,
@@ -697,11 +680,11 @@ internal fun handledExceptionEventResponse(
  *
  * Serialization was hoisted out of the writer/broadcaster's own try/catch so a change is serialized
  * at most once (the one [serialize] result is reused for both [write] and [broadcast]). That move
- * exposed a leak: [CtrlProxy.extractedHierarchyFrameContexts] is a strong-keyed identity map that
- * only the broadcaster removed from, so an encode failure (e.g. a NaN/Infinity `textSizeInPx`)
- * before the broadcast would retain a full hierarchy forever. Centralizing the sequence guarantees
- * [releaseFrameContext] runs in a `finally` even when [serialize] throws, so no call site can
- * serialize-then-leak.
+ * exposed a leak: [HierarchyController.extractedHierarchyFrameContexts] is a strong-keyed identity
+ * map that only the broadcaster removed from, so an encode failure (e.g. a NaN/Infinity
+ * `textSizeInPx`) before the broadcast would retain a full hierarchy forever. Centralizing the
+ * sequence guarantees [releaseFrameContext] runs in a `finally` even when [serialize] throws, so no
+ * call site can serialize-then-leak.
  *
  * A failure in [serialize] (or [write]/[broadcast]) skips the remaining steps and rethrows so the
  * caller drops just that one frame; the frame-context entry is released regardless. This function
@@ -736,8 +719,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     private const val TAG = "CtrlProxy"
 
     // File name for app-scoped storage
-    private const val HIERARCHY_FILE_NAME = "latest_hierarchy.json"
-    private const val DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250L
 
     /**
      * The universe of accessibility event types we classify for subscription. [HANDLED_EVENT_TYPES]
@@ -818,8 +799,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     /**
      * `notificationTimeout` coalesces bursts of same-type events at the OS boundary before
-     * delivery. 100 ms matches the tightest interaction debounce the handler already applies
-     * ([inputTextDebounceMs]) and sits well under the scroll debounce (300 ms) and hierarchy
+     * delivery. 100 ms matches the tightest interaction debounce the handler already applies (see
+     * [InteractionEventController]) and sits well under the scroll debounce (300 ms) and hierarchy
      * broadcast interval (250 ms), so it collapses event floods without adding perceptible latency
      * to the interaction/telemetry or hierarchy-refresh paths the debouncers rely on.
      */
@@ -1034,7 +1015,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val timeProvider: TimeProvider = SystemTimeProvider()
   private lateinit var webSocketServer: WebSocketServer
   private val webSocketLifecycle = ServerLifecycle<WebSocketServer> { it.stop() }
-  private lateinit var hierarchyDebouncer: HierarchyDebouncer
   private lateinit var rotationProvenance: RotationProvenanceTracker
   private var deviceStateRegistration: AutoCloseable? = null
   private val navigationEventAccumulator = NavigationEventAccumulator()
@@ -1293,6 +1273,195 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
+  private val displayController by lazy {
+    DisplayController(
+      host =
+        object : DisplayController.Host {
+          override fun displayManager() =
+            getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+
+          override fun windowManager() = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+
+          private val insetsProvider by lazy { createDisplayInsetsProvider(this@CtrlProxy) }
+
+          override fun displayInsetsProvider() = insetsProvider
+
+          override fun frameworkDimenPx(name: String): Int {
+            val id = resources.getIdentifier(name, "dimen", "android")
+            return if (id > 0) resources.getDimensionPixelSize(id) else 0
+          }
+
+          override fun densityDpi() = resources.displayMetrics.densityDpi
+        },
+    )
+  }
+  internal val hierarchyController by lazy {
+    HierarchyController(
+      host =
+        object : HierarchyController.Host {
+          override fun currentFrameContext() = this@CtrlProxy.currentFrameContext()
+
+          override fun selectDisplayWindows(displayId: Int?) =
+            viewHierarchyExtractor.selectDisplayWindows(this@CtrlProxy, displayId)
+
+          override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
+
+          override fun lastWindowClassName() = this@CtrlProxy.lastWindowClassName
+
+          override fun rotationProvenance() = this@CtrlProxy.rotationProvenance
+
+          override fun occlusionEnabled() = this@CtrlProxy.occlusionEnabled
+
+          override fun wakefulness() = getWakefulness()
+
+          override fun foregroundActivity(rootPackage: String?, windowClass: String?) =
+            getForegroundActivity(rootPackage, windowClass)
+
+          override fun isEmulator() = getIsEmulator()
+
+          override fun accessibilityTool() = getAccessibilityTool()
+
+          override fun isServerRunning() =
+            ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+
+          override fun releaseRequestOwner(requestId: String?) {
+            if (::webSocketServer.isInitialized) webSocketServer.releaseRequestOwner(requestId)
+          }
+
+          override suspend fun broadcastHierarchyWithPerf(
+            routeByRequestId: Boolean,
+            messageBuilder: (perfTiming: JsonElement?) -> String,
+          ) = webSocketServer.broadcastWithPerf(routeByRequestId, messageBuilder)
+
+          override suspend fun broadcastHierarchyWithPerfSync(
+            routeByRequestId: Boolean,
+            messageBuilder: (perfTiming: JsonElement?) -> String,
+          ) = webSocketServer.broadcastWithPerfSync(routeByRequestId, messageBuilder)
+
+          override suspend fun broadcastHierarchyExtractFrame(
+            frame: ErrorResponse?,
+            externallyCorrelated: Boolean,
+          ) = this@CtrlProxy.broadcastHierarchyExtractFrame(frame, externallyCorrelated)
+
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) = this@CtrlProxy.launchRequestScope(requestId, block)
+
+          override fun openFileOutput(filename: String, mode: Int) =
+            this@CtrlProxy.openFileOutput(filename, mode)
+
+          override fun filesDir() = this@CtrlProxy.filesDir
+        },
+      serviceScope = serviceScope,
+      viewHierarchyExtractor = viewHierarchyExtractor,
+      displayController = displayController,
+      perfProvider = perfProvider,
+      timeProvider = timeProvider,
+      workStats = workStats,
+      jsonCompact = jsonCompact,
+    )
+  }
+  private val screenshotController by lazy {
+    ScreenshotController(
+      host =
+        object : ScreenshotController.Host {
+          override fun takeScreenshot(displayId: Int, callback: TakeScreenshotCallback) {
+            this@CtrlProxy.takeScreenshot(displayId, mainExecutor, callback)
+          }
+
+          override fun rotationProvenance() = this@CtrlProxy.rotationProvenance
+        },
+      displayController = displayController,
+      timeProvider = timeProvider,
+    )
+  }
+  private val interactionEventController by lazy {
+    InteractionEventController(
+      host =
+        object : InteractionEventController.Host {
+          override fun connectionCount() =
+            if (::webSocketServer.isInitialized) webSocketServer.getConnectionCount() else 0
+
+          override fun observerSessionGeneration() =
+            if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration() else 0
+
+          override fun isServerRunning() =
+            ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcast(message: String) {
+            webSocketServer.broadcast(message)
+          }
+
+          override fun lastWindowClassName() = this@CtrlProxy.lastWindowClassName
+
+          override fun launchInServiceScope(block: suspend CoroutineScope.() -> Unit) {
+            serviceScope.launch(block = block)
+          }
+        },
+      timeProvider = timeProvider,
+      jsonCompact = jsonCompact,
+    )
+  }
+  private val nodeActionController by lazy {
+    NodeActionController(
+      host =
+        object : NodeActionController.Host {
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) {
+            this@CtrlProxy.launchRequestScope(requestId, block)
+          }
+
+          override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
+
+          override fun findNodeInDisplayWindows(
+            find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?,
+          ) = this@CtrlProxy.findNodeInDisplayWindows(find)
+
+          override fun screenDimensions(displayId: Int) =
+            displayController.getScreenDimensions(displayId)
+
+          override fun createView() = View(this@CtrlProxy)
+
+          override suspend fun publishSettledHierarchy() {
+            val freshHierarchy =
+              hierarchyController.debouncer.extractAfterQuiescenceSuspending(
+                quiescenceMs = HierarchyQuiescence.POLL_MS,
+                maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
+                pollIntervalMs = 10L,
+              )
+            if (freshHierarchy != null) {
+              hierarchyController.broadcastHierarchyUpdate(freshHierarchy, sync = true)
+            }
+          }
+
+          override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
+
+          override suspend fun sendActionResult(
+            requestId: String?,
+            action: String,
+            success: Boolean,
+            error: String?,
+            totalTimeMs: Long,
+            alreadySatisfied: Boolean,
+          ) =
+            this@CtrlProxy.broadcastActionResult(
+              requestId,
+              action,
+              success,
+              error,
+              totalTimeMs,
+              alreadySatisfied,
+            )
+        },
+      perfProvider = perfProvider,
+      timeProvider = timeProvider,
+    )
+  }
   private val focusController by lazy {
     FocusController(
       host =
@@ -1314,7 +1483,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun extractTraversalOrder(): TraversalOrderResult? {
             val allWindows = windows
             val rootNode = rootInActiveWindow
-            val screenDimensions = getScreenDimensions()
+            val screenDimensions = displayController.getScreenDimensions()
             if (allWindows.isNullOrEmpty() && rootNode == null) return null
             return if (!allWindows.isNullOrEmpty()) {
               viewHierarchyExtractor.extractTraversalOrderFromAllWindows(
@@ -1372,7 +1541,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
 
-          override fun screenDimensions(displayId: Int) = getScreenDimensions(displayId)
+          override fun screenDimensions(displayId: Int) =
+            displayController.getScreenDimensions(displayId)
 
           override fun hideSoftKeyboard() {
             softKeyboardController.setShowMode(AccessibilityService.SHOW_MODE_HIDDEN)
@@ -1386,13 +1556,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override suspend fun publishSettledHierarchy() {
             val freshHierarchy =
-              hierarchyDebouncer.extractAfterQuiescenceSuspending(
+              hierarchyController.debouncer.extractAfterQuiescenceSuspending(
                 quiescenceMs = HierarchyQuiescence.POLL_MS,
                 maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
                 pollIntervalMs = 10L,
               )
             if (freshHierarchy != null) {
-              broadcastHierarchyUpdate(freshHierarchy, sync = true)
+              hierarchyController.broadcastHierarchyUpdate(freshHierarchy, sync = true)
             }
           }
         },
@@ -1464,7 +1634,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
 
           override suspend fun settledHierarchy(displayId: Int?) =
-            hierarchyDebouncer.extractAfterQuiescenceSuspending(
+            hierarchyController.debouncer.extractAfterQuiescenceSuspending(
               quiescenceMs = HierarchyQuiescence.POLL_MS,
               maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
               pollIntervalMs = 10L,
@@ -1472,7 +1642,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             )
 
           override suspend fun publishHierarchy(hierarchy: ViewHierarchy) =
-            broadcastHierarchyUpdate(hierarchy, sync = true)
+            hierarchyController.broadcastHierarchyUpdate(hierarchy, sync = true)
         },
       scope = { serviceScope },
       perfProvider = perfProvider,
@@ -1502,69 +1672,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private fun currentFrameContext(): String = "$frameContextEpoch:${frameContext.get()}"
 
-  // A hierarchy has object identity for its short trip from extraction to broadcast. Retaining the
-  // extraction-time token lets broadcast fail closed if an accessibility event intervenes.
-  private val extractedHierarchyFrameContexts: MutableMap<ViewHierarchy, String> =
-    Collections.synchronizedMap(IdentityHashMap<ViewHierarchy, String>())
-
   // Not an AccessibilityServiceInfo flag — read directly by extractHierarchyDirect/extractHierarchy
   // when calling into ViewHierarchyExtractor. Set via setAccessibilityFlags (--no-occlusion).
   @Volatile private var occlusionEnabled: Boolean = true
-
-  // Debounce timestamps — @Volatile since interaction events may trigger coroutines
-  @Volatile private var lastInputTextBroadcastMs: Long = 0
-  private val inputTextDebounceMs: Long = 100
-
-  @Volatile private var lastA11yFocusTapMs: Long = 0
-  private val a11yFocusTapDebounceMs: Long = 200
-
-  // Debounce for scroll events — accumulate delta and emit once per gesture.
-  // Store extracted fields instead of the raw AccessibilityEvent because
-  // Android recycles events after onAccessibilityEvent returns.
-  private var lastScrollBroadcastMs: Long = 0
-  private val scrollDebounceMs: Long = 300
-  @Volatile private var pendingScrollDeltaX: Int = 0
-  @Volatile private var pendingScrollDeltaY: Int = 0
-  private var pendingScrollPackageName: String? = null
-
-  // The WebSocketServer.observerSessionGeneration the pending scroll deltas were accumulated under.
-  // A change means the observer set emptied and a new session began since the last sample (issue
-  // #5470 review); the next scroll discards the stale accumulation instead of combining across
-  // sessions. A concurrent client joining does NOT change it, so an in-flight scroll is preserved.
-  @Volatile private var pendingScrollSessionGeneration: Int = 0
-
-  private data class ScreenshotCapturePayload(
-    val base64Image: String,
-    val rotation: Int?,
-    val displayId: Int,
-    val panelUniqueId: String?,
-    val captureDurationMs: Long,
-    val encodeDurationMs: Long,
-    val byteLength: Int,
-    val base64Length: Int,
-  )
-
-  /**
-   * Raw result of the platform takeScreenshot callback, carrying the failure code (issue #4927).
-   */
-  private sealed interface ScreenshotCallbackResult {
-    data class Captured(val bitmap: Bitmap, val rotation: Int?) : ScreenshotCallbackResult
-
-    data class Failed(val errorCode: Int?) : ScreenshotCallbackResult
-  }
-
-  /**
-   * Outcome of [takeScreenshotAsync]: an encoded payload, or a failure that retains the platform
-   * error code so the broadcast can surface a rate limit distinctly instead of a generic failure.
-   */
-  private sealed interface ScreenshotCaptureOutcome {
-    data class Success(val payload: ScreenshotCapturePayload) : ScreenshotCaptureOutcome
-
-    data class Failure(val errorCode: Int?) : ScreenshotCaptureOutcome
-  }
-
-  // Job for collecting hierarchy flow results
-  private var hierarchyFlowJob: Job? = null
 
   // Job for collecting navigation event updates
   private var navigationEventJob: Job? = null
@@ -1671,11 +1781,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       object : ScreenStateHost {
         override fun refreshPrototypeWindow() = this@CtrlProxy.refreshPrototypeWindow()
 
-        override fun extractHierarchyNow() {
-          if (::hierarchyDebouncer.isInitialized) {
-            hierarchyDebouncer.extractNow()
-          }
-        }
+        override fun extractHierarchyNow() = hierarchyController.extractNow()
       },
     )
 
@@ -1767,7 +1873,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         DeviceStateTransitions.register(this) { state ->
           displaySignal.emitDeviceState(state)
         }
-      overlayDrawer = OverlayDrawer(screenDimensionsProvider = { getScreenDimensions() })
+      overlayDrawer =
+        OverlayDrawer(screenDimensionsProvider = { displayController.getScreenDimensions() })
       overlayManager =
         OverlayManager(this, viewFactory = { HighlightOverlayView(it, overlayDrawer) })
       overlayDrawer.attachOverlayManager(overlayManager)
@@ -1995,78 +2102,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       registerReceiver(screenStateReceiver, screenStateFilter)
       Log.d(TAG, "Screen state receiver registered")
 
-      // Initialize the smart hierarchy debouncer with structural hash comparison
-      hierarchyDebouncer =
-        HierarchyDebouncer(
-          scope = serviceScope,
-          timeProvider = timeProvider,
-          perfProvider = perfProvider,
-          quickDebounceMs = 5L,
-          animationSkipWindowMs = 100L,
-          unsolicitedIntervalMs = DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS,
-          stats = workStats,
-          onDiscardedHierarchy = { extractedHierarchyFrameContexts.remove(it) },
-          extractHierarchy = { disableAllFiltering, snapshotOptions ->
-            extractHierarchyDirect(disableAllFiltering, snapshotOptions)
-          },
-        )
-
-      // Event-driven extraction is admitted before this collector at the configured interval.
-      // Deliver every admitted result so extraction time cannot cause a final refresh to be lost.
-      hierarchyFlowJob =
-        hierarchyDebouncer.hierarchyFlow
-          .onEach { result ->
-            // Guard the whole body: serialization was hoisted here (issue #5469) out of
-            // writeHierarchyToFile/broadcastHierarchyUpdate's own try/catch, so an encode failure
-            // on
-            // one frame (e.g. a NaN/Infinity textSizeInPx) would otherwise complete this collector
-            // —
-            // and it is never relaunched, silently losing all later unsolicited updates. Swallow so
-            // one bad frame is dropped, not the whole flow.
-            try {
-              when (result) {
-                is HierarchyResult.Changed -> {
-                  Log.d(
-                    TAG,
-                    "Hierarchy changed (hash=${result.hash}, extraction=${result.extractionTimeMs}ms)",
-                  )
-                  // Serialize once for the debug file and wire; release frame context on failure.
-                  deliverHierarchyFrame(
-                    serialize = {
-                      perfProvider.track("serializeHierarchy") {
-                        jsonCompact.encodeToString(result.hierarchy)
-                      }
-                    },
-                    write = { serialized ->
-                      writeHierarchyToFile(result.hierarchy, serialized = serialized)
-                    },
-                    broadcast = { serialized ->
-                      broadcastHierarchyUpdate(result.hierarchy, serialized = serialized)
-                    },
-                    releaseFrameContext = {
-                      extractedHierarchyFrameContexts.remove(result.hierarchy)
-                    },
-                  )
-                }
-                is HierarchyResult.Unchanged -> {
-                  Log.d(
-                    TAG,
-                    "Hierarchy unchanged (animation mode, skipped=${result.skippedEventCount})",
-                  )
-                  broadcastHierarchyUpdate(result.hierarchy)
-                }
-                is HierarchyResult.Error -> {
-                  Log.w(TAG, "Hierarchy extraction error: ${result.message}")
-                }
-              }
-            } catch (e: CancellationException) {
-              // Let cooperative cancellation unwind the collector normally.
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Error handling hierarchy result — dropping this frame", e)
-            }
-          }
-          .launchIn(serviceScope)
+      hierarchyController.start()
 
       // Initialize storage subscription manager for SharedPreferences inspection
       storageSubscriptionManager = StorageSubscriptionManager(this, scope = serviceScope)
@@ -2277,7 +2313,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     // Cancel hierarchy flow subscription
-    hierarchyFlowJob?.cancel()
+    hierarchyController.stop()
 
     // Cancel navigation event flow subscription
     navigationEventJob?.cancel()
@@ -2290,9 +2326,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     // Reset debouncer
-    if (::hierarchyDebouncer.isInitialized) {
-      hierarchyDebouncer.reset()
-    }
+    hierarchyController.resetDebouncer()
 
     // Stop WebSocket server
     if (::webSocketServer.isInitialized) {
@@ -2367,48 +2401,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override suspend fun requestHierarchy(request: RequestHierarchy) {
-    val disableAllFiltering = request.disableAllFiltering
-    val maxDepth = request.maxDepth
-    val maxNodes = request.maxNodes
-    val displayId = request.displayId
-    val requestId = request.requestId
+  override suspend fun requestHierarchy(request: RequestHierarchy) =
+    hierarchyController.requestHierarchy(request)
 
-    extractHierarchyNow(
-      disableAllFiltering,
-      HierarchySnapshotOptions(
-        maxDepth = maxDepth ?: 100,
-        maxNodes = maxNodes ?: 10_000,
-        displayId = displayId,
-      ),
-      requestId,
-    )
-  }
+  override suspend fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) =
+    hierarchyController.requestHierarchyIfStale(sinceTimestamp, requestId)
 
-  override suspend fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {
-    var extractionRequested = false
-    hierarchyDebouncer.extractIfStale(sinceTimestamp) {
-      extractionRequested = true
-      launchRequestScope(requestId) { extractHierarchyNow(requestId = requestId) }
-        .invokeOnCompletion { cause ->
-          // Also release when the service scope cancels the launch before extraction starts.
-          if (cause is CancellationException && ::webSocketServer.isInitialized) {
-            webSocketServer.releaseRequestOwner(requestId)
-          }
-        }
-    }
-    if (!extractionRequested && ::webSocketServer.isInitialized) {
-      webSocketServer.releaseRequestOwner(requestId)
-    }
-  }
-
-  override suspend fun setHierarchyInterval(intervalMs: Long?) {
-    val resolvedIntervalMs = intervalMs ?: DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
-    if (::hierarchyDebouncer.isInitialized) {
-      hierarchyDebouncer.setUnsolicitedIntervalMs(resolvedIntervalMs)
-    }
-    Log.d(TAG, "Hierarchy broadcast interval set to ${resolvedIntervalMs}ms")
-  }
+  override suspend fun setHierarchyInterval(intervalMs: Long?) =
+    hierarchyController.setHierarchyInterval(intervalMs)
 
   override suspend fun requestScreenshot(request: RequestScreenshot) {
     val requestId = request.requestId
@@ -2887,7 +2887,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override suspend fun requestClickFocusedInput(requestId: String?) {
     textInputController.forgetRememberedInsert()
     val startTime = System.currentTimeMillis()
-    // Like performNodeAction, stay on the inbound command queue until settling and replying.
+    // Like NodeActionController.performNodeAction, stay on the inbound command queue until settling
+    // and replying.
     try {
       val outcome =
         clickFocusedInput(
@@ -2899,7 +2900,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
           },
           recycle = { node -> node.recycle() },
-          settleAfterClick = ::refreshHierarchyAfterNodeAction,
+          settleAfterClick = nodeActionController::refreshHierarchyAfterNodeAction,
         )
       broadcastActionResult(
         requestId,
@@ -2927,14 +2928,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     action: String,
     resourceId: String?,
     selector: NodeSelector?,
-  ) = performNodeAction(requestId, action, resourceId, selector)
+  ) = nodeActionController.performNodeAction(requestId, action, resourceId, selector)
 
   override suspend fun requestActivateAccessibilityLink(
     requestId: String?,
     text: String,
     occurrence: Int,
     selector: NodeSelector?,
-  ) = performAccessibilityLinkActivation(requestId, text, occurrence, selector)
+  ) = nodeActionController.performAccessibilityLinkActivation(requestId, text, occurrence, selector)
 
   override suspend fun requestClipboard(requestId: String?, action: String, text: String?) =
     clipboardController.performClipboard(requestId, action, text)
@@ -3402,7 +3403,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /** The keyboard's reach up from [displayId]'s bottom edge, from its accessibility window. */
   private fun prototypeImeLiftPx(displayId: Int): Int {
-    val screen = getScreenDimensions(displayId) ?: return 0
+    val screen = displayController.getScreenDimensions(displayId) ?: return 0
     val windows =
       viewHierarchyExtractor.windowsForDisplay(this, displayId).map {
         val bounds = Rect()
@@ -3509,46 +3510,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
       // Broadcast interaction events for telemetry tracking. Classification is routed through the
       // shared [interactionDispatchFor] so the subscribed event-type mask (derived from the same
-      // classifier) can never drift from what this `when` actually acts on.
-      when (work.interaction) {
-        InteractionDispatch.TAP -> recordInteractionEvent(event, "tap")
-        InteractionDispatch.LONG_PRESS -> recordInteractionEvent(event, "longPress")
-        // Compose doesn't fire TYPE_VIEW_CLICKED — detect taps via content changes
-        // on clickable elements. CONTENT_CHANGE_TYPE_STATE_DESCRIPTION (64) fires
-        // when Compose state changes (e.g., button click updates counter).
-        // CONTENT_CHANGE_TYPE_CONTENT_DESCRIPTION (4) fires on many Compose interactions.
-        InteractionDispatch.CONTENT_CHANGED -> {
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            val ct = event.contentChangeTypes
-            // State description change = likely user interaction (Compose state update)
-            if (ct and AccessibilityEvent.CONTENT_CHANGE_TYPE_STATE_DESCRIPTION != 0) {
-              recordDebouncedInteraction(event, "stateChange")
-            }
-          }
-        }
-        InteractionDispatch.NAVIGATE -> recordInteractionEvent(event, "navigate")
-        InteractionDispatch.SELECT -> recordInteractionEvent(event, "select")
-        InteractionDispatch.INPUT_TEXT -> {
-          val now = System.currentTimeMillis()
-          if (now - lastInputTextBroadcastMs >= inputTextDebounceMs) {
-            lastInputTextBroadcastMs = now
-            recordInteractionEvent(event, "inputText")
-          }
-        }
-        // frameContext already advanced above (unconditionally); here we only do the gated,
-        // expensive scroll recording, which runs solely when observed.
-        InteractionDispatch.SCROLL -> recordDebouncedScroll(event)
-        null -> {} // event type this service does not act on
-      }
+      // classifier) can never drift from what the controller actually acts on.
+      work.interaction?.let { interactionEventController.record(event, it) }
 
       // Delegate to the smart debouncer for content/window changes (same shared classifier). The
       // debouncer uses structural hash comparison to detect animation vs real changes. Gated on an
       // observer (issue #5470): with no client connected, work.refreshesHierarchy is false, so the
       // extraction/hash is skipped. The frameContext token advanced unconditionally above.
       if (work.refreshesHierarchy) {
-        if (::hierarchyDebouncer.isInitialized) {
-          hierarchyDebouncer.onAccessibilityEvent()
-        }
+        hierarchyController.onAccessibilityEvent()
       }
     } catch (e: Exception) {
       Log.e(TAG, "Error handling accessibility event", e)
@@ -3558,179 +3528,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun onInterrupt() {
     Log.w(TAG, "Accessibility service interrupted")
-  }
-
-  private fun recordInteractionEvent(event: AccessibilityEvent, type: String) {
-    // Observer gate (issue #5470): early-return BEFORE reading event.source / getBoundsInScreen /
-    // allocating when nobody is connected. onAccessibilityEvent already gates dispatch on the same
-    // count; this is the defensive backstop for the scroll/debounced callers, and
-    // getConnectionCount
-    // > 0 also implies the server is running.
-    if (!::webSocketServer.isInitialized || webSocketServer.getConnectionCount() <= 0) {
-      return
-    }
-
-    val source =
-      try {
-        event.source
-      } catch (_: Exception) {
-        null
-      }
-    val bounds = source?.let {
-      try {
-        val rect = Rect()
-        it.getBoundsInScreen(rect)
-        ElementBounds(rect)
-      } catch (_: Exception) {
-        null
-      }
-    }
-    // Build element from source node, falling back to event-level data
-    val element =
-      if (source != null) {
-        InteractionElement(
-          text = source.text?.toString(),
-          contentDescription = source.contentDescription?.toString(),
-          resourceId = source.viewIdResourceName,
-          className = source.className?.toString(),
-          bounds = bounds,
-        )
-      } else {
-        // Fallback: extract what we can from the AccessibilityEvent itself
-        val eventText = event.text?.joinToString("") { it.toString() }?.takeIf { it.isNotEmpty() }
-        val eventDesc = event.contentDescription?.toString()
-        val eventClass = event.className?.toString()
-        if (eventText != null || eventDesc != null || eventClass != null) {
-          InteractionElement(
-            text = eventText,
-            contentDescription = eventDesc,
-            resourceId = null,
-            className = eventClass,
-            bounds = null,
-          )
-        } else null
-      }
-    try {
-      source?.recycle()
-    } catch (_: Exception) {
-      /* already recycled */
-    }
-
-    val textValue =
-      if (type == "inputText") {
-        val textList = event.text
-        if (textList.isNullOrEmpty()) null
-        else textList.joinToString(separator = "") { it.toString() }
-      } else {
-        null
-      }
-
-    val scrollDeltaX =
-      if (type == "scroll" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        pendingScrollDeltaX.takeIf { it != 0 } ?: event.scrollDeltaX
-      } else {
-        null
-      }
-    val scrollDeltaY =
-      if (type == "scroll" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        pendingScrollDeltaY.takeIf { it != 0 } ?: event.scrollDeltaY
-      } else {
-        null
-      }
-
-    val interaction =
-      InteractionEvent(
-        type = type,
-        timestamp = System.currentTimeMillis(),
-        packageName = event.packageName?.toString(),
-        screenClassName = lastWindowClassName,
-        element = element,
-        text = textValue,
-        scrollDeltaX = scrollDeltaX,
-        scrollDeltaY = scrollDeltaY,
-      )
-
-    serviceScope.launch {
-      try {
-        broadcastInteractionEvent(interaction)
-      } catch (e: CancellationException) {
-        // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3130).
-        throw e
-      } catch (e: Exception) {
-        Log.e(TAG, "Error broadcasting interaction event", e)
-      }
-    }
-  }
-
-  /**
-   * Debounce scroll events — accumulate deltas and emit once scrolling stops. TYPE_VIEW_SCROLLED
-   * fires many times per scroll gesture (every frame).
-   */
-  private fun recordDebouncedScroll(event: AccessibilityEvent) {
-    val now = System.currentTimeMillis()
-    // Only observed events reach here (the onAccessibilityEvent gate), so observerSessionGeneration
-    // reflects the current session. Fold this sample in through accumulatePendingScroll, which
-    // discards any accumulation tagged with a prior session first — closing the event-free-gap hole
-    // where a disconnect+reconnect between samples would otherwise let stale deltas combine with
-    // the
-    // first post-reconnect scroll (issue #5470 review). The generation is stable while any client
-    // stays connected, so a concurrent client joining mid-scroll does not drop the in-flight
-    // deltas.
-    // Store extracted fields, not the event reference (Android recycles it).
-    val sampleDeltaX = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) event.scrollDeltaX else 0
-    val sampleDeltaY = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) event.scrollDeltaY else 0
-    val currentGeneration =
-      if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration() else 0
-    val accumulated =
-      accumulatePendingScroll(
-        PendingScroll(
-          pendingScrollDeltaX,
-          pendingScrollDeltaY,
-          pendingScrollPackageName,
-          pendingScrollSessionGeneration,
-        ),
-        sampleDeltaX,
-        sampleDeltaY,
-        event.packageName?.toString(),
-        currentGeneration,
-      )
-    pendingScrollDeltaX = accumulated.deltaX
-    pendingScrollDeltaY = accumulated.deltaY
-    pendingScrollPackageName = accumulated.packageName
-    pendingScrollSessionGeneration = accumulated.sessionGeneration
-
-    if (now - lastScrollBroadcastMs >= scrollDebounceMs) {
-      lastScrollBroadcastMs = now
-      recordInteractionEvent(event, "scroll")
-      pendingScrollDeltaX = 0
-      pendingScrollDeltaY = 0
-      pendingScrollPackageName = null
-    }
-  }
-
-  /**
-   * Record an interaction event with debouncing to avoid duplicates. Used for
-   * TYPE_VIEW_ACCESSIBILITY_FOCUSED which fires alongside TYPE_VIEW_CLICKED.
-   */
-  private fun recordDebouncedInteraction(event: AccessibilityEvent, type: String) {
-    val now = System.currentTimeMillis()
-    if (now - lastA11yFocusTapMs >= a11yFocusTapDebounceMs) {
-      lastA11yFocusTapMs = now
-      recordInteractionEvent(event, type)
-    }
-  }
-
-  private suspend fun broadcastInteractionEvent(interaction: InteractionEvent) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping interaction event broadcast")
-      return
-    }
-
-    webSocketServer.broadcast(
-      webSocketFrameJson("interaction_event", timestamp = interaction.timestamp) {
-        put("event", jsonCompact.encodeToJsonElement(interaction))
-      },
-    )
   }
 
   private fun resolveSystemApp(packageName: String): Boolean? {
@@ -3776,129 +3573,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  /** Get current screen dimensions for offscreen filtering. */
-  @Suppress("DEPRECATION")
-  private fun getScreenDimensions(displayId: Int = Display.DEFAULT_DISPLAY): ScreenDimensions? {
-    return try {
-      if (displayId != Display.DEFAULT_DISPLAY && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        val displayManager =
-          getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
-        val display = displayManager?.getDisplay(displayId) ?: return null
-        val size = Point()
-        display.getRealSize(size)
-        return ScreenDimensions(size.x, size.y)
-      }
-      val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-      if (windowManager != null) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-          val bounds = windowManager.currentWindowMetrics.bounds
-          ScreenDimensions(bounds.width(), bounds.height())
-        } else {
-          val displayMetrics = DisplayMetrics()
-          windowManager.defaultDisplay.getRealMetrics(displayMetrics)
-          ScreenDimensions(displayMetrics.widthPixels, displayMetrics.heightPixels)
-        }
-      } else {
-        null
-      }
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to get screen dimensions", e)
-      null
-    }
-  }
-
   private fun activeDisplayId(): Int = viewHierarchyExtractor.selectDisplayWindows(this).displayId
-
-  private fun panelUniqueId(displayId: Int): String? =
-    (getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager)
-      ?.getDisplay(displayId)
-      .let(::panelUniqueIdOf)
-
-  private fun panelFingerprint(
-    displayId: Int,
-  ): dev.jasonpearson.automobile.ctrlproxy.models.PanelFingerprintInfo? =
-    (getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager)
-      ?.getDisplay(displayId)
-      .let(::panelFingerprintOf)
-      ?.let {
-        dev.jasonpearson.automobile.ctrlproxy.models.PanelFingerprintInfo(it.width, it.height)
-      }
-
-  /** Get current display rotation. Returns 0=portrait, 1=landscape90, 2=reverse, 3=landscape270. */
-  @Suppress("DEPRECATION")
-  private fun getRotation(): Int {
-    return getRotationOrNull() ?: 0
-  }
-
-  /**
-   * Read the display rotation without inventing portrait when the display is unavailable.
-   * Screenshot capture provenance uses this nullable form: an unknown rotation must make desktop
-   * control fail closed, unlike the older diagnostic hierarchy/device-info fields that retain their
-   * 0 fallback.
-   */
-  @Suppress("DEPRECATION")
-  private fun getRotationOrNull(displayId: Int = Display.DEFAULT_DISPLAY): Int? {
-    return try {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        // Use DisplayManager for AccessibilityService context (can't use context.display)
-        val displayManager =
-          getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
-        displayManager?.getDisplay(displayId)?.rotation
-      } else {
-        val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-        windowManager?.defaultDisplay?.rotation
-      }
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to get rotation", e)
-      null
-    }
-  }
-
-  /** Supplies each requested display's inset categories and [SystemChromeInfo] visibility. */
-  private val displayInsetsProvider: DisplayInsetsProvider by lazy {
-    createDisplayInsetsProvider(this)
-  }
-
-  /** Get typed current-window inset metadata for coordinate and layout inspection. */
-  @Suppress("DEPRECATION")
-  private fun getObservationInsets(
-    screenDimensions: ScreenDimensions?,
-    displayId: Int = Display.DEFAULT_DISPLAY,
-  ): ObservationInsetsInfo {
-    if (displayId != Display.DEFAULT_DISPLAY) {
-      return displayInsetsProvider.insetsFor(displayId, screenDimensions)
-    }
-    return try {
-      val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-      if (windowManager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        val metrics = windowManager.currentWindowMetrics
-        val windowInsets = metrics.windowInsets
-        observationInsetsFromWindowInsets(windowInsets, screenDimensions)
-      } else {
-        // API 24-29 cannot provide the typed WindowInsets categories from this service context.
-        val statusBarId = resources.getIdentifier("status_bar_height", "dimen", "android")
-        val navBarId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
-        val statusBarHeight =
-          if (statusBarId > 0) resources.getDimensionPixelSize(statusBarId) else 0
-        val navBarHeight = if (navBarId > 0) resources.getDimensionPixelSize(navBarId) else 0
-        val bars =
-          SystemInsetsInfo(top = statusBarHeight, bottom = navBarHeight, left = 0, right = 0)
-        ObservationInsetsInfo(
-          source = "android-resource-fallback",
-          systemBars = SystemBarsInsetsInfo(visible = bars, stable = bars),
-          displayCutoutInfo = DisplayCutoutInfo.unknown(),
-        )
-      }
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to get system insets", e)
-      ObservationInsetsInfo(
-        available = false,
-        source = "unavailable",
-        units = "unknown",
-        displayCutoutInfo = DisplayCutoutInfo.unknown(),
-      )
-    }
-  }
 
   /** Get device wakefulness state: "Awake", "Asleep", or "Dozing". */
   private fun getWakefulness(): String {
@@ -3962,16 +3637,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     className.startsWith("android.widget.") ||
       className.startsWith("android.view.") ||
       className.endsWith("DecorView")
-
-  /** Get display density in DPI. */
-  private fun getDensity(): Int {
-    return try {
-      resources.displayMetrics.densityDpi
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to get density", e)
-      0
-    }
-  }
 
   /** Check if running on an emulator. */
   /**
@@ -4042,7 +3707,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   /** Handle a request_device_info WebSocket message. */
   private fun performDeviceInfoRequest(requestId: String?) {
     val startTime = System.currentTimeMillis()
-    val screenDimensions = getScreenDimensions()
+    val screenDimensions = displayController.getScreenDimensions()
     val foreground = getForegroundActivity()
     val totalTimeMs = System.currentTimeMillis() - startTime
     asyncActionRunner.launch(requestId, "request_device_info") {
@@ -4053,8 +3718,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           success = true,
           screenWidth = screenDimensions?.width,
           screenHeight = screenDimensions?.height,
-          density = getDensity(),
-          rotation = getRotation(),
+          density = displayController.getDensity(),
+          rotation = displayController.getRotation(),
           sdkInt = Build.VERSION.SDK_INT,
           deviceModel = Build.MODEL,
           isEmulator = getIsEmulator(),
@@ -4066,249 +3731,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  /**
-   * Direct hierarchy extraction without debouncing. Used by the HierarchyDebouncer. Extracts from
-   * all visible windows to capture popups, toolbars, etc.
-   */
-  private fun extractHierarchyDirect(
-    disableAllFiltering: Boolean = false,
-    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
-  ): ViewHierarchy? {
-    val contextAtExtractionStart = currentFrameContext()
-    // Bracket every input acquisition and the extraction itself. If rotation changes anywhere in
-    // that interval, hierarchy geometry cannot be proven to match a single display orientation.
-    val selected = viewHierarchyExtractor.selectDisplayWindows(this, snapshotOptions.displayId)
-    val targetDisplayId = selected.displayId
-    val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
-    val rotationAtCaptureStart = getRotationOrNull(targetDisplayId)
-    val allWindows = selected.windows
-    val rootNode =
-      viewHierarchyExtractor.rootForDisplay(rootInActiveWindow, allWindows, targetDisplayId)
-    // Capture foreground info atomically with rootNode to avoid race conditions
-    // where the app state changes between hierarchy extraction and getForegroundActivity()
-    val capturedRootPackage = rootNode?.packageName?.toString()
-    val capturedWindowClass = lastWindowClassName
-    val screenDimensions = getScreenDimensions(targetDisplayId)
-    val insets = getObservationInsets(screenDimensions, targetDisplayId)
-
-    if (allWindows.isNullOrEmpty() && rootNode == null) {
-      Log.w(TAG, "No windows or root node available for extraction")
-      return null
-    }
-
-    // Use multi-window extraction if windows are available, otherwise fall back to single window
-    val hierarchy =
-      if (!allWindows.isNullOrEmpty()) {
-        Log.d(
-          TAG,
-          "Extracting from ${allWindows.size} windows " +
-            "(disableAllFiltering: $disableAllFiltering, occlusionEnabled: $occlusionEnabled)",
-        )
-        viewHierarchyExtractor.extractFromAllWindows(
-          allWindows,
-          rootNode,
-          null,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          occlusionEnabled,
-          snapshotOptions = snapshotOptions,
-          displayId = targetDisplayId,
-          panelUniqueId = panelUniqueId(targetDisplayId),
-        )
-      } else {
-        viewHierarchyExtractor.extractFromActiveWindow(
-          rootNode,
-          null,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          snapshotOptions = snapshotOptions,
-          displayId = targetDisplayId,
-          panelUniqueId = panelUniqueId(targetDisplayId),
-        )
-      }
-
-    if (snapshotOptions.isCancelled()) {
-      // A cancelled snapshot will not be delivered; do not retain its frame-context entry.
-      Log.d(TAG, "Discarding cancelled direct hierarchy extraction")
-      return null
-    }
-
-    val rotation =
-      rotationProvenance.rotationIfUnchanged(
-        rotationCapture,
-        rotationAtCaptureStart,
-        getRotationOrNull(targetDisplayId),
-        targetDisplayId,
-      )
-    // Bounding rectangles are only meaningful relative to the same orientation
-    // as screenDimensions. Keep the established edge insets, but avoid emitting
-    // stale geometry when the capture's orientation could not be proven.
-    val captureInsets =
-      if (rotation == null) {
-        insets.copy(displayCutoutInfo = DisplayCutoutInfo.unknown())
-      } else {
-        insets
-      }
-
-    // Add device metadata to the hierarchy (eliminates need for dumpsys calls on client)
-    val wakefulness = getWakefulness()
-    val foreground = getForegroundActivity(capturedRootPackage, capturedWindowClass)
-    val density = getDensity()
-    val enriched =
-      HierarchyMetadataBuilder.enrich(
-        hierarchy,
-        HierarchyMetadata(
-          displayId = targetDisplayId,
-          panelUniqueId = panelUniqueId(targetDisplayId),
-          panelFingerprint = panelFingerprint(targetDisplayId),
-          screenWidth = screenDimensions?.width,
-          screenHeight = screenDimensions?.height,
-          rotation = rotation,
-          systemInsets = legacySystemInsets(captureInsets),
-          insets = captureInsets,
-          wakefulness = wakefulness,
-          foregroundActivity = foreground,
-          density = density,
-          sdkInt = Build.VERSION.SDK_INT,
-          deviceModel = Build.MODEL,
-          isEmulator = getIsEmulator(),
-          accessibilityTool = getAccessibilityTool(),
-        ),
-      )
-    val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
-    if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
-      extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
-    }
-    return hierarchyWithScaleMetadata
-  }
-
-  /**
-   * Apply the additive #4548 scale metadata to a hierarchy response. Android accessibility bounds
-   * and screenshots are both physical pixels, so the bounds->pixel ratio is exactly 1 and the pixel
-   * dimensions equal the reported screen dimensions; the fields are omitted (null) when screen
-   * dimensions are unavailable. EVERY route that produces a hierarchy response — the debounced
-   * direct extraction ([extractHierarchyDirect]) AND the ADB EXTRACT_HIERARCHY broadcast
-   * ([extractHierarchy]) — passes through here, so the daemon can retain the metadata regardless of
-   * which route delivered the hierarchy (#4548).
-   */
-  private fun withScaleMetadata(
-    hierarchy: ViewHierarchy?,
-    screenDimensions: ScreenDimensions?,
-  ): ViewHierarchy? =
-    hierarchy?.copy(
-      nativeScale = if (screenDimensions != null) 1f else null,
-      pixelWidth = screenDimensions?.width,
-      pixelHeight = screenDimensions?.height,
-    )
-
-  /**
-   * Extract hierarchy immediately and broadcast synchronously, bypassing the debouncer and the
-   * SharedFlow async path. Used for explicit WebSocket requests where the daemon is waiting for
-   * fresh data. Matches the sync=true pattern used by tap/setText/imeAction handlers.
-   */
-  private suspend fun extractHierarchyNow(
-    disableAllFiltering: Boolean = false,
-    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
-    requestId: String? = null,
-  ) {
-    Log.d(TAG, "extractHierarchyNow (disableAllFiltering: $disableAllFiltering)")
-    val commandJob = currentCoroutineContext()[Job]
-    val cancellableOptions =
-      snapshotOptions.copy(
-        isCancelled = {
-          snapshotOptions.isCancelled() ||
-            commandJob?.isActive == false ||
-            serviceScope.coroutineContext[Job]?.isActive == false
-        },
-      )
-    try {
-      val hierarchy =
-        try {
-          hierarchyDebouncer.extractImmediately(
-            skipFlowEmit = true,
-            disableAllFiltering = disableAllFiltering,
-            snapshotOptions = cancellableOptions,
-          )
-        } catch (e: CancellationException) {
-          // Command cancellation must unwind; an independently cancelled snapshot returns null.
-          throw e
-        } catch (e: Exception) {
-          Log.e(TAG, "Error extracting WebSocket hierarchy for requestId=$requestId", e)
-          if (requestId == null) throw e
-          commandJob?.let { it.ensureActive() }
-          serviceScope.coroutineContext[Job]?.ensureActive()
-          broadcastHierarchyExtractFrame(
-            HierarchyExtractErrorFrames.thrownFrame(requestId, e),
-            externallyCorrelated = false,
-          )
-          if (::webSocketServer.isInitialized) webSocketServer.releaseRequestOwner(requestId)
-          // The extraction failure is settled here, so neither the queue nor scope guard replies.
-          return
-        }
-      if (hierarchy != null) {
-        // Explicit request: force-write the file and broadcast, serializing the tree once (#5469).
-        // Routed through deliverHierarchyFrame so the frame-context entry is released even if the
-        // encode throws (leak fix).
-        deliverHierarchyFrame(
-          serialize = {
-            commandJob?.ensureActive()
-            perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
-          },
-          write = { serialized -> writeHierarchyToFile(hierarchy, serialized = serialized) },
-          broadcast = { serialized ->
-            broadcastHierarchyUpdate(
-              hierarchy,
-              sync = true,
-              serialized = serialized,
-              requestId = requestId,
-              routeByRequestId = false,
-            )
-          },
-          releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
-        )
-      } else {
-        commandJob?.ensureActive()
-        serviceScope.coroutineContext[Job]?.ensureActive()
-        broadcastHierarchyExtractFrame(
-          HierarchyExtractErrorFrames.nullResultFrame(requestId),
-          externallyCorrelated = false,
-        )
-      }
-      if (::webSocketServer.isInitialized) webSocketServer.releaseRequestOwner(requestId)
-    } catch (e: CancellationException) {
-      if (::webSocketServer.isInitialized) webSocketServer.releaseRequestOwner(requestId)
-      throw e
-    }
-  }
-
-  /**
-   * Writes the hierarchy to a file for synchronous access. Callers that already serialized the tree
-   * for the wire frame pass that exact compact string via [serialized] so a single change is never
-   * serialized twice (issue #5469); the file therefore holds the same canonical form as the wire.
-   */
-  private fun writeHierarchyToFile(
-    hierarchy: ViewHierarchy,
-    filename: String = HIERARCHY_FILE_NAME,
-    serialized: String? = null,
-  ) {
-    try {
-      val jsonString = serialized ?: jsonCompact.encodeToString(hierarchy)
-      val jsonBytes = jsonString.toByteArray()
-      openFileOutput(filename, Context.MODE_PRIVATE).use { output ->
-        Log.d(TAG, "Writing ${jsonBytes.size} bytes to $filename")
-        output.write(jsonBytes)
-        output.flush()
-      }
-    } catch (e: Exception) {
-      Log.e(TAG, "Error writing hierarchy to file: $filename", e)
-    }
-  }
-
   private suspend fun handleCommand(intent: Intent) {
     // Clean up any lingering UUID-based hierarchy files before processing new requests
-    cleanupUuidHierarchyFiles()
+    hierarchyController.cleanupUuidHierarchyFiles()
 
     when (intent.action) {
       ACTION_EXTRACT_HIERARCHY -> {
@@ -4326,7 +3751,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         try {
           val textFilter = intent.getStringExtra("text")
           val disableAllFiltering = intent.getBooleanExtra("disableAllFiltering", false)
-          val hierarchy = extractHierarchy(textFilter, disableAllFiltering)
+          val hierarchy = hierarchyController.extractHierarchy(textFilter, disableAllFiltering)
           if (hierarchy != null) {
             val filename = "hierarchy_$uuid.json"
             // Explicit request: serialize once and reuse for the file and the wire frame (#5469).
@@ -4337,12 +3762,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
               },
               write = { serialized ->
-                writeHierarchyToFile(hierarchy, filename, serialized = serialized)
+                hierarchyController.writeHierarchyToFile(
+                  hierarchy,
+                  filename,
+                  serialized = serialized,
+                )
               },
               broadcast = { serialized ->
-                broadcastHierarchyUpdate(hierarchy, serialized = serialized, requestId = uuid)
+                hierarchyController.broadcastHierarchyUpdate(
+                  hierarchy,
+                  serialized = serialized,
+                  requestId = uuid,
+                )
               },
-              releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
+              releaseFrameContext = {
+                hierarchyController.extractedHierarchyFrameContexts.remove(hierarchy)
+              },
             )
 
             val message =
@@ -4367,96 +3802,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
     }
-  }
-
-  private fun extractHierarchy(
-    textFilter: String? = null,
-    disableAllFiltering: Boolean = false,
-  ): ViewHierarchy? {
-    val contextAtExtractionStart = currentFrameContext()
-    // This is the synchronous ADB-broadcast fallback, not the debounced direct route above. It
-    // must bracket the same inputs and extraction so the fallback never publishes a hierarchy
-    // whose geometry and rotation came from different display states.
-    val selected = viewHierarchyExtractor.selectDisplayWindows(this)
-    val targetDisplayId = selected.displayId
-    val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
-    val rotationAtCaptureStart = getRotationOrNull(targetDisplayId)
-    val allWindows = selected.windows
-    val rootNode =
-      viewHierarchyExtractor.rootForDisplay(rootInActiveWindow, allWindows, targetDisplayId)
-    val capturedRootPackage = rootNode?.packageName?.toString()
-    val capturedWindowClass = lastWindowClassName
-    val screenDimensions = getScreenDimensions(targetDisplayId)
-    val insets = getObservationInsets(screenDimensions, targetDisplayId)
-
-    if (allWindows.isNullOrEmpty() && rootNode == null) {
-      return null
-    }
-
-    val hierarchy =
-      if (!allWindows.isNullOrEmpty()) {
-        Log.d(
-          TAG,
-          "extractHierarchy from ${allWindows.size} windows " +
-            "(disableAllFiltering: $disableAllFiltering, occlusionEnabled: $occlusionEnabled)",
-        )
-        viewHierarchyExtractor.extractFromAllWindows(
-          allWindows,
-          rootNode,
-          textFilter,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          occlusionEnabled,
-          displayId = targetDisplayId,
-          panelUniqueId = panelUniqueId(targetDisplayId),
-        )
-      } else {
-        viewHierarchyExtractor.extractFromActiveWindow(
-          rootNode,
-          textFilter,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          displayId = targetDisplayId,
-          panelUniqueId = panelUniqueId(targetDisplayId),
-        )
-      }
-    val rotation =
-      rotationProvenance.rotationIfUnchanged(
-        rotationCapture,
-        rotationAtCaptureStart,
-        getRotationOrNull(targetDisplayId),
-        targetDisplayId,
-      )
-    val captureInsets =
-      if (rotation == null) insets.copy(displayCutoutInfo = DisplayCutoutInfo.unknown()) else insets
-    val enriched =
-      HierarchyMetadataBuilder.enrich(
-        hierarchy,
-        HierarchyMetadata(
-          displayId = targetDisplayId,
-          panelUniqueId = panelUniqueId(targetDisplayId),
-          panelFingerprint = panelFingerprint(targetDisplayId),
-          screenWidth = screenDimensions?.width,
-          screenHeight = screenDimensions?.height,
-          rotation = rotation,
-          systemInsets = legacySystemInsets(captureInsets),
-          insets = captureInsets,
-          wakefulness = getWakefulness(),
-          foregroundActivity = getForegroundActivity(capturedRootPackage, capturedWindowClass),
-          density = getDensity(),
-          sdkInt = Build.VERSION.SDK_INT,
-          deviceModel = Build.MODEL,
-          isEmulator = getIsEmulator(),
-          accessibilityTool = getAccessibilityTool(),
-        ),
-      )
-    val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
-    if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
-      extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
-    }
-    return hierarchyWithScaleMetadata
   }
 
   private fun sendResult(success: Boolean, data: String? = null, error: String? = null) {
@@ -4498,443 +3843,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         if (externallyCorrelated) webSocketServer.broadcastExternallyCorrelatedResponse(frame)
         else webSocketServer.broadcast(frame)
       }
-    }
-  }
-
-  /**
-   * Broadcast hierarchy update to WebSocket clients (suspend function for proper ordering).
-   *
-   * @param sync If true, enqueues for each client in call order; each client's sender drains its
-   *   queue FIFO. Returns before socket delivery.
-   */
-  private suspend fun broadcastHierarchyUpdate(
-    hierarchy: ViewHierarchy,
-    sync: Boolean = false,
-    serialized: String? = null,
-    requestId: String? = null,
-    routeByRequestId: Boolean = false,
-  ) {
-    val contextAtExtraction = extractedHierarchyFrameContexts.remove(hierarchy)
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping broadcast")
-      return
-    }
-
-    try {
-      // Reuse the string the caller already serialized for the disk file when present, so a single
-      // change is serialized at most once (issue #5469); otherwise serialize the wire form here.
-      val jsonString =
-        serialized
-          ?: perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
-
-      val messageBuilder: (kotlinx.serialization.json.JsonElement?) -> String = { perfTiming ->
-        buildString {
-          append(
-            """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$jsonString""",
-          )
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          if (contextAtExtraction != null && contextAtExtraction == currentFrameContext()) {
-            appendJsonStringField("frameContext", contextAtExtraction, jsonCompact)
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
-      }
-
-      withContext(PerfRequestContext(null)) {
-        if (sync) {
-          // Enqueue in call order; each client's sender preserves FIFO without waiting for
-          // delivery.
-          webSocketServer.broadcastWithPerfSync(
-            routeByRequestId = routeByRequestId,
-            messageBuilder = messageBuilder,
-          )
-        } else {
-          // Async broadcast - for normal event-driven updates
-          webSocketServer.broadcastWithPerf(
-            routeByRequestId = routeByRequestId,
-            messageBuilder = messageBuilder,
-          )
-        }
-      }
-      Log.d(
-        TAG,
-        "Broadcasted hierarchy update to ${webSocketServer.getConnectionCount()} clients (sync=$sync)",
-      )
-    } catch (e: CancellationException) {
-      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting hierarchy update", e)
-    }
-  }
-
-  /** Clean up any existing UUID-based hierarchy files */
-  private fun cleanupUuidHierarchyFiles() {
-    try {
-      val filesDir = filesDir
-      val files = filesDir.listFiles() ?: return
-
-      var deletedCount = 0
-      files.forEach { file ->
-        if (
-          file.name.startsWith("hierarchy_") &&
-            file.name.endsWith(".json") &&
-            file.name != HIERARCHY_FILE_NAME
-        ) {
-          if (file.delete()) {
-            deletedCount++
-            Log.d(TAG, "Deleted old hierarchy file: ${file.name}")
-          } else {
-            Log.w(TAG, "Failed to delete hierarchy file: ${file.name}")
-          }
-        }
-      }
-
-      if (deletedCount > 0) {
-        Log.i(TAG, "Cleaned up $deletedCount old UUID hierarchy files")
-      }
-    } catch (e: Exception) {
-      Log.e(TAG, "Error cleaning up UUID hierarchy files", e)
-      // Don't let cleanup errors prevent the main operation
-    }
-  }
-
-  /**
-   * Takes a screenshot and returns it as a base64-encoded JPEG plus capture diagnostics. Requires
-   * Android R (API 30) or higher. Runs on IO dispatcher to avoid blocking the main thread.
-   */
-  private suspend fun takeScreenshotAsync(
-    targetDisplayId: Int,
-    quality: Int = 80,
-  ): ScreenshotCaptureOutcome {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-      Log.w(TAG, "Screenshot API requires Android R (API 30) or higher")
-      return ScreenshotCaptureOutcome.Failure(null)
-    }
-
-    return withContext(Dispatchers.IO) {
-      try {
-        val startTime = System.currentTimeMillis()
-
-        // Use suspendCancellableCoroutine to bridge callback-based API
-        val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
-        val rotationAtCaptureStart = getRotationOrNull(targetDisplayId)
-        val captured =
-          suspendCancellableCoroutine<ScreenshotCallbackResult> { continuation ->
-            takeScreenshot(
-              targetDisplayId,
-              mainExecutor,
-              object : TakeScreenshotCallback {
-                override fun onSuccess(screenshot: ScreenshotResult) {
-                  val hardwareBitmap =
-                    Bitmap.wrapHardwareBuffer(
-                      screenshot.hardwareBuffer,
-                      screenshot.colorSpace,
-                    )
-                  screenshot.hardwareBuffer.close()
-                  if (hardwareBitmap == null) {
-                    continuation.resume(ScreenshotCallbackResult.Failed(null))
-                    return
-                  }
-                  // A display change makes the pixels' orientation ambiguous. Preserve that
-                  // ambiguity as null so desktop control fails closed rather than guessing.
-                  val rotation =
-                    rotationProvenance.rotationIfUnchanged(
-                      rotationCapture,
-                      rotationAtCaptureStart,
-                      getRotationOrNull(targetDisplayId),
-                      targetDisplayId,
-                    )
-                  continuation.resume(ScreenshotCallbackResult.Captured(hardwareBitmap, rotation))
-                }
-
-                override fun onFailure(errorCode: Int) {
-                  // Retain the platform error code so the broadcast can distinguish a rate limit
-                  // (ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT) from a real failure (issue #4927).
-                  Log.e(TAG, "Screenshot failed with error code: $errorCode")
-                  continuation.resume(ScreenshotCallbackResult.Failed(errorCode))
-                }
-              },
-            )
-          }
-
-        if (captured is ScreenshotCallbackResult.Failed) {
-          Log.e(TAG, "Failed to capture screenshot bitmap (errorCode=${captured.errorCode})")
-          return@withContext ScreenshotCaptureOutcome.Failure(captured.errorCode)
-        }
-
-        val (bitmap, rotation) = captured as ScreenshotCallbackResult.Captured
-
-        val screenshotTime = System.currentTimeMillis() - startTime
-        Log.d(TAG, "Screenshot captured in ${screenshotTime}ms (${bitmap.width}x${bitmap.height})")
-
-        // Convert to JPEG bytes on IO thread
-        val encodeStart = System.currentTimeMillis()
-        val outputStream = ByteArrayOutputStream()
-
-        // Convert hardware bitmap to software bitmap for compression
-        val softwareBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false)
-        bitmap.recycle()
-
-        softwareBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
-        softwareBitmap.recycle()
-
-        val jpegBytes = outputStream.toByteArray()
-        val base64String = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
-
-        val encodeTime = System.currentTimeMillis() - encodeStart
-        val totalTime = System.currentTimeMillis() - startTime
-
-        Log.d(
-          TAG,
-          "Screenshot encoded: ${jpegBytes.size} bytes -> ${base64String.length} base64 chars in ${encodeTime}ms (total: ${totalTime}ms)",
-        )
-
-        ScreenshotCaptureOutcome.Success(
-          ScreenshotCapturePayload(
-            base64Image = base64String,
-            rotation = rotation,
-            displayId = targetDisplayId,
-            panelUniqueId = panelUniqueId(targetDisplayId),
-            captureDurationMs = screenshotTime,
-            encodeDurationMs = encodeTime,
-            byteLength = jpegBytes.size,
-            base64Length = base64String.length,
-          ),
-        )
-      } catch (e: CancellationException) {
-        // The awaiting caller is being cancelled — rethrow instead of converting the cancellation
-        // into a null screenshot (#3191).
-        throw e
-      } catch (e: Exception) {
-        Log.e(TAG, "Error taking screenshot", e)
-        ScreenshotCaptureOutcome.Failure(null)
-      }
-    }
-  }
-
-  /**
-   * Perform an accessibility action on a node selected from observed stable fields. Resource ID is
-   * preserved as the legacy selector; newer clients can additionally use test tags, Android unique
-   * IDs, and collection coordinates.
-   */
-  private fun performAccessibilityLinkActivation(
-    requestId: String?,
-    text: String,
-    occurrence: Int,
-    selector: NodeSelector?,
-  ) {
-    val startTime = System.currentTimeMillis()
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-      launchRequestScope(requestId) {
-        broadcastActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          "Semantic accessibility links require Android API 26 or later",
-          System.currentTimeMillis() - startTime,
-        )
-      }
-      return
-    }
-    if (text.isBlank() || occurrence < 0) {
-      launchRequestScope(requestId) {
-        broadcastActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          "Link text must be non-blank and occurrence must be non-negative",
-          System.currentTimeMillis() - startTime,
-        )
-      }
-      return
-    }
-
-    try {
-      val root = rootInActiveWindow
-      val owner = selector?.let { sel -> findNodeInDisplayWindows { findNodeBySelector(it, sel) } }
-      if (selector != null && owner == null) {
-        throw IllegalStateException("Selected link owner is no longer present")
-      }
-      var matched = 0
-      var activated = false
-      var activationError: String? = null
-      fun visit(node: AccessibilityNodeInfo?) {
-        if (node == null || activated) return
-        val nodeText = node.text as? Spanned
-        if (nodeText != null) {
-          nodeText
-            .getSpans(0, nodeText.length, ClickableSpan::class.java)
-            .sortedBy { nodeText.getSpanStart(it) }
-            .forEach { span ->
-              if (activated) return@forEach
-              val start = nodeText.getSpanStart(span)
-              val end = nodeText.getSpanEnd(span)
-              val spanText = nodeText.subSequence(start, end).toString()
-              if (spanText.equals(text, ignoreCase = true)) {
-                if (matched++ == occurrence) {
-                  try {
-                    // Accessibility exposes ClickableSpan only from API 26. Invoke its public
-                    // contract; no coordinate, reflection, or whole-node fallback is permitted.
-                    span.onClick(View(this))
-                    activated = true
-                  } catch (error: Exception) {
-                    activationError = error.message ?: error.javaClass.simpleName
-                  }
-                }
-              }
-            }
-        }
-        for (index in 0 until node.childCount) {
-          node.getChild(index)?.let { child ->
-            try {
-              visit(child)
-            } finally {
-              child.recycle()
-            }
-          }
-        }
-      }
-      visit(owner ?: root)
-      owner?.recycle()
-
-      val error =
-        when {
-          activated -> null
-          activationError != null -> "Semantic link activation failed: $activationError"
-          else -> "No actionable semantic link matching '$text' at occurrence $occurrence"
-        }
-      launchRequestScope(requestId) {
-        broadcastActionResult(
-          requestId,
-          "activate_accessibility_link",
-          activated,
-          error,
-          System.currentTimeMillis() - startTime,
-        )
-      }
-    } catch (error: Exception) {
-      Log.w(TAG, "Semantic accessibility link activation failed", error)
-      launchRequestScope(requestId) {
-        broadcastActionResult(
-          requestId,
-          "activate_accessibility_link",
-          false,
-          error.message ?: error.javaClass.simpleName,
-          System.currentTimeMillis() - startTime,
-        )
-      }
-    }
-  }
-
-  /** Settle and publish a fresh hierarchy before acknowledging a successful node action. */
-  private suspend fun refreshHierarchyAfterNodeAction() {
-    val freshHierarchy =
-      hierarchyDebouncer.extractAfterQuiescenceSuspending(
-        quiescenceMs = HierarchyQuiescence.POLL_MS,
-        maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-        pollIntervalMs = 10L,
-      )
-    if (freshHierarchy != null) {
-      broadcastHierarchyUpdate(freshHierarchy, sync = true)
-    }
-  }
-
-  private suspend fun performNodeAction(
-    requestId: String?,
-    action: String,
-    resourceId: String?,
-    selector: NodeSelector?,
-  ) {
-    textInputController.forgetRememberedInsert()
-    val startTime = System.currentTimeMillis()
-    val effectiveSelector = selector?.takeIf { it.hasCriteria() }
-    val targetDescription = effectiveSelector?.toString() ?: "resource-id: $resourceId"
-    Log.d(TAG, "performAction: action='$action', target='$targetDescription'")
-    perfProvider.serial("performAction")
-
-    try {
-      if (effectiveSelector == null && resourceId.isNullOrEmpty()) {
-        perfProvider.end()
-        val errorTime = System.currentTimeMillis()
-        val error = "A resource-id or stable node selector is required for accessibility actions"
-        Log.w(TAG, error)
-        launchRequestScope(requestId) {
-          broadcastActionResult(requestId, action, false, error, errorTime - startTime)
-        }
-        return
-      }
-
-      perfProvider.startOperation("findNode")
-      val targetNode = findNodeInDisplayWindows { root ->
-        if (effectiveSelector != null) {
-          findNodeBySelector(root, effectiveSelector)
-        } else if (resourceId != null) {
-          findNodeByResourceIdOnRootDisplay(root, resourceId, ::getScreenDimensions)
-        } else {
-          null
-        }
-      }
-      perfProvider.endOperation("findNode")
-
-      if (targetNode == null) {
-        perfProvider.end()
-        val errorTime = System.currentTimeMillis()
-        val error = "Element not found with $targetDescription"
-        Log.w(TAG, error)
-        launchRequestScope(requestId) {
-          broadcastActionResult(requestId, action, false, error, errorTime - startTime)
-        }
-        return
-      }
-
-      perfProvider.startOperation("executeAction")
-      val decision =
-        decideNodeAction(
-          action,
-          targetNode.isAccessibilityFocused,
-          targetNode.actionList?.map { it.id },
-        )
-      val alreadySatisfied = decision is NodeActionDecision.AlreadySatisfied
-      val actionError = (decision as? NodeActionDecision.Refused)?.message
-      val success =
-        alreadySatisfied ||
-          (decision is NodeActionDecision.Perform && targetNode.performAction(decision.actionId))
-      perfProvider.endOperation("executeAction")
-
-      targetNode.recycle()
-      perfProvider.end()
-
-      Log.d(TAG, "Action completed: success=$success")
-
-      // Wait for UI to settle after click/long_click/scroll, then extract fresh hierarchy
-      if (success && action in listOf("click", "long_click", "scroll_forward", "scroll_backward")) {
-        refreshHierarchyAfterNodeAction()
-      }
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "Action total time: ${totalTime}ms")
-
-      broadcastActionResult(
-        requestId,
-        action,
-        success,
-        if (success) null else actionError ?: "performAction returned false",
-        totalTime,
-        alreadySatisfied,
-      )
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing action", e)
-      broadcastActionResult(requestId, action, false, e.message, errorTime - startTime)
     }
   }
 
@@ -5150,7 +4058,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           capture.value
         } else {
           prototypesHidden = null
-          takeScreenshotAsync(targetDisplayId)
+          screenshotController.takeScreenshotAsync(targetDisplayId)
         }
       val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
       when (outcome) {
@@ -5180,7 +4088,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           // rather than a generic capture failure (issue #4927).
           val error = CtrlProxyScreenshotWire.errorMessageForCode(outcome.errorCode)
           webSocketServer.broadcast(
-            screenshotErrorFrame(requestId, error, targetDisplayId, panelUniqueId(targetDisplayId)),
+            screenshotErrorFrame(
+              requestId,
+              error,
+              targetDisplayId,
+              displayController.panelUniqueId(targetDisplayId),
+            ),
           )
         }
       }
@@ -5195,8 +4108,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     targetDisplayId: Int,
   ): PrototypeHiddenCapture<ScreenshotCaptureOutcome> =
     if (::prototypeController.isInitialized)
-      prototypeController.withHiddenForCapture { takeScreenshotAsync(targetDisplayId) }
-    else PrototypeHiddenCapture(takeScreenshotAsync(targetDisplayId), prototypeExcluded = true)
+      prototypeController.withHiddenForCapture {
+        screenshotController.takeScreenshotAsync(targetDisplayId)
+      }
+    else
+      PrototypeHiddenCapture(
+        screenshotController.takeScreenshotAsync(targetDisplayId),
+        prototypeExcluded = true,
+      )
 
   /** Broadcast navigation event to WebSocket clients using typed protocol */
   private suspend fun broadcastNavigationEvent(

@@ -13,18 +13,6 @@ import type { SystemDetection } from "../../../src/utils/system/SystemDetection"
 const ANDROID_ENV_NAMES = ["ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_SDK_HOME"] as const;
 const savedAndroidEnvironment = new Map(ANDROID_ENV_NAMES.map((name) => [name, process.env[name]]));
 
-type AdbClientInternals = {
-  isTestMode: boolean;
-  execAsync: (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
-  execWithSignal: (
-    file: string,
-    args: string[],
-    maxBuffer?: number,
-    timeoutMs?: number,
-    signal?: AbortSignal,
-  ) => Promise<ExecResult>;
-};
-
 function ok(stdout = ""): ExecResult {
   return {
     stdout,
@@ -60,10 +48,9 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
   test("fails the request budget when a cold-cache path probe stalls", async () => {
     const timer = new FakeTimer();
     const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
-    const internals = client as unknown as AdbClientInternals;
-    internals.isTestMode = false;
-    internals.execAsync = async () => new Promise<ExecResult>(() => {});
-    internals.execWithSignal = async (_file, _args, _maxBuffer, timeoutMs) =>
+    client["isTestMode"] = false;
+    client["execAsync"] = async () => new Promise<ExecResult>(() => {});
+    client["execWithSignal"] = async (_file, _args, _maxBuffer, timeoutMs) =>
       new Promise<ExecResult>((_resolve, reject) => {
         timer.setTimeout(
           () => reject(new AdbCommandTimeoutError(`Command timed out after ${timeoutMs}ms`)),
@@ -92,10 +79,9 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
     const timer = new FakeTimer();
     const controller = new AbortController();
     const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
-    const internals = client as unknown as AdbClientInternals;
-    internals.isTestMode = false;
+    client["isTestMode"] = false;
     const probes: Array<{ timeoutMs?: number; signal?: AbortSignal }> = [];
-    internals.execWithSignal = async (file, args, _maxBuffer, timeoutMs, signal) => {
+    client["execWithSignal"] = async (file, args, _maxBuffer, timeoutMs, signal) => {
       probes.push({ timeoutMs, signal });
       return file === "which" && args[0] === "adb" ? ok("/sdk/platform-tools/adb\n") : ok();
     };
@@ -114,16 +100,15 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
   test("passes only the remaining request budget to the command after discovery", async () => {
     const timer = new FakeTimer();
     const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
-    const internals = client as unknown as AdbClientInternals;
-    internals.isTestMode = false;
-    internals.execAsync = async (file, args) => {
+    client["isTestMode"] = false;
+    client["execAsync"] = async (file, args) => {
       expect([file, ...args]).toEqual(["which", "adb"]);
       timer.advanceTime(7);
       return ok("/sdk/platform-tools/adb\n");
     };
 
     const commandTimeouts: number[] = [];
-    internals.execWithSignal = async (file, args, _maxBuffer, timeoutMs) => {
+    client["execWithSignal"] = async (file, args, _maxBuffer, timeoutMs) => {
       if (file === "which" && args[0] === "adb") {
         timer.advanceTime(7);
         return ok("/sdk/platform-tools/adb\n");
@@ -142,12 +127,11 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
   test("propagates a fallback-detection timeout and does not cache an incomplete resolution", async () => {
     const timer = new FakeTimer();
     const client = new AdbClient(null, null, null, defaultRetryExecutor, timer);
-    const internals = client as unknown as AdbClientInternals;
-    internals.isTestMode = false;
+    client["isTestMode"] = false;
     let recover = false;
     let adbPathProbeCalls = 0;
     const executedCommands: string[] = [];
-    internals.execWithSignal = async (file, args, _maxBuffer, timeoutMs) => {
+    client["execWithSignal"] = async (file, args, _maxBuffer, timeoutMs) => {
       const command = [file, ...args].join(" ");
       executedCommands.push(command);
       if (command === "which adb") {
@@ -185,11 +169,10 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
   test("does not cache the fallback path when an environment probe is aborted", async () => {
     process.env.ANDROID_HOME = "/sdk";
     const client = new AdbClient(null, null, null, defaultRetryExecutor, new FakeTimer());
-    const internals = client as unknown as AdbClientInternals;
-    internals.isTestMode = false;
+    client["isTestMode"] = false;
     let versionProbeCalls = 0;
     const commandFiles: string[] = [];
-    internals.execWithSignal = async (file, args, _maxBuffer, _timeoutMs, signal) => {
+    client["execWithSignal"] = async (file, args, _maxBuffer, _timeoutMs, signal) => {
       if (signal?.aborted) {
         throw new Error("probe aborted");
       }
@@ -225,11 +208,10 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
 
   test("does not cache the fallback path when a later tool-discovery probe is aborted", async () => {
     const client = new AdbClient(null, null, null, defaultRetryExecutor, new FakeTimer());
-    const internals = client as unknown as AdbClientInternals;
-    internals.isTestMode = false;
+    client["isTestMode"] = false;
     let adbPathProbeCalls = 0;
     const commandFiles: string[] = [];
-    internals.execWithSignal = async (file, args, _maxBuffer, _timeoutMs, signal) => {
+    client["execWithSignal"] = async (file, args, _maxBuffer, _timeoutMs, signal) => {
       if (signal?.aborted) {
         throw new Error("probe aborted");
       }
@@ -288,9 +270,8 @@ describe.serial("AdbClient ADB-path discovery deadline", () => {
       timer,
       () => stalledSystemDetection,
     );
-    const internals = client as unknown as AdbClientInternals;
-    internals.isTestMode = false;
-    internals.execWithSignal = async (file, args) => {
+    client["isTestMode"] = false;
+    client["execWithSignal"] = async (file, args) => {
       if (file === "which" && args[0] === "adb") {
         return ok("");
       }

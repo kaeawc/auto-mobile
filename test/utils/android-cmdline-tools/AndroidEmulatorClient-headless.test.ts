@@ -119,12 +119,11 @@ describe("AndroidEmulatorClient detectDisplayError", () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new FakeAdbExecutor();
     const fakeFactory = new TestAdbClientFactory(fakeAdb);
-    client = new AndroidEmulatorClient(
-      async () => createExecResult("", ""),
-      null,
-      fakeTimer,
-      fakeFactory,
-    );
+    client = new AndroidEmulatorClient({
+      execAsync: async () => createExecResult("", ""),
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+    });
   });
 
   test("detects 'could not connect to display'", () => {
@@ -223,13 +222,13 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
     skipEmulatorPathDetection(client);
 
     try {
@@ -266,13 +265,13 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
     skipEmulatorPathDetection(client);
 
     try {
@@ -314,13 +313,13 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
     };
 
     fakeTimer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
       spawnFn,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
     skipEmulatorPathDetection(client);
 
     try {
@@ -344,13 +343,12 @@ describe("AndroidEmulatorClient startEmulator headless wiring", () => {
       return createExecResult("");
     };
 
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
-      null,
-      fakeTimer,
-      fakeFactory,
-      fakeAvdConfigReader,
-    );
+      timer: fakeTimer,
+      adbFactory: fakeFactory,
+      avdConfigReader: fakeAvdConfigReader,
+    });
     skipEmulatorPathDetection(client);
 
     await expect(client.startEmulator("Missing_Device")).rejects.toThrow(

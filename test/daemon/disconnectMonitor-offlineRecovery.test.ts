@@ -309,12 +309,10 @@ test("alternating successful and failed offline probes do not repeat global reco
       return [{ deviceId: "emulator-5554", state: "offline" as const }];
     }
   }
-  const client = new AndroidEmulatorClient(
-    undefined,
-    null,
-    new FakeTimer(),
-    new FakeAdbClientFactory(new ProbeExecutor()),
-  );
+  const client = new AndroidEmulatorClient({
+    timer: new FakeTimer(),
+    adbFactory: new FakeAdbClientFactory(new ProbeExecutor()),
+  });
   let reconnects = 0;
   class OfflineManager extends FakeDeviceManager {
     async getAndroidOfflineDeviceIds(ids: Iterable<string>) {

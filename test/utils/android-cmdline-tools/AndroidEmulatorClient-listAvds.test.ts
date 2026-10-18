@@ -41,13 +41,11 @@ describe("AndroidEmulatorClient listAvds", () => {
       const execAsync = async (_command: string): Promise<ExecResult> => {
         throw new Error("emulator: command not found");
       };
-      const client = new AndroidEmulatorClient(
+      const client = new AndroidEmulatorClient({
         execAsync,
-        null,
-        new FakeTimer(),
-        undefined,
-        noAvdConfigReader,
-      );
+        timer: new FakeTimer(),
+        avdConfigReader: noAvdConfigReader,
+      });
       (client as any).ensureEmulatorPath = async () => "emulator";
 
       await expect(client.listAvds()).rejects.toThrow("Android emulator not found");
@@ -79,7 +77,7 @@ describe("AndroidEmulatorClient listAvds", () => {
       const execAsync = async (_command: string): Promise<ExecResult> => {
         throw new Error("spawn /bin/sh ENOENT");
       };
-      const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer());
+      const client = new AndroidEmulatorClient({ execAsync, timer: new FakeTimer() });
       (client as any).emulatorPath = emulatorPath;
       (client as any).ensureEmulatorPath = async () => emulatorPath;
 
@@ -117,7 +115,7 @@ describe("AndroidEmulatorClient listAvds", () => {
       const execAsync = async (_command: string): Promise<ExecResult> => {
         throw new Error("ENOENT: no such file or directory, posix_spawn '/bin/sh'");
       };
-      const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer());
+      const client = new AndroidEmulatorClient({ execAsync, timer: new FakeTimer() });
       (client as any).emulatorPath = emulatorPath;
       (client as any).ensureEmulatorPath = async () => emulatorPath;
 
@@ -141,7 +139,7 @@ describe("AndroidEmulatorClient listAvds", () => {
       const execAsync = async (_command: string): Promise<ExecResult> => {
         throw new Error("emulator: command not found");
       };
-      const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer());
+      const client = new AndroidEmulatorClient({ execAsync, timer: new FakeTimer() });
       (client as any).ensureEmulatorPath = async () => "emulator";
 
       await expect(client.listAvds()).rejects.toThrow("Android emulator not found");
@@ -180,13 +178,11 @@ describe("AndroidEmulatorClient listAvds", () => {
       const execAsync = async (): Promise<ExecResult> => {
         throw new Error("spawn /usr/local/lib/android/sdk/emulator/emulator ENOENT");
       };
-      const client = new AndroidEmulatorClient(
+      const client = new AndroidEmulatorClient({
         execAsync,
-        null,
-        new FakeTimer(),
-        undefined,
-        noAvdConfigReader,
-      );
+        timer: new FakeTimer(),
+        avdConfigReader: noAvdConfigReader,
+      });
       (client as any).ensureEmulatorPath = async () =>
         "/usr/local/lib/android/sdk/emulator/emulator";
 
@@ -220,13 +216,11 @@ describe("AndroidEmulatorClient listAvds", () => {
   test("returns AVDs when emulator command succeeds", async () => {
     const execAsync = async (_command: string): Promise<ExecResult> =>
       createExecResult("Pixel_9\nPixel_Tablet\n");
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
-      null,
-      new FakeTimer(),
-      undefined,
-      noAvdConfigReader,
-    );
+      timer: new FakeTimer(),
+      avdConfigReader: noAvdConfigReader,
+    });
     (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([
@@ -247,13 +241,11 @@ describe("AndroidEmulatorClient listAvds", () => {
         `);
       },
     };
-    const client = new AndroidEmulatorClient(
-      async () => createExecResult("Pixel_6\n"),
-      null,
-      new FakeTimer(),
-      undefined,
-      configReader,
-    );
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => createExecResult("Pixel_6\n"),
+      timer: new FakeTimer(),
+      avdConfigReader: configReader,
+    });
     (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([
@@ -272,13 +264,11 @@ describe("AndroidEmulatorClient listAvds", () => {
         return parseAvdConfig("hw.device.name=pixel_tablet");
       },
     };
-    const client = new AndroidEmulatorClient(
-      async () => createExecResult("Pixel_Tablet\n"),
-      null,
-      new FakeTimer(),
-      undefined,
-      configReader,
-    );
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => createExecResult("Pixel_Tablet\n"),
+      timer: new FakeTimer(),
+      avdConfigReader: configReader,
+    });
     (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([
@@ -295,13 +285,11 @@ describe("AndroidEmulatorClient listAvds", () => {
         return parseAvdConfig("hw.device.name=pixel_6");
       },
     };
-    const client = new AndroidEmulatorClient(
-      async () => createExecResult("Pixel_6\n"),
-      null,
-      new FakeTimer(),
-      undefined,
-      configReader,
-    );
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => createExecResult("Pixel_6\n"),
+      timer: new FakeTimer(),
+      avdConfigReader: configReader,
+    });
     (client as any).ensureEmulatorPath = async () => "emulator";
 
     const [image] = await client.listAvds();
@@ -324,13 +312,11 @@ describe("AndroidEmulatorClient listAvds", () => {
     };
     const execAsync = async (_command: string): Promise<ExecResult> =>
       createExecResult("Pixel_9\n");
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
-      null,
-      new FakeTimer(),
-      undefined,
-      configReader,
-    );
+      timer: new FakeTimer(),
+      avdConfigReader: configReader,
+    });
     (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([
@@ -357,13 +343,11 @@ describe("AndroidEmulatorClient listAvds", () => {
     };
     const execAsync = async (_command: string): Promise<ExecResult> =>
       createExecResult("Pixel_9\\n");
-    const client = new AndroidEmulatorClient(
+    const client = new AndroidEmulatorClient({
       execAsync,
-      null,
-      new FakeTimer(),
-      undefined,
-      configReader,
-    );
+      timer: new FakeTimer(),
+      avdConfigReader: configReader,
+    });
     (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toMatchObject([{ apiLevel: 34 }]);
@@ -398,15 +382,13 @@ describe("AndroidEmulatorClient listAvds", () => {
   };
 
   function clientRejecting(error: Error, path: string): AndroidEmulatorClient {
-    const client = new AndroidEmulatorClient(
-      async () => {
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => {
         throw error;
       },
-      null,
-      new FakeTimer(),
-      undefined,
-      noAvdConfigReader,
-    );
+      timer: new FakeTimer(),
+      avdConfigReader: noAvdConfigReader,
+    });
     Object.assign(client, { emulatorPath: path, ensureEmulatorPath: async () => path });
     return client;
   }
@@ -468,19 +450,17 @@ describe("AndroidEmulatorClient listAvds", () => {
 
   // Node's documented execFile spawn-error shape (not a Bun capture).
   test("missing executable retains the typed unavailable error and existing message", async () => {
-    const client = new AndroidEmulatorClient(
-      async () => {
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => {
         throw Object.assign(new Error("spawn amprobe-emulator-not-on-path ENOENT"), {
           code: "ENOENT",
           path: "amprobe-emulator-not-on-path",
           syscall: "spawn amprobe-emulator-not-on-path",
         });
       },
-      null,
-      new FakeTimer(),
-      undefined,
-      noAvdConfigReader,
-    );
+      timer: new FakeTimer(),
+      avdConfigReader: noAvdConfigReader,
+    });
     Object.assign(client, {
       emulatorPath: "amprobe-emulator-not-on-path",
       ensureEmulatorPath: async () => "amprobe-emulator-not-on-path",
@@ -494,15 +474,13 @@ describe("AndroidEmulatorClient listAvds", () => {
     "spawn /bin/sh ENOENT",
   ])("an installed executable failure stays untyped: %s", async (message) => {
     // This existing on-disk source file stands in for the resolved executable; it is never run.
-    const client = new AndroidEmulatorClient(
-      async () => {
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => {
         throw new Error(message);
       },
-      null,
-      new FakeTimer(),
-      undefined,
-      noAvdConfigReader,
-    );
+      timer: new FakeTimer(),
+      avdConfigReader: noAvdConfigReader,
+    });
     Object.assign(client, {
       emulatorPath: import.meta.path,
       ensureEmulatorPath: async () => import.meta.path,

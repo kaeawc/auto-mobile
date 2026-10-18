@@ -420,6 +420,61 @@ const methods: RequestMethod[] = [
     name: "requestHierarchySync",
     invoke: (h, s) => h.client.requestHierarchySync(perf, false, s, LONG_TIMEOUT_MS),
   },
+  {
+    name: "listPreferenceFiles",
+    abortable: false,
+    invoke: (h) => h.client.listPreferenceFiles("pkg", LONG_TIMEOUT_MS),
+  },
+  {
+    name: "getPreferenceEntries",
+    abortable: false,
+    invoke: (h) => h.client.getPreferenceEntries("pkg", "file", LONG_TIMEOUT_MS),
+  },
+  {
+    name: "getPreference",
+    abortable: false,
+    invoke: (h) => h.client.getPreference("pkg", "file", "key", LONG_TIMEOUT_MS),
+  },
+  {
+    name: "setPreference",
+    abortable: false,
+    invoke: (h) => h.client.setPreference("pkg", "file", "key", "1", "string", LONG_TIMEOUT_MS),
+  },
+  {
+    name: "removePreference",
+    abortable: false,
+    invoke: (h) => h.client.removePreference("pkg", "file", "key", LONG_TIMEOUT_MS),
+  },
+  {
+    name: "clearPreferenceStore",
+    abortable: false,
+    invoke: (h) => h.client.clearPreferenceStore("pkg", "file", LONG_TIMEOUT_MS),
+  },
+  {
+    name: "listDataStores",
+    abortable: false,
+    invoke: (h) => h.client.listDataStores("pkg", "adapter", LONG_TIMEOUT_MS),
+  },
+  {
+    name: "getDataStore",
+    abortable: false,
+    invoke: (h) => h.client.getDataStore("pkg", "adapter", "store", LONG_TIMEOUT_MS),
+  },
+  {
+    name: "unsubscribeStorage",
+    abortable: false,
+    invoke: (h) => h.client.unsubscribeStorage("sub", LONG_TIMEOUT_MS),
+  },
+  {
+    name: "setAccessibilityFocus",
+    abortable: false,
+    invoke: (h) => h.client.setAccessibilityFocus("id", LONG_TIMEOUT_MS, perf),
+  },
+  {
+    name: "clearAccessibilityFocus",
+    abortable: false,
+    invoke: (h) => h.client.clearAccessibilityFocus("id", LONG_TIMEOUT_MS, perf),
+  },
 ];
 
 type Trigger = "abort" | "socket close";
@@ -486,6 +541,10 @@ describe("AndroidCtrlProxyClient request settlement (#11844)", () => {
 const EXCLUDED: Record<string, string> = {
   requestInstallCaCertificateFromFile:
     "reads the certificate on the host, then sends the same frame as requestInstallCaCertificate",
+  getSdkCapabilities:
+    "sends only when the device advertises the optional command, which this harness does not",
+  discoverKeystore:
+    "sends only when the device advertises the optional command, which this harness does not",
   requestIdFromWireData: "decodes an inbound frame's id; it sends nothing",
 };
 
@@ -498,7 +557,7 @@ function requestMethodNames(client: object): string[] {
   ) {
     for (const name of Object.getOwnPropertyNames(o)) {
       if (
-        /^(request[A-Z]|subscribe[A-Z]|commitVia|setKeyboardProfile|listKeyboardProfiles|validateFrame)/.test(
+        /^(request[A-Z]|subscribe[A-Z]|commitVia|setKeyboardProfile|listKeyboardProfiles|validateFrame|(list|get|set|remove|clear|discover|unsubscribe)(Preference|DataStore|Storage|AccessibilityFocus|Keystore|SdkCapabilities))/.test(
           name,
         )
       ) {

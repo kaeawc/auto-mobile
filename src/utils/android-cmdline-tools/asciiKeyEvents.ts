@@ -230,5 +230,7 @@ function chunkEnd(text: string, start: number, chunkChars: number): number {
   while (end > start + 1 && text[end - 1] === " ") {
     end--;
   }
-  return text[end - 1] === " " ? hardEnd : end;
+  // An all-space chunk has no earlier boundary: leave its final space for the next chunk so
+  // that space still travels with the character after it.
+  return text[end - 1] === " " ? hardEnd - 1 : end;
 }

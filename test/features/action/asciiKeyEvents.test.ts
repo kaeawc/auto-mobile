@@ -4,6 +4,7 @@ import {
   buildAndroidInputTextCommand,
   ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS,
   buildAndroidInputTextPlan,
+  splitAndroidInputText,
   canJoinAndroidInputText,
 } from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
 import { decodeInputTextCommand } from "./SendKeysTestHarness";
@@ -162,6 +163,21 @@ describe("buildAndroidInputTextPlan", () => {
         ],
         textLength: 32,
       });
+    }
+  });
+});
+
+describe("splitAndroidInputText space boundary", () => {
+  test("keeps the final space of an all-space chunk with the following character", () => {
+    for (const [apiLevel, size] of [
+      [30, ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS],
+      [34, 32],
+    ] as const) {
+      const text = " ".repeat(size) + "b";
+      const chunks = splitAndroidInputText(text, apiLevel);
+      expect(chunks.join("")).toBe(text);
+      expect(chunks[chunks.length - 1].startsWith(" b")).toBe(true);
+      expect(chunks.every((c) => c.length <= size)).toBe(true);
     }
   });
 });

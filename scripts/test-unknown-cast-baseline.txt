@@ -296,10 +296,9 @@
 1	test/server/toolRegistry.readOnlyDeviceAccess.test.ts
 1	test/server/toolRegistryNotifyToolListChanged.test.ts
 1	test/server/tools/structuredContentGating.test.ts
-1	test/server/videoStopByIdInterruptedRetainedCapture.test.ts
 1	test/server/watchedDeviceReadTools.test.ts
 3	test/server/webrtcStreamManager.publishFailure.test.ts
-3	test/server/webrtcStreamManager.publishFailurePacketBoundary.test.ts
+2	test/server/webrtcStreamManager.publishFailurePacketBoundary.test.ts
 2	test/setup/fixedCtrlProxyPortFetchGuard.test.ts
 1	test/setup/fixedCtrlProxyPortFetchGuard.ts
 1	test/setup/realDeviceToolSpawnGuard.test.ts

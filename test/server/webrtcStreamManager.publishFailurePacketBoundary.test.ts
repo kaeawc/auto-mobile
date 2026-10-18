@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { RTCPeerConnection } from "werift";
 import { createDeviceCaptureRegistry } from "../../src/features/webrtc/deviceCaptureRegistry";
 import { WebRtcPublisher } from "../../src/features/webrtc/WebRtcPublisher";
 import {
@@ -13,6 +12,7 @@ import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
 import type { AndroidH264Source } from "../../src/features/webrtc";
 import type { AndroidH264SourceOptions } from "../../src/features/webrtc/H264CaptureSource";
+import { FakePublisherPeerConnection } from "../fakes/FakePublisherPeerConnection";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { capturedH264AsDevicePackets } from "../helpers/capturedH264Stream";
 import { fakeWhipClient } from "../helpers/fakeWhipClient";
@@ -29,26 +29,6 @@ const IOS: BootedDevice = {
 } as BootedDevice;
 const ENDPOINT = "https://coord.example.com/whip";
 const NAL_TYPE_SPS = 7;
-
-class FakePeerConnection {
-  closed = false;
-  connectionState = "new";
-  iceGatheringState = "complete";
-  connectionStateChange = { subscribe: () => {} };
-  iceGatheringStateChange = { watch: async () => {} };
-  localDescription = { sdp: "v=0" };
-  addTransceiver() {
-    return { sender: { ssrc: 1, onPictureLossIndication: { subscribe: () => {} } } };
-  }
-  async createOffer() {
-    return { type: "offer", sdp: "v=0" };
-  }
-  async setLocalDescription() {}
-  async setRemoteDescription() {}
-  async close() {
-    this.closed = true;
-  }
-}
 
 /** The real publisher, recording every media call that reaches it after `stop()`. */
 class RecordingPublisher extends WebRtcPublisher {
@@ -107,7 +87,7 @@ function installFakes() {
         {
           ...deps,
           timer,
-          createPeerConnection: () => new FakePeerConnection() as unknown as RTCPeerConnection,
+          createPeerConnection: () => new FakePublisherPeerConnection(),
           createWhipClient: () =>
             fakeWhipClient({
               publish: () =>

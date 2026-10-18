@@ -39,7 +39,7 @@ import {
   DEVICE_OWNED_BY_OTHER_SESSION_CODE,
   InputDeviceOwnedError,
 } from "../../src/daemon/inputDeviceOwnership";
-import { Daemon } from "../../src/daemon/daemon";
+import { stopRecordingAfterDeviceDisconnect } from "../../src/daemon/deviceLossDiscovery";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
 
@@ -132,11 +132,6 @@ afterEach(() => {
   }
 });
 
-interface DisconnectRecordingStopSurface {
-  stoppingRecordings: Set<string>;
-  stopRecordingAfterDeviceDisconnect(recordingId: string, deviceId: string): Promise<boolean>;
-}
-
 async function disconnectRetainingCapture(): Promise<string> {
   const active = await startVideoRecording({ device, ownerSessionUuid: OWNER });
   const realStop = backend.stop.bind(backend);
@@ -149,15 +144,16 @@ async function disconnectRetainingCapture(): Promise<string> {
         throw new Error("adb: device offline");
       }),
   );
-  const daemon: Daemon = Object.create(Daemon.prototype);
-  const harness = Object.assign(daemon, {
-    timer,
-    stoppingRecordings: new Set<string>(),
-  }) as unknown as DisconnectRecordingStopSurface;
+  // The daemon delegates its disconnect stop to this function with exactly these deps.
+  const stoppingRecordings = new Set<string>();
   expect(
-    await harness.stopRecordingAfterDeviceDisconnect(active.recordingId, device.deviceId),
+    await stopRecordingAfterDeviceDisconnect(
+      { timer, stoppingRecordings },
+      active.recordingId,
+      device.deviceId,
+    ),
   ).toBe(true);
-  expect(harness.stoppingRecordings.size).toBe(0);
+  expect(stoppingRecordings.size).toBe(0);
   expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
   expect((await repository.getRecording(active.recordingId))?.status).toBe("interrupted");
   return active.recordingId;

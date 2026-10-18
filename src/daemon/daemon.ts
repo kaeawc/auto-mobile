@@ -6,7 +6,6 @@ import type { SessionReleaseReason } from "./releaseReasons";
 import { type BindingExclusion } from "./sessionBroker/provisioning/exclusion";
 import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
-import { handleHttpHeartbeat, parseHttpHeartbeatBody } from "./httpHeartbeat";
 import {
   cancelAndReleaseSession as cancelExecutionsAndReleaseSession,
   cancelExecutionsCutBySessionRelease,
@@ -25,16 +24,11 @@ import {
   createServer as createHttpServer,
   Server as HttpServer,
   type IncomingMessage,
-  type ServerResponse,
 } from "node:http";
 import { ActionableError } from "../models/ActionableError";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
-import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
-import {
-  StatelessMcpHttpEndpoint,
-  type StatelessMcpRequestScope,
-  type StatelessMcpServer,
-} from "./statelessMcpHttpEndpoint";
+import { DaemonHttpIngress } from "./daemonHttpIngress";
+import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
 import { createDaemonMcpDispatcher, MCP_FORWARD_CLOSED_REASON } from "./inProcessMcpDispatcher";
 import {
   buildMcpRequestContext,
@@ -420,22 +414,10 @@ export type {
   DaemonProcessGenerationTokenProvider,
 };
 
-const HTTP_BODY_TIMEOUT_MS = 60_000;
-const HTTP_BODY_MAX_BYTES = 256 * 1024 * 1024;
-// The HTTP listener binds before device discovery (<=5 s) and session rehydration
-// (<=15 s). A direct HTTP MCP request waits this long for startup to finish so it
-// cannot take a device whose persisted session is about to be rehydrated (#11156);
-// past it the client gets 503 with Retry-After instead of an unbounded hang.
-const HTTP_STARTUP_ADMISSION_TIMEOUT_MS = 30_000;
-const HTTP_STARTUP_RETRY_AFTER_SECONDS = 1;
-
-type HttpBodyResult = { ok: true; body: string } | { ok: false; status: number; error: string };
-
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
 // Retain plan-time evidence while requiring two inactive observations before cleanup.
 const PLAN_DEVICE_DISCONNECT_MISS_CAP = DEVICE_DISCONNECT_MISS_THRESHOLD - 2;
-const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 // How long device-disconnect cleanup waits for a recording's stop before releasing the device.
 // An iOS recording started with `resolution` is re-encoded by ffmpeg on stop, which an
 // unattended stop bounds by up to 10 minutes; the device and its session must not wait that
@@ -664,8 +646,6 @@ export class Daemon {
   private readonly iosDoctorDependencies = createIosDoctorDependencies({
     coreDeviceProbe: createProductionCoreDeviceProbe(),
   });
-  private httpServer: HttpServer | null = null;
-  private httpServerClosePromise: Promise<void> | null = null;
   private socketServer: UnixSocketServer | null = null;
   private exitRecordFileSystem: DaemonExitRecordFileSystem = defaultDaemonExitRecordFileSystem;
   private enteredDaemonProcess = false;
@@ -683,46 +663,17 @@ export class Daemon {
   private readonly startupCompletion: Promise<void>;
   private resolveStartupCompletion!: () => void;
   private rejectStartupCompletion!: (reason: unknown) => void;
-  /**
-   * Aborted when shutdown closes ingress, so an HTTP MCP request still waiting
-   * on {@link startupCompletion} answers 503 instead of holding the HTTP server
-   * close (and every later shutdown stage) open (#11189).
-   */
-  private readonly shutdownIngressAbort = new AbortController();
-  /** Host headers the HTTP listener admits; set when it starts. */
-  private httpAllowedHosts: string[] = [];
-  /** Builds one MCP request's transport (stateless: no transport session id, #4678); tests replace it with a double. */
-  private mcpHttpTransportFactory = (allowedHosts: string[]): StreamableHTTPServerTransport =>
-    new StreamableHTTPServerTransport({
-      enableDnsRebindingProtection: true,
-      allowedHosts,
-    });
-  /** Builds one MCP request's server; tests replace it with a double. */
-  private mcpRequestServerFactory = (
-    req: IncomingMessage,
-    scope: StatelessMcpRequestScope,
-  ): StatelessMcpServer<StreamableHTTPServerTransport> => this.createRequestMcpServer(req, scope);
-  /** One server and transport per MCP POST, closed with its response (#4678). */
-  private readonly mcpHttpEndpoint = new StatelessMcpHttpEndpoint<
-    IncomingMessage,
-    ServerResponse,
-    StreamableHTTPServerTransport
-  >({
-    timer: {
-      setInterval: (callback, ms) => this.timer.setInterval(callback, ms),
-      clearInterval: (handle) => this.timer.clearInterval(handle),
-    },
-    idGenerator: { next: () => this.idGenerator.next() },
-    keepaliveIntervalMs: SSE_KEEPALIVE_INTERVAL_MS,
-    createTransport: () => this.mcpHttpTransportFactory(this.httpAllowedHosts),
-    createServer: (req, scope) => this.mcpRequestServerFactory(req, scope),
-    cancelScopeExecutions: (requestScopeId, reason) =>
-      executionTracker.cancelSessionExecutions(requestScopeId, reason),
-    forgetScopeBindings: (requestScopeId) => daemonSessionToolBindingStore().forget(requestScopeId),
-    closeReason: () =>
-      this.shutdownInProgress
-        ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
-        : "streamable_http_onclose",
+  private readonly httpIngress = new DaemonHttpIngress({
+    httpServerFactory: () => this.httpServerFactory(),
+    timer: () => this.timer,
+    idGenerator: () => this.idGenerator,
+    address: () => ({ host: this.host, port: this.port }),
+    strictPort: () => this.strictPort,
+    startupCompletion: () => this.startupCompletion,
+    sessionManager: () => this.sessionManager,
+    observerSessionRegistry: () => this.observerSessionRegistry,
+    createRequestMcpServer: (req, scope) => this.createRequestMcpServer(req, scope),
+    isShutdownInProgress: () => this.shutdownInProgress,
   });
   /** Runs control-socket forwards in process, one client and server each (#11820). */
   private readonly mcpDispatcher = createDaemonMcpDispatcher({
@@ -733,13 +684,6 @@ export class Daemon {
         ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
         : MCP_FORWARD_CLOSED_REASON,
   });
-  /** HTTP requests whose response is still open (SSE streams included). */
-  private openHttpRequests = 0;
-  /** HTTP requests ever received. */
-  private httpRequestsSeen = 0;
-  private acceptingHttpSessions = false;
-  /** Set once start() finished, so admitted HTTP requests skip the startup wait. */
-  private startupCompleted = false;
   private port: number;
   private host: string;
   private readonly strictPort: boolean;
@@ -871,7 +815,7 @@ export class Daemon {
     // Startup can fail before the socket server exists or any request awaits it.
     void this.startupCompletion.then(
       () => {
-        this.startupCompleted = true;
+        this.httpIngress.markStartupCompleted();
       },
       (error: unknown) => {
         logger.debug(`Daemon startup completion rejected: ${errorMessage(error)}`);
@@ -1804,14 +1748,14 @@ export class Daemon {
     // for a competitor to claim the canonical port and for the fallback to
     // paper over it with a "successful" restart on the wrong port. Leaving
     // `this.port` as the requested port makes the real `listen()` call below
-    // (in startHttpServer) the single atomic bind-or-fail attempt.
+    // (in DaemonHttpIngress.start) the single atomic bind-or-fail attempt.
     if (!this.strictPort) {
       this.port = await this.findAvailablePort(this.port);
     }
 
     // Start HTTP MCP server
     startupBenchmark.startPhase("httpServerStart");
-    await this.startHttpServer();
+    await this.httpIngress.start();
     startupBenchmark.endPhase("httpServerStart");
   }
 
@@ -1923,7 +1867,7 @@ export class Daemon {
       port: this.port,
       socketPath: SOCKET_PATH,
       deviceCount: this.devicePool.getTotalDeviceCount(),
-      mcpHttpListenerBound: this.httpServer?.listening ?? false,
+      mcpHttpListenerBound: this.httpIngress.server?.listening ?? false,
       daemonSocketListenerBound: this.socketServer?.isListening() ?? false,
     });
 
@@ -2001,234 +1945,6 @@ export class Daemon {
     });
   }
 
-  /**
-   * Start the HTTP MCP server (internal daemon transport, not exposed publicly)
-   */
-  private async startHttpServer(): Promise<void> {
-    this.httpServer = this.httpServerFactory();
-    this.httpServerClosePromise = null;
-    this.acceptingHttpSessions = true;
-    const allowedHosts = [`127.0.0.1:${this.port}`, `localhost:${this.port}`, `[::1]:${this.port}`];
-    this.httpAllowedHosts = allowedHosts;
-
-    // Disable default timeouts on this loopback-only server. Node.js 18+ sets
-    // requestTimeout to 300 000 ms (5 min), which kills Streamable HTTP
-    // connections for long-running tool calls like executePlan. With the timeout
-    // active the HTTP response is silently dropped after ~5 min, the
-    // request's transport closes, and the MCP client never
-    // receives the result — even when the tool completed successfully.
-    this.httpServer.requestTimeout = 0;
-    this.httpServer.headersTimeout = 0;
-    this.httpServer.timeout = 0;
-
-    const handleRequest = (req: IncomingMessage, res: ServerResponse): Promise<void> =>
-      this.handleHttpRequest(req, res, allowedHosts);
-    this.httpServer.on("request", (req, res) => {
-      // Counted for the orphaned private-daemon watchdog (#10497): an open
-      // request is a connected client.
-      this.openHttpRequests++;
-      this.httpRequestsSeen++;
-      res.once("close", () => {
-        this.openHttpRequests--;
-      });
-      handleRequest(req, res).catch((error) => {
-        logger.warn(`HTTP request callback failed: ${errorMessage(error)}`, error);
-        if (!res.headersSent) {
-          res.writeHead(500, { "Content-Type": "application/json" });
-        }
-        res.end();
-      });
-    });
-
-    // Start HTTP server
-    return new Promise((resolve, reject) => {
-      this.httpServer!.listen(this.port, this.host, () => {
-        logger.info(`automobile:${this.host}:${this.port}${MCP_STREAMABLE_PATH}`);
-        resolve();
-      });
-
-      this.httpServer!.on("error", (error: NodeJS.ErrnoException) => {
-        if (this.strictPort && error.code === "EADDRINUSE") {
-          // The authoritative guard (issue #6260): this listen() call is the
-          // one atomic bind attempt in strict-port mode, so a genuine
-          // EADDRINUSE here means another process holds the canonical port
-          // RIGHT NOW — not a stale probe result. Fail loudly instead of the
-          // caller (start()) ever falling back to a different port.
-          reject(
-            new ActionableError(
-              `Port ${this.port} on ${this.host} is required for this daemon start but is ` +
-                `already in use by another process. Refusing to fall back to a different port ` +
-                `and risk a split-brain daemon (issue #6260) — find and stop whatever holds ` +
-                `port ${this.port} and retry.`,
-            ),
-          );
-          return;
-        }
-        logger.error(`HTTP server error: ${error}`);
-        reject(error);
-      });
-    });
-  }
-
-  private async handleHttpRequest(
-    req: IncomingMessage,
-    res: ServerResponse,
-    allowedHosts: string[],
-  ): Promise<void> {
-    // Check every path before parsing the URL or handling preflight requests.
-    if (!req.headers.host || !allowedHosts.includes(req.headers.host) || req.headers.origin) {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Forbidden" }));
-      return;
-    }
-
-    if (req.method === "OPTIONS") {
-      res.writeHead(200);
-      res.end();
-      return;
-    }
-
-    const url = new URL(req.url!, `http://${req.headers.host}`);
-
-    if (url.pathname === "/heartbeat") {
-      return this.handleHeartbeatHttpRequest(req, res);
-    }
-
-    if (url.pathname === MCP_STREAMABLE_PATH) {
-      return this.handleMcpHttpRequest(req, res);
-    } else {
-      // 404 for unknown paths
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Not found" }));
-    }
-  }
-
-  private async handleHeartbeatHttpRequest(
-    req: IncomingMessage,
-    res: ServerResponse,
-  ): Promise<void> {
-    if (req.method !== "POST") {
-      res.writeHead(405, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Method not allowed" }));
-      return;
-    }
-
-    const bodyResult = await this.readHttpBody(req);
-    if (!bodyResult.ok) {
-      this.respondToBodyReadFailure(res, bodyResult);
-      return;
-    }
-
-    const body = parseHttpHeartbeatBody(bodyResult.body);
-    if (!body.ok) {
-      res.writeHead(body.response.status, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(body.response.body));
-      return;
-    }
-    const result = await handleHttpHeartbeat(
-      this.sessionManager,
-      this.observerSessionRegistry,
-      body.sessionId,
-      body.livenessOwnerToken,
-    );
-    res.writeHead(result.status, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(result.body));
-  }
-
-  /**
-   * Refuse a direct HTTP MCP request during shutdown, and hold it until startup
-   * (device discovery and session rehydration) completes, as the Unix socket
-   * path already does (#11156). Returns false after answering 503 when shutting
-   * down, or when startup is still running past the admission bound or failed.
-   */
-  private async admitHttpMcpRequest(res: ServerResponse): Promise<boolean> {
-    if (!this.acceptingHttpSessions) {
-      res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Daemon is shutting down" }));
-      return false;
-    }
-    if (this.startupCompleted) {
-      return true;
-    }
-    const timedOut = Symbol("HTTP startup admission timeout");
-    const signal = this.shutdownIngressAbort.signal;
-    try {
-      await raceWithDeadline(this.startupCompletion, {
-        timer: this.timer,
-        timeoutMs: HTTP_STARTUP_ADMISSION_TIMEOUT_MS,
-        signal,
-        label: "HTTP MCP startup admission",
-        timeoutError: () => timedOut,
-      });
-      return true;
-    } catch (error) {
-      if (signal.aborted) {
-        // Shutdown began while this request waited on startup; the HTTP server
-        // close waits for it, so answer now rather than after startup (#11189).
-        logger.info("HTTP MCP request refused: daemon shut down during startup admission");
-        res.writeHead(503, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Daemon is shutting down" }));
-        return false;
-      }
-      if (error === timedOut) {
-        logger.warn(
-          `HTTP MCP request refused: daemon still starting after ${HTTP_STARTUP_ADMISSION_TIMEOUT_MS}ms`,
-        );
-        res.writeHead(503, {
-          "Content-Type": "application/json",
-          "Retry-After": String(HTTP_STARTUP_RETRY_AFTER_SECONDS),
-        });
-        res.end(JSON.stringify({ error: "Daemon is still starting" }));
-        return false;
-      }
-      logger.warn(`HTTP MCP request refused: daemon startup failed: ${errorMessage(error)}`);
-      res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Daemon startup failed" }));
-      return false;
-    }
-  }
-
-  private async handleMcpHttpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (!(await this.admitHttpMcpRequest(res))) {
-      return;
-    }
-
-    let parsedBody: unknown;
-
-    // Parse body for POST requests
-    if (req.method === "POST") {
-      const bodyResult = await this.readHttpBody(req);
-      if (!bodyResult.ok) {
-        this.respondToBodyReadFailure(res, bodyResult);
-        return;
-      }
-
-      try {
-        parsedBody = JSON.parse(bodyResult.body);
-      } catch (error) {
-        // Invalid client JSON is expected; the 400 response fully describes the failure.
-        logger.debug(`Invalid MCP JSON: ${error}`);
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Invalid JSON" }));
-        return;
-      }
-    }
-
-    const sendJsonRpcError = (message: string, error?: unknown) =>
-      this.sendHttpJsonRpcError(res, parsedBody, message, error);
-
-    // A request may have begun reading its body just before shutdown
-    // quiesced the listener. Recheck admission before it can create a
-    // server after the shutdown in-flight snapshot is taken.
-    if (!this.acceptingHttpSessions) {
-      res.writeHead(503, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Daemon is shutting down" }));
-      return;
-    }
-
-    return this.mcpHttpEndpoint.handle(req, res, parsedBody, sendJsonRpcError);
-  }
-
   /** Build one request's MCP server from its headers (#4678 stateless, #11820). */
   private createRequestMcpServer(
     req: IncomingMessage,
@@ -2248,105 +1964,6 @@ export class Daemon {
       debug: this.debug,
       acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
     };
-  }
-
-  private sendHttpJsonRpcError(
-    res: ServerResponse,
-    parsedBody: unknown,
-    message: string,
-    error?: unknown,
-  ): void {
-    if (res.headersSent) {
-      return;
-    }
-    const id =
-      parsedBody && typeof parsedBody === "object" && "id" in parsedBody ? parsedBody.id : null;
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id,
-        error: {
-          code: -32603,
-          message,
-          data: error instanceof Error ? error.message : undefined,
-        },
-      }),
-    );
-  }
-
-  private readHttpBody(req: IncomingMessage): Promise<HttpBodyResult> {
-    return new Promise((resolve) => {
-      const chunks: Buffer[] = [];
-      let bytes = 0;
-      let settled = false;
-      const finish = (result: HttpBodyResult): void => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.timer.clearTimeout(timeout);
-        req.off("data", onData);
-        req.off("end", onEnd);
-        req.off("error", onError);
-        req.off("aborted", onAborted);
-        req.off("close", onClose);
-        resolve(result);
-      };
-      const onData = (chunk: Buffer | string): void => {
-        const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        bytes += data.length;
-        if (bytes > HTTP_BODY_MAX_BYTES) {
-          finish({ ok: false, status: 413, error: "Request body too large" });
-          req.destroy();
-          return;
-        }
-        chunks.push(data);
-      };
-      const onEnd = (): void => finish({ ok: true, body: Buffer.concat(chunks).toString("utf8") });
-      const onError = (error: Error): void => {
-        logger.warn("HTTP request body read failed", error);
-        finish({ ok: false, status: 400, error: "Request body read failed" });
-      };
-      const onAborted = (): void => finish({ ok: false, status: 400, error: "Request aborted" });
-      const onClose = (): void => finish({ ok: false, status: 400, error: "Request closed" });
-      const timeout = this.timer.setTimeout(() => {
-        finish({ ok: false, status: 408, error: "Request body timed out" });
-        req.destroy();
-      }, HTTP_BODY_TIMEOUT_MS);
-      req.on("data", onData);
-      req.on("end", onEnd);
-      req.on("error", onError);
-      req.on("aborted", onAborted);
-      req.on("close", onClose);
-    });
-  }
-
-  private respondToBodyReadFailure(
-    res: ServerResponse,
-    result: Extract<HttpBodyResult, { ok: false }>,
-  ): void {
-    if (!res.destroyed) {
-      res.writeHead(result.status, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: result.error }));
-    }
-  }
-
-  private closeHttpListener(): Promise<void> {
-    if (!this.httpServer) {
-      return Promise.resolve();
-    }
-    this.httpServerClosePromise ??= new Promise<void>((resolve, reject) => {
-      this.httpServer!.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        logger.info("HTTP server stopped");
-        resolve();
-      });
-    });
-    return this.httpServerClosePromise;
   }
 
   /**
@@ -3041,12 +2658,13 @@ export class Daemon {
     recordHealthCheckFailure: (kind: HealthFailureKind) => void,
   ): boolean {
     // Check if HTTP server is responsive
-    if (!this.httpServer) {
+    const httpServer = this.httpIngress.server;
+    if (!httpServer) {
       logger.warn("Health check failed: HTTP server not initialized");
       recordHealthCheckFailure("http");
       return false;
     }
-    if (!this.httpServer.listening) {
+    if (!httpServer.listening) {
       logger.warn("Health check failed: HTTP server not listening");
       recordHealthCheckFailure("http");
       return false;
@@ -3225,11 +2843,11 @@ export class Daemon {
         clientCount: () =>
           (this.socketServer?.getClientConnectionCount() ?? 0) +
           getLiveAuxSocketConnectionCount() +
-          this.openHttpRequests,
+          this.httpIngress.openRequestCount,
         clientActivityCount: () =>
           (this.socketServer?.getAcceptedClientConnectionCount() ?? 0) +
           getAcceptedAuxSocketConnectionCount() +
-          this.httpRequestsSeen,
+          this.httpIngress.requestsSeenCount,
         liveSessionCount: () => this.sessionManager.getAllSessions().length,
         shutdown: () => {
           this.selfExitRecorder.record("orphan-watchdog");
@@ -4885,7 +4503,7 @@ export class Daemon {
     requestScopeId: string,
     transport: Pick<StreamableHTTPServerTransport, "close">,
   ): void {
-    this.mcpHttpEndpoint.trackForTesting(requestScopeId, () => transport.close());
+    this.httpIngress.trackTransportForTesting(requestScopeId, () => transport.close());
   }
 
   /** Test seam: behave as if shutdown had already started, without running it. */
@@ -5090,7 +4708,7 @@ export class Daemon {
         // also marks the stage as still running for the database stage.
         runShutdownCleanupStages(
           [
-            ...this.mcpHttpEndpoint.inFlightRequests().map(({ requestScopeId, close }) => ({
+            ...this.httpIngress.inFlightRequests().map(({ requestScopeId, close }) => ({
               name: `Streamable HTTP request ${requestScopeId}`,
               run: close,
             })),
@@ -5105,7 +4723,9 @@ export class Daemon {
       shutdownStage("active HTTP session registry", "nothing (synchronous)", () =>
         this.clearHttpSessionRegistry(),
       ),
-      shutdownStage("HTTP server", "open HTTP connections closing", () => this.closeHttpListener()),
+      shutdownStage("HTTP server", "open HTTP connections closing", () =>
+        this.httpIngress.closeListener(),
+      ),
     ];
   }
 
@@ -5247,7 +4867,7 @@ export class Daemon {
   }
 
   private clearHttpSessionRegistry(): void {
-    this.mcpHttpEndpoint.clear();
+    this.httpIngress.clearSessions();
   }
 
   private async drainShutdownDatabaseWrites(timeoutMs: number): Promise<void> {
@@ -5326,14 +4946,13 @@ export class Daemon {
    * shutdown teardown without persisting its retryable handoff outcome.
    */
   private async quiesceProvisioningIngress(): Promise<void> {
-    this.acceptingHttpSessions = false;
-    this.mcpHttpEndpoint.stopAccepting();
+    this.httpIngress.stopAccepting();
     // No forward reaches the MCP server from here on: the in-process gate HTTP's 503 was.
     this.mcpDispatcher.stopAccepting();
-    this.shutdownIngressAbort.abort();
+    this.httpIngress.abortPendingAdmissions();
     // Start closing the listener now so it cannot admit a connection after the
     // transport snapshot. The later HTTP server stage awaits this close.
-    void this.closeHttpListener().catch((error) => {
+    void this.httpIngress.closeListener().catch((error) => {
       logger.warn(`Failed to begin HTTP listener shutdown: ${errorMessage(error)}`, error);
     });
     const quiescing = this.socketServer?.quiesce();

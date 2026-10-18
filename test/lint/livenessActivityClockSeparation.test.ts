@@ -90,7 +90,7 @@ const LIVENESS_ONLY: Readonly<Record<string, readonly string[]>> = {
     "SessionLivenessController.restoreHeartbeatLivenessPolicy",
   ],
   "src/daemon/daemonRequestHandlers.ts": ["handleHeartbeat"],
-  "src/daemon/daemon.ts": ["Daemon.handleHeartbeatHttpRequest"],
+  "src/daemon/daemonHttpIngress.ts": ["DaemonHttpIngress.handleHeartbeatHttpRequest"],
   "src/daemon/cli/runDaemonCommand.ts": ["recordLocalDaemonHeartbeat"],
   "src/daemon/daemonMcpProxy.ts": [
     "DaemonMcpProxy.sendFirstBoundSessionHeartbeat",

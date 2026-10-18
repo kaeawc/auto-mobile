@@ -10,7 +10,7 @@ import type { FencedGestureOptions } from "../ExecuteGesture";
 import { ActionableError, BootedDevice, Element, SwipeDirection } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
-import { AndroidCtrlProxyClient } from "../../observe/android";
+import type { AndroidCtrlProxyClient } from "../../observe/android";
 import type { AccessibilityNodeSelector } from "../../observe/android/types";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
@@ -52,11 +52,21 @@ export function scrollActionForFingerDirection(
     : "scroll_backward";
 }
 
+/** The CtrlProxy surface the TalkBack swipe path calls. */
+export type TalkBackSwipeCtrlProxy = Pick<
+  AndroidCtrlProxyClient,
+  | "requestAction"
+  | "requestNodeAction"
+  | "requestTwoFingerSwipe"
+  | "supportsNodeActionSelectors"
+  | "getAccessibilityHierarchy"
+>;
+
 export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
   constructor(
     private readonly device: BootedDevice,
     private readonly executeGesture: GestureExecutor,
-    private readonly accessibilityService: AndroidCtrlProxyClient,
+    private readonly accessibilityService: TalkBackSwipeCtrlProxy,
     private readonly accessibilityDetector: AccessibilityDetector,
     private readonly adb: AdbExecutor,
     private readonly timer: Timer,

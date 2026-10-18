@@ -37,11 +37,6 @@ const result = (overrides: Partial<VisionFallbackResult> = {}): VisionFallbackRe
 const criteria = (text: string): ElementSearchCriteria => ({ text });
 const HIERARCHY: ViewHierarchyNode = {};
 
-/** A config as it would arrive from disk with a provider this build does not know. */
-function unsupportedProviderConfig(): VisionFallbackConfig {
-  return JSON.parse(JSON.stringify({ ...config(), provider: "unsupported" }));
-}
-
 describe("VisionFallback orchestrator", () => {
   let originalApiKey: string | undefined;
   let timer: FakeTimer;
@@ -93,12 +88,12 @@ describe("VisionFallback orchestrator", () => {
     );
   });
 
-  test("rejects an unsupported provider before attempting a paid analysis", async () => {
-    const fallback = new VisionFallback(unsupportedProviderConfig(), timer, undefined, checksums);
+  test("rejects a provider with no implementation before attempting a paid analysis", async () => {
+    const fallback = new VisionFallback(config({ provider: "local" }), timer, undefined, checksums);
 
     await expect(
       fallback.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login")),
-    ).rejects.toThrow("Unsupported vision provider: unsupported");
+    ).rejects.toThrow("Unsupported vision provider: local");
   });
 
   test("caches a result: an identical query hits the analyzer only once", async () => {

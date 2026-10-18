@@ -7,10 +7,7 @@ import {
   ActionableError,
   BootedDevice,
   DeviceInfo,
-  VideoFormat,
   VideoRecordingHighlightEntry,
-  VideoRecordingHighlightInput,
-  VideoQualityPreset,
   VideoRecordingMetadata,
 } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
@@ -408,28 +405,7 @@ interface RecordingToolContext {
   requesterResolver: RecordingRequesterResolver;
 }
 
-export interface VideoRecordingArgs {
-  action: "start" | "stop";
-  // #6154: optional — resolved from deviceId/session when omitted.
-  platform?: "android" | "ios";
-  deviceId?: string;
-  qualityPreset?: VideoQualityPreset;
-  targetBitrateKbps?: number;
-  maxThroughputMbps?: number;
-  fps?: number;
-  resolution?: {
-    width: number;
-    height: number;
-  };
-  format?: VideoFormat;
-  maxDuration?: number;
-  outputName?: string;
-  recordingId?: string;
-  sessionUuid?: string;
-  device?: string;
-  highlights?: VideoRecordingHighlightInput[];
-  display?: string;
-}
+export type VideoRecordingArgs = z.output<typeof videoRecordingSchema>;
 
 const resolutionSchema = z.object({
   width: z.number().int().positive(),

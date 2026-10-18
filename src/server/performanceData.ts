@@ -6,7 +6,7 @@ const DEFAULT_PERFORMANCE_RESULTS_LIMIT = 50;
 const DEFAULT_PERFORMANCE_RESULTS_OFFSET = 0;
 export const PERFORMANCE_RESULTS_LIMIT_MAX = 500;
 
-export interface PerformanceAuditQueryArgs {
+export interface PerformanceAuditQueryParams {
   startTime?: string | number;
   endTime?: string | number;
   limit?: number;
@@ -59,7 +59,7 @@ function getTimestampRange(timestamps: string[]): { start: string; end: string }
 }
 
 export async function buildPerformanceAuditResponse(
-  args: PerformanceAuditQueryArgs,
+  args: PerformanceAuditQueryParams,
   repositories: PerformanceAuditRepositories = { auditRepository, toolCallRepository },
 ): Promise<PerformanceAuditResponse> {
   const startTime = normalizeTimestamp(args.startTime);

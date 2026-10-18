@@ -129,7 +129,7 @@ export interface PutAppFileInput {
 export type PutAppFileArgs = z.output<typeof putAppFileSchema>;
 
 /** The single-file app-container request accepted while callers migrate to {@link PutAppFileArgs}. */
-export interface LegacyPutAppFileArgs {
+export interface LegacyPutAppFileInput {
   appId: string;
   container: AppFileContainer;
   userId?: number;

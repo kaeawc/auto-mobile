@@ -101,7 +101,7 @@ import {
   swipeScreenSize,
 } from "./iosChromeInsets";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
-import { explicitDuration } from "./swipeDurationReport";
+import { explicitDuration, withSwipeOnVelocity } from "./swipeDurationReport";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "../touchscreenInput";
 import { IOSCtrlProxyClient } from "../../observe/ios";
@@ -1178,9 +1178,10 @@ export class SwipeOn extends BaseVisualChange {
     signalArg?: AbortSignal,
   ): Promise<SwipeOnResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
-    return withSwipeObservationReadScope(() =>
+    const result = await withSwipeObservationReadScope(() =>
       this.executeWithReadScope(options, progress, signal),
     );
+    return withSwipeOnVelocity(result, options);
   }
 
   private async executeWithReadScope(

@@ -16,6 +16,8 @@ import {
 } from "../features/action/tapAtGesture";
 import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
 import { dragPathHandler, dragPathSchema } from "./dragPathTool";
+import { pointerSchema } from "./pointerSchema";
+import { validateCoordinateRange } from "./coordinateRangeValidation";
 import { previewHierarchyHitTest } from "../features/observe/HierarchyHitTest";
 import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
 import { TapAnyElement } from "../features/action/TapAnyElement";
@@ -588,37 +590,6 @@ const coordinatePointInputSchema = () =>
       .strict(),
   );
 
-type CoordinatePointInput = z.infer<ReturnType<typeof coordinatePointInputSchema>>;
-
-function validateCoordinateRange(
-  value: { x?: number; y?: number; coordinateSpace?: CoordinatePointInput["coordinateSpace"] },
-  context: z.RefinementCtx,
-): void {
-  const max =
-    value.coordinateSpace === "normalized"
-      ? 1
-      : value.coordinateSpace === "percent"
-        ? 100
-        : undefined;
-  if (max === undefined) {
-    return;
-  }
-  for (const axis of ["x", "y"] as const) {
-    if (
-      value[axis] === undefined ||
-      !Number.isFinite(value[axis]) ||
-      value[axis] < 0 ||
-      value[axis] > max
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: `${axis} must be between 0 and ${max}`,
-        path: [axis],
-      });
-    }
-  }
-}
-
 export const tapAtSchema = withJsonSchemaOverride(
   coordinatePointInputSchema()
     .extend({
@@ -643,6 +614,7 @@ export const tapAtSchema = withJsonSchemaOverride(
         .describe(
           `Long-press duration in milliseconds (${LONG_PRESS_MIN_MS}–${LONG_PRESS_MAX_MS}; default ${LONG_PRESS_DEFAULT_MS}); only with longPress`,
         ),
+      pointer: pointerSchema.optional(),
     })
     .superRefine((value, context) => {
       if (value.durationMs !== undefined && value.action !== "longPress") {
@@ -902,7 +874,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
           .max(SWIPE_DURATION_MAX_MS)
           .optional()
           .describe(
-            `Forward-stroke duration in ms (integer ${SWIPE_DURATION_MIN_MS}-${SWIPE_DURATION_MAX_MS}); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total). Android may quantize very short strokes. Limits: the TalkBack semantic-scroll route has no timed stroke and ignores it (durationIgnored + warnings); the iOS XCUICoordinate route clamps velocity to 100-10000 pt/s (effectiveDurationMs + warnings).`,
+            `Forward-stroke duration in ms (integer ${SWIPE_DURATION_MIN_MS}-${SWIPE_DURATION_MAX_MS}); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total) and, for a single swipe, velocityPxPerSecond (omitted for boomerang, lookFor, and the TalkBack route that ignores duration; uses effectiveDurationMs when clamped). Android may quantize very short strokes. Limits: the TalkBack semantic-scroll route has no timed stroke and ignores it (durationIgnored + warnings); the iOS XCUICoordinate route clamps velocity to 100-10000 pt/s (effectiveDurationMs + warnings).`,
           ),
         fromEdge: z
           .enum(["left", "right", "top", "bottom"])
@@ -2337,6 +2309,7 @@ export async function tapAtHandler(
       action: args.action,
       durationMs: args.durationMs,
       layer: args.layer,
+      pointer: args.pointer,
     },
     { progress, signal, planContext: args.__tapAtPlanContext ?? args.__tapAtRecordingContext },
   );

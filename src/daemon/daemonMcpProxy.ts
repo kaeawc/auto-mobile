@@ -182,6 +182,7 @@ import {
   type ToolCallForwarderPort,
 } from "./proxy/ToolCallForwarder";
 import { DeviceCleanupWait, DEVICE_CLEANUP_WAIT_BUDGET_MS } from "./proxy/DeviceCleanupWait";
+import { FinalizedRecordingOwners } from "./proxy/FinalizedRecordingOwners";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { type SessionReleaseSnapshot } from "./sessionManager";
@@ -242,8 +243,6 @@ const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 // released they must be able to discover the stable target for an explicit
 // getAndroid/getApple reacquisition (#7144).
 const SESSIONLESS_DEVICE_DISCOVERY_TOOLS = ["listDevices", "listDeviceImages"] as const;
-/** Finalized recordings a proxy remembers the starting session of (oldest dropped first). */
-const MAX_FINALIZED_RECORDING_OWNERS = 64;
 
 /**
  * A tool definition's read classification, generated from the tool's `deviceReadOnly`
@@ -787,12 +786,14 @@ export class DaemonMcpProxy {
   // owner with SCREENSHOT_ACCESS_DENIED (issue #5663). Membership here is what
   // authorizes owner-routing; a session this connection never bound is absent, so
   // a foreign read still forwards this connection's own binding and stays denied.
-  /**
-   * Recordings a session this proxy held finalized when it was released, by id, to the session
-   * that started them (#11362). The release notification names them; only this connection learns
-   * them, so only it can retrieve them later.
-   */
-  private readonly finalizedRecordingOwners = new Map<string, string>();
+  private readonly finalizedRecordingOwners = new FinalizedRecordingOwners({
+    holdsSession: (id) =>
+      id === this.boundSessionUuid ||
+      id === this.terminalBoundSession?.sessionUuid ||
+      this.ownedDeviceSessions.has(id) ||
+      this.claimableSessions.has(id) ||
+      this.otherHeldSessions.has(id),
+  });
   private readonly ownedDeviceSessions = new Set<string>();
   private get claimableSessions(): Set<string> {
     return this.sessionState.claimableSessions;
@@ -1880,7 +1881,7 @@ export class DaemonMcpProxy {
       return keepsHandover;
     };
     const preservedStallHandover = handleStallHandoverRelease();
-    this.rememberFinalizedRecordings(releasedSessionUuid, notification.recordingIds);
+    this.finalizedRecordingOwners.remember(releasedSessionUuid, notification.recordingIds);
     if (notification.reason === "daemon-shutdown") {
       this.daemonShutdownAnnouncedAt = this.timer.now();
       // Daemon shutdown is connection-wide. Arm the successor barrier even when
@@ -2692,7 +2693,7 @@ export class DaemonMcpProxy {
     // caller cannot forge or override that configuration.
     delete callerArgs[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
     delete callerArgs[INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM];
-    const retrievalOwner = this.finalizedRecordingRetrievalOwner(name, callerArgs);
+    const retrievalOwner = this.finalizedRecordingOwners.retrievalOwner(name, callerArgs);
     if (retrievalOwner !== undefined) {
       return this.forwardFinalizedRecordingRetrieval(
         name,
@@ -2710,57 +2711,6 @@ export class DaemonMcpProxy {
       signal,
       mode,
     );
-  }
-
-  private rememberFinalizedRecordings(
-    releasedSessionUuid: string,
-    recordingIds: readonly string[] | undefined,
-  ): void {
-    if (!recordingIds?.length || !this.holdsSessionFamily(releasedSessionUuid)) {
-      return;
-    }
-    for (const recordingId of recordingIds) {
-      this.finalizedRecordingOwners.delete(recordingId);
-      this.finalizedRecordingOwners.set(recordingId, releasedSessionUuid);
-    }
-    while (this.finalizedRecordingOwners.size > MAX_FINALIZED_RECORDING_OWNERS) {
-      const oldest = this.finalizedRecordingOwners.keys().next();
-      if (oldest.done) {
-        break;
-      }
-      this.finalizedRecordingOwners.delete(oldest.value);
-    }
-  }
-
-  /** Whether this proxy holds, or held until now, the session or its base (`base:label`). */
-  private holdsSessionFamily(sessionUuid: string): boolean {
-    const colon = sessionUuid.indexOf(":");
-    return [sessionUuid, ...(colon > 0 ? [sessionUuid.slice(0, colon)] : [])].some(
-      (id) =>
-        id === this.boundSessionUuid ||
-        id === this.terminalBoundSession?.sessionUuid ||
-        this.ownedDeviceSessions.has(id) ||
-        this.claimableSessions.has(id) ||
-        this.otherHeldSessions.has(id),
-    );
-  }
-
-  /**
-   * The session that started the finalized recording a `videoRecording stop {recordingId}` call
-   * retrieves, when this connection learned of that recording from its own session's release
-   * (#11362). Retrieval is a read of a stored artifact: it touches no device, so a terminal fence
-   * never refuses it, and the daemon scopes the lookup to the starting session, not to whichever
-   * session this connection holds now. An id this connection was not told about is not one.
-   */
-  private finalizedRecordingRetrievalOwner(
-    name: string,
-    args: Record<string, unknown>,
-  ): string | undefined {
-    return name === "videoRecording" &&
-      args.action === "stop" &&
-      typeof args.recordingId === "string"
-      ? this.finalizedRecordingOwners.get(args.recordingId)
-      : undefined;
   }
 
   /**

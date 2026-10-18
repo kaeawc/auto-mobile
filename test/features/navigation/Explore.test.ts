@@ -49,7 +49,6 @@ import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { PressButton } from "../../../src/features/action/PressButton";
 import { FakeDialogTapAction } from "../../fakes/FakeDialogTapAction";
 import { FakeDisplayInventoryProvider } from "../../fakes/FakeDisplayInventoryProvider";
-import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { registerNavigationTools } from "../../../src/server/navigationTools";
 import type { ExploreResult } from "../../../src/features/navigation/ExploreTypes";
 import type { ExportedGraph } from "../../../src/utils/interfaces/NavigationGraph";
@@ -1001,11 +1000,8 @@ describe("Explore", () => {
           stopReason,
         };
         const execute = spyOn(Explore.prototype, "execute").mockResolvedValue(result);
-        const manager = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-          fakeGraph as unknown as NavigationGraphManager,
-        );
         try {
-          registerNavigationTools();
+          registerNavigationTools({ navigationManagerFactory: () => fakeGraph });
           const response = (await ToolRegistry.getRegisteredTool("explore")!.deviceAwareHandler!(
             device,
             {},
@@ -1022,7 +1018,6 @@ describe("Explore", () => {
           );
         } finally {
           execute.mockRestore();
-          manager.mockRestore();
         }
       });
     }

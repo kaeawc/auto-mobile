@@ -445,6 +445,14 @@ enum PrototypePatch {
         )
     }
 
+    /// The UTF-8 size of the parts of `spec` a patch can change outside `/state`: its authored root
+    /// and its data. The difference between two specs is how far a patch moved the size baseline.
+    static func structureBytes(_ spec: PrototypeSpec) -> Int {
+        var parts: [String: JSONValue] = ["root": spec.authoredRoot]
+        if let data = spec.data { parts["data"] = .object(data) }
+        return PrototypeStateValidator.stateBytes(parts)
+    }
+
     /// Applies `ops` to `spec` with `state` as its live state and rebuilds the spec the way a show
     /// would, then checks the new state against every bound control. The failure is the message for
     /// `prototype_result.error`.

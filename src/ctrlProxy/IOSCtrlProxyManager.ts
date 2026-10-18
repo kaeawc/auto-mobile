@@ -385,19 +385,20 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   // XCUITest process state
   private xcTestProcessId: number | null = null;
+  private xcTestProcess: ChildProcess | null = null;
 
   /** The runner process id this manager currently owns, or null when none is recorded. */
   getXcTestProcessId(): number | null {
     return this.xcTestProcessId;
   }
 
-  /** Test seam: record (or clear) the owned runner process id without launching a runner. */
+  /** @internal Test seam: record (or clear) the owned runner process id without launching a runner. */
   setXcTestProcessIdForTesting(pid: number | null): void {
     this.xcTestProcessId = pid;
   }
 
   /**
-   * Test seam: record the runner a launch step would have published, without
+   * @internal Test seam: record the runner a launch step would have published, without
    * spawning one. Pass `process`/`abortController` when the test exercises the
    * stop and exit paths that read them.
    */
@@ -411,7 +412,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     this.runnerAbortController = runner.abortController ?? null;
   }
 
-  /** Test seam: make this injected-dependency manager the one `getInstance`/`shutdownAll` see. */
+  /** @internal Test seam: make this injected-dependency manager the one `getInstance`/`shutdownAll` see. */
   registerForTesting(): this {
     IOSCtrlProxyManager.instances.set(this.device.deviceId, this);
     return this;
@@ -428,7 +429,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       sharedStartExternalWaitingCallers: this.sharedStart?.externalWaitingCallers ?? null,
     };
   }
-  private xcTestProcess: ChildProcess | null = null;
   // Owns the resident runner's process-lifecycle abort signal (issue #6410).
   // Deliberately NOT the ambient per-request signal: this runner is shared
   // across every session targeting the device and must outlive whichever
@@ -619,10 +619,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       uninstallLegacyAppIfPresent: () => this.appBundleGuard.uninstallLegacyAppIfPresent(),
       fenceLateRemoteStartAfterShutdown: (pid) => this.fenceLateRemoteStartAfterShutdown(pid),
     };
-    return {
-      ...ownSteps,
-      ...(typeof overrides === "function" ? overrides(ownSteps) : overrides),
-    };
+    const requested = typeof overrides === "function" ? overrides(ownSteps) : overrides;
+    // An explicitly undefined entry means "keep the manager's own step".
+    const defined = Object.entries(requested ?? {}).filter(([, step]) => step !== undefined);
+    return { ...ownSteps, ...Object.fromEntries(defined) };
   }
 
   private createProcessSupervisor(

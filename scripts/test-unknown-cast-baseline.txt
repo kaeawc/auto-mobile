@@ -203,7 +203,6 @@
 1	test/features/action/swipeon/swipeOnUtils.property.test.ts
 1	test/features/action/swipeon/swipeOnUtils.test.ts
 1	test/features/debug/SimulatorHighlights.test.ts
-1	test/features/navigation/NavigateTo.test.ts
 1	test/features/observe/ObserveScreenAndroidScreenIdentity.test.ts
 1	test/features/observe/android/AndroidScreenIdentity.test.ts
 9	test/features/observe/ios/CtrlProxyClientAutoSetup.test.ts

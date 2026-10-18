@@ -108,6 +108,8 @@ interface RotationSettingCleanup {
 
 const ROTATION_SETTING_CLEANUP_TIMEOUT_MS = 1000;
 const ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS = 1000;
+/** Bound on `cmd display get-displays` when enumerating displays. */
+const DISPLAY_LIST_TIMEOUT_MS = 2_000;
 // Reads of a non-default display's rotation after `cmd window user-rotation -d` (150ms apart).
 const DISPLAY_ROTATION_CONFIRM_ATTEMPTS = 5;
 
@@ -1468,7 +1470,7 @@ export class Rotate extends BaseVisualChange {
     let availableDisplayIds: string[] = [];
     try {
       const displayOutput = await this.adb.executeCommand("shell cmd display get-displays", {
-        timeoutMs: 2000,
+        timeoutMs: DISPLAY_LIST_TIMEOUT_MS,
         noRetry: true,
         signal,
       });

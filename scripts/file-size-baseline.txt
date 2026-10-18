@@ -6,7 +6,7 @@
 1183	src/daemon/cli/runDaemonCommand.ts
 1588	src/daemon/client.ts
 5222	src/daemon/daemon.ts
-6196	src/daemon/daemonMcpProxy.ts
+6203	src/daemon/daemonMcpProxy.ts
 1730	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8441	src/daemon/devicePool.ts
@@ -33,14 +33,14 @@
 1298	src/features/action/BaseVisualChange.ts
 1104	src/features/action/InputText.ts
 1528	src/features/action/InstallApp.ts
-2261	src/features/action/LaunchApp.ts
-2031	src/features/action/Rotate.ts
+2267	src/features/action/LaunchApp.ts
+2033	src/features/action/Rotate.ts
 1915	src/features/action/SetUIState.ts
 1887	src/features/action/TapAnyElement.ts
 1424	src/features/action/TapAtCoordinate.ts
 3788	src/features/action/TapOnElement.ts
-1420	src/features/action/swipeon/ScrollUntilVisible.ts
-1834	src/features/action/swipeon/SwipeOn.ts
+1423	src/features/action/swipeon/ScrollUntilVisible.ts
+1835	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
 5888	src/features/deviceLifecycle/deviceLifecycleCore.ts
 1385	src/features/navigation/Explore.ts
@@ -66,7 +66,7 @@
 1399	src/features/utility/ElementResolver.ts
 1712	src/features/video/FfmpegVideoProcessingBackend.ts
 1163	src/features/video/IosPhysicalVideoCaptureBackend.ts
-2323	src/features/webrtc/IosH264Source.ts
+2322	src/features/webrtc/IosH264Source.ts
 2259	src/features/webrtc/PersistentEncoderH264Source.ts
 1005	src/features/webrtc/WebRtcPublisher.ts
 2370	src/server/appFileService.ts

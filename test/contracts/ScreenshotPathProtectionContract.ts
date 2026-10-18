@@ -44,12 +44,6 @@ export function runScreenshotPathProtectionContract(
 
   // Lets every already-queued promise continuation run without involving a timer.
   const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
-  // The real implementation reads its inventory through async stores before the write starts.
-  const until = async (condition: () => boolean): Promise<void> => {
-    for (let i = 0; i < 1000 && !condition(); i += 1) {
-      await tick();
-    }
-  };
 
   describe(`ScreenshotPathProtection contract: ${name}`, () => {
     test("protect leases a path for the minimum lifetime and returns the deadline", () =>
@@ -181,10 +175,14 @@ export function runScreenshotPathProtectionContract(
       withProtection(async (protection, _timer, fileSystem) => {
         const order: string[] = [];
         const gate = deferred();
+        // The real implementation reads its inventory through async stores before the write
+        // starts; await the write's own start signal instead of polling for it.
+        const firstStarted = deferred();
         const first = protection.write(PATH, {
           size: 10,
           write: async () => {
             order.push("first:start");
+            firstStarted.resolve();
             await gate.promise;
             order.push("first:end");
           },
@@ -199,7 +197,7 @@ export function runScreenshotPathProtectionContract(
           remove: async () => {},
           fileSystem,
         });
-        await until(() => order.length > 0);
+        await firstStarted.promise;
         await tick();
         expect(order).toEqual(["first:start"]);
         gate.resolve();

@@ -40,15 +40,25 @@ const MAX_TIMER_SECONDS = 2_147_483;
 /** Text the oracle matches; a blank needle would match almost any screen or answer. */
 const needle = z.string().refine((value) => value.trim() !== "", "must not be blank");
 
+/**
+ * A baseline count: a non-negative safe integer. Past 2^53 YAML has already rounded the value,
+ * so the baseline and every delta against it would be wrong.
+ */
+const count = z
+  .number()
+  .int()
+  .nonnegative()
+  .refine(Number.isSafeInteger, "must be a safe integer (at most 2^53 - 1)");
+
 const baselineSchema = z
   .object({
-    totalToolCalls: z.number().int().nonnegative().optional(),
-    mcpToolCalls: z.number().int().nonnegative().optional(),
-    toolErrors: z.number().int().nonnegative().optional(),
-    numTurns: z.number().int().nonnegative().optional(),
+    totalToolCalls: count.optional(),
+    mcpToolCalls: count.optional(),
+    toolErrors: count.optional(),
+    numTurns: count.optional(),
     costUsd: z.number().finite().nonnegative().optional(),
     wallClockSeconds: z.number().finite().nonnegative().optional(),
-    tools: z.record(z.number().int().nonnegative()).optional(),
+    tools: z.record(count).optional(),
     /** The preflight app fingerprint the baseline was recorded against. */
     appBuild: z.string().min(1).optional(),
     /** SHA-256 prefix of the AutoMobile server bundle (`dist/src/index.js`) the run used. */

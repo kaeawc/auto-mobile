@@ -177,6 +177,18 @@ describe("agent benchmark suite config", () => {
     );
   });
 
+  test("baseline counts must be safe integers", () => {
+    // 2^53 + 1 parses as 2^53, so a larger count would already be wrong.
+    for (const baseline of [{ numTurns: 2 ** 53 }, { tools: { tapOn: 2 ** 53 } }]) {
+      expect(() => parseSuiteDefinition({ ...MINIMAL, baseline }, "demo.yml")).toThrow(
+        /must be a safe integer/,
+      );
+    }
+    expect(
+      parseSuiteDefinition({ ...MINIMAL, baseline: { totalToolCalls: 12 } }, "demo.yml").baseline,
+    ).toMatchObject({ totalToolCalls: 12 });
+  });
+
   test("baseline cost and wall-clock must be finite", () => {
     for (const baseline of [{ costUsd: Infinity }, { wallClockSeconds: Infinity }]) {
       expect(() => parseSuiteDefinition({ ...MINIMAL, baseline }, "demo.yml")).toThrow();

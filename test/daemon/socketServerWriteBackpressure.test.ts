@@ -85,7 +85,7 @@ interface SocketServerInternals {
 }
 
 function connectedServer(timer: FakeTimer, socket: BackpressuredSocket): SocketServerInternals {
-  const server = createTestUnixSocketServer("unused", "http://localhost:0/mcp", undefined, timer);
+  const server = createTestUnixSocketServer("unused", undefined, timer);
   const internals = server as unknown as SocketServerInternals;
   internals.acceptingRequests = true;
   internals.handleConnection(socket as unknown as Socket);

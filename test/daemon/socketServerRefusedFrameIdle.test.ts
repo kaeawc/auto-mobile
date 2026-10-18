@@ -282,7 +282,6 @@ describe("a holder's control frame refused before it reaches the device", () => 
     };
     const server = createTestUnixSocketServer(
       "unused",
-      "http://localhost:0/mcp",
       {
         isInitialized: () => true,
         getSessionManager: () => sessionManager,

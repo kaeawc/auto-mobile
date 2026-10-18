@@ -57,13 +57,7 @@ describe("concurrent client restart during provisionDevice", () => {
       const lockFilePath = join(directory, "daemon.lock");
       const timer = new FakeTimer();
       timer.setCurrentTime(1);
-      const socketServer = new UnixSocketServer(
-        socketPath,
-        "http://localhost:0/mcp",
-        createFakeDaemonState(),
-        timer,
-        null,
-      );
+      const socketServer = new UnixSocketServer(socketPath, createFakeDaemonState(), timer, null);
       await socketServer.start();
       cleanup.push(() => socketServer.close());
 

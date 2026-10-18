@@ -239,7 +239,6 @@ async function startHarness(
   const socketPath = join(tmpdir(), `mcp-parity-${randomUUID().slice(0, 8)}.sock`);
   const socketServer = new UnixSocketServer(
     socketPath,
-    endpointUrl,
     fakeDaemonState(),
     defaultTimer,
     null,

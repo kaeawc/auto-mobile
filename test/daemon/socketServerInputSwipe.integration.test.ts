@@ -76,12 +76,7 @@ describe("UnixSocketServer input/swipe", () => {
       requestSwipe,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     server.mcpClientFactory = createMcpClient;
     await server.start();
 
@@ -137,12 +132,7 @@ describe("UnixSocketServer input/swipe", () => {
       requestHierarchySyncWithoutObservationStreamPush: fetchHierarchy,
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/swipe", {
@@ -191,12 +181,7 @@ describe("UnixSocketServer input/swipe", () => {
       getScreenScaleMetadata: () => ({ nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 }),
     })) as unknown as typeof IOSCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([iosDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/swipe", {
@@ -243,7 +228,6 @@ describe("UnixSocketServer input/swipe", () => {
     const mcpAutolockSessions = new Map<string, string>();
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(autolockSessions, mcpAutolockSessions),
       fakeTimer,
     );
@@ -309,12 +293,7 @@ describe("UnixSocketServer input/swipe", () => {
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
     fakeTimer.enableAutoAdvance();
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const [first, second] = await Promise.all([
@@ -360,12 +339,7 @@ describe("UnixSocketServer input/swipe", () => {
       requestSwipe,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const first = sendRequest(socketPath, "input/swipe", {
@@ -412,12 +386,7 @@ describe("UnixSocketServer input/swipe", () => {
 
   test("surfaces platform discovery failures before device targeting errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([], new Set()));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const response = await sendRequest(socketPath, "input/swipe", {
@@ -435,12 +404,7 @@ describe("UnixSocketServer input/swipe", () => {
 
   test("rejects missing and non-numeric coordinates with actionable errors", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const missing = await sendRequest(socketPath, "input/swipe", {
@@ -469,12 +433,7 @@ describe("UnixSocketServer input/swipe", () => {
 
   test("rejects duration outside the supported bounds", async () => {
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), fakeTimer);
     await server.start();
 
     const zero = await sendRequest(socketPath, "input/swipe", {
@@ -537,12 +496,7 @@ describe("UnixSocketServer input/swipe", () => {
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createDrainDaemonState(sessions),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/swipe", {
       platform: "android",
@@ -601,12 +555,7 @@ describe("UnixSocketServer input/swipe", () => {
     const sessions = new Map([
       [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
     ]);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createDrainDaemonState(sessions),
-      fakeTimer,
-    );
+    server = new UnixSocketServer(socketPath, createDrainDaemonState(sessions), fakeTimer);
     await server.start();
     const response = sendRequest(socketPath, "input/swipe", {
       platform: "android",

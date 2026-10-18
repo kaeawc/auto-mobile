@@ -82,7 +82,6 @@ beforeEach(() => {
   }));
   const server = createTestUnixSocketServer(
     "unused",
-    "http://localhost:0/mcp",
     { isInitialized: () => false } as DaemonStateAccess,
     timer,
   );
@@ -314,7 +313,6 @@ test("a parked sessionless input/tap is not sent once another session acquires t
   });
   const server = createTestUnixSocketServer(
     "unused",
-    "http://localhost:0/mcp",
     {
       isInitialized: () => true,
       getSessionManager: () => sessionManager,

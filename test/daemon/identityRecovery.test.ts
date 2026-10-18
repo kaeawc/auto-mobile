@@ -906,7 +906,6 @@ function provider(
   let writes = 0;
   const server = createTestUnixSocketServer(
     socketPath,
-    "http://localhost:0/mcp",
     {
       isInitialized: () => true,
       getSessionManager: () => ({

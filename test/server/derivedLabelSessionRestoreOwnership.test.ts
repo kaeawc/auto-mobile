@@ -125,7 +125,6 @@ describe("restoring a derived label session through the owned-sessions selector"
     );
     socketServer = createTestUnixSocketServer(
       "/tmp/never-listened.sock",
-      "http://localhost:0/mcp",
       { isInitialized: () => true, getDevicePool: () => pool } as unknown as DaemonStateAccess,
       timer,
     );

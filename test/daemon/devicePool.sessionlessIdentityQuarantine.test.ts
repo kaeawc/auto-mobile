@@ -289,7 +289,6 @@ describe("sessionless identity quarantine", () => {
     const newServer = () =>
       createTestUnixSocketServer(
         "scratch/never-listened.sock",
-        "http://localhost:0/mcp",
         DaemonState.getInstance(),
         new FakeTimer(),
       );
@@ -350,7 +349,6 @@ describe("sessionless identity quarantine", () => {
     const h = await setup(executionTracker);
     const server = createTestUnixSocketServer(
       "scratch/never-listened.sock",
-      "http://localhost:0/mcp",
       DaemonState.getInstance(),
       new FakeTimer(),
     );
@@ -383,7 +381,6 @@ describe("sessionless identity quarantine", () => {
     const h = await setup(executionTracker);
     const server = createTestUnixSocketServer(
       "scratch/never-listened.sock",
-      "http://localhost:0/mcp",
       DaemonState.getInstance(),
       new FakeTimer(),
     );

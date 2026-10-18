@@ -443,7 +443,6 @@ describe("Daemon stream wiring", () => {
           stream.pushHierarchyUpdate("emulator-5554", hierarchy, "static-context");
           const inputServer = new UnixSocketServer(
             "/fake/input.sock",
-            "http://localhost:0/mcp",
             createFakeDaemonState(),
             timer,
           );

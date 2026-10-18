@@ -55,7 +55,6 @@ function makeServer(
 ): UnixSocketServer {
   return new UnixSocketServer(
     socketPath,
-    "http://localhost:0/mcp",
     createFakeDaemonState(),
     new FakeTimer(),
     null,

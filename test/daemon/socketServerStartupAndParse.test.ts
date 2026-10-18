@@ -42,14 +42,9 @@ function createHarness(startupCompletion: Promise<void>) {
     getSessionManager: () => ({ getSession: () => null }),
     getDevicePool: () => ({ releaseMcpSessionBindings: () => {} }),
   } as unknown as DaemonStateAccess;
-  const server = createTestUnixSocketServer(
-    "/fake/socket",
-    "http://127.0.0.1:1/mcp",
-    state,
-    timer,
-    null,
-    { startupCompletion },
-  );
+  const server = createTestUnixSocketServer("/fake/socket", state, timer, null, {
+    startupCompletion,
+  });
   let forwarded = 0;
   server.mcpClientFactory = async () => ({
     callTool: async () => {

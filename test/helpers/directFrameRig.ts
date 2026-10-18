@@ -191,7 +191,6 @@ export function createDirectFrameRig(
   };
   const server = createTestUnixSocketServer(
     "unused",
-    "http://localhost:0/mcp",
     {
       isInitialized: () => true,
       getSessionManager: () => sessionManager,

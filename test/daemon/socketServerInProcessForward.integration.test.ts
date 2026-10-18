@@ -126,7 +126,6 @@ describe("control-socket forwards through the in-process MCP dispatcher", () => 
     socketPath = join(tmpdir(), `mcp-ip-${randomUUID().slice(0, 8)}.sock`);
     socketServer = new UnixSocketServer(
       socketPath,
-      "http://127.0.0.1:1/unused",
       fakeDaemonState(),
       defaultTimer,
       null,

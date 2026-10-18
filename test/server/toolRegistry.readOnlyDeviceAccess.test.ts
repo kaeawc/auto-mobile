@@ -12,7 +12,11 @@ import {
   test,
 } from "bun:test";
 import { z } from "zod/v4";
-import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
+import {
+  ToolRegistry,
+  type AuditRunnerInput,
+  type ToolRegistryCollaborators,
+} from "../../src/server/toolRegistry";
 import { registerAppTools } from "../../src/server/appTools";
 import { registerDatabaseTools } from "../../src/server/databaseTools";
 import { registerNetworkTools } from "../../src/server/networkTools";
@@ -95,9 +99,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   let authorized: boolean;
   /** Whether the fake audit runner also runs the audited tool's handler. */
   let runAuditedHandlers: boolean;
-  let originalDeviceSessionManager: unknown;
-  let originalToolCallRepository: unknown;
-  let originalNavigationRecorder: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
   let devices: FakeDeviceSessionManager;
@@ -156,15 +158,17 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     });
     devices = new FakeDeviceSessionManager();
     devices.setConnectedDevices([held, free]);
-    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
-    Reflect.set(ToolRegistry, "deviceSessionManager", devices);
-    originalToolCallRepository = Reflect.get(ToolRegistry, "toolCallRepository");
-    Reflect.set(ToolRegistry, "toolCallRepository", { async recordToolCall(): Promise<void> {} });
-    originalNavigationRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", {
-      record: (name: string) => {
-        recorded.push(name);
-        return undefined;
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    });
+    ToolRegistry.setCollaboratorsForTesting({
+      navigationToolCallRecorder: {
+        record: (name: string) => {
+          recorded.push(name);
+          return undefined;
+        },
       },
     });
 
@@ -211,9 +215,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     expect(executionTracker.getActiveExecutionCount()).toBe(0);
     serverConfig.setEmbeddedSdkEnabled(false);
     restorePipeline();
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
-    Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", originalNavigationRecorder);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
@@ -544,9 +546,9 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     let previousFlagNotifier: Parameters<FeatureFlagService["setToolListChangedNotifier"]>[0];
     let previousResources: ReturnType<typeof ResourceRegistry.getAllResources>;
     let previousTemplates: Map<string, ReturnType<typeof ResourceRegistry.getAllTemplates>[number]>;
-    let previousToolServers: unknown;
+    let previousToolServers: ReturnType<typeof ToolRegistry.trackedServerCountsForTesting>;
     let previousResourceServers: unknown;
-    let previousBindingHandlers: unknown;
+    let previousBindingHandlers: number;
     let previousReleaseListeners: Set<Parameters<typeof SessionReleaseBroadcaster.subscribe>[0]>;
     let previousDeviceRemovalListeners: Set<(deviceId: string) => void>;
 
@@ -558,9 +560,9 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       }
       previousResources = ResourceRegistry.getAllResources();
       previousTemplates = new Map(ResourceRegistry["templates"]);
-      previousToolServers = new Set(ToolRegistry["servers"]);
+      previousToolServers = ToolRegistry.trackedServerCountsForTesting();
       previousResourceServers = new Set(ResourceRegistry["servers"]);
-      previousBindingHandlers = new Set(ToolRegistry["sessionBindingReleaseHandlers"]);
+      previousBindingHandlers = ToolRegistry.sessionBindingReleaseHandlerCountForTesting();
       previousReleaseListeners = new Set(SessionReleaseBroadcaster["listeners"]);
       previousDeviceRemovalListeners = new Set(getDaemonStreamDeviceLifecycleEmitter()["removed"]);
       // Warm the real server/SDK setup outside the individual test budgets.
@@ -633,9 +635,11 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       expect(ResourceRegistry.getAllResources()).toEqual(previousResources);
       expect(ResourceRegistry["templates"]).toEqual(previousTemplates);
       // Closing the fixtures must unsubscribe their servers and binding closures, not mask leaks.
-      expect(ToolRegistry["servers"]).toEqual(previousToolServers);
+      expect(ToolRegistry.trackedServerCountsForTesting()).toEqual(previousToolServers);
       expect(ResourceRegistry["servers"]).toEqual(previousResourceServers);
-      expect(ToolRegistry["sessionBindingReleaseHandlers"]).toEqual(previousBindingHandlers);
+      expect(ToolRegistry.sessionBindingReleaseHandlerCountForTesting()).toBe(
+        previousBindingHandlers,
+      );
       expect(SessionReleaseBroadcaster["listeners"]).toEqual(previousReleaseListeners);
       expect(removed).toEqual(previousDeviceRemovalListeners);
     });

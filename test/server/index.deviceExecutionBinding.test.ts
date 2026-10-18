@@ -36,7 +36,7 @@ describe("MCP ingress device execution binding", () => {
 
   afterAll(async () => {
     await fixture.teardown();
-    ToolRegistry["tools"].delete(TOOL);
+    ToolRegistry.removeToolForTesting(TOOL);
     restore();
   });
 

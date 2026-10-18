@@ -13,6 +13,7 @@ import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import type { DaemonRequest, DaemonResponse, DaemonNotification } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { executionTracker } from "../../src/server/executionTracker";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
   getToolCallRecorder,
@@ -142,7 +143,27 @@ describe("daemon socket transport lifecycle", () => {
     expect(getToolCallRecorder({ connectionId: "reused-id" })).toBeNull();
   });
 
-  test("reset sends HTTP DELETE before closing the loopback MCP client", async () => {
+  test("socket disconnect cancels the executions keyed by its session id", async () => {
+    const server = createTestUnixSocketServer(
+      "/fake/socket",
+      "http://127.0.0.1:1/mcp",
+      undefined,
+      new FakeTimer(),
+    );
+    const internals = server as unknown as ServerInternals;
+    const socket = new RpcSocket() as unknown as Socket;
+    internals.clientSockets.set("cancel-socket", socket);
+    const execution = executionTracker.startExecution("observe", "cancel-socket");
+    try {
+      internals.releaseSocketSession("cancel-socket", socket);
+      await Promise.all([...internals.activeRequestHandlers]);
+      expect(execution.abortController.signal.aborted).toBe(true);
+    } finally {
+      executionTracker.endExecution(execution.id);
+    }
+  });
+
+  test("reset closes the loopback MCP client without any session termination", async () => {
     const server = createTestUnixSocketServer(
       "/fake/socket",
       "http://127.0.0.1:1/mcp",
@@ -168,38 +189,8 @@ describe("daemon socket transport lifecycle", () => {
 
     await internals.resetMcpClient("device:a");
 
-    expect(events).toEqual(["DELETE", "close"]);
+    expect(events).toEqual(["close"]);
     expect(internals.mcpClients.size).toBe(0);
-  });
-
-  test("a stalled HTTP DELETE cannot block client close indefinitely", async () => {
-    const timer = new FakeTimer();
-    const server = createTestUnixSocketServer(
-      "/fake/socket",
-      "http://127.0.0.1:1/mcp",
-      undefined,
-      timer,
-    );
-    const internals = server as unknown as ServerInternals;
-    let closed = false;
-    const transport = Object.create(
-      StreamableHTTPClientTransport.prototype,
-    ) as StreamableHTTPClientTransport;
-    Object.defineProperty(transport, "sessionId", { value: "http-session" });
-    transport.terminateSession = () => new Promise<void>(() => {});
-    internals.mcpClients.set("device:a", {
-      transport,
-      close: async () => {
-        closed = true;
-      },
-    } as unknown as Client);
-
-    const reset = internals.resetMcpClient("device:a");
-    await Promise.resolve();
-    await Promise.resolve();
-    timer.advanceTime(2_000);
-    await reset;
-    expect(closed).toBeTrue();
   });
 
   test("daemon RPC reader preserves UTF-8 split across socket events", async () => {

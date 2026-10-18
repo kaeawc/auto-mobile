@@ -71,7 +71,6 @@
 1	src/db/database.ts	eslint(max-classes-per-file)
 1	src/db/deviceSessionRepository.ts	eslint(max-classes-per-file)
 1	src/db/migrationLock.ts	eslint(max-classes-per-file)
-1	src/features/action/BaseVisualChange.ts	auto-mobile(max-class-lines)
 1	src/features/action/CaptureSnapshot.ts	eslint(max-params)
 1	src/features/action/InstallApp.ts	auto-mobile(max-class-lines)
 1	src/features/action/Keyboard.ts	eslint(max-params)

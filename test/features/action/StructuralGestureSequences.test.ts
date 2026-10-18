@@ -208,7 +208,7 @@ describe("gesture request sequences", () => {
         return action(recordObservationRead(observation));
       };
       let refreshCount = 0;
-      tap.setRefreshViewHierarchyForTesting(async (_refresh, timeout, screen, signal) => {
+      tap.testHooks.setRefreshViewHierarchy(async (_refresh, timeout, screen, signal) => {
         expect(screen).toBe(observation.screenSize);
         expect(signal).toBe(controller.signal);
         calls.push(`refresh:${timeout}`);

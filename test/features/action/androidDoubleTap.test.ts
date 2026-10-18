@@ -640,7 +640,7 @@ describe("tapAny (Android default display)", () => {
           screenSize: { width: 500, height: 500 },
         }),
       );
-    tapAny.setRefreshViewHierarchyForTesting(async () => null);
+    tapAny.testHooks.setRefreshViewHierarchy(async () => null);
     return tapAny;
   }
 

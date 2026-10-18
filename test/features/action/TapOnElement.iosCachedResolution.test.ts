@@ -200,7 +200,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
             return hierarchy;
           };
         } else {
-          h.tap.setRefreshViewHierarchyForTesting(async (refresh, ...args) => {
+          h.tap.testHooks.setRefreshViewHierarchy(async (refresh, ...args) => {
             const hierarchy = await refresh(...args);
             markers.push(hierarchy && Reflect.get(hierarchy, iosHierarchyAcquisition));
             return hierarchy;

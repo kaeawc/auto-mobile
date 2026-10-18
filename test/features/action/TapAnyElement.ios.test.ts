@@ -526,7 +526,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
         totalMatches: 1,
         strategy: "first",
       }));
-    tapAny.setRefreshViewHierarchyForTesting(async () => {
+    tapAny.testHooks.setRefreshViewHierarchy(async () => {
       fakeTimer.advanceTime(400);
       return hierarchy;
     });

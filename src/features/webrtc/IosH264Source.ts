@@ -71,6 +71,10 @@ import {
   readScreenCaptureHelperEnvOverride,
   resolveIosScreenCaptureHelperPath,
 } from "../screen-stream/screenCaptureHelperPath";
+import { NoFirstFrameError } from "./NoFirstFrameError";
+import { ScreenRecordingPermissionHintError } from "./ScreenRecordingPermissionHintError";
+import { ScreenRecordingPermissionError } from "./ScreenRecordingPermissionError";
+export { ScreenRecordingPermissionError } from "./ScreenRecordingPermissionError";
 
 export {
   IOS_SCREEN_CAPTURE_HELPER_ENV,
@@ -385,19 +389,6 @@ export interface ScreenCaptureHelperEnsurer {
   ensure(): Promise<string | null>;
 }
 
-class NoFirstFrameError extends ActionableError {
-  finalStartupError(_approvalTarget: string | null): Error {
-    return this;
-  }
-}
-
-/** A legacy helper's "no frames" warning that may indicate Screen Recording was denied. */
-class ScreenRecordingPermissionHintError extends NoFirstFrameError {
-  override finalStartupError(approvalTarget: string | null): Error {
-    return new ScreenRecordingPermissionError(approvalTarget ?? "AutoMobile");
-  }
-}
-
 /**
  * A helper that advertised no encoded-video capability failed to start encoded
  * capture — i.e. an outdated binary that predates `--encode h264`. Signals
@@ -405,20 +396,6 @@ class ScreenRecordingPermissionHintError extends NoFirstFrameError {
  * (issue #4789).
  */
 class EncodedUnsupportedError extends ActionableError {}
-
-/**
- * Stable capture-startup failure for a denied macOS Screen Recording grant.
- * Socket consumers can classify this without exposing ScreenCaptureKit/TCC text
- * as their primary user guidance.
- */
-export class ScreenRecordingPermissionError extends ActionableError {
-  readonly approvalTarget: string;
-
-  constructor(approvalTarget = "AutoMobile") {
-    super("Screen Recording permission is required to discover and observe iOS Simulator windows.");
-    this.approvalTarget = approvalTarget;
-  }
-}
 
 export class IosH264Source implements H264CaptureSource {
   private readonly helperPath?: string;

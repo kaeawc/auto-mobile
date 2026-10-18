@@ -339,9 +339,7 @@ export class PlanValidator {
     // A step reaching this validator before PlanNormalizer runs may carry
     // coordination fields as plain siblings of `tool`/`params` -- outside
     // PlanStep's declared shape, but present on the underlying object.
-    // oxlint-disable-next-line auto-mobile/no-unknown-cast
-    const inlineFields = step as unknown as Record<string, unknown>;
-    return inlineFields[field];
+    return Reflect.get(step, field);
   }
 
   /**

@@ -22,6 +22,8 @@ import {
   type AndroidToolsLocation,
 } from "./detection";
 import type { AvdInfo, CreateAvdParams, DeviceProfile } from "./avdmanager";
+import { AvdCreateInterruptedError } from "./AvdCreateInterruptedError";
+export { AvdCreateInterruptedError } from "./AvdCreateInterruptedError";
 
 export interface AvdManagerExecutionOptions {
   signal?: AbortSignal;
@@ -156,22 +158,6 @@ function createAvdArgs(params: CreateAvdParams): string[] {
     }
   }
   return args;
-}
-
-/**
- * `avdmanager create avd` was killed (timeout or signal) before it reported an
- * outcome, so the AVD may exist half-written. Unlike a clean non-zero exit
- * (`success: false`), the caller must treat the AVD as possibly created and
- * roll it back (#11155).
- */
-export class AvdCreateInterruptedError extends ActionableError {
-  constructor(
-    public readonly avdName: string,
-    detail: string,
-  ) {
-    super(`Failed to create AVD ${avdName}: ${detail}. The AVD may have been partially created.`);
-    this.name = "AvdCreateInterruptedError";
-  }
 }
 
 export class AvdManagerClient {

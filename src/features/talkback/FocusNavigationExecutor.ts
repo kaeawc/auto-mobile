@@ -24,6 +24,10 @@ import {
   requiresNodeSelector,
   stableNodeSelectorForElement,
 } from "./nodeActionTarget";
+import { FocusNavigationStoppedError } from "./FocusNavigationStoppedError";
+import { FocusNavigationUnavailableError } from "./FocusNavigationUnavailableError";
+export { FocusNavigationStoppedError } from "./FocusNavigationStoppedError";
+export { FocusNavigationUnavailableError } from "./FocusNavigationUnavailableError";
 
 interface NavigationOptions {
   displayFence?: DisplayFence;
@@ -39,20 +43,6 @@ interface NavigationOptions {
    */
   signal?: AbortSignal;
 }
-
-/**
- * A request ended focus navigation (cancelled, timed out, session released, or out of time
- * budget). Deliberately not an ActionableError: callers must never treat it as a navigation
- * failure with a coordinate fallback, because the request is over.
- */
-export class FocusNavigationStoppedError extends Error {}
-
-/**
- * Focus navigation could not start: nothing was dispatched, so the screen is exactly as it was
- * observed and a caller may still use a non-cursor activation. Every other navigation failure
- * happens after a focus request was sent and must never fall back to a coordinate tap.
- */
-export class FocusNavigationUnavailableError extends ActionableError {}
 
 const BUDGET_EXHAUSTED_MESSAGE = "Request time budget exhausted during focus navigation.";
 

@@ -22,6 +22,8 @@ import {
   PROTOTYPE_REQUEST_MESSAGE_TYPE,
   PROTOTYPE_RESPONSE_MESSAGE_TYPE,
 } from "../prototypeRequestProtocol";
+import { PrototypeAgentFrameTooLargeError } from "./PrototypeAgentFrameTooLargeError";
+export { PrototypeAgentFrameTooLargeError } from "./PrototypeAgentFrameTooLargeError";
 
 /** Must equal `PrototypeAgentProtocol.protocolVersion` in the agent. */
 export const PROTOTYPE_AGENT_PROTOCOL_VERSION = 1;
@@ -36,15 +38,6 @@ export const PROTOTYPE_AGENT_PROTOCOL_VERSION = 1;
  */
 export const PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES = 8 * MAX_PROTOTYPE_SPEC_BYTES;
 
-export class PrototypeAgentFrameTooLargeError extends ActionableError {
-  constructor(readonly limitBytes: number) {
-    super(
-      `Prototype agent response frame exceeded ${limitBytes} bytes; the connection was closed. ` +
-        "Relaunch the app with prototype injection; the agent build may not match this host.",
-    );
-    this.name = "PrototypeAgentFrameTooLargeError";
-  }
-}
 const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;

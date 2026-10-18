@@ -1,4 +1,3 @@
-import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../daemon/deviceAcquisitionRefusals";
 import { TransitionalWaitBudget } from "../utils/TransitionalWaitBudget";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
@@ -61,6 +60,11 @@ import {
   hydrateRequiredDisplayInventories,
   type DisplayInventoryProvider,
 } from "./DisplayInventoryProvider";
+import { AndroidAvdIdentityConflictError } from "./AndroidAvdIdentityConflictError";
+import { AndroidAvdIdentityUnresolvedError } from "./AndroidAvdIdentityUnresolvedError";
+export { AndroidAvdIdentityConflictError } from "./AndroidAvdIdentityConflictError";
+export { AndroidAvdIdentityUnresolvedError } from "./AndroidAvdIdentityUnresolvedError";
+export { AndroidDeviceIdentityUnresolvedError } from "./AndroidDeviceIdentityUnresolvedError";
 
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 /** Bound on the iOS post-lease "did a sibling already boot this simulator" re-check (#9920). */
@@ -93,79 +97,6 @@ export {
   AndroidBootedDeviceDiscoveryIncompleteError,
   BootedDeviceDiscoveryIncompleteError,
 } from "../models/BootedDeviceDiscoveryIncompleteError";
-/** More than one live emulator claims the requested stable AVD identity. */
-export class AndroidAvdIdentityConflictError extends ActionableError {
-  readonly code = "identity_conflict";
-
-  constructor(
-    readonly avdName: string,
-    readonly candidateSerials: readonly string[],
-  ) {
-    super(
-      `identity_conflict: Android AVD '${avdName}' is claimed by multiple running ` +
-        `emulators: ${candidateSerials.join(", ")}. Pass an explicit deviceId (ADB serial) to select one.`,
-    );
-  }
-}
-
-/** Shared retry evidence for an emulator whose AVD identity cannot be proved. */
-class AndroidIdentityUnresolvedError extends ActionableError {
-  readonly code = "target_identity_unresolved";
-  readonly retryable = true;
-  readonly retryAfterMs = DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
-  readonly deviceId?: string;
-
-  constructor(
-    message: string,
-    readonly candidateSerials: readonly string[],
-  ) {
-    super(message);
-    if (candidateSerials.length === 1) {
-      this.deviceId = candidateSerials[0];
-    }
-  }
-
-  toPayload(): Record<string, unknown> {
-    return {
-      code: this.code,
-      retryable: this.retryable,
-      retryAfterMs: this.retryAfterMs,
-      candidateSerials: this.candidateSerials,
-      ...(this.deviceId !== undefined ? { deviceId: this.deviceId } : {}),
-    };
-  }
-}
-
-/** A live emulator with an unanswered AVD-name probe may be the requested image. */
-export class AndroidAvdIdentityUnresolvedError extends AndroidIdentityUnresolvedError {
-  constructor(
-    readonly avdName: string,
-    candidateSerials: readonly string[],
-  ) {
-    super(
-      `target_identity_unresolved: Cannot prove whether Android AVD '${avdName}' is already running; ` +
-        `AVD name is unavailable for ${candidateSerials.join(", ")}. Retry after identity discovery recovers.`,
-      candidateSerials,
-    );
-  }
-
-  override toPayload(): Record<string, unknown> {
-    return { ...super.toPayload(), avdName: this.avdName };
-  }
-}
-
-/** adb lists the serial, but its unanswered probe prevents lifecycle identity resolution. */
-export class AndroidDeviceIdentityUnresolvedError extends AndroidIdentityUnresolvedError {
-  constructor(deviceId: string) {
-    super(
-      `target_identity_unresolved: Android emulator '${deviceId}' is listed by adb but did not answer its AVD-name probe, ` +
-        "so it cannot be resolved for lifecycle coordination. Retry once it responds; " +
-        "if it stays unresponsive, call killDevice for it and then startDevice.",
-      [deviceId],
-    );
-  }
-}
-
 /**
  * Whether a request that names its device by `deviceId` also carries spec fields that device must
  * satisfy. `name` is a spec field like any other (#11648); an exact name (`matchExactName`) paired

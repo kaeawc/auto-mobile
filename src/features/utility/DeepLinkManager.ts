@@ -52,6 +52,7 @@ import {
   AppBundleMetadataClient,
   type AppBundleMetadata,
 } from "../../utils/ios-cmdline-tools/AppBundleMetadataClient";
+import { ChooserRowMissingError } from "./ChooserRowMissingError";
 
 /**
  * Runs a host program (NOT `xcrun simctl`) **by argv, never via a shell**. Used
@@ -156,11 +157,6 @@ export type ChooserActivityLabelResult =
   | { kind: "literal"; label: string }
   | { kind: "resource" }
   | { kind: "none" };
-
-/** Retry signal for a missing chooser row; carries the capture time when known so paging can continue safely. */
-class ChooserRowMissingError extends Error {
-  capturedAt?: number;
-}
 
 interface ChooserMatch {
   element: Element;

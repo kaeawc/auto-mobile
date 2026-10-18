@@ -19,7 +19,12 @@ import * as deviceLost from "../../src/models/DeviceLostError";
 import * as bindingConfig from "../../src/daemon/sessionBroker/provisioning/provisionRequest";
 import * as bindingRefusals from "../../src/daemon/sessionBroker/provisioning/refusal";
 import * as sessionConfig from "../../src/devices/sessionConfig";
-import * as discoveryRefusals from "../../src/models/BootedDeviceDiscoveryIncompleteError";
+import * as discoveryRefusals from "../../src/models/BootedDeviceDiscoveryIncompleteError.base";
+import * as androidDiscoveryRefusals from "../../src/models/AndroidBootedDeviceDiscoveryIncompleteError";
+import * as androidAvdIdentityConflict from "../../src/devices/AndroidAvdIdentityConflictError";
+import * as androidIdentityUnresolved from "../../src/devices/AndroidIdentityUnresolvedError";
+import * as androidDeviceIdentityUnresolved from "../../src/devices/AndroidDeviceIdentityUnresolvedError";
+import * as androidAvdIdentityUnresolved from "../../src/devices/AndroidAvdIdentityUnresolvedError";
 import * as shutdownTimeout from "../../src/models/DeviceShutdownTimeoutError";
 import * as iosHomeLaunchTimeout from "../../src/models/IosHomeLaunchTimeoutError";
 import * as recoveryAssignment from "../../src/models/SessionRecoveryAssignmentError";
@@ -100,7 +105,12 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/sessionBroker/provisioning/provisionRequest": bindingConfig,
   "daemon/sessionBroker/provisioning/refusal": bindingRefusals,
   "devices/sessionConfig": sessionConfig,
-  "models/BootedDeviceDiscoveryIncompleteError": discoveryRefusals,
+  "models/BootedDeviceDiscoveryIncompleteError.base": discoveryRefusals,
+  "models/AndroidBootedDeviceDiscoveryIncompleteError": androidDiscoveryRefusals,
+  "devices/AndroidAvdIdentityConflictError": androidAvdIdentityConflict,
+  "devices/AndroidIdentityUnresolvedError": androidIdentityUnresolved,
+  "devices/AndroidDeviceIdentityUnresolvedError": androidDeviceIdentityUnresolved,
+  "devices/AndroidAvdIdentityUnresolvedError": androidAvdIdentityUnresolved,
   "models/DeviceShutdownTimeoutError": shutdownTimeout,
   "models/IosHomeLaunchTimeoutError": iosHomeLaunchTimeout,
   "models/SessionRecoveryAssignmentError": recoveryAssignment,

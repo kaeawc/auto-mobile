@@ -26,6 +26,7 @@ import {
   parsePrototypeViewerEndpoint,
   PROTOTYPE_VIEWER_ENDPOINT_RELATIVE_PATH,
 } from "./prototypeViewerEndpoint";
+export { CompositePrototypeAgentConnections } from "./CompositePrototypeAgentConnections";
 
 // Simulator and prototype container paths are POSIX on every host OS.
 const { join } = posix;
@@ -73,16 +74,6 @@ export class PrototypeViewerConnections implements PrototypeAgentConnections {
     if (previous !== undefined && previous.client !== record.client) {
       previous.client.close();
     }
-  }
-}
-
-export class CompositePrototypeAgentConnections implements PrototypeAgentConnections {
-  constructor(
-    private readonly viewer: PrototypeAgentConnections,
-    private readonly injected: PrototypeAgentConnections,
-  ) {}
-  get(deviceId: string): PrototypeAgentClient | undefined {
-    return this.viewer.get(deviceId) ?? this.injected.get(deviceId);
   }
 }
 

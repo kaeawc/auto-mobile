@@ -113,11 +113,28 @@ export function buildProfile(identity: NetworkFilterIdentity = NETWORK_FILTER_ID
 }
 
 // XML 1.0 rejects these code points outright; escaping cannot represent them.
-// oxlint-disable-next-line no-control-regex -- matching control characters is the point.
-const INVALID_XML_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F￾￿]/;
+function isInvalidXmlCodeUnit(code: number): boolean {
+  return (
+    code <= 0x08 ||
+    code === 0x0b ||
+    code === 0x0c ||
+    (code >= 0x0e && code <= 0x1f) ||
+    code === 0xfffe ||
+    code === 0xffff
+  );
+}
+
+function containsInvalidXmlChars(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    if (isInvalidXmlCodeUnit(text.charCodeAt(i))) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export function escapeXmlText(text: string): string {
-  if (INVALID_XML_CHARS.test(text)) {
+  if (containsInvalidXmlChars(text)) {
     throw new Error(
       `Plist string contains a character XML 1.0 cannot represent: ${JSON.stringify(text)}`,
     );

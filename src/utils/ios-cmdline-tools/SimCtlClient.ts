@@ -58,6 +58,10 @@ import {
   isTransitionalSimulatorState,
   type TransitionalSimulator,
 } from "../../models/TransitionalSimulator";
+import { SimctlUnavailableError } from "./SimctlUnavailableError";
+import { SimulatorStillShuttingDownError } from "./SimulatorStillShuttingDownError";
+export { SimctlUnavailableError } from "./SimctlUnavailableError";
+export { SimulatorStillShuttingDownError } from "./SimulatorStillShuttingDownError";
 
 const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
 const SCREENSHOT_CLEANUP_BOUND_MS = 1_000;
@@ -134,33 +138,6 @@ export type SimctlScreenshotFailureReason =
   | "aborted-by-caller"
   | "aborted-by-timeout"
   | "non-zero-exit";
-
-/**
- * `xcrun`/`simctl` is not installed on this host (ENOENT, no active developer directory, or xcrun
- * cannot find the utility). Distinct from a simctl that exists and failed: discovery reports this
- * one as not applicable rather than incomplete (#11605).
- */
-export class SimctlUnavailableError extends ActionableError {}
-
-export class SimulatorStillShuttingDownError extends ActionableError {
-  constructor(
-    readonly udid: string,
-    readonly deviceName: string,
-    readonly lastState: string | undefined,
-    readonly waitedMs: number,
-    readonly launchdSimPid?: number,
-  ) {
-    super(
-      `simctl shutdown returned but iOS simulator '${deviceName}' (${udid}) was still ${lastState ?? "unknown"} after ${waitedMs} ms.` +
-        " The shutdown may still complete; check with xcrun simctl list devices. Retrying is safe." +
-        (launchdSimPid === undefined
-          ? ""
-          : ` Its launchd_sim process is pid ${launchdSimPid}; this daemon did not signal it, CoreSimulator may respawn it.`) +
-        " An application displaying the device can also keep it booted.",
-    );
-    this.name = "SimulatorStillShuttingDownError";
-  }
-}
 
 export class SimctlScreenshotError extends Error {
   readonly reason: SimctlScreenshotFailureReason;

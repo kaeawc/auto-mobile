@@ -11,6 +11,8 @@ import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 
 import { clockInstantInWindow, clockInstantTextInWindow } from "../../models/DeviceClock";
+import { DeviceClockValidationError } from "./DeviceClockValidationError";
+export { DeviceClockValidationError } from "./DeviceClockValidationError";
 export { MIN_DEVICE_CLOCK_INSTANT_MS, MAX_DEVICE_CLOCK_INSTANT_MS } from "../../models/DeviceClock";
 /** Ten 365-day years; independent of calendar leap years. */
 export const MAX_DEVICE_CLOCK_ADVANCE_MS = 10 * 365 * 24 * 60 * 60 * 1000;
@@ -36,7 +38,6 @@ export const deviceClockInputSchema = z.union([
     .strict(),
   z.object({ mode: z.literal("reset") }).strict(),
 ]);
-export class DeviceClockValidationError extends ActionableError {}
 export type SetDeviceClockInput = z.infer<typeof deviceClockInputSchema>;
 export interface DeviceClockState {
   supported: boolean;

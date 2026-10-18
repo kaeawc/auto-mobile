@@ -1,4 +1,3 @@
-import { ActionableError } from "../../models/ActionableError";
 import { isAndroidEmulatorSerial } from "../androidSerial";
 import { exponentialBackoff } from "../Backoff";
 import { errorMessage } from "../describeUnknownError";
@@ -6,6 +5,8 @@ import { logger } from "../logger";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { Timer } from "../SystemTimer";
 import type { LockOwnerGenerationProbe } from "../fileLock";
+import { EmulatorStopDispatchedError } from "./EmulatorStopDispatchedError";
+export { EmulatorStopDispatchedError } from "./EmulatorStopDispatchedError";
 
 /** Structurally the same as boot admission's AndroidProcessRow. */
 export interface EmulatorHostProcessRow {
@@ -176,9 +177,6 @@ export function emulatorProcessEscapeHint(
 }
 
 const STOP_DISPATCHED = Symbol("emulatorStopDispatched");
-
-/** A stop reached the console or signaler; a late exit must remain intentional. */
-export class EmulatorStopDispatchedError extends ActionableError {}
 
 /** Preserve adb's timeout type while attaching the dispatched-stop classification. */
 export function markEmulatorStopDispatched<T extends Error>(error: T): T {

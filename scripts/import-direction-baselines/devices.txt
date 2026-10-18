@@ -1,3 +1,4 @@
+src/devices/AndroidIdentityUnresolvedError.ts -> src/daemon/deviceAcquisitionRefusals
 src/devices/DeviceReadiness.ts -> src/daemon/deviceAcquisitionRefusals
 src/devices/DeviceReadiness.ts -> src/features/bootAdmission/sharedBootAdmissionGates
 src/devices/DeviceReadiness.ts -> src/features/iosSimFleet/IosBootInstrumentation
@@ -15,7 +16,6 @@ src/devices/DeviceReadiness.ts -> src/server/ToolExecutionContext
 src/devices/DeviceReadiness.ts -> src/server/appearanceSessionKey
 src/devices/DeviceReadiness.ts -> src/server/applyAppearanceOnConnect
 src/devices/DeviceReadiness.ts -> src/server/deviceExecutionBinding
-src/devices/deviceBootService.ts -> src/daemon/deviceAcquisitionRefusals
 src/devices/deviceBootService.ts -> src/features/bootAdmission/sharedBootAdmissionGates
 src/devices/deviceUtils.ts -> src/features/bootAdmission/sharedBootAdmissionGates
 src/devices/deviceUtils.ts -> src/features/iosSimFleet/IosBootInstrumentation

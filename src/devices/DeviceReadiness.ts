@@ -113,6 +113,7 @@ import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import { throwIfProvisionedDeviceTransportRetired } from "../utils/provisionedDeviceTransportFence";
 import { deviceReadinessLockKey, withDeviceReadinessLock } from "../utils/deviceReadinessLock";
+import { AndroidForwardReadinessConflictError } from "./AndroidForwardReadinessConflictError";
 
 function lifecycleIdentityForDevice(
   device: BootedDevice,
@@ -270,8 +271,6 @@ export class DefaultDeviceClientProvider implements DeviceClientProvider {
     return RealObserveScreen.defaultObserveScreenCache;
   }
 }
-
-class AndroidForwardReadinessConflictError extends ActionableError {}
 
 /**
  * Interface for device session management

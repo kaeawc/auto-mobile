@@ -53,6 +53,7 @@ import {
   type VideoCaptureTeardownDescriptor,
   type OrphanCaptureStopOptions,
 } from "./VideoRecorderService";
+import { PostProcessOutOfTimeError } from "./PostProcessOutOfTimeError";
 
 export { PROCESS_EXIT_TIMEOUT_MS, waitForExit };
 export type { ProcessTracker, StoppableProcess };
@@ -148,12 +149,6 @@ export function boundPostProcessBudgetToRequest(
   const availableMs = remainingMs - POST_PROCESS_RESPONSE_MARGIN_MS;
   return availableMs <= 0 ? undefined : Math.min(budgetMs, availableMs);
 }
-
-/**
- * ffmpeg ran out of its time (or the stop request had none left to give it), as opposed to
- * failing. The raw capture is returned for either, but the warning says which.
- */
-class PostProcessOutOfTimeError extends ActionableError {}
 
 /** What iOS post-processing produced: the processed output, or the raw capture kept instead. */
 type PostProcessOutcome = { kind: "processed" } | { kind: "kept-raw"; warning: string };

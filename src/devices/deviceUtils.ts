@@ -50,6 +50,7 @@ import {
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleLease,
 } from "./virtualDeviceLifecycleCoordinator";
+import { PhysicalIosScanBudgetExceeded } from "./PhysicalIosScanBudgetExceeded";
 
 export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 
@@ -438,9 +439,6 @@ export async function waitForDeviceReadyOrCancel(
 
 /** Readiness budget for the shared devicectl sweep; a wedged CoreDevice must not stall callers (#11077, #11122). */
 export const PHYSICAL_IOS_SCAN_BUDGET_MS = 3_000;
-
-/** Thrown by the budget race only, so it is never confused with a caller abort. */
-class PhysicalIosScanBudgetExceeded extends Error {}
 
 function skippedPhysicalIosDiscovery(): {
   devices: BootedDevice[];

@@ -34,9 +34,7 @@ function effectiveField(step: PlanStep, field: string): unknown {
   if (params && typeof params === "object" && Object.prototype.hasOwnProperty.call(params, field)) {
     return (params as Record<string, unknown>)[field];
   }
-  // oxlint-disable-next-line auto-mobile/no-unknown-cast
-  const inlineFields = step as unknown as Record<string, unknown>;
-  return inlineFields[field];
+  return Reflect.get(step, field);
 }
 
 interface Arrival {

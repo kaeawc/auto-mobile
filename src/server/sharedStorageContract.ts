@@ -9,7 +9,7 @@ export interface SharedStorageFileInput {
   contentBase64?: string;
 }
 
-export interface StageSharedStorageArgs {
+export interface StageSharedStorageInput {
   namespace: string;
   reset?: boolean;
   indexMedia?: boolean;

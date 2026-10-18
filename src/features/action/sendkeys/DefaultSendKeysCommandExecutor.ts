@@ -295,6 +295,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private createEventAllTyper(): EventAllTyper {
     return new EventAllTyper({
       session: this.session,
+      timer: this.timer,
       textClient: this.textClient,
       hasFocusedPasswordField: (hierarchy) => hasFocusedPasswordField(hierarchy),
       graphemeCodePoints: (graphemes) => graphemeCodePoints(graphemes),

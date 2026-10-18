@@ -2,7 +2,12 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ActionableError, BootedDevice } from "../models/index";
 import { logger } from "../utils/logger";
-import { abortErrorFromSignal, createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
+import {
+  abortErrorFromSignal,
+  createStructuredToolResponse,
+  throwIfAborted,
+} from "../utils/toolUtils";
+import { barrierResultSchema } from "./barrierToolOutputSchemas";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { defineDeviceTool, type DeviceToolSchema } from "./defineTool";
 import { isDeviceLostError } from "./deviceLossOutcome";
@@ -81,7 +86,7 @@ const barrierHandler = async (
 
   logger.info(`Device ${device.deviceId} passed barrier "${lock}"`);
 
-  return createJSONToolResponse({
+  return createStructuredToolResponse({
     success: true,
     lock,
     deviceId: device.deviceId,
@@ -100,6 +105,7 @@ const barrierTool = defineDeviceTool({
   handler: barrierHandler,
   options: {
     defaultEnabled: false,
+    outputSchema: barrierResultSchema,
     planOnly: true,
     planExecutable: true,
     acceptsPlanLockNamespace: true,

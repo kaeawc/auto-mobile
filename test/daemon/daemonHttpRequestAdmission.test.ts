@@ -18,20 +18,24 @@ import type { ObserverSessionRegistry } from "../../src/daemon/observerSessionRe
 
 const port = 41321;
 
+interface DaemonHttpIngressInternals {
+  start(): Promise<void>;
+  closeListener(): Promise<void>;
+  mcpHttpTransportFactory: () => FakeTransport;
+  mcpRequestServerFactory: () => FakeMcpServer;
+}
+
 interface DaemonHttpInternals {
-  startHttpServer(): Promise<void>;
+  httpIngress: DaemonHttpIngressInternals;
   startUntilReady(): Promise<void>;
   startThroughSocketBind(): Promise<void>;
   startAfterSocketBind(): Promise<void>;
   stopAfterFailedStartup(): Promise<void>;
   quiesceProvisioningIngress(): Promise<void>;
-  closeHttpListener(): Promise<void>;
   resolveStartupCompletion(): void;
   rejectStartupCompletion(reason: unknown): void;
   sessionManager: SessionManager;
   observerSessionRegistry: ObserverSessionRegistry;
-  mcpHttpTransportFactory: () => FakeTransport;
-  mcpRequestServerFactory: () => FakeMcpServer;
 }
 
 class FakeRequest extends EventEmitter {
@@ -188,9 +192,9 @@ async function harness(
   if (observers) {
     internals.observerSessionRegistry = observers;
   }
-  internals.mcpHttpTransportFactory = () => transport;
-  internals.mcpRequestServerFactory = () => new FakeMcpServer();
-  await internals.startHttpServer();
+  internals.httpIngress.mcpHttpTransportFactory = () => transport;
+  internals.httpIngress.mcpRequestServerFactory = () => new FakeMcpServer();
+  await internals.httpIngress.start();
   if (startupComplete) {
     internals.resolveStartupCompletion();
     // Let the daemon observe completion so admitted requests take the fast path.
@@ -379,7 +383,7 @@ describe("Daemon HTTP MCP admission during shutdown (#11189)", () => {
 
       await internals.quiesceProvisioningIngress();
       let closed = false;
-      void internals.closeHttpListener().then(() => {
+      void internals.httpIngress.closeListener().then(() => {
         closed = true;
       });
       for (let turn = 0; turn < 20 && !closed; turn++) {
@@ -414,7 +418,7 @@ describe("Daemon HTTP MCP admission during shutdown (#11189)", () => {
       // The real stop awaits the HTTP server close, which waits for the held request.
       internals.stopAfterFailedStartup = async () => {
         stopEntered = true;
-        await internals.closeHttpListener();
+        await internals.httpIngress.closeListener();
       };
       let startError: unknown;
       await internals.startUntilReady().catch((error: unknown) => {

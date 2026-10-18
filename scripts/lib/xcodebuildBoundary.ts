@@ -1,10 +1,9 @@
-import { readFileSync } from "node:fs";
 import ts from "typescript";
 import {
   DYNAMIC_BOUNDARY,
   executionBoundaryAst,
   STRING_ANALYSIS_OVERFLOW,
-} from "./lib/executionBoundaryAst";
+} from "./executionBoundaryAst";
 
 export interface XcodebuildViolation {
   readonly file: string;
@@ -333,18 +332,4 @@ export function findDirectXcodebuildCalls(file: string, source: string): Xcodebu
       },
     ];
   });
-}
-
-if (import.meta.main) {
-  const violations = process.argv
-    .slice(2)
-    .flatMap((file) => findDirectXcodebuildCalls(file, readFileSync(file, "utf8")));
-  if (violations.length > 0) {
-    console.error("New production xcodebuild execution must go through XcodebuildClient:");
-    for (const violation of violations) {
-      console.error(`  ${violation.file}:${violation.line}:${violation.column}: ${violation.text}`);
-    }
-    process.exit(1);
-  }
-  console.log("xcodebuild-boundary: no new direct production xcodebuild invocations.");
 }

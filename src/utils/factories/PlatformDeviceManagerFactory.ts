@@ -61,6 +61,19 @@ export class PlatformDeviceManagerFactory {
     return PlatformDeviceManagerFactory.instance;
   }
 
+  /** Test-only: which slots are populated, so a suite can prove teardown retired them. */
+  public static slotsForTesting(): {
+    instance: PlatformDeviceManager | null;
+    injectedManager: PlatformDeviceManager | null;
+    injectedAdbFactory: AdbClientFactory | null;
+  } {
+    return {
+      instance: PlatformDeviceManagerFactory.instance,
+      injectedManager: PlatformDeviceManagerFactory.injectedManager,
+      injectedAdbFactory: PlatformDeviceManagerFactory.injectedAdbFactory,
+    };
+  }
+
   /**
    * Reset the factory state
    * Clears both the cached instance and injected dependencies

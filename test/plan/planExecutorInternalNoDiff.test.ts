@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { Plan } from "../../src/models/Plan";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -16,12 +16,11 @@ import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
  * finalize half is covered by toolRegistry.internalNoDiff.test.ts) and confirms
  * the marker does not disturb the success/error step logic.
  */
-type ToolRegistryDeviceSessionManager = (typeof ToolRegistry)["deviceSessionManager"];
 
 describe("PlanExecutor internal no-diff marker (#3053)", () => {
   let planExecutor: DefaultPlanExecutor;
   let capturedArgs: Record<string, unknown>[];
-  let originalDeviceSessionManager: ToolRegistryDeviceSessionManager;
+  let originalCollaborators: ToolRegistryCollaborators;
 
   const schema = z.object({
     text: z.string().optional(),
@@ -40,14 +39,14 @@ describe("PlanExecutor internal no-diff marker (#3053)", () => {
     fakeDeviceSessionManager.setConnectedDevices([
       { name: "Pixel A", deviceId: "emulator-5554", platform: "android" },
     ]);
-    originalDeviceSessionManager = ToolRegistry["deviceSessionManager"];
-    ToolRegistry["deviceSessionManager"] = fakeDeviceSessionManager;
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
     planExecutor = new DefaultPlanExecutor();
     capturedArgs = [];
   });
 
   afterEach(() => {
-    ToolRegistry["deviceSessionManager"] = originalDeviceSessionManager;
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     unregisterTemporaryTools("tapOn");
   });
 

@@ -23,7 +23,7 @@ import {
 } from "../HostCommandExecutor";
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
 import { toActionableError } from "../../models/ActionableError";
-import { EmulatorLaunchCancelledError } from "../../models/EmulatorLaunchCancelledError";
+import { EmulatorLaunchCancelledError } from "./EmulatorLaunchCancelledError";
 import type { AdmitColdBoot, BootAdmission } from "../../models/BootAdmission";
 import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
 import { arch } from "os";

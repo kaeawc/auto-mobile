@@ -12,7 +12,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
-import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
+import { EmulatorLaunchCancelledError } from "../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { getAbortSignal } from "../../src/utils/AbortContext";

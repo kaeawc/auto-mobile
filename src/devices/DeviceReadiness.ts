@@ -101,7 +101,7 @@ import {
   type VirtualDeviceLifecycleLease,
 } from "./virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "../utils/AbortContext";
-import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
+import { isEmulatorLaunchCancelledError } from "../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { terminateOwnedEmulatorProcess } from "./coldBootProcessTermination";
 import {
   compareIdentityEvidence,

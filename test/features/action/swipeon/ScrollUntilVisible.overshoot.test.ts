@@ -15,7 +15,14 @@ import { FakeOverlayDetector } from "../../../fakes/FakeOverlayDetector";
 import { FakeScrollAccessibilityService } from "../../../fakes/FakeScrollAccessibilityService";
 import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
-import type { BootedDevice, Element, ObserveResult } from "../../../../src/models";
+import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
+import type { ObserveScreenExecuteOptions } from "../../../../src/features/observe/interfaces/ObserveScreen";
+import type {
+  BootedDevice,
+  Element,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../../../src/models";
 import type {
   OverlayCandidate,
   SwipeOnResolvedOptions,
@@ -43,14 +50,45 @@ const CONTAINER_ELEMENT: Element = {
   bounds: { left: 0, top: 0, right: 400, bottom: 900 },
   "resource-id": "test:id/list",
   scrollable: true,
-} as unknown as Element;
+};
 
 const TARGET_ELEMENT: Element = {
   bounds: { left: 10, top: 200, right: 390, bottom: 250 },
   "resource-id": "test:id/target",
   text: "Skills",
   scrollable: false,
-} as unknown as Element;
+};
+
+/** Serves the observation at the current index, recording the options passed to execute. */
+class IndexedObserveScreen extends FakeObserveScreen {
+  constructor(
+    private readonly current: () => ObserveResult,
+    private readonly seenOptions?: Array<ObserveScreenExecuteOptions | undefined>,
+  ) {
+    super();
+  }
+
+  override async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
+    this.seenOptions?.push(options);
+    return recordObservationRead(this.current());
+  }
+
+  override async getMostRecentCachedObserveResult(): Promise<ObserveResult> {
+    return this.current();
+  }
+}
+
+/** A fully wired instance for tests that only exercise its pure hierarchy search. */
+const bareScrollUntilVisible = () =>
+  makeScrollUntilVisible({
+    resolver: new ElementResolver(),
+    accessibilityDetector: new FakeAccessibilityDetector(),
+    scrollResolver: new FakeScrollElementResolver(),
+    timer: new FakeTimer(),
+    accessibilityService: new FakeScrollAccessibilityService(),
+    observeResults: [makeObserveResult()],
+    talkBackExecutor: new FakeTalkBackSwipeExecutor(),
+  });
 
 function makeScrollUntilVisible({
   accessibilityDetector,
@@ -77,7 +115,7 @@ function makeScrollUntilVisible({
   talkBackExecutor: FakeTalkBackSwipeExecutor;
   getDuration?: (options: SwipeOnResolvedOptions) => number;
   overlayDetector?: FakeOverlayDetector;
-  observeOptions?: Array<Record<string, unknown> | undefined>;
+  observeOptions?: Array<ObserveScreenExecuteOptions | undefined>;
   observedInteractionOptions?: Array<Record<string, unknown>>;
   terminalEvidence?: ObserveResult[];
   resolver?: ElementResolver;
@@ -87,14 +125,10 @@ function makeScrollUntilVisible({
 }): ScrollUntilVisible {
   let callIdx = 0;
 
-  const fakeObserveScreen = {
-    execute: async (options?: Record<string, unknown>) => {
-      observeOptions?.push(options);
-      return recordObservationRead(observeResults[Math.min(callIdx, observeResults.length - 1)]);
-    },
-    getMostRecentCachedObserveResult: async () =>
-      observeResults[Math.min(callIdx, observeResults.length - 1)],
-  };
+  const fakeObserveScreen = new IndexedObserveScreen(
+    () => observeResults[Math.min(callIdx, observeResults.length - 1)],
+    observeOptions,
+  );
 
   const fakeGeometry = new FakeElementGeometry();
 
@@ -114,10 +148,10 @@ function makeScrollUntilVisible({
     device,
     resolver: resolver ?? scrollResolver,
     geometry: geometry ?? fakeGeometry,
-    observeScreen: fakeObserveScreen as any,
+    observeScreen: fakeObserveScreen,
     accessibilityService,
     accessibilityDetector,
-    adb: new FakeAdbClient() as any,
+    adb: new FakeAdbClient(),
     overlayDetector: fakeOverlayDetector,
     talkBackExecutor,
     voiceOverExecutor: talkBackExecutor,
@@ -191,7 +225,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
   });
 
   test("already aborted scroll observes no device state", async () => {
-    const observeOptions: Array<Record<string, unknown> | undefined> = [];
+    const observeOptions: Array<ObserveScreenExecuteOptions | undefined> = [];
     const scroll = makeScrollUntilVisible({
       accessibilityDetector: detector,
       scrollResolver,
@@ -256,7 +290,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
   test("a cancel that lands during a swipe stops before the settle poll that follows it (#10151)", async () => {
     const controller = new AbortController();
-    const observeOptions: Array<Record<string, unknown> | undefined> = [];
+    const observeOptions: Array<ObserveScreenExecuteOptions | undefined> = [];
     let observesAtSwipe: number | undefined;
     const scroll = makeScrollUntilVisible({
       accessibilityDetector: detector,
@@ -462,7 +496,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       findCount++;
       return findCount >= 2 ? TARGET_ELEMENT : null;
     };
-    const observeOptions: Array<Record<string, unknown> | undefined> = [];
+    const observeOptions: Array<ObserveScreenExecuteOptions | undefined> = [];
     const observedInteractionOptions: Array<Record<string, unknown>> = [];
     const terminalEvidence: ObserveResult[] = [];
     const suv = makeScrollUntilVisible({
@@ -542,7 +576,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
         return Reflect.get(results, property, receiver);
       },
     });
-    const observeOptions: Array<Record<string, unknown> | undefined> = [];
+    const observeOptions: Array<ObserveScreenExecuteOptions | undefined> = [];
     const suv = makeScrollUntilVisible({
       accessibilityDetector: detector,
       scrollResolver,
@@ -726,10 +760,10 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       device: DEVICE,
       resolver: fakeResolver,
       geometry: fakeGeometry,
-      observeScreen: fakeObserveScreen as any,
+      observeScreen: fakeObserveScreen,
       accessibilityService: fakeAccessibilityService,
       accessibilityDetector: fakeDetector,
-      adb: new FakeAdbClient() as any,
+      adb: new FakeAdbClient(),
       overlayDetector: fakeOverlayDetector,
       talkBackExecutor: fakeTalkBack,
       timer: fakeTimer,
@@ -1098,33 +1132,35 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 });
 
 describe("ScrollUntilVisible shared resolver identity", () => {
-  const hierarchy = (ids: string[]) => ({
+  const hierarchy = (ids: string[]): ViewHierarchyResult => ({
     hierarchy: {
-      node: ids.map((id, index) => ({
-        "resource-id": id,
-        bounds: { left: 0, top: index * 50, right: 100, bottom: index * 50 + 40 },
-      })),
+      node: {
+        node: ids.map((id, index) => ({
+          "resource-id": id,
+          bounds: { left: 0, top: index * 50, right: 100, bottom: index * 50 + 40 },
+        })),
+      },
     },
   });
   test("bare lookFor ID rejects substring near misses", async () => {
-    const scroll = new ScrollUntilVisible({} as any);
+    const scroll = bareScrollUntilVisible();
     const result = await scroll.findElementInHierarchy(
       { elementId: "btn_login" },
-      hierarchy(["com.app:id/btn_login_help"]) as any,
+      hierarchy(["com.app:id/btn_login_help"]),
     );
     expect(result).toBeNull();
   });
   test("bare lookFor ID reports candidate packages when ambiguous", async () => {
-    const scroll = new ScrollUntilVisible({} as any);
+    const scroll = bareScrollUntilVisible();
     await expect(
       scroll.findElementInHierarchy(
         { elementId: "btn_login" },
-        hierarchy(["com.one:id/btn_login", "com.two:id/btn_login"]) as any,
+        hierarchy(["com.one:id/btn_login", "com.two:id/btn_login"]),
       ),
     ).rejects.toThrow(/com.one:id\/btn_login.*com.two:id\/btn_login/);
   });
   test("text lookFor keeps the matched label rather than its clickable row", async () => {
-    const scroll = new ScrollUntilVisible({} as any);
+    const scroll = bareScrollUntilVisible();
     const label = {
       "resource-id": "com.app:id/target_label",
       text: "Target",
@@ -1139,12 +1175,12 @@ describe("ScrollUntilVisible shared resolver identity", () => {
           node: [label],
         },
       },
-    } as any);
+    } satisfies ViewHierarchyResult);
     expect(found?.["resource-id"]).toBe("com.app:id/target_label");
     expect(found?.bounds).toEqual(label.bounds);
   });
   test("explicit text swipe keeps matched label bounds, while ID uses the selected row", async () => {
-    const scroll = new ScrollUntilVisible({} as any);
+    const scroll = bareScrollUntilVisible();
     const label = { text: "Target", bounds: { left: 20, top: 40, right: 80, bottom: 60 } };
     const viewHierarchy = {
       hierarchy: {
@@ -1155,18 +1191,26 @@ describe("ScrollUntilVisible shared resolver identity", () => {
           node: [label],
         },
       },
-    } as any;
+    } satisfies ViewHierarchyResult;
     expect(
-      (await scroll.findTargetElement({ container: { text: "Target" } } as any, viewHierarchy))
-        .bounds,
+      (
+        await scroll.findTargetElement(
+          { direction: "up", container: { text: "Target" } },
+          viewHierarchy,
+        )
+      ).bounds,
     ).toEqual(label.bounds);
     expect(
-      (await scroll.findTargetElement({ container: { elementId: "row" } } as any, viewHierarchy))
-        .bounds,
+      (
+        await scroll.findTargetElement(
+          { direction: "up", container: { elementId: "row" } },
+          viewHierarchy,
+        )
+      ).bounds,
     ).toEqual({ left: 0, top: 0, right: 100, bottom: 100 });
   });
   test("text lookFor skips unrelated text on the promoted row", async () => {
-    const scroll = new ScrollUntilVisible({} as any);
+    const scroll = bareScrollUntilVisible();
     const target = { text: "Target", bounds: { left: 0, top: 40, right: 100, bottom: 60 } };
     const found = await scroll.findElementInHierarchy({ text: "Target" }, {
       hierarchy: {
@@ -1177,11 +1221,11 @@ describe("ScrollUntilVisible shared resolver identity", () => {
           node: [target],
         },
       },
-    } as any);
+    } satisfies ViewHierarchyResult);
     expect(found?.bounds).toEqual(target.bounds);
   });
   test("text lookFor preserves curly-quote matching source geometry", async () => {
-    const scroll = new ScrollUntilVisible({} as any);
+    const scroll = bareScrollUntilVisible();
     const target = { text: "It’s here", bounds: { left: 0, top: 40, right: 100, bottom: 60 } };
     const found = await scroll.findElementInHierarchy({ text: "It's here" }, {
       hierarchy: {
@@ -1191,13 +1235,13 @@ describe("ScrollUntilVisible shared resolver identity", () => {
           node: [target],
         },
       },
-    } as any);
+    } satisfies ViewHierarchyResult);
     expect(found?.bounds).toEqual(target.bounds);
   });
 });
 
 test("lookFor treats a temporarily missing container as a miss and retries within its scope", async () => {
-  const scroll = new ScrollUntilVisible({} as any);
+  const scroll = bareScrollUntilVisible();
   const target = {
     "resource-id": "com.app:id/login",
     bounds: { left: 0, top: 0, right: 100, bottom: 40 },
@@ -1208,7 +1252,7 @@ test("lookFor treats a temporarily missing container as a miss and retries withi
       { elementId: "login" },
       {
         hierarchy: { node: target },
-      } as any,
+      } satisfies ViewHierarchyResult,
       scope,
     ),
   ).toBeNull();
@@ -1222,7 +1266,7 @@ test("lookFor treats a temporarily missing container as a miss and retries withi
           node: [target],
         },
       },
-    } as any,
+    } satisfies ViewHierarchyResult,
     scope,
   );
   expect(found?.["resource-id"]).toBe("com.app:id/login");

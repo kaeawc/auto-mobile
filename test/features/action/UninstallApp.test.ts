@@ -49,8 +49,8 @@ class FakeDeviceAppUninstaller implements DeviceAppUninstaller {
   }
 }
 
-const fakeAdbFactory = (fakeAdb: FakeAdbClient) => ({ create: () => fakeAdb as any });
-const nullAdbFactory = { create: () => ({}) as any };
+const fakeAdbFactory = (fakeAdb: FakeAdbClient) => ({ create: () => fakeAdb });
+const nullAdbFactory = { create: () => new FakeAdbClient() };
 
 describe("UninstallApp (iOS simulator)", () => {
   const iosSimDevice: BootedDevice = {

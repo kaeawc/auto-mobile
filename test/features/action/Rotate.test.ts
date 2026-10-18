@@ -1892,9 +1892,9 @@ describe("Rotate", () => {
         window: fakeWindow,
       });
 
-      const lock = (rotate as any).getRotationLock();
+      const lock = rotate.getRotationLock();
       // Same deviceId -> the second instance must resolve to the SAME lock.
-      expect((secondRotate as any).getRotationLock()).toBe(lock);
+      expect(secondRotate.getRotationLock()).toBe(lock);
 
       const firstCall = rotate.execute("landscape");
 

@@ -48,6 +48,7 @@ describe("TerminateApp (Android install listing)", () => {
   const device: BootedDevice = { deviceId: "emulator-9426", name: "Pixel", platform: "android" };
   let adb: FakeAdbClient;
   let app: TerminateApp;
+  let cacheInvalidator: FakeDeviceWindowCacheInvalidator;
   let ctrlProxySpy: ReturnType<typeof spyOn<typeof AndroidCtrlProxyClient, "getInstance">>;
 
   beforeEach(() => {
@@ -55,7 +56,8 @@ describe("TerminateApp (Android install listing)", () => {
     adb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    app = new TerminateApp(device, adb, { timer });
+    cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
+    app = new TerminateApp(device, adb, { timer, cacheInvalidator });
     ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
       throw new Error("CtrlProxy unavailable");
     });
@@ -119,9 +121,6 @@ describe("TerminateApp (Android install listing)", () => {
   });
 
   test("retires the app's process state after a force-stop and for an already-dead process", async () => {
-    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
-    const retiring = app as unknown as { cacheInvalidator: FakeDeviceWindowCacheInvalidator };
-    retiring.cacheInvalidator = cacheInvalidator;
     adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
     adb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
     await app.execute("com.example.app", { skipObservation: true });

@@ -123,7 +123,7 @@ describe("RecentApps", () => {
     test("should still press recents when the view hierarchy is unavailable", async () => {
       fakeObserveScreen.setObserveResult(() => {
         const result = createObserveResult();
-        (result.viewHierarchy as any) = null;
+        result.viewHierarchy = undefined;
         return result;
       });
       fakeAdb.setDefaultResponse({ stdout: "", stderr: "" });

@@ -201,7 +201,6 @@
 2	test/features/action/PressButton.android.test.ts
 1	test/features/action/PressButton.test.ts
 1	test/features/action/RecentApps.test.ts
-2	test/features/action/SelectAllText.test.ts
 1	test/features/action/SendKeys.test.ts
 13	test/features/action/SetUIState.test.ts
 2	test/features/action/StaleDisplay.test.ts
@@ -215,7 +214,6 @@
 1	test/features/action/TapOnElement.retryIfNoChange.test.ts
 1	test/features/action/TapOnElement.searchBarFocus.test.ts
 1	test/features/action/TapOnElement.toolDispatch.test.ts
-1	test/features/action/TerminateApp.test.ts
 1	test/features/action/UninstallApp.test.ts
 1	test/features/action/androidCoordinateTapPolicy.test.ts
 1	test/features/action/androidDoubleTap.test.ts
@@ -224,14 +222,7 @@
 1	test/features/action/appIdShellInjection.test.ts
 3	test/features/action/openUrlShellInjection.test.ts
 4	test/features/action/swipeon/BoomerangPartialApplication.test.ts
-3	test/features/action/swipeon/OverlayDetector.test.ts
-2	test/features/action/swipeon/ScrollUntilVisible.overshoot.test.ts
-3	test/features/action/swipeon/ScrollUntilVisible.talkback.test.ts
-2	test/features/action/swipeon/SwipeOn.hierarchyLayer.test.ts
 3	test/features/action/swipeon/SwipeOn.navigationOutcome.test.ts
-2	test/features/action/swipeon/SwipeOn.pagerContainer.test.ts
-2	test/features/action/swipeon/SwipeOn.test.ts
-2	test/features/action/swipeon/SwipeOn.unnamedAutoTarget.test.ts
 2	test/features/action/swipeon/TalkBackSwipeExecutor.test.ts
 2	test/features/action/swipeon/resolveContainerSwipeCoordinates.test.ts
 11	test/features/action/swipeon/swipeNavigation.test.ts

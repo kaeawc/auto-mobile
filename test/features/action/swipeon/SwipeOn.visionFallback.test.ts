@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import { SwipeOn } from "../../../../src/features/action/swipeon";
 import { FakeScreenshotCapturer } from "../../../fakes/FakeScreenshotCapturer";
 import { FakeVisionAnalyzer } from "../../../fakes/FakeVisionAnalyzer";
@@ -25,7 +26,7 @@ const createObserveResult = (): ObserveResult => ({
   timestamp: Date.now(),
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  viewHierarchy: { hierarchy: { node: [] } } as any,
+  viewHierarchy: { hierarchy: {} },
 });
 
 describe("SwipeOn vision fallback", () => {
@@ -54,7 +55,8 @@ describe("SwipeOn vision fallback", () => {
   });
 
   const createSwipeOn = (capturer: FakeScreenshotCapturer, analyzer: FakeVisionAnalyzer) => {
-    const swipeOn = new SwipeOn(device, {} as any, {
+    const swipeOn = new SwipeOn(device, new FakeAdbClient(), {
+      timer: fakeTimer,
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
@@ -62,8 +64,6 @@ describe("SwipeOn vision fallback", () => {
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
     });
-    // Patch the inner scrollUntilVisible timer so retries are fast
-    (swipeOn as any).scrollUntilVisible.deps.timer = fakeTimer;
     return swipeOn;
   };
 
@@ -126,7 +126,8 @@ describe("SwipeOn vision fallback", () => {
     capturer.setPaths(["/screenshot.png"]);
     const analyzer = new FakeVisionAnalyzer();
 
-    const swipeOn = new SwipeOn(device, {} as any, {
+    const swipeOn = new SwipeOn(device, new FakeAdbClient(), {
+      timer: fakeTimer,
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
@@ -134,7 +135,6 @@ describe("SwipeOn vision fallback", () => {
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
     });
-    (swipeOn as any).scrollUntilVisible.deps.timer = fakeTimer;
 
     const result = await swipeOn.execute({
       direction: "up",

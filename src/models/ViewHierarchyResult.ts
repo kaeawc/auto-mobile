@@ -288,6 +288,20 @@ export type ViewHierarchyNode = {
   "test-tag"?: string;
   "view-id"?: string;
   extras?: Record<string, string>;
+  /** Flat Android attributes (cleaned nodes carry them directly; iOS nests them under `$`). */
+  text?: string;
+  "content-desc"?: string;
+  "resource-id"?: string;
+  class?: string;
+  package?: string;
+  checkable?: boolean | string;
+  checked?: boolean | string;
+  clickable?: boolean | string;
+  enabled?: boolean | string;
+  focusable?: boolean | string;
+  focused?: boolean | string;
+  scrollable?: boolean | string;
+  selected?: boolean | string;
 };
 
 /** iOS CtrlProxy nests attributes in `$`; Android and cleaned iOS nodes are flat. */

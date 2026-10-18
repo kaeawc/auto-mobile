@@ -4,7 +4,7 @@ import {
   panelKeyForFingerprint,
   type PanelFingerprint,
 } from "../../models/DisplayPanel";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ScreenshotJobTracker } from "../../utils/ScreenshotJobTracker";
@@ -581,9 +581,8 @@ export function createDisplayCacheInvalidator(
     if (ios) {
       ios.clearDisplayProvenance();
     }
-    const daemon = DaemonState.getInstance();
-    if (daemon.isInitialized()) {
-      const sessions = daemon.getSessionManager();
+    const sessions = defaultDaemonContext.sessionManager();
+    if (sessions) {
       const sessionId = sessions.getSessionForDevice(deviceId);
       if (sessionId) {
         sessions.clearSessionCache(sessionId, "lastHierarchy");

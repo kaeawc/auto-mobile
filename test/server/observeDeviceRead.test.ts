@@ -23,7 +23,7 @@ import {
 import toolDefinitions from "../../schemas/tool-definitions.json";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
-import { ObserverPendingRequestTimeoutError } from "../../src/features/observe/DeviceServiceClient";
+import { ObserverPendingRequestTimeoutError } from "../../src/features/observe/ObserverPendingRequestTimeoutError";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";
@@ -48,6 +48,9 @@ import { snapshotReferences } from "../../src/features/observe/SnapshotReference
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { DeviceReadOptions } from "../../src/features/observe/interfaces/ObserveScreen";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 const callDeviceRead = (args: Record<string, unknown>) =>

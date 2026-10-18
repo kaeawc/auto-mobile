@@ -17,7 +17,8 @@ import {
   type ImeSubtypeSnapshot,
   type KeyboardIdentity,
 } from "./AndroidImeCatalog";
-import { Keyboard, KeyboardOpenIndeterminateError } from "./Keyboard";
+import { Keyboard } from "./Keyboard";
+import { KeyboardOpenIndeterminateError } from "./KeyboardOpenIndeterminateError";
 import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
 
 const READY_TIMEOUT_MS = 2_000;

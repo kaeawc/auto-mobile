@@ -10,6 +10,7 @@ import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { runMigrations, resolveMigrationFolder } from "../../src/db/migrator";
 import { FileMigrationLock, type MigrationLock } from "../../src/db/migrationLock";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { looseKyselyTables } from "../helpers/looseKyselyTables";
 
 // These tests exercise `runMigrations`'s interaction with a real
 // `FileMigrationLock` (a temp lock file, opened/closed synchronously — no
@@ -96,8 +97,8 @@ describe("runMigrations lock integration", () => {
     expect(lock.calls).toEqual(["acquire", "release"]);
 
     // Migrations actually ran between acquire and release.
-    const rows = await db
-      .selectFrom("kysely_migration" as any)
+    const rows = await looseKyselyTables(db)
+      .selectFrom("kysely_migration")
       .select("name")
       .execute();
     expect(rows.length).toBeGreaterThan(0);
@@ -146,8 +147,8 @@ describe("runMigrations lock integration", () => {
       await holder.release();
       await runMigrations(db, { lock: opener(lockPath, 2) });
 
-      const rows = await db
-        .selectFrom("kysely_migration" as any)
+      const rows = await looseKyselyTables(db)
+        .selectFrom("kysely_migration")
         .select("name")
         .execute();
       expect(rows.length).toBe(await expectedMigrationCount());
@@ -179,8 +180,8 @@ describe("runMigrations lock integration", () => {
       }
       await runMigrations(dbB, { lock: opener(lockPath, 2) });
 
-      const rows = await dbB
-        .selectFrom("kysely_migration" as any)
+      const rows = await looseKyselyTables(dbB)
+        .selectFrom("kysely_migration")
         .select("name")
         .execute();
       expect(rows.length).toBe(await expectedMigrationCount());

@@ -6,6 +6,9 @@ import {
   registerNotificationTools,
 } from "../../src/server/notificationTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("notification tools", () => {
   beforeEach(() => {

@@ -40,6 +40,9 @@ import { FakeBindingRegistry } from "../fakes/FakeBindingRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // Inventory contract: every inventory surface describes the same device the same way. The
 // listDevices tool and the booted-devices resource are built from different code paths, so this

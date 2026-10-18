@@ -299,3 +299,16 @@ export function nodeAttributes(node: { $?: NodeAttributes }): NodeAttributes {
 export function nodeBounds(node: ViewHierarchyNode): unknown {
   return node.bounds ?? nodeAttributes(node)["bounds"];
 }
+
+function isPlainObject(value: unknown): value is object {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Shallow wire-boundary check for a capture arriving as untyped JSON: it has an object
+ * `hierarchy`. Deeper node shapes (array roots, array bounds from older runners) are
+ * tolerated downstream by `ElementParser`, so they are deliberately not validated here.
+ */
+export function isViewHierarchyResult(value: unknown): value is ViewHierarchyResult {
+  return isPlainObject(value) && "hierarchy" in value && isPlainObject(value.hierarchy);
+}

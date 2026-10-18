@@ -2,7 +2,7 @@ import { warmedTests } from "../helpers/interactionCancellation";
 import { expect, spyOn } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { InstalledImeKeySession } from "../../src/features/action/InstalledImeKeySession";
-import { KeyboardOpenIndeterminateError } from "../../src/features/action/Keyboard";
+import { KeyboardOpenIndeterminateError } from "../../src/features/action/KeyboardOpenIndeterminateError";
 import {
   type InteractionToolDependencies,
   registerInteractionTools,
@@ -10,6 +10,9 @@ import {
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const interactionDeps: InteractionToolDependencies = {};
 const test = warmedTests(() => ToolRegistry.clearTools());

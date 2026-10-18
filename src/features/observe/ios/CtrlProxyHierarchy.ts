@@ -1,10 +1,9 @@
+import type { CtrlSocket } from "../shared/types";
 import { normalizeHierarchyOptionalFields } from "../truncationReasons";
-import { iosHierarchyAcquisition } from "./types";
 /**
  * CtrlProxy iOSHierarchy - Delegate for hierarchy operations.
  *
- * This delegate handles hierarchy retrieval, caching, and conversion
- * via the iOS CtrlProxy iOS WebSocket API.
+ * Handles hierarchy retrieval, caching, and conversion via the iOS CtrlProxy WebSocket API.
  */
 
 import type { SemanticLink, ViewHierarchyResult } from "../../../models";
@@ -22,14 +21,15 @@ import { hasIosHeaderTrait } from "./semanticRoles";
 import { IOS_WINDOW_LAYER_EXTRA } from "./iosWindowLayer";
 import { maxObservationAgeMs } from "../observationFreshness";
 import { assignIosStableViewIds, GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
-import type {
-  HierarchyDelegateContext,
-  CtrlProxyNode,
-  XCTestHierarchy,
-  CtrlProxyHierarchyResponse,
-  CtrlProxySyncedHierarchy,
-  CtrlProxyPerfTiming,
-  CachedHierarchy,
+import {
+  iosHierarchyAcquisition,
+  type HierarchyDelegateContext,
+  type CtrlProxyNode,
+  type XCTestHierarchy,
+  type CtrlProxyHierarchyResponse,
+  type CtrlProxySyncedHierarchy,
+  type CtrlProxyPerfTiming,
+  type CachedHierarchy,
 } from "./types";
 import {
   resolveAccessibilityHierarchyArgs,
@@ -747,7 +747,7 @@ export class CtrlProxyHierarchy {
     });
   }
 
-  private sendHierarchyRequest(ws: WebSocket | null, requestId: string, payload: string): void {
+  private sendHierarchyRequest(ws: CtrlSocket | null, requestId: string, payload: string): void {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       this.context.requestManager.reject(
         requestId,

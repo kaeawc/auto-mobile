@@ -15,10 +15,8 @@ import {
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { drainUntil } from "../../../helpers/fakeTimerStepping";
 import { ForcedRestartBudget } from "../../../../src/ctrlProxy/ForcedRestartBudget";
-import {
-  RealCtrlProxyWebSocketInTestError,
-  defaultWebSocketFactory,
-} from "../../../../src/features/observe/DeviceServiceClient";
+import { defaultWebSocketFactory } from "../../../../src/features/observe/DeviceServiceClient";
+import { RealCtrlProxyWebSocketInTestError } from "../../../../src/features/observe/RealCtrlProxyWebSocketInTestError";
 import { maskRealCtrlProxyWebSocketOptIn } from "../../../helpers/maskRealCtrlProxyWebSocketOptIn";
 
 /**
@@ -271,7 +269,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       webSocketFactory: (url) => {
         const socket = new FakeWebSocket(url, "none", 0, timer);
         socket.on("open", () => timer.setTimeout(() => socket.terminate(), 1000));
-        return socket as WebSocket;
+        return socket;
       },
       timer,
       serviceManagerFactory: () => manager,
@@ -355,7 +353,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       webSocketFactory: (url) => {
         const socket = new FakeWebSocket(url, "none", 0, timer);
         sockets.push(socket);
-        return socket as WebSocket;
+        return socket;
       },
       timer,
       serviceManagerFactory: () => manager,

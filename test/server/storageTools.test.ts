@@ -9,6 +9,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { ActionableError } from "../../src/models";
 import type { BootedDevice } from "../../src/models";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 let deps: Partial<StorageToolsDependencies> = {};
 function useStorageToolsDependenciesForTesting(value: Partial<StorageToolsDependencies>): void {

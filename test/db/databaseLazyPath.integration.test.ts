@@ -3,6 +3,7 @@ import path from "path";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { bindFileBackedDbHarness, WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./withFileBackedDb";
 import { runExclusiveResetTest } from "./resetTestSerialLock";
+import { looseKyselyTables } from "../helpers/looseKyselyTables";
 
 /**
  * Regression test for the module-load-time-vs-runtime path hazard.
@@ -70,10 +71,7 @@ describe("database path lazy resolution", () => {
         const db = databaseModule.getDatabase();
 
         try {
-          const rows = await db
-            .selectFrom("tool_calls" as any)
-            .selectAll()
-            .execute();
+          const rows = await looseKyselyTables(db).selectFrom("tool_calls").selectAll().execute();
 
           expect(rows).toEqual([]);
         } finally {
@@ -99,11 +97,7 @@ describe("database path lazy resolution", () => {
 
         const databaseModule = await getHarness().importFreshDatabaseModule();
         const db = databaseModule.getDatabase();
-        const query = () =>
-          db
-            .selectFrom("tool_calls" as any)
-            .selectAll()
-            .execute();
+        const query = () => looseKyselyTables(db).selectFrom("tool_calls").selectAll().execute();
 
         try {
           await expect(query()).rejects.toThrow(

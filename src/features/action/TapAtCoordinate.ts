@@ -70,8 +70,7 @@ import { LONG_PRESS_DEFAULT_MS, LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "./t
 import { resolveTapAtCall, type TapAtCall } from "./ActionCall";
 import { collectWarnings, partialDoubleTapNote, tapDeliveryReporter } from "./tapSharedHelpers";
 import { dispatchStylusTap, refusedTap, stylusTapRefusal } from "./stylusPointer";
-
-class TapAtGeometryError extends ActionableError {}
+import { TapAtGeometryError } from "./TapAtGeometryError";
 
 const ANDROID_TAP_DURATION_MS = 10;
 const IOS_TAP_DURATION_MS = 50;

@@ -24,6 +24,9 @@ import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import nestedCapture from "../fixtures/android-focus/playground-text-field-pre-tap.json";
 import type { ViewHierarchyResult } from "../../src/models";
 import captureFixture from "../fixtures/observe/android-container-scope.json";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const strategies = ["first", "random", "unique", "invalid", "", null, 1];
 const allStrategies = ["first", "random", "unique"];

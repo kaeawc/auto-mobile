@@ -23,6 +23,9 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
 import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 function ipaBytes(): Buffer {
   // A real CtrlProxy .ipa is a zip over 10KB; the override guard validates

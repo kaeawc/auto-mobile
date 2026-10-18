@@ -21,6 +21,28 @@ const missingPackageDump = readFileSync(
   ),
   "utf8",
 );
+
+const createManagerWithElementServices = (
+  device: BootedDevice,
+  adb: AdbClientFactory | FakeAdbExecutor,
+  parser: DefaultElementParser,
+  geometry: DefaultElementGeometry,
+) =>
+  new DeepLinkManager(
+    device,
+    adb,
+    null,
+    null,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      parser,
+      geometry,
+    },
+  );
 const stderrWarning = "avc: denied { read } for name=package";
 
 describe("DeepLinkManager", () => {
@@ -108,14 +130,15 @@ Receiver Resolver Table:
       stderr: "",
     });
 
-    // Create deep link manager
-    deepLinkManager = new DeepLinkManager(testDevice, fakeAdbFactory);
-
-    // Create mock parser and geometry
+    // Create mock parser and geometry, injected into the manager
     mockParser = new DefaultElementParser();
     mockGeometry = new DefaultElementGeometry();
-    (deepLinkManager as any).parser = mockParser;
-    (deepLinkManager as any).geometry = mockGeometry;
+    deepLinkManager = createManagerWithElementServices(
+      testDevice,
+      fakeAdbFactory,
+      mockParser,
+      mockGeometry,
+    );
   });
 
   afterEach(() => {
@@ -436,23 +459,18 @@ Receiver Resolver Table:
     beforeEach(() => {
       // Mock the element utils methods
       const mockButton = {
-        bounds: { left: 100, top: 200, right: 300, bottom: 400 },
-        text: "Always",
+        $: {
+          text: "Always",
+          class: "android.widget.Button",
+          bounds: { left: 100, top: 200, right: 300, bottom: 400 },
+        },
       };
 
       // Mock extractRootNodes
-      (mockParser as any).extractRootNodes = () => [mockButton];
+      mockParser.extractRootNodes = () => [mockButton];
 
       // Mock getElementCenter
-      (mockGeometry as any).getElementCenter = () => ({ x: 200, y: 300 });
-
-      // Mock findButtonByText method by adding it to the deep link manager
-      (deepLinkManager as any).findButtonByText = (node: any, textOptions: string[]) => {
-        if (textOptions.some((option) => node.text && node.text.includes(option))) {
-          return node;
-        }
-        return null;
-      };
+      mockGeometry.getElementCenter = () => ({ x: 200, y: 300 });
     });
 
     test("should handle intent chooser with 'always' preference", async () => {
@@ -501,7 +519,7 @@ Receiver Resolver Table:
       };
 
       // Reset mocks for this specific test
-      (mockParser as any).extractRootNodes = () => [
+      mockParser.extractRootNodes = () => [
         {
           $: {
             class: "android.widget.LinearLayout",
@@ -552,9 +570,12 @@ Receiver Resolver Table:
         includes: () => true,
       });
 
-      const manager = new DeepLinkManager(testDevice, failingFake);
-      (manager as any).parser = mockParser;
-      (manager as any).geometry = mockGeometry;
+      const manager = createManagerWithElementServices(
+        testDevice,
+        failingFake,
+        mockParser,
+        mockGeometry,
+      );
 
       const result = await manager.handleIntentChooser(viewHierarchy, "always");
 
@@ -564,7 +585,15 @@ Receiver Resolver Table:
   });
 
   describe("parsePackageDumpsysOutput", () => {
-    test("should extract schemes and hosts from dumpsys output", () => {
+    const parseDumpsys = async (output: string) => {
+      fakeAdb.setCommandResponse("dumpsys package 'com.example.app'", {
+        stdout: output,
+        stderr: "",
+      });
+      return (await deepLinkManager.getDeepLinks("com.example.app")).deepLinks;
+    };
+
+    test("should extract schemes and hosts from dumpsys output", async () => {
       const output = `  Schemes:
       https:
         abcdef123 com.example.app/.MainActivity filter 987654
@@ -581,7 +610,7 @@ Receiver Resolver Table:
           Scheme: "myapp"
           Authority: "deep": -1`;
 
-      const result = (deepLinkManager as any).parsePackageDumpsysOutput("com.example.app", output);
+      const result = await parseDumpsys(output);
 
       expect(result.schemes).toContain("https");
       expect(result.schemes).toContain("myapp");
@@ -590,10 +619,10 @@ Receiver Resolver Table:
       expect(result.intentFilters.length).toBeGreaterThan(0);
     });
 
-    test("should handle empty dumpsys output", () => {
+    test("should handle empty dumpsys output", async () => {
       const output = "";
 
-      const result = (deepLinkManager as any).parsePackageDumpsysOutput("com.example.app", output);
+      const result = await parseDumpsys(output);
 
       expect(result.schemes).toHaveLength(0);
       expect(result.hosts).toHaveLength(0);
@@ -601,7 +630,7 @@ Receiver Resolver Table:
       expect(result.supportedMimeTypes).toHaveLength(0);
     });
 
-    test("should handle dumpsys output without schemes section", () => {
+    test("should handle dumpsys output without schemes section", async () => {
       const output = `Package [com.example.app] (12345):
   Non-Data Actions:
       android.intent.action.MAIN:
@@ -609,7 +638,7 @@ Receiver Resolver Table:
           Action: "android.intent.action.MAIN"
           Category: "android.intent.category.LAUNCHER"`;
 
-      const result = (deepLinkManager as any).parsePackageDumpsysOutput("com.example.app", output);
+      const result = await parseDumpsys(output);
 
       expect(result.schemes).toHaveLength(0);
       expect(result.hosts).toHaveLength(0);

@@ -3,6 +3,7 @@ import path from "path";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { bindFileBackedDbHarness, WINDOWS_FILE_DB_TEST_TIMEOUT_MS } from "./withFileBackedDb";
 import { runExclusiveResetTest } from "./resetTestSerialLock";
+import { looseKyselyTables } from "../helpers/looseKyselyTables";
 
 /**
  * Structural guard for issue #2900.
@@ -35,10 +36,7 @@ describe("closeDatabase resets the migration/path lifecycle as one set (issue #2
   const getHarness = bindFileBackedDbHarness();
 
   function queryToolCalls(db: any) {
-    return db
-      .selectFrom("tool_calls" as any)
-      .selectAll()
-      .execute();
+    return looseKyselyTables(db).selectFrom("tool_calls").selectAll().execute();
   }
 
   test(

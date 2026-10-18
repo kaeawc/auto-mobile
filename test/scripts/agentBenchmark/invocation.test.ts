@@ -57,6 +57,7 @@ describe("agent benchmark claude invocation", () => {
       "mcp__auto-mobile",
       "--disallowedTools",
       "Bash",
+      "PowerShell",
     ]);
   });
 
@@ -71,10 +72,14 @@ describe("agent benchmark claude invocation", () => {
     expect(buildClaudeArgs(configured, "/c.json", "S")).toContain("suite-model");
   });
 
-  test("an empty allow list drops its flag; Bash is always denied", () => {
+  test("an empty allow list drops its flag; Bash and PowerShell are always denied", () => {
     const args = buildClaudeArgs(suite({ allowedTools: [], disallowedTools: [] }), "/c.json", "S");
     expect(args).not.toContain("--allowedTools");
-    expect(args.slice(args.indexOf("--disallowedTools"))).toEqual(["--disallowedTools", "Bash"]);
+    expect(args.slice(args.indexOf("--disallowedTools"))).toEqual([
+      "--disallowedTools",
+      "Bash",
+      "PowerShell",
+    ]);
     const extra = buildClaudeArgs(
       suite({ disallowedTools: ["mcp__auto-mobile__openLink"] }),
       "/c.json",
@@ -83,6 +88,7 @@ describe("agent benchmark claude invocation", () => {
     expect(extra.slice(extra.indexOf("--disallowedTools"))).toEqual([
       "--disallowedTools",
       "Bash",
+      "PowerShell",
       "mcp__auto-mobile__openLink",
     ]);
   });
@@ -227,6 +233,8 @@ describe("agent benchmark provider identity", () => {
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_EXTRA_BODY")).toBe(true);
     // The allowlist toggle would hide PATH (and the fingerprinted adb) from the server.
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_MCP_ALLOWLIST_ENV")).toBe(true);
+    // This opt-in keeps PowerShell enabled alongside a Bash deny.
+    expect(isRunShapingClaudeVariable("CLAUDE_CODE_USE_POWERSHELL_TOOL")).toBe(true);
     expect(isRunShapingClaudeVariable("ANTHROPIC_BETAS")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS")).toBe(true);

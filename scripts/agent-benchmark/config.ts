@@ -37,6 +37,9 @@ const xmlText = z.string().refine((text) => !XML_ILLEGAL.test(text), {
 /** Longest delay setTimeout honors (2^31-1 ms); a larger one fires almost immediately. */
 const MAX_TIMER_SECONDS = 2_147_483;
 
+/** Shell tools every suite denies, so the agent cannot drive the device with raw adb. */
+const ALWAYS_DENIED_TOOLS = ["Bash", "PowerShell"];
+
 /** Text the oracle matches; a blank needle would match almost any screen or answer. */
 const needle = z.string().refine((value) => value.trim() !== "", "must not be blank");
 
@@ -86,12 +89,16 @@ const claudeSchema = z
     model: z.string().min(1).optional(),
     appendSystemPrompt: z.string().optional(),
     allowedTools: z.array(toolRule).default([`mcp__${MCP_SERVER_NAME}`]),
-    // Bash is always denied: raw adb would bypass the MCP server being measured. A suite's
-    // own list adds to it rather than replacing it.
+    // Shell tools are always denied: raw adb would bypass the MCP server being measured.
+    // PowerShell counts too (Claude Code can enable it alongside a Bash deny). A suite's own
+    // list adds to them rather than replacing them.
     disallowedTools: z
       .array(toolRule)
       .default([])
-      .transform((tools) => (tools.includes("Bash") ? tools : ["Bash", ...tools])),
+      .transform((tools) => [
+        ...ALWAYS_DENIED_TOOLS.filter((tool) => !tools.includes(tool)),
+        ...tools,
+      ]),
     maxBudgetUsd: z.number().finite().positive().optional(),
     timeoutSeconds: z
       .number()

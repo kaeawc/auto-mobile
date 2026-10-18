@@ -127,7 +127,8 @@ they can still affect results:
   rather than assuming none.
 - Exactly one Android device must be online. Nothing pins the MCP server to a serial, so with
   several online the agent could act on a device other than the one prepared and verified.
-- `Bash` is disallowed by default, so the agent cannot fall back to raw `adb`. A suite can disallow
+- `Bash` and `PowerShell` are always disallowed (and `CLAUDE_CODE_USE_POWERSHELL_TOOL` is removed
+  from Claude's environment), so the agent cannot fall back to raw `adb`. A suite can disallow
   more tools: `ux-flow` also blocks `openLink`, `navigateTo`, and `executePlan` (which can run a
   nested `openLink`), because the task is to navigate by tapping.
 

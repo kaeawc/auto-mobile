@@ -26,15 +26,15 @@ describe("agent benchmark suite config", () => {
       settleSeconds: 2,
       startScreenIncludes: [],
     });
-    expect(suite.claude.disallowedTools).toEqual(["Bash"]);
+    expect(suite.claude.disallowedTools).toEqual(["Bash", "PowerShell"]);
     // A suite's own denials add to the Bash ban instead of replacing it.
     expect(
       parseSuiteDefinition({ ...MINIMAL, claude: { disallowedTools: ["mcp__x__y"] } }, "x.yml")
         .claude.disallowedTools,
-    ).toEqual(["Bash", "mcp__x__y"]);
+    ).toEqual(["Bash", "PowerShell", "mcp__x__y"]);
     expect(suite.claude).toMatchObject({
       allowedTools: ["mcp__auto-mobile"],
-      disallowedTools: ["Bash"],
+      disallowedTools: ["Bash", "PowerShell"],
       timeoutSeconds: 900,
     });
     expect(suite.verify).toEqual({ answerIncludes: ["DONE"], screenIncludes: ["Done"] });

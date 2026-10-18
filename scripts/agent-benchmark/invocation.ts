@@ -115,6 +115,8 @@ export const RUN_SHAPING_CLAUDE_VARIABLES: ReadonlySet<string> = new Set([
   "BASH_DEFAULT_TIMEOUT_MS",
   "BASH_MAX_TIMEOUT_MS",
   "CLAUDE_CODE_GLOB_TIMEOUT_SECONDS",
+  // Shell tools: this opt-in keeps PowerShell enabled alongside the Bash deny.
+  "CLAUDE_CODE_USE_POWERSHELL_TOOL",
   // MCP (the allowlist toggle would hide PATH, and with it the adb the run was
   // fingerprinted against, from the measured server)
   "CLAUDE_CODE_MCP_ALLOWLIST_ENV",

@@ -88,7 +88,7 @@ describe("simctl argv integrity (#4196)", () => {
       test(`defaults write survives ${label}`, async () => {
         const simctl = new FakeSimctl();
 
-        await restoreIosSettings(simctl as any, UDID, {
+        await restoreIosSettings(simctl, UDID, {
           values: { ".GlobalPreferences/AppleLocale": value },
         });
 
@@ -109,7 +109,7 @@ describe("simctl argv integrity (#4196)", () => {
     test("an empty value keeps `write` as the verb and does not shift positions", async () => {
       const simctl = new FakeSimctl();
 
-      await restoreIosSettings(simctl as any, UDID, {
+      await restoreIosSettings(simctl, UDID, {
         values: { ".GlobalPreferences/AppleLocale": "" },
       });
 
@@ -120,7 +120,7 @@ describe("simctl argv integrity (#4196)", () => {
 
     test("no legacy string command path is used for defaults write", async () => {
       const simctl = new FakeSimctl();
-      await restoreIosSettings(simctl as any, UDID, {
+      await restoreIosSettings(simctl, UDID, {
         values: { ".GlobalPreferences/AppleLocale": "nl_BE" },
         ui: { appearance: "dark", contentSize: "large" },
       });
@@ -134,7 +134,7 @@ describe("simctl argv integrity (#4196)", () => {
         const simctl = new FakeSimctl();
         simctl.setCommandArgsResult(["get_app_container", UDID, value, "data"], "/tmp/container\n");
 
-        const result = await getAppDataContainerPath(simctl as any, UDID, value);
+        const result = await getAppDataContainerPath(simctl, UDID, value);
 
         expect(result).toBe("/tmp/container");
         expect(simctl.getMethodCalls("executeCommandArgs")[0].args).toEqual([

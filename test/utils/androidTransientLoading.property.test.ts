@@ -1,6 +1,6 @@
 import { describe, test } from "bun:test";
 import fc from "fast-check";
-import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
+import type { ViewHierarchyNode, ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../src/utils/androidTransientLoading";
 import { FakeElementParser } from "../fakes/FakeElementParser";
 
@@ -19,7 +19,6 @@ interface RawNode {
   kind: "rid" | "class";
   children: RawNode[];
 }
-type HierNode = { props: Record<string, string>; node: HierNode[] };
 
 // A depth-bounded forest of nodes, each optionally a loading node signalled via
 // either its resource-id or its class.
@@ -37,7 +36,7 @@ const forest = fc.array(rawNodeAtDepth(3), { maxLength: 4 });
 const anyLoading = (nodes: RawNode[]): boolean =>
   nodes.some((n) => n.loading || anyLoading(n.children));
 
-const toHier = (raw: RawNode): HierNode => {
+const toHier = (raw: RawNode): ViewHierarchyNode => {
   const props: Record<string, string> = { "resource-id": BENIGN_RID, class: BENIGN_CLASS };
   if (raw.loading) {
     if (raw.kind === "rid") {
@@ -46,19 +45,12 @@ const toHier = (raw: RawNode): HierNode => {
       props.class = LOADING_CLASS;
     }
   }
-  return { props, node: raw.children.map(toHier) };
+  return { $: props, node: raw.children.map(toHier) };
 };
 
-// Reuse the shared fake but read per-node props (the base returns one shared bag).
-class PropsReadingParser extends FakeElementParser {
-  extractNodeProperties(node: any): any {
-    return node?.props ?? {};
-  }
-}
-
 const detect = (roots: RawNode[]): boolean => {
-  const parser = new PropsReadingParser();
-  parser.nextRootNodes = roots.map(toHier) as any;
+  const parser = new FakeElementParser();
+  parser.nextRootNodes = roots.map(toHier);
   parser.nextWindowRootGroups = [];
   return androidViewHierarchyIndicatesLikelyBlockingLoading({} as ViewHierarchyResult, parser);
 };

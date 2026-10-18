@@ -197,3 +197,76 @@ describe("DefaultTaskManager (#4668)", () => {
     expect((await after.get("k", running.taskId)).status).toBe("failed");
   });
 });
+
+describe("DefaultTaskManager persistence failures and input keys (#13143)", () => {
+  test("a settle the store rejects leaves the task settleable, so the fallback fail persists", async () => {
+    const { manager, store } = setup();
+    const task = await manager.create({ ownerKey: "k", toolName: "t" });
+    store.settleFailures = 1;
+
+    expect((await rejection(task.complete({ content: [] }))).message).toContain("SQLITE_BUSY");
+    expect((await manager.get("k", task.taskId)).status).toBe("working");
+
+    await task.fail({ code: -32603, message: "store busy" });
+    const got = await manager.get("k", task.taskId);
+    expect(got.status).toBe("failed");
+    expect(got.error).toEqual({ code: -32603, message: "store busy" });
+  });
+
+  test("a final input response the store rejects keeps the waiter, so a retry resolves it", async () => {
+    const { manager, store } = setup();
+    const task = await manager.create({ ownerKey: "k", toolName: "t" });
+    const answered = task.requestInput({ a: { method: "elicitation/create", params: {} } });
+    await Promise.resolve();
+    store.updateRunningFailures = 1;
+
+    expect(
+      (await rejection(manager.update("k", task.taskId, { a: { action: "accept" } }))).message,
+    ).toContain("SQLITE_BUSY");
+    expect((await manager.get("k", task.taskId)).status).toBe("input_required");
+
+    await manager.update("k", task.taskId, { a: { action: "accept" } });
+    expect(await answered).toEqual({ a: { action: "accept" } });
+    expect((await manager.get("k", task.taskId)).status).toBe("working");
+  });
+
+  test("an input request the store rejects clears the waiter, so the work can ask again", async () => {
+    const { manager, store } = setup();
+    const task = await manager.create({ ownerKey: "k", toolName: "t" });
+    store.updateRunningFailures = 1;
+
+    expect(
+      (await rejection(task.requestInput({ a: { method: "elicitation/create", params: {} } })))
+        .message,
+    ).toContain("SQLITE_BUSY");
+
+    const answered = task.requestInput({ a: { method: "elicitation/create", params: {} } });
+    await Promise.resolve();
+    expect((await manager.get("k", task.taskId)).status).toBe("input_required");
+    await manager.update("k", task.taskId, { a: { action: "decline" } });
+    expect(await answered).toEqual({ a: { action: "decline" } });
+  });
+
+  test("input-request keys stay unique over the task's whole life", async () => {
+    const { manager } = setup();
+    const task = await manager.create({ ownerKey: "k", toolName: "t" });
+    const first = task.requestInput({ a: { method: "elicitation/create", params: {} } });
+    await Promise.resolve();
+    await manager.update("k", task.taskId, { a: { action: "accept" } });
+    await first;
+
+    const reused = await rejection(
+      task.requestInput({
+        b: { method: "elicitation/create", params: {} },
+        a: { method: "elicitation/create", params: {} },
+      }),
+    );
+    expect(reused.message).toContain('"a"');
+    expect((await manager.get("k", task.taskId)).status).toBe("working");
+
+    const second = task.requestInput({ b: { method: "elicitation/create", params: {} } });
+    await Promise.resolve();
+    await manager.update("k", task.taskId, { b: { action: "accept" } });
+    expect(await second).toEqual({ b: { action: "accept" } });
+  });
+});

@@ -4,7 +4,7 @@ import {
   getLiveTextRequestState,
   subscribeLiveDeadline,
 } from "../../../daemon/liveDeadlineRegistry";
-import { DaemonState } from "../../../daemon/daemonState";
+import { defaultDaemonContext } from "../../../daemon/daemonContext";
 import {
   DaemonRestartPendingError,
   daemonRestartPendingToolResult,
@@ -203,11 +203,10 @@ function foreignOwnedExplicitSessionUuid(input: {
   readonly implicitAutolockMcpSessionId: string | undefined;
 }): string | undefined {
   const { providedSessionUuid, implicitAutolockMcpSessionId } = input;
-  const state = DaemonState.getInstance();
-  if (!providedSessionUuid || !state.isInitialized()) {
+  const pool = providedSessionUuid ? defaultDaemonContext.devicePool() : undefined;
+  if (!providedSessionUuid || !pool) {
     return undefined;
   }
-  const pool = state.getDevicePool();
   if (pool.isSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)) {
     return providedSessionUuid;
   }
@@ -216,7 +215,7 @@ function foreignOwnedExplicitSessionUuid(input: {
     input.daemonMode &&
     input.tool.isDeviceReadOnlyCall?.(input.parsedParams) === true &&
     implicitAutolockMcpSessionId
-      ? state.getSessionManager().getSession(providedSessionUuid)
+      ? defaultDaemonContext.requireSessionManager().getSession(providedSessionUuid)
       : undefined;
   return session &&
     holdsOwnerHeartbeatLease(session.livenessPolicy) &&
@@ -622,9 +621,8 @@ function claimExplicitSessionBind(
   return providedSessionUuid &&
     tool.requiresDevice &&
     tool.isDeviceReadOnlyCall?.(validated.parsedParams) !== true &&
-    implicitAutolockMcpSessionId &&
-    DaemonState.getInstance().isInitialized()
-    ? DaemonState.getInstance().getDevicePool().beginMcpBind(implicitAutolockMcpSessionId)
+    implicitAutolockMcpSessionId
+    ? defaultDaemonContext.devicePoolWrites()?.beginMcpBind(implicitAutolockMcpSessionId)
     : undefined;
 }
 

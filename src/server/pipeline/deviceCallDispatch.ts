@@ -8,8 +8,7 @@ import { DeviceReadiness, type ConnectedPlatformScan } from "../../devices/Devic
 import { ActionableError, BootedDevice, SomePlatform } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { DaemonState } from "../../daemon/daemonState";
-import { defaultDaemonContext } from "../../daemon/daemonContext";
+import { defaultDaemonContext, type DevicePoolReads } from "../../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../../daemon/discoveryReconcile";
 import { PlatformDeviceManagerFactory } from "../../utils/factories/PlatformDeviceManagerFactory";
 import { hasRecentReadTransportListingFailure } from "../../daemon/toolCallDeviceIdentity";
@@ -199,11 +198,10 @@ export async function unidentifiedToolTargetRow(
   input: ToolTargetIdentityInput & ({ readOnly: true; now: number } | { readOnly: false }),
   signal?: AbortSignal,
 ): Promise<BootedDevice | undefined> {
-  const daemonState = DaemonState.getInstance();
-  if (!input.deviceId || !daemonState.isInitialized()) {
+  const pool = input.deviceId ? defaultDaemonContext.devicePool() : undefined;
+  if (!input.deviceId || !pool) {
     return undefined;
   }
-  const pool = daemonState.getDevicePool();
   const knownDevice = input.device ?? pool.getDevice(input.deviceId);
   if (input.platform === "ios" || knownDevice?.platform === "ios") {
     return undefined;
@@ -237,7 +235,7 @@ export async function unidentifiedToolTargetRow(
 
 /** Cached alias mapping adds no probes; completed listings reconcile before the identity verdict. */
 async function reconciledUnidentifiedToolTargetRow(
-  pool: DevicePool,
+  pool: Pick<DevicePool, "mapAndroidDiscovery">,
   synthetic: BootedDevice,
   signal?: AbortSignal,
 ): Promise<BootedDevice> {
@@ -278,10 +276,9 @@ export async function assertToolControlTargetIdentity(
   if (!device) {
     return;
   }
-  const daemonState = DaemonState.getInstance();
-  const sessionManager = daemonState.getSessionManager();
+  const sessionManager = defaultDaemonContext.requireSessionManager();
   await assertFrameTargetIdentityProven(
-    daemonState.getDevicePool(),
+    defaultDaemonContext.devicePool(),
     device,
     input.toolName,
     Boolean(sessionManager.getSessionForDevice(device.deviceId)),
@@ -348,17 +345,16 @@ export async function assertBindingControlAccess(input: {
   platform: unknown;
   remedy?: string;
 }): Promise<void> {
-  const daemonState = DaemonState.getInstance();
-  if (input.readOnly || !daemonState.isInitialized()) {
+  const sessionManager = input.readOnly ? undefined : defaultDaemonContext.sessionManager();
+  const connectionScopes = defaultDaemonContext.brokerConnectionScopes();
+  if (!sessionManager || !connectionScopes) {
     return;
   }
-  const sessionManager = daemonState.getSessionManager();
   const requesterSessionUuid = input.sessionUuid
     ? (resolveToolSelectionBaseSessionUuid(input.sessionUuid, sessionManager) ?? input.sessionUuid)
     : undefined;
   // An internal call (plan step, nested tool) carries no socket session id: its connection is
   // recognized by the broker session it runs on (#11397).
-  const connectionScopes = daemonState.getBrokerConnectionScopes();
   const connectionRefusal = brokerConnectionControlRefusal({
     binding:
       connectionScopes.get(input.mcpSessionId) ??
@@ -373,10 +369,18 @@ export async function assertBindingControlAccess(input: {
     throw connectionRefusal;
   }
   const deviceId = input.deviceId;
-  if (!deviceId) {
-    return;
+  const pool = defaultDaemonContext.devicePool();
+  if (deviceId && pool) {
+    await assertBindingPoolAccess(pool, { ...input, deviceId }, requesterSessionUuid);
   }
-  const pool = daemonState.getDevicePool();
+}
+
+async function assertBindingPoolAccess(
+  pool: DevicePoolReads,
+  input: { toolName: string; deviceId: string; platform: unknown; remedy?: string },
+  requesterSessionUuid: string | undefined,
+): Promise<void> {
+  const { deviceId } = input;
   for (const platform of bindingPlatformsFor(pool.getDevice(deviceId)?.platform, input.platform)) {
     await bindingPoolGate(pool).assertNotAssignedToBinding?.({
       action: input.toolName,
@@ -440,16 +444,18 @@ export function assertInternalCallWithinBrokerGrant(
   toolName: string,
   invocation: { args: Record<string, unknown>; routingSessionUuid?: string },
 ): void {
-  const daemonState = DaemonState.getInstance();
-  if (!invocation.routingSessionUuid || !daemonState.isInitialized()) {
+  const sessionManager = invocation.routingSessionUuid
+    ? defaultDaemonContext.sessionManager()
+    : undefined;
+  const connectionScopes = defaultDaemonContext.brokerConnectionScopes();
+  if (!invocation.routingSessionUuid || !sessionManager || !connectionScopes) {
     return;
   }
-  const sessionManager = daemonState.getSessionManager();
   const requesterSessionUuid =
     resolveToolSelectionBaseSessionUuid(invocation.routingSessionUuid, sessionManager) ??
     invocation.routingSessionUuid;
   const refusal = brokerConnectionPlainToolRefusal({
-    binding: daemonState.getBrokerConnectionScopes().forGrantedSession(requesterSessionUuid),
+    binding: connectionScopes.forGrantedSession(requesterSessionUuid),
     toolName,
     args: invocation.args,
     requesterSessionUuid,

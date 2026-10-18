@@ -1,4 +1,4 @@
-import { MAX_VM_SNAPSHOT_TIMEOUT_MS } from "../features/snapshot/deviceSnapshotTimeout";
+import { MAX_VM_SNAPSHOT_TIMEOUT_MS } from "../models/deviceSnapshotTimeout";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -8,7 +8,7 @@ import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { captureDeviceSnapshot, restoreDeviceSnapshot } from "./deviceSnapshotManager";
 
 /** Per-call VM snapshot budget: at most 30 minutes, safely below the timer overflow ceiling. */
-export { MAX_VM_SNAPSHOT_TIMEOUT_MS } from "../features/snapshot/deviceSnapshotTimeout";
+export { MAX_VM_SNAPSHOT_TIMEOUT_MS } from "../models/deviceSnapshotTimeout";
 
 const snapshotNameRequiredMessage = "snapshotName is required when action is restore";
 const optionalSnapshotNameSchema = z.string().min(1).optional().describe("Snapshot name");

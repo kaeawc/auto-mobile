@@ -56,9 +56,9 @@ export interface ObserveScreenDependencies {
   activeWindowAttributionReconciler?: ActiveWindowAttributionReconciler;
   windowIdentityFreshnessResolver?: WindowIdentityFreshnessResolver;
   iosLockStateProbe?: IosLockStateProbe;
-  performanceAuditor?: PerformanceAuditor;
-  accessibilityAuditor?: AccessibilityAuditor;
-  accessibilityStateDetector?: AccessibilityStateDetector;
+  performanceAuditor?: Pick<PerformanceAuditor, "run">;
+  accessibilityAuditor?: Pick<AccessibilityAuditor, "run">;
+  accessibilityStateDetector?: Pick<AccessibilityStateDetector, "run">;
 
   // Rejects cross-platform (stale) hierarchies. Defaults to RealHierarchyPlatformValidator.
   platformValidator?: HierarchyPlatformValidator;

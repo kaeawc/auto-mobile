@@ -32,6 +32,23 @@ export interface VideoResolutionInput {
   height?: number | string;
 }
 
+/** Durable identities for capture processes that may outlive their daemon. */
+export type VideoCaptureTeardownDescriptor =
+  | {
+      kind: "android-screenrecord";
+      devicePid?: number;
+      deviceTempPath: string;
+    }
+  | {
+      kind: "ios-host-recorder";
+      hostPid: number;
+      hostStartToken: string;
+      udid: string;
+      capturePath?: string;
+      /** Host captures never have an Android device process identity. */
+      devicePid?: never;
+    };
+
 export interface VideoRecordingConfig {
   qualityPreset: VideoQualityPreset;
   targetBitrateKbps: number;

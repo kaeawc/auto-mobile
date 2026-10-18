@@ -93,7 +93,8 @@ describe("tapOn iOS multi-panel screen size", () => {
       });
       const tap = createTap(hierarchy);
       const captured = await tap["refreshViewHierarchy"](50);
-      expect(captured).toBe(hierarchy);
+      // The real capture hands back a shallow projection copy, not the source object.
+      expect(captured).toEqual(hierarchy);
       const observation = replace(tap, captured!);
       // The constructed instance is the real ObserveScreen; this pure method uses
       // HierarchyCollector.extractScreenSize without collecting from any device.

@@ -1,10 +1,11 @@
 import { afterEach, describe, it, expect } from "bun:test";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   parseAvdConfig,
   apiLevelToVersion,
   versionToApiLevelRange,
   FileAvdConfigReader,
+  validateAvdMemory,
 } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 
 describe("parseAvdConfig", () => {
@@ -673,4 +674,56 @@ describe("FileAvdConfigReader constructor precedence", () => {
       }
     },
   );
+});
+
+describe("validateAvdMemory", () => {
+  it("rejects a modern AVD whose configured RAM is below the floor", () => {
+    expect(() =>
+      validateAvdMemory("Pixel_9_Pro", {
+        apiLevel: 36,
+        tag: "google_apis_playstore",
+        ramSizeMb: 1024,
+      }),
+    ).toThrow("hw.ramSize is 1024 MB, below the minimum 2048 MB");
+  });
+
+  it("rejects a modern AVD with an invalid RAM setting", () => {
+    expect(() =>
+      validateAvdMemory("Pixel_9_Pro", {
+        apiLevel: 36,
+        tag: "google_apis_playstore",
+        ramSizeInvalid: true,
+      }),
+    ).toThrow("hw.ramSize is invalid");
+  });
+
+  it("ignores a missing config", () => {
+    expect(() => validateAvdMemory("Pixel_9_Pro", null)).not.toThrow();
+  });
+
+  it("applies the RAM floor when the AVD config comes from an absolute registry path", async () => {
+    const avdHome = resolve("fake", "avd");
+    const relocatedAvdHome = resolve("custom", "avds");
+    const registryPath = join(avdHome, "Pixel_9_Pro.ini");
+    const configPath = join(relocatedAvdHome, "Pixel_9_Pro.avd", "config.ini");
+    const reader = new FileAvdConfigReader(
+      async (filePath) =>
+        filePath === registryPath
+          ? `path=${join(relocatedAvdHome, "Pixel_9_Pro.avd")}\n`
+          : "hw.ramSize=1024\nimage.sysdir.1=system-images/android-36/google_apis_playstore/arm64-v8a/\ntag.id=google_apis_playstore\n",
+      (filePath) => filePath === registryPath || filePath === configPath,
+      avdHome,
+    );
+    const config = await reader.readConfig("Pixel_9_Pro");
+    expect(() => validateAvdMemory("Pixel_9_Pro", config)).toThrow("hw.ramSize is 1024 MB");
+  });
+
+  it("does not apply the floor to older or non-Play images", () => {
+    expect(() =>
+      validateAvdMemory("Old", { apiLevel: 29, tag: "google_apis_playstore", ramSizeMb: 512 }),
+    ).not.toThrow();
+    expect(() =>
+      validateAvdMemory("Plain", { apiLevel: 36, tag: "google_apis", ramSizeMb: 512 }),
+    ).not.toThrow();
+  });
 });

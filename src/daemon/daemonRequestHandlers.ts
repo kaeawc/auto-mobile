@@ -78,10 +78,8 @@ import {
 } from "./constants";
 import { executionTracker } from "../server/executionTracker";
 import { sessionHoldDiagnostics, vetoedIdleReleaseAt } from "./sessionHoldDiagnostics";
-import {
-  MANAGED_EXECUTION_LIVENESS_POLICY,
-  holdsOwnerHeartbeatLease,
-} from "./sessionBroker/provisioning/executionLiveness";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../models/managedExecutionLiveness";
+import { holdsOwnerHeartbeatLease } from "./sessionBroker/provisioning/executionLiveness";
 import { readDeviceLeaseActivity, type DeviceLeaseActivitySources } from "./deviceLeaseActivity";
 import {
   SESSION_OWNERSHIP_LOST_CODE,

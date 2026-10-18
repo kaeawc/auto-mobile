@@ -5,6 +5,7 @@ import type {
   HostProcessExecutor,
   StartedHostCommand,
 } from "../../src/utils/HostCommandExecutor";
+import { wrapCommandError } from "../../src/utils/CommandError";
 import { FakeChildProcess } from "./FakeChildProcess";
 
 /**
@@ -17,7 +18,9 @@ export class FakeProcessExecutor implements HostProcessExecutor {
     handler: (command: string) => ExecResult | Promise<ExecResult>;
   }> = [];
   private defaultResponse: ExecResult = this.createExecResult("", "");
+  private commandErrors: Array<{ pattern: string; error: Error }> = [];
   private executedCommands: string[] = [];
+  private executedArgv: Array<{ file: string; args: string[] }> = [];
   private spawnResponses: Array<{
     command: string;
     args: string[];
@@ -37,12 +40,22 @@ export class FakeProcessExecutor implements HostProcessExecutor {
     this.commandHandlers.push({ pattern: commandPattern, handler });
   }
 
+  /** Makes matching commands fail the way a non-zero exit does for the real executor. */
+  setCommandError(commandPattern: string, error: Error): void {
+    this.commandErrors.push({ pattern: commandPattern, error });
+  }
+
   setDefaultResponse(response: ExecResult): void {
     this.defaultResponse = this.ensureExecResultMethods(response);
   }
 
   getExecutedCommands(): string[] {
     return [...this.executedCommands];
+  }
+
+  /** The exact file and argv of each executeCommand call, unlike the rendered command strings. */
+  getExecutedArgv(): Array<{ file: string; args: string[] }> {
+    return this.executedArgv.map(({ file, args }) => ({ file, args: [...args] }));
   }
 
   wasCommandExecuted(pattern: string): boolean {
@@ -89,7 +102,17 @@ export class FakeProcessExecutor implements HostProcessExecutor {
           ? `'${arg}'`
           : arg,
     );
-    return this.exec([command, ...renderedArgs].join(" "));
+    this.executedArgv.push({ file: command, args: [...args] });
+    const rendered = [command, ...renderedArgs].join(" ");
+    const scripted = this.commandErrors.find(({ pattern }) => rendered.includes(pattern));
+    if (scripted) {
+      this.executedCommands.push(rendered);
+      // The real executor rethrows through wrapCommandError so callers see the command line.
+      // Only errors scripted here are wrapped: handler-thrown raw errors predate this and
+      // dependent tests assert them unwrapped.
+      throw wrapCommandError(scripted.error, { command, args, cwd: _options?.cwd });
+    }
+    return this.exec(rendered);
   }
 
   spawn(command: string, args: string[], options?: SpawnOptions): ChildProcess {

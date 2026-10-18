@@ -1,5 +1,5 @@
-import { stripNavigationToolParams } from "../../daemon/constants";
-import { edgeActionKey, edgePairKey, storedEdgeActionKey } from "./edgeReplayKey";
+import { stripNavigationToolParams } from "../../models/navigationToolParams";
+import { edgeActionKey, edgePairKey, storedEdgeActionKey } from "../../db/edgeReplayKey";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { buildNavigationNodeScreenshotUri } from "../../utils/navigationResourceUri";

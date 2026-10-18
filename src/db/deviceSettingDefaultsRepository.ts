@@ -8,7 +8,7 @@ import {
   DEVICE_SETTING_KEYS,
   type DeviceSettingDefaultsPersistence,
   type DeviceSettingDefaultsRecord,
-} from "../features/utility/DeviceSettingDefaults";
+} from "../models/DeviceSettingDefaults";
 
 const settingValueSchema = z.union([z.string(), z.number(), z.null()]);
 const recordSchema = z.object({

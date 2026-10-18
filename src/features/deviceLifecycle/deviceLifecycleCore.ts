@@ -78,7 +78,7 @@ import {
 } from "../../daemon/devicePoolRefresh";
 import { releasePoolDevice, releaseSessionAndDevice } from "../../daemon/releaseSessionAndDevice";
 import { heldDeviceBindRefusal, isSameHolderSession } from "../../daemon/inputDeviceOwnership";
-import { lifecycleRequester } from "../../server/lifecycleDeviceOwnership";
+import { lifecycleRequester } from "./lifecycleRequester";
 import { deviceLossCancellationReason as utilDeviceLossCancellationReason } from "../../utils/deviceLossCancellationReason";
 import { terminateColdBootProcess } from "../../devices/coldBootProcessTermination";
 import { z } from "zod/v4";
@@ -4216,7 +4216,7 @@ export function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
   );
 }
 
-export function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceArgs {
+export function parseProvisionDeviceArgs(input: Partial<ProvisionDeviceArgs>): ProvisionDeviceArgs {
   const __mcpSessionId = input.__mcpSessionId;
   const __oneShotCli = input.__oneShotCli === true;
   const __mcpRequestDeadlineMs = input.__mcpRequestDeadlineMs;

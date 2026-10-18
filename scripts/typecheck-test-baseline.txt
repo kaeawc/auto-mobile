@@ -5,6 +5,7 @@ scripts/benchmark-device-tools-fixture.ts TS2322 2
 scripts/check-daemon-launcher-boundary.ts TS2339 2
 scripts/check-daemon-launcher-boundary.ts TS2345 5
 scripts/check-daemon-launcher-boundary.ts TS2740 5
+scripts/check-mcp-sdk-boundary.ts TS2551 1
 scripts/check-sdkmanager-execution-boundary.ts TS2322 2
 scripts/check-sdkmanager-execution-boundary.ts TS2345 1
 scripts/ci/ciTimeToGreenReport.ts TS2322 1
@@ -24,7 +25,6 @@ scripts/memory/stress-harness.ts TS2322 1
 scripts/memory/stress-harness.ts TS2739 5
 src/daemon/sessionBroker/registry/sqliteBindingRegistry.ts TS2322 1
 src/features/networkFilter/NetworkFilterBridge.ts TS2559 1
-src/features/observe/android/AndroidAppEventRecorder.ts TS2322 1
 src/features/observe/android/AndroidCtrlProxyClient.ts TS2345 1
 src/features/utility/ios/IosNotificationAuthorizationReader.ts TS2559 1
 src/utils/android-cmdline-tools/AdbClient.ts TS2559 1
@@ -49,13 +49,13 @@ test/contracts/NavigationGraphContract.ts TS7006 1
 test/contracts/ObserveCacheStoreContract.ts TS2322 1
 test/contracts/ObserveScreenContract.ts TS2722 1
 test/contracts/ObserveScreenContract.ts TS2739 1
-test/contracts/SessionToolSelectionRepositoryContract.ts TS2459 1
-test/contracts/SimctlContract.ts TS18046 4
+test/contracts/SimctlContract.ts TS18046 5
 test/contracts/SimctlContract.ts TS2344 1
 test/contracts/adbExecutor.test.ts TS2353 1
 test/contracts/androidCtrlProxy.test.ts TS2554 1
 test/contracts/daemonManager.test.ts TS2353 1
 test/contracts/daemonManager.test.ts TS7006 1
+test/contracts/deviceHealthMarkers.test.ts TS2741 1
 test/contracts/deviceSessionManager.test.ts TS2345 1
 test/contracts/deviceWindowCacheInvalidator.test.ts TS2739 1
 test/contracts/highlightClient.test.ts TS2740 1
@@ -126,7 +126,6 @@ test/daemon/connectedOwnerStallExcuse.test.ts TS2502 1
 test/daemon/connectedOwnerStallExcuse.test.ts TS2741 1
 test/daemon/connectedOwnerStallExcuse.test.ts TS7006 14
 test/daemon/connectedOwnerStallExcuse.test.ts TS7023 1
-test/daemon/daemonBuildContextStream.test.ts TS2540 2
 test/daemon/daemonCapabilitiesCommand.test.ts TS2322 2
 test/daemon/daemonCapabilitiesCommand.test.ts TS2345 1
 test/daemon/daemonCapabilitiesCommand.test.ts TS2769 2
@@ -194,6 +193,9 @@ test/daemon/deviceGestureRecordingSocketServerReadinessSession.test.ts TS2345 1
 test/daemon/deviceHold.test.ts TS2769 2
 test/daemon/deviceHoldCharacterization.test.ts TS2540 7
 test/daemon/deviceLeaseOwnerQuery.test.ts TS2322 3
+test/daemon/deviceLossDiscovery.test.ts TS2345 2
+test/daemon/deviceLossDiscovery.test.ts TS2353 1
+test/daemon/deviceLossDiscovery.test.ts TS2554 1
 test/daemon/devicePool.allocationDiscoveryOutsideMutex.test.ts TS2540 2
 test/daemon/devicePool.assignDevice.restartRecovery.test.ts TS2322 1
 test/daemon/devicePool.assignDevice.test.ts TS2345 1
@@ -620,7 +622,7 @@ test/daemon/socketServerInputTypeText.integration.test.ts TS2769 3
 test/daemon/socketServerInputTypeText.test.ts TS2769 3
 test/daemon/socketServerInputTypeText.test.ts TS7006 4
 test/daemon/socketServerKeyValue.integration.test.ts TS2741 1
-test/daemon/socketServerManagedConnectionDirectFrames.test.ts TS2322 3
+test/daemon/socketServerManagedConnectionDirectFrames.test.ts TS2322 1
 test/daemon/socketServerManagedConnectionInput.test.ts TS2322 1
 test/daemon/socketServerManagedConnectionInput.test.ts TS2741 1
 test/daemon/socketServerMcpCancelDispatchHold.test.ts TS2322 1
@@ -726,6 +728,7 @@ test/db/navigationRetention.integration.test.ts TS2353 13
 test/db/navigationRetention.integration.test.ts TS2769 3
 test/db/repairDatetimeNowDefaultsMigration.integration.test.ts TS2345 1
 test/db/repairUpdatedAtDefaultsMigration.integration.test.ts TS2345 1
+test/db/repositoryClock.test.ts TS2322 1
 test/db/sessionToolOverridesMigration.integration.test.ts TS2339 2
 test/db/sessionToolOverridesMigration.integration.test.ts TS2345 2
 test/db/staticMigrations.test.ts TS2769 1
@@ -786,7 +789,6 @@ test/fakes/FakeProcessExecutor.ts TS2322 2
 test/fakes/FakeScrollElementResolver.ts TS2322 1
 test/fakes/FakeScrollElementResolver.ts TS2345 2
 test/fakes/FakeSetUIStateDependencies.ts TS2741 1
-test/fakes/FakeToolSelectionRepository.ts TS2459 1
 test/fakes/FakeWebSocket.ts TS2344 1
 test/fakes/FakeWindow.ts TS2724 1
 test/fakes/ResultFaker.ts TS2322 1
@@ -1038,8 +1040,8 @@ test/features/action/SendKeysTestHarness.ts TS2352 1
 test/features/action/SendKeysTestHarness.ts TS2739 3
 test/features/action/SetUIState.test.ts TS2345 6
 test/features/action/SetUIState.test.ts TS2559 21
-test/features/action/SetUIState.test.ts TS2739 12
-test/features/action/SetUIState.test.ts TS2740 20
+test/features/action/SetUIState.test.ts TS2739 13
+test/features/action/SetUIState.test.ts TS2740 21
 test/features/action/Shake.consoleFailure.test.ts TS2739 1
 test/features/action/Shake.test.ts TS2353 1
 test/features/action/Shake.test.ts TS2739 15
@@ -1056,6 +1058,7 @@ test/features/action/SwipeAtCoordinate.display.test.ts TS2769 1
 test/features/action/SwipeOn.nestedContainers.test.ts TS2353 1
 test/features/action/SwipeOn.nestedContainers.test.ts TS2416 1
 test/features/action/SwipeOnElement.test.ts TS2416 1
+test/features/action/SwipeOnElement.test.ts TS2493 1
 test/features/action/SwipeOnElement.test.ts TS2739 2
 test/features/action/TapAnyDisplay.test.ts TS2322 2
 test/features/action/TapAnyDisplay.test.ts TS2345 1
@@ -1394,6 +1397,7 @@ test/features/navigation/NavigationGraphManager.hierarchyAppIdentity.test.ts TS2
 test/features/navigation/NavigationGraphManager.integration.test.ts TS2345 1
 test/features/navigation/NavigationGraphManager.integration.test.ts TS2352 1
 test/features/navigation/NavigationGraphManager.serialization.test.ts TS2739 14
+test/features/navigation/NavigationRecording.regression.test.ts TS2322 1
 test/features/navigation/SelectionStateDetector.test.ts TS2739 1
 test/features/navigation/SelectionStateTracker.test.ts TS2739 1
 test/features/navigation/SmartNavigationHelper.test.ts TS2739 15
@@ -1562,9 +1566,10 @@ test/features/observe/OwnerDisplayHierarchyIsolation.test.ts TS2322 1
 test/features/observe/OwnerDisplayHierarchyIsolation.test.ts TS2345 1
 test/features/observe/OwnerDisplayHierarchyIsolation.test.ts TS2739 1
 test/features/observe/PredictionAnalyzer.test.ts TS2739 1
-test/features/observe/PredictionSessionGraph.test.ts TS2739 2
+test/features/observe/PredictionSessionGraph.test.ts TS2540 2
+test/features/observe/PredictionSessionGraph.test.ts TS2739 1
 test/features/observe/PredictionSessionGraph.test.ts TS2741 1
-test/features/observe/PredictiveUIState.test.ts TS2739 3
+test/features/observe/PredictiveUIState.test.ts TS2739 2
 test/features/observe/PredictiveUIState.test.ts TS2741 5
 test/features/observe/ResolverMigration.test.ts TS2559 1
 test/features/observe/ScreenshotBackoffScheduler.test.ts TS2322 1
@@ -1587,7 +1592,6 @@ test/features/observe/TakeScreenshot.iOS.test.ts TS2493 1
 test/features/observe/TakeScreenshot.iOSHidePrototype.test.ts TS2352 1
 test/features/observe/ViewHierarchy.test.ts TS2554 2
 test/features/observe/ViewHierarchy.test.ts TS2769 1
-test/features/observe/android/AndroidAppEventRecorder.test.ts TS2769 1
 test/features/observe/android/AndroidCtrlProxyClient.prototypeNavigation.test.ts TS2322 1
 test/features/observe/android/AndroidCtrlProxyClient.prototypeNavigation.test.ts TS2353 1
 test/features/observe/android/AndroidCtrlProxyClientAccessibilityFlagsSync.test.ts TS2322 3
@@ -1998,7 +2002,6 @@ test/helpers/deviceLikeAndroidHierarchy.ts TS2353 1
 test/helpers/devicePoolRecoveryInternals.ts TS2322 1
 test/helpers/devicePoolRecoveryShutdownHarness.ts TS2416 3
 test/helpers/devicePoolSuite.ts TS2416 3
-test/helpers/directFrameRig.ts TS2322 1
 test/helpers/directFrameRig.ts TS2345 1
 test/helpers/fakeServerContext.ts TS2352 1
 test/helpers/inMemoryDaemonWire.test.ts TS2322 2
@@ -2073,7 +2076,6 @@ test/parity/coordinateMappingGoldenVectorParity.test.ts TS2352 1
 test/parity/coordinateMappingGoldenVectors.ts TS2352 1
 test/parity/prototypeSpec.test.ts TS2769 2
 test/plan/PlanSchemaValidator.test.ts TS2769 2
-test/plan/planExecutorInternalNoDiff.test.ts TS2740 1
 test/plan/planExecutorNestedLifecycle.test.ts TS2345 1
 test/plan/planExecutorNestedLifecycle.test.ts TS2769 1
 test/plan/planExecutorOnBeforePlanStep.test.ts TS2493 5
@@ -2146,6 +2148,7 @@ test/server/androidSegmentedPlanVideoSession.test.ts TS2345 1
 test/server/androidSegmentedPlanVideoSession.test.ts TS2769 1
 test/server/announcedDeviceGestureRecordingFetchDuringFinalize.test.ts TS18046 2
 test/server/announcedDeviceGestureRecordingFetchDuringFinalize.test.ts TS2571 1
+test/server/appFileDownloadsDatabaseTools.outputSchema.test.ts TS2352 1
 test/server/appFileResources.test.ts TS2339 6
 test/server/appFileService.test.ts TS2345 3
 test/server/appFileService.test.ts TS2422 1
@@ -2158,6 +2161,8 @@ test/server/appLifecycleTools.test.ts TS18046 5
 test/server/appLifecycleTools.test.ts TS2571 2
 test/server/appResources.ensureAppsCacheSingleFlight.test.ts TS2345 4
 test/server/appResources.metadata.test.ts TS2339 1
+test/server/appResources.resyncOnList.test.ts TS2341 1
+test/server/appResources.resyncOnList.test.ts TS2353 5
 test/server/appTools.launchAppPrototype.test.ts TS2322 1
 test/server/appTools.launchAppResponse.test.ts TS2352 3
 test/server/appTools.launchAppResponse.test.ts TS2741 1
@@ -2302,6 +2307,7 @@ test/server/finalizeToolResponse.test.ts TS2769 20
 test/server/finalizeToolResponse.test.ts TS7053 5
 test/server/formTools.setUIStateWarnings.test.ts TS2322 1
 test/server/formTools.setUIStateWarnings.test.ts TS2459 1
+test/server/gestureSnapshotOfTools.outputSchema.test.ts TS2559 1
 test/server/highlightLayer.test.ts TS18046 1
 test/server/highlightSelectorCharacterization.test.ts TS18046 2
 test/server/highlightSelectorCharacterization.test.ts TS2352 1
@@ -2374,8 +2380,8 @@ test/server/inventorySurfaceParity.test.ts TS2571 1
 test/server/inventorySurfaceParity.test.ts TS7006 1
 test/server/iosUserFilesProvider.test.ts TS18048 2
 test/server/iosUserFilesProvider.test.ts TS2769 3
-test/server/isErrorConsistency.test.ts TS2339 7
-test/server/isErrorConsistency.test.ts TS2551 3
+test/server/isErrorConsistency.test.ts TS2339 5
+test/server/isErrorConsistency.test.ts TS2551 5
 test/server/killDeviceDropsOwnRestartHold.test.ts TS2345 1
 test/server/killDeviceDropsOwnRestartHold.test.ts TS2571 5
 test/server/killDeviceDropsOwnRestartHold.test.ts TS2769 2
@@ -2418,7 +2424,6 @@ test/server/observeDeviceRead.test.ts TS2339 1
 test/server/observeDeviceRead.test.ts TS2345 21
 test/server/observeDeviceRead.test.ts TS2739 1
 test/server/observeDeviceRead.test.ts TS2769 6
-test/server/observeDeviceRead.test.ts TS7006 4
 test/server/observeLayer.test.ts TS2322 1
 test/server/observeOutputSchema.test.ts TS18046 2
 test/server/observeOutputSchema.test.ts TS2307 1
@@ -2464,6 +2469,8 @@ test/server/planTools.executePlanThrow.integration.test.ts TS18046 2
 test/server/planToolsVideoWarnings.outputSchema.test.ts TS18046 19
 test/server/planToolsVideoWarnings.outputSchema.test.ts TS2339 1
 test/server/planToolsVideoWarnings.outputSchema.test.ts TS2345 1
+test/server/preferenceTelephonyTools.outputSchema.test.ts TS18046 1
+test/server/preferenceTelephonyTools.outputSchema.test.ts TS2345 1
 test/server/prototypeClearStorage.test.ts TS18046 1
 test/server/prototypeClearStorage.test.ts TS2322 1
 test/server/prototypeDisplay.test.ts TS18046 1
@@ -2653,6 +2660,7 @@ test/server/storageResources.test.ts TS2339 1
 test/server/storageTools.androidInspectionFallback.test.ts TS18046 1
 test/server/storageTools.androidInspectionFallback.test.ts TS2339 1
 test/server/storageTools.characterization.test.ts TS18046 1
+test/server/storageTools.outputSchema.test.ts TS18046 5
 test/server/storageTools.test.ts TS18046 2
 test/server/storageTools.test.ts TS2339 1
 test/server/stripInternalToolParams.property.test.ts TS2345 3
@@ -2701,7 +2709,6 @@ test/server/toolRegistry.pipeline.test.ts TS2741 9
 test/server/toolRegistry.postActionCaptureScope.test.ts TS2322 2
 test/server/toolRegistry.postActionCaptureScope.test.ts TS2739 1
 test/server/toolRegistry.readOnlyDeviceAccess.test.ts TS2349 1
-test/server/toolRegistry.readOnlyDeviceAccess.test.ts TS2769 3
 test/server/toolRegistry.readOnlyDeviceAccess.test.ts TS7006 6
 test/server/toolRegistry.sessionlessReadHeldElsewhere.test.ts TS2345 1
 test/server/toolRegistry.sharedWriterFailure.test.ts TS2741 1
@@ -2809,6 +2816,12 @@ test/utils/android-cmdline-tools/AvdManagerClient.test.ts TS2339 8
 test/utils/android-cmdline-tools/AvdManagerClient.test.ts TS2345 1
 test/utils/android-cmdline-tools/AvdSnapshotService.test.ts TS7006 2
 test/utils/android-cmdline-tools/EmulatorConsoleClient.test.ts TS2339 2
+test/utils/android-cmdline-tools/EmulatorLaunchCoordinator.test.ts TS2345 2
+test/utils/android-cmdline-tools/EmulatorLaunchCoordinator.test.ts TS2352 1
+test/utils/android-cmdline-tools/EmulatorLaunchCoordinator.test.ts TS2540 3
+test/utils/android-cmdline-tools/EmulatorLaunchCoordinator.test.ts TS2724 1
+test/utils/android-cmdline-tools/EmulatorLaunchDiagnostics.test.ts TS2345 2
+test/utils/android-cmdline-tools/EmulatorLaunchTargets.test.ts TS2353 1
 test/utils/android-cmdline-tools/EmulatorProcessStop.group.test.ts TS2769 2
 test/utils/android-cmdline-tools/SdkManagerClient.test.ts TS2339 1
 test/utils/android-cmdline-tools/SdkManagerClient.test.ts TS2345 1

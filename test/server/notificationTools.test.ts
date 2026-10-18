@@ -186,7 +186,9 @@ for (const name of ["getNotificationPolicy", "setNotificationPolicy"] as const) 
           : result.error;
         expect(response).toEqual({
           content: [{ type: "text", text: JSON.stringify({ message, ...result }) }],
-          ...(success ? {} : { isError: true }),
+          structuredContent: { message, ...result },
+          success: result.success,
+          ...(success ? {} : { error: result.error, isError: true }),
         });
       } finally {
         policy.mockRestore();

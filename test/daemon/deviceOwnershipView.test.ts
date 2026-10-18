@@ -104,6 +104,46 @@ describe("default sources", () => {
   });
 });
 
+describe("default sources lock liveness (#13279)", () => {
+  const claim = ctrlProxyForwardLeaseFileName("Pixel_8");
+  const phone8: DeviceRef = { platform: "android", deviceId: "Pixel_8" };
+  const sourcesWith = (verdict: "same" | "different" | "unknown", generation?: string) =>
+    createDefaultDeviceOwnershipSources({
+      readers: {
+        readLock: (path) =>
+          path.endsWith(claim) ? { pid: 77, token: "t", generation } : undefined,
+        isProcessRunning: () => true,
+        listFiles: () => [],
+        generationVerdict: () => verdict,
+      },
+    });
+
+  test("a reused PID with a different generation is not a live owner", () => {
+    const [owner] = sourcesWith("different", "linux:1")
+      .lockFileOwners(phone8)
+      .filter((r) => r.source === "claim_file");
+    expect(owner).toMatchObject({ source: "claim_file", pid: 77, alive: false });
+  });
+
+  test("the same generation, an unknown one or no recorded generation stays live", () => {
+    expect(
+      sourcesWith("same", "linux:1")
+        .lockFileOwners(phone8)
+        .every((r) => r.alive),
+    ).toBe(true);
+    expect(
+      sourcesWith("unknown", "linux:1")
+        .lockFileOwners(phone8)
+        .every((r) => r.alive),
+    ).toBe(true);
+    expect(
+      sourcesWith("different")
+        .lockFileOwners(phone8)
+        .every((r) => r.alive),
+    ).toBe(true);
+  });
+});
+
 describe("default sources listing failures", () => {
   const sourcesWith = (listFiles: () => string[]) =>
     createDefaultDeviceOwnershipSources({

@@ -23,7 +23,7 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { FakeDeviceExecutionBinding } from "../fakes/FakeDeviceExecutionBinding";
-import { permissiveDeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
+import { permissiveDeviceAdmissionGate } from "../../src/utils/deviceAdmissionGate";
 import type { BootedDevice } from "../../src/models";
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { createExecResult } from "../../src/utils/execResult";

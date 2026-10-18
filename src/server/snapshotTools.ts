@@ -2,8 +2,9 @@ import { MAX_VM_SNAPSHOT_TIMEOUT_MS } from "../models/deviceSnapshotTimeout";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice } from "../models";
+import { deviceSnapshotResultSchema } from "./deviceSnapshotToolOutputSchemas";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { captureDeviceSnapshot, restoreDeviceSnapshot } from "./deviceSnapshotManager";
 
@@ -72,7 +73,7 @@ export function registerSnapshotTools() {
       if (args.action === "capture") {
         const { result, evictedSnapshotNames } = await captureDeviceSnapshot(device, args);
 
-        return createJSONToolResponse({
+        return createStructuredToolResponse({
           message: `Snapshot '${result.snapshotName}' captured successfully`,
           snapshotName: result.snapshotName,
           snapshotType: result.snapshotType,
@@ -100,7 +101,7 @@ export function registerSnapshotTools() {
         const failures = result.failures ?? [];
         const success = result.success !== false && failures.length === 0;
 
-        return createJSONToolResponse({
+        return createStructuredToolResponse({
           message: success
             ? `Snapshot '${args.snapshotName}' restored successfully`
             : `Snapshot '${args.snapshotName}' partially restored: ${failures.length} item(s) failed`,
@@ -132,6 +133,6 @@ export function registerSnapshotTools() {
     "Capture or restore device snapshot. An Android VM restore in daemon mode returns the new deviceSessionUuid; the previous device-session UUID is superseded by the restore.",
     deviceSnapshotSchema,
     deviceSnapshotHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: deviceSnapshotResultSchema },
   );
 }

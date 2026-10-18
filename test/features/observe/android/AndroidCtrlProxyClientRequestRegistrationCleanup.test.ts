@@ -100,13 +100,13 @@ describe("AndroidCtrlProxyClient request registration cleanup", () => {
   test("reset clears singleton state even when close rejects and warns", async () => {
     const timer = new FakeTimer();
     client = disconnectedClient(timer);
-    AndroidCtrlProxyClient["instances"].set(device.deviceId, client);
+    AndroidCtrlProxyClient.registerForTesting(client, device.deviceId);
     const close = spyOn(client, "close").mockRejectedValue(new Error("close denied"));
     const log = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       expect(AndroidCtrlProxyClient.resetInstances()).toBeUndefined();
       await Promise.resolve();
-      expect(AndroidCtrlProxyClient["instances"].size).toBe(0);
+      expect(AndroidCtrlProxyClient.registry.entries()).toEqual([]);
       expect(log).toHaveBeenCalledWith(
         "[CTRL_PROXY] Instance reset cleanup failed: close denied",
         expect.any(Error),

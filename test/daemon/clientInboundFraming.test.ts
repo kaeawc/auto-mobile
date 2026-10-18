@@ -10,6 +10,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
+import { ISOLATED_DAEMON_RECOVERY } from "../helpers/isolatedDaemonRecovery";
 
 function setup(limit = 256) {
   const timer = new FakeTimer();
@@ -18,7 +19,7 @@ function setup(limit = 256) {
     "/fake/socket",
     1000,
     timer,
-    {},
+    ISOLATED_DAEMON_RECOVERY,
     null,
     new FakeIdGenerator(["p"]),
     "darwin",
@@ -227,7 +228,7 @@ async function withSocketConnection(
     "/fake/socket",
     1000,
     timer,
-    {},
+    ISOLATED_DAEMON_RECOVERY,
     null,
     new FakeIdGenerator(["p", "q"]),
     "win32",
@@ -321,7 +322,13 @@ test("overflow destroys the socket and rejects requests even when a connection-c
 
 test("test socket attachment adds no listeners", async () => {
   const socket = new FakeSocket();
-  const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), {}, null);
+  const client = new DaemonClient(
+    "/fake/socket",
+    1000,
+    new FakeTimer(),
+    ISOLATED_DAEMON_RECOVERY,
+    null,
+  );
   const listeners = socket.eventNames().map((event) => [event, socket.listeners(event)]);
   try {
     client.attachSocketForTesting(socket);

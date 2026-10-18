@@ -74,15 +74,20 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
     previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     restoreHermeticServer = installHermeticServerFixture();
-    const original = Reflect.get(ToolRegistry, "toolCallRepository");
-    Reflect.set(ToolRegistry, "toolCallRepository", { async recordToolCall(): Promise<void> {} });
-    restoreToolCallRepository = () => Reflect.set(ToolRegistry, "toolCallRepository", original);
+    const original = ToolRegistry.getCollaboratorsForTesting().toolCallRepository;
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    });
+    restoreToolCallRepository = () =>
+      ToolRegistry.setCollaboratorsForTesting({ toolCallRepository: original });
     const previousDeviceSessionManager = ToolRegistry.getDeviceSessionManager();
     const deviceSessionManager = new FakeDeviceSessionManager();
     deviceSessionManager.setConnectedDevices([DEVICE]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", deviceSessionManager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessionManager });
     restoreDeviceSessionManager = () =>
-      Reflect.set(ToolRegistry, "deviceSessionManager", previousDeviceSessionManager);
+      ToolRegistry.setCollaboratorsForTesting({
+        deviceSessionManager: previousDeviceSessionManager,
+      });
 
     timer = new FakeTimer();
     manager = new SessionManager(timer, new FakeDeviceSessionPersistence());

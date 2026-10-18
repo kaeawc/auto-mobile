@@ -19,6 +19,7 @@ export type DevicePoolReads = Pick<
   | "getDevice"
   | "isShutdownReserved"
   | "isSessionOwnedByOtherConnection"
+  | "isSessionOwnedByConnection"
   | "resolveAutolockSessionForMcpSession"
   | "resolveOwnedDeviceSessionForMcpSession"
   | "assertSessionReadyForAutomation"
@@ -71,6 +72,9 @@ export type DevicePoolWrites = Pick<
   | "reserveDeviceForShutdown"
   | "retireDeviceForShutdown"
   | "settlePooledRuntimeIdentity"
+  | "attachAutolockSessionToMcpSession"
+  | "attachExplicitSessionUuidCall"
+  | "beginMcpBind"
 >;
 
 /**
@@ -86,6 +90,8 @@ export interface DaemonContext {
   sessionManager(): SessionManager | undefined;
   /** The SessionManager, throwing "DaemonState not initialized" when the daemon is not initialized. */
   requireSessionManager(): SessionManager;
+  /** The whole device pool, throwing "DaemonState not initialized" when the daemon is not initialized. */
+  requireFullDevicePool(): DevicePool;
   /** The device-pool mutations, throwing "DaemonState not initialized" when the daemon is not initialized. */
   requireDevicePoolWrites(): DevicePoolWrites;
   /** Whether the daemon is initialized (stdio and tests are not). */
@@ -122,6 +128,7 @@ export const defaultDaemonContext: DaemonContext = {
   renderedDisplaySessions: () => initializedDaemon()?.getSessionManager(),
   sessionManager: () => initializedDaemon()?.getSessionManager(),
   requireSessionManager: () => currentDaemon().getSessionManager(),
+  requireFullDevicePool: () => currentDaemon().getDevicePool(),
   requireDevicePoolWrites: () => currentDaemon().getDevicePool(),
   isInitialized: () => currentDaemon().isInitialized(),
   fullDevicePool: () => initializedDaemon()?.getDevicePool(),

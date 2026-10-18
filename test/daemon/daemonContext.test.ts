@@ -15,6 +15,9 @@ function contextWith(reads: ReturnType<DaemonContext["renderedDisplaySessions"]>
     requireSessionManager: () => {
       throw new Error("DaemonState not initialized");
     },
+    requireFullDevicePool: () => {
+      throw new Error("DaemonState not initialized");
+    },
     requireDevicePoolWrites: () => {
       throw new Error("DaemonState not initialized");
     },

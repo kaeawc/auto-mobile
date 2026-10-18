@@ -1,7 +1,6 @@
 import { holderOf } from "../daemon/deviceBinding";
 import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessService";
 import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
-import { DaemonState } from "../daemon/daemonState";
 import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import type { DevicePool, PooledDevice } from "../daemon/devicePool";
 import type { SessionManager } from "../daemon/sessionManager";
@@ -364,8 +363,8 @@ async function selectSessionDevice(input: {
   transportAttempt: TransportAttempt;
 }): Promise<boolean> {
   const { args, dependencies, receipt, signal, rememberPrior } = input;
-  const sessions = DaemonState.getInstance().getSessionManager();
-  const pool = DaemonState.getInstance().getDevicePool();
+  const sessions = defaultDaemonContext.requireSessionManager();
+  const pool = defaultDaemonContext.requireFullDevicePool();
   const device = await input.transportAttempt(() =>
     requestedPoolDevice(pool, args.deviceId, args.platform),
   );
@@ -542,8 +541,8 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
           });
         }
         if (selectedAutolockSession) {
-          await DaemonState.getInstance()
-            .getDevicePool()
+          await defaultDaemonContext
+            .requireDevicePoolWrites()
             .attachAutolockSessionToMcpSession(selectedAutolockSession, mcpSessionId, true, true);
         }
         const payload = {

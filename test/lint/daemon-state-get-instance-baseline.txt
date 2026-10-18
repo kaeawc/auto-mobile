@@ -23,7 +23,6 @@ src/server/deviceToolsProvisioning.ts	1
 src/server/deviceToolsShutdown.ts	4
 src/server/deviceToolsStartDevice.ts	6
 src/server/deviceToolsStartupLease.ts	1
-src/server/foreignOwnedSessionRefusal.ts	2
 src/server/interactionTools.ts	2
 src/server/lifecycleDeviceOwnership.ts	5
 src/server/observeTools.ts	2
@@ -32,12 +31,10 @@ src/server/pipeline/executionTarget.ts	5
 src/server/pipeline/ingress/acquisition.ts	1
 src/server/pipeline/ingress/bindSession.ts	3
 src/server/pipeline/ingress/executeToolCall.ts	3
-src/server/pipeline/ingress/namesLiveSessionOfBoundPlan.ts	1
 src/server/pipeline/ingress/routing.ts	1
 src/server/pipeline/ingress/shapeResult.ts	1
 src/server/pipeline/planLifecycle.ts	10
 src/server/pipeline/readTarget.ts	12
-src/server/planDeviceOwnership.ts	1
 src/server/planExecutionOrchestrator.ts	7
 src/server/prototypeTools.ts	2
 src/server/resourceDeviceResolver.ts	1

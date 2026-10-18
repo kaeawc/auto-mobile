@@ -13,6 +13,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import { releasedRowStatus } from "./releaseReasons";
 import type { SessionReleaseSnapshot } from "./sessionManager";
+import { SupersededRowReasserts } from "./supersededRowReasserts";
 
 /** In-process refusal; unlike a SQL miss it needs no peer/generation reclassification. */
 export class TerminalReleaseGenerationRefusedError extends DeviceSessionRowNotReleasableError {}
@@ -64,6 +65,8 @@ export interface LiveRowWrites {
 }
 
 export interface SessionRowWriter extends LiveRowWrites {
+  /** Superseded-row rewrite state and owed-rewrite scheduling (#11799 W3). */
+  readonly superseded: SupersededRowReasserts;
   desire(uuid: string, desired: DesiredReleaseRow): void;
   noteLive(uuid: string): void;
   noteRelease(snapshot: SessionReleaseSnapshot): void;
@@ -190,6 +193,7 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
   });
   private desireSeq = 0;
   private draining = false;
+  readonly superseded: SupersededRowReasserts;
 
   constructor(
     private readonly persistence: DeviceSessionPersistence,
@@ -197,7 +201,14 @@ export class SerializedSessionRowWriter implements SessionRowWriter {
     private backoff: BackoffPolicy,
     private readonly logger: Pick<Logger, "warn" | "debug">,
     private readonly options: SessionRowWriterOptions,
-  ) {}
+  ) {
+    this.superseded = new SupersededRowReasserts({
+      timer,
+      logger,
+      draining: () => this.draining,
+      trackDrainWrite: (write) => this.trackDrainWrite(write),
+    });
+  }
 
   /** W2 adapter: register once, including first attempts whose promise timing stays in the manager. */
   noteRelease(snapshot: SessionReleaseSnapshot): void {

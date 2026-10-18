@@ -35,7 +35,8 @@ import {
 import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { logger } from "../../utils/logger";
-import { readEnvPositiveInteger } from "../../utils/envNumbers";
+import { ENV } from "../../config/env";
+import { readEnvInt } from "../../utils/envNumbers";
 import {
   capToQualityPreset,
   QUALITY_PRESET_MAX_LONG_SIDE,
@@ -78,8 +79,8 @@ export {
   resolveIosScreenCaptureHelperPath,
 };
 
-export const IOS_WEBRTC_FFMPEG_ENV = "AUTOMOBILE_IOS_WEBRTC_FFMPEG";
-export const IOS_WEBRTC_FFMPEG_ENV_ALIAS = "AUTO_MOBILE_IOS_WEBRTC_FFMPEG";
+export const IOS_WEBRTC_FFMPEG_ENV = ENV.IOS_WEBRTC_FFMPEG.name;
+export const IOS_WEBRTC_FFMPEG_ENV_ALIAS = ENV.IOS_WEBRTC_FFMPEG.legacyName;
 /**
  * Escape hatch (issue #4789): force the legacy raw-BGRA + ffmpeg pipeline even on
  * a helper that advertises in-helper H.264 encoding. Set to a truthy value
@@ -87,8 +88,8 @@ export const IOS_WEBRTC_FFMPEG_ENV_ALIAS = "AUTO_MOBILE_IOS_WEBRTC_FFMPEG";
  * soak, without a redeploy. Absent/false selects the encoded path when the helper
  * supports it.
  */
-export const IOS_WEBRTC_FORCE_RAW_ENV = "AUTOMOBILE_IOS_WEBRTC_FORCE_RAW";
-export const IOS_WEBRTC_FORCE_RAW_ENV_ALIAS = "AUTO_MOBILE_IOS_WEBRTC_FORCE_RAW";
+export const IOS_WEBRTC_FORCE_RAW_ENV = ENV.IOS_WEBRTC_FORCE_RAW.name;
+export const IOS_WEBRTC_FORCE_RAW_ENV_ALIAS = ENV.IOS_WEBRTC_FORCE_RAW.legacyName;
 const DEFAULT_IOS_WEBRTC_FPS = WEBRTC_IOS_SIMULATOR_FPS_DEFAULT;
 /**
  * Deadline for the capture helper's first frame (and, when audio is on, its first
@@ -98,15 +99,10 @@ const DEFAULT_IOS_WEBRTC_FPS = WEBRTC_IOS_SIMULATOR_FPS_DEFAULT;
  */
 export const IOS_FIRST_FRAME_TIMEOUT_MS = 15_000;
 /** Env override for {@link IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS}. */
-export const IOS_SIMULATOR_WINDOW_TIMEOUT_ENV = "AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS";
+export const IOS_SIMULATOR_WINDOW_TIMEOUT_ENV = ENV.IOS_SIMULATOR_WINDOW_TIMEOUT_MS.name;
 
 export function resolveSimulatorWindowTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  return readEnvPositiveInteger(
-    IOS_SIMULATOR_WINDOW_TIMEOUT_ENV,
-    undefined,
-    { fallback: 2_000 },
-    env,
-  );
+  return readEnvInt(ENV.IOS_SIMULATOR_WINDOW_TIMEOUT_MS, env);
 }
 
 /**
@@ -2240,8 +2236,8 @@ function tightlyPackBgraFrame(frame: DecodedFrame): Buffer {
 /** True when the force-raw escape hatch is set on either the primary or alias env var. */
 function readForceRawPipeline(env: NodeJS.ProcessEnv): boolean {
   return (
-    isTruthyEnvValue(env[IOS_WEBRTC_FORCE_RAW_ENV]) ||
-    isTruthyEnvValue(env[IOS_WEBRTC_FORCE_RAW_ENV_ALIAS])
+    isTruthyEnvValue(env[ENV.IOS_WEBRTC_FORCE_RAW.name]) ||
+    isTruthyEnvValue(env[ENV.IOS_WEBRTC_FORCE_RAW.legacyName])
   );
 }
 

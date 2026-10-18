@@ -307,7 +307,8 @@ class CaretObservingAccessibilityServiceShadow : ShadowAccessibilityService() {
     callback: AccessibilityService.GestureResultCallback?,
     handler: Handler?,
   ): Boolean {
-    rememberedAtDispatch.add(ReflectionHelpers.getField<Any?>(service, "rememberedInsert"))
+    val textInput = ReflectionHelpers.getField<TextInputController>(service, "textInputController")
+    rememberedAtDispatch.add(ReflectionHelpers.getField<Any?>(textInput, "rememberedInsert"))
     return super.dispatchGesture(gesture, callback, handler)
   }
 }

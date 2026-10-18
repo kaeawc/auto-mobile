@@ -40,7 +40,7 @@
 1424	src/features/action/TapAtCoordinate.ts
 3788	src/features/action/TapOnElement.ts
 1420	src/features/action/swipeon/ScrollUntilVisible.ts
-1830	src/features/action/swipeon/SwipeOn.ts
+1833	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
 5888	src/features/deviceLifecycle/deviceLifecycleCore.ts
 1385	src/features/navigation/Explore.ts

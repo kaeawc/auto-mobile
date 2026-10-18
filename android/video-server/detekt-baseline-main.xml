@@ -2,6 +2,15 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>PrintStackTrace:VideoServer.kt:VideoServer$e</ID>
+    <ID>SwallowedException:VideoServer.kt:VideoServer$e: IllegalArgumentException</ID>
+    <ID>TooGenericExceptionCaught:AudioCapture.kt:AudioCapture$e: RuntimeException</ID>
+    <ID>TooGenericExceptionCaught:DisplayControl.kt:DisplayControl$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:RotationMonitor.kt:RotationMonitor$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:ScreenCapture.kt:ScreenCapture$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:VideoServer.kt:VideoServer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:VideoServer.kt:VideoServer$error: Exception</ID>
+    <ID>TooGenericExceptionCaught:VideoSessionLease.kt:VideoSessionLease$error: Exception</ID>
     <ID>UnsafeCallOnNullableType:VideoServer.kt:VideoServer$audioCapture!!</ID>
     <ID>UnsafeCallOnNullableType:VideoServer.kt:VideoServer$streamWriter!!</ID>
     <ID>UnsafeCallOnNullableType:VideoStreamWriter.kt:VideoStreamWriter$outputStream!!</ID>

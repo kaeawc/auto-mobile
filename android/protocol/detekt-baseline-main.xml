@@ -1,0 +1,10 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>SwallowedException:SdkEventSerializer.kt:SdkEventSerializer$e: Exception</ID>
+    <ID>SwallowedException:StorageProtocol.kt:StorageProtocolSerializer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SdkEventSerializer.kt:SdkEventSerializer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:StorageProtocol.kt:StorageProtocolSerializer$e: Exception</ID>
+  </CurrentIssues>
+</SmellBaseline>

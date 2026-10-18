@@ -366,14 +366,11 @@
 1	test/models/screenScaleMetadata.test.ts
 1	test/scripts/liveDeviceAcceptance.test.ts
 1	test/scripts/optimizeSourcemap.test.ts
-2	test/server/CriticalSectionCoordinator.test.ts
-1	test/server/DeviceIncarnationInvalidator.test.ts
 1	test/server/DeviceSessionManager.appearanceSync.test.ts
 1	test/server/DeviceSessionManager.foreignForward.test.ts
 1	test/server/androidStartLifecycleDiscoveryTyped.test.ts
 1	test/server/appFileService.test.ts
 2	test/server/bootedDeviceResourcesCharacterization.test.ts
-1	test/server/databaseResourcesMalformedUri.test.ts
 1	test/server/databaseResourcesPagination.test.ts
 2	test/server/derivedLabelSessionRestoreOwnership.test.ts
 1	test/server/deviceDescription.test.ts
@@ -381,8 +378,6 @@
 1	test/server/deviceSnapshotVmReclaim.test.ts
 1	test/server/deviceTools.acquisitionWaitDeadlines.test.ts
 1	test/server/deviceTools.bootRollbackSparesHeldDevice.test.ts
-1	test/server/deviceTools.createIfMissing.test.ts
-3	test/server/deviceTools.killDevice.test.ts
 1	test/server/deviceTools.listDeviceImages.test.ts
 1	test/server/elementSelectorSchemas.property.test.ts
 1	test/server/explicitSessionUuidBinding.daemon.integration.test.ts
@@ -391,7 +386,6 @@
 1	test/server/identifyInteractionsFreshness.test.ts
 1	test/server/identifyInteractionsLayer.test.ts
 1	test/server/idleFlagOnEveryReleaseSurface.test.ts
-1	test/server/index.progress.test.ts
 1	test/server/internalToolPayloads.test.ts
 2	test/server/inventoryIdeIosPhysicalSource.test.ts
 1	test/server/inventorySurfaceParity.test.ts

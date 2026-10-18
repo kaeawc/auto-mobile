@@ -14,6 +14,10 @@ interface DisplayedTimeCaptureOptions {
 }
 
 // AdbExecutor extended with optional AdbClient-specific methods
+// Budget and output cap for the logcat dump that is scanned for "Displayed" lines.
+const LOGCAT_DISPLAYED_TIMEOUT_MS = 5000;
+const LOGCAT_DISPLAYED_MAX_BUFFER = 1024 * 1024;
+
 type ExtendedAdbExecutor = AdbExecutor & { getAndroidApiLevel?: () => Promise<number | null> };
 
 export async function getPreferredDisplayedLogcatTag(
@@ -86,7 +90,10 @@ export class DisplayedTimeMetricsCollector {
     logger.info(`[DisplayedTimeMetrics] Logcat command: ${cmd}`);
     try {
       const { stdout } = await perf.track("adbLogcatDisplayed", () =>
-        this.adb.executeCommand(cmd, { timeoutMs: 5000, maxBuffer: 1024 * 1024 }),
+        this.adb.executeCommand(cmd, {
+          timeoutMs: LOGCAT_DISPLAYED_TIMEOUT_MS,
+          maxBuffer: LOGCAT_DISPLAYED_MAX_BUFFER,
+        }),
       );
       logger.info(`[DisplayedTimeMetrics] Logcat output length: ${stdout.length} chars`);
       const metrics = this.parseDisplayedMetrics(stdout, options);

@@ -3,6 +3,8 @@ import { describe, expect, test, spyOn } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
+import type { ElementSelectionOptions } from "../../../src/utils/interfaces/ElementSelector";
+import type { ElementQuery } from "../../../src/models/ElementQuery";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { Element, TapOnElementOptions, ViewHierarchyResult } from "../../../src/models";
@@ -75,13 +77,17 @@ class RecordingTapOn extends TapOnElement {
   }
 }
 class RecordingSelector extends ResolverElementSelector {
-  readonly clickableOptions: Parameters<ResolverElementSelector["selectClickable"]>[1][] = [];
-  override selectClickable(
+  readonly clickableOptions: ElementSelectionOptions[] = [];
+  override select(
     capture: ViewHierarchyResult,
-    options: Parameters<ResolverElementSelector["selectClickable"]>[1] = {},
+    query: ElementQuery,
+    options: ElementSelectionOptions = {},
   ) {
-    this.clickableOptions.push(options);
-    return super.selectClickable(capture, options);
+    // tapAny's clickable lookup is the only caller that selects with an empty query.
+    if (Object.keys(query).length === 0) {
+      this.clickableOptions.push(options);
+    }
+    return super.select(capture, query, options);
   }
 }
 function harness(kind: "tapOn" | "tapAny", hierarchy: ViewHierarchyResult) {

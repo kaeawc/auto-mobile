@@ -102,14 +102,14 @@ function createClient(
     queueMicrotask(onSpawn);
     return child;
   }) as never;
-  const client = new AndroidEmulatorClient(
+  const client = new AndroidEmulatorClient({
     execAsync,
     spawnFn,
     timer,
-    factory,
+    adbFactory: factory,
     avdConfigReader,
-    "linux",
-  );
+    platform: "linux",
+  });
   (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
     async () => "emulator";
 

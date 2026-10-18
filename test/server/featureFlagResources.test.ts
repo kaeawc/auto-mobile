@@ -2,10 +2,7 @@ import { describe, expect, test, beforeEach } from "bun:test";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { registerFeatureFlagResources } from "../../src/server/featureFlagResources";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
-import type {
-  FeatureFlagRepository,
-  FeatureFlagRecord,
-} from "../../src/features/featureFlags/FeatureFlagRepository";
+import type { FeatureFlagRepository, FeatureFlagRecord } from "../../src/db/featureFlagRepository";
 import type {
   FeatureFlagDefinition,
   FeatureFlagConfig,

@@ -166,13 +166,13 @@ platforms), so there is no iOS recorder representation to extend.
 
 ## Capability matrix
 
-| Capability                          | Android emulator                                    | Android device                   | iOS simulator                                                                       | iOS device                  |
-| ----------------------------------- | --------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------- | --------------------------- |
-| Stylus tool type, constant pressure | Supported via `adb shell input stylus` (**Source**) | Same (**Source**)                | Unverified (no stylus selector in the header)                                       | Unverified                  |
-| Pressure curve                      | Unverified (`uinput`/console)                       | Root-only, unverified (`uinput`) | Unverified (private `pressDownWithPressure`; **Reported** no effect through Appium) | Unverified                  |
-| Tilt, eraser, barrel button         | Unverified                                          | Root-only, unverified            | Impossible via known paths (**Source**)                                             | Impossible without a Pencil |
-| Hover                               | Unverified (evdev only)                             | Root-only, unverified            | Unverified (mouse path)                                                             | Unverified                  |
-| Records the above                   | No (**Source**)                                     | No (**Source**)                  | No (**Source**, Android-only recorder)                                              | No (**Source**)             |
+| Capability                          | Android emulator                                    | Android device                                     | iOS simulator                                                                       | iOS device                  |
+| ----------------------------------- | --------------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------- |
+| Stylus tool type, constant pressure | Supported via `adb shell input stylus` (**Source**) | Same (**Source**)                                  | Unverified (no stylus selector in the header)                                       | Unverified                  |
+| Pressure curve                      | Unverified (`uinput`/console)                       | Unverified (`UiAutomation`; `uinput` is root-only) | Unverified (private `pressDownWithPressure`; **Reported** no effect through Appium) | Unverified                  |
+| Tilt, eraser, barrel button         | Unverified                                          | Unverified (`UiAutomation`; `uinput` is root-only) | Impossible via known paths (**Source**)                                             | Impossible without a Pencil |
+| Hover                               | Unverified (evdev only)                             | Unverified (`UiAutomation`; `uinput` is root-only) | Unverified (mouse path)                                                             | Unverified                  |
+| Records the above                   | No (**Source**)                                     | No (**Source**)                                    | No (**Source**, Android-only recorder)                                              | No (**Source**)             |
 
 "Supported" means a documented path exists in source. Nothing in the table other
 than the `adb shell input stylus` cells has been demonstrated.
@@ -201,11 +201,15 @@ than the `adb shell input stylus` cells has been demonstrated.
    optionally dwell) has different semantics from a gesture: no contact, no
    scroll or fling, and the result is a UI change, not a navigation. It also has the
    weakest platform support, so it should not be bundled into the first slice.
-4. **Report capability once.** Expose per-device pointer capability (tool types, the
-   fixed or allowed constant pressure values, pressure curve, hover) in the device or
-   session description so a client can
-   choose without trial and error, and so the error in point 2 is derived from the
-   same data. The reported pressure values matter because a backend that accepts only
+4. **Report capability once, per operation.** Expose pointer capability in the device
+   or session description, keyed by tool and action (or by backend path) rather than as
+   one flat device tuple: for each of `tapAt` tap, long press and double tap, `swipeAt`
+   and `dragPath`, the supported tool types, the fixed or allowed constant pressure
+   values, whether a pressure curve is accepted, and whether hover applies. A flat
+   tuple could not say that stylus works for a tap and a straight swipe but not for a
+   double tap or a drawn path, and the same record can then drive replay validation, so
+   a client can choose without trial and error, and so the error in point 2 is derived
+   from the same data. The reported pressure values matter because a backend that accepts only
    `1.0` is otherwise indistinguishable from one that accepts any constant.
 5. **Stage by what is proven.** First slice: `pointer.toolType: "stylus"` at the
    backend's fixed pressure (`1.0`) on `tapAt` and a straight two-point `swipeAt`, on
@@ -268,9 +272,12 @@ The feasible parts, filed from this note:
   `dragPath` waits for #13082. Per-device capability reporting (recommendation 4),
   including the accepted pressure values, starts here, as the data those errors are
   derived from. AutoMobile supports API 24, and only AOSP `main` was read, so the
-  stylus capability is fail-closed: it is advertised only after a runtime probe of the
-  device's `input` command succeeds, or after the minimum-API part of #13082 shows the
-  syntax exists on every supported release.
+  stylus capability is fail-closed: it is advertised only after a receiving probe
+  observes `TOOL_TYPE_STYLUS` on an injected event, or after the minimum-API part of
+  #13082 shows that on every supported release. A successful `input stylus` command is
+  not enough: older releases build the event with a legacy `MotionEvent` overload that
+  changes the source but can leave the tool type unknown, and applications are told to
+  read `getToolType()` regardless of the reported source.
 - #13082: Android emulator and device experiments (pressure curve, tilt, hover, eraser
   and barrel buttons, `UiAutomation.injectInputEvent`, `uinput`, minimum API level).
 - #13083: iOS simulator and device experiments (pressure, hover through the public

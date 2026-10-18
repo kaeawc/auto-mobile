@@ -191,8 +191,28 @@ export function buildAndroidInputTextPlan(text: string, apiLevel: number | null)
 
 function chunkedInputTextPlan(text: string, chunkChars: number): KeyEventPlan {
   const commands: string[] = [];
-  for (let start = 0; start < text.length; start += chunkChars) {
-    commands.push(buildAndroidInputTextCommand(text.slice(start, start + chunkChars)));
+  let start = 0;
+  while (start < text.length) {
+    const end = chunkEnd(text, start, chunkChars);
+    commands.push(buildAndroidInputTextCommand(text.slice(start, end)));
+    start = end;
   }
   return { commands, textLength: Math.min(text.length, chunkChars) };
+}
+
+/**
+ * End of the chunk starting at `start`. A space must travel in the same process as the
+ * character after it: a keyboard re-capitalises a letter that follows a space delivered by an
+ * earlier process (#9888), so a boundary that would strand trailing spaces moves in front of them.
+ */
+function chunkEnd(text: string, start: number, chunkChars: number): number {
+  const hardEnd = start + chunkChars;
+  if (hardEnd >= text.length) {
+    return text.length;
+  }
+  let end = hardEnd;
+  while (end > start + 1 && text[end - 1] === " ") {
+    end--;
+  }
+  return text[end - 1] === " " ? hardEnd : end;
 }

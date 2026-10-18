@@ -358,7 +358,7 @@ data class SwipeResult(
   val totalTimeMs: Long,
   val gestureTimeMs: Long? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -370,7 +370,7 @@ data class TapCoordinatesResult(
   val totalTimeMs: Long,
   val gestureTimeMs: Long? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -382,7 +382,7 @@ data class DragResult(
   val totalTimeMs: Long,
   val gestureTimeMs: Long? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -394,7 +394,7 @@ data class PinchResult(
   val totalTimeMs: Long,
   val gestureTimeMs: Long? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -441,15 +441,18 @@ data class SetNetworkMockRulesResult(
   val error: String? = null,
 ) : WebSocketResponse()
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @SerialName("set_keyboard_profile_result")
 data class SetKeyboardProfileResult(
   override val timestamp: Long,
-  val requestId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val requestId: String? = null,
   val success: Boolean,
-  val activeProfileId: String? = null,
-  val previousProfileId: String? = null,
-  val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val activeProfileId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val previousProfileId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  @Serializable(with = PerfTimingJsonSerializer::class)
   val perfTiming: String? = null,
 ) : WebSocketResponse()
 
@@ -517,20 +520,23 @@ data class SelectAllResult(
 // Action Result
 // =============================================================================
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @SerialName("action_result")
 data class ActionResult(
   override val timestamp: Long,
-  val requestId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val requestId: String? = null,
   val success: Boolean,
   val action: String? = null,
   val totalTimeMs: Long,
-  val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  @Serializable(with = PerfTimingJsonSerializer::class)
   val perfTiming: String? = null,
   /**
    * The node was already in the requested state (e.g. focus on a focused node); nothing was sent.
    */
-  val alreadySatisfied: Boolean = false,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val alreadySatisfied: Boolean = false,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -630,21 +636,24 @@ data class DeviceOwnerStatusResult(
   val perfTiming: String? = null,
 ) : WebSocketResponse()
 
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 @SerialName("permission_result")
 data class PermissionResult(
   override val timestamp: Long,
-  val requestId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val requestId: String? = null,
   val success: Boolean,
   val permission: String,
   val granted: Boolean,
   val requestLaunched: Boolean = false,
   val canRequest: Boolean = false,
   val requiresSettings: Boolean = false,
-  val instructions: String? = null,
-  val adbCommand: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val instructions: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val adbCommand: String? = null,
   val totalTimeMs: Long,
-  val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  @Serializable(with = PerfTimingJsonSerializer::class)
   val perfTiming: String? = null,
 ) : WebSocketResponse()
 
@@ -708,7 +717,7 @@ data class CurrentFocusResult(
   val focusedElement: String? = null, // JSON string of focused element
   val totalTimeMs: Long,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -719,7 +728,7 @@ data class TraversalOrderResult(
   val result: TraversalOrderData? = null,
   val totalTimeMs: Long,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable

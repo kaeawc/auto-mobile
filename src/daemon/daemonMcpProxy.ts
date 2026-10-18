@@ -6466,6 +6466,8 @@ export class DaemonMcpProxy {
     this.cancelBackgroundConnectRetry();
     this.cancelConnectedFallbackReconcile();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
+    // A completed device-binding task must not bind a session after the release below (#13144).
+    await this.deviceBindingTasks?.drain(BROKER_EXECUTION_RELEASE_TIMEOUT_MS);
     // Before the keeper stops, so the lease stays live until the release lands (#11176).
     await Promise.all([
       this.releaseOwnedSessions(connectedClient),
@@ -6513,8 +6515,6 @@ export class DaemonMcpProxy {
     // backstop the reference counter does not cover — a proxy closed with calls
     // still in flight, or reused across a reconnect, cannot retain release
     // records across its lifetime (issue #4689).
-    // No device-binding task binds into a closed proxy; their acquisition epochs go with them.
-    this.deviceBindingTasks?.clear();
     this.releaseLedger.clearReleaseRecords();
     this.invalidateCache();
     logger.debug("[DaemonMcpProxy] Disconnected from daemon");

@@ -1,4 +1,5 @@
 import { errorMessage } from "../../utils/describeUnknownError";
+import { EncodedUnsupportedError } from "./EncodedUnsupportedError";
 import { basename } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { ActionableError, toActionableError, type BootedDevice } from "../../models";
@@ -388,14 +389,6 @@ type IosH264SourcePhase = "idle" | "starting" | "running" | "reconnecting" | "st
 export interface ScreenCaptureHelperEnsurer {
   ensure(): Promise<string | null>;
 }
-
-/**
- * A helper that advertised no encoded-video capability failed to start encoded
- * capture — i.e. an outdated binary that predates `--encode h264`. Signals
- * {@link IosH264Source.establishCapture} to fall back to the raw ffmpeg pipeline
- * (issue #4789).
- */
-class EncodedUnsupportedError extends ActionableError {}
 
 export class IosH264Source implements H264CaptureSource {
   private readonly helperPath?: string;

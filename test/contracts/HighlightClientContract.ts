@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ActionableError, type BootedDevice, type HighlightShape } from "../../src/models";
-import type { VisualHighlightClient } from "../../src/features/debug/VisualHighlight";
+import type { VisualHighlightClient } from "../../src/features/debug/VisualHighlightClient";
 
 export interface HighlightClientHandle {
   client: Pick<VisualHighlightClient, "addHighlight">;

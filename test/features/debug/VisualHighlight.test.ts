@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
-  VisualHighlight,
-  VisualHighlightClient,
-} from "../../../src/features/debug/VisualHighlight";
+import { VisualHighlight } from "../../../src/features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../../../src/features/debug/VisualHighlightClient";
 import type { HighlightDeviceClient } from "../../../src/features/debug/VisualHighlight";
 import type { BootedDevice, HighlightOperationResult, HighlightShape } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";

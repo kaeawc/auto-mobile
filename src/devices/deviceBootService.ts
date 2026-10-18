@@ -62,6 +62,8 @@ import {
 } from "./DisplayInventoryProvider";
 import { AndroidAvdIdentityConflictError } from "./AndroidAvdIdentityConflictError";
 import { AndroidAvdIdentityUnresolvedError } from "./AndroidAvdIdentityUnresolvedError";
+import { DeviceBootTimeoutError } from "./DeviceBootTimeoutError";
+export { DeviceBootTimeoutError } from "./DeviceBootTimeoutError";
 export { AndroidAvdIdentityConflictError } from "./AndroidAvdIdentityConflictError";
 export { AndroidAvdIdentityUnresolvedError } from "./AndroidAvdIdentityUnresolvedError";
 export { AndroidDeviceIdentityUnresolvedError } from "./AndroidDeviceIdentityUnresolvedError";
@@ -69,28 +71,6 @@ export { AndroidDeviceIdentityUnresolvedError } from "./AndroidDeviceIdentityUnr
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 /** Bound on the iOS post-lease "did a sibling already boot this simulator" re-check (#9920). */
 const IOS_POST_LEASE_RECHECK_TIMEOUT_MS = 5_000;
-
-/** A boot deadline failure, kept distinct from platform command failures. */
-export class DeviceBootTimeoutError extends ActionableError {
-  readonly code = "timeout";
-  /** A purely time-based failure, retryable like provisionDevice's `timeout` (#11548). */
-  readonly retryable = true;
-
-  constructor(
-    readonly operation: string,
-    readonly phase: string,
-    readonly elapsedMs: number,
-    readonly budgetMs: number,
-    /** The device being booted, when it was known at the time of the timeout. */
-    readonly device?: string,
-  ) {
-    super(
-      `${operation} timeout exhausted while ${phase}; ` +
-        (device ? `device=${device}; ` : "") +
-        `remainingBudgetMs=0; elapsedMs=${elapsedMs}; budgetMs=${budgetMs}; origin=DeviceBootService`,
-    );
-  }
-}
 
 // Defined beside the other typed models so the boot admission gates can throw it too (#11236).
 export {

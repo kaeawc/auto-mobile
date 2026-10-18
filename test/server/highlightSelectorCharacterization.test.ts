@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { registerHighlightTools } from "../../src/server/highlightTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { VisualHighlightClient } from "../../src/features/debug/VisualHighlight";
+import { VisualHighlightClient } from "../../src/features/debug/VisualHighlightClient";
 import { FakeHierarchyCapture } from "../fakes/FakeHierarchyCapture";
 import { issue8379Hierarchy } from "../fixtures/issue8379Hierarchy";
 import capturedAndroid from "../fixtures/android-focus/playground-text-field-pre-tap.json";

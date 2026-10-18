@@ -1,8 +1,8 @@
 import { describe, expect, it, spyOn } from "bun:test";
-import type { Database as BunDatabase } from "bun:sqlite";
 import { CompiledQuery } from "kysely";
 import {
   BunSqliteConnectionState,
+  type BunSqliteHandle,
   DEFAULT_RETRY_TOTAL_WAIT_MS,
 } from "../../src/db/bunSqliteDialect";
 import {
@@ -34,7 +34,7 @@ function contendedConnection(releaseAtMs = Infinity) {
       throw busy;
     }
   };
-  const db = {
+  const db: BunSqliteHandle = {
     prepare: () => ({
       all: () => {
         attempt();
@@ -49,7 +49,7 @@ function contendedConnection(releaseAtMs = Infinity) {
     }),
     exec: () => {},
     close: () => {},
-  } as unknown as BunDatabase;
+  };
   const state = new BunSqliteConnectionState(db, undefined, {
     maxAttempts: APP_CONNECTION_MAX_RETRY_ATTEMPTS,
     timer,

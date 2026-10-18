@@ -82,7 +82,7 @@ interface SqlRow {
   sql: string | null;
 }
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   // Fast path: on a fresh/already-fixed schema no column carries a broken default,
   // so there is nothing to rebuild. Return WITHOUT touching PRAGMA foreign_keys so
   // the common case (every existing DB and test) leaves the connection's FK state
@@ -118,7 +118,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
  * broken string literal. Uses a `SELECT`-shaped `pragma_table_info(...)` read so
  * the bunSqliteDialect returns rows (a bare `PRAGMA x` value read does not).
  */
-async function findTablesWithBrokenDefaults(db: Kysely<unknown>): Promise<string[]> {
+async function findTablesWithBrokenDefaults<DB>(db: Kysely<DB>): Promise<string[]> {
   const tables = await sql<NamedRow>`
     SELECT name FROM sqlite_master
     WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
@@ -147,7 +147,7 @@ async function findTablesWithBrokenDefaults(db: Kysely<unknown>): Promise<string
   return broken;
 }
 
-async function rebuildAndRepair(trx: Kysely<unknown>, tables: string[]): Promise<void> {
+async function rebuildAndRepair<DB>(trx: Kysely<DB>, tables: string[]): Promise<void> {
   for (const table of tables) {
     // sql.lit (not a bound param) for the same bun:sqlite null-dflt_value quirk
     // guarded in findTablesWithBrokenDefaults above (#2922 / #3612).
@@ -183,8 +183,8 @@ async function rebuildAndRepair(trx: Kysely<unknown>, tables: string[]): Promise
  * clauses change; column set and order are untouched, so `INSERT ... SELECT *`
  * lines the rows up 1:1.
  */
-async function rebuildTableWithCorrectedDefaults(
-  trx: Kysely<unknown>,
+async function rebuildTableWithCorrectedDefaults<DB>(
+  trx: Kysely<DB>,
   table: string,
 ): Promise<void> {
   const createRow = await sql<SqlRow>`
@@ -241,7 +241,7 @@ async function rebuildTableWithCorrectedDefaults(
  * is not AUTOINCREMENT / has never been inserted into (no sequence row) or the
  * `sqlite_sequence` table does not exist (no AUTOINCREMENT table in the DB).
  */
-async function captureSequence(trx: Kysely<unknown>, table: string): Promise<number | undefined> {
+async function captureSequence<DB>(trx: Kysely<DB>, table: string): Promise<number | undefined> {
   const hasSequenceTable = await sql<NamedRow>`
     SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'
   `.execute(trx);

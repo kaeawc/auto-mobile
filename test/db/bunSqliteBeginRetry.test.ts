@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import type { Database as BunDatabase } from "bun:sqlite";
 import { CompiledQuery } from "kysely";
 import {
   BunSqliteConnectionState,
+  type BunSqliteHandle,
   DEFAULT_RETRY_TOTAL_WAIT_MS,
 } from "../../src/db/bunSqliteDialect";
 import { fixedBackoff } from "../../src/utils/Backoff";
@@ -29,7 +29,7 @@ class FakeSqliteError extends Error {
 
 /** Scripted bun:sqlite fake: one outcome per statement execution, in order. */
 function scriptedDatabase(outcomes: (FakeSqliteError | null | (() => FakeSqliteError))[]): {
-  db: BunDatabase;
+  db: BunSqliteHandle;
   executed: string[];
 } {
   const executed: string[] = [];
@@ -40,7 +40,7 @@ function scriptedDatabase(outcomes: (FakeSqliteError | null | (() => FakeSqliteE
       throw typeof outcome === "function" ? outcome() : outcome;
     }
   };
-  const db = {
+  const db: BunSqliteHandle = {
     prepare: (sql: string) => ({
       all: () => {
         executed.push(sql);
@@ -57,7 +57,7 @@ function scriptedDatabase(outcomes: (FakeSqliteError | null | (() => FakeSqliteE
     }),
     exec: () => {},
     close: () => {},
-  } as unknown as BunDatabase;
+  };
   return { db, executed };
 }
 
@@ -68,7 +68,7 @@ const zeroRandom: Random = {
 
 const busy = () => new FakeSqliteError("database is locked", "SQLITE_BUSY");
 
-function connection(db: BunDatabase, maxAttempts = 3, timer = new FakeTimer()) {
+function connection(db: BunSqliteHandle, maxAttempts = 3, timer = new FakeTimer()) {
   timer.enableAutoAdvance();
   const state = new BunSqliteConnectionState(db, undefined, {
     maxAttempts,

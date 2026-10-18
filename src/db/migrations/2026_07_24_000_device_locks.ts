@@ -11,7 +11,7 @@ import { type Kysely, sql } from "kysely";
  * automation store — so a locked dev device does not have to be unlocked by hand
  * every session.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema
     .createTable("device_locks")
     .ifNotExists()
@@ -22,6 +22,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("device_locks").execute();
 }

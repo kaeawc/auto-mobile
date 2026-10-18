@@ -77,38 +77,35 @@ export class VisionFallback {
     }
 
     // Use Claude vision
-    if (this.config.provider === "claude") {
-      if (!this.claudeClient) {
-        throw new Error("Claude client not initialized");
-      }
-
-      logger.debug("Vision fallback: analyzing with Claude");
-      const result = await this.claudeClient.analyzeUIElement(
-        screenshotPath,
-        searchCriteria,
-        hierarchy,
-      );
-
-      // Check if cost exceeds max
-      if (result.costUsd > this.config.maxCostUsd) {
-        logger.warn(
-          `Vision fallback cost ($${result.costUsd.toFixed(4)}) exceeds max ($${this.config.maxCostUsd})`,
-        );
-      }
-
-      logger.debug(
-        `Vision fallback complete: confidence=${result.confidence}, cost=$${result.costUsd.toFixed(4)}, time=${result.durationMs}ms`,
-      );
-
-      // Cache result
-      if (cacheKey) {
-        this.cacheResult(cacheKey, result);
-      }
-
-      return result;
+    resolveVisionProvider(this.config.provider);
+    if (!this.claudeClient) {
+      throw new Error("Claude client not initialized");
     }
 
-    throw new Error(`Unsupported vision provider: ${this.config.provider}`);
+    logger.debug("Vision fallback: analyzing with Claude");
+    const result = await this.claudeClient.analyzeUIElement(
+      screenshotPath,
+      searchCriteria,
+      hierarchy,
+    );
+
+    // Check if cost exceeds max
+    if (result.costUsd > this.config.maxCostUsd) {
+      logger.warn(
+        `Vision fallback cost ($${result.costUsd.toFixed(4)}) exceeds max ($${this.config.maxCostUsd})`,
+      );
+    }
+
+    logger.debug(
+      `Vision fallback complete: confidence=${result.confidence}, cost=$${result.costUsd.toFixed(4)}, time=${result.durationMs}ms`,
+    );
+
+    // Cache result
+    if (cacheKey) {
+      this.cacheResult(cacheKey, result);
+    }
+
+    return result;
   }
 
   private getCachedResult(cacheKey: string): VisionFallbackResult | null {
@@ -212,6 +209,18 @@ export class VisionFallback {
       keys: Array.from(this.resultCache.keys()),
     };
   }
+}
+
+/**
+ * Accepts a provider name from outside the type system (persisted or user config)
+ * and narrows it to a supported one, rejecting every other value before a paid
+ * analysis is attempted.
+ */
+export function resolveVisionProvider(provider: unknown): VisionFallbackConfig["provider"] {
+  if (provider === "claude") {
+    return provider;
+  }
+  throw new Error(`Unsupported vision provider: ${String(provider)}`);
 }
 
 /**

@@ -89,7 +89,7 @@ describe("VideoRecordingRepository", () => {
   });
 
   test("display migration tolerates both columns already existing", async () => {
-    await addDisplayColumns(db as unknown as Kysely<unknown>);
+    await addDisplayColumns(db);
     await repo.insertRecording(makeRecord({ recordedPanel: { key: "11", role: "inner" } }));
     expect((await repo.getRecording("rec-1"))?.recordedPanel?.key).toBe("11");
   });

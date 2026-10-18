@@ -147,11 +147,6 @@ const listDataStoresSchema = withAppIdAliases(
   ),
 );
 
-interface ListDataStoresArgs {
-  appId: string;
-  adapterName: string;
-}
-
 // getDataStore: read all entries from a named DataStore instance (Android).
 const getDataStoreSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
@@ -164,12 +159,6 @@ const getDataStoreSchema = withAppIdAliases(
       .strict(),
   ),
 );
-
-interface GetDataStoreArgs {
-  appId: string;
-  adapterName: string;
-  name: string;
-}
 
 const legacyFileNameDescription = "Deprecated alias for name";
 const storageNameRequiredMessage =
@@ -295,30 +284,11 @@ const clearKeyValueFileSchema = advertiseStorageNameRequirement(
   ),
 );
 
-interface SetKeyValueArgs {
-  appId: string;
-  name?: string;
-  fileName?: string;
-  key: string;
-  value: string | number | boolean | null;
-  type: KeyValueType;
-  userId?: number;
-}
-
-interface RemoveKeyValueArgs {
-  appId: string;
-  name?: string;
-  fileName?: string;
-  key: string;
-  userId?: number;
-}
-
-interface ClearKeyValueFileArgs {
-  appId: string;
-  name?: string;
-  fileName?: string;
-  userId?: number;
-}
+type ListDataStoresArgs = z.output<typeof listDataStoresSchema>;
+type GetDataStoreArgs = z.output<typeof getDataStoreSchema>;
+type SetKeyValueArgs = z.output<typeof setKeyValueSchema>;
+type RemoveKeyValueArgs = z.output<typeof removeKeyValueSchema>;
+type ClearKeyValueFileArgs = z.output<typeof clearKeyValueFileSchema>;
 
 /**
  * Build resource URI for storage entries (mirrors storageResources.ts)

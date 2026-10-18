@@ -3,7 +3,6 @@
   <ManuallySuppressedIssues/>
   <CurrentIssues>
     <ID>UnsafeCallOnNullableType:VideoServer.kt:VideoServer$audioCapture!!</ID>
-    <ID>UnsafeCallOnNullableType:VideoServer.kt:VideoServer$encoder!!</ID>
     <ID>UnsafeCallOnNullableType:VideoServer.kt:VideoServer$streamWriter!!</ID>
     <ID>UnsafeCallOnNullableType:VideoStreamWriter.kt:VideoStreamWriter$outputStream!!</ID>
   </CurrentIssues>

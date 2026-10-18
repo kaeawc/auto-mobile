@@ -217,7 +217,7 @@ describe("PerformanceAudit windowed CPU and jank", () => {
   test("CPU: a busy process on a long-uptime device now trips the 80% threshold", async () => {
     const reads = stubCpuSamples(cpu(6000, 172800), cpu(6050, 172800.5));
 
-    const result = await audit["collectCpuMetrics"]("com.example", perf);
+    const result = await audit.collectCpuMetrics("com.example", perf);
 
     expect(reads).toHaveBeenCalledTimes(2);
     expect(timer.getSleepHistory()).toEqual([PERF_AUDIT_WINDOW_MS]);
@@ -233,7 +233,7 @@ describe("PerformanceAudit windowed CPU and jank", () => {
   test("CPU: an idle process does not violate however much CPU it used since launch", async () => {
     stubCpuSamples(cpu(8489, 74390.96), cpu(8489, 74391.46));
 
-    const result = await audit["collectCpuMetrics"]("com.example", perf);
+    const result = await audit.collectCpuMetrics("com.example", perf);
 
     expect(result.cpuUsagePercent).toBe(0);
   });
@@ -241,7 +241,7 @@ describe("PerformanceAudit windowed CPU and jank", () => {
   test("CPU: a restarted process yields no figure instead of a bogus delta", async () => {
     stubCpuSamples(cpu(6000, 100, 875), cpu(10, 100.5, 12345));
 
-    const result = await audit["collectCpuMetrics"]("com.example", perf);
+    const result = await audit.collectCpuMetrics("com.example", perf);
 
     expect(result.cpuUsagePercent).toBeNull();
     expect(result.threadCount).toBe(48);
@@ -250,14 +250,14 @@ describe("PerformanceAudit windowed CPU and jank", () => {
   test("CPU: unreadable samples yield no figure", async () => {
     stubCpuSamples(null, cpu(10, 100.5));
 
-    expect((await audit["collectCpuMetrics"]("com.example", perf)).cpuUsagePercent).toBeNull();
+    expect((await audit.collectCpuMetrics("com.example", perf)).cpuUsagePercent).toBeNull();
   });
 
   test("CPU: no running process takes no samples and does not wait", async () => {
     factory.getFakeClient().setCommandResult("shell pidof 'com.example'", "\n");
     const reads = stubCpuSamples();
 
-    const result = await audit["collectCpuMetrics"]("com.example", perf);
+    const result = await audit.collectCpuMetrics("com.example", perf);
 
     expect(result.cpuUsagePercent).toBeNull();
     expect(reads).not.toHaveBeenCalled();
@@ -269,7 +269,7 @@ describe("PerformanceAudit windowed CPU and jank", () => {
     factory.getFakeClient().setCommandResult("shell ps -T -p '1220' | wc -l", "49\n");
     const reads = stubCpuSamples(cpu(100, 10), cpu(100, 10.5));
 
-    await audit["collectCpuMetrics"]("com.example", perf);
+    await audit.collectCpuMetrics("com.example", perf);
 
     expect(reads.mock.calls.map(([pid]) => pid)).toEqual(["1220", "1220"]);
   });
@@ -277,7 +277,7 @@ describe("PerformanceAudit windowed CPU and jank", () => {
   test("jank: a high cumulative total with no new janky frames passes (issue scenario)", async () => {
     spyOn(audit, "readGfxSample").mockResolvedValue({ stdout: capturedGfxinfo, counters: gfx() });
 
-    const result = await audit["collectGfxMetrics"]("com.example", perf);
+    const result = await audit.collectGfxMetrics("com.example", perf);
 
     expect(timer.getSleepHistory()).toEqual([PERF_AUDIT_WINDOW_MS]);
     expect(result.jankCount).toBe(0);
@@ -296,7 +296,7 @@ describe("PerformanceAudit windowed CPU and jank", () => {
       counters: readings.shift()!,
     }));
 
-    const result = await audit["collectGfxMetrics"]("com.example", perf);
+    const result = await audit.collectGfxMetrics("com.example", perf);
 
     // 4 janky frames in the 500 ms window = 8/s against a 5/s budget.
     expect(result.jankCount).toBe(8);
@@ -319,7 +319,7 @@ describe("PerformanceAudit windowed CPU and jank", () => {
       .getFakeClient()
       .setCommandResult("shell dumpsys gfxinfo 'com.example'", capturedGfxinfo);
 
-    const result = await audit["collectGfxMetrics"]("com.example", perf);
+    const result = await audit.collectGfxMetrics("com.example", perf);
 
     expect(result.jankCount).toBe(0);
     expect(result.missedVsyncCount).toBe(0);
@@ -331,7 +331,7 @@ describe("PerformanceAudit windowed CPU and jank", () => {
   test("jank: an unreadable gfxinfo reading reports no figure rather than zero", async () => {
     factory.getFakeClient().setCommandResult("shell dumpsys gfxinfo 'com.example'", "");
 
-    const result = await audit["collectGfxMetrics"]("com.example", perf);
+    const result = await audit.collectGfxMetrics("com.example", perf);
 
     expect(result.jankCount).toBeNull();
     expect(result.missedVsyncCount).toBeNull();

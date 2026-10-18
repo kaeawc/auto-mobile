@@ -1,28 +1,6 @@
+import type { SessionToolSelectionRepository } from "../../db/sessionToolSelectionRepository";
 import { isAlwaysOnTool } from "./toolSelectionControl";
 import { logger } from "../../utils/logger";
-
-/** One tool's enable/disable decision inside a batch write. */
-export interface SessionToolSelectionEntry {
-  toolName: string;
-  enabled: boolean;
-}
-
-/** Persistent per-session overrides keyed by exact MCP tool name. */
-export interface SessionToolSelectionRepository {
-  list(sessionUuid: string): Promise<Map<string, boolean>>;
-  set(sessionUuid: string, toolName: string, enabled: boolean): Promise<void>;
-  /**
-   * Persist a whole batch atomically — either every entry lands or none does
-   * (#6886 review). Optional: a repository that cannot offer that (an in-memory
-   * test double) is written one entry at a time by the service instead. The
-   * production SQLite repository implements it with a transaction, which is what
-   * makes `setToolEnabled { toolNames: [...] }`'s advertised all-or-nothing
-   * contract hold against a mid-batch write failure and against a concurrent
-   * enable/disable batch for the same session.
-   */
-  setMany?(sessionUuid: string, entries: readonly SessionToolSelectionEntry[]): Promise<void>;
-  deleteSession(sessionUuid: string): Promise<void>;
-}
 
 export type ToolDefaultOverrides = ReadonlyMap<string, boolean>;
 
@@ -247,7 +225,7 @@ export function getSessionToolSelectionService(): SessionToolSelectionService {
     // and resolve the registry only after all production tools are registered.
     const {
       SqliteSessionToolSelectionRepository,
-    } = require("./SqliteSessionToolSelectionRepository");
+    } = require("../../db/sessionToolSelectionRepository");
     const { ToolRegistry } = require("../../server/toolRegistry");
     const knownToolNames = new Set<string>(ToolRegistry.getConfigurableToolNames());
     defaultService = new SessionToolSelectionService(

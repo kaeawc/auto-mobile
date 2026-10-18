@@ -46,16 +46,14 @@ function createClient(
   adb.setDevices(bootedDevices);
   adb.setCommandResponse("emu avd name", execResult(`${AVD}\n`));
   const adbFactory: AdbClientFactory = { create: (): AdbExecutor => adb };
-  const client = new AndroidEmulatorClient(
-    async () => execResult(),
-    spawnFn as never,
-    new FakeTimer(),
+  const client = new AndroidEmulatorClient({
+    execAsync: async () => execResult(),
+    spawnFn: spawnFn as never,
+    timer: new FakeTimer(),
     adbFactory,
-    { readConfig: async () => ({ ramSizeMb: 2048 }) },
-    undefined,
-    undefined,
-    { isPortAvailable: () => true },
-  );
+    avdConfigReader: { readConfig: async () => ({ ramSizeMb: 2048 }) },
+    hostPortAvailabilityChecker: { isPortAvailable: () => true },
+  });
   (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
     async () => "emulator";
   (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [

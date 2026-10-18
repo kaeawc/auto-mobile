@@ -2,6 +2,7 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>InjectDispatcher:NetworkTestScreen.kt:IO</ID>
     <ID>UnsafeCallOnNullableType:HandledExceptionDemoScreen.kt:nullString!!</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -27,18 +27,16 @@ const result = (): ExecResult => ({
 function createClient(config: AvdConfig | null, hostArchitecture: string) {
   const commandCalls: string[][] = [];
   const reader = new FakeAvdConfigReader(config);
-  const client = new AndroidEmulatorClient(
-    async (_file, args) => {
+  const client = new AndroidEmulatorClient({
+    execAsync: async (_file, args) => {
       commandCalls.push(args);
       return result();
     },
-    null,
-    new FakeTimer(),
-    undefined,
-    reader,
-    "linux",
+    timer: new FakeTimer(),
+    avdConfigReader: reader,
+    platform: "linux",
     hostArchitecture,
-  );
+  });
   (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
     async () => "emulator";
 

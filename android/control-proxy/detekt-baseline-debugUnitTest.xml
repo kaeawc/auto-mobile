@@ -1,0 +1,19 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>InjectDispatcher:CtrlProxyGestureServiceFixture.kt:CtrlProxyGestureServiceFixture$Unconfined</ID>
+    <ID>InjectDispatcher:CtrlProxyObserverGateTest.kt:CtrlProxyObserverGateTest$Unconfined</ID>
+    <ID>InjectDispatcher:GestureControllerTest.kt:GestureControllerTest$Unconfined</ID>
+    <ID>InjectDispatcher:HierarchyDebouncerErrorEmitTest.kt:HierarchyDebouncerErrorEmitTest$Unconfined</ID>
+    <ID>InjectDispatcher:PrototypeAnchorWindowTest.kt:PrototypeAnchorWindowTest$Unconfined</ID>
+    <ID>InjectDispatcher:PrototypeDetachedWindowTest.kt:PrototypeDetachedWindowTest$Unconfined</ID>
+    <ID>InjectDispatcher:PrototypeHideForCaptureTest.kt:PrototypeHideForCaptureTest$Unconfined</ID>
+    <ID>InjectDispatcher:PrototypeHostTest.kt:PrototypeHostTest$Unconfined</ID>
+    <ID>InjectDispatcher:PrototypeImeLiftTest.kt:PrototypeImeLiftTest$Unconfined</ID>
+    <ID>InjectDispatcher:PrototypeRenderWorkTest.kt:PrototypeRenderWorkTest$Unconfined</ID>
+    <ID>InjectDispatcher:SavedPrototypeActivityTest.kt:SavedPrototypeActivityTest$Unconfined</ID>
+    <ID>InjectDispatcher:StorageSubscriptionManagerTest.kt:StorageSubscriptionManagerTest$IO</ID>
+    <ID>InjectDispatcher:WebSocketServerIntegrationTest.kt:WebSocketServerIntegrationTest$Default</ID>
+  </CurrentIssues>
+</SmellBaseline>

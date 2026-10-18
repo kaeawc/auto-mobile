@@ -90,6 +90,18 @@ describe("Simctl", function () {
     simctl = new Simctl(mockDevice, mockExecAsync);
   });
 
+  describe("getDeviceTypes", function () {
+    test.each([
+      ["non-array devicetypes", '{"devicetypes":{}}'],
+      ["null payload", "null"],
+      ["missing devicetypes", "{}"],
+    ])("returns [] for %s", async function (_label, stdout) {
+      mockExecAsync = async (): Promise<ExecResult> => createExecResult(stdout, "");
+      simctl = new Simctl(null, mockExecAsync);
+      expect(await simctl.getDeviceTypes()).toEqual([]);
+    });
+  });
+
   describe("isAvailable", function () {
     test("should return true when simctl is available", async function () {
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {

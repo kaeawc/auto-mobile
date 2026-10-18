@@ -3,6 +3,7 @@ import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
+import { StaleDisplayError } from "../StaleDisplayError";
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 import type { BaseResult } from "../shared/types";
@@ -61,6 +62,17 @@ export function iosWireDeadlineParams(
   return { timeoutMs: Math.max(1, Math.round(timeoutMs)) };
 }
 
+/**
+ * A runner refusal acknowledges dispatch; the caller's abort reason does not. Before any write, the
+ * beforeSend display fence's StaleDisplayError keeps its typed details for the caller.
+ */
+function shouldRethrow(error: unknown, dispatched: boolean, abortReason: unknown): boolean {
+  if (!dispatched) {
+    return error instanceof StaleDisplayError;
+  }
+  return error instanceof ActionableError && error !== abortReason;
+}
+
 /** VoiceOver's dispatch contract for iOS presses and multi-finger swipes. */
 export async function sendIOSPressCommand(
   context: DelegateContext,
@@ -114,8 +126,7 @@ export async function sendIOSPressCommand(
   } catch (error) {
     // A unit test reached the real WebSocket factory; fail it, never report a transport miss.
     rethrowRealCtrlProxyWebSocketInTestError(error);
-    // A runner refusal acknowledges dispatch; the caller's abort reason does not.
-    if (dispatched && error instanceof ActionableError && error !== signal?.reason) {
+    if (shouldRethrow(error, dispatched, signal?.reason)) {
       throw error;
     }
     logger.warn(`[CtrlProxyDispatch] ${options.errorLabel} transport failed`, error);

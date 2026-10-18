@@ -2,6 +2,7 @@ import { holderOf } from "../daemon/deviceBinding";
 import { RunnerReadinessError } from "../ctrlProxy/RunnerReadinessService";
 import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import type { DevicePool, PooledDevice } from "../daemon/devicePool";
 import type { SessionManager } from "../daemon/sessionManager";
 import { TransitionalAdbBindWait } from "../daemon/transitionalAdbBindWait";
@@ -340,11 +341,14 @@ type PriorSelection = { sessionUuid: string; deviceId: string; displayPin: strin
  * A rebind drops the session's display pin, and the selection may have set a new one. Once a
  * cancelled selection is undone and the session is back on its device, it gets its pin back too.
  */
-function restorePriorDisplayPin(prior: PriorSelection | undefined): void {
-  if (!prior || !DaemonState.getInstance().isInitialized()) {
+function restorePriorDisplayPin(
+  prior: PriorSelection | undefined,
+  daemon: DaemonContext = defaultDaemonContext,
+): void {
+  const sessions = prior ? daemon.sessionManager() : undefined;
+  if (!prior || !sessions) {
     return;
   }
-  const sessions = DaemonState.getInstance().getSessionManager();
   if (
     sessions.getSession(prior.sessionUuid)?.assignedDevice === prior.deviceId &&
     sessions.getDisplayPin(prior.sessionUuid) !== prior.displayPin
@@ -483,13 +487,17 @@ async function selectLegacyDevice(input: {
   sessions.setExplicitDevicePin(readyDevice);
 }
 
-function currentDisplayPinResult(input: { sessionUuid?: string; reportClearedPin: boolean }): {
+function currentDisplayPinResult(
+  input: { sessionUuid?: string; reportClearedPin: boolean },
+  daemon: DaemonContext = defaultDaemonContext,
+): {
   displayPin?: string | null;
 } {
-  if (!input.sessionUuid || !DaemonState.getInstance().isInitialized()) {
+  const sessions = input.sessionUuid ? daemon.sessionManager() : undefined;
+  if (!input.sessionUuid || !sessions) {
     return {};
   }
-  const pin = DaemonState.getInstance().getSessionManager().getDisplayPin(input.sessionUuid);
+  const pin = sessions.getDisplayPin(input.sessionUuid);
   return pin !== undefined || input.reportClearedPin ? { displayPin: pin ?? null } : {};
 }
 
@@ -506,7 +514,8 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
       refuseForeignOwnedSession(args);
       admitSessionlessSelection(args);
       const sessionUuid = args.sessionUuid;
-      const sessionScoped = Boolean(sessionUuid) && DaemonState.getInstance().isInitialized();
+      const sessionScoped =
+        Boolean(sessionUuid) && defaultDaemonContext.sessionManager() !== undefined;
       if (args.display !== undefined && !sessionScoped) {
         throw new DisplayPinNeedsSessionError();
       }

@@ -1,5 +1,6 @@
 import { brokerConnectionPlatformRefusal } from "../../../daemon/sessionBroker/connectionScope";
 import { DaemonState } from "../../../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../../../daemon/daemonContext";
 import {
   resolveToolSelectionBaseSessionUuid,
   type ToolSelectionSessionManager,
@@ -349,13 +350,9 @@ export function resolveConnectionPresentation(
  */
 function selectionSessionManagerOf(
   options: McpServerOptions,
+  daemon: DaemonContext = defaultDaemonContext,
 ): ToolSelectionSessionManager | undefined {
-  return (
-    options.toolSelectionSessionManager ??
-    (DaemonState.getInstance().isInitialized()
-      ? DaemonState.getInstance().getSessionManager()
-      : undefined)
-  );
+  return options.toolSelectionSessionManager ?? daemon.sessionManager();
 }
 
 function labelLookupSessionUuid(

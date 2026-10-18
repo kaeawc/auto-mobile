@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { defaultDaemonContext, type DaemonContext } from "../../src/daemon/daemonContext";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { withAdmittedSessionEcho } from "../../src/server/routedSessionEcho";
 import { sessionRenderedObservation } from "../../src/features/action/TargetDisplayAction";
+import { getDeviceLabelMap, planLifecycleSessionUuid } from "../../src/server/deviceLabelMapping";
+import { resolveAppearanceSessionKey } from "../../src/server/appearanceSessionKey";
 import { sessionRenderedDisplayGeneration } from "../../src/features/action/BaseVisualChange";
 
 function contextWith(reads: ReturnType<DaemonContext["renderedDisplaySessions"]>): DaemonContext {
@@ -44,5 +47,22 @@ describe("DaemonContext", () => {
     const ctx: DaemonContext = { ...contextWith(undefined), sessionManager: () => undefined };
     const result = { content: [] };
     expect(withAdmittedSessionEcho(result, "no-such-execution", ctx)).toBeDefined();
+  });
+
+  test("injected sessionManager feeds label and appearance reads without DaemonState", () => {
+    const manager: SessionManager = Object.assign(Object.create(SessionManager.prototype), {
+      getDeviceLabels: () => ({ a: "base" }),
+      getBaseSessionOfDerivedLabel: (uuid: string) => (uuid === "base:b" ? "base" : undefined),
+    });
+    const ctx: DaemonContext = {
+      renderedDisplaySessions: () => undefined,
+      sessionManager: () => manager,
+    };
+    expect(getDeviceLabelMap("base", ctx)).toEqual({ a: "base" });
+    expect(planLifecycleSessionUuid("base:b", ctx)).toBe("base");
+    expect(planLifecycleSessionUuid("other", ctx)).toBe("other");
+    const none = { renderedDisplaySessions: () => undefined, sessionManager: () => undefined };
+    expect(getDeviceLabelMap("base", none)).toBeNull();
+    expect(resolveAppearanceSessionKey(" s1 ", none)).toBe("s1");
   });
 });

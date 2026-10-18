@@ -24,7 +24,7 @@ export const RELEASE_REASON_WIRE_BUILDERS: readonly string[] = [
   "src/daemon/types.ts#sanitizeBoundSessionLoss",
   "src/daemon/socketServer/errorFrames.ts#sessionAdmissionRefusalFields",
   "src/daemon/socketServer/notificationFanOut.ts#broadcastSessionReleased",
-  "src/daemon/socketServer.ts#UnixSocketServer.admitReleasedBoundSession",
+  "src/daemon/socketServer/DeviceControlTransportRecovery.ts#DeviceControlTransportRecovery.admitReleasedBoundSession",
   "src/daemon/sessionReleasedDuringCall.ts#SessionReleasedDuringCallError.constructor",
   "src/daemon/daemonRequestHandlers.ts#terminalSessionRegistrationRefusal",
 ];
@@ -40,10 +40,6 @@ export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, stri
   [
     "src/server/deviceSessionResult.ts#recoveryIdentityLossPayload",
     "Passes recovery loss evidence into sessionOwnershipLostPayload and recoveryIdentityLossDetails, which build the wire fields.",
-  ],
-  [
-    "src/daemon/socketServer.ts#UnixSocketServer.rejectOnHandshakeMismatch",
-    "Serializes a client version/build handshake mismatch reason, not a session release reason.",
   ],
   [
     "src/server/pipeline/ingress/shapeResult.ts#shapeCallFailure",

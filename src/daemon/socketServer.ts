@@ -32,7 +32,6 @@ import {
 } from "./inputRoutes";
 import { throwIfAborted } from "../utils/toolUtils";
 import { holdDispatchedRequest } from "./dispatchedRequestHold";
-import { idleReleaseField } from "./releaseReasons";
 import {
   applyResourceSubscription,
   broadcastListChanged as fanOutListChanged,
@@ -42,8 +41,6 @@ import {
   type NotificationTransport,
 } from "./socketServer/notificationFanOut";
 import { shapeToolCallError } from "../server/shapeToolCallError";
-import type { SessionRecoveryAssignmentDetails } from "../models/SessionRecoveryAssignmentError";
-import { readToolEnvelopePayload } from "../server/toolEnvelopePayload";
 import {
   getToolSelectionContext,
   runWithToolSelectionContext,
@@ -78,7 +75,6 @@ import {
   RESOURCE_UNSUBSCRIBE_METHOD,
   SessionContext,
   type BoundSessionLoss,
-  boundSessionLossMessage,
   type DaemonRequestFailureCause,
   type DaemonOptions,
 } from "./types";
@@ -147,6 +143,11 @@ import { deviceIncarnationToken } from "../utils/deviceIncarnation";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES } from "./outboundWriteGuard";
 import { ControlConnection } from "./socketServer/ControlConnection";
+import {
+  DeviceControlTransportRecovery,
+  isRetryableSessionRecoveryResult,
+} from "./socketServer/DeviceControlTransportRecovery";
+import { ReleasedBoundSessionError } from "./socketServer/ReleasedBoundSessionError";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import {
@@ -361,13 +362,6 @@ export class DaemonSocketQueueOverflowError extends Error {
   ) {
     super(`Daemon RPC socket queued bytes exceeded ${limitBytes}`);
     this.name = "DaemonSocketQueueOverflowError";
-  }
-}
-
-class ReleasedBoundSessionError extends Error {
-  constructor(readonly failure: BoundSessionLoss) {
-    super(boundSessionLossMessage(failure));
-    this.name = "ReleasedBoundSessionError";
   }
 }
 
@@ -2492,6 +2486,17 @@ export class UnixSocketServer {
     );
   }
 
+  private readonly transportRecovery = new DeviceControlTransportRecovery({
+    isReleasedSessionInRestartRecoveryWindow: async (sessionUuid) =>
+      await this.daemonState
+        .getSessionManager()
+        .isReleasedSessionInRestartRecoveryWindow?.(sessionUuid),
+    terminalReleaseSnapshot: (sessionUuid) =>
+      this.daemonState.getSessionManager().getTerminalReleaseSnapshot?.(sessionUuid),
+    expiredReleaseSnapshot: async (sessionUuid) =>
+      await this.daemonState.getSessionManager().getExpiredReleaseSnapshot?.(sessionUuid),
+  });
+
   private readonly mcpForwardRouter = new McpForwardRouter({
     withAdmittedBoundSession: (args, forward, socketSessionId) =>
       this.withAdmittedBoundSession(args, forward, socketSessionId),
@@ -2764,7 +2769,7 @@ export class UnixSocketServer {
     }
     if (
       this.isReleasedBoundSession(request.params?.arguments, socketSessionId) &&
-      this.isRetryableSessionRecoveryResult(response, sessionUuid)
+      isRetryableSessionRecoveryResult(response, sessionUuid)
     ) {
       // Recovery is still using the admitted identity; keep its transport binding.
       return;
@@ -2813,25 +2818,6 @@ export class UnixSocketServer {
       !ownerToken ||
       this.ownedSessionsOwnerToken(args) === ownerToken ||
       !this.isSessionOwnedByOtherConnection(sessionUuid, socketSessionId)
-    );
-  }
-
-  private isRetryableSessionRecoveryResult(response: unknown, sessionUuid: string): boolean {
-    if (
-      !response ||
-      typeof response !== "object" ||
-      !("isError" in response) ||
-      response.isError !== true
-    ) {
-      return false;
-    }
-    const error = readToolEnvelopePayload(response)?.payload.error as
-      | Partial<SessionRecoveryAssignmentDetails>
-      | undefined;
-    return (
-      error?.code === "session_recovery_pending" &&
-      error.retryable === true &&
-      error.sessionUuid === sessionUuid
     );
   }
 
@@ -3107,58 +3093,10 @@ export class UnixSocketServer {
     forward: (recoverableSessionUuid?: string) => T,
     socketSessionId?: string,
   ): T | Promise<T> {
-    if (!this.isReleasedBoundSession(args, socketSessionId)) {
-      // Keep healthy routing and forwarding synchronous up to the existing I/O.
-      return forward();
-    }
-    const sessionUuid = this.getSessionUuid(args)!;
-    return this.admitReleasedBoundSession(sessionUuid).then(() => forward(sessionUuid));
-  }
-
-  private async admitReleasedBoundSession(sessionUuid: string): Promise<void> {
-    try {
-      if (
-        await this.daemonState
-          .getSessionManager()
-          .isReleasedSessionInRestartRecoveryWindow?.(sessionUuid)
-      ) {
-        return;
-      }
-    } catch (error) {
-      logger.warn(
-        `Unable to read restart recovery window for bound session ${sessionUuid}: ${errorMessage(error)}`,
-        error,
-      );
-    }
-    const release =
-      this.daemonState.getSessionManager().getTerminalReleaseSnapshot?.(sessionUuid) ??
-      (await this.expiredBoundSessionRelease(sessionUuid));
-    throw new ReleasedBoundSessionError({
-      code: BOUND_SESSION_LOSS_CODE,
-      sessionUuid,
-      reason: release?.releaseReason ?? "session-not-found",
-      ...idleReleaseField(release?.releaseReason),
-      ...(release ? { release } : {}),
-    });
-  }
-
-  /**
-   * The release of a bound session whose row ran out its window with no daemon holding it
-   * (#11361), so its owner is told `expired` rather than `session-not-found`. Best-effort: a
-   * failed read keeps the fail-closed not-found answer.
-   */
-  private async expiredBoundSessionRelease(
-    sessionUuid: string,
-  ): Promise<BoundSessionLoss["release"]> {
-    try {
-      return await this.daemonState.getSessionManager().getExpiredReleaseSnapshot?.(sessionUuid);
-    } catch (error) {
-      logger.warn(
-        `Unable to read the expired release of bound session ${sessionUuid}: ${errorMessage(error)}`,
-        error,
-      );
-      return undefined;
-    }
+    return this.transportRecovery.withAdmittedBoundSession(
+      this.isReleasedBoundSession(args, socketSessionId) ? this.getSessionUuid(args)! : undefined,
+      forward,
+    );
   }
 
   private getRequestArgumentScopeKey(args: unknown): string | undefined {

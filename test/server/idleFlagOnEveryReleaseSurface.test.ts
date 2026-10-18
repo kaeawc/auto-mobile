@@ -11,6 +11,7 @@ import {
   sessionReleasedDuringCallPayload,
 } from "../../src/server/deviceSessionResult";
 import { DaemonConnectionSessionReleasedError } from "../../src/daemon/daemonMcpProxy";
+import { DeviceControlTransportRecovery } from "../../src/daemon/socketServer/DeviceControlTransportRecovery";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { TerminalSessionError, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
@@ -43,7 +44,6 @@ const snapshot = (reason: string): SessionReleaseSnapshot => ({
 });
 
 interface ReleaseSocketHarness {
-  admitReleasedBoundSession(sessionUuid: string): Promise<void>;
   broadcastSessionReleased(sessionUuid: string, reason: string): void;
 }
 
@@ -71,7 +71,11 @@ function socketHarness(reason: string, capture?: (frame: DaemonNotification) => 
 
 async function boundLoss(reason: string): Promise<Holder> {
   try {
-    await socketHarness(reason).admitReleasedBoundSession(SESSION);
+    await new DeviceControlTransportRecovery({
+      isReleasedSessionInRestartRecoveryWindow: async () => false,
+      terminalReleaseSnapshot: () => snapshot(reason),
+      expiredReleaseSnapshot: async () => undefined,
+    }).withAdmittedBoundSession(SESSION, async () => undefined);
   } catch (error) {
     if (error instanceof Error && "failure" in error) {
       return error.failure as Holder;
@@ -163,7 +167,9 @@ const surfaces: Surface[] = [
   },
   {
     name: "bound session loss construction",
-    builders: ["src/daemon/socketServer.ts#UnixSocketServer.admitReleasedBoundSession"],
+    builders: [
+      "src/daemon/socketServer/DeviceControlTransportRecovery.ts#DeviceControlTransportRecovery.admitReleasedBoundSession",
+    ],
     reasonKey: "reason",
     holder: boundLoss,
   },
@@ -171,7 +177,7 @@ const surfaces: Surface[] = [
     name: "bound session loss sanitizer round trip",
     builders: [
       "src/daemon/types.ts#sanitizeBoundSessionLoss",
-      "src/daemon/socketServer.ts#UnixSocketServer.admitReleasedBoundSession",
+      "src/daemon/socketServer/DeviceControlTransportRecovery.ts#DeviceControlTransportRecovery.admitReleasedBoundSession",
     ],
     reasonKey: "reason",
     holder: async (reason) =>

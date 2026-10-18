@@ -5,7 +5,7 @@ import {
   getRemovedToolActionHint,
   getRemovedToolHint,
   getRemovedToolReplacement,
-} from "../../src/models/removedTools";
+} from "../../src/utils/removedTools";
 import { formatDaemonToolError } from "../../src/cli/removedTools";
 
 test("one removed-tool table supplies the same replacement sentence to all paths", () => {

@@ -8,19 +8,19 @@ import type { TimingData } from "./TimingData";
 import { GfxMetrics } from "./GfxMetrics";
 import { PerfSnapshot } from "./PerfSnapshot";
 import { BackStackInfo } from "./BackStack";
-import { PerformanceAuditResult } from "../features/performance/PerformanceAudit";
+import type { PerformanceAuditResult } from "./PerformanceAuditResult";
 import { AccessibilityAuditResult } from "./AccessibilityAudit";
 import { RecompositionSummary } from "./Recomposition";
 import { DisplayedTimeMetric } from "./DisplayedTimeMetric";
-import { SelectedElement } from "../utils/interfaces/NavigationGraph";
+import { SelectedElement } from "./SelectedElement";
 import { RawViewHierarchyResult } from "./RawViewHierarchyResult";
-import type { MediaView } from "../features/observe/IdentifyMediaViews";
-import type { ObserveError } from "../features/observe/ObserveError";
+import type { MediaView } from "./MediaView";
+import type { ObserveError } from "./ObserveError";
 import type { LayoutWarnings, ObservationInsets } from "./ObservationInsets";
 import type { ObserveScopeMetadata } from "./ObserveScope";
 import type { SemanticLink } from "./SemanticLink";
 import type { DisplayPanel, DisplayRef } from "./DisplayPanel";
-import type { SnapshotReference } from "../features/observe/SnapshotReferenceStore";
+import type { SnapshotReference } from "./SnapshotReference";
 
 /** Output-only screen dimensions with an optional coordinate-unit marker. */
 export interface ScreenSizeWithUnits extends ScreenSize {
@@ -237,7 +237,7 @@ export type ObserveResult = {
   /** Host-clock epoch milliseconds through which this returned path is retained. */
   screenshotExpiresAt?: number;
   /** Upright display-oriented PNG crop; its orientation is independent of the full screenshot. */
-  crop?: import("../features/observe/screenshot/observeCrop").ObserveCropResult;
+  crop?: import("./ObserveCropResult").ObserveCropResult;
   /** Provenance of the screenshot returned with this observation. */
   screenshotSource?: "fresh" | "cached";
   screenshotCaptureSource?: "device" | "observation-cache";
@@ -247,7 +247,7 @@ export type ObserveResult = {
   screenshotFormat?: "png" | "jpeg" | "webp";
   screenshotMimeType?: "image/png" | "image/jpeg" | "image/webp";
   /** Status of opt-in inline screenshot delivery; absent for ordinary observations. */
-  screenshotImage?: import("../features/observe/screenshot/inlineScreenshotImage").ScreenshotImageStatus;
+  screenshotImage?: import("./ScreenshotImageStatus").ScreenshotImageStatus;
 
   /**
    * Timestamp when the screen state was captured on the device (milliseconds since epoch)

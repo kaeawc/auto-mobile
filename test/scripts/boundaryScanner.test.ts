@@ -144,6 +144,68 @@ describe("xcodebuild row", () => {
   });
 });
 
+describe("tree rows", () => {
+  const treeFile = (path: string, source: string) => ({
+    path,
+    addedLines: new Set<number>(),
+    source,
+  });
+
+  test("plutil flags string and template literals at their start, not other mentions", () => {
+    const file = treeFile(
+      "src/x.ts",
+      ['exec("plutil -p a");', "const t = `plutil -convert`;", 'const n = "plutilx";'].join("\n"),
+    );
+
+    expect(scan("plutil", [file]).map(({ line, column }) => [line, column])).toEqual([
+      [1, 6],
+      [2, 11],
+    ]);
+  });
+
+  test("scans every hit regardless of added lines and skips the owner", () => {
+    const owner = treeFile("src/utils/media/FfmpegClient.ts", 'spawn("ffmpeg");');
+    const other = treeFile(
+      "src/y.ts",
+      'import { spawn } from "node:child_process"; spawn("ffmpeg");',
+    );
+
+    expect(scan("ffmpeg", [owner, other]).map(({ file }) => file)).toEqual(["src/y.ts"]);
+  });
+
+  test("simulator-tcc-sqlite flags shell-wrapped sqlite3", () => {
+    const file = treeFile("src/y.ts", "exec(\"sh -c 'sqlite3 x'\");");
+
+    expect(scan("simulator-tcc-sqlite", [file])).toHaveLength(1);
+  });
+
+  test("android-emulator only inspects files that mention the emulator", () => {
+    const unrelated = treeFile(
+      "src/a.ts",
+      'import { spawn } from "node:child_process"; spawn("ls");',
+    );
+    const emulator = treeFile(
+      "src/b.ts",
+      'import { spawn } from "node:child_process"; spawn("emulator");',
+    );
+
+    expect(scan("android-emulator", [unrelated, emulator]).map(({ file }) => file)).toEqual([
+      "src/b.ts",
+    ]);
+  });
+
+  test("src-locations strips the src/ prefix; positions omit the snippet", () => {
+    const violation = { file: "src/a/b.ts", line: 3, column: 4, text: "spawn()" };
+
+    expect(renderBoundaryResult(row("ffmpeg"), [violation]).stderr).toBe(
+      "error: FFmpeg execution must use src/utils/media/FfmpegClient.ts:\na/b.ts:3:4: spawn()\n",
+    );
+    expect(renderBoundaryResult(row("plutil"), [violation]).stderr).toBe(
+      "Direct production plutil execution must go through PlistClient:\n  src/a/b.ts:3:4\n",
+    );
+  });
+});
+
 describe("renderBoundaryResult", () => {
   test("lists each violating file once for file-report rows", () => {
     const result = renderBoundaryResult(row("security"), [

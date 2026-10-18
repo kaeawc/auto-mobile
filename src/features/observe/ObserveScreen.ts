@@ -199,9 +199,9 @@ export class RealObserveScreen implements ObserveScreen {
   private hierarchyCollector: HierarchyCollector;
   private deviceStateCollector: DeviceStateCollector;
   private readonly iosLockStateProbe: IosLockStateProbe;
-  private performanceAuditor: PerformanceAuditor;
-  private accessibilityAuditor: AccessibilityAuditor;
-  private accessibilityStateDetector: AccessibilityStateDetector;
+  private performanceAuditor: Pick<PerformanceAuditor, "run">;
+  private accessibilityAuditor: Pick<AccessibilityAuditor, "run">;
+  private accessibilityStateDetector: Pick<AccessibilityStateDetector, "run">;
   private elementsBuilder: ObserveElementsBuilder;
   private readonly reconciler: ActiveWindowAttributionReconciler;
   private readonly staleRecovery: StaleHierarchyRecovery;

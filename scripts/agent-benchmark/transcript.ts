@@ -83,6 +83,14 @@ function asNumber(value: unknown): number | undefined {
 }
 
 /**
+ * Protocol identifiers (event and block types, tool names and ids) are exact strings: blank
+ * ones carry nothing and padded ones are not the identifier they look like, so neither is
+ * trimmed into a match.
+ */
+function isIdentifier(value: unknown): value is string {
+  return typeof value === "string" && value !== "" && value === value.trim();
+}
+/**
  * The content blocks of an assistant or user event. Plain-text content (a string) has no
  * blocks; any other shape could hide tool calls or results, so it is a parse error.
  */
@@ -102,10 +110,11 @@ function contentBlocks(event: JsonRecord, line: number, state: AuditState): Json
     );
   }
   const blocks = content.filter(isRecord);
-  if (blocks.some((block) => typeof block.type !== "string" || block.type.trim() === "")) {
-    // Unknown block kinds are skipped, but a block with no kind could be hiding a tool call.
+  if (blocks.some((block) => !isIdentifier(block.type))) {
+    // Unknown block kinds are skipped, but a block with no kind, or a padded one that would
+    // be skipped as unknown, could be hiding a tool call.
     state.audit.parseErrors.push(
-      `line ${line}: ${String(event.type)} event has a block without a type`,
+      `line ${line}: ${String(event.type)} event has a block without an exact type`,
     );
   }
   return blocks;
@@ -119,8 +128,7 @@ function contentBlocks(event: JsonRecord, line: number, state: AuditState): Json
 function isContentBlock(block: unknown): boolean {
   return (
     isRecord(block) &&
-    typeof block.type === "string" &&
-    block.type.trim() !== "" &&
+    isIdentifier(block.type) &&
     // A text block must carry its text; other block types (an image) need none.
     (block.type === "text"
       ? typeof block.text === "string"
@@ -252,15 +260,18 @@ function handleAssistant(event: JsonRecord, line: number, state: AuditState): vo
     if (name === "unknown") {
       // A nameless call would hide which tool ran from the counts and sequence.
       state.audit.parseErrors.push(`line ${line}: tool_use without a name`);
-    } else if (name !== rawName) {
-      // Tool names are exact identifiers; a padded one is not the registered tool, so it is
-      // not canonicalized into one.
+    } else if (!isIdentifier(rawName)) {
+      // A padded name is not the registered tool, so it is not canonicalized into one.
       state.audit.parseErrors.push(`line ${line}: tool_use name has surrounding whitespace`);
     }
-    const id = asString(block.id)?.trim();
+    // Ids stay verbatim: results look them up exactly, so a padded id must not match a clean one.
+    const rawId = asString(block.id) ?? "";
+    const id = rawId.trim() === "" ? undefined : rawId;
     if (!id) {
       // A missing or blank id would let a result with a blank tool_use_id complete it.
       state.audit.parseErrors.push(`line ${line}: tool_use without an id`);
+    } else if (!isIdentifier(id)) {
+      state.audit.parseErrors.push(`line ${line}: tool_use id has surrounding whitespace`);
     }
     if (!isRecord(block.input)) {
       // Tool input is always an object; a missing or scalar one marks a damaged stream.
@@ -390,10 +401,10 @@ function handleResult(event: JsonRecord, state: AuditState): void {
 }
 
 function handleEvent(event: JsonRecord, line: number, state: AuditState): void {
-  if (typeof event.type !== "string" || event.type.trim() === "") {
-    // Unknown event kinds are skipped for forward compatibility, but an event with no kind
-    // could be hiding tool calls.
-    state.audit.parseErrors.push(`line ${line}: event without a type`);
+  if (!isIdentifier(event.type)) {
+    // Unknown event kinds are skipped for forward compatibility, but an event with no kind, or
+    // a padded one that would be skipped as unknown, could be hiding tool calls.
+    state.audit.parseErrors.push(`line ${line}: event without an exact type`);
     return;
   }
   const activity = event.type === "assistant" || event.type === "user" || event.type === "result";

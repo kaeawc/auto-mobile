@@ -188,6 +188,19 @@ describe("agent benchmark isolated server environment", () => {
   });
 });
 
+describe("agent benchmark Windows environment casing", () => {
+  test("classifies keys case-insensitively on Windows, exactly elsewhere", () => {
+    const inherited = { Path: "C:\\bin", node_env: "test", claude_code_max_turns: "1" };
+    const windows = claudeLaunchEnv(inherited, PATHS, "win32");
+    expect(windows.node_env).toBeUndefined();
+    expect(windows.claude_code_max_turns).toBeUndefined();
+    expect(windows.Path).toBe("C:\\bin");
+    // On POSIX these lowercase names are distinct variables the children never read as the
+    // canonical ones, so they pass through untouched.
+    expect(claudeLaunchEnv(inherited, PATHS, "linux").node_env).toBe("test");
+  });
+});
+
 describe("agent benchmark provider identity", () => {
   test("records provider, base URL host, region, and routing without secrets", () => {
     const identity = providerIdentity({
@@ -239,6 +252,10 @@ describe("agent benchmark provider identity", () => {
         id,
       ),
     ).toContain(`GOOGLE_APPLICATION_CREDENTIALS=${id("/a.json")}`);
+    // The assumed role's ARN names the target account.
+    expect(providerIdentity({ AWS_ROLE_ARN: "arn:aws:iam::123:role/r" })).toBe(
+      `AWS_ROLE_ARN=sha256:${pathDigest("arn:aws:iam::123:role/r")}`,
+    );
     // The AWS profile picks Bedrock's account through the credential chain.
     expect(providerIdentity({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_PROFILE: "team-a" })).toContain(
       `AWS_PROFILE=sha256:${pathDigest("team-a")}`,

@@ -186,14 +186,23 @@ export function isRunShapingClaudeVariable(key: string): boolean {
   );
 }
 
+/**
+ * Windows environment names are case-insensitive, so `node_env` reaches a child as NODE_ENV;
+ * keys are classified in their canonical (upper) case there.
+ */
+function canonicalKey(key: string, platform: NodeJS.Platform): string {
+  return platform === "win32" ? key.toUpperCase() : key;
+}
+
 /** The launch environment for Claude: isolated server env without run-shaping Claude overrides. */
 export function claudeLaunchEnv(
   inherited: Record<string, string | undefined>,
   paths: ServerPaths,
+  platform: NodeJS.Platform = process.platform,
 ): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(isolatedServerEnv(inherited, paths)).filter(
-      ([key]) => !isRunShapingClaudeVariable(key),
+    Object.entries(isolatedServerEnv(inherited, paths, platform)).filter(
+      ([key]) => !isRunShapingClaudeVariable(canonicalKey(key, platform)),
     ),
   );
 }
@@ -206,15 +215,20 @@ export function claudeLaunchEnv(
 export function isolatedServerEnv(
   inherited: Record<string, string | undefined>,
   paths: ServerPaths,
+  platform: NodeJS.Platform = process.platform,
 ): Record<string, string> {
+  const keep = (key: string) => {
+    const canonical = canonicalKey(key, platform);
+    // NODE_ENV=test (an operator's shell or a bun test parent) arms the server's test-only
+    // guards and changes its behavior, so the run never inherits it.
+    return (
+      canonical !== "NODE_ENV" &&
+      (SHARED_AUTOMOBILE_VARIABLES.has(canonical) || !isAutoMobileVariable(canonical))
+    );
+  };
   const base = Object.fromEntries(
     Object.entries(inherited).filter(
-      (entry): entry is [string, string] =>
-        entry[1] !== undefined &&
-        // NODE_ENV=test (an operator's shell or a bun test parent) arms the server's
-        // test-only guards and changes its behavior, so the run never inherits it.
-        entry[0] !== "NODE_ENV" &&
-        (SHARED_AUTOMOBILE_VARIABLES.has(entry[0]) || !isAutoMobileVariable(entry[0])),
+      (entry): entry is [string, string] => entry[1] !== undefined && keep(entry[0]),
     ),
   );
   return { ...base, ...privateServerEnv(paths) };
@@ -367,6 +381,8 @@ const PROVIDER_ACCOUNTS = [
   "CLOUDSDK_CORE_PROJECT",
   "AWS_PROFILE",
   "AWS_DEFAULT_PROFILE",
+  // The role the AWS credential chain assumes; its ARN names the target account.
+  "AWS_ROLE_ARN",
 ];
 const PROXY_BYPASS = ["NO_PROXY", "no_proxy"];
 // The adb server the measured MCP server reaches (MCP_PASSTHROUGH_VARIABLES): a remote adb

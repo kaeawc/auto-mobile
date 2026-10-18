@@ -309,6 +309,35 @@ describe("agent benchmark transcript audit", () => {
     ]);
   });
 
+  test("padded types and ids are not trimmed into a match", () => {
+    const lines = [
+      JSON.stringify({ type: " assistant ", message: { content: [] } }),
+      JSON.stringify({
+        type: "assistant",
+        message: { content: [{ type: " tool_use ", id: "toolu_a", name: "x", input: {} }] },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", id: " toolu_1 ", name: "mcp__auto-mobile__observe", input: {} },
+          ],
+        },
+      }),
+      // A clean id cannot complete the padded call.
+      JSON.stringify({
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "ok" }] },
+      }),
+    ];
+    expect(auditTranscript(`${INIT}${lines.join("\n")}\n`, NO_PATTERNS).parseErrors).toEqual([
+      "line 4: event without an exact type",
+      "line 5: assistant event has a block without an exact type",
+      "line 6: tool_use id has surrounding whitespace",
+      "tool_result for unknown tool_use_id toolu_1",
+    ]);
+  });
+
   test("tool blocks under the wrong message role fail the transcript", () => {
     const lines = [
       JSON.stringify({
@@ -455,8 +484,8 @@ describe("agent benchmark transcript audit", () => {
     const future = JSON.stringify({ type: "future_event_kind" });
     const audit = auditTranscript(`${INIT}${untyped}\n${blank}\n${future}\n`, NO_PATTERNS);
     expect(audit.parseErrors).toEqual([
-      "line 4: event without a type",
-      "line 5: event without a type",
+      "line 4: event without an exact type",
+      "line 5: event without an exact type",
     ]);
   });
 
@@ -552,7 +581,9 @@ describe("agent benchmark transcript audit", () => {
       },
     });
     const audit = auditTranscript(`${INIT}${assistant}\n`, NO_PATTERNS);
-    expect(audit.parseErrors).toEqual(["line 4: assistant event has a block without a type"]);
+    expect(audit.parseErrors).toEqual([
+      "line 4: assistant event has a block without an exact type",
+    ]);
   });
 
   test("a non-string final answer fails the transcript", () => {

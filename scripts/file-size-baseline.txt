@@ -46,7 +46,7 @@
 1385	src/features/navigation/Explore.ts
 2576	src/features/navigation/NavigationGraphManager.ts
 1568	src/features/observe/DeviceServiceClient.ts
-1861	src/features/observe/ObserveScreen.ts
+1840	src/features/observe/ObserveScreen.ts
 1032	src/features/observe/TakeScreenshot.ts
 1056	src/features/observe/ViewHierarchy.ts
 3153	src/features/observe/android/AndroidCtrlProxyClient.ts
@@ -66,7 +66,7 @@
 1399	src/features/utility/ElementResolver.ts
 1712	src/features/video/FfmpegVideoProcessingBackend.ts
 1163	src/features/video/IosPhysicalVideoCaptureBackend.ts
-2323	src/features/webrtc/IosH264Source.ts
+2322	src/features/webrtc/IosH264Source.ts
 2259	src/features/webrtc/PersistentEncoderH264Source.ts
 1005	src/features/webrtc/WebRtcPublisher.ts
 2370	src/server/appFileService.ts

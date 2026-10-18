@@ -1,3 +1,4 @@
+import type { ObservationCollectionRequest } from "./collectors/ObservationCollectionRequest";
 import { type WindowIdentityFreshnessResolver } from "./WindowIdentityFreshness";
 import {
   type ActiveWindowAttributionReconciler,
@@ -77,10 +78,7 @@ import type {
 } from "./interfaces/ObserveScreen";
 export type { DeviceReadOptions } from "./interfaces/ObserveScreen";
 import type { ObserveScreenDependencies } from "./ObserveScreenDependencies";
-import type {
-  ViewHierarchy as ViewHierarchyInterface,
-  HierarchyReadOptions,
-} from "./interfaces/ViewHierarchy";
+import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
 import type { PredictiveUIState as PredictiveUIStateInterface } from "./interfaces/PredictiveUIState";
 
 import { getObserveCacheStore } from "./cache/ObserveCacheRegistry";
@@ -762,21 +760,21 @@ export class RealObserveScreen implements ObserveScreen {
     } = context;
 
     // Phase 1+2: hierarchy + derived device state (platform-specific orchestration).
-    return this.collectAllData(
-      result,
+    return this.collectAllData(result, {
       queryOptions,
       perf,
       skipWaitForFresh,
       minTimestamp,
       signal,
       skipBackStack,
-      observerMode || preserveDisplayState || options?.skipRecompositionTracking === true,
+      readOnly: observerMode || preserveDisplayState || options?.skipRecompositionTracking === true,
       capturedHierarchy,
-      this.device.platform === "android" && options?.requireFreshExtraction
-        ? { timeoutMs: options.timeoutMs, requireFreshExtraction: options.requireFreshExtraction }
-        : options?.timeoutMs,
-      requestedDisplayId ?? observedAndroid?.logicalId ?? 0,
-    );
+      readOptions:
+        this.device.platform === "android" && options?.requireFreshExtraction
+          ? { timeoutMs: options.timeoutMs, requireFreshExtraction: options.requireFreshExtraction }
+          : options?.timeoutMs,
+      displayId: requestedDisplayId ?? observedAndroid?.logicalId ?? 0,
+    });
   }
 
   private enrichSingleDisplayElements(context: SingleDisplayStageContext): void {
@@ -1848,46 +1846,27 @@ export class RealObserveScreen implements ObserveScreen {
    * Public + parameterized for back-compat with existing tests and for callers
    * that need to assemble an `ObserveResult` without the full `execute()` pipeline.
    */
-  collectAllData(
-    result: ObserveResult,
-    queryOptions?: import("../../models/ViewHierarchyQueryOptions").ViewHierarchyQueryOptions,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
-    signal?: AbortSignal,
-    skipBackStack: boolean = false,
-    readOnly: boolean = false,
-    capturedHierarchy?: ViewHierarchyResult,
-    readOptions?: number | HierarchyReadOptions,
-    displayId: number = 0,
-  ): Promise<void> {
+  collectAllData(result: ObserveResult, request: ObservationCollectionRequest = {}): Promise<void> {
+    const context = {
+      result,
+      queryOptions: request.queryOptions,
+      perf: request.perf ?? new NoOpPerformanceTracker(),
+      skipWaitForFresh: request.skipWaitForFresh ?? false,
+      minTimestamp: request.minTimestamp ?? 0,
+      signal: request.signal,
+      readOnly: request.readOnly ?? false,
+      capturedHierarchy: request.capturedHierarchy,
+      readOptions: request.readOptions,
+    };
     switch (this.device.platform) {
       case "android":
         return this.androidCollector.collect({
-          result,
-          queryOptions,
-          perf,
-          skipWaitForFresh,
-          minTimestamp,
-          signal,
-          skipBackStack,
-          readOnly,
-          capturedHierarchy,
-          readOptions,
-          displayId,
+          ...context,
+          skipBackStack: request.skipBackStack ?? false,
+          displayId: request.displayId ?? 0,
         });
       case "ios":
-        return this.iosCollector.collect({
-          result,
-          queryOptions,
-          perf,
-          skipWaitForFresh,
-          minTimestamp,
-          signal,
-          readOnly,
-          capturedHierarchy,
-          readOptions,
-        });
+        return this.iosCollector.collect(context);
       default:
         return Promise.resolve();
     }

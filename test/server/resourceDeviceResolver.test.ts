@@ -2,13 +2,14 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import * as resourceRead from "../../src/server/resourceDeviceResolver";
 import { defaultDeviceObservationAccess } from "../../src/server/deviceObservationAccess";
 import { listBootedDevicesForResource } from "../../src/server/resourceDeviceResolver";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, Platform, SomePlatform } from "../../src/models";
 import type {
   BootedDeviceDiscoveryOptions,
   PlatformDeviceManager,
 } from "../../src/devices/deviceUtils";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { DaemonState } from "../../src/daemon/daemonState";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import {
   QUARANTINE_POOL_SERIAL,
   createIdentityQuarantinePool,
@@ -19,6 +20,15 @@ const device: BootedDevice = {
   name: "Pixel 8",
   platform: "android",
 };
+
+type DiscoveryOverrides = Partial<
+  Pick<PlatformDeviceManager, "getBootedDevices" | "getBootedDevicesDetailed">
+>;
+
+/** A FakeDeviceUtils whose discovery methods are replaced by the scenario's own closures. */
+function installManager(overrides: DiscoveryOverrides): void {
+  PlatformDeviceManagerFactory.setInstance(Object.assign(new FakeDeviceUtils(), overrides));
+}
 
 describe("listBootedDevicesForResource", () => {
   afterEach(() => {
@@ -33,7 +43,7 @@ describe("listBootedDevicesForResource", () => {
         return [device];
       },
     };
-    PlatformDeviceManagerFactory.setInstance(legacyOnlyManager as unknown as PlatformDeviceManager);
+    installManager(legacyOnlyManager);
 
     await expect(listBootedDevicesForResource("android", "test")).resolves.toEqual([device]);
     expect(legacyCalls).toBe(1);
@@ -46,13 +56,16 @@ describe("listBootedDevicesForResource", () => {
       getBootedDevices: async () => {
         throw new Error("legacy discovery should not be used with an abort signal");
       },
-      getBootedDevicesDetailed: async (_platform: string, options?: { signal?: AbortSignal }) => {
+      getBootedDevicesDetailed: async (
+        _platform: SomePlatform,
+        options?: { signal?: AbortSignal },
+      ) => {
         receivedSignal = options?.signal;
         options?.signal?.throwIfAborted();
-        return { devices: [device], succeededPlatforms: new Set(["android"]) };
+        return { devices: [device], succeededPlatforms: new Set<Platform>(["android"]) };
       },
     };
-    PlatformDeviceManagerFactory.setInstance(detailedManager as unknown as PlatformDeviceManager);
+    installManager(detailedManager);
 
     controller.abort();
     await expect(
@@ -67,7 +80,7 @@ describe("listBootedDevicesForResource", () => {
     const failedPlatform = { ...device, deviceId: "ios-1", platform: "ios" as const };
     const detailedManager = {
       getBootedDevicesDetailed: async (
-        platform: string,
+        platform: SomePlatform,
         options?: {
           signal?: AbortSignal;
           bypassAndroidDeviceListCache?: boolean;
@@ -82,12 +95,12 @@ describe("listBootedDevicesForResource", () => {
         });
         return {
           devices: [device, stale, failedPlatform],
-          succeededPlatforms: new Set(["android"]),
+          succeededPlatforms: new Set<Platform>(["android"]),
           freshDeviceIds: new Set([device.deviceId, failedPlatform.deviceId]),
         };
       },
     };
-    PlatformDeviceManagerFactory.setInstance(detailedManager as unknown as PlatformDeviceManager);
+    installManager(detailedManager);
 
     await expect(
       listBootedDevicesForResource("either", "test", {
@@ -103,12 +116,15 @@ describe("listBootedDevicesForResource", () => {
       getBootedDevices: async () => {
         throw new Error("legacy discovery should not be used with an abort signal");
       },
-      getBootedDevicesDetailed: async (_platform: string, options?: { signal?: AbortSignal }) => {
+      getBootedDevicesDetailed: async (
+        _platform: SomePlatform,
+        options?: { signal?: AbortSignal },
+      ) => {
         expect(options?.signal).toBe(controller.signal);
-        return { devices: [], succeededPlatforms: new Set(["android"]) };
+        return { devices: [], succeededPlatforms: new Set<Platform>(["android"]) };
       },
     };
-    PlatformDeviceManagerFactory.setInstance(detailedManager as unknown as PlatformDeviceManager);
+    installManager(detailedManager);
 
     controller.abort();
     await expect(
@@ -139,10 +155,10 @@ describe("listBootedDevicesForResource rechecks cancellation after reconciliatio
       },
       getBootedDevicesDetailed: async () => ({
         devices: [disagreeing],
-        succeededPlatforms: new Set(["android"]),
+        succeededPlatforms: new Set<Platform>(["android"]),
       }),
     };
-    PlatformDeviceManagerFactory.setInstance(detailedManager as unknown as PlatformDeviceManager);
+    installManager(detailedManager);
 
     await expect(
       listBootedDevicesForResource("android", "test", { signal: controller.signal }),
@@ -171,14 +187,14 @@ describe("read listing status preserves incomplete discovery", () => {
     const received: BootedDeviceDiscoveryOptions[] = [];
     const manager = {
       getBootedDevicesDetailed: async (
-        _platform: string,
+        _platform: SomePlatform,
         options: BootedDeviceDiscoveryOptions = {},
       ) => {
         received.push(options);
-        return { devices: [], succeededPlatforms: new Set(["android"]) };
+        return { devices: [], succeededPlatforms: new Set<Platform>(["android"]) };
       },
     };
-    PlatformDeviceManagerFactory.setInstance(manager as unknown as PlatformDeviceManager);
+    installManager(manager);
     await resourceRead.listBootedDevicesForReadWithStatus("android", "test");
     await listBootedDevicesForResource("android", "test", { requireFresh: true });
     expect(received[0]).toMatchObject({
@@ -196,7 +212,7 @@ describe("read listing status preserves incomplete discovery", () => {
         throw new Error("listing failed");
       },
     };
-    PlatformDeviceManagerFactory.setInstance(manager as unknown as PlatformDeviceManager);
+    installManager(manager);
     expect(await listBootedDevicesForResource("android", "test")).toEqual([]);
     expect(await resourceRead.listBootedDevicesForReadWithStatus("android", "test")).toMatchObject({
       devices: [],
@@ -208,7 +224,7 @@ describe("read listing status preserves incomplete discovery", () => {
     const error = { code: "failed" as const, message: "simctl unavailable" };
     const manager = {
       getBootedDevicesDetailed: async (
-        _platform: string,
+        _platform: SomePlatform,
         options?: { bypassAndroidDeviceListCache?: boolean; bypassIosDeviceListCache?: boolean },
       ) => {
         expect(options).toMatchObject({
@@ -216,13 +232,13 @@ describe("read listing status preserves incomplete discovery", () => {
           bypassIosDeviceListCache: true,
         });
         return {
-          devices: [device, { ...device, platform: "ios", deviceId: "stale-ios" }],
-          succeededPlatforms: new Set(["android"]),
+          devices: [device, { ...device, platform: "ios" as const, deviceId: "stale-ios" }],
+          succeededPlatforms: new Set<Platform>(["android"]),
           discoveryErrors: { ios: error },
         };
       },
     };
-    PlatformDeviceManagerFactory.setInstance(manager as unknown as PlatformDeviceManager);
+    installManager(manager);
     expect(await defaultDeviceObservationAccess.listBootedWithStatus!(undefined)).toEqual({
       devices: [device],
       scanned: { android: true, ios: false },
@@ -234,11 +250,11 @@ describe("read listing status preserves incomplete discovery", () => {
     const manager = {
       getBootedDevicesDetailed: async () => ({
         devices: [],
-        succeededPlatforms: new Set(["android"]),
+        succeededPlatforms: new Set<Platform>(["android"]),
         discoveryErrors: { ios: error },
       }),
     };
-    PlatformDeviceManagerFactory.setInstance(manager as unknown as PlatformDeviceManager);
+    installManager(manager);
     expect(await resourceRead.listBootedDevicesForReadWithStatus("either", "test")).toEqual({
       devices: [],
       scanned: { android: true, ios: false },
@@ -249,10 +265,10 @@ describe("read listing status preserves incomplete discovery", () => {
     const manager = {
       getBootedDevicesDetailed: async () => ({
         devices: [],
-        succeededPlatforms: new Set(["android", "ios"]),
+        succeededPlatforms: new Set<Platform>(["android", "ios"]),
       }),
     };
-    PlatformDeviceManagerFactory.setInstance(manager as unknown as PlatformDeviceManager);
+    installManager(manager);
     expect(await resourceRead.listBootedDevicesForReadWithStatus("either", "test")).toMatchObject({
       devices: [],
       scanned: { android: true, ios: true },

@@ -4,6 +4,8 @@ import { z } from "zod/v4";
 import { DefaultAfterToolCallHandler, ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { flatHierarchyNode } from "../helpers/flatHierarchyNode";
+import { valueAt } from "../helpers/valueAt";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { BootedDevice } from "../../src/models";
@@ -68,7 +70,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       viewHierarchy: {
         packageName: "com.example",
         hierarchy: {
-          node: { "resource-id": "com.example:id/root", "content-desc": "keep" } as any,
+          node: flatHierarchyNode({ "resource-id": "com.example:id/root", "content-desc": "keep" }),
         },
       },
     } as ObserveResult;
@@ -119,21 +121,17 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       source: "heuristic",
       confidence: "low",
       key: "bundle=com.example|focus=Search",
-      components: { bundleId: "com.example", focusedField: "Search" } as any,
+      components: { bundleId: "com.example", focusedElementId: "Search" },
     };
     observation.viewHierarchy = {
       packageName: "com.example",
       hierarchy: {
-        node: {
-          "resource-id": "com.example:id/root",
-          "content-desc": "keep",
-          node: [
-            {
-              "resource-id": "com.example:id/field",
-              checked: checked ? "true" : undefined,
-            } as any,
-          ],
-        } as any,
+        node: flatHierarchyNode({ "resource-id": "com.example:id/root", "content-desc": "keep" }, [
+          flatHierarchyNode({
+            "resource-id": "com.example:id/field",
+            checked: checked ? "true" : undefined,
+          }),
+        ]),
       },
     };
     return observation;
@@ -238,7 +236,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       platform: "android",
       __mcpSessionId: "mcp-session-1",
     });
-    expect((normal.structuredContent as any).observation.isDiff).toBe(true);
+    expect(valueAt(normal, "structuredContent", "observation", "isDiff")).toBe(true);
 
     // Re-seed the baseline (the diffing tapOn advanced it), then an internal tapOn
     // must emit the FULL observation instead of a diff.
@@ -251,9 +249,17 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       __mcpSessionId: "mcp-session-1",
       __internalNoDiff: true,
     });
-    const obs = (internal.structuredContent as any).observation;
-    expect(obs.isDiff).toBeUndefined();
-    expect(obs.viewHierarchy.hierarchy.node["resource-id"]).toBe("com.example:id/root");
+    expect(valueAt(internal, "structuredContent", "observation", "isDiff")).toBeUndefined();
+    expect(
+      valueAt(
+        internal.structuredContent,
+        "observation",
+        "viewHierarchy",
+        "hierarchy",
+        "node",
+        "resource-id",
+      ),
+    ).toBe("com.example:id/root");
   });
 
   test("EC2.3: an internal tapOn keeps its observation even with --actions-no-observe on", async () => {
@@ -267,7 +273,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       platform: "android",
       __mcpSessionId: "mcp-session-1",
     });
-    expect((normal.structuredContent as any).observation).toBeUndefined();
+    expect(valueAt(normal, "structuredContent", "observation")).toBeUndefined();
 
     // Internal tapOn: observation preserved for internal consumers.
     const internal = await ToolRegistry.getTool("tapOn")!.handler({
@@ -275,8 +281,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       __mcpSessionId: "mcp-session-1",
       __internalNoDiff: true,
     });
-    expect((internal.structuredContent as any).observation).toBeDefined();
-    expect((internal.structuredContent as any).observation.viewHierarchy).toBeDefined();
+    expect(valueAt(internal, "structuredContent", "observation")).toBeDefined();
+    expect(valueAt(internal, "structuredContent", "observation", "viewHierarchy")).toBeDefined();
   });
 
   test("action policy: ToolRegistry forwards submit IME args for uncertain-identity fallbacks", async () => {
@@ -294,10 +300,10 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       __mcpSessionId: "mcp-session-1",
       commands: [{ action: "key", key: "search" }],
     });
-    expect((search.structuredContent as any).observation.isDiff).toBeUndefined();
-    expect((search.structuredContent as any).observation.skeleton).toBeDefined();
-    expect((search.structuredContent as any).observation.viewHierarchy).toBeUndefined();
-    expect((search.structuredContent as any).observationDiff).toMatchObject({
+    expect(valueAt(search, "structuredContent", "observation", "isDiff")).toBeUndefined();
+    expect(valueAt(search, "structuredContent", "observation", "skeleton")).toBeDefined();
+    expect(valueAt(search, "structuredContent", "observation", "viewHierarchy")).toBeUndefined();
+    expect(valueAt(search, "structuredContent", "observationDiff")).toMatchObject({
       mode: "full",
       reason: "screen_changed",
     });
@@ -313,10 +319,10 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
         commands: [{ action: "key", key: "go" }],
       }),
     );
-    expect((go.structuredContent as any).observation.isDiff).toBeUndefined();
-    expect((go.structuredContent as any).observation.skeleton).toBeDefined();
-    expect((go.structuredContent as any).observation.viewHierarchy).toBeUndefined();
-    expect((go.structuredContent as any).observationDiff).toMatchObject({
+    expect(valueAt(go, "structuredContent", "observation", "isDiff")).toBeUndefined();
+    expect(valueAt(go, "structuredContent", "observation", "skeleton")).toBeDefined();
+    expect(valueAt(go, "structuredContent", "observation", "viewHierarchy")).toBeUndefined();
+    expect(valueAt(go, "structuredContent", "observationDiff")).toMatchObject({
       mode: "full",
       reason: "screen_changed",
     });
@@ -337,8 +343,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       __mcpSessionId: "mcp-session-1",
       commands: [{ action: "key", key: "next" }],
     });
-    expect((next.structuredContent as any).observation.isDiff).toBe(true);
-    expect((next.structuredContent as any).observationDiff).toMatchObject({
+    expect(valueAt(next, "structuredContent", "observation", "isDiff")).toBe(true);
+    expect(valueAt(next, "structuredContent", "observationDiff")).toMatchObject({
       mode: "diff",
       reason: "diff_emitted",
     });
@@ -354,8 +360,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
         commands: [{ action: "key", key: "previous" }],
       }),
     );
-    expect((previous.structuredContent as any).observation.isDiff).toBe(true);
-    expect((previous.structuredContent as any).observationDiff).toMatchObject({
+    expect(valueAt(previous, "structuredContent", "observation", "isDiff")).toBe(true);
+    expect(valueAt(previous, "structuredContent", "observationDiff")).toMatchObject({
       mode: "diff",
       reason: "diff_emitted",
     });

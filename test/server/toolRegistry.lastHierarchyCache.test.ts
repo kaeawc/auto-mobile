@@ -1,3 +1,5 @@
+import { flatHierarchyNode } from "../helpers/flatHierarchyNode";
+import { valueAt } from "../helpers/valueAt";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
@@ -48,12 +50,12 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: {
         hierarchy: {
-          node: {
+          node: flatHierarchyNode({
             "resource-id": "com.example:id/root",
             "view-id": "com.example:id/root", // redundant duplicate
             clickable: "false", // default-false boolean
             "content-desc": "root",
-          } as any,
+          }),
         },
       },
     } as ObserveResult;
@@ -137,7 +139,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     const observeResult = makeObserveResult();
     // Inject a rogue `screenshot` field: the dead lastScreenshot cache chain was
     // removed (#3221), so even a payload that carries one must NOT be cached.
-    (observeResult as any).screenshot = "base64-screenshot-data";
+    Object.assign(observeResult, { screenshot: "base64-screenshot-data" });
     ToolRegistry.registerDeviceAware("observe", "observe", toolSchema, async () =>
       createStructuredToolResponse(observeResult),
     );
@@ -154,10 +156,10 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     // Caches are populated (were dormant before the fix) with the FULL hierarchy.
     // #2917: the canonical slots are the typed top-level fields, NOT customData.
     const cacheData = daemonSessionManager!.getSession(sessionId)!.cacheData;
-    const cachedHierarchy = cacheData.lastHierarchy as any;
+    const cachedHierarchy = cacheData.lastHierarchy;
     expect(cachedHierarchy).toBeDefined();
-    expect(cachedHierarchy.hierarchy.node["view-id"]).toBe("com.example:id/root");
-    expect(cachedHierarchy.hierarchy.node.clickable).toBe("false");
+    expect(valueAt(cachedHierarchy, "hierarchy", "node", "view-id")).toBe("com.example:id/root");
+    expect(valueAt(cachedHierarchy, "hierarchy", "node", "clickable")).toBe("false");
     // Observe timestamp is stamped alongside the hierarchy.
     expect(typeof cacheData.lastObserveTime).toBe("number");
     // The dead screenshot cache chain is removed (#3221): no lastScreenshot slot
@@ -169,10 +171,10 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
 
     // Returned wire response is sanitized at the chokepoint.
     const returnedRoot = (response.structuredContent as ObserveResult).viewHierarchy!.hierarchy
-      .node as any;
-    expect(returnedRoot["view-id"]).toBeUndefined();
-    expect(returnedRoot.clickable).toBeUndefined();
-    expect(returnedRoot["content-desc"]).toBe("root");
+      .node;
+    expect(valueAt(returnedRoot, "view-id")).toBeUndefined();
+    expect(valueAt(returnedRoot, "clickable")).toBeUndefined();
+    expect(valueAt(returnedRoot, "content-desc")).toBe("root");
   });
 
   test("sanitizes a tapOn action response's .observation end-to-end through the chokepoint", async () => {
@@ -197,20 +199,26 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     });
 
     // Action's nested observation is sanitized in BOTH representations.
-    const scRoot = (response.structuredContent as any).observation.viewHierarchy.hierarchy.node;
-    expect(scRoot["view-id"]).toBeUndefined();
-    expect(scRoot.clickable).toBeUndefined();
-    expect((response.structuredContent as any).success).toBe(true);
+    const scRoot = valueAt(
+      response.structuredContent,
+      "observation",
+      "viewHierarchy",
+      "hierarchy",
+      "node",
+    );
+    expect(valueAt(scRoot, "view-id")).toBeUndefined();
+    expect(valueAt(scRoot, "clickable")).toBeUndefined();
+    expect(valueAt(response, "structuredContent", "success")).toBe(true);
 
     const parsed = JSON.parse(response.content[0].text);
     expect(parsed.observation.viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
     expect(response.content[0].text).toBe(stringifyToolResponse(response.structuredContent));
 
     const cacheData = daemonSessionManager!.getSession(sessionId)!.cacheData;
-    const cachedHierarchy = cacheData.lastHierarchy as any;
+    const cachedHierarchy = cacheData.lastHierarchy;
     expect(cachedHierarchy).toBeDefined();
-    expect(cachedHierarchy.hierarchy.node["view-id"]).toBe("com.example:id/root");
-    expect(cachedHierarchy.hierarchy.node.clickable).toBe("false");
+    expect(valueAt(cachedHierarchy, "hierarchy", "node", "view-id")).toBe("com.example:id/root");
+    expect(valueAt(cachedHierarchy, "hierarchy", "node", "clickable")).toBe("false");
     expect(typeof cacheData.lastObserveTime).toBe("number");
     expect((cacheData as Record<string, unknown>).customData).toBeUndefined();
   });
@@ -233,10 +241,10 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     });
 
     const cacheData = daemonSessionManager!.getSession(sessionId)!.cacheData;
-    const cachedHierarchy = cacheData.lastHierarchy as any;
+    const cachedHierarchy = cacheData.lastHierarchy;
     expect(cachedHierarchy).toBeDefined();
-    expect(cachedHierarchy.hierarchy.node["view-id"]).toBe("com.example:id/root");
-    expect(cachedHierarchy.hierarchy.node.clickable).toBe("false");
+    expect(valueAt(cachedHierarchy, "hierarchy", "node", "view-id")).toBe("com.example:id/root");
+    expect(valueAt(cachedHierarchy, "hierarchy", "node", "clickable")).toBe("false");
     expect(typeof cacheData.lastObserveTime).toBe("number");
   });
 });

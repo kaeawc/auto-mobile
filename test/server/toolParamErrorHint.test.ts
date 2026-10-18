@@ -15,16 +15,28 @@ import { setPreferenceSchema } from "../../src/server/preferenceTools";
 // reds the pinchOn negative row.
 const HINT = 'container must be an object like { "elementId": "<id>" }';
 
+/**
+ * zod v4 invalid_type issue as produced on the wire. `input` is required by the type but never
+ * rendered by the formatter; `received` is the extra marker some zod builds attach.
+ */
+function invalidTypeIssue(fields: {
+  expected: z.core.$ZodIssueInvalidType["expected"];
+  path: PropertyKey[];
+  message: string;
+  received?: string;
+}): z.core.$ZodIssue {
+  return { code: "invalid_type", input: undefined, ...fields };
+}
+
 function containerError(): z.ZodError {
   // A container-path invalid_type issue, the exact shape produced when a tapOn
   // container is passed a non-object.
   return new z.ZodError([
-    {
-      code: "invalid_type",
+    invalidTypeIssue({
       expected: "object",
       path: ["container"],
       message: "Invalid input: expected object, received string",
-    } as unknown as z.core.$ZodIssue,
+    }),
   ]);
 }
 
@@ -45,12 +57,11 @@ describe("formatToolParamError container hint", () => {
 
   test("tapOn omits the hint when the failing field is not container", () => {
     const err = new z.ZodError([
-      {
-        code: "invalid_type",
+      invalidTypeIssue({
         expected: "string",
         path: ["text"],
         message: "Invalid input: expected string, received number",
-      } as unknown as z.core.$ZodIssue,
+      }),
     ]);
     const message = formatToolParamError("tapOn", err);
     expect(message).not.toContain(HINT);
@@ -103,13 +114,12 @@ describe("formatToolParamError non-finite numbers", () => {
     // wild, so the formatter must recognize each. typeof is still "number", so
     // the default text collapses to "expected number, received number".
     return new z.ZodError([
-      {
-        code: "invalid_type",
+      invalidTypeIssue({
         expected: "number",
         received,
         path,
         message: `Invalid input: expected number, received ${received === "Infinity" ? "number" : received}`,
-      } as unknown as z.core.$ZodIssue,
+      }),
     ]);
   }
 
@@ -127,13 +137,12 @@ describe("formatToolParamError non-finite numbers", () => {
     // received "string" means the caller passed a string, not a non-finite
     // number — that must keep the type-mismatch message.
     const err = new z.ZodError([
-      {
-        code: "invalid_type",
+      invalidTypeIssue({
         expected: "number",
         received: "string",
         path: ["returnSpeed"],
         message: "Invalid input: expected number, received string",
-      } as unknown as z.core.$ZodIssue,
+      }),
     ]);
     const message = formatToolParamError("swipeOn", err);
     expect(message).toBe("returnSpeed expected number, received string");
@@ -176,7 +185,7 @@ describe("formatToolParamError non-finite numbers", () => {
 // message and drop the union-branch discrimination noise.
 describe("formatToolParamError observe union noise (#5854)", () => {
   test("a non-finite waitFor field leads with the finite constraint, no branch dump", () => {
-    const result = waitForSchema.safeParse({ timeoutMs: 1e999 } as unknown as object);
+    const result = waitForSchema.safeParse({ timeoutMs: 1e999 });
     expect(result.success).toBe(false);
     const message = formatToolParamError("observe", result.error);
     expect(message).toBe("timeoutMs must be a finite number");
@@ -185,14 +194,14 @@ describe("formatToolParamError observe union noise (#5854)", () => {
   });
 
   test("a wrong-type waitFor field leads with the type mismatch, deduplicated", () => {
-    const result = waitForSchema.safeParse({ timeoutMs: "abc" } as unknown as object);
+    const result = waitForSchema.safeParse({ timeoutMs: "abc" });
     expect(result.success).toBe(false);
     const message = formatToolParamError("observe", result.error);
     expect(message).toBe("timeoutMs expected number, received string");
   });
 
   test("the actionable message is never repeated once per union branch", () => {
-    const result = waitForSchema.safeParse({ timeoutMs: 1e999 } as unknown as object);
+    const result = waitForSchema.safeParse({ timeoutMs: 1e999 });
     expect(result.success).toBe(false);
     const message = formatToolParamError("observe", result.error);
     const occurrences = message.split("must be a finite number").length - 1;
@@ -200,7 +209,7 @@ describe("formatToolParamError observe union noise (#5854)", () => {
   });
 
   test("with no actionable field, falls back to the full guidance instead of an empty message", () => {
-    const result = waitForSchema.safeParse({} as unknown as object);
+    const result = waitForSchema.safeParse({});
     expect(result.success).toBe(false);
     const message = formatToolParamError("observe", result.error);
     expect(message.length).toBeGreaterThan(0);
@@ -216,7 +225,7 @@ describe("formatToolParamError observe union noise (#5854)", () => {
       key: "k",
       type: "bogus",
       value: {},
-    } as unknown as object);
+    });
     expect(result.success).toBe(false);
     const message = formatToolParamError("setPreference", result.error);
     // Both top-level enum failures survive alongside the union-valued failures.
@@ -236,7 +245,7 @@ describe("formatToolParamError observe union noise (#5854)", () => {
     ]);
     // `id` is wrong-typed and `kind` is a bad enum; both are required in both
     // branches, so both are genuine and must appear.
-    const result = schema.safeParse({ id: 42, name: "n", kind: "BOGUS" } as unknown as object);
+    const result = schema.safeParse({ id: 42, name: "n", kind: "BOGUS" });
     expect(result.success).toBe(false);
     const message = formatToolParamError("setKeyValue", result.error);
     expect(message).toContain("id expected string, received number");
@@ -252,7 +261,7 @@ describe("formatToolParamError observe union noise (#5854)", () => {
     ]);
     // `shared` is bad in both branches (genuine); `mode` is missing but required
     // only on branch 0 (discrimination noise).
-    const result = schema.safeParse({ shared: 1e999 } as unknown as object);
+    const result = schema.safeParse({ shared: 1e999 });
     expect(result.success).toBe(false);
     const message = formatToolParamError("observe", result.error);
     expect(message).toBe("shared must be a finite number");
@@ -268,7 +277,7 @@ describe("formatToolParamError observe union noise (#5854)", () => {
     ]);
     // `id` is wrong-typed and `key` is missing; both branches require `key`, so the
     // missing-`key` error is genuine and must appear next to the `id` error.
-    const result = schema.safeParse({ id: 42, name: "n" } as unknown as object);
+    const result = schema.safeParse({ id: 42, name: "n" });
     expect(result.success).toBe(false);
     const message = formatToolParamError("setKeyValue", result.error);
     expect(message).toContain("id expected string, received number");
@@ -281,7 +290,7 @@ describe("formatToolParamError observe union noise (#5854)", () => {
   // of the outermost discriminating one. `observe`'s `waitFor.activeWindow` is such
   // a field, so a bad `timeoutMs` must still lead alone (#5854).
   test("a missing union-typed predicate is not resurrected as a shared constraint", () => {
-    const result = waitForSchema.safeParse({ timeoutMs: 1e999 } as unknown as object);
+    const result = waitForSchema.safeParse({ timeoutMs: 1e999 });
     expect(result.success).toBe(false);
     const message = formatToolParamError("observe", result.error);
     expect(message).toBe("timeoutMs must be a finite number");
@@ -302,7 +311,7 @@ describe("formatToolParamError viable-arm provided value (#5862)", () => {
     // `activeWindow` as `z.never()`, so it never evaluates `activityName`. The
     // across-all-branches test counted the inapplicable DSL arm and suppressed it.
     const input = { timeoutMs: 1e999, activeWindow: { activityName: 123 } };
-    const result = waitForSchema.safeParse(input as unknown as object);
+    const result = waitForSchema.safeParse(input);
     expect(result.success).toBe(false);
     const message = formatToolParamError("observe", result.error, input);
     expect(message).toContain("activeWindow.activityName expected string, received number");
@@ -318,7 +327,7 @@ describe("formatToolParamError viable-arm provided value (#5862)", () => {
 
   test("criterion 2: a lone non-finite waitFor field still leads exactly, with rawInput", () => {
     const input = { timeoutMs: 1e999 };
-    const result = waitForSchema.safeParse(input as unknown as object);
+    const result = waitForSchema.safeParse(input);
     expect(result.success).toBe(false);
     const message = formatToolParamError("observe", result.error, input);
     expect(message).toBe("timeoutMs must be a finite number");
@@ -332,7 +341,7 @@ describe("formatToolParamError viable-arm provided value (#5862)", () => {
     // `id` is provided but wrong-typed (genuine); `key` is missing from both
     // branches (universally required — genuine); both must survive.
     const input = { id: 42, name: "n" };
-    const result = schema.safeParse(input as unknown as object);
+    const result = schema.safeParse(input);
     expect(result.success).toBe(false);
     const message = formatToolParamError("setKeyValue", result.error, input);
     expect(message).toContain("id expected string, received number");
@@ -348,7 +357,7 @@ describe("formatToolParamError viable-arm provided value (#5862)", () => {
       z.object({ shared: z.number() }),
     ]);
     const input = { shared: 1e999, mode: "z" };
-    const result = schema.safeParse(input as unknown as object);
+    const result = schema.safeParse(input);
     expect(result.success).toBe(false);
     const message = formatToolParamError("observe", result.error, input);
     expect(message).toBe("shared must be a finite number");
@@ -366,7 +375,7 @@ describe("formatToolParamError viable-arm provided value (#5862)", () => {
       platform: "android",
       waitFor: { timeoutMs: Infinity, activeWindow: { activityName: 123 } },
     };
-    const result = observeSchema.safeParse(input as unknown as object);
+    const result = observeSchema.safeParse(input);
     expect(result.success).toBe(false);
     const message = formatToolParamError("observe", result.error, input);
     expect(message).toContain("waitFor.activeWindow.activityName expected string, received number");
@@ -381,7 +390,7 @@ describe("formatToolParamError viable-arm provided value (#5862)", () => {
   // errors rather than only the two-arg path the #5854 tests cover.
   test("criterion 2: setPreference enum errors survive with rawInput threaded", () => {
     const input = { scope: "bogus", key: "k", type: "bogus", value: {} };
-    const result = setPreferenceSchema.safeParse(input as unknown as object);
+    const result = setPreferenceSchema.safeParse(input);
     expect(result.success).toBe(false);
     const message = formatToolParamError("setPreference", result.error, input);
     expect(message).toContain("scope Invalid option");

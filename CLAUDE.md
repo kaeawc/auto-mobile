@@ -247,6 +247,14 @@ Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.
 The ratchet nudges toward declarative style where a clean declarative form
 exists; it does not outlaw iteration.
 
+## DaemonState.getInstance() ratchet
+
+`test/lint/daemonStateGetInstanceRatchet.test.ts` parses `src/` and compares per-file
+`DaemonState.getInstance(` call counts to `test/lint/daemon-state-get-instance-baseline.txt`
+(#11806). A file may never exceed its baseline count; after removing calls, run
+`UPDATE_DAEMON_STATE_BASELINE=1 bun test test/lint/daemonStateGetInstanceRatchet.test.ts`
+and commit the smaller baseline (it refuses to grow without `=grow`).
+
 ## File-backed DB lifecycle tests
 
 Any test suite that opens a real `auto-mobile.db` (module close/reopen, migration

@@ -3,6 +3,7 @@ import { parseSuiteDefinition } from "../../../scripts/agent-benchmark/config";
 import {
   buildClaudeArgs,
   buildMcpConfig,
+  claudeLaunchEnv,
   fillPlaceholders,
   isolatedServerEnv,
   providerIdentity,
@@ -235,6 +236,14 @@ describe("agent benchmark provider identity", () => {
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_MCP_ALLOWLIST_ENV")).toBe(true);
     // This opt-in keeps PowerShell enabled alongside a Bash deny.
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_USE_POWERSHELL_TOOL")).toBe(true);
+    // It wraps the measured stdio MCP server's startup command.
+    expect(isRunShapingClaudeVariable("CLAUDE_CODE_SHELL_PREFIX")).toBe(true);
+    const launch = claudeLaunchEnv(
+      { PATH: "/bin", CLAUDE_CODE_SHELL_PREFIX: "/usr/local/bin/audit-wrap" },
+      PATHS,
+    );
+    expect(launch.CLAUDE_CODE_SHELL_PREFIX).toBeUndefined();
+    expect(launch.PATH).toBe("/bin");
     expect(isRunShapingClaudeVariable("ANTHROPIC_BETAS")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_DISABLE_BACKGROUND_TASKS")).toBe(true);
     expect(isRunShapingClaudeVariable("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS")).toBe(true);

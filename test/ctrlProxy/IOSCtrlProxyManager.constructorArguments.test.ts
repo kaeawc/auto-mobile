@@ -30,16 +30,18 @@ afterEach(resetSingletons);
 test("singleton construction applies undefined dependency defaults", () => {
   PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
   const manager = IOSCtrlProxyManager.getInstance(device, undefined);
-  expect(manager["device"]).toBe(device);
-  expect(manager["timer"]).toBe(defaultTimer);
-  expect(manager["builder"]).toBe(IosCtrlProxyBuilder.getInstance());
-  expect(manager["processExecutor"]).toBeInstanceOf(DefaultHostCommandExecutor);
-  expect(manager["signingManager"]).toBeInstanceOf(XcodeSigningManager);
-  expect(manager["deviceAppManager"]).toBeInstanceOf(DeviceAppManager);
-  expect(manager["hostPortAvailabilityChecker"]).toBeInstanceOf(TcpHostPortAvailabilityChecker);
-  expect(manager["xcodebuild"]).toBeInstanceOf(XcodebuildClient);
-  expect(manager["processClient"]).toBeInstanceOf(IosCtrlProxyProcessClient);
-  expect(manager["remoteRunner"].isEnabled()).toBe(false);
+  expect(manager.diagnostics.device).toBe(device);
+  expect(manager.diagnostics.timer).toBe(defaultTimer);
+  expect(manager.diagnostics.builder).toBe(IosCtrlProxyBuilder.getInstance());
+  expect(manager.diagnostics.processExecutor).toBeInstanceOf(DefaultHostCommandExecutor);
+  expect(manager.diagnostics.signingManager).toBeInstanceOf(XcodeSigningManager);
+  expect(manager.diagnostics.deviceAppManager).toBeInstanceOf(DeviceAppManager);
+  expect(manager.diagnostics.hostPortAvailabilityChecker).toBeInstanceOf(
+    TcpHostPortAvailabilityChecker,
+  );
+  expect(manager.diagnostics.xcodebuild).toBeInstanceOf(XcodebuildClient);
+  expect(manager.diagnostics.processClient).toBeInstanceOf(IosCtrlProxyProcessClient);
+  expect(manager.diagnostics.remoteRunner.isEnabled()).toBe(false);
   expect(manager.getServicePort()).toBe(8765);
 });
 
@@ -62,15 +64,15 @@ test("test construction preserves injected dependencies and defaults undefined f
     undefined,
     undefined,
   );
-  expect(manager["timer"]).toBe(timer);
-  expect(manager["processExecutor"]).toBe(executor);
-  expect(manager["signingManager"]).toBe(signing);
-  expect(manager["deviceAppManager"]).toBe(apps);
-  expect(manager["hostPortAvailabilityChecker"]).toBe(ports);
-  expect(manager["builder"]).toBe(IosCtrlProxyBuilder.getInstance());
-  expect(manager["xcodebuild"]).toBeInstanceOf(XcodebuildClient);
-  expect(manager["processClient"]).toBeInstanceOf(IosCtrlProxyProcessClient);
-  expect(manager["remoteRunner"].isEnabled()).toBe(false);
+  expect(manager.diagnostics.timer).toBe(timer);
+  expect(manager.diagnostics.processExecutor).toBe(executor);
+  expect(manager.diagnostics.signingManager).toBe(signing);
+  expect(manager.diagnostics.deviceAppManager).toBe(apps);
+  expect(manager.diagnostics.hostPortAvailabilityChecker).toBe(ports);
+  expect(manager.diagnostics.builder).toBe(IosCtrlProxyBuilder.getInstance());
+  expect(manager.diagnostics.xcodebuild).toBeInstanceOf(XcodebuildClient);
+  expect(manager.diagnostics.processClient).toBeInstanceOf(IosCtrlProxyProcessClient);
+  expect(manager.diagnostics.remoteRunner.isEnabled()).toBe(false);
   expect(executor.getExecutedCommands()).toEqual([]);
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
@@ -127,16 +129,16 @@ test("test construction preserves every injected dependency", () => {
     xcodebuild,
     processClient,
   );
-  expect(manager["device"]).toBe(device);
-  expect(manager["timer"]).toBe(timer);
-  expect(manager["builder"]).toBe(builder);
-  expect(manager["processExecutor"]).toBe(executor);
-  expect(manager["signingManager"]).toBe(signing);
-  expect(manager["deviceAppManager"]).toBe(apps);
-  expect(manager["remoteRunner"]).toBe(remoteRunner);
-  expect(manager["hostPortAvailabilityChecker"]).toBe(ports);
-  expect(manager["xcodebuild"]).toBe(xcodebuild);
-  expect(manager["processClient"]).toBe(processClient);
+  expect(manager.diagnostics.device).toBe(device);
+  expect(manager.diagnostics.timer).toBe(timer);
+  expect(manager.diagnostics.builder).toBe(builder);
+  expect(manager.diagnostics.processExecutor).toBe(executor);
+  expect(manager.diagnostics.signingManager).toBe(signing);
+  expect(manager.diagnostics.deviceAppManager).toBe(apps);
+  expect(manager.diagnostics.remoteRunner).toBe(remoteRunner);
+  expect(manager.diagnostics.hostPortAvailabilityChecker).toBe(ports);
+  expect(manager.diagnostics.xcodebuild).toBe(xcodebuild);
+  expect(manager.diagnostics.processClient).toBe(processClient);
   expect(executor.getExecutedCommands()).toEqual([]);
   expect(executor.getSpawnedProcesses()).toEqual([]);
   expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -147,8 +149,8 @@ test("createForTesting preserves the injected builder", () => {
   const timer = new FakeTimer();
   const builder = builderStub();
   const manager = IOSCtrlProxyManager.createForTesting(device, timer, builder);
-  expect(manager["device"]).toBe(device);
-  expect(manager["timer"]).toBe(timer);
-  expect(manager["builder"]).toBe(builder);
+  expect(manager.diagnostics.device).toBe(device);
+  expect(manager.diagnostics.timer).toBe(timer);
+  expect(manager.diagnostics.builder).toBe(builder);
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });

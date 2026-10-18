@@ -823,23 +823,11 @@ type ListAppsArgs = z.output<typeof listAppsTool.schema>;
 type InstallAppArgs = z.output<typeof installAppTool.schema>;
 
 // Export interfaces for type safety
-export interface AppActionArgs {
-  appId: string;
-}
+export type AppActionArgs = z.output<typeof terminateAppSchema>;
 
-export interface CrashAppActionArgs {
-  appId: string;
-}
+export type CrashAppActionArgs = z.output<typeof crashAppSchema>;
 
-export interface LaunchAppActionArgs {
-  appId: string;
-  clearAppData?: boolean;
-  coldBoot?: boolean;
-  launchArguments?: string[];
-  prototype?: boolean;
-  raw?: boolean;
-  project?: "full" | "skeleton";
-}
+export type LaunchAppActionArgs = z.output<typeof launchAppSchema>;
 
 function prepareLaunchArguments(
   device: BootedDevice,
@@ -875,11 +863,7 @@ function redactLaunchError(error: unknown, token: string | undefined): unknown {
     : error;
 }
 
-export interface UninstallAppArgs {
-  appId: string;
-  keepData?: boolean;
-  expectedSigningSha256?: string[];
-}
+export type UninstallAppArgs = z.output<typeof uninstallAppSchema>;
 
 export type SetAppPermissionsArgs = z.infer<typeof setAppPermissionsSchema>;
 

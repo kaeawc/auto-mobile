@@ -50,6 +50,14 @@ export interface AssignableIdleDeviceSelection {
   snapshotStale: boolean;
 }
 
+/** Flags for {@link DeviceAllocationPort.ensurePooledDevicePresentForUse}; every field defaults to off. */
+export interface PooledDevicePresenceOptions {
+  deferRecovery?: boolean;
+  assignmentLockHeld?: boolean;
+  idleEviction?: boolean;
+  discovery?: BootedDeviceDiscovery;
+}
+
 export interface DeviceAllocationPort extends Pick<
   DevicePool,
   "getStatsForPlatform" | "releaseRehydrationReservation" | "getDeviceHealthMarker"
@@ -115,10 +123,7 @@ export interface DeviceAllocationPort extends Pick<
   isReservedForAssignment(device: PooledDevice, forSessionId?: string): boolean;
   ensurePooledDevicePresentForUse(
     device: PooledDevice,
-    deferRecovery?: boolean,
-    assignmentLockHeld?: boolean,
-    idleEviction?: boolean,
-    discovery?: BootedDeviceDiscovery,
+    options?: PooledDevicePresenceOptions,
   ): Promise<boolean>;
   unhealthyDevicesError(devices: readonly PooledDevice[]): DeviceUnhealthyError;
   snapshotSessionAssignment(device: PooledDevice): SessionAssignmentSnapshot;
@@ -886,13 +891,11 @@ export class DeviceAllocation {
           // fenced refresh/monitor miss thresholds alone own missing eviction.
           snapshotStale = true;
         } else if (
-          await this.port.ensurePooledDevicePresentForUse(
-            device,
-            true,
-            true,
-            false,
-            androidPresence,
-          )
+          await this.port.ensurePooledDevicePresentForUse(device, {
+            deferRecovery: true,
+            assignmentLockHeld: true,
+            discovery: androidPresence,
+          })
         ) {
           return { device, livenessUnknown, snapshotStale };
         } else {

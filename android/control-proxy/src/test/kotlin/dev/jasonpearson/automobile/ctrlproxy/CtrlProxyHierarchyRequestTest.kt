@@ -6,8 +6,6 @@ import dev.jasonpearson.automobile.protocol.RequestHierarchy
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import io.ktor.websocket.CloseReason
-import kotlin.coroutines.Continuation
-import kotlin.coroutines.intrinsics.suspendCoroutineUninterceptedOrReturn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -70,7 +68,7 @@ class CtrlProxyHierarchyRequestTest {
     init {
       oldScope.cancel()
       ReflectionHelpers.setField(proxy, "serviceScope", scope)
-      ReflectionHelpers.setField(proxy, "hierarchyDebouncer", debouncer)
+      proxy.hierarchyController.debouncer = debouncer
       ReflectionHelpers.setField(proxy, "webSocketServer", server)
       // An unstarted engine marks the server running without opening a socket or launching jobs.
       ReflectionHelpers.setField(server, "server", embeddedServer(CIO, port = 0) {})
@@ -109,22 +107,9 @@ class CtrlProxyHierarchyRequestTest {
       assertFalse(server.hasRequestOwner(id))
     }
 
-    suspend fun extractSnapshot(id: String, options: HierarchySnapshotOptions): Unit =
-      suspendCoroutineUninterceptedOrReturn { continuation ->
-        // Exercise the private service entry point without widening its production API.
-        val method =
-          CtrlProxy::class
-            .java
-            .getDeclaredMethod(
-              "extractHierarchyNow",
-              Boolean::class.javaPrimitiveType,
-              HierarchySnapshotOptions::class.java,
-              String::class.java,
-              Continuation::class.java,
-            )
-        method.isAccessible = true
-        method.invoke(proxy, false, options, id, continuation)
-      }
+    suspend fun extractSnapshot(id: String, options: HierarchySnapshotOptions) {
+      proxy.hierarchyController.extractHierarchyNow(false, options, id)
+    }
   }
 
   @Test

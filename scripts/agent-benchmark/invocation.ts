@@ -207,6 +207,14 @@ function canonicalEnv(
     : env;
 }
 
+/** Credential and config file paths the provider SDKs read from the environment. */
+const CREDENTIAL_FILE_VARIABLES = new Set([
+  "GOOGLE_APPLICATION_CREDENTIALS",
+  "AWS_CONFIG_FILE",
+  "AWS_SHARED_CREDENTIALS_FILE",
+  "AWS_WEB_IDENTITY_TOKEN_FILE",
+]);
+
 /**
  * Claude runs from an empty temp directory, so a relative PATH entry or credentials path
  * that resolved from the invocation directory would resolve somewhere else (or nowhere)
@@ -226,7 +234,7 @@ function absolutizeInheritedPaths(
         // An empty POSIX entry means the current directory, which is also relative.
         return [key, value.split(path.delimiter).map(absolute).join(path.delimiter)];
       }
-      if (canonical === "GOOGLE_APPLICATION_CREDENTIALS" && value !== "") {
+      if (CREDENTIAL_FILE_VARIABLES.has(canonical) && value !== "") {
         return [key, absolute(value)];
       }
       return [key, value];

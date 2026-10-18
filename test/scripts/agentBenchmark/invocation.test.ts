@@ -200,6 +200,22 @@ describe("agent benchmark launch paths", () => {
     // An empty POSIX entry means the current directory, so it becomes /work too.
     expect(posix.PATH).toBe("/work/bin:/work:/usr/bin");
     expect(posix.GOOGLE_APPLICATION_CREDENTIALS).toBe("/work/creds.json");
+    // The AWS credential chain's file paths resolve the same way.
+    const aws = claudeLaunchEnv(
+      {
+        AWS_CONFIG_FILE: "aws/config",
+        AWS_SHARED_CREDENTIALS_FILE: "/abs/credentials",
+        AWS_WEB_IDENTITY_TOKEN_FILE: "token",
+      },
+      PATHS,
+      "linux",
+      "/work",
+    );
+    expect([
+      aws.AWS_CONFIG_FILE,
+      aws.AWS_SHARED_CREDENTIALS_FILE,
+      aws.AWS_WEB_IDENTITY_TOKEN_FILE,
+    ]).toEqual(["/work/aws/config", "/abs/credentials", "/work/token"]);
     const windows = claudeLaunchEnv({ Path: "bin;C:\\tools" }, PATHS, "win32", "C:\\work");
     expect(windows.Path).toBe("C:\\work\\bin;C:\\tools");
   });
@@ -371,10 +387,12 @@ describe("agent benchmark provider identity", () => {
       providerIdentity({ CLAUDE_CODE_USE_MANTLE: "1", CLAUDE_CODE_USE_ANTHROPIC_AWS: "1" }),
     ).toBe(["CLAUDE_CODE_USE_ANTHROPIC_AWS=1", "CLAUDE_CODE_USE_MANTLE=1"].join("\n"));
     // Proxy routing is recorded by host and bypass list, never with its credentials.
-    const proxied = providerIdentity({
-      HTTPS_PROXY: "http://user:pass@proxy.corp:3128",
-      no_proxy: "localhost,127.0.0.1",
-    });
+    // POSIX casing: on Windows no_proxy is NO_PROXY (covered separately).
+    const proxied = providerIdentity(
+      { HTTPS_PROXY: "http://user:pass@proxy.corp:3128", no_proxy: "localhost,127.0.0.1" },
+      undefined,
+      "linux",
+    );
     expect(proxied).toBe(
       ["HTTPS_PROXY=http://proxy.corp:3128", "no_proxy=localhost,127.0.0.1"].join("\n"),
     );

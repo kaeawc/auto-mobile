@@ -9,7 +9,7 @@
 6047	src/daemon/daemonMcpProxy.ts
 1728	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
-8324	src/daemon/devicePool.ts
+8322	src/daemon/devicePool.ts
 1004	src/daemon/deviceRuntimeIdentity.ts
 3913	src/daemon/manager.ts
 1566	src/daemon/sessionBroker/provisioning/executionRelease.ts

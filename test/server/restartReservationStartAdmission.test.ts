@@ -8,7 +8,6 @@ import { McpSessionRecoveryInProgressError } from "../../src/daemon/deviceAutolo
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
-import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
@@ -43,17 +42,6 @@ isolateEmptyToolRegistry();
 
 const HOLDER = "restart-holder";
 const CONNECTION = "holder-connection";
-interface Internals {
-  releaseDisconnectedRecoverySessionWithRetry(
-    id: string,
-    deviceId: string,
-    reason: SessionReleaseReason,
-  ): Promise<void>;
-  rehydrationReservations: Map<string, { restartHandoff?: boolean; scheduledDeadlineMs?: number }>;
-  intentionalShutdowns: Map<string, number>;
-  restartReadiness: ReadonlySet<unknown>;
-}
-
 class RestartDeviceManager extends FakeDeviceUtils {
   beforeReady?: () => Promise<void>;
   override async waitForDeviceReady(...args: Parameters<FakeDeviceUtils["waitForDeviceReady"]>) {
@@ -214,7 +202,7 @@ describe("start admission and owner resume for restart reservations", () => {
         await sessions.claimLivenessOwnership(options.label ? HOLDER : holder, options.ownerToken),
       ).toBe("claimed");
     }
-    const internals = pool as unknown as Internals;
+    const internals = pool.testHooks;
     if (options.serialReuse) {
       const replacement = { ...device, name: "AVD-B", observedAt: timer.now() };
       manager.setBootedDevices(platform, [replacement]);
@@ -568,7 +556,7 @@ describe("start admission and owner resume for restart reservations", () => {
 
   function coldBoot(f: Fixture) {
     const child = new FakeChildProcess(f.timer);
-    const process = child as unknown as HostChildProcess;
+    const process: HostChildProcess = child;
     f.manager.setMockChildProcess(f.device.name, process);
     cleanups.push(() => {
       child.simulateExit();
@@ -1213,7 +1201,7 @@ describe("start admission and owner resume for restart reservations", () => {
   test("owner admitted then terminally released during boot never mints a replacement", async () => {
     const f = await fixture();
     const child = new FakeChildProcess(f.timer);
-    f.manager.setMockChildProcess(f.device.name, child as unknown as HostChildProcess);
+    f.manager.setMockChildProcess(f.device.name, child);
     f.manager.beforeReady = async () => {
       await f.sessions.releaseSession(HOLDER, "explicit-release");
     };
@@ -1305,7 +1293,7 @@ describe("start admission and owner resume for restart reservations", () => {
   test("owner resume records its cold-boot process and source AVD", async () => {
     const f = await fixture();
     const child = new FakeChildProcess(f.timer);
-    const process = child as unknown as HostChildProcess;
+    const process: HostChildProcess = child;
     f.manager.setMockChildProcess(f.device.name, process);
     await resumed(f, () => f.start(undefined, HOLDER));
     expect(f.pool.hasStartedDeviceProcess(f.device.deviceId, process)).toBe(true);
@@ -1341,7 +1329,7 @@ describe("start admission and owner resume for restart reservations", () => {
     test(`owner ${selector ? "selector" : "exact"} window expires during boot without a replacement mint`, async () => {
       const f = await fixture();
       const child = new FakeChildProcess(f.timer);
-      f.manager.setMockChildProcess(f.device.name, child as unknown as HostChildProcess);
+      f.manager.setMockChildProcess(f.device.name, child);
       f.manager.beforeReady = async () => {
         f.timer.advanceTime(180_001);
         await drainMicrotasks(40);

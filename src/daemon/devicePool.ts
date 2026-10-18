@@ -746,11 +746,6 @@ export class DevicePool {
   private readonly explicitDeviceBind = this.createExplicitDeviceBind();
   private readonly deviceAllocation = this.createDeviceAllocation();
 
-  /** Kept under its pre-extraction name; owned by DeviceReservations (test internals read it). */
-  private get restartReadiness(): ReadonlySet<unknown> {
-    return this.deviceReservations.restartReadiness;
-  }
-
   private timer: Timer;
   private readonly idGenerator: IdGenerator;
   private lastUsedAtMarker = 0;
@@ -8739,6 +8734,8 @@ export class DevicePool {
       runtimeIdentity: this.runtimeIdentity,
       idleDeviceReaper: this.idleDeviceReaper,
       rehydrationReservations: this.rehydrationReservations,
+      intentionalShutdowns: this.intentionalShutdowns,
+      restartReadiness: this.deviceReservations.restartReadiness,
       collaborators: {
         timer: this.timer,
         installedAppsRepository: this.installedAppsRepository,

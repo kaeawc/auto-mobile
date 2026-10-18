@@ -1005,7 +1005,10 @@ describe("deviceSnapshotManager", () => {
       }
       const adb = new FakeAdbClient();
       adb.setCommandResult(`emu avd snapshot load ${manifest.snapshotName}`, "OK");
-      const emulator = new DeferredEmulator(null, null, fakeTimer, { create: () => adb });
+      const emulator = new DeferredEmulator({
+        timer: fakeTimer,
+        adbFactory: { create: () => adb },
+      });
       await setDeviceSnapshotManagerDependencies({
         deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator([listener]),
         createRestoreProvider: () =>

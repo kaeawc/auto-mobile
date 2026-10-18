@@ -38,9 +38,13 @@ describe("Android emulator boot failure diagnostics", () => {
       adb.setCommandResponse("shell getprop init.svc.bootanim", result("stopped"));
       return [{ deviceId: "emulator-5554", state: "device" }];
     };
-    const client = new AndroidEmulatorClient(async () => result(), null, timer, {
-      create: () => adb,
-    } as AdbClientFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => result(),
+      timer,
+      adbFactory: {
+        create: () => adb,
+      } as AdbClientFactory,
+    });
     const previousPollingInterval = process.env.EMULATOR_POLLING_INTERVAL_MS;
     process.env.EMULATOR_POLLING_INTERVAL_MS = "500";
 
@@ -69,9 +73,13 @@ describe("Android emulator boot failure diagnostics", () => {
     adb.getDeviceStates = async () => {
       throw new Error("state probe unavailable");
     };
-    const client = new AndroidEmulatorClient(async () => result(), null, timer, {
-      create: () => adb,
-    } as AdbClientFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => result(),
+      timer,
+      adbFactory: {
+        create: () => adb,
+      } as AdbClientFactory,
+    });
 
     const booted = await client.waitForEmulatorReady("Pixel_9_Pro", 20_000, null, "emulator-5554");
     expect(booted.deviceId).toBe("emulator-5554");
@@ -86,9 +94,13 @@ describe("Android emulator boot failure diagnostics", () => {
       observedTimeouts.push(options?.timeoutMs);
       return [];
     };
-    const client = new AndroidEmulatorClient(async () => result(), null, timer, {
-      create: () => adb,
-    } as AdbClientFactory);
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => result(),
+      timer,
+      adbFactory: {
+        create: () => adb,
+      } as AdbClientFactory,
+    });
 
     await expectRejection(client.waitForEmulatorReady("Pixel_9_Pro", 100, null, "emulator-5554"));
     expect(observedTimeouts[0]).toBe(100);

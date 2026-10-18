@@ -3962,6 +3962,84 @@
       "required": ["appId"],
       "additionalProperties": false
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "policyAccess": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "type": "boolean"
+            },
+            "allowed": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "android_cmd_notification",
+                "android_dumpsys_notification",
+                "ios_bulletinboard_plist",
+                "unsupported"
+              ]
+            },
+            "rawValue": {
+              "type": "string"
+            },
+            "warning": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            },
+            "authorizationStatus": {
+              "type": "string",
+              "enum": ["notDetermined", "denied", "authorized", "provisional", "ephemeral"]
+            },
+            "lockScreen": {
+              "type": "boolean"
+            },
+            "notificationCenter": {
+              "type": "boolean"
+            },
+            "alerts": {
+              "type": "boolean"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "appId", "deviceId", "platform", "policyAccess"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/deviceReadOnly": true
     }
@@ -4321,6 +4399,20 @@
           ]
         }
       }
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["success"],
+      "additionalProperties": {}
     }
   },
   {
@@ -16736,6 +16828,43 @@
       },
       "required": ["title", "body"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["sdk", "simctlPush"]
+        },
+        "imageType": {
+          "type": "string",
+          "enum": ["normal", "bigPicture"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "channelId": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "supported"],
+      "additionalProperties": {}
     }
   },
   {
@@ -33577,6 +33706,84 @@
       },
       "required": ["appId", "policyAccess"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "policyAccess": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "type": "boolean"
+            },
+            "allowed": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "android_cmd_notification",
+                "android_dumpsys_notification",
+                "ios_bulletinboard_plist",
+                "unsupported"
+              ]
+            },
+            "rawValue": {
+              "type": "string"
+            },
+            "warning": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            },
+            "authorizationStatus": {
+              "type": "string",
+              "enum": ["notDetermined", "denied", "authorized", "provisional", "ephemeral"]
+            },
+            "lockScreen": {
+              "type": "boolean"
+            },
+            "notificationCenter": {
+              "type": "boolean"
+            },
+            "alerts": {
+              "type": "boolean"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": ["message", "success", "appId", "deviceId", "platform", "policyAccess"],
+      "additionalProperties": {}
     }
   },
   {

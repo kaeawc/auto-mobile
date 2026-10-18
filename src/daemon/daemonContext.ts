@@ -27,6 +27,12 @@ export type DevicePoolReads = Pick<
   | "assertAutolockAccess"
   | "isSafeForObservationServiceStart"
   | "restartReservationForStart"
+  | "hasRestartHandoffReservation"
+  | "restartStopConfirmedPooledIdentity"
+  | "restartReservationForStop"
+  | "isRestartReservationOwnedByOtherConnection"
+  | "hasUnconfirmedRestartStopReservation"
+  | "restartStopConnectionHasLiveSession"
   | "bindingOwnershipGate"
   | "getAllDevices"
   | "mapAndroidDiscovery"
@@ -82,12 +88,20 @@ export interface DaemonContext {
   requireSessionManager(): SessionManager;
   /** The device-pool mutations, throwing "DaemonState not initialized" when the daemon is not initialized. */
   requireDevicePoolWrites(): DevicePoolWrites;
+  /** Whether the daemon is initialized (stdio and tests are not). */
+  isInitialized(): boolean;
+  /**
+   * The whole device pool for callers that hand it on to session creation, or undefined when the
+   * daemon is not initialized. Prefer {@link DaemonContext.devicePool} or `devicePoolWrites`; narrow
+   * this when `getOrCreateSession` takes a narrower pool.
+   */
+  fullDevicePool(): DevicePool | undefined;
   /** Read-only device-pool view, or undefined when the daemon is not initialized (stdio, tests). */
   devicePool(): DevicePoolReads | undefined;
   /** The device-pool mutations callers need, or undefined when the daemon is not initialized. */
   devicePoolWrites(): DevicePoolWrites | undefined;
   /** Socket sessions bound to broker bindings, or undefined when the daemon is not initialized. */
-  brokerConnectionScopes(): Pick<BrokerConnectionScopes, "forGrantedSession"> | undefined;
+  brokerConnectionScopes(): Pick<BrokerConnectionScopes, "get" | "forGrantedSession"> | undefined;
   /** Device-session identity lookups, or undefined when the daemon is not initialized. */
   deviceSessionRegistry(): Pick<DeviceSessionRegistry, "getByDeviceId"> | undefined;
 }
@@ -109,6 +123,8 @@ export const defaultDaemonContext: DaemonContext = {
   sessionManager: () => initializedDaemon()?.getSessionManager(),
   requireSessionManager: () => currentDaemon().getSessionManager(),
   requireDevicePoolWrites: () => currentDaemon().getDevicePool(),
+  isInitialized: () => currentDaemon().isInitialized(),
+  fullDevicePool: () => initializedDaemon()?.getDevicePool(),
   devicePool: () => initializedDaemon()?.getDevicePool(),
   devicePoolWrites: () => initializedDaemon()?.getDevicePool(),
   brokerConnectionScopes: () => initializedDaemon()?.getBrokerConnectionScopes(),

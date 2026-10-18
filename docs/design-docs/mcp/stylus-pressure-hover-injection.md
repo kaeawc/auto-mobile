@@ -22,7 +22,7 @@ Nothing in this note was run on a device.
 | Android adb path    | Fallback is `adb shell input touchscreen [-d display] tap/swipe/...` (`src/features/action/touchscreenInput.ts`). Source is hard-wired to `touchscreen`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | code |
 | Option plumbing     | `GestureOptions.pressure` (`src/models/GestureOptions.ts:18`) has no readers in `src/`, `android/` or `ios/`. (The recorder's `TouchSlot.pressure` is unrelated.)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | code |
 | Stylus handwriting  | `src/utils/disableStylusHandwriting.ts` only runs `settings put secure stylus_handwriting_enabled 0` so injected touches are not treated as handwriting.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | code |
-| Recorder            | `getevent` is parsed by `TouchFrameReconstructor`. It handles `ABS_MT_SLOT/TRACKING_ID/POSITION_X/Y`, `ABS_MT_PRESSURE` (stored on `TouchSlot.pressure`) and `KEY_*` buttons. It ignores `BTN_TOOL_PEN`, `BTN_TOOL_RUBBER`, `BTN_STYLUS*`, `BTN_TOUCH`, `ABS_MT_TOOL_TYPE`, `ABS_DISTANCE`, `ABS_TILT_X/Y`, `ABS_MT_DISTANCE`. Pressure is captured per slot but `GestureClassifier` / `GestureEvent` do not emit it. `TouchNodeDiscovery` picks the first node with `ABS_MT_POSITION_X/Y`, so a separate pen digitizer node would be skipped if a finger node is listed first.                                                                                                                                                                                      | code |
+| Recorder            | Since #13101: `InputNodeDiscovery` parses real `getevent -p`/`-lp` output into a touch node and pen nodes (single-touch `ABS_X/Y` plus `BTN_TOOL_PEN`/`RUBBER`); `GetEventReader` runs one `getevent -lt` process per node. `TouchFrameReconstructor` tracks `BTN_TOOL_PEN/RUBBER`, `BTN_TOUCH`, `BTN_STYLUS*`, `ABS_MT_TOOL_TYPE`, `ABS_X/Y/PRESSURE` (pen nodes), `ABS_TILT_X/Y` and `ABS_DISTANCE`; `GestureEvent` carries optional `toolType`, `pressure` (min/max/mean, normalized when the axis range is known) and `buttons`. Tilt and distance stay on `TouchSlot`; hover/stroke events and replay are not implemented (#13102).                                                                                                                             | code |
 | iOS dispatch        | The runner uses public `XCUICoordinate.tap/press(forDuration:thenDragTo:)` and `XCUIDevice.shared.press`. Pinch and multi-finger swipe use private `XCPointerEventPath` / `XCSynthesizedEventRecord` resolved with `NSClassFromString` and selector probes (`ObjCExceptionCatcher.m`), with a public fallback.                                                                                                                                                                                                                                                                                                                                                                                                                                                       | code |
 | iOS private surface | `ObjCExceptionCatcher.h:14-25` declares seven selectors: `initForTouchAtPoint:offset:`, `moveToPoint:atOffset:`, `liftUpAtOffset:`, `initWithName:interfaceOrientation:`, `initWithName:displayID:interfaceOrientation:`, `addPointerEventPath:`, `synthesizeWithError:`. No pressure, hover or pencil selector is declared or used. Precedent for non-touch IOHID injection exists: keyboard events (`IOHIDEventCreateKeyboardEvent`, `GesturePerformer+HardwareButtons.swift:148`) and the vendor-defined hinge-angle event (`IOHIDEventCreateVendorDefinedEvent` / `IOHIDVirtualServiceClientDispatchEvent`, `DefaultHingeAngleSetter.swift:108-128,202-213`); `XCTestQueryTimeout.swift:113` dlsyms `_XCTSetXPCRequestTimeout`. No digitizer events are created. | code |
 
@@ -155,18 +155,13 @@ Two different things are called recording:
 - `recordDeviceGestures` observes physical input via `getevent`. Stylus
   support there is only for observing a real pen.
 
-Proposed `recordDeviceGestures` changes (additive; finger recordings keep their
-shape):
+Remaining `recordDeviceGestures` changes (additive; finger recordings keep their
+shape). Pen-node discovery, per-node `getevent`, pen key/axis parsing and the
+`toolType`/`pressure`/`buttons` fields on `GestureEvent` landed in #13101 (see
+the table above). Still to do:
 
-1. Parsing. `TouchNodeDiscovery.ts:19-33` takes `nodes[0]` and `parseTouchNodes`
-   keeps only devices with `ABS_MT_POSITION_X/Y`, and
-   `TouchFrameReconstructor.handleAbsEvent` handles only `ABS_MT_*`. A pen
-   digitizer reporting single-touch `ABS_X`/`ABS_Y`/`ABS_PRESSURE` would be
-   dropped entirely. Add non-MT `ABS_X/Y/PRESSURE` parsing and read several
-   nodes at once. Also track `BTN_TOOL_PEN`/`BTN_TOOL_RUBBER`, `BTN_TOUCH`,
-   `BTN_STYLUS`/`BTN_STYLUS2`, `ABS_MT_TOOL_TYPE`, `ABS_TILT_X/Y`, `ABS_DISTANCE`.
-2. `GestureEvent` fields: optional `toolType`, `pressure` (min/max/mean, or a
-   sampled array for strokes), `tilt`, `buttons`.
+1. Surface `tilt` and `distance` on `GestureEvent` where replay needs them.
+2. `pressure` as a sampled array for strokes.
 3. New event types `hover` (positions, `distance`) and `stroke` (a pen path with
    per-point pressure), since a pressure-varying pen drag is not faithfully a
    `swipe`.
@@ -229,10 +224,9 @@ results are still to be collected.
    points, extend schemas and `tool-definitions.json`.
 5. **`hoverAt` tool for Android.** Hover enter/move/exit using the dragPath
    point schema; document mouse vs stylus hover semantics.
-6. **Recorder: parse pen input.** Non-MT `ABS_X/Y/PRESSURE`, multi-node
-   `getevent`, `BTN_TOOL_*`, `BTN_TOUCH`, tilt and distance in
-   `TouchNodeDiscovery` / `TouchFrameReconstructor`, and carry pressure and tool
-   type into `GestureEvent`.
+6. **Recorder: parse pen input** (#13101, done). Non-MT `ABS_X/Y/PRESSURE`,
+   per-node `getevent`, `BTN_TOOL_*`, `BTN_TOUCH`, tilt and distance, with
+   pressure and tool type carried into `GestureEvent`.
 7. **Recorded stylus gestures: wire shape and replay.** Define `stroke` / `hover`
    event types and their serialization, and replay with strict
    unsupported-feature failures.

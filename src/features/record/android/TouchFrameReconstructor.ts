@@ -265,7 +265,12 @@ export class TouchFrameReconstructor {
 
   /** Pen fields are added only when present, so finger frames keep their exact shape. */
   private withPenState(slot: TouchSlot): TouchSlot {
-    if (!slot.toolType && this.nodeTool) {
+    // BTN_TOOL_RUBBER refines a generic MT pen (ABS_MT_TOOL_TYPE=MT_TOOL_PEN) into an eraser; an
+    // explicit finger identity (no toolType) only takes the node tool when nothing else is known.
+    if (
+      this.nodeTool &&
+      (!slot.toolType || (slot.toolType === "stylus" && this.nodeTool === "eraser"))
+    ) {
       slot.toolType = this.nodeTool;
     }
     if (this.heldButtons.size > 0) {

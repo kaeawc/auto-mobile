@@ -20,6 +20,7 @@
 test/contracts/deviceResourceApplicationStore.integration.test.ts | safe | fake versus real DeviceResourceApplicationRepository over createTestDatabase in-memory L8
 test/contracts/deviceSessionPersistence.integration.test.ts | safe | fake versus real DeviceSessionRepository over createTestDatabase in-memory L8
 test/contracts/deviceSnapshotStore.integration.test.ts | safe | fake versus real store over a private mkdtemp directory removed afterwards L9
+test/contracts/mcpTaskStore.integration.test.ts | safe | fake versus real McpTaskRepository over createTestDatabase in-memory with FakeTimer L12
 test/contracts/nativeHelperRecordStore.integration.test.ts | safe | fake versus real FileNativeHelperRecordStore over a private mkdtemp AUTOMOBILE_DATA_DIR removed afterwards L10
 test/contracts/navigationGraph.integration.test.ts | safe | fake versus real NavigationGraphManager over createTestDatabase in-memory with stubbed telemetry L7
 test/contracts/observeCacheStore.integration.test.ts | safe | fake versus real FileSystemObserveCacheStore over a private mkdtemp directory removed afterwards L11

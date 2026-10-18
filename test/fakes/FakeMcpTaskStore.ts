@@ -16,6 +16,10 @@ export class FakeMcpTaskStore implements McpTaskStore {
   constructor(private readonly timer: Pick<Timer, "now">) {}
 
   async insert(task: NewMcpTask): Promise<McpTaskRecord> {
+    // The real table's primary key rejects a duplicate task id rather than replacing the row.
+    if (this.rows.has(task.taskId)) {
+      throw new Error(`UNIQUE constraint failed: mcp_tasks.task_id (${task.taskId})`);
+    }
     const now = this.timer.now();
     const record: McpTaskRecord = {
       taskId: task.taskId,

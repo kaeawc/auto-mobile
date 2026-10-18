@@ -3184,8 +3184,8 @@ Unset or other env values express no preference and use the daemon's effective s
 
 AutoMobile implements the [MCP Tasks extension](https://modelcontextprotocol.io/extensions/tasks/overview)
 (`io.modelcontextprotocol/tasks`, #4668) on the daemon's MCP endpoint. A tool that opts in can
-answer a `tools/call` with a task handle instead of blocking. `startDevice` opts in; `executePlan`,
-`installApp` and recording start and stop follow. Short interaction tools stay synchronous.
+answer a `tools/call` with a task handle instead of blocking. `startDevice` and `executePlan` opt
+in; `installApp` and recording start and stop follow. Short interaction tools stay synchronous.
 
 To opt in, a client declares the extension on **every request** that may return a task, and on
 every `tasks/*` request, in the per-request capabilities:
@@ -3223,6 +3223,13 @@ every `tasks/*` request, in the per-request capabilities:
   client need not heartbeat a session it has not seen yet. Once the task is terminal, the
   client heartbeats that session as after a synchronous `startDevice`. Cancelling during the
   boot stops it and leaves no session bound, as cancelling a synchronous call does.
+- While an `executePlan` task is `working`, the daemon heartbeats the plan's session and, for a
+  multi-device plan, each label session once it is allocated; the plan keeps its session's plan
+  lock as a synchronous plan does. `tasks/cancel` aborts the running step, unwinds the plan as a
+  cancelled request would (its cleanup and session release still run) and releases the lock.
+  A plan whose steps fail completes with the same `isError` result as the synchronous call;
+  a call the synchronous path answers with a JSON-RPC error (invalid arguments, for one)
+  reports `failed` with that error.
 - A finished task stays readable for 10 minutes (its `ttlMs` is then set, counted from
   creation); afterwards `tasks/get` answers `-32602` "Task has expired" or "Task not found".
 - Tasks survive a daemon restart: a restarted daemon still answers `tasks/get`, and a task that

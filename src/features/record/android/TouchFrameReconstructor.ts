@@ -288,7 +288,11 @@ export class TouchFrameReconstructor {
     if (!penSlot) {
       return slot;
     }
-    if (this.nodeTool && (this.options.singleTouch || this.nodeTool === "eraser")) {
+    if (this.options.singleTouch) {
+      // Every contact on a pen node is a pen. getevent does not replay a BTN_TOOL_* already held
+      // when recording starts, so a contact with no tool key seen yet is still a stylus.
+      slot.toolType = this.nodeTool ?? "stylus";
+    } else if (this.nodeTool === "eraser") {
       slot.toolType = this.nodeTool;
     }
     if (this.heldButtons.size > 0) {

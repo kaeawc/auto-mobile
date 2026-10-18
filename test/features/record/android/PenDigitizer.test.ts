@@ -314,6 +314,20 @@ describe("pen contacts", () => {
     expect(gestures[0].toolType).toBe("stylus");
   });
 
+  test("a pen-node contact is a stylus even when its tool key predates the recording", () => {
+    const lines = [
+      "[  1.0] EV_ABS    ABS_X                000001a4",
+      "[  1.0] EV_ABS    ABS_Y                000002b0",
+      "[  1.0] EV_KEY    BTN_TOUCH            DOWN",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+      "[  1.1] EV_KEY    BTN_TOUCH            UP",
+      "[  1.1] EV_SYN    SYN_REPORT           00000000",
+    ];
+    const { gestures } = run(lines, { singleTouch: true });
+    expect(gestures).toHaveLength(1);
+    expect(gestures[0].toolType).toBe("stylus");
+  });
+
   test("single-touch axes are ignored on a multitouch node", () => {
     const { frames } = run(PEN_STROKE);
     expect(frames.every((frame) => frame.activeSlots.length === 0)).toBe(true);

@@ -371,7 +371,6 @@
 1	test/server/DeviceSessionManager.appearanceSync.test.ts
 1	test/server/DeviceSessionManager.foreignForward.test.ts
 1	test/server/androidStartLifecycleDiscoveryTyped.test.ts
-1	test/server/appFileService.test.ts
 2	test/server/bootedDeviceResourcesCharacterization.test.ts
 4	test/server/coordinateToolLayer.test.ts
 14	test/server/databaseIos.test.ts

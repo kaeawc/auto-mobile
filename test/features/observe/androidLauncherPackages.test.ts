@@ -10,6 +10,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import type { ExecResult } from "../../../src/models";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 const RESOLVE_HOME_PATTERN = "resolve-activity";
 
@@ -25,15 +26,9 @@ class SlowResolveAdbExecutor extends FakeAdbExecutor {
     super();
   }
 
-  override async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-  ): Promise<ExecResult> {
+  override async executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult> {
     this.clock.setCurrentTime(this.clock.now() + this.elapsedMs);
-    return await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    return await super.executeCommand(command, options);
   }
 }
 

@@ -3,7 +3,7 @@ import { BootedDevice } from "../../models";
 import { NavigationGraphManager } from "../../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../../features/observe/ObserveScreen";
-import { stripNavigationToolParams } from "../../daemon/constants";
+import { stripNavigationToolParams } from "../../models/navigationToolParams";
 import type { ToolTraits } from "../toolRegistry";
 
 export interface NavigationToolCallRecorder {

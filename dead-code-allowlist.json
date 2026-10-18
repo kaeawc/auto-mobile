@@ -107,7 +107,7 @@
       "reason": "Barrel re-export; consumers import DualTrackRecorder from the implementation module"
     },
     {
-      "file": "src/features/toolSelection/SqliteSessionToolSelectionRepository.ts",
+      "file": "src/db/sessionToolSelectionRepository.ts",
       "name": "SqliteSessionToolSelectionRepository",
       "reason": "Consumed by src/features/toolSelection/SessionToolSelectionService.ts"
     },

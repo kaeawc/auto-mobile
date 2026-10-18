@@ -40,6 +40,7 @@ import {
 import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 // Overlay ids come from the Pixel Launcher captures under test/fixtures/android-launcher/.
 const ANDROID_LAUNCHER_OVERLAY_MARKERS = [
@@ -109,7 +110,7 @@ export class HomeScreen extends BaseVisualChange {
       changeExpected: true,
       foregroundAppMayChange: true,
       usesObservationForResolution: false,
-      timeoutMs: 5000,
+      timeoutMs: SETTLE_BUDGET_MS.lifecycle,
       progress,
       perf,
       signal,

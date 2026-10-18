@@ -274,6 +274,46 @@ describe("pen contacts", () => {
     expect(bySlot.get(1)?.buttons).toBeUndefined();
   });
 
+  test("an MT pen hovering with ABS_MT_DISTANCE > 0 is not a contact", () => {
+    const hoverOnly = [
+      "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+      "[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     00000001",
+      "[  1.0] EV_ABS    ABS_MT_DISTANCE      00000005",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+      "[  1.1] EV_ABS    ABS_MT_POSITION_X    000001b0",
+      "[  1.1] EV_SYN    SYN_REPORT           00000000",
+      "[  1.2] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+      "[  1.2] EV_SYN    SYN_REPORT           00000000",
+    ];
+    const hover = run(hoverOnly);
+    expect(hover.frames.every((frame) => frame.activeSlots.length === 0)).toBe(true);
+    expect(hover.gestures).toEqual([]);
+  });
+
+  test("an MT pen that touches and lifts back into hover records one contact", () => {
+    const lines = [
+      "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+      "[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     00000001",
+      "[  1.0] EV_ABS    ABS_MT_DISTANCE      00000005",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+      "[  1.1] EV_ABS    ABS_MT_DISTANCE      00000000",
+      "[  1.1] EV_SYN    SYN_REPORT           00000000",
+      "[  1.2] EV_ABS    ABS_MT_DISTANCE      00000004",
+      "[  1.2] EV_SYN    SYN_REPORT           00000000",
+      "[  1.3] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+      "[  1.3] EV_SYN    SYN_REPORT           00000000",
+    ];
+    const { frames, gestures } = run(lines);
+    expect(frames[1].activeSlots.map((slot) => slot.slotId)).toEqual([0]);
+    expect(frames[2].releasedSlots).toEqual([0]);
+    expect(gestures).toHaveLength(1);
+    expect(gestures[0].toolType).toBe("stylus");
+  });
+
   test("single-touch axes are ignored on a multitouch node", () => {
     const { frames } = run(PEN_STROKE);
     expect(frames.every((frame) => frame.activeSlots.length === 0)).toBe(true);

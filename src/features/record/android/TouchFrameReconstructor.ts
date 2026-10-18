@@ -39,6 +39,8 @@ export class TouchFrameReconstructor {
   private slots: Map<number, TouchSlot> = new Map();
   private currentSlot = 0;
   private releasedSlots = new Set<number>();
+  /** Slots reported as in contact in the previous frame. */
+  private touchingSlots = new Set<number>();
   /** Pen tool in range (BTN_TOOL_PEN / BTN_TOOL_RUBBER); node-wide, applied to active slots. */
   private nodeTool: PointerToolType | undefined;
   private readonly heldButtons = new Set<StylusButton>();
@@ -99,9 +101,10 @@ export class TouchFrameReconstructor {
           }
         } else {
           // New or continuing contact; a new tracking id starts a fresh contact, so per-contact pen
-          // state from the slot's previous occupant must not carry over to it. The tool type is kept:
-          // the kernel only re-sends ABS_MT_TOOL_TYPE when it changes, so a second pen contact on
-          // the slot arrives without it, and a finger replacing a pen arrives with an explicit 0.
+          // state from the slot's previous occupant must not carry over to it. Tool type and distance
+          // are kept: the kernel only re-sends ABS_MT_TOOL_TYPE / ABS_MT_DISTANCE when they change, so
+          // a second pen contact on the slot arrives without them, and a finger replacing a pen
+          // arrives with an explicit tool type 0.
           const slot = this.getOrCreateSlot();
           if (slot.trackingId !== value) {
             clearPenState(slot);
@@ -156,6 +159,7 @@ export class TouchFrameReconstructor {
         break;
 
       case "ABS_DISTANCE":
+      case "ABS_MT_DISTANCE":
         this.getOrCreateSlot().distance = value;
         break;
 
@@ -247,15 +251,22 @@ export class TouchFrameReconstructor {
     const activeSlots: TouchSlot[] = [];
     const releasedSlots: number[] = [];
 
+    const touching = new Set<number>();
     for (const [, slot] of this.slots) {
-      if (slot.trackingId >= 0) {
+      if (slot.trackingId >= 0 && !this.isMtPenHovering(slot)) {
+        touching.add(slot.slotId);
         activeSlots.push(this.withPenState({ ...slot }));
-      } else if (this.releasedSlots.has(slot.slotId)) {
+      } else if (
+        this.releasedSlots.has(slot.slotId) ||
+        (slot.trackingId >= 0 && this.touchingSlots.has(slot.slotId))
+      ) {
+        // A tracked MT pen that lifts into hover ends its contact just like a release.
         releasedSlots.push(slot.slotId);
       }
     }
 
     this.releasedSlots.clear();
+    this.touchingSlots = touching;
 
     // Protocol B retains each slot's axes and pressure after contact release.
     // Release notifications are per-frame; inactive slots stay out of activeSlots.
@@ -286,6 +297,15 @@ export class TouchFrameReconstructor {
     return slot;
   }
 
+  /**
+   * An MT pen slot stays tracked while it hovers, reporting ABS_MT_DISTANCE > 0. Hover is not a
+   * contact, so it must not become a tap or swipe (hover events are #13102). Single-touch pen
+   * nodes use BTN_TOUCH for contact instead, and finger slots are never treated as hovering.
+   */
+  private isMtPenHovering(slot: TouchSlot): boolean {
+    return !this.options.singleTouch && slot.toolType !== undefined && (slot.distance ?? 0) > 0;
+  }
+
   private getOrCreateSlot(): TouchSlot {
     if (!this.slots.has(this.currentSlot)) {
       this.slots.set(this.currentSlot, {
@@ -314,5 +334,4 @@ function clearPenState(slot: TouchSlot): void {
   delete slot.buttons;
   delete slot.tiltX;
   delete slot.tiltY;
-  delete slot.distance;
 }

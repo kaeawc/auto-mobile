@@ -180,6 +180,24 @@ describe("loopback session key header", () => {
     expect(seen).toEqual(["socket-a", "socket-b"]);
   });
 
+  test("a cancellation sent outside the forward carries the key of the request it cancels (#13067)", async () => {
+    const { seen, fetch } = recordingFetch();
+    const post = (message: Record<string, unknown>) =>
+      fetch("http://x/mcp", { method: "POST", body: JSON.stringify(message) });
+    await runWithLoopbackSessionKey("socket-a", () =>
+      post({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "swipeOn" } }),
+    );
+    await runWithLoopbackSessionKey("socket-b", () =>
+      post({ jsonrpc: "2.0", id: "3", method: "tools/call", params: { name: "observe" } }),
+    );
+    // The abort listener runs in the canceller's context: no forward store is active.
+    await post({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 3 } });
+    await post({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: "3" } });
+    // Each id is forgotten once cancelled.
+    await post({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 3 } });
+    expect(seen).toEqual(["socket-a", "socket-b", "socket-a", "socket-b", null]);
+  });
+
   test("a request outside a forward carries no session key", async () => {
     const { seen, fetch } = recordingFetch();
     await fetch("http://x/mcp");

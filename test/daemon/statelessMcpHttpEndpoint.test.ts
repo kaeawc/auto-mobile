@@ -14,6 +14,7 @@ import { createSdkMcpServer } from "../../src/server/sdkMcpServer";
 import type { ExecutionCancellationReason } from "../../src/server/executionTracker";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const PATH = "/auto-mobile/streamable";
@@ -68,6 +69,10 @@ class BlockingTransport {
 class FakeScopeExecutions {
   readonly cancelled: Array<{ scope: string; reason: ExecutionCancellationReason }> = [];
   private readonly running = new Map<string, AbortController>();
+
+  get runningCount(): number {
+    return this.running.size;
+  }
 
   start(scope: string): AbortSignal {
     const controller = new AbortController();
@@ -207,6 +212,49 @@ async function connect(url: string, sessionKey?: string): Promise<Client> {
     new StreamableHTTPClientTransport(new URL(url), { requestInit: { headers } }),
   );
   return client;
+}
+
+/** Poll `predicate` until it holds, bounded by a real deadline (the HTTP hop is real I/O). */
+async function waitFor(predicate: () => boolean, what: string): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (!predicate()) {
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out waiting for ${what}`);
+    }
+    await new Promise((resolve) => defaultTimer.setTimeout(resolve, 2));
+  }
+}
+
+/** POST a `block` tools/call under `id`, with the session-key header when `sessionKey` is set. */
+function postBlock(url: string, id: number, sessionKey?: string): Promise<Response> {
+  return fetch(url, {
+    method: "POST",
+    headers: {
+      ...POST_HEADERS,
+      "mcp-protocol-version": "2025-06-18",
+      ...(sessionKey ? { [MCP_SESSION_KEY_HEADER]: sessionKey } : {}),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id,
+      method: "tools/call",
+      params: { name: "block", arguments: {} },
+    }),
+  });
+}
+
+/** POST a header-less `notifications/cancelled` for `requestId`. */
+async function postHeaderlessCancel(url: string, requestId: number): Promise<void> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { ...POST_HEADERS, "mcp-protocol-version": "2025-06-18" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      method: "notifications/cancelled",
+      params: { requestId, reason: "header-less cancel" },
+    }),
+  });
+  await response.text();
 }
 
 const POST_HEADERS = {
@@ -350,11 +398,36 @@ describe("StatelessMcpHttpEndpoint (#4678)", () => {
     controller.abort("caller gave up");
     expect(await call).toBeDefined();
     // The cancellation POST resolves the request by session key + JSON-RPC id.
-    for (let turn = 0; turn < 50 && h.executions.cancelled.length === 0; turn++) {
-      await new Promise((resolve) => setImmediate(resolve));
-    }
+    await waitFor(() => h.executions.cancelled.length > 0, "the cancellation");
     expect(h.executions.cancelled).toEqual([{ scope: blockScope, reason: "caller gave up" }]);
     await client.close();
+  });
+
+  test("a header-less notifications/cancelled cancels the one in-flight request with its id (#13067)", async () => {
+    const h = await harness();
+    const call = postBlock(h.url, 42, "socket-session");
+    await h.blockStarted;
+    const blockScope = h.scopes.at(-1)!.requestScopeId;
+
+    await postHeaderlessCancel(h.url, 42);
+
+    await waitFor(() => h.executions.cancelled.length > 0, "the cancellation");
+    expect(h.executions.cancelled).toEqual([{ scope: blockScope, reason: "header-less cancel" }]);
+    await (await call).text();
+  });
+
+  test("a header-less notifications/cancelled whose id two in-flight requests share cancels neither", async () => {
+    const h = await harness();
+    const first = postBlock(h.url, 7, "socket-a");
+    const second = postBlock(h.url, 7, "socket-b");
+    await waitFor(() => h.executions.runningCount === 2, "both calls to start");
+
+    await postHeaderlessCancel(h.url, 7);
+
+    expect(h.executions.cancelled).toEqual([]);
+    expect(h.executions.runningCount).toBe(2);
+    await Promise.all(h.endpoint.inFlightRequests().map((request) => request.close()));
+    await Promise.all([first, second].map(async (response) => (await response).text()));
   });
 
   test.each(["response", "socket"] as const)(

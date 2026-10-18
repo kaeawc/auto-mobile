@@ -27,10 +27,89 @@ export function runWithLoopbackSessionKey<T>(sessionKey: string, fn: () => Promi
 
 type LoopbackFetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
 
-/** Wrap a fetch so each request carries the session key of the forward that issued it. */
+/** Request ids remembered per wrapped fetch: enough for every forward a pooled client has in flight. */
+const MAX_REMEMBERED_REQUEST_KEYS = 256;
+
+type JsonRpcId = string | number;
+
+function jsonRpcBodyMessages(body: RequestInit["body"]): Record<string, unknown>[] {
+  if (typeof body !== "string") {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch (error) {
+    // The SDK always sends JSON; a body that is not is not a JSON-RPC message to key.
+    logger.debug(`Loopback MCP body is not JSON: ${error}`);
+    return [];
+  }
+  const messages: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+  return messages.filter(
+    (message): message is Record<string, unknown> =>
+      !!message && typeof message === "object" && !Array.isArray(message),
+  );
+}
+
+function requestIdKey(id: unknown): string | undefined {
+  return typeof id === "string" || typeof id === "number"
+    ? `${typeof id}:${String(id)}`
+    : undefined;
+}
+
+function cancelledRequestKeys(messages: readonly Record<string, unknown>[]): string[] {
+  return messages
+    .filter((message) => message.method === "notifications/cancelled")
+    .map((message) => {
+      const params = message.params as { requestId?: JsonRpcId } | undefined;
+      return requestIdKey(params?.requestId);
+    })
+    .filter((key): key is string => key !== undefined);
+}
+
+/**
+ * Wrap a fetch so each request carries the session key of the forward that issued it.
+ *
+ * A `notifications/cancelled` is sent from the abort listener of the forward's signal, which runs
+ * in the context of whoever aborted it (the socket's cancel frame), not the forward, so the async
+ * store is empty there (#13067). The wrapper therefore remembers which session key sent each
+ * request id and gives a cancellation the key of the request it cancels.
+ */
 export function withLoopbackSessionKey(inner: LoopbackFetch): LoopbackFetch {
+  const keyByRequestId = new Map<string, string>();
+  const remember = (requestKey: string, sessionKey: string): void => {
+    keyByRequestId.delete(requestKey);
+    keyByRequestId.set(requestKey, sessionKey);
+    if (keyByRequestId.size > MAX_REMEMBERED_REQUEST_KEYS) {
+      const oldest = keyByRequestId.keys().next().value;
+      if (oldest !== undefined) {
+        keyByRequestId.delete(oldest);
+      }
+    }
+  };
+  const sessionKeyFor = (init: RequestInit | undefined): string | undefined => {
+    const messages = jsonRpcBodyMessages(init?.body);
+    const ambient = loopbackSessionKey.getStore();
+    if (ambient !== undefined) {
+      for (const message of messages) {
+        const requestKey = requestIdKey(message.id);
+        if (requestKey !== undefined && typeof message.method === "string") {
+          remember(requestKey, ambient);
+        }
+      }
+      return ambient;
+    }
+    const cancelled = cancelledRequestKeys(messages);
+    const sessionKey = cancelled
+      .map((requestKey) => keyByRequestId.get(requestKey))
+      .find((key) => key !== undefined);
+    for (const requestKey of cancelled) {
+      keyByRequestId.delete(requestKey);
+    }
+    return sessionKey;
+  };
   return (url, init) => {
-    const sessionKey = loopbackSessionKey.getStore();
+    const sessionKey = sessionKeyFor(init);
     if (sessionKey === undefined) {
       return inner(url, init);
     }

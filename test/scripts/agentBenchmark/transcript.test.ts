@@ -385,6 +385,10 @@ describe("agent benchmark transcript audit", () => {
     expect(auditTranscript(result({ num_turns: -1 }), NO_PATTERNS).parseErrors).toEqual([
       "result event has an invalid num_turns",
     ]);
+    // Past 2^53 JSON parsing has already rounded the count.
+    expect(auditTranscript(result({ num_turns: 2 ** 53 + 2 }), NO_PATTERNS).parseErrors).toEqual([
+      "result event has an invalid num_turns",
+    ]);
     expect(auditTranscript(result({ total_cost_usd: -0.1 }), NO_PATTERNS).parseErrors).toEqual([
       "result event has an invalid total_cost_usd",
     ]);
@@ -457,6 +461,19 @@ describe("agent benchmark transcript audit", () => {
     expect(auditTranscript(result([1]), NO_PATTERNS).parseErrors).toEqual([
       "result event has a malformed usage",
     ]);
+    // Safe components can still sum past 2^53 and store an imprecise total.
+    const max = Number.MAX_SAFE_INTEGER;
+    expect(
+      auditTranscript(
+        result({
+          input_tokens: max,
+          cache_creation_input_tokens: max,
+          cache_read_input_tokens: max,
+          output_tokens: 0,
+        }),
+        NO_PATTERNS,
+      ).parseErrors,
+    ).toEqual(["result event has an imprecise input token total"]);
     expect(
       auditTranscript(result({ input_tokens: 4, output_tokens: 2 }), NO_PATTERNS).parseErrors,
     ).toEqual([]);

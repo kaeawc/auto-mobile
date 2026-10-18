@@ -154,8 +154,18 @@ const USAGE_KEYS = [
   "output_tokens",
 ];
 const REQUIRED_USAGE_KEYS = ["input_tokens", "output_tokens"];
+const INPUT_TOKEN_KEYS = USAGE_KEYS.slice(0, 3);
 
-/** Usage components must be non-negative safe-integer counts. */
+/**
+ * Every count the transcript reports (turns, token counters, and their totals) must be a
+ * non-negative safe integer: a fraction is not a count, and past 2^53 a JSON number has
+ * already lost precision, so result.json and the baseline would record a wrong value.
+ */
+function isCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+/** Usage components, and the input total they sum to, must be counts (see isCount). */
 function usageErrors(usage: unknown, success: boolean): string[] {
   if (usage === undefined) {
     // A successful result always reports usage; without it the token metrics go missing.
@@ -170,13 +180,15 @@ function usageErrors(usage: unknown, success: boolean): string[] {
         (key) => `result event has no usage.${key}`,
       )
     : [];
-  const invalid = USAGE_KEYS.filter((key) => {
-    const value = usage[key];
-    // Counts: a fraction is nonsense and past 2^53 the JSON value loses precision.
-    return value !== undefined && !(Number.isSafeInteger(value) && (value as number) >= 0);
-  }).map((key) => `result event has an invalid usage.${key}`);
-  // Safe-integer components keep every sum finite, so no separate overflow check is needed.
-  return [...missing, ...invalid];
+  const invalid = USAGE_KEYS.filter((key) => usage[key] !== undefined && !isCount(usage[key])).map(
+    (key) => `result event has an invalid usage.${key}`,
+  );
+  // Safe components can still sum past 2^53, which would store an imprecise total.
+  const totals =
+    invalid.length === 0 && !isCount(sumTokens(usage, INPUT_TOKEN_KEYS))
+      ? ["result event has an imprecise input token total"]
+      : [];
+  return [...missing, ...invalid, ...totals];
 }
 
 function sumTokens(usage: unknown, keys: string[]): number | undefined {
@@ -326,7 +338,7 @@ function handleResult(event: JsonRecord, state: AuditState): void {
   if (turns === undefined && event.subtype === "success") {
     // A successful result always reports its turn count; without it the metric goes missing.
     state.audit.parseErrors.push("result event has no num_turns");
-  } else if (turns !== undefined && !(Number.isInteger(turns) && (turns as number) >= 0)) {
+  } else if (turns !== undefined && !isCount(turns)) {
     state.audit.parseErrors.push("result event has an invalid num_turns");
   }
   const cost = event.total_cost_usd;
@@ -346,11 +358,7 @@ function handleResult(event: JsonRecord, state: AuditState): void {
     durationMs: asNumber(event.duration_ms),
     finalText: asString(event.result) ?? "",
     terminalReason: asString(event.terminal_reason),
-    inputTokens: sumTokens(usage, [
-      "input_tokens",
-      "cache_creation_input_tokens",
-      "cache_read_input_tokens",
-    ]),
+    inputTokens: sumTokens(usage, INPUT_TOKEN_KEYS),
     outputTokens: sumTokens(usage, ["output_tokens"]),
   };
   if (event.permission_denials === undefined && event.subtype === "success") {

@@ -350,9 +350,17 @@ const PROXY_URLS = [
   "CLAUDE_CODE_HTTPS_PROXY",
   "CLAUDE_CODE_HTTP_PROXY",
 ];
-// The Google Cloud project Vertex bills and routes through: projects differ in quota and
-// provisioned capacity. Digested, since a project ID names an account.
-const PROVIDER_PROJECTS = ["ANTHROPIC_VERTEX_PROJECT_ID"];
+// Account and project selectors the provider SDKs read (the Vertex project, the Google Cloud
+// project, the AWS profile Bedrock's credential chain uses): accounts differ in quota and
+// provisioned capacity. Digested, since each names an account; secrets are never read.
+const PROVIDER_ACCOUNTS = [
+  "ANTHROPIC_VERTEX_PROJECT_ID",
+  "GOOGLE_CLOUD_PROJECT",
+  "GCLOUD_PROJECT",
+  "CLOUDSDK_CORE_PROJECT",
+  "AWS_PROFILE",
+  "AWS_DEFAULT_PROFILE",
+];
 const PROXY_BYPASS = ["NO_PROXY", "no_proxy"];
 // The adb server the measured MCP server reaches (MCP_PASSTHROUGH_VARIABLES): a remote adb
 // route changes every device call's latency. These name a socket or host and port, no secret.
@@ -361,7 +369,7 @@ const ADB_ENDPOINT = ["ADB_SERVER_SOCKET", "ANDROID_ADB_SERVER_ADDRESS", "ANDROI
 /**
  * A non-secret identity of the backend Claude will use: which provider is selected, the
  * host and a digest of the path (never credentials, the path itself, or the query) of any
- * provider base URL or proxy, a digest of the Vertex project, the proxy bypass list, regions
+ * provider base URL or proxy, digests of the account and project selectors, the proxy bypass list, regions
  * and service tiers, the adb server endpoint,
  * and model-routing variables. Provider settings pass through to Claude on purpose, so they are recorded
  * rather than scrubbed: the same model through another backend can differ in latency.
@@ -394,7 +402,7 @@ export function providerIdentity(env: Record<string, string | undefined>): strin
   return [
     ...PROVIDER_FLAGS.filter(set).map((key) => `${key}=${env[key]}`),
     ...[...urls, ...PROXY_URLS].filter(set).map((key) => `${key}=${host(env[key] as string)}`),
-    ...PROVIDER_PROJECTS.filter(set).map(
+    ...PROVIDER_ACCOUNTS.filter(set).map(
       (key) =>
         `${key}=sha256:${createHash("sha256")
           .update(env[key] as string)

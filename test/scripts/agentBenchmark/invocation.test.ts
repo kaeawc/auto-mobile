@@ -207,6 +207,10 @@ describe("agent benchmark provider identity", () => {
     });
     expect(vertex).toContain(`ANTHROPIC_VERTEX_PROJECT_ID=sha256:${pathDigest("my-project")}`);
     expect(vertex).not.toContain("my-project");
+    // The AWS profile picks Bedrock's account through the credential chain.
+    expect(providerIdentity({ CLAUDE_CODE_USE_BEDROCK: "1", AWS_PROFILE: "team-a" })).toContain(
+      `AWS_PROFILE=sha256:${pathDigest("team-a")}`,
+    );
     // Every Claude/API/MCP/Bash timeout or watchdog override is run-shaping.
     for (const key of [
       "API_TIMEOUT_MS",

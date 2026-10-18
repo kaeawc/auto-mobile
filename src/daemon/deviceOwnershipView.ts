@@ -5,6 +5,7 @@ import { sortedReaddirSync } from "../utils/io";
 import { isProcessRunning } from "../utils/processLiveness";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
+import { toActionableError } from "../models/ActionableError";
 import {
   ctrlProxyForwardLeaseDir,
   deviceIdFromCtrlProxyForwardLeaseFileName,
@@ -203,9 +204,13 @@ export function createDefaultDeviceOwnershipSources(
         return deviceId === undefined ? [] : [{ platform, deviceId }];
       });
     } catch (error) {
-      // A directory that was never created simply means nothing claimed through it.
-      logger.debug(`ownership view cannot list ${dir}: ${errorMessage(error)}`);
-      return [];
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        // A directory that was never created simply means nothing claimed through it.
+        logger.debug(`ownership view: ${dir} does not exist: ${errorMessage(error)}`);
+        return [];
+      }
+      // EACCES/EIO must not read as "nothing claimed": the doctor check reports the failure.
+      throw toActionableError(error, `Cannot list device ownership directory ${dir}`);
     }
   };
 

@@ -57,7 +57,7 @@
 4565	src/features/observe/ios/IOSCtrlProxyClient.ts
 2136	src/features/observe/output/ObserveResultOutput.ts
 1693	src/features/observe/output/SkeletonProjection.ts
-1429	src/features/performance/PerformanceMonitor.ts
+1439	src/features/performance/PerformanceMonitor.ts
 1223	src/features/preferences/AppPreferences.ts
 1291	src/features/prototype/prototypeSpec.ts
 1271	src/features/prototype/prototypeValidation.ts

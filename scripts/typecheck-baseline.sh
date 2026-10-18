@@ -46,11 +46,15 @@
 # already gates this step on `ts_changed`, so native-only PRs skip it entirely.)
 #
 # Scope: `tsconfig.json` includes `src` and compile-only `test/**/*.typecheck.ts`
-# contract fixtures. Runtime test files remain outside this gate; extending
-# coverage to them would need a separate test-scoped tsconfig and its own baseline.
+# contract fixtures. Runtime test files are covered by a second, independent pass
+# (issue #11787): `--project=test` runs the same gate over `tsconfig.test.json`
+# (every `test/**/*.ts`) against its own baseline,
+# scripts/typecheck-test-baseline.txt. Same normalization, swap-guard and
+# one-way ratchet; the burn-down of the recorded test errors is separate work.
 #
 # Usage:
 #   scripts/typecheck-baseline.sh                     # check mode (CI gate)
+#   scripts/typecheck-baseline.sh --project=test      # same gate over test/
 #   scripts/typecheck-baseline.sh --update            # regenerate (refuses to grow)
 #   scripts/typecheck-baseline.sh --update --allow-grow  # regenerate, allow growth
 
@@ -63,7 +67,8 @@ export LC_ALL=C
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # TYPECHECK_BASELINE overrides the baseline location (used by the BATS tests so
 # they never touch the committed baseline).
-BASELINE="${TYPECHECK_BASELINE:-$ROOT/scripts/typecheck-baseline.txt}"
+DEFAULT_BASELINE="$ROOT/scripts/typecheck-baseline.txt"
+TSCONFIG="tsconfig.json"
 cd "$ROOT"
 
 MODE="check"
@@ -72,12 +77,17 @@ for arg in "$@"; do
   case "$arg" in
     --update) MODE="update" ;;
     --allow-grow) ALLOW_GROW="true" ;;
+    --project=test)
+      TSCONFIG="tsconfig.test.json"
+      DEFAULT_BASELINE="$ROOT/scripts/typecheck-test-baseline.txt"
+      ;;
     *)
-      echo "Unknown argument: $arg (expected --update and/or --allow-grow)" >&2
+      echo "Unknown argument: $arg (expected --update, --allow-grow and/or --project=test)" >&2
       exit 2
       ;;
   esac
 done
+BASELINE="${TYPECHECK_BASELINE:-$DEFAULT_BASELINE}"
 if [[ "$ALLOW_GROW" == "true" && "$MODE" != "update" ]]; then
   echo "--allow-grow is only valid with --update" >&2
   exit 2
@@ -99,7 +109,7 @@ run_tsc() {
   if [[ -n "${TYPECHECK_TSC_CMD:-}" ]]; then
     eval "$TYPECHECK_TSC_CMD" 2>&1
   else
-    bunx tsgo --noEmit -p tsconfig.json 2>&1
+    bunx tsgo --noEmit -p "$TSCONFIG" 2>&1
   fi
 }
 

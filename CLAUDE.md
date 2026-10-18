@@ -173,6 +173,13 @@ bun run typecheck             # gate: fail on NEW type errors (CI runs this)
 bun run typecheck:update      # regenerate the baseline after fixing errors
 ```
 
+Test files get the same gate (issue #11787): `bun run typecheck:test` checks every
+`test/**/*.ts` via `tsconfig.test.json` against `scripts/typecheck-test-baseline.txt`
+(same `# generated-with:` header, signature keys and one-way ratchet; refresh with
+`bun run typecheck:test:update`, which also refuses to grow without
+`bash scripts/typecheck-baseline.sh --project=test --update --allow-grow`). It runs in CI
+beside `typecheck`; burning the recorded test errors down is separate work.
+
 When you FIX type errors, run `bun run typecheck:update` and commit the smaller
 baseline — it is a one-way ratchet (`--update` refuses to grow it without
 `-- --allow-grow`). When you INTRODUCE a new error the gate prints it; fix it, or

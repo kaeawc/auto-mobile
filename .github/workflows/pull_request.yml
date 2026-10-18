@@ -2249,6 +2249,12 @@ jobs:
         if: needs.detect-changes.outputs.ts_changed == 'true'
         run: bun run typecheck
 
+      # Second pass over every test/**/*.ts (issue #11787) against its own
+      # count baseline; same one-way ratchet as the gate above.
+      - name: "Run Test Typecheck Gate"
+        if: needs.detect-changes.outputs.ts_changed == 'true'
+        run: bun run typecheck:test
+
       - name: "Run Build"
         shell: bash
         env:

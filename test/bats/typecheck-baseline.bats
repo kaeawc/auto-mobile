@@ -455,3 +455,24 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"no new type errors"* ]]
 }
+
+@test "--project=test type-checks tsconfig.test.json against its own baseline (issue #11787)" {
+  unset TYPECHECK_BASELINE
+  grep -q 'test/\*\*/\*.ts' "$REPO_ROOT/tsconfig.test.json"
+  run grep -n 'TSCONFIG="tsconfig.test.json"' "$SCRIPT"
+  [ "$status" -eq 0 ]
+  run grep -n 'typecheck-test-baseline.txt' "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -f "$REPO_ROOT/scripts/typecheck-test-baseline.txt" ]
+  grep -q '^# generated-with: tsgo' "$REPO_ROOT/scripts/typecheck-test-baseline.txt"
+}
+
+@test "--project=test gate fails on a new error and passes when unchanged" {
+  TYPECHECK_TSC_CMD="$FIXTURE_TSC" bash "$SCRIPT" --project=test --update
+  TYPECHECK_TSC_CMD="$FIXTURE_TSC" run bash "$SCRIPT" --project=test
+  [ "$status" -eq 0 ]
+  local more="$FIXTURE_TSC"' && printf "%s\n" "test/z.test.ts(2,2): error TS2554: Expected 1 arguments, but got 2."'
+  TYPECHECK_TSC_CMD="$more" run bash "$SCRIPT" --project=test
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NEW TypeScript error"* ]]
+}

@@ -9,7 +9,8 @@ import {
   getStructuredField,
   StructuredToolResponse,
 } from "../../src/utils/toolUtils";
-import { ObserveToolPayload, SwipeOnToolPayload } from "../../src/models";
+import { ObserveToolPayload, SwipeOnToolPayload, type ViewHierarchyResult } from "../../src/models";
+import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { INTERNAL_NO_DIFF_PARAM } from "../../src/server/internalToolCall";
 
 /**
@@ -44,13 +45,14 @@ describe("narrowInternalToolEnvelope (AC2 runtime-validated narrowing)", () => {
   });
 
   test("narrows a valid observe envelope keyed to the observe payload type", () => {
-    const hierarchy = { hierarchy: { node: {} } };
+    const hierarchy: ViewHierarchyResult = { hierarchy: { node: {} } };
     const response: unknown = createStructuredToolResponse<ObserveToolPayload>({
+      ...loadAndroidHomeObserve().observe,
       viewHierarchy: hierarchy,
-    } as unknown as ObserveToolPayload);
+    });
 
     const envelope = narrowInternalToolEnvelope("observe", response);
-    expect(getStructuredField(envelope, "viewHierarchy")).toBe(hierarchy as never);
+    expect(getStructuredField(envelope, "viewHierarchy")).toBe(hierarchy);
   });
 
   test("returns undefined for null / undefined responses", () => {

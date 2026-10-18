@@ -30,6 +30,9 @@ import {
   type InMemoryNavManagerHarness,
 } from "../helpers/navigationTestHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { ObserveResult } from "../../src/models";
+import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
 
 describe("Android navigation graph workflow (#4459)", () => {
@@ -138,34 +141,32 @@ describe("Android navigation graph workflow (#4459)", () => {
         return createJSONToolResponse({ success: true });
       },
     );
-    const explore = new Explore(
-      device,
-      { executeCommand: async () => "" } as never,
-      timer,
-      sessionManager,
-    );
-    (explore as any).observeScreen = {
-      execute: async () => ({
+    const explore = new Explore(device, new FakeAdbExecutor(), timer, sessionManager);
+    explore.observeScreen = {
+      execute: async (): Promise<ObserveResult> => ({
+        ...loadAndroidHomeObserve().observe,
         viewHierarchy: {
           hierarchy: {
-            node: [
-              {
-                $: {
-                  class: "android.widget.Button",
-                  text: "Settings",
-                  "resource-id": "com.example:id/settings",
-                  clickable: "true",
-                  enabled: "true",
+            node: {
+              node: [
+                {
+                  $: {
+                    class: "android.widget.Button",
+                    text: "Settings",
+                    "resource-id": "com.example:id/settings",
+                    clickable: "true",
+                    enabled: "true",
+                  },
+                  bounds: { left: 0, top: 0, right: 100, bottom: 50 },
                 },
-                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-              },
-            ],
+              ],
+            },
           },
           packageName: appId,
         },
       }),
     };
-    (explore as any).performInteraction = async () => {
+    explore.performInteraction = async () => {
       sessionManager.recordToolCall("tapOn", {
         text: "Settings",
         action: "tap",

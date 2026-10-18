@@ -10,6 +10,7 @@ import {
   type DeviceDescriptionInput,
 } from "../../src/server/deviceDescription";
 import type { DeviceInfo } from "../../src/models";
+import { formFactorFrom } from "../../src/models/formFactor";
 
 type Assert<T extends true> = T;
 type ProjectionCanonicalExact<T> = Assert<
@@ -712,16 +713,18 @@ describe("device description projections", () => {
     ["tablet", "tablet"],
     ["foldable", "foldable"],
     [undefined, "unknown"],
-    [null, "unknown"],
-    ["watch", "unknown"],
-  ])("maps form factor %p to %s", (value, expected) => {
-    const image = {
+  ] as const)("maps form factor %p to %s", (value, expected) => {
+    const image: DeviceInfo = {
       name: "Form factor fixture",
       platform: "android",
       isRunning: false,
       formFactor: value,
-    } as unknown as DeviceInfo;
+    };
     expect(describeDevice({ kind: "image", image }).formFactor).toBe(expected);
+  });
+
+  test.each([null, "watch"])("maps out-of-vocabulary form factor hint %p to unknown", (hint) => {
+    expect(formFactorFrom({ hint })).toBe("unknown");
   });
 
   test("normalizes missing form factors without adding a display alias", () => {

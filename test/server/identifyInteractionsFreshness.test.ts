@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { IdentifyInteractions } from "../../src/features/observe/IdentifyInteractions";
 import { ActionableError, type BootedDevice, type ObserveResult } from "../../src/models";
 import { registerObserveTools } from "../../src/server/observeTools";
@@ -18,7 +17,6 @@ const device: BootedDevice = {
 describe("identifyInteractions cached freshness", () => {
   let screen: FakeObserveScreen;
   let timer: FakeTimer;
-  let navigation: ReturnType<typeof spyOn<typeof NavigationGraphManager, "getInstance">>;
   let previousDebugMode: boolean;
   let analyze: ReturnType<typeof spyOn<IdentifyInteractions, "analyze">>;
 
@@ -63,14 +61,12 @@ describe("identifyInteractions cached freshness", () => {
     previousDebugMode = isDebugModeEnabled();
     setDebugModeEnabled(true);
     // Freshness only reads the current screen; avoid unrelated database migrations.
-    navigation = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
-    );
     timer = new FakeTimer();
     screen = new FakeObserveScreen();
     analyze = spyOn(IdentifyInteractions.prototype, "analyze");
     registerObserveTools({
       timer,
+      navigationGraph: () => new FakeNavigationGraphManager(),
       createScreen: () => ({
         execute: screen.execute.bind(screen),
         executeDeviceRead: () => screen.execute(),
@@ -86,7 +82,6 @@ describe("identifyInteractions cached freshness", () => {
     ToolRegistry.clearTools();
     setDebugModeEnabled(previousDebugMode);
     timer.reset();
-    navigation.mockRestore();
   });
 
   test("refetches stale usable cache exactly once and analyzes fresh elements", async () => {

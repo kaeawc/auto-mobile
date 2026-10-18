@@ -151,7 +151,6 @@
 8	test/plan/planExecutorSessionRouting.test.ts
 2	test/planUtils.test.ts
 1	test/server/TopLevelUnionFlattener.test.ts
-2	test/server/androidNavigationWorkflow.integration.test.ts
 10	test/server/appFileService.test.ts
 14	test/server/deviceSnapshotManager.test.ts
 12	test/server/deviceSnapshotResources.test.ts

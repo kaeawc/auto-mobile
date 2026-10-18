@@ -465,9 +465,11 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
         : await readObservationForInteractions(
             dependencies.createScreen?.(device) ?? new RealObserveScreen(device),
           );
-      const navigationGraph = args.sessionUuid
-        ? NavigationGraphManager.getInstanceForSession(args.sessionUuid)
-        : NavigationGraphManager.getInstance();
+      const navigationGraph = dependencies.navigationGraph
+        ? dependencies.navigationGraph(args.sessionUuid)
+        : args.sessionUuid
+          ? NavigationGraphManager.getInstanceForSession(args.sessionUuid)
+          : NavigationGraphManager.getInstance();
       const currentScreen = navigationGraph.getCurrentScreen();
       const navigationEdges =
         args.includeContext?.navigationGraph !== false && currentScreen

@@ -13,6 +13,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceReplacement } from "../../src/daemon/deviceReplacement";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError, type DeviceInfo } from "../../src/models";
@@ -297,7 +298,7 @@ describe("a failed start does not stop the device it booted once another session
         throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
       };
       const handoff = spyOn(
-        DevicePool.prototype as unknown as { cancelOldDeviceWorkForSystemUiAnr(): Promise<void> },
+        DeviceReplacement.prototype,
         "cancelOldDeviceWorkForSystemUiAnr",
       ).mockRejectedValue(new Error("handoff failed"));
 

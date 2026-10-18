@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -11,7 +11,6 @@ import {
   sessionReleasedDuringCallPayload,
 } from "../../src/server/deviceSessionResult";
 import { DaemonConnectionSessionReleasedError } from "../../src/daemon/daemonMcpProxy";
-import { DaemonState } from "../../src/daemon/daemonState";
 import { TerminalSessionError, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { isIdleReleaseReason, type SessionReleaseReason } from "../../src/daemon/releaseReasons";
@@ -215,19 +214,15 @@ const surfaces: Surface[] = [
     reasonKey: "reason",
     holder: (reason) => {
       const ended = new TerminalSessionError(SESSION, snapshot(reason));
-      const state = spyOn(DaemonState, "getInstance").mockReturnValue({
-        isInitialized: () => true,
-        getSessionManager: () => ({ peekTerminalAnswerForEndedSession: () => ended }),
-      } as unknown as DaemonState);
-      try {
-        return planBaseEndFields(SESSION, false, {
-          error: String(ended),
-          stepIndex: 0,
-          tool: "homeScreen",
-        }).details as Holder;
-      } finally {
-        state.mockRestore();
-      }
+      return planBaseEndFields(
+        SESSION,
+        false,
+        { error: String(ended), stepIndex: 0, tool: "homeScreen" },
+        {
+          isInitialized: () => true,
+          getSessionManager: () => ({ peekTerminalAnswerForEndedSession: () => ended }),
+        },
+      ).details as Holder;
     },
   },
   {

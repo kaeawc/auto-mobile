@@ -9,7 +9,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
 import { RegistryBindingExclusion } from "../../src/daemon/sessionBroker/provisioning/exclusion";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { listBootedDevicesForIdeAction } from "../../src/daemon/ideActionDeviceDiscovery";
 import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { BootedDevice } from "../../src/models";
 import type { BootedDeviceDescription } from "../../src/server/deviceDescription";
@@ -878,11 +878,6 @@ describe("every inventory surface gives one answer per discovery-source outcome 
         getDeviceSessionRegistry: () => ({ list: () => [] }),
       },
     );
-    const ideLookup = (
-      UnixSocketServer.prototype as unknown as {
-        listBootedDevicesForIdeAction(p: "android" | "ios", serial: string): Promise<unknown>;
-      }
-    ).listBootedDevicesForIdeAction;
     const select = createSetActiveDeviceHandler({
       resumeCtrlProxy: async () => {},
       transportWait: {
@@ -932,12 +927,14 @@ describe("every inventory surface gives one answer per discovery-source outcome 
       ideRefusesAbsentSerialOf: (
         await Promise.all(
           ALL_SOURCES.map((source) =>
-            ideLookup
-              .call({ daemonState }, source === "android" ? "android" : "ios", ABSENT[source])
-              .then(
-                () => [],
-                (error: unknown) => [`${source}:${codeOf(error)}`],
-              ),
+            listBootedDevicesForIdeAction(
+              daemonState,
+              source === "android" ? "android" : "ios",
+              ABSENT[source],
+            ).then(
+              () => [],
+              (error: unknown) => [`${source}:${codeOf(error)}`],
+            ),
           ),
         )
       ).flat(),

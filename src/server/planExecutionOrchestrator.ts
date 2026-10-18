@@ -33,7 +33,7 @@ import {
   registerDeviceLabelMap,
 } from "./deviceLabelMapping";
 import { importPlanFromYaml, executePlan } from "../utils/planUtils";
-import { DaemonState } from "../daemon/daemonState";
+import { DaemonState, type PlanEndDaemonState } from "../daemon/daemonState";
 import { DAEMON_SHUTTING_DOWN_ERROR_CODE, INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import {
   brokerConnectionPlanLabelRefusal,
@@ -294,8 +294,8 @@ export function planBaseEndFields(
   baseSessionUuid: string | undefined,
   planSucceeded: boolean,
   failedStep?: PlanExecutionResult["failedStep"],
+  daemonState: PlanEndDaemonState = DaemonState.getInstance(),
 ): Pick<ExecutePlanResult, "code" | "retryable" | "nextAction" | "details"> {
-  const daemonState = DaemonState.getInstance();
   if (planSucceeded || !baseSessionUuid || !failedStep || !daemonState.isInitialized()) {
     return {};
   }

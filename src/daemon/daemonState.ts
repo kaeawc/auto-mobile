@@ -19,6 +19,12 @@ export interface DaemonStateLike {
   getDeviceSessionRegistry(): DeviceSessionRegistry;
 }
 
+/** The slice of daemon state a failed plan reads to explain a lost session base. */
+export interface PlanEndDaemonState {
+  isInitialized(): boolean;
+  getSessionManager(): Pick<SessionManager, "peekTerminalAnswerForEndedSession">;
+}
+
 /**
  * Singleton for accessing daemon state
  *

@@ -1,27 +1,26 @@
 import { useRealLogSinks } from "../helpers/realLogSinks";
 import { describe, expect, test, spyOn } from "bun:test";
 import fs from "fs";
-import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LogLevel, parseAutomobileLogLevel, resolveProcessLogPrefix } from "../../src/utils/logger";
+import { FakeLogWriteStream, type WriteDone } from "../fakes/FakeLogWriteStream";
 
 useRealLogSinks();
 
-class FakeLogStream extends EventEmitter {
+class FakeLogStream extends FakeLogWriteStream {
   writableFinished = false;
-  destroyed = false;
-  writable = true;
+  override destroyed = false;
   readonly writes: string[] = [];
   endCalls = 0;
 
-  write(chunk: unknown, callback?: (error: Error | null) => void): boolean {
+  protected override recordWrite(chunk: unknown, callback: WriteDone | undefined): boolean {
     this.writes.push(String(chunk));
     queueMicrotask(() => callback?.(null));
     return true;
   }
 
-  end(callback?: () => void): this {
+  override end(callback?: () => void): this {
     this.endCalls += 1;
     this.writableFinished = true;
     queueMicrotask(() => {
@@ -173,9 +172,7 @@ describe("AUTOMOBILE_LOG_LEVEL is applied at process start (issue #3845)", () =>
   test("close waits for queued file-log writes", async () => {
     const stream = new FakeLogStream();
     const logFileExists = spyOn(fs, "existsSync").mockReturnValue(false);
-    const createWriteStream = spyOn(fs, "createWriteStream").mockReturnValue(
-      stream as unknown as fs.WriteStream,
-    );
+    const createWriteStream = spyOn(fs, "createWriteStream").mockReturnValue(stream);
 
     try {
       const mod = await loggerWithEnvLevel("error");
@@ -201,9 +198,7 @@ describe("AUTOMOBILE_LOG_DIR", () => {
     const logDir = join(root, "logs");
     const dataDir = join(root, "data");
     const stream = new FakeLogStream();
-    const createWriteStream = spyOn(fs, "createWriteStream").mockReturnValue(
-      stream as unknown as fs.WriteStream,
-    );
+    const createWriteStream = spyOn(fs, "createWriteStream").mockReturnValue(stream);
 
     try {
       const mod = await loggerWithLogDirectory(logDir, dataDir);

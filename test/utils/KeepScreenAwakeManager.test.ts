@@ -5,7 +5,7 @@ import {
   type KeepScreenAwakeState,
 } from "../../src/utils/KeepScreenAwakeManager";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
-import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { ExecResult } from "../../src/models";
 import type { BootedDevice } from "../../src/models";
 import { logger } from "../../src/utils/logger";
@@ -35,11 +35,13 @@ interface FakeAdbOptions {
   rejectAt?: Array<{ match: string; occurrence: number }>;
 }
 
-class FakeAdb implements Partial<AdbExecutor> {
+class FakeAdb extends FakeAdbExecutor {
   calls: string[] = [];
-  constructor(private readonly opts: FakeAdbOptions = {}) {}
+  constructor(private readonly opts: FakeAdbOptions = {}) {
+    super();
+  }
 
-  async executeCommand(command: string): Promise<ExecResult> {
+  override async executeCommand(command: string): Promise<ExecResult> {
     this.calls.push(command);
     const occurrences = this.calls.filter((call) => call.includes(command)).length;
     if (this.opts.reject?.some((r) => command.includes(r))) {
@@ -64,7 +66,7 @@ class FakeAdb implements Partial<AdbExecutor> {
 }
 
 const makeFactory = (adb: FakeAdb): AdbClientFactory => ({
-  create: () => adb as unknown as AdbExecutor,
+  create: () => adb,
 });
 
 const physicalDevice: BootedDevice = {

@@ -1,19 +1,16 @@
 import { useRealLogSinks } from "../helpers/realLogSinks";
 import { describe, expect, test, spyOn } from "bun:test";
 import fs, { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { FakeLogWriteStream, type WriteDone } from "../fakes/FakeLogWriteStream";
 
 useRealLogSinks();
 
 let importCounter = 0;
 
-class FailingLogStream extends EventEmitter {
-  destroyed = false;
-  writable = true;
-
-  write(_chunk: unknown, callback?: (error: Error | null) => void): boolean {
+class FailingLogStream extends FakeLogWriteStream {
+  protected override recordWrite(_chunk: unknown, callback: WriteDone | undefined): boolean {
     queueMicrotask(() => callback?.(new Error("ENOSPC")));
     return false;
   }
@@ -158,7 +155,7 @@ describe("structured logging", () => {
   test("keeps the stderr record when the file sink fails in both mode", async () => {
     const logDir = mkdtempSync(join(tmpdir(), "am-logger-both-"));
     const createWriteStream = spyOn(fs, "createWriteStream").mockReturnValue(
-      new FailingLogStream() as unknown as fs.WriteStream,
+      new FailingLogStream(),
     );
     const mod = await loggerWithEnv("json", "both", logDir);
     const stderr: string[] = [];

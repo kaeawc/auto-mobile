@@ -4,7 +4,6 @@ import {
   getStructuredField,
   getStructuredPayload,
   throwIfAborted,
-  type StructuredToolResponse,
 } from "../../src/utils/toolUtils";
 
 // Property-based tests. See Backoff.property.test.ts for the pinned-seed rationale.
@@ -15,8 +14,7 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 const payloadObject = fc.dictionary(fc.string({ maxLength: 8 }), fc.jsonValue(), { maxKeys: 6 });
 // structuredContent may be a valid object payload, a non-object, or absent.
 const structuredContent = fc.oneof(payloadObject, fc.string(), fc.integer(), fc.constant(null));
-const asResponse = (sc: unknown): StructuredToolResponse<Record<string, unknown>> =>
-  ({ structuredContent: sc }) as unknown as StructuredToolResponse<Record<string, unknown>>;
+const asResponse = (sc: unknown): { structuredContent: unknown } => ({ structuredContent: sc });
 
 describe("getStructuredPayload (property-based)", () => {
   test("returns the structuredContent object by identity, else undefined", () => {

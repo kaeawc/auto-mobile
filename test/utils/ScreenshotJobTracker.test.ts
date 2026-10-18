@@ -1,3 +1,4 @@
+import { getEventListeners } from "node:events";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
@@ -664,41 +665,25 @@ describe("ScreenshotJobTracker", () => {
   });
 
   test("removes its abort listener from the long-lived parent signal once the job settles", async () => {
-    const listeners = new Set<EventListenerOrEventListenerObject>();
-    const parentSignal = {
-      aborted: false,
-      addEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
-        listeners.add(cb);
-      },
-      removeEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
-        listeners.delete(cb);
-      },
-    } as unknown as AbortSignal;
+    const parentSignal = new AbortController().signal;
+    const abortListenerCount = (): number => getEventListeners(parentSignal, "abort").length;
 
     const job = ScreenshotJobTracker.startJob("device-d", async () => ({ success: true }), {
       parentSignal,
     });
     // While in flight the job holds exactly one abort listener on the parent.
-    expect(listeners.size).toBe(1);
+    expect(abortListenerCount()).toBe(1);
 
     await job.promise;
     await Promise.resolve();
 
     // Cleanup prevents listener accumulation across every observe poll.
-    expect(listeners.size).toBe(0);
+    expect(abortListenerCount()).toBe(0);
   });
 
   test("clear aborts every pending job, removes their parent-signal listeners, and empties the tracker", async () => {
-    const listeners = new Set<EventListenerOrEventListenerObject>();
-    const parentSignal = {
-      aborted: false,
-      addEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
-        listeners.add(cb);
-      },
-      removeEventListener: (_type: string, cb: EventListenerOrEventListenerObject) => {
-        listeners.delete(cb);
-      },
-    } as unknown as AbortSignal;
+    const parentSignal = new AbortController().signal;
+    const abortListenerCount = (): number => getEventListeners(parentSignal, "abort").length;
 
     const hang = (signal: AbortSignal) =>
       new Promise<{ success: boolean; error?: string }>((resolve) => {
@@ -719,7 +704,7 @@ describe("ScreenshotJobTracker", () => {
     expect(ScreenshotJobTracker.isPending("device-1")).toBe(true);
     expect(ScreenshotJobTracker.isPending("device-2")).toBe(true);
     // The parent-signal-backed job holds exactly one abort listener while live.
-    expect(listeners.size).toBe(1);
+    expect(abortListenerCount()).toBe(1);
 
     ScreenshotJobTracker.clear();
 
@@ -730,7 +715,7 @@ describe("ScreenshotJobTracker", () => {
     expect(ScreenshotJobTracker.isPending("device-1")).toBe(false);
     expect(ScreenshotJobTracker.isPending("device-2")).toBe(false);
     // ...and the long-lived parent-signal listener is removed to prevent leaks.
-    expect(listeners.size).toBe(0);
+    expect(abortListenerCount()).toBe(0);
 
     // The aborted runners still resolve with the cancellation result.
     const [rA, rB] = await Promise.all([jobA.promise, jobB.promise]);

@@ -5,6 +5,9 @@ export const FIXED_CTRL_PROXY_PORT_START = 8765;
 /** Last host port of the default CtrlProxy range (100 devices). */
 export const FIXED_CTRL_PROXY_PORT_END = 8864;
 
+type FetchInput = Parameters<typeof fetch>[0];
+type FetchInit = Parameters<typeof fetch>[1];
+
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
 /** Whether `input` targets a loopback host port in the fixed CtrlProxy range. */
@@ -39,17 +42,17 @@ export function installFixedCtrlProxyPortFetchGuard(
   getTestFile: () => string,
 ): void {
   const original = target.fetch;
-  const guarded = ((input: unknown, init?: unknown) => {
+  const guarded = (input: FetchInput, init?: FetchInit): Promise<Response> => {
     if (isUnitTestPath(getTestFile()) && isFixedCtrlProxyPortUrl(input)) {
+      const dialed = input instanceof Request ? input.url : String(input);
       return Promise.reject(
         new TypeError(
-          `Unable to connect: unit tests must not dial fixed CtrlProxy host ports (${String(
-            (input as { url?: string }).url ?? input,
-          )}); inject a fake fetch (#11106)`,
+          `Unable to connect: unit tests must not dial fixed CtrlProxy host ports (${dialed}); inject a fake fetch (#11106)`,
         ),
       );
     }
-    return (original as (...args: unknown[]) => Promise<Response>)(input, init);
-  }) as unknown as typeof fetch;
+    return original(input, init);
+  };
+  guarded.preconnect = original.preconnect;
   target.fetch = guarded;
 }

@@ -1,3 +1,4 @@
+import { createObserveResultForTest } from "../features/observe/flatHierarchyBuilders";
 import {
   afterAll,
   afterEach,
@@ -129,12 +130,14 @@ describe("detached promise rejection ownership", () => {
       error,
     );
     const tracker = new RecompositionTracker(timer, () => nav.db);
-    const observation = {
+    const observation = createObserveResultForTest({
       activeWindow: { appId: "com.promise.recomposition" },
       viewHierarchy: {
-        hierarchy: { node: [{ recomposition: { id: "a", total: 1, rolling1sAverage: 1 } }] },
+        hierarchy: {
+          node: { node: [{ recomposition: { id: "a", total: 1, rolling1sAverage: 1 } }] },
+        },
       },
-    } as unknown as ObserveResult;
+    });
     try {
       await tracker.processObservation(observation, device);
       expect(observation.recompositionSummary?.totalRecompositions).toBe(1);

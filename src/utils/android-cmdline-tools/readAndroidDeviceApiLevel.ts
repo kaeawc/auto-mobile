@@ -13,16 +13,22 @@ import { defaultTimer, type Timer } from "../SystemTimer";
  * @param timer - Clock for charging the fallback against the remaining budget;
  *   injectable so tests stay deterministic.
  */
+/**
+ * What this read needs: `executeCommand` for the getprop fallback, plus the optional
+ * `getAndroidApiLevel` that `AdbClient` (but not every executor) exposes.
+ */
+export type ApiLevelReader = Pick<AdbExecutor, "executeCommand"> & {
+  getAndroidApiLevel?: (timeoutMs?: number, signal?: AbortSignal) => Promise<number | null>;
+};
+
 export async function readAndroidDeviceApiLevel(
-  adb: AdbExecutor,
+  adb: ApiLevelReader,
   timeoutMs?: number,
   timer: Timer = defaultTimer,
   signal?: AbortSignal,
 ): Promise<number | null> {
   throwIfAborted(signal);
-  const extended = adb as AdbExecutor & {
-    getAndroidApiLevel?: (timeoutMs?: number, signal?: AbortSignal) => Promise<number | null>;
-  };
+  const extended = adb;
   // Single deadline for the whole read. The fallback is charged against what is
   // LEFT after the primary probe, never a fresh full budget.
   const deadline = timeoutMs === undefined ? undefined : timer.now() + timeoutMs;

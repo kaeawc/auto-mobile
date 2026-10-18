@@ -6,7 +6,8 @@ export function shouldStripSources(env: Record<string, string | undefined>): boo
 }
 
 export interface SourceMap {
-  sources: string[];
+  // Absent in a malformed map; optimizeSourceMap checks before it reads.
+  sources?: string[];
   sourcesContent?: unknown;
   [key: string]: unknown;
 }

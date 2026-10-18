@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionableError } from "../../src/models/ActionableError";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import { FakeLogWriteStream, type WriteDone } from "../fakes/FakeLogWriteStream";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 useRealLogSinks();
@@ -30,14 +31,14 @@ if (previousSink === undefined) {
  * race (issue #6149). `finish` and `close` are modelled separately so the test
  * can withhold `close` and prove the promise stays pending on `finish` alone.
  */
-class FakeLogStream extends EventEmitter {
+class FakeLogStream extends FakeLogWriteStream {
   ended = false;
   // Mirrors Node/Bun WriteStream's `closed` getter: false until the fd has
   // actually been released, at which point it flips true and stays true —
   // `close` never fires a second time on the same stream.
   closed = false;
 
-  end(callback?: () => void): void {
+  override end(callback?: () => void): this {
     this.ended = true;
     // The end callback fires at writable-completion time, i.e. the same instant
     // as `finish` — well before the fd is released.
@@ -45,6 +46,12 @@ class FakeLogStream extends EventEmitter {
       queueMicrotask(callback);
     }
     queueMicrotask(() => this.emit("finish"));
+    return this;
+  }
+
+  /** Real `destroy(error)` would re-emit `error` into a listener that already consumed it. */
+  override destroy(): this {
+    return this;
   }
 
   emitFinish(): void {
@@ -65,11 +72,10 @@ class FakeLogStream extends EventEmitter {
 }
 
 class WritableFakeLogStream extends FakeLogStream {
-  destroyed = false;
-  writable = true;
+  override destroyed = false;
   writesAfterEnd = 0;
 
-  write(_chunk: unknown, callback?: (error: Error | null) => void): boolean {
+  protected override recordWrite(_chunk: unknown, callback: WriteDone | undefined): boolean {
     if (this.ended) {
       this.writesAfterEnd++;
       const error = new Error("write after end");
@@ -83,13 +89,15 @@ class WritableFakeLogStream extends FakeLogStream {
     return true;
   }
 
-  override end(callback?: () => void): void {
+  override end(callback?: () => void): this {
     super.end(callback);
     queueMicrotask(() => this.emitClose());
+    return this;
   }
 
-  destroy(): void {
+  override destroy(): this {
     this.destroyed = true;
+    return this;
   }
 }
 
@@ -108,7 +116,7 @@ async function fileLoggerWithStreams(
   const createStream = spyOn(fs, "createWriteStream").mockImplementation(() => {
     const stream = makeStream();
     streams.push(stream);
-    return stream as unknown as fs.WriteStream;
+    return stream;
   });
   try {
     const mod = await import(`../../src/utils/logger.ts?logger-close-${instance}`);

@@ -55,7 +55,7 @@ function budgetProbe(
       probe.fallbackTimeoutMs = options?.timeoutMs;
       return ok(fallbackStdout);
     },
-  } as unknown as AdbExecutor;
+  };
   return { adb, probe };
 }
 

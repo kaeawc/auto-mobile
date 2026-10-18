@@ -4,6 +4,7 @@ import {
   createStructuredToolResponse,
   getStructuredField,
   getStructuredPayload,
+  readStructuredField,
   StructuredToolResponse,
 } from "../../src/utils/toolUtils";
 
@@ -39,9 +40,8 @@ interface SamplePayload {
   awaitTimeout?: boolean;
 }
 
-// A loose view of the accessor, used ONLY to exercise the runtime own-key guard
-// with keys the type system now (correctly) forbids passing directly.
-const looseField = getStructuredField as unknown as (response: unknown, key: string) => unknown;
+// The untyped accessor exercises the runtime own-key guard with keys the typed one forbids.
+const looseField = readStructuredField;
 
 describe("getStructuredField (typed)", () => {
   test("returns a payload field that lives under structuredContent", () => {
@@ -166,9 +166,7 @@ describe("createStructuredToolResponse typed envelope", () => {
   });
 
   test("tolerates non-object payloads without hoisting", () => {
-    const response = createStructuredToolResponse(
-      "plain-string" as unknown as { success?: boolean },
-    );
+    const response = createStructuredToolResponse("plain-string");
     expect(response.structuredContent).toBe("plain-string");
     expect("success" in response).toBe(false);
   });

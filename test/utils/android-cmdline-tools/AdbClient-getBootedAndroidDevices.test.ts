@@ -366,11 +366,7 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       spawnCalls++;
       throw new Error("must not spawn");
     }) as never);
-    (
-      adb as unknown as {
-        getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
-      }
-    ).getBaseCommandParts = () =>
+    adb.getBaseCommandParts = () =>
       new Promise((resolve) => {
         resolveBase = resolve;
       });
@@ -396,11 +392,7 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       undefined,
       timer,
     );
-    (
-      adb as unknown as {
-        getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
-      }
-    ).getBaseCommandParts = async () => {
+    adb.getBaseCommandParts = async () => {
       timer.advanceTime(100);
       return { adbPath: "adb", baseArgs: [] };
     };

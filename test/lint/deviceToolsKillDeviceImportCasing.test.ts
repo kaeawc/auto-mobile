@@ -70,8 +70,14 @@ describe("deviceTools.killDevice import casing (issue #6060)", () => {
   // casing check: do it once here.
   let pollutingSuite: AstNode;
   beforeAll(() => {
-    pollutingSuite = parseSync(POLLUTING_SUITE, readFileSync(join(ROOT, POLLUTING_SUITE), "utf8"))
-      .program as unknown as AstNode;
+    const { program } = parseSync(
+      POLLUTING_SUITE,
+      readFileSync(join(ROOT, POLLUTING_SUITE), "utf8"),
+    );
+    if (!isAstNode(program)) {
+      throw new Error(`${POLLUTING_SUITE}: parser returned a program without a node type`);
+    }
+    pollutingSuite = program;
   });
 
   test("uses the repository filename's exact casing", () => {

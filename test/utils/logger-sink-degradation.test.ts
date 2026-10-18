@@ -1,47 +1,19 @@
 import { useRealLogSinks } from "../helpers/realLogSinks";
 import { describe, expect, test, spyOn } from "bun:test";
 import fs, { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { Writable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { FakeLogWriteStream, type WriteDone } from "../fakes/FakeLogWriteStream";
 
 useRealLogSinks();
 
-/** Shape-complete `fs.WriteStream` stand-in. It extends a real `Writable` and adds the
- * members only `fs.WriteStream` has, so `createWriteStream` spies can return it uncast. */
-class FakeWriteStreamBase extends Writable {
-  bytesWritten = 0;
-  path = "fake.log";
-  pending = false;
-
-  close(callback?: (error?: NodeJS.ErrnoException | null) => void): void {
-    this.end(() => callback?.());
-  }
-
-  /** Resolves a (chunk, [encoding], [callback]) argument tail to its callback. */
-  protected static callbackOf(
-    encodingOrCallback: unknown,
-    callback: unknown,
-  ): ((error: Error | null | undefined) => void) | undefined {
-    const candidate = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
-    return typeof candidate === "function" ? (error) => candidate(error) : undefined;
-  }
-}
-
 /** A stream that constructs successfully but can be made to fail later, the
  * way a real fd surfaces EACCES/ENOSPC asynchronously after open(). */
-class AsyncFailStream extends FakeWriteStreamBase {
+class AsyncFailStream extends FakeLogWriteStream {
   /** When set, the next write fails the way a real fd does: callback error plus 'error'. */
   failWritesWith: Error | undefined;
 
-  override write(chunk: unknown, callback?: (error: Error | null | undefined) => void): boolean;
-  override write(
-    chunk: unknown,
-    encoding: BufferEncoding,
-    callback?: (error: Error | null | undefined) => void,
-  ): boolean;
-  override write(chunk: unknown, encodingOrCallback?: unknown, callback?: unknown): boolean {
-    const done = FakeWriteStreamBase.callbackOf(encodingOrCallback, callback);
+  protected override recordWrite(chunk: unknown, done: WriteDone | undefined): boolean {
     queueMicrotask(() => {
       const failure = this.failWritesWith;
       if (failure) {
@@ -70,20 +42,13 @@ class AsyncFailStream extends FakeWriteStreamBase {
  * asserted deterministically instead of racing real fs/epoll timing.
  * `finish` (writable drained) and `close` (fd released) are modelled
  * separately, since closeLogStream must wait for the latter (issue #6149). */
-class ControllableStream extends FakeWriteStreamBase {
+class ControllableStream extends FakeLogWriteStream {
   ended = false;
   readonly writes: string[] = [];
   private endCallback: (() => void) | undefined;
 
-  override write(chunk: unknown, callback?: (error: Error | null | undefined) => void): boolean;
-  override write(
-    chunk: unknown,
-    encoding: BufferEncoding,
-    callback?: (error: Error | null | undefined) => void,
-  ): boolean;
-  override write(chunk: unknown, encodingOrCallback?: unknown, callback?: unknown): boolean {
+  protected override recordWrite(chunk: unknown, done: WriteDone | undefined): boolean {
     this.writes.push(String(chunk));
-    const done = FakeWriteStreamBase.callbackOf(encodingOrCallback, callback);
     queueMicrotask(() => done?.(null));
     return true;
   }

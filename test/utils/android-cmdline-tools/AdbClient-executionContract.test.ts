@@ -97,10 +97,7 @@ describe("AdbClient retry contract", () => {
       null,
       ...autoRetrySeam(),
     );
-    const internals = client as unknown as {
-      getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
-    };
-    internals.getBaseCommandParts = async () => {
+    client.getBaseCommandParts = async () => {
       events.push("path-resolved");
       return { adbPath: "adb", baseArgs: [] };
     };

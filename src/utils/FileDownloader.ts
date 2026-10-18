@@ -30,12 +30,12 @@ export interface FileDownloader {
 }
 
 export class DefaultFileDownloader implements FileDownloader {
-  private onFirstResponseByte?: () => void;
-
   constructor(
     private readonly idGenerator: IdGenerator = defaultIdGenerator,
     private readonly execute: DownloadExec = defaultDownloadExec,
     private readonly fileSystem: DownloadFileSystem = fs,
+    /** Called when a response body first becomes readable; lets tests gate on it without a timer. */
+    private readonly onFirstResponseByte?: () => void,
   ) {}
 
   public async download(url: string, destination: string, signal?: AbortSignal): Promise<void> {
@@ -188,7 +188,7 @@ export class DefaultFileDownloader implements FileDownloader {
    * `'end'`/`'error'`, neither of which fires when the source stream is
    * merely destroyed without ending.
    */
-  private async pipeResponseToFile(response: Readable, tempDestination: string): Promise<void> {
+  async pipeResponseToFile(response: Readable, tempDestination: string): Promise<void> {
     const fileStream = createWriteStream(tempDestination);
     response.once("readable", () => this.onFirstResponseByte?.());
     await pipeline(response, fileStream);

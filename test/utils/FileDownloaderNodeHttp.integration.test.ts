@@ -5,13 +5,6 @@ import path from "node:path";
 import { DefaultFileDownloader } from "../../src/utils/FileDownloader";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
-type NodeHttpDownloader = {
-  onFirstResponseByte?: () => void;
-};
-
-const asNodeHttpDownloader = (downloader: DefaultFileDownloader): NodeHttpDownloader =>
-  downloader as unknown as NodeHttpDownloader;
-
 // Real loopback socket I/O belongs in the integration lane, not the
 // hermetic unit lane (scripts/test-ts.sh classifies by *.integration.test.ts
 // suffix). The deterministic fake-stream coverage of the response-close
@@ -103,9 +96,12 @@ describe("DefaultFileDownloader downloadWithNodeHttp (end to end, real socket)",
     const unavailable = async (command: string): Promise<void> => {
       throw Object.assign(new Error(`${command} not found`), { code: "ENOENT" });
     };
-    const downloader = new DefaultFileDownloader(new CountingIdGenerator("node"), unavailable);
-    const responseObserver = asNodeHttpDownloader(downloader);
-    responseObserver.onFirstResponseByte = markFirstByteReceived;
+    const downloader = new DefaultFileDownloader(
+      new CountingIdGenerator("node"),
+      unavailable,
+      undefined,
+      markFirstByteReceived,
+    );
 
     try {
       // The runtimes word a real mid-body socket close differently: Node's

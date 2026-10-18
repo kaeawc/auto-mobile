@@ -42,7 +42,7 @@ describe("readScreenScaleMetadata (#4548)", () => {
     // A coercible impostor (e.g. a string that survived JSON parsing) must not pass.
     expect(
       readScreenScaleMetadata({
-        nativeScale: "3" as unknown as number,
+        nativeScale: "3",
         pixelWidth: 1179,
         pixelHeight: 2553,
       }),

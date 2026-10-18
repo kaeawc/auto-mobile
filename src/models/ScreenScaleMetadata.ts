@@ -21,20 +21,23 @@ export interface ScreenScaleMetadata {
 }
 
 /**
+ * Runner JSON fields are unvalidated, so each is `unknown` until {@link readScreenScaleMetadata}
+ * accepts the whole tuple.
+ */
+export interface ScreenScaleSource {
+  nativeScale?: unknown;
+  pixelWidth?: unknown;
+  pixelHeight?: unknown;
+}
+
+/**
  * Extract complete, well-formed scale metadata from a runner hierarchy message, or null when any
  * field is missing or degenerate (which is exactly what a pre-#4548 runner produces — the Android
  * runner serializes absent optionals as JSON null, so null and undefined both mean "absent").
  * All-or-nothing: partial metadata is unusable for unit conversion, so it is never retained.
  */
 export function readScreenScaleMetadata(
-  source:
-    | {
-        nativeScale?: number | null;
-        pixelWidth?: number | null;
-        pixelHeight?: number | null;
-      }
-    | null
-    | undefined,
+  source: ScreenScaleSource | null | undefined,
 ): ScreenScaleMetadata | null {
   if (!source) {
     return null;
@@ -65,14 +68,7 @@ export function readScreenScaleMetadata(
  * three keys are omitted entirely rather than emitted as `undefined`.
  */
 export function screenScaleMetadataSpread(
-  source:
-    | {
-        nativeScale?: number | null;
-        pixelWidth?: number | null;
-        pixelHeight?: number | null;
-      }
-    | null
-    | undefined,
+  source: ScreenScaleSource | null | undefined,
 ): ScreenScaleMetadata | Record<string, never> {
   return readScreenScaleMetadata(source) ?? {};
 }

@@ -321,7 +321,7 @@ describe("ChildProcessTracker", () => {
       process.signalCode = null;
       process.killed = false;
       const stderrEmitter = new EventEmitter();
-      process.stderr = stderrEmitter as unknown as TrackedChildProcess["stderr"];
+      process.stderr = stderrEmitter;
       process.kill = () => true;
 
       const stderr: string[] = [];
@@ -343,7 +343,7 @@ describe("ChildProcessTracker", () => {
       process.signalCode = null;
       process.killed = false;
       const stderrEmitter = new EventEmitter();
-      process.stderr = stderrEmitter as unknown as TrackedChildProcess["stderr"];
+      process.stderr = stderrEmitter;
       process.kill = () => true;
 
       const stderr: string[] = [];

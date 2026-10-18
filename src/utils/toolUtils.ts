@@ -227,6 +227,21 @@ export const getStructuredField = <TPayload, K extends keyof TPayload & string>(
   return undefined;
 };
 
+/**
+ * {@link getStructuredField} for an envelope that is not statically typed (parsed JSON, a
+ * malformed upstream response): any key, `unknown` result, same own-key guard.
+ */
+export const readStructuredField = (
+  response: { structuredContent?: unknown } | null | undefined,
+  key: string,
+): unknown => {
+  const structuredContent = response?.structuredContent;
+  if (structuredContent && typeof structuredContent === "object") {
+    return Object.getOwnPropertyDescriptor(structuredContent, key)?.value;
+  }
+  return undefined;
+};
+
 /** Resolve runtime-hidden device loss before falling back to ordinary cancellation. */
 export const abortErrorFromSignal = (signal: AbortSignal, preserveReason = true): unknown =>
   deviceLostErrorFromAbortSignal(signal) ??

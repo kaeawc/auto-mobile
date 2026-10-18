@@ -878,7 +878,6 @@ export class AndroidCtrlProxyClient
     this.localPort = PortManager.allocate(this.portAllocationId, {
       reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
     });
-    AndroidCtrlProxyManager.getInstance(device);
     AndroidCtrlProxyClient.trackObserver(this);
   }
 
@@ -2630,6 +2629,9 @@ export class AndroidCtrlProxyClient
       this.lateCancelledScreenshotRequestIds.clear();
       this.releaseCtrlProxyForwardLeaseAfterConnectionSettles();
       AndroidCtrlProxyClient.activeObservers.delete(this);
+      // A closed client never reconnects, so leaving it registered would hand a
+      // stale client to the next getInstance. Only evict if still current.
+      AndroidCtrlProxyClient.registry.invalidate(this.device.deviceId, this);
     }
   }
 

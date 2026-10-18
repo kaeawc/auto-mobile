@@ -1,6 +1,9 @@
 import { warmedTests } from "./warmedTests";
 import { afterEach, beforeAll, beforeEach, spyOn } from "bun:test";
-import { registerInteractionTools } from "../../src/server/interactionTools";
+import {
+  registerInteractionTools,
+  type InteractionToolDependencies,
+} from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { logger, LogLevel } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -10,11 +13,14 @@ export { warmedTests } from "./warmedTests";
 export const cancellationTests = warmedTests;
 
 /** Register once, retaining real handler wiring even when another suite clears the registry. */
-export function cancellationHandlers(names: readonly string[]) {
+export function cancellationHandlers(
+  names: readonly string[],
+  deps: InteractionToolDependencies = {},
+) {
   type Handler = NonNullable<ReturnType<typeof ToolRegistry.getTool>>["deviceAwareHandler"];
   const handlers = new Map<string, NonNullable<Handler>>();
   beforeAll(() => {
-    registerInteractionTools();
+    registerInteractionTools(deps);
     for (const name of names) {
       const handler = ToolRegistry.getTool(name)?.deviceAwareHandler;
       if (!handler) {

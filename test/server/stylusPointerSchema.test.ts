@@ -6,7 +6,6 @@ import {
   setTapAtElementFactory,
   tapAtHandler,
   tapAtSchema,
-  type TapAtElementLike,
 } from "../../src/server/interactionTools";
 
 const device: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
@@ -58,7 +57,7 @@ describe("handlers forward the pointer to the action (#13081)", () => {
             seen.push(options.pointer);
             return { success: true, x: 1, y: 2, action: "tap" };
           },
-        }) as unknown as TapAtElementLike,
+        }) as never,
     );
 
     await tapAtHandler(device, { x: 1, y: 2, pointer: { toolType: "stylus" } });

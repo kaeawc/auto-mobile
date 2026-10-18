@@ -52,7 +52,6 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeDeviceResourceController } from "../fakes/FakeDeviceResourceController";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -77,6 +76,9 @@ import type {
   BootedDeviceDiscoveryOptions,
 } from "../../src/devices/deviceUtils";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
+import { FakeColdBootProcess } from "../fakes/FakeColdBootProcess";
+import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
@@ -313,29 +315,36 @@ function provisionedTestDevice(
   };
 }
 
+/** A cold-boot handle whose `kill` stops the booted device and emits `exit`. */
+class ProvisionBootProcess extends FakeColdBootProcess {
+  constructor(private readonly onKill: () => void) {
+    super();
+  }
+
+  override kill(): boolean {
+    this.exitCode = 0;
+    this.onKill();
+    this.emit("exit");
+    return true;
+  }
+}
+
+/** A handle whose exit-listener registration throws, so unowned cold-boot settlement rejects. */
+class ThrowingOnceProcess extends FakeColdBootProcess {
+  override once(): never {
+    throw new Error("exit listener registration failed");
+  }
+}
+
 function configureProvisionBootAndTeardown(
   manager: FakeDeviceUtils,
   platform: ProvisionTestPlatform,
 ): void {
   const deviceName = provisionTestArgs(platform).device.name;
-  let exitListener: (() => void) | undefined;
-  const processHandle: any = {
-    exitCode: null,
-    signalCode: null,
-    once: (event: string, listener: () => void) => {
-      if (event === "exit") {
-        exitListener = listener;
-      }
-      return processHandle;
-    },
-    kill: () => {
-      processHandle.exitCode = 0;
-      manager.setBootedDevices(platform, []);
-      exitListener?.();
-      return true;
-    },
-  };
-  manager.setMockChildProcess(deviceName, processHandle as any);
+  manager.setMockChildProcess(
+    deviceName,
+    new ProvisionBootProcess(() => manager.setBootedDevices(platform, [])),
+  );
   const originalWaitForDeviceReady = manager.waitForDeviceReady.bind(manager);
   manager.waitForDeviceReady = async (device, timeoutMs, childProcess, signal) => {
     const booted = await originalWaitForDeviceReady(device, timeoutMs, childProcess, signal);
@@ -3887,14 +3896,7 @@ describe("provisionDevice handler", () => {
     // Registering the exit listener throws, so the unowned cold-boot
     // settlement promise REJECTS. A lease release deferred onto it with a bare
     // `.then()` would never run.
-    deviceManager.setMockChildProcess(provisioned.device.name, {
-      exitCode: null,
-      signalCode: null,
-      once: () => {
-        throw new Error("exit listener registration failed");
-      },
-      kill: () => true,
-    } as any);
+    deviceManager.setMockChildProcess(provisioned.device.name, new ThrowingOnceProcess());
     setDeviceToolsDependencies({
       timer,
       lifecycleCoordinator,
@@ -4364,7 +4366,7 @@ describe("provisionDevice handler", () => {
       });
       const provisioned = provisionedTestDevice("android", kind === "created-deadline");
       deviceManager.setDeviceImages("android", [provisioned.device]);
-      deviceManager.setMockChildProcess(provisioned.device.name, child as unknown as ChildProcess);
+      deviceManager.setMockChildProcess(provisioned.device.name, child);
       exactProvisioner.provision = async () => provisioned;
       setDeviceToolsDependencies({
         timer,
@@ -4768,7 +4770,9 @@ describe("provisionDevice handler", () => {
     });
     expect(provisionCalls).toBe(1);
     expect(await deviceManager.listDeviceImages("android")).toEqual([]);
-    const followUp = DeviceSessionManager.createInstance({} as any);
+    const followUp = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(new FakeAdbExecutor(), deviceManager),
+    );
     await expect(followUp.ensureDeviceReady("android", "emulator-5554")).rejects.toMatchObject({
       code: "device_lost",
       deviceId: "emulator-5554",
@@ -5249,9 +5253,8 @@ describe("provisionDevice handler", () => {
     };
     deviceManager.setBootedDevices("android", [booted]);
     deviceManager.setDeviceImages("android", [avdInfo]);
-    await pool.initializeWithDevices([booted]);
     // `trackStableName` only fires for an emulator whose pooled AVD name matches.
-    (pool as any).devices.get("emulator-5554").avdName = "phone-api-36-a";
+    await pool.addDevice(booted, avdInfo);
     DaemonState.getInstance().initialize(sessionManager, pool);
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);
     setDeviceToolsDependencies({

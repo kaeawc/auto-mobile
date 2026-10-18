@@ -12,6 +12,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { BootedDevice } from "../../src/models";
+import type { BootedDeviceDescription } from "../../src/server/deviceDescription";
 import {
   getBootedDevicesForPlatforms,
   resetBootedDevicesResourceCache,
@@ -29,6 +30,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { assignBindingDevice } from "../daemon/sessionBroker/provisioning/bindingFixtures";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { createExecResult } from "../../src/utils/execResult";
@@ -65,7 +67,7 @@ const RESOURCE_ONLY_FIELDS = [
  */
 const TOOL_ONLY_FIELDS = ["transportAliases"];
 
-type Entry = Record<string, unknown> & { runtime: Record<string, unknown> };
+type Entry = BootedDeviceDescription;
 
 interface Scenario {
   name: string;
@@ -191,14 +193,14 @@ const scenarios: Scenario[] = [
       wifiAdb.setCommandResponse("getprop ro.serialno", createExecResult(usb.deviceId, ""));
       wifiAdb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
       wifiAdb.setCommandResponse("getprop ro.kernel.qemu", createExecResult("0", ""));
-      const factory = {
+      const factory: AdbClientFactory = {
         create: (device?: BootedDevice | null) => {
           if (device?.deviceId === wifi.deviceId) {
             return wifiAdb;
           }
           throw new Error("usb transport has no identity");
         },
-      } as unknown as FakeAdbClientFactory;
+      };
       const pool = poolFor(ctx, { androidAdbFactory: factory });
       await pool.initializeWithDevices([usb]);
       const rows = [usb, wifi];
@@ -266,8 +268,12 @@ function describeEntry(entries: Entry[], deviceId: string): Entry {
 
 function withoutResourceOnly(entry: Entry): Record<string, unknown> {
   return Object.fromEntries(
+    // Undefined-valued keys are absent on the wire, so the resource's in-memory rows drop them.
     Object.entries(entry).filter(
-      ([key]) => !RESOURCE_ONLY_FIELDS.includes(key) && !TOOL_ONLY_FIELDS.includes(key),
+      ([key, value]) =>
+        value !== undefined &&
+        !RESOURCE_ONLY_FIELDS.includes(key) &&
+        !TOOL_ONLY_FIELDS.includes(key),
     ),
   );
 }
@@ -319,15 +325,12 @@ describe("listDevices tool and booted resource describe a device identically", (
     const response = await ToolRegistry.getTool("listDevices")!.handler({ platform: "android" });
     const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
 
-    const fromResource = describeEntry(
-      resource.devices as unknown as Entry[],
-      scenario.focus ?? android.deviceId,
-    );
+    const fromResource = describeEntry(resource.devices, scenario.focus ?? android.deviceId);
     const fromTool = describeEntry(payload.devices as Entry[], scenario.focus ?? android.deviceId);
 
     // One status authority: every row either surface publishes carries the pool's own bucket.
     const surfaces = {
-      resource: resource.devices as unknown as Entry[],
+      resource: resource.devices,
       tool: payload.devices as Entry[],
     };
     for (const [surface, rows] of Object.entries(surfaces)) {
@@ -349,9 +352,7 @@ describe("listDevices tool and booted resource describe a device identically", (
     // The CLI `available-devices` counts and `getStats` are the same buckets as the rows, whenever
     // every pooled device is published with its pool context.
     const stats = pool.getStats();
-    const pooledRows = (resource.devices as unknown as Entry[]).filter(
-      (row) => row.runtime.poolStatus !== null,
-    );
+    const pooledRows = resource.devices.filter((row) => row.runtime.poolStatus !== null);
     if (pooledRows.length === stats.total) {
       expect(resource.poolStatus).toMatchObject({
         idle: stats.idle,
@@ -367,7 +368,7 @@ describe("listDevices tool and booted resource describe a device identically", (
     const withoutLifecycle = (view: Record<string, unknown>) => ({
       ...view,
       runtime: Object.fromEntries(
-        Object.entries(view.runtime as Entry).filter(([key]) => key !== "lifecycle"),
+        Object.entries(view.runtime ?? {}).filter(([key]) => key !== "lifecycle"),
       ),
     });
     expect(withoutLifecycle(toolView)).toEqual(withoutLifecycle(resourceView));
@@ -529,7 +530,7 @@ async function readSurfaces(
   );
   return {
     tool: tool.devices,
-    resource: resource.devices as unknown as Entry[],
+    resource: resource.devices,
     resourcePool: resource.poolStatus,
     resourceComplete: resource.observationComplete,
     toolComplete: tool.discovery?.complete,

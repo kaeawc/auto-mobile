@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import {
@@ -7,9 +8,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 
 // Pins the pooledSessionIdentities fence (#11802): the pool records which Session object it bound
@@ -32,13 +31,10 @@ async function createContext(): Promise<Context> {
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [ORIGINAL, REPLACEMENT];
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "pooled-identity-test", {
-      timer,
-      deviceManager,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-    }),
-  );
+  const pool = makePool(manager, "pooled-identity-test", {
+    timer,
+    deviceManager,
+  });
   await pool.initializeWithDevices([ORIGINAL, REPLACEMENT]);
   await pool.bindOrReuseDeviceSession(SESSION_ID, ORIGINAL.deviceId, "android");
   const session = manager.getSession(SESSION_ID)!;

@@ -1,12 +1,11 @@
+import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
-import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
+import { type PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 test("a stale refresh entry cannot replace a runtime confirmed by newer discovery", async () => {
   const original: BootedDevice = {
@@ -18,13 +17,10 @@ test("a stale refresh entry cannot replace a runtime confirmed by newer discover
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new FakeDeviceManager([], [original]);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon-test", {
-      timer,
-      deviceManager: manager,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-    }),
-  );
+  const pool = makePool(sessions, "daemon-test", {
+    timer,
+    deviceManager: manager,
+  });
   try {
     await pool.initializeWithDevices([original]);
     const pooled = pool.getDevice(original.deviceId);

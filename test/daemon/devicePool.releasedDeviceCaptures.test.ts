@@ -1,11 +1,9 @@
+import { makePool } from "../helpers/makePool";
 import { expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Pins the releasedDeviceCaptures fence (#11802): an explicit session release records which pooled
 // device incarnation and assignment generation it owns, so the later caller-ordered pool release
@@ -19,13 +17,10 @@ async function createContext() {
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [DEVICE, OTHER];
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "released-captures-test", {
-      timer,
-      deviceManager,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-    }),
-  );
+  const pool = makePool(manager, "released-captures-test", {
+    timer,
+    deviceManager,
+  });
   await pool.initializeWithDevices([DEVICE, OTHER]);
   await pool.bindOrReuseDeviceSession(HOLDER, DEVICE.deviceId, "android");
   const captures = pool["releasedDeviceCaptures"];

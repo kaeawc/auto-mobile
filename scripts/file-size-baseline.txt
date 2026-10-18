@@ -38,7 +38,7 @@
 1915	src/features/action/SetUIState.ts
 1887	src/features/action/TapAnyElement.ts
 1424	src/features/action/TapAtCoordinate.ts
-3181	src/features/action/TapOnElement.ts
+3042	src/features/action/TapOnElement.ts
 1420	src/features/action/swipeon/ScrollUntilVisible.ts
 1835	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts

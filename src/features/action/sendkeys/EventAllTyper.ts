@@ -67,6 +67,7 @@ export interface EventAllTyperHost {
   ): Promise<TextActionResult>;
   checkAbort(signal?: AbortSignal, error?: unknown): void;
   getEventAllKeyEventPlan(grapheme: string): Promise<KeyEventPlan | null>;
+  getAndroidApiLevel(signal?: AbortSignal): Promise<number | null>;
   clearForReplace(
     operation: SendKeysOperation,
     signal?: AbortSignal,
@@ -301,7 +302,7 @@ export class EventAllTyper implements AndroidModeTyper {
     }
     // The process may have typed part of the run before failing, so any failure is partial.
     return this.host.executeKeyEventPlanSafely(
-      buildAndroidInputTextPlan(run.join("")),
+      buildAndroidInputTextPlan(run.join(""), await this.host.getAndroidApiLevel(signal)),
       true,
       signal,
     );

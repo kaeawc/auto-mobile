@@ -2266,6 +2266,33 @@ describe("DefaultSendKeysCommandExecutor", () => {
     ]);
   });
 
+  // 42 characters with a space, quote, backtick and backslash: the first 32 end at "z".
+  const longRun = "abc def'g h`i\\j klmnopqrstuvwxyz0123456789";
+  const longRunHead =
+    String.raw`input text 'abc%sdef'\''g%sh` + "`" + String.raw`i\j%sklmnopqrstuvwxyz'`;
+  for (const [apiLevel, expected] of [
+    [30, [longRunHead.replace("xyz'", "xyz0123456789'")]],
+    [31, [longRunHead, "input text '0123456789'"]],
+  ] as const) {
+    test(`eventAll types a 42-char run as ${expected.length} input text command(s) on API ${apiLevel}`, async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(apiLevel);
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation()),
+        { textClient: createTextClient().client },
+      );
+
+      const result = await executor.type({ action: "type", text: longRun, mode: "eventAll" });
+
+      expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
+      expect(adb.getExecutedCommands().filter((command) => command.includes("input text"))).toEqual(
+        expected.map((command) => trackedInputTextCommand(`shell ${command}`, apiLevel)),
+      );
+    });
+  }
+
   test("auto password replace is not pre-checked and sets the whole value", async () => {
     const adb = new FakeAdbExecutor();
     adb.setAndroidApiLevel(30);

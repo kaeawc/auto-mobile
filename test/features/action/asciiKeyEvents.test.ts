@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { buildAsciiKeyEventPlan } from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
 import {
   buildAndroidInputTextCommand,
+  buildAndroidInputTextPlan,
   canJoinAndroidInputText,
 } from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
 import { decodeInputTextCommand } from "./SendKeysTestHarness";
@@ -91,5 +92,30 @@ describe("canJoinAndroidInputText", () => {
     expect(canJoinAndroidInputText("%", "S")).toBe(true);
     expect(canJoinAndroidInputText("%", " ")).toBe(true);
     expect(canJoinAndroidInputText("a", "s")).toBe(true);
+  });
+});
+
+describe("buildAndroidInputTextPlan", () => {
+  const text = "it's a long run of text, 1234567890 and more";
+
+  test("emits one command for the whole run on API 30 and older", () => {
+    for (const apiLevel of [21, 29, 30]) {
+      expect(buildAndroidInputTextPlan(text, apiLevel)).toEqual({
+        commands: [buildAndroidInputTextCommand(text)],
+        textLength: text.length,
+      });
+    }
+  });
+
+  test("chunks at 32 characters on API 31+ and when the level is unknown", () => {
+    for (const apiLevel of [31, 36, null]) {
+      expect(buildAndroidInputTextPlan(text, apiLevel)).toEqual({
+        commands: [
+          buildAndroidInputTextCommand(text.slice(0, 32)),
+          buildAndroidInputTextCommand(text.slice(32)),
+        ],
+        textLength: 32,
+      });
+    }
   });
 });

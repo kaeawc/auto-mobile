@@ -497,12 +497,12 @@ data class KeyboardProfileCatalogResult(
 data class ImeActionResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val success: Boolean,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val approximated: Boolean? = null,
   val action: String? = null,
+  val success: Boolean,
   val totalTimeMs: Long,
   val error: String? = null,
-  val perfTiming: String? = null,
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val approximated: Boolean? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @Serializable
@@ -513,7 +513,7 @@ data class SelectAllResult(
   val success: Boolean,
   val totalTimeMs: Long,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -548,12 +548,12 @@ data class ActionResult(
 data class ClipboardResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val success: Boolean,
   val action: String,
-  val text: String? = null, // For 'get' action
+  val success: Boolean,
   val totalTimeMs: Long,
+  val text: String? = null, // For 'get' action
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -610,12 +610,12 @@ data class SettingsListResult(
 data class CaCertResult(
   override val timestamp: Long,
   val requestId: String? = null,
-  val success: Boolean,
   val action: String, // install, remove
-  val alias: String? = null,
+  val success: Boolean,
   val totalTimeMs: Long,
+  val alias: String? = null,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 // =============================================================================
@@ -628,12 +628,12 @@ data class DeviceOwnerStatusResult(
   override val timestamp: Long,
   val requestId: String? = null,
   val success: Boolean,
+  val totalTimeMs: Long,
+  val packageName: String? = null,
   val isDeviceOwner: Boolean,
   val isAdminActive: Boolean,
-  val packageName: String? = null,
-  val totalTimeMs: Long,
   val error: String? = null,
-  val perfTiming: String? = null,
+  @Serializable(with = PerfTimingJsonSerializer::class) val perfTiming: String? = null,
 ) : WebSocketResponse()
 
 @OptIn(ExperimentalSerializationApi::class)

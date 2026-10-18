@@ -145,4 +145,74 @@ class ResultFramesGoldenTest {
       }
     }
   }
+
+  @Test
+  fun `clipboard and ca cert frames match the hand-built bytes`() {
+    val texts = listOf(null, "clip \"q\" é")
+    for (id in requestIds) for (err in errors) for (text in texts) for (p in perfs) {
+      assertEquals(
+        legacyFrame("clipboard_result", id, p) {
+          put("action", "get")
+          put("success", err == null)
+          put("totalTimeMs", 10L)
+          if (text != null) put("text", text)
+          if (err != null) put("error", err)
+        },
+        masked(clipboardResultFrame(id, "get", err == null, text, err, 10L, p)),
+      )
+      assertEquals(
+        legacyFrame("ca_cert_result", id, p) {
+          put("action", "install")
+          put("success", err == null)
+          put("totalTimeMs", 10L)
+          if (text != null) put("alias", text)
+          if (err != null) put("error", err)
+        },
+        masked(caCertResultFrame(id, "install", err == null, text, err, 10L, p)),
+      )
+    }
+  }
+
+  @Test
+  fun `device owner status frame matches the hand-built bytes`() {
+    for (id in requestIds) for (err in errors) for (p in perfs) for (owner in listOf(false, true)) {
+      assertEquals(
+        legacyFrame("device_owner_status_result", id, p) {
+          put("success", err == null)
+          put("totalTimeMs", 10L)
+          put("packageName", "dev.example")
+          put("isDeviceOwner", owner)
+          put("isAdminActive", !owner)
+          if (err != null) put("error", err)
+        },
+        masked(deviceOwnerStatusResultFrame(id, "dev.example", owner, !owner, err, 10L, p)),
+      )
+    }
+  }
+
+  @Test
+  fun `ime action and select all frames match the hand-built bytes`() {
+    for (id in requestIds) for (err in errors) for (p in perfs) {
+      for (approximated in listOf(null, false, true)) {
+        assertEquals(
+          legacyFrame("ime_action_result", id, p) {
+            if (approximated != null) put("approximated", approximated)
+            put("action", "next")
+            put("success", err == null)
+            put("totalTimeMs", 10L)
+            if (err != null) put("error", err)
+          },
+          masked(imeActionResultFrame(id, "next", err == null, err, 10L, approximated, p)),
+        )
+      }
+      assertEquals(
+        legacyFrame("select_all_result", id, p) {
+          put("success", err == null)
+          put("totalTimeMs", 10L)
+          if (err != null) put("error", err)
+        },
+        masked(selectAllResultFrame(id, err == null, err, 10L, p)),
+      )
+    }
+  }
 }

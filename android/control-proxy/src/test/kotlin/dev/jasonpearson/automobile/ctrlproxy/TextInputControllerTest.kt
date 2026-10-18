@@ -16,6 +16,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.boolean
@@ -165,12 +166,11 @@ class TextInputControllerTest {
 
     override fun isRunning() = running
 
-    override suspend fun broadcastWithPerf(
-      type: String,
-      requestId: String?,
-      buildContent: JsonObjectBuilder.() -> Unit,
-    ) {
-      record(type, requestId, buildContent)
+    override suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
+      val frame = Json.parseToJsonElement(messageBuilder(null)).jsonObject
+      val type = frame.getValue("type").jsonPrimitive.content
+      events += "frame:$type"
+      frames += type to JsonObject(frame - setOf("type", "timestamp", "perfTiming"))
     }
 
     override suspend fun broadcastWithPerfSync(

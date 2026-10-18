@@ -130,4 +130,70 @@ class TypedResultWireTest {
     assertEquals(true, text.contains(""""perfTiming":"not json {""""), text)
     assertEquals(frame, json.decodeFromString<WebSocketResponse>(text))
   }
+
+  @Test
+  fun `clipboard ca cert device owner ime action and select all keep the hand-built field order`() {
+    val ordered = Json {
+      classDiscriminator = "type"
+      encodeDefaults = true
+      explicitNulls = false
+    }
+    fun text(response: WebSocketResponse) = ordered.encodeToString<WebSocketResponse>(response)
+    assertEquals(
+      """{"type":"clipboard_result","timestamp":1,"requestId":"r","action":"get","success":true,"totalTimeMs":2,"text":"t","perfTiming":{"a":1}}""",
+      text(
+        ClipboardResult(
+          timestamp = 1,
+          requestId = "r",
+          action = "get",
+          success = true,
+          totalTimeMs = 2,
+          text = "t",
+          perfTiming = """{"a":1}""",
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"ca_cert_result","timestamp":1,"action":"install","success":false,"totalTimeMs":2,"alias":"a","error":"e"}""",
+      text(
+        CaCertResult(
+          timestamp = 1,
+          action = "install",
+          success = false,
+          totalTimeMs = 2,
+          alias = "a",
+          error = "e",
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"device_owner_status_result","timestamp":1,"success":true,"totalTimeMs":2,"packageName":"p","isDeviceOwner":true,"isAdminActive":false}""",
+      text(
+        DeviceOwnerStatusResult(
+          timestamp = 1,
+          success = true,
+          totalTimeMs = 2,
+          packageName = "p",
+          isDeviceOwner = true,
+          isAdminActive = false,
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"ime_action_result","timestamp":1,"approximated":true,"action":"next","success":true,"totalTimeMs":2}""",
+      text(
+        ImeActionResult(
+          timestamp = 1,
+          approximated = true,
+          action = "next",
+          success = true,
+          totalTimeMs = 2,
+        ),
+      ),
+    )
+    assertEquals(
+      """{"type":"select_all_result","timestamp":1,"success":true,"totalTimeMs":2}""",
+      text(SelectAllResult(timestamp = 1, success = true, totalTimeMs = 2)),
+    )
+  }
 }

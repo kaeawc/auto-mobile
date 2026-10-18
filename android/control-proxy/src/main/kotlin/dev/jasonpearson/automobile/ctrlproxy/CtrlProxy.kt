@@ -1160,18 +1160,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
 
           override suspend fun broadcastWithPerf(
-            type: String,
-            requestId: String?,
-            buildContent: JsonObjectBuilder.() -> Unit,
+            messageBuilder: (perfTiming: JsonElement?) -> String,
           ) {
-            webSocketServer.broadcastWithPerf { perfTiming ->
-              webSocketFrameJson(
-                type,
-                requestId = requestId,
-                perfTiming = perfTiming,
-                buildContent = buildContent,
-              )
-            }
+            webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
           }
 
           override fun getConnectionCount() = webSocketServer.getConnectionCount()
@@ -1241,18 +1232,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
 
           override suspend fun broadcastWithPerf(
-            type: String,
-            requestId: String?,
-            buildContent: JsonObjectBuilder.() -> Unit,
+            messageBuilder: (perfTiming: JsonElement?) -> String,
           ) {
-            webSocketServer.broadcastWithPerf { perfTiming ->
-              webSocketFrameJson(
-                type,
-                requestId = requestId,
-                perfTiming = perfTiming,
-                buildContent = buildContent,
-              )
-            }
+            webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
           }
 
           override fun connectionCount() = webSocketServer.getConnectionCount()
@@ -1562,18 +1544,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
 
           override suspend fun broadcastWithPerf(
-            type: String,
-            requestId: String?,
-            buildContent: JsonObjectBuilder.() -> Unit,
+            messageBuilder: (perfTiming: JsonElement?) -> String,
           ) {
-            webSocketServer.broadcastWithPerf { perfTiming ->
-              webSocketFrameJson(
-                type,
-                requestId = requestId,
-                perfTiming = perfTiming,
-                buildContent = buildContent,
-              )
-            }
+            webSocketServer.broadcastWithPerf(messageBuilder = messageBuilder)
           }
 
           override suspend fun broadcastWithPerfSync(

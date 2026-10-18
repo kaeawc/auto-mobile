@@ -1,7 +1,11 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.CaCertResult
+import dev.jasonpearson.automobile.protocol.ClipboardResult
 import dev.jasonpearson.automobile.protocol.CurrentFocusResult
+import dev.jasonpearson.automobile.protocol.DeviceOwnerStatusResult
 import dev.jasonpearson.automobile.protocol.DragResult
+import dev.jasonpearson.automobile.protocol.ImeActionResult
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleReportContract
 import dev.jasonpearson.automobile.protocol.PinchResult
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
@@ -14,6 +18,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode
 import dev.jasonpearson.automobile.protocol.SavedPrototypeInfo
+import dev.jasonpearson.automobile.protocol.SelectAllResult
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.SwipeResult
 import dev.jasonpearson.automobile.protocol.TapCoordinatesResult
@@ -162,6 +167,113 @@ internal fun pinchResultFrame(
       success = success,
       totalTimeMs = totalTimeMs,
       gestureTimeMs = gestureTimeMs,
+      error = error,
+      perfTiming = perfTiming?.toString(),
+    ),
+  )
+
+internal fun clipboardResultFrame(
+  requestId: String?,
+  action: String,
+  success: Boolean,
+  text: String?,
+  error: String?,
+  totalTimeMs: Long,
+  perfTiming: JsonElement?,
+): String =
+  typedResultFrame(
+    ClipboardResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      action = action,
+      success = success,
+      totalTimeMs = totalTimeMs,
+      text = text,
+      error = error,
+      perfTiming = perfTiming?.toString(),
+    ),
+  )
+
+internal fun caCertResultFrame(
+  requestId: String?,
+  action: String,
+  success: Boolean,
+  alias: String?,
+  error: String?,
+  totalTimeMs: Long,
+  perfTiming: JsonElement?,
+): String =
+  typedResultFrame(
+    CaCertResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      action = action,
+      success = success,
+      totalTimeMs = totalTimeMs,
+      alias = alias,
+      error = error,
+      perfTiming = perfTiming?.toString(),
+    ),
+  )
+
+internal fun deviceOwnerStatusResultFrame(
+  requestId: String?,
+  packageName: String,
+  isDeviceOwner: Boolean,
+  isAdminActive: Boolean,
+  error: String?,
+  totalTimeMs: Long,
+  perfTiming: JsonElement?,
+): String =
+  typedResultFrame(
+    DeviceOwnerStatusResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = error == null,
+      totalTimeMs = totalTimeMs,
+      packageName = packageName,
+      isDeviceOwner = isDeviceOwner,
+      isAdminActive = isAdminActive,
+      error = error,
+      perfTiming = perfTiming?.toString(),
+    ),
+  )
+
+internal fun imeActionResultFrame(
+  requestId: String?,
+  action: String,
+  success: Boolean,
+  error: String?,
+  totalTimeMs: Long,
+  approximated: Boolean?,
+  perfTiming: JsonElement?,
+): String =
+  typedResultFrame(
+    ImeActionResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      approximated = approximated,
+      action = action,
+      success = success,
+      totalTimeMs = totalTimeMs,
+      error = error,
+      perfTiming = perfTiming?.toString(),
+    ),
+  )
+
+internal fun selectAllResultFrame(
+  requestId: String?,
+  success: Boolean,
+  error: String?,
+  totalTimeMs: Long,
+  perfTiming: JsonElement?,
+): String =
+  typedResultFrame(
+    SelectAllResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = success,
+      totalTimeMs = totalTimeMs,
       error = error,
       perfTiming = perfTiming?.toString(),
     ),

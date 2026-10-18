@@ -1947,14 +1947,20 @@
           "hasDefault": true
         },
         {
+          "name": "action",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
           "name": "success",
           "type": "boolean",
           "nullable": false,
           "hasDefault": false
         },
         {
-          "name": "action",
-          "type": "string",
+          "name": "totalTimeMs",
+          "type": "long",
           "nullable": false,
           "hasDefault": false
         },
@@ -1963,12 +1969,6 @@
           "type": "string",
           "nullable": true,
           "hasDefault": true
-        },
-        {
-          "name": "totalTimeMs",
-          "type": "long",
-          "nullable": false,
-          "hasDefault": false
         },
         {
           "name": "error",
@@ -2041,14 +2041,20 @@
           "hasDefault": true
         },
         {
+          "name": "action",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
           "name": "success",
           "type": "boolean",
           "nullable": false,
           "hasDefault": false
         },
         {
-          "name": "action",
-          "type": "string",
+          "name": "totalTimeMs",
+          "type": "long",
           "nullable": false,
           "hasDefault": false
         },
@@ -2057,12 +2063,6 @@
           "type": "string",
           "nullable": true,
           "hasDefault": true
-        },
-        {
-          "name": "totalTimeMs",
-          "type": "long",
-          "nullable": false,
-          "hasDefault": false
         },
         {
           "name": "error",
@@ -2311,14 +2311,8 @@
           "hasDefault": false
         },
         {
-          "name": "isDeviceOwner",
-          "type": "boolean",
-          "nullable": false,
-          "hasDefault": false
-        },
-        {
-          "name": "isAdminActive",
-          "type": "boolean",
+          "name": "totalTimeMs",
+          "type": "long",
           "nullable": false,
           "hasDefault": false
         },
@@ -2329,8 +2323,14 @@
           "hasDefault": true
         },
         {
-          "name": "totalTimeMs",
-          "type": "long",
+          "name": "isDeviceOwner",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "isAdminActive",
+          "type": "boolean",
           "nullable": false,
           "hasDefault": false
         },
@@ -2673,16 +2673,22 @@
           "hasDefault": true
         },
         {
-          "name": "success",
+          "name": "approximated",
           "type": "boolean",
-          "nullable": false,
-          "hasDefault": false
+          "nullable": true,
+          "hasDefault": true
         },
         {
           "name": "action",
           "type": "string",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "success",
+          "type": "boolean",
+          "nullable": false,
+          "hasDefault": false
         },
         {
           "name": "totalTimeMs",
@@ -2699,12 +2705,6 @@
         {
           "name": "perfTiming",
           "type": "string",
-          "nullable": true,
-          "hasDefault": true
-        },
-        {
-          "name": "approximated",
-          "type": "boolean",
           "nullable": true,
           "hasDefault": true
         }

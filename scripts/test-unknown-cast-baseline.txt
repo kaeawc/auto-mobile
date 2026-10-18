@@ -237,8 +237,6 @@
 2	test/features/prototype/prototypeNodeContractParity.test.ts
 1	test/features/utility/DeepLinkManagerHostExec.test.ts
 1	test/features/video/FfmpegVideoProcessingBackend.test.ts
-4	test/features/webrtc/AndroidH264Source.test.ts
-1	test/features/webrtc/PersistentEncoderH264Source.test.ts
 1	test/fixtures/observe/observeFixture.ts
 1	test/helpers/daemonHeartbeatHandler.ts
 3	test/helpers/daemonRestartScenario.ts

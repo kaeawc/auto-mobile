@@ -1,6 +1,6 @@
 import { expect, describe, test } from "bun:test";
 import { DefaultPathOptimizer } from "../../../src/features/navigation/DefaultPathOptimizer";
-import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
+import type { NavigationGraphService } from "../../../src/features/navigation/NavigationGraphManager";
 import type { NavigationEdgeTarget } from "../../../src/db/navigationRepository";
 import type {
   NavigationNode,
@@ -34,11 +34,11 @@ function makeStub(config: {
   nodes?: Record<string, NavigationNode | undefined>;
   paths?: Record<string, PathResult>;
   edges?: NavigationEdge[];
-}): NavigationGraphManager {
+}): Pick<NavigationGraphService, "getEdgeTargetsFrom" | "getNode" | "findPath"> {
   const nodes = config.nodes ?? {};
   const paths = config.paths ?? {};
   const edges = config.edges ?? [];
-  const stub = {
+  return {
     async getNode(screen: string): Promise<NavigationNode | undefined> {
       return nodes[screen];
     },
@@ -58,7 +58,6 @@ function makeStub(config: {
       );
     },
   };
-  return stub as unknown as NavigationGraphManager;
 }
 
 describe("DefaultPathOptimizer", function () {

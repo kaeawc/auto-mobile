@@ -265,6 +265,7 @@ describe("IOSCtrlProxyClient press option forwarding", () => {
     const h = createIosDelegateHarness();
     const signal = new AbortController().signal;
     const onDispatch = () => {};
+    const beforeSend = () => {};
     const result = {
       success: false,
       totalTimeMs: 50,
@@ -327,9 +328,23 @@ describe("IOSCtrlProxyClient press option forwarding", () => {
           10,
           signal,
           onDispatch,
+          beforeSend,
         ),
       ).toBe(result);
-      expect(swipe).toHaveBeenCalledWith(1, 2, 3, 4, 2, 300, 50, undefined, 10, signal, onDispatch);
+      expect(swipe).toHaveBeenCalledWith(
+        1,
+        2,
+        3,
+        4,
+        2,
+        300,
+        50,
+        undefined,
+        10,
+        signal,
+        onDispatch,
+        beforeSend,
+      );
       expect(await client.requestPinch(1, 2, 3, 4, 0, 300, 50, undefined, signal, onDispatch)).toBe(
         result,
       );

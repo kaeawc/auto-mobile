@@ -1459,8 +1459,8 @@ describe("LaunchApp", () => {
     cancellableLaunch.window = fakeWindow;
     const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
     const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
-      async (command, timeoutMs, maxBuffer, noRetry, signal) => {
-        const result = await originalExecuteCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      async (command, options) => {
+        const result = await originalExecuteCommand(command, options);
         if (command.startsWith("shell dumpsys activity processes")) {
           controller.abort(deviceLoss);
         }
@@ -1491,7 +1491,7 @@ describe("LaunchApp", () => {
     );
     const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
     const executeSpy = spyOn(fakeAdb, "executeCommand").mockImplementation(
-      async (command, timeoutMs, maxBuffer, noRetry, signal) => {
+      async (command, options) => {
         if (
           command.includes("android.intent.action.MAIN") &&
           command.includes("android.intent.category.LAUNCHER")
@@ -1499,7 +1499,7 @@ describe("LaunchApp", () => {
           controller.abort(deviceLoss);
           throw new Error("ADB transport disconnected");
         }
-        return await originalExecuteCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return await originalExecuteCommand(command, options);
       },
     );
 

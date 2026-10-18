@@ -257,7 +257,10 @@ for (const offline of [false, true]) {
         }
         return result;
       };
-      const client = new AndroidEmulatorClient(null, null, s.timer, new FakeAdbClientFactory(adb));
+      const client = new AndroidEmulatorClient({
+        timer: s.timer,
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
       const stopper = new FakeEmulatorProcessStopper();
       stopper.outcome = { kind: "stopped", pid: 42, signal: "SIGTERM" };
       stopper.onStop = () => {

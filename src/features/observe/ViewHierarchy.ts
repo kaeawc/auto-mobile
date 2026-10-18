@@ -17,7 +17,7 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import { findAccessibilityFocusedElement, findFocusedElement } from "./HierarchyFocus";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { ViewHierarchyQueryOptions } from "../../models";
-import { AndroidCtrlProxyClient } from "./android";
+import { AndroidCtrlProxyClient, type ViewHierarchyAndroidCtrlProxy } from "./android";
 import { IOSCtrlProxyClient, type IOSCtrlProxy } from "./ios";
 import { IosRunnerStalledError } from "./ios/runnerErrorCodes";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -78,7 +78,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   private device: BootedDevice;
   private parser: ElementParser;
   private geometry: ElementGeometry;
-  private accessibilityServiceClient: AndroidCtrlProxyClient;
+  private accessibilityServiceClient: ViewHierarchyAndroidCtrlProxy;
   private adbFactory: AdbClientFactory;
   private timer: Timer;
   private observeAccessibilityManagerFactory: ObserveAccessibilityManagerFactory;
@@ -92,7 +92,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    accessibilityServiceClient: AndroidCtrlProxyClient | null = null,
+    accessibilityServiceClient: ViewHierarchyAndroidCtrlProxy | null = null,
     timer: Timer = defaultTimer,
     observeAccessibilityManagerFactory: ObserveAccessibilityManagerFactory = defaultObserveAccessibilityManagerFactory,
   ) {

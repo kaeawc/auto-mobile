@@ -143,6 +143,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
    * @param duration - Gesture duration in milliseconds (default: 300)
    * @param timeoutMs - Request timeout in milliseconds (default: 5000)
    * @param perf - Optional performance tracker
+   * @param beforeSend - Synchronous display/stale fence run immediately before the socket write
    * @returns Gesture timing result
    */
   async requestMultiFingerSwipe(
@@ -157,6 +158,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     fingerSpacing?: number,
     signal?: AbortSignal,
     onDispatch?: () => void,
+    beforeSend?: () => void,
   ): Promise<IOSDispatchResult<GestureTimingResult>> {
     return sendIOSPressCommand(this.context, {
       idPrefix: "multi_finger_swipe",
@@ -167,6 +169,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       abortSignal: signal,
       perf,
       onDispatch,
+      beforeSend,
       notConnectedMessage: "Not connected to CtrlProxy",
       errorLabel: "Multi-finger swipe",
     });

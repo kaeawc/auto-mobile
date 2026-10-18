@@ -13,7 +13,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client } from "@modelcontextprotocol/client";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { createFakeDeviceManager } from "../daemon/helpers/inputSocketHarness";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";

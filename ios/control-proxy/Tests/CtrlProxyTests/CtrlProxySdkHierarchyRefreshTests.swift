@@ -65,4 +65,16 @@ final class CtrlProxySdkHierarchyRefreshTests: XCTestCase {
         XCTAssertNil(CtrlProxy.sdkHierarchyRefresh(hierarchyDebouncer: debouncer, commandHandler: handler))
         XCTAssertTrue(locator.filteringRequests.isEmpty)
     }
+
+    func testUndecodableSdkHierarchyEventLeavesCacheAndCallbackUntouched() throws {
+        let cache = SdkHierarchyCache()
+        // Missing required hierarchy fields: wire drift must not publish a refresh.
+        let payload = Data(#"{"hierarchy":{"unexpected":true}}"#.utf8)
+        let batch = try JSONSerialization.data(withJSONObject: [
+            "events": [["eventType": "view_hierarchy", "payload": payload.base64EncodedString()]],
+        ])
+        var updates = 0
+        SdkHierarchyExtractor.extractIfPresent(from: batch, into: cache) { updates += 1 }
+        XCTAssertEqual(updates, 0)
+    }
 }

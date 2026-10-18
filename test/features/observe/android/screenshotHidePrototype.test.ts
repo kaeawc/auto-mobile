@@ -77,7 +77,7 @@ describe("request_screenshot hidePrototypes (#9305)", () => {
 
   test("a device advertising the capability receives the flag", async () => {
     const { client, sent } = clientWithCapturedFrames(fullAdvertisement);
-    await client["dispatchScreenshotRequest"]("s-1", undefined, 2, true);
+    await client["getScreenshotRequester"]().dispatchScreenshotRequest("s-1", undefined, 2, true);
     expect(sent.frames).toEqual([
       { type: "request_screenshot", requestId: "s-1", displayId: 2, hidePrototypes: true },
     ]);
@@ -92,13 +92,18 @@ describe("request_screenshot hidePrototypes (#9305)", () => {
     ["no handshake yet", undefined],
   ])("%s never receives the flag", async (_, advertisement) => {
     const { client, sent } = clientWithCapturedFrames(advertisement);
-    await client["dispatchScreenshotRequest"]("s-1", undefined, undefined, true);
+    await client["getScreenshotRequester"]().dispatchScreenshotRequest(
+      "s-1",
+      undefined,
+      undefined,
+      true,
+    );
     expect(sent.frames).toEqual([{ type: "request_screenshot", requestId: "s-1" }]);
   });
 
   test("a capture without hiding never sends the flag", async () => {
     const { client, sent } = clientWithCapturedFrames(fullAdvertisement);
-    await client["dispatchScreenshotRequest"]("s-1");
+    await client["getScreenshotRequester"]().dispatchScreenshotRequest("s-1");
     expect(sent.frames).toEqual([{ type: "request_screenshot", requestId: "s-1" }]);
   });
 

@@ -6,6 +6,7 @@ import {
   DefaultEmulatorReadinessPoller,
   resolveEmulatorPollingInterval,
   type EmulatorReadinessHost,
+  type OfflineTracker,
 } from "../../../src/utils/android-cmdline-tools/EmulatorReadinessPoller";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -50,8 +51,6 @@ function setup(adb: FakeAdbExecutor, classify: (output: string) => ActionableErr
     throwLaunchError: () => {},
     getLaunchTargetDeviceId: () => undefined,
     captureLaunchTargetDeviceId: () => {},
-    clearOfflineTracker: () => {},
-    detectOfflineFailure: async () => null,
     maybeRecoverFreshOffline: async () => {},
     nextPollingDelayMs: (_tracker, _options, _id, _now, interval) => interval,
     getBootedDevicesWithDiagnostics: async () => ({ devices: [emulator], diagnostics: [] }),
@@ -61,7 +60,7 @@ function setup(adb: FakeAdbExecutor, classify: (output: string) => ActionableErr
     foundBootedDevice: (name, deviceId, model) => ({ name, deviceId, platform: "android", model }),
     classifyEmulatorExitOutput: classify,
   };
-  return { timer, poller: new DefaultEmulatorReadinessPoller(host) };
+  return { timer, adb, poller: new DefaultEmulatorReadinessPoller(host) };
 }
 
 describe("DefaultEmulatorReadinessPoller", () => {
@@ -126,6 +125,45 @@ describe("DefaultEmulatorReadinessPoller", () => {
         skipWakeAndUnlock: true,
       }),
     ).rejects.toBe(reason);
+  });
+});
+
+describe("DefaultEmulatorReadinessPoller.detectOfflineFailure", () => {
+  test("clears a stale offline diagnosis when the target recovers", async () => {
+    const adb = readyAdb();
+    const { timer, poller } = setup(adb, () => null);
+    const tracker: OfflineTracker = { deviceId: null, since: null, recoveryAttempted: false };
+
+    adb.setDeviceStates([{ deviceId: "emulator-5554", state: "offline" }]);
+    await poller.detectOfflineFailure("emulator-5554", tracker);
+    expect(tracker.since).toBe(0);
+    expect(tracker.state).toBe("offline");
+    timer.advanceTime(15_000);
+    expect(await poller.detectOfflineFailure("emulator-5554", tracker)).toBeNull();
+    expect(tracker.since).toBe(0);
+
+    adb.setDeviceStates([{ deviceId: "emulator-5554", state: "device" }]);
+    expect(await poller.detectOfflineFailure("emulator-5554", tracker)).toBeNull();
+    expect(tracker.since).toBeNull();
+    expect(tracker.state).toBe("not-ready");
+  });
+
+  test("a rejected state probe clears the current observation", async () => {
+    const adb = readyAdb();
+    adb.getDeviceStates = async () => {
+      throw new Error("probe unavailable");
+    };
+    const { poller } = setup(adb, () => null);
+    const tracker: OfflineTracker = {
+      deviceId: "emulator-5554",
+      since: 5,
+      state: "offline",
+      recoveryAttempted: true,
+    };
+    expect(await poller.detectOfflineFailure("emulator-5554", tracker)).toBeNull();
+    expect(tracker.deviceId).toBeNull();
+    expect(tracker.since).toBeNull();
+    expect(tracker.recoveryAttempted).toBe(true);
   });
 });
 

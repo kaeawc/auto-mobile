@@ -209,16 +209,21 @@ class RotationProvenanceTrackerTest {
 
   @Test
   fun `all capture routes use rotation provenance instead of endpoint equality`() {
-    val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
+    val ctrlProxySource =
+      KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
+    val screenshotSource =
+      KotlinSourceScan.maskLiteralsAndComments(
+        locateCtrlProxySource("ScreenshotController.kt").readText(),
+      )
 
-    for (route in
+    for ((route, source) in
       listOf(
-        "private fun extractHierarchyDirect",
-        "private fun extractHierarchy(",
-        "private suspend fun takeScreenshotAsync",
+        "private fun extractHierarchyDirect" to ctrlProxySource,
+        "private fun extractHierarchy(" to ctrlProxySource,
+        "suspend fun takeScreenshotAsync" to screenshotSource,
       )) {
       val start = source.indexOf(route)
-      assertTrue("$route not found in CtrlProxy.kt", start >= 0)
+      assertTrue("$route not found", start >= 0)
       val bodyOpen = source.indexOf('{', start)
       val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
       assertTrue(
@@ -242,13 +247,16 @@ class RotationProvenanceTrackerTest {
 
   @Test
   fun `screenshot capture passes the requested display to the platform`() {
-    val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
-    val start = source.indexOf("private suspend fun takeScreenshotAsync")
+    val source =
+      KotlinSourceScan.maskLiteralsAndComments(
+        locateCtrlProxySource("ScreenshotController.kt").readText(),
+      )
+    val start = source.indexOf("suspend fun takeScreenshotAsync")
     assertTrue(start >= 0)
     val bodyOpen = source.indexOf('{', start)
     val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
-    assertTrue(body.contains("takeScreenshot(\n              targetDisplayId,"))
-    assertFalse(body.contains("takeScreenshot(\n              Display.DEFAULT_DISPLAY,"))
+    assertTrue(body.contains("host.takeScreenshot(\n              targetDisplayId,"))
+    assertFalse(body.contains("host.takeScreenshot(\n              Display.DEFAULT_DISPLAY,"))
   }
 
   private class FakeRotationChangeSignal(private val synchronizeResult: Boolean = true) :
@@ -288,8 +296,8 @@ class RotationProvenanceTrackerTest {
     }
   }
 
-  private fun locateCtrlProxySource(): File {
-    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"
+  private fun locateCtrlProxySource(fileName: String = "CtrlProxy.kt"): File {
+    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/$fileName"
     val direct =
       listOf(File(rel), File("control-proxy/$rel"), File("android/control-proxy/$rel"))
         .firstOrNull { it.isFile }
@@ -307,7 +315,7 @@ class RotationProvenanceTrackerTest {
       }
       directory = directory.parentFile
     }
-    fail("Could not locate CtrlProxy.kt from user.dir=${System.getProperty("user.dir")}")
+    fail("Could not locate $fileName from user.dir=${System.getProperty("user.dir")}")
     error("unreachable")
   }
 }

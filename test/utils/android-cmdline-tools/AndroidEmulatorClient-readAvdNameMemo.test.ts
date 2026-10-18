@@ -201,7 +201,7 @@ describe("read-only connection-keyed AVD name memo", () => {
     const execute = f.adb.executeCommand.bind(f.adb);
     f.adb.executeCommand = async (command, ...args) => {
       if (command === "emu avd name") {
-        const signal = args[3] ?? getAbortSignal();
+        const signal = args[0]?.signal ?? getAbortSignal();
         await f.timer.sleep(25);
         signal?.throwIfAborted();
       }

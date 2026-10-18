@@ -73,6 +73,10 @@
               {
                 "group": ["lodash", "lodash/*"],
                 "message": "Prefer the JavaScript/Node standard library or an existing AutoMobile helper. Do not add a direct lodash dependency."
+              },
+              {
+                "group": ["@modelcontextprotocol/sdk", "@modelcontextprotocol/sdk/*"],
+                "message": "The v1 MCP SDK is being removed (#4678). Import from the v2 split packages (@modelcontextprotocol/server, /client, /node) instead."
               }
             ]
           }

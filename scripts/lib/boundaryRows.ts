@@ -1,5 +1,8 @@
 import ts from "typescript";
 import { type BoundaryHit, type BoundaryRow, type BoundarySpan, spanOf } from "./boundaryScanner";
+import * as appBundle from "./appBundleMetadataBoundary";
+import { ALLOWED_IMPORTERS, findChildProcessImports } from "./childProcessImportBoundary";
+import * as iosCtrlProxy from "./iosCtrlProxyProcessBoundary";
 import { findDirectEmulatorCalls } from "./androidEmulatorBoundary";
 import { findDirectFfmpegCalls } from "./ffmpegBoundary";
 import { findDirectSqliteCalls } from "./simulatorTccSqliteBoundary";
@@ -209,5 +212,44 @@ export const BOUNDARY_ROWS: readonly BoundaryRow[] = [
     failureHeader: "error: Android emulator execution must use AndroidEmulatorClient:",
     successMessage: "android-emulator-boundary: no direct production emulator invocations.",
     detect: fromViolations(findDirectEmulatorCalls),
+  },
+  {
+    id: "ios-ctrl-proxy-process",
+    owner: iosCtrlProxy.OWNER,
+    skipPrefixes: [],
+    skipFiles: [...iosCtrlProxy.EXCEPTIONS.keys()],
+    scope: "tree",
+    report: "bare-locations",
+    failureHeader: "",
+    successMessage: "ios-ctrl-proxy-process-boundary: no direct production PID tooling.",
+    detect: fromViolations((file, source) => iosCtrlProxy.findViolationsInSource(file, source)),
+  },
+  {
+    id: "app-bundle-metadata",
+    owner: appBundle.OWNER,
+    skipPrefixes: [],
+    skipFiles: [...appBundle.EXCEPTIONS.keys()],
+    scope: "tree",
+    report: "bare-locations",
+    failureHeader: "error: codesign execution must use AppBundleMetadataClient:",
+    successMessage: "app-bundle-metadata-boundary: no direct production codesign invocations.",
+    detect: (source, file) =>
+      appBundle.directlyExecutesCodesign(file, source).map((hit) => ({
+        ...hit,
+        endLine: hit.line + hit.text.split("\n").length - 1,
+      })),
+  },
+  {
+    id: "child-process-import",
+    owner: ALLOWED_IMPORTERS[0]!,
+    skipPrefixes: [],
+    skipFiles: ALLOWED_IMPORTERS.slice(1),
+    extensions: [".ts", ".tsx", ".mts", ".cts"],
+    scope: "tree",
+    report: "bare-positions",
+    failureHeader: "error: child_process imports are restricted to the reviewed allowlist:",
+    successMessage: "child-process-import-boundary: no unlisted production imports.",
+    detect: (source, file) =>
+      findChildProcessImports(file, source).map((hit) => ({ ...hit, endLine: hit.line })),
   },
 ];

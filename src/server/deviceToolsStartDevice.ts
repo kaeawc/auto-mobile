@@ -107,7 +107,6 @@ type StartDeviceHooks = {
     signal?: AbortSignal,
   ) => Promise<StructuredToolResponse>;
   stripInternalAcquisitionParams: (rawArgs: object) => Record<string, unknown>;
-  rollbackCreatedDevice?: CreatedDeviceRollback;
 };
 
 /** Bound a request's wait; shared removal cleanup must retain its own lifetime. */
@@ -849,7 +848,7 @@ async function throwIfBindingAborted(
   signal.throwIfAborted();
 }
 
-async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<void> {
+export async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<void> {
   request.perf?.startOperation("ensureCtrlProxy");
   try {
     const timer = getDeviceToolsDependencies().timer;
@@ -899,7 +898,7 @@ async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<vo
   }
 }
 
-async function bindBootedDeviceSession(
+export async function bindBootedDeviceSession(
   device: BootedDevice,
   args: StartDeviceArgs,
   sourceImage?: DeviceInfo,
@@ -1214,9 +1213,32 @@ async function resolveCameraPosterQr<T extends StartDeviceArgs>(args: T): Promis
   return { ...rest, cameraPosterPath: await writer.writePoster(cameraPosterQr.text) } as T;
 }
 
-export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
-  const { prepareDevice, stripInternalAcquisitionParams, rollbackCreatedDevice } = hooks;
+/** Boot + prepare, rolling a createIfMissing image back via the injected rollback (#11100, #11827). */
+export function createBootAndPrepareDevice(rollbackCreatedDevice: CreatedDeviceRollback) {
+  return async (
+    args: StartDeviceArgs,
+    budgets: DevicePreparationBudgets,
+    deps: DeviceToolsDependencies,
+    deviceUtils: PlatformDeviceManager,
+    options: BootPreparationOptions,
+  ) => {
+    const bootOptions = { ...options, rollbackCreatedDevice };
+    // Keep a close during boot visible through a resumed session's bind and autolock adoption.
+    const pool = options.autolockEnabled ? initializedDevicePool() : undefined;
+    const endAutolockBind = pool?.beginMcpBind(args.__mcpSessionId);
+    try {
+      return await bootAndPrepareDevice(args, budgets, deps, deviceUtils, bootOptions);
+    } catch (error) {
+      await rollbackCreatedDeviceAfterBoot(bootOptions, error);
+      throw error;
+    } finally {
+      endAutolockBind?.();
+    }
+  };
+}
 
+export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
+  const { prepareDevice, stripInternalAcquisitionParams } = hooks;
   const startDeviceHandler = async (
     rawArgs: StartDeviceArgs,
     progress?: ProgressCallback,
@@ -1280,27 +1302,6 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
   };
 
   return {
-    bootAndPrepareDevice: async (
-      args: StartDeviceArgs,
-      budgets: DevicePreparationBudgets,
-      deps: DeviceToolsDependencies,
-      deviceUtils: PlatformDeviceManager,
-      options: BootPreparationOptions,
-    ) => {
-      const bootOptions = { ...options, rollbackCreatedDevice };
-      // Keep a close during boot visible through a resumed session's bind and autolock adoption.
-      const endAutolockBind = options.autolockEnabled
-        ? initializedDevicePool()?.beginMcpBind(args.__mcpSessionId)
-        : undefined;
-      try {
-        return await bootAndPrepareDevice(args, budgets, deps, deviceUtils, bootOptions);
-      } catch (error) {
-        await rollbackCreatedDeviceAfterBoot(bootOptions, error);
-        throw error;
-      } finally {
-        endAutolockBind?.();
-      }
-    },
     startDeviceHandler,
     bindBootedDeviceSession,
     ensureCtrlProxyReady,

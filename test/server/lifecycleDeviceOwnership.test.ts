@@ -31,6 +31,9 @@ import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /** Records each platform kill and stops there, so an admitted call proves only that it got past the gate. */
 class RecordingKillDeviceManager extends FakeDeviceUtils {

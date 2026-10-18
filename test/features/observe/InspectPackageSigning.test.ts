@@ -3,11 +3,13 @@ import { promises as fsPromises, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BootedDevice } from "../../../src/models";
 import {
-  AdbPullApkFetcher,
   InspectPackageSigning,
   selectSigners,
-  type ApkFetcher,
 } from "../../../src/features/observe/InspectPackageSigning";
+import {
+  AdbPullApkFetcher,
+  type ApkFetcher,
+} from "../../../src/features/observe/AdbPullApkFetcher";
 import { bufferByteSource } from "../../../src/utils/android-cmdline-tools/apkSigningBlock";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";

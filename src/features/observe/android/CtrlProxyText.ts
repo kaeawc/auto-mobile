@@ -18,7 +18,7 @@ import {
   type KeyboardProfileCatalog,
 } from "../../action/keyboardProfiles";
 import { errorMessage } from "../../../utils/describeUnknownError";
-import { TextIndeterminateError } from "../../action/textTransportTimeout";
+import { TextIndeterminateError } from "../../action/TextIndeterminateError";
 import { logger } from "../../../utils/logger";
 
 export interface SetKeyboardProfileResult {

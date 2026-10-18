@@ -12,6 +12,9 @@ import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { toolJson } from "../helpers/toolResponse";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 let deps: Partial<StorageToolsDependencies> = {};
 function useStorageToolsDependenciesForTesting(value: Partial<StorageToolsDependencies>): void {

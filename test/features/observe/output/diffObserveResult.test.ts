@@ -1,9 +1,12 @@
 import { androidControlObservation } from "../../../helpers/androidDisabledControlCapture";
 import { describe, expect, test } from "bun:test";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
+import type { Element } from "../../../../src/models/Element";
+import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
 import {
   diffObserveResult,
   isSameObservationScreen,
+  type ObserveDiff,
   sanitizeObserveResult,
   DIFF_SCALAR_FIELDS,
   DIFF_ELEMENT_FIELDS,
@@ -29,8 +32,43 @@ import {
  * `node`.
  */
 
+/**
+ * A hand-built hierarchy node or element payload. Tests deliberately build
+ * partial and malformed nodes (array bounds, missing fields), so values stay
+ * loose while keys remain checked at call sites.
+ */
+type LooseNode = Record<string, any>;
+
+/** `from`/`to` of a scalar or element entry in `diff.fields` (not a layout-warnings delta). */
+function fieldChange(diff: ObserveDiff, key: string): { from?: any; to?: any } {
+  const change = diff.fields?.[key];
+  if (!change || "added" in change) {
+    throw new Error(`expected an element/scalar change for ${key}`);
+  }
+  return change;
+}
+
+/** A hierarchy whose root is the given loose node (or array of roots). */
+function hierarchyOf(node: LooseNode): ViewHierarchyResult["hierarchy"] {
+  return { node };
+}
+
+/** The root node(s) of an observation as mutable loose nodes (array-shaped roots included). */
+function rootNodes(result: ObserveResult): LooseNode[] {
+  const node: LooseNode | undefined = result.viewHierarchy?.hierarchy.node;
+  if (!node) {
+    throw new Error("observation has no hierarchy root");
+  }
+  return Array.isArray(node) ? node : [node];
+}
+
+/** An element payload with a deliberately malformed shape (e.g. array `bounds`). */
+function malformedElement(element: { bounds: any } & LooseNode): Element {
+  return element;
+}
+
 /** Build a minimal ObserveResult around a single root node (+ optional scalars). */
-function obs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): ObserveResult {
+function obs(node: LooseNode, extra?: Partial<ObserveResult>): ObserveResult {
   return {
     updatedAt: 1,
     screenSize: { width: 1080, height: 1920 },
@@ -38,18 +76,18 @@ function obs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): Obs
     activeWindow: { appId: "com.example", activityName: ".MainActivity", layoutSeqSum: 1 },
     viewHierarchy: {
       packageName: "com.example",
-      hierarchy: { node: node as any },
+      hierarchy: { node: node },
     },
     ...extra,
   } as ObserveResult;
 }
 
-function iosObs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): ObserveResult {
+function iosObs(node: LooseNode, extra?: Partial<ObserveResult>): ObserveResult {
   return obs(node, {
     activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 1 },
     viewHierarchy: {
       packageName: "com.apple.reminders",
-      hierarchy: { node: node as any },
+      hierarchy: { node: node },
     },
     screenIdentity: {
       platform: "ios",
@@ -639,7 +677,7 @@ describe("diffObserveResult", () => {
       bounds: { left: 0, top: 0, right: 10, bottom: 10 },
       text: "same",
     });
-    const next = obs({ "resource-id": "a", bounds: [0, 0, 10, 10] as any, text: "same" });
+    const next = obs({ "resource-id": "a", bounds: [0, 0, 10, 10], text: "same" });
     const diff = diffObserveResult(baseline, next);
     expect(diff.added).toEqual([]);
     expect(diff.removed).toEqual([]);
@@ -652,10 +690,7 @@ describe("diffObserveResult", () => {
     const { observe } = loadAndroidHomeObserve();
     const baseline = sanitizeObserveResult(observe, { dropElements: false });
     const next = JSON.parse(JSON.stringify(baseline)) as ObserveResult;
-    const roots = Array.isArray(next.viewHierarchy?.hierarchy?.node)
-      ? (next.viewHierarchy!.hierarchy.node as any[])
-      : [next.viewHierarchy!.hierarchy.node];
-    (roots[0] as any).selected = "true"; // toggle one attribute on one node
+    rootNodes(next)[0].selected = "true"; // toggle one attribute on one node
 
     const diff = diffObserveResult(baseline, next);
     // R3: a "one-node change" must diff to EXACTLY one changed entry — a diff that
@@ -691,27 +726,16 @@ describe("diffObserveResult", () => {
   });
 
   test("diffs an array-shaped root (multiple roots)", () => {
-    const baseline = {
-      updatedAt: 1,
-      screenSize: { width: 1, height: 1 },
-      systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
-      viewHierarchy: {
-        packageName: "com.example",
-        hierarchy: {
-          node: [
-            { "resource-id": "r0", bounds: { left: 0, top: 0, right: 5, bottom: 5 } },
-            {
-              "resource-id": "r1",
-              bounds: { left: 5, top: 5, right: 10, bottom: 10 },
-              text: "old",
-            },
-          ] as any,
-        },
+    const baseline = obs([
+      { "resource-id": "r0", bounds: { left: 0, top: 0, right: 5, bottom: 5 } },
+      {
+        "resource-id": "r1",
+        bounds: { left: 5, top: 5, right: 10, bottom: 10 },
+        text: "old",
       },
-    } as ObserveResult;
+    ]);
     const next = JSON.parse(JSON.stringify(baseline)) as ObserveResult;
-    (next.viewHierarchy!.hierarchy.node as any)[0].selected = "true";
+    rootNodes(next)[0].selected = "true";
     const diff = diffObserveResult(baseline, next);
     expect(diff.changed).toHaveLength(1);
     expect(diff.changed[0].changes.selected).toEqual({ from: undefined, to: "true" });
@@ -734,40 +758,40 @@ describe("diffObserveResult", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
     const baseline = obs(
       { ...node },
-      { focusedElement: elem({ "resource-id": "field1", text: "" }) as any },
+      { focusedElement: elem({ "resource-id": "field1", text: "" }) },
     );
     const next = obs(
       { ...node },
-      { focusedElement: elem({ "resource-id": "field2", text: "hi" }) as any },
+      { focusedElement: elem({ "resource-id": "field2", text: "hi" }) },
     );
 
     const diff = diffObserveResult(baseline, next);
     expect(diff.fields).toBeDefined();
     expect(diff.fields!.focusedElement).toBeDefined();
-    expect((diff.fields!.focusedElement.from as any)["resource-id"]).toBe("field1");
-    expect((diff.fields!.focusedElement.to as any)["resource-id"]).toBe("field2");
+    expect(fieldChange(diff, "focusedElement").from["resource-id"]).toBe("field1");
+    expect(fieldChange(diff, "focusedElement").to["resource-id"]).toBe("field2");
   });
 
   test("focus gained (undefined → element) surfaces as a change", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
     const baseline = obs({ ...node });
-    const next = obs({ ...node }, { focusedElement: elem({ "resource-id": "f" }) as any });
+    const next = obs({ ...node }, { focusedElement: elem({ "resource-id": "f" }) });
 
     const diff = diffObserveResult(baseline, next);
     expect(diff.fields!.focusedElement).toEqual({
       from: undefined,
-      to: elem({ "resource-id": "f" }) as any,
+      to: elem({ "resource-id": "f" }),
     });
   });
 
   test("focus lost (element → undefined) surfaces as a change", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
-    const baseline = obs({ ...node }, { focusedElement: elem({ "resource-id": "f" }) as any });
+    const baseline = obs({ ...node }, { focusedElement: elem({ "resource-id": "f" }) });
     const next = obs({ ...node });
 
     const diff = diffObserveResult(baseline, next);
     expect(diff.fields!.focusedElement).toEqual({
-      from: elem({ "resource-id": "f" }) as any,
+      from: elem({ "resource-id": "f" }),
       to: undefined,
     });
   });
@@ -775,8 +799,8 @@ describe("diffObserveResult", () => {
   test("an unchanged focusedElement is not reported", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
     const same = elem({ "resource-id": "f", text: "same" });
-    const baseline = obs({ ...node }, { focusedElement: { ...same } as any });
-    const next = obs({ ...node }, { focusedElement: { ...same } as any });
+    const baseline = obs({ ...node }, { focusedElement: { ...same } });
+    const next = obs({ ...node }, { focusedElement: { ...same } });
 
     const diff = diffObserveResult(baseline, next);
     expect(diff.fields).toBeUndefined();
@@ -793,12 +817,12 @@ describe("diffObserveResult", () => {
         focusedElement: {
           bounds: { left: 0, top: 0, right: 10, bottom: 10 },
           "resource-id": "f",
-        } as any,
+        },
       },
     );
     const next = obs(
       { ...node },
-      { focusedElement: { bounds: [0, 0, 10, 10], "resource-id": "f" } as any },
+      { focusedElement: malformedElement({ bounds: [0, 0, 10, 10], "resource-id": "f" }) },
     );
 
     const diff = diffObserveResult(baseline, next);
@@ -810,21 +834,21 @@ describe("diffObserveResult", () => {
     const baseline = obs(
       { ...node },
       {
-        accessibilityFocusedElement: elem({ "resource-id": "ax1" }) as any,
+        accessibilityFocusedElement: elem({ "resource-id": "ax1" }),
         awaitedElement: undefined,
       },
     );
     const next = obs(
       { ...node },
       {
-        accessibilityFocusedElement: elem({ "resource-id": "ax2" }) as any,
-        awaitedElement: elem({ "resource-id": "await" }) as any,
+        accessibilityFocusedElement: elem({ "resource-id": "ax2" }),
+        awaitedElement: elem({ "resource-id": "await" }),
       },
     );
 
     const diff = diffObserveResult(baseline, next);
-    expect((diff.fields!.accessibilityFocusedElement.to as any)["resource-id"]).toBe("ax2");
-    expect((diff.fields!.awaitedElement.to as any)["resource-id"]).toBe("await");
+    expect(fieldChange(diff, "accessibilityFocusedElement").to["resource-id"]).toBe("ax2");
+    expect(fieldChange(diff, "awaitedElement").to["resource-id"]).toBe("await");
   });
 
   test("awaitDuration change is captured as a scalar field", () => {
@@ -1182,14 +1206,14 @@ describe("diffObserveResult", () => {
         { "resource-id": "child", bounds: { left: 1, top: 1, right: 2, bottom: 2 }, text: "deep" },
       ],
     });
-    const baseline = obs({ ...node }, { focusedElement: heavy("f1") as any });
-    const next = obs({ ...node }, { focusedElement: heavy("f2") as any });
+    const baseline = obs({ ...node }, { focusedElement: heavy("f1") });
+    const next = obs({ ...node }, { focusedElement: heavy("f2") });
 
     const diff = diffObserveResult(baseline, next);
     expect(diff.fields!.focusedElement).toBeDefined();
-    expect((diff.fields!.focusedElement.from as any).node).toBeUndefined();
-    expect((diff.fields!.focusedElement.to as any).node).toBeUndefined();
-    expect((diff.fields!.focusedElement.to as any)["resource-id"]).toBe("f2");
+    expect(fieldChange(diff, "focusedElement").from.node).toBeUndefined();
+    expect(fieldChange(diff, "focusedElement").to.node).toBeUndefined();
+    expect(fieldChange(diff, "focusedElement").to["resource-id"]).toBe("f2");
   });
 
   test("a mirror element whose only change is inside its `node` subtree is not reported", () => {
@@ -1207,8 +1231,8 @@ describe("diffObserveResult", () => {
         },
       ],
     });
-    const baseline = obs({ ...node }, { focusedElement: withChild("before") as any });
-    const next = obs({ ...node }, { focusedElement: withChild("after") as any });
+    const baseline = obs({ ...node }, { focusedElement: withChild("before") });
+    const next = obs({ ...node }, { focusedElement: withChild("after") });
 
     const diff = diffObserveResult(baseline, next);
     expect(diff.fields).toBeUndefined();
@@ -1239,9 +1263,9 @@ describe("diffObserveResult", () => {
     const diff = diffObserveResult(baseline, next);
     // The focus change is reported (only the mirror changed; the hierarchy is identical).
     expect(diff.fields?.focusedElement).toBeDefined();
-    expect((diff.fields!.focusedElement.to as any)["resource-id"]).toBe("focus-b");
-    expect((diff.fields!.focusedElement.from as any).node).toBeUndefined();
-    expect((diff.fields!.focusedElement.to as any).node).toBeUndefined();
+    expect(fieldChange(diff, "focusedElement").to["resource-id"]).toBe("focus-b");
+    expect(fieldChange(diff, "focusedElement").from.node).toBeUndefined();
+    expect(fieldChange(diff, "focusedElement").to.node).toBeUndefined();
     // The whole diff stays a tiny fraction of the full observation: the deep subtree
     // is stripped from both sides, so it is never re-embedded.
     expect(measureValue(diff).bytes).toBeLessThan(measureValue(base).bytes * 0.1);
@@ -1259,7 +1283,7 @@ describe("diffObserveResult", () => {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         node: [baseChild],
       },
-      { rotation: 0, focusedElement: elem({ "resource-id": "f1" }) as any },
+      { rotation: 0, focusedElement: elem({ "resource-id": "f1" }) },
     );
     const next = obs(
       {
@@ -1267,13 +1291,13 @@ describe("diffObserveResult", () => {
         bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         node: [{ ...baseChild, selected: "true" }],
       },
-      { rotation: 1, focusedElement: elem({ "resource-id": "f2" }) as any },
+      { rotation: 1, focusedElement: elem({ "resource-id": "f2" }) },
     );
 
     const diff = diffObserveResult(baseline, next);
     expect(diff.changed).toHaveLength(1); // node child toggled selected
     expect(diff.fields!.rotation).toEqual({ from: 0, to: 1 });
-    expect((diff.fields!.focusedElement.to as any)["resource-id"]).toBe("f2");
+    expect(fieldChange(diff, "focusedElement").to["resource-id"]).toBe("f2");
   });
 
   test("elementFields config override restricts which mirror fields are diffed", () => {
@@ -1281,21 +1305,21 @@ describe("diffObserveResult", () => {
     const baseline = obs(
       { ...node },
       {
-        focusedElement: elem({ "resource-id": "f1" }) as any,
-        awaitedElement: elem({ "resource-id": "w1" }) as any,
+        focusedElement: elem({ "resource-id": "f1" }),
+        awaitedElement: elem({ "resource-id": "w1" }),
       },
     );
     const next = obs(
       { ...node },
       {
-        focusedElement: elem({ "resource-id": "f2" }) as any,
-        awaitedElement: elem({ "resource-id": "w2" }) as any,
+        focusedElement: elem({ "resource-id": "f2" }),
+        awaitedElement: elem({ "resource-id": "w2" }),
       },
     );
 
     const diff = diffObserveResult(baseline, next, { elementFields: ["awaitedElement"] });
     expect(diff.fields!.focusedElement).toBeUndefined(); // not in the override set
-    expect((diff.fields!.awaitedElement.to as any)["resource-id"]).toBe("w2");
+    expect(fieldChange(diff, "awaitedElement").to["resource-id"]).toBe("w2");
   });
 
   test("DIFF_ELEMENT_FIELDS covers exactly the three mirror fields", () => {
@@ -1308,8 +1332,8 @@ describe("diffObserveResult", () => {
 
   test("element-field diffing does not mutate either input", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
-    const baseline = obs({ ...node }, { focusedElement: elem({ "resource-id": "f1" }) as any });
-    const next = obs({ ...node }, { focusedElement: elem({ "resource-id": "f2" }) as any });
+    const baseline = obs({ ...node }, { focusedElement: elem({ "resource-id": "f1" }) });
+    const next = obs({ ...node }, { focusedElement: elem({ "resource-id": "f2" }) });
     const beforeBaseline = JSON.stringify(baseline);
     const beforeNext = JSON.stringify(next);
 
@@ -1412,7 +1436,7 @@ describe("diffObserveResult", () => {
     });
     // Re-flow the following rows' bounds (as a real insert would).
     (shifted.node as Record<string, unknown>[]).forEach((n, i) => {
-      (n as any).bounds = { left: 0, top: i * 10, right: 100, bottom: i * 10 + 10 };
+      n.bounds = { left: 0, top: i * 10, right: 100, bottom: i * 10 + 10 };
     });
     const next = obs(shifted);
 
@@ -1675,13 +1699,13 @@ describe("diffObserveResult", () => {
       text: "T",
       bounds: { left: 0, top: 0, right: 10, bottom: 10 },
     });
-    const next = obs({ "resource-id": "m", text: "T", bounds: [5, 5, 15, 15] as any });
+    const next = obs({ "resource-id": "m", text: "T", bounds: [5, 5, 15, 15] });
 
     const diff = diffObserveResult(baseline, next);
     expect(diff.changed).toHaveLength(1);
     expect(diff.changed[0].changes.bounds).toEqual({
       from: { left: 0, top: 0, right: 10, bottom: 10 },
-      to: [5, 5, 15, 15] as any,
+      to: [5, 5, 15, 15],
     });
   });
 
@@ -1745,10 +1769,7 @@ describe("diffObserveResult", () => {
     const { observe } = loadAndroidHomeObserve();
     const baseline = sanitizeObserveResult(observe, { dropElements: false });
     const next = JSON.parse(JSON.stringify(baseline)) as ObserveResult;
-    const roots = Array.isArray(next.viewHierarchy?.hierarchy?.node)
-      ? (next.viewHierarchy!.hierarchy.node as any[])
-      : [next.viewHierarchy!.hierarchy.node];
-    (roots[0] as any).selected = "true";
+    rootNodes(next)[0].selected = "true";
 
     const withIdentity = diffObserveResult(baseline, next);
     const positional = diffObserveResult(baseline, next, { contentIdentity: false });
@@ -1895,7 +1916,7 @@ describe("diffObserveResult — conservative iOS stable identity (#3318)", () =>
         activeWindow: { appId: "dev.example.todo", activityName: "", layoutSeqSum: 1 },
         viewHierarchy: {
           packageName: "dev.example.todo",
-          hierarchy: { node: root(text) as any },
+          hierarchy: { node: root(text) },
         },
         screenIdentity: undefined,
       });
@@ -1922,7 +1943,7 @@ describe("diffObserveResult — conservative iOS stable identity (#3318)", () =>
           sdkInt: 34,
           foregroundActivity: "com.example.android/.MainActivity",
           screenScale: 3,
-          hierarchy: { node: node as any },
+          hierarchy: { node: node },
         },
       } as ObserveResult);
     const baseline = androidObs({
@@ -2250,8 +2271,8 @@ describe("diffObserveResult — volatile `extras` metadata exclusion (#3051)", (
       bounds: { left: 0, top: 0, right: 10, bottom: 10 },
       extras: { "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL": t },
     });
-    const baseline = obs({ ...node }, { focusedElement: fe("84") as any });
-    const next = obs({ ...node }, { focusedElement: fe("335") as any });
+    const baseline = obs({ ...node }, { focusedElement: fe("84") });
+    const next = obs({ ...node }, { focusedElement: fe("335") });
 
     const diff = diffObserveResult(baseline, next);
     expect(diff.fields).toBeUndefined();
@@ -2266,7 +2287,7 @@ describe("diffObserveResult — volatile `extras` metadata exclusion (#3051)", (
           "resource-id": "f1",
           bounds: { left: 0, top: 0, right: 10, bottom: 10 },
           extras: { k: "1" },
-        } as any,
+        },
       },
     );
     const next = obs(
@@ -2276,16 +2297,16 @@ describe("diffObserveResult — volatile `extras` metadata exclusion (#3051)", (
           "resource-id": "f2",
           bounds: { left: 0, top: 0, right: 10, bottom: 10 },
           extras: { k: "2" },
-        } as any,
+        },
       },
     );
 
     const diff = diffObserveResult(baseline, next);
     expect(diff.fields!.focusedElement).toBeDefined();
-    expect((diff.fields!.focusedElement.from as any)["resource-id"]).toBe("f1");
-    expect((diff.fields!.focusedElement.to as any)["resource-id"]).toBe("f2");
-    expect((diff.fields!.focusedElement.from as any).extras).toBeUndefined();
-    expect((diff.fields!.focusedElement.to as any).extras).toBeUndefined();
+    expect(fieldChange(diff, "focusedElement").from["resource-id"]).toBe("f1");
+    expect(fieldChange(diff, "focusedElement").to["resource-id"]).toBe("f2");
+    expect(fieldChange(diff, "focusedElement").from.extras).toBeUndefined();
+    expect(fieldChange(diff, "focusedElement").to.extras).toBeUndefined();
   });
 });
 
@@ -2341,10 +2362,10 @@ describe("diffObserveResult — volatile occlusion exclusion (#4399)", () => {
 
   test("an element mirror whose only change is occlusion churn is not reported", () => {
     const baseline = obs(node(), {
-      focusedElement: node({ occlusionState: "partial", occludedBy: "overlay-a" }) as any,
+      focusedElement: node({ occlusionState: "partial", occludedBy: "overlay-a" }),
     });
     const next = obs(node(), {
-      focusedElement: node({ occlusionState: "visible", occludedBy: "overlay-b" }) as any,
+      focusedElement: node({ occlusionState: "visible", occludedBy: "overlay-b" }),
     });
 
     expect(diffObserveResult(baseline, next).fields).toBeUndefined();
@@ -2948,7 +2969,7 @@ describe("isSameObservationScreen", () => {
       {
         viewHierarchy: {
           packageName: "com.other",
-          hierarchy: { node: { "resource-id": "a" } as any },
+          hierarchy: hierarchyOf({ "resource-id": "a" }),
         },
       },
     );
@@ -2962,7 +2983,7 @@ describe("isSameObservationScreen", () => {
         activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 1 },
         viewHierarchy: {
           packageName: "com.apple.reminders",
-          hierarchy: { node: { "resource-id": "a" } as any },
+          hierarchy: hierarchyOf({ "resource-id": "a" }),
         },
         screenIdentity: iosIdentity("bundle=com.apple.reminders|nav=Reminders"),
       },
@@ -2973,7 +2994,7 @@ describe("isSameObservationScreen", () => {
         activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 2 },
         viewHierarchy: {
           packageName: "com.apple.reminders",
-          hierarchy: { node: { "resource-id": "b" } as any },
+          hierarchy: hierarchyOf({ "resource-id": "b" }),
         },
         screenIdentity: iosIdentity("bundle=com.apple.reminders|nav=Reminders"),
       },
@@ -2988,7 +3009,7 @@ describe("isSameObservationScreen", () => {
         activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 1 },
         viewHierarchy: {
           packageName: "com.apple.reminders",
-          hierarchy: { node: { "resource-id": "a" } as any },
+          hierarchy: hierarchyOf({ "resource-id": "a" }),
         },
         screenIdentity: iosIdentity("bundle=com.apple.reminders|nav=Reminders"),
       },
@@ -2999,7 +3020,7 @@ describe("isSameObservationScreen", () => {
         activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 2 },
         viewHierarchy: {
           packageName: "com.apple.reminders",
-          hierarchy: { node: { "resource-id": "b" } as any },
+          hierarchy: hierarchyOf({ "resource-id": "b" }),
         },
         screenIdentity: iosIdentity("bundle=com.apple.reminders|nav=New Reminder"),
       },
@@ -3038,7 +3059,7 @@ describe("isSameObservationScreen", () => {
         activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 1 },
         viewHierarchy: {
           packageName: "com.apple.reminders",
-          hierarchy: { node: { "resource-id": "a" } as any },
+          hierarchy: hierarchyOf({ "resource-id": "a" }),
         },
         screenIdentity: iosIdentity("bundle=com.apple.reminders|tab=Inbox", "medium"),
       },
@@ -3049,7 +3070,7 @@ describe("isSameObservationScreen", () => {
         activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 2 },
         viewHierarchy: {
           packageName: "com.apple.reminders",
-          hierarchy: { node: { "resource-id": "b" } as any },
+          hierarchy: hierarchyOf({ "resource-id": "b" }),
         },
         screenIdentity: iosIdentity("bundle=com.apple.reminders|tab=Search", "medium"),
       },
@@ -3064,7 +3085,7 @@ describe("isSameObservationScreen", () => {
         activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 1 },
         viewHierarchy: {
           packageName: "com.apple.reminders",
-          hierarchy: { node: { "resource-id": "a" } as any },
+          hierarchy: hierarchyOf({ "resource-id": "a" }),
         },
         screenIdentity: iosIdentity("bundle=com.apple.reminders|nav=Reminders"),
       },
@@ -3075,7 +3096,7 @@ describe("isSameObservationScreen", () => {
         activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 2 },
         viewHierarchy: {
           packageName: "com.apple.reminders",
-          hierarchy: { node: { "resource-id": "b" } as any },
+          hierarchy: hierarchyOf({ "resource-id": "b" }),
         },
       },
     );
@@ -3115,7 +3136,7 @@ describe("isSameObservationScreen", () => {
         { "resource-id": "a" },
         {
           activeWindow: { appId, activityName: "", layoutSeqSum: 1 },
-          viewHierarchy: { packageName: appId, hierarchy: { node: { "resource-id": "a" } as any } },
+          viewHierarchy: { packageName: appId, hierarchy: hierarchyOf({ "resource-id": "a" }) },
           screenIdentity: identity,
         },
       );

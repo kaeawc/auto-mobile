@@ -8,11 +8,17 @@ import type { GestureEmitter, GestureEvent } from "./types";
 import type { TouchInputNode } from "./TouchNodeDiscovery";
 import type { GestureScaler } from "./AxisRanges";
 import { TouchFrameReconstructor } from "./TouchFrameReconstructor";
-import { GestureClassifier } from "./GestureClassifier";
+import { GestureClassifier, type PressureRange } from "./GestureClassifier";
+import { splitDeviceLine } from "./GetEventLine";
 
 interface GetEventReaderOptions {
   adb: AdbExecutor;
   touchNode: TouchInputNode;
+  /**
+   * Additional pen digitizer nodes read by the same `getevent` process. Each has
+   * its own axis ranges, so it needs its own scaler.
+   */
+  penNodes?: ReadonlyArray<{ node: TouchInputNode; scaler: GestureScaler }>;
   /** A timeline-backed scaler maps each touch with the geometry current at its DOWN. */
   scaler: GestureScaler;
   /** Display density in dp multiplier (e.g. 2.75 for 440dpi) */
@@ -20,9 +26,17 @@ interface GetEventReaderOptions {
   timer?: Timer;
 }
 
+interface NodePipeline {
+  reconstructor: TouchFrameReconstructor;
+  classifier: GestureClassifier;
+}
+
 /**
- * Spawns `adb shell getevent -lt <touchNode.path>` through AdbClient and pipes
- * the output through TouchFrameReconstructor → GestureClassifier.
+ * Spawns `adb shell getevent -lt <touchNode.path> [<pen paths>...]` through
+ * AdbClient and pipes the output through TouchFrameReconstructor →
+ * GestureClassifier, one pair per node. With several paths getevent prefixes
+ * each line with its device path, which attributes the line to a node; lines
+ * without a prefix belong to `touchNode`.
  *
  * Implements GestureEmitter so it can be replaced with a fake in tests.
  */
@@ -51,10 +65,14 @@ export class GetEventReader implements GestureEmitter {
     onGesture: (event: GestureEvent) => void,
     onError?: (err: Error) => void,
   ): Promise<void> {
-    const reconstructor = new TouchFrameReconstructor();
-    const classifier = new GestureClassifier(this.opts.scaler, this.opts.density);
+    const primaryNode = this.opts.touchNode;
+    const pipelines = new Map<string, NodePipeline>();
+    pipelines.set(primaryNode.path, this.createPipeline(primaryNode, this.opts.scaler));
+    for (const { node, scaler } of this.opts.penNodes ?? []) {
+      pipelines.set(node.path, this.createPipeline(node, scaler));
+    }
 
-    const args = ["shell", "getevent", "-lt", this.opts.touchNode.path];
+    const args = ["shell", "getevent", "-lt", ...pipelines.keys()];
 
     logger.debug(`[GetEventReader] Spawning: ${args.join(" ")}`);
     try {
@@ -94,7 +112,13 @@ export class GetEventReader implements GestureEmitter {
           continue;
         }
         const arrivedAt = this.timer.now();
-        const result = reconstructor.feedLine(line, arrivedAt);
+        const { path, line: eventLine } = splitDeviceLine(line);
+        const pipeline = pipelines.get(path ?? primaryNode.path);
+        if (!pipeline) {
+          continue;
+        }
+        const { reconstructor, classifier } = pipeline;
+        const result = reconstructor.feedLine(eventLine, arrivedAt);
         if (!result) {
           continue;
         }
@@ -158,6 +182,17 @@ export class GetEventReader implements GestureEmitter {
     child.stderr.on("data", onStderr);
     child.on("error", onChildError);
     child.on("exit", onExit);
+  }
+
+  private createPipeline(node: TouchInputNode, scaler: GestureScaler): NodePipeline {
+    const pressureRange: PressureRange | undefined =
+      node.pressureMin !== undefined && node.pressureMax !== undefined
+        ? { min: node.pressureMin, max: node.pressureMax }
+        : undefined;
+    return {
+      reconstructor: new TouchFrameReconstructor({ singleTouch: node.kind === "pen" }),
+      classifier: new GestureClassifier(scaler, this.opts.density, pressureRange),
+    };
   }
 
   stop(): void {

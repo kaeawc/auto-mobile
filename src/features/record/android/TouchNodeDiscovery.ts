@@ -9,6 +9,11 @@ export interface TouchInputNode {
   axisXMax: number;
   axisYMin: number;
   axisYMax: number;
+  /** Set by InputNodeDiscovery; absent from discoverTouchNode results, which are touch. */
+  kind?: "touch" | "pen";
+  /** Pressure axis range from `getevent -p`, when the node reports one. */
+  pressureMin?: number;
+  pressureMax?: number;
 }
 
 /**

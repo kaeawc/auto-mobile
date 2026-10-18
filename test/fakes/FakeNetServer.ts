@@ -116,11 +116,15 @@ export class FakeSocket<Response = DaemonResponse> extends Socket implements Fak
   /**
    * Destroy the socket
    */
-  destroy(_error?: Error): this {
+  destroy(error?: Error): this {
     if (!this.destroyed) {
       this.destroyed = true;
       this.writable = false;
-      this.emit("close", false);
+      // A real socket reports the destroy cause as `error`, then closes with hadError true.
+      if (error) {
+        this.emit("error", error);
+      }
+      this.emit("close", error !== undefined);
     }
     return this;
   }

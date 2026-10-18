@@ -2,6 +2,7 @@ import { ChildProcess } from "child_process";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import {
   BootedDeviceDiscovery,
+  BootedDeviceDiscoveryOptions,
   DeviceDestroyOptions,
   DeviceImageDiscovery,
   DeviceImageDiscoveryOptions,
@@ -73,10 +74,27 @@ export class FakeDeviceManager implements PlatformDeviceManager {
   }
 
   async listDeviceImages(platform: SomePlatform): Promise<DeviceInfo[]> {
-    if (platform === "either") {
-      return this.deviceImages;
-    }
-    return this.deviceImages.filter((device) => device.platform === platform);
+    const images =
+      platform === "either"
+        ? this.deviceImages
+        : this.deviceImages.filter((device) => device.platform === platform);
+    return images.map((image) => this.withRunningState(image));
+  }
+
+  /** Listings overlay the booted state onto each image, as the real manager's listings do. */
+  private withRunningState(image: DeviceInfo): DeviceInfo {
+    return this.matchesBooted(image) ? { ...image, isRunning: true } : image;
+  }
+
+  /** Android images match a booted emulator by name; iOS by device id (name only without one). */
+  private matchesBooted(device: DeviceInfo): boolean {
+    return this.bootedDevices.some((booted) =>
+      booted.platform !== device.platform
+        ? false
+        : device.platform === "android" || device.deviceId === undefined
+          ? booted.name === device.name
+          : booted.deviceId === device.deviceId,
+    );
   }
 
   async getDeviceImagesDetailed(
@@ -98,22 +116,19 @@ export class FakeDeviceManager implements PlatformDeviceManager {
       }
     }
     return {
-      devices: this.deviceImages.filter(
-        (device) => requested.includes(device.platform) && succeededPlatforms.has(device.platform),
-      ),
+      devices: this.deviceImages
+        .filter(
+          (device) =>
+            requested.includes(device.platform) && succeededPlatforms.has(device.platform),
+        )
+        .map((image) => this.withRunningState(image)),
       succeededPlatforms,
       discoveryErrors,
     };
   }
 
   async isDeviceImageRunning(device: DeviceInfo): Promise<boolean> {
-    if (device.isRunning) {
-      return true;
-    }
-    const id = device.deviceId ?? device.name;
-    return this.bootedDevices.some(
-      (booted) => booted.deviceId === id || booted.name === device.name,
-    );
+    return this.matchesBooted(device);
   }
 
   async getBootedDevices(platform: SomePlatform): Promise<BootedDevice[]> {
@@ -131,7 +146,10 @@ export class FakeDeviceManager implements PlatformDeviceManager {
     });
   }
 
-  async getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery> {
+  async getBootedDevicesDetailed(
+    platform: SomePlatform,
+    options: BootedDeviceDiscoveryOptions = {},
+  ): Promise<BootedDeviceDiscovery> {
     const requested: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const devices: BootedDevice[] = [];
     const succeededPlatforms = new Set<Platform>();
@@ -185,7 +203,7 @@ export class FakeDeviceManager implements PlatformDeviceManager {
       }
     }
     return {
-      devices,
+      devices: options.presentationOrder === "reverse" ? devices.toReversed() : devices,
       succeededPlatforms,
       succeededSources,
       freshDeviceIds,

@@ -2,6 +2,7 @@ import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { BootedDevice, DeviceInfo, Platform } from "../../src/models";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
 import { runDeviceManagerContract, type ScriptedDeviceManager } from "./DeviceManagerContract";
@@ -12,6 +13,26 @@ function scriptedFake(): ScriptedDeviceManager {
     manager: fake,
     setImages: (platform, images) => fake.setDeviceImages(platform, images),
     setBooted: (platform, devices) => fake.setBootedDevices(platform, devices),
+    failBootedDiscovery: (platform) => fake.failedPlatforms.add(platform),
+  };
+}
+
+function scriptedFakeDeviceManager(): ScriptedDeviceManager {
+  const fake = new FakeDeviceManager();
+  const inPlatform = (platform: Platform) => (entry: { platform: Platform }) =>
+    entry.platform === platform;
+  const replace = <T extends { platform: Platform }>(list: T[], platform: Platform, next: T[]) => [
+    ...list.filter((entry) => !inPlatform(platform)(entry)),
+    ...next,
+  ];
+  return {
+    manager: fake,
+    setImages: (platform, images) => {
+      fake.deviceImages = replace(fake.deviceImages, platform, images);
+    },
+    setBooted: (platform, devices) => {
+      fake.bootedDevices = replace(fake.bootedDevices, platform, devices);
+    },
     failBootedDiscovery: (platform) => fake.failedPlatforms.add(platform),
   };
 }
@@ -60,3 +81,4 @@ function scriptedReal(): ScriptedDeviceManager {
 
 runDeviceManagerContract("FakeDeviceUtils", scriptedFake);
 runDeviceManagerContract("MultiPlatformDeviceManager (stubbed seams)", scriptedReal);
+runDeviceManagerContract("FakeDeviceManager", scriptedFakeDeviceManager);

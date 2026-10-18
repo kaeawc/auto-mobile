@@ -50,6 +50,7 @@ import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { DeviceShutdownTimeoutError } from "../../models/DeviceShutdownTimeoutError";
 import { fixedBackoff } from "../../utils/Backoff";
 import { DaemonState, type DaemonStateLike } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { type Session, type SessionManager } from "../../daemon/sessionManager";
 import { reconcileDiscoveryObservation } from "../../daemon/discoveryReconcile";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
@@ -911,9 +912,7 @@ export function listDevicePayloads(
    */
   transitionalHolds: ReadonlyMap<string, TransitionalHold> = new Map(),
 ) {
-  const sessionManager = DaemonState.getInstance().isInitialized()
-    ? DaemonState.getInstance().getSessionManager()
-    : undefined;
+  const sessionManager = defaultDaemonContext.sessionManager();
   const sessions = new Map(
     sessionManager?.getAllSessions().map((session) => [session.sessionId, session]),
   );

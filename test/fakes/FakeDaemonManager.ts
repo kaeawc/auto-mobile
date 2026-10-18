@@ -29,6 +29,10 @@ export class FakeDaemonManager implements DaemonManagerLike {
   restartOptions: DaemonOptions | undefined;
   restartExpectedDaemon: DaemonStatus | undefined;
   restartResult: DaemonRestartResult = "restarted";
+  restartAdmittedCallCount = 0;
+  restartAdmittedOptions: DaemonOptions | undefined;
+  restartAdmittedToken: string | undefined;
+  restartAdmittedResult: DaemonRestartResult = "restarted";
   waitForReadyResult = true;
   waitForReadyCallCount = 0;
   startupLockHeldByLiveProcess = false;
@@ -66,8 +70,27 @@ export class FakeDaemonManager implements DaemonManagerLike {
     return this.restartResult;
   }
 
-  async waitForReady(_timeout: number): Promise<boolean> {
+  async restartAdmitted(
+    options: DaemonOptions,
+    maintenanceToken: string,
+  ): Promise<DaemonRestartResult> {
+    this.restartAdmittedCallCount++;
+    this.restartAdmittedOptions = options;
+    this.restartAdmittedToken = maintenanceToken;
+    return this.restartAdmittedResult;
+  }
+
+  async waitForReady(
+    timeout: number,
+    signal?: AbortSignal,
+    _shouldContinueWaiting?: () => boolean,
+  ): Promise<boolean> {
     this.waitForReadyCallCount++;
+    // The real wait checks its loop bound and the caller's signal before it ever
+    // probes the socket, so a spent budget or a cancelled wait is never ready.
+    if (timeout <= 0 || signal?.aborted) {
+      return false;
+    }
     return this.waitForReadyResult;
   }
 

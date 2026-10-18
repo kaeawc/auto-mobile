@@ -116,7 +116,6 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
 
     server = new UnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(async () => shutdownReserved),
       fakeTimer,
       null,
@@ -206,7 +205,6 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     const fingerprintSocketPath = join(tmpdir(), `t-fingerprint-${randomUUID().slice(0, 8)}.sock`);
     const fingerprintServer = new UnixSocketServer(
       fingerprintSocketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonState(),
       fakeTimer,
       null,
@@ -327,13 +325,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       releaseSession: async () => null,
     });
     const activeSocketPath = join(tmpdir(), `t-maintenance-${randomUUID().slice(0, 8)}.sock`);
-    const activeServer = new UnixSocketServer(
-      activeSocketPath,
-      "http://localhost:0/mcp",
-      state,
-      new FakeTimer(),
-      null,
-    );
+    const activeServer = new UnixSocketServer(activeSocketPath, state, new FakeTimer(), null);
     try {
       await activeServer.start();
       const activeStatus = (await sendRequest(activeSocketPath, "ide/status")).result!;
@@ -462,18 +454,11 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     const timer = new LateCallbackFakeTimer();
     let lateRestartRequests = 0;
     const lateSocketPath = join(tmpdir(), `t-maintenance-late-${randomUUID().slice(0, 8)}.sock`);
-    const lateServer = new UnixSocketServer(
-      lateSocketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      timer,
-      null,
-      {
-        onRestartAccepted: () => {
-          lateRestartRequests++;
-        },
+    const lateServer = new UnixSocketServer(lateSocketPath, createFakeDaemonState(), timer, null, {
+      onRestartAccepted: () => {
+        lateRestartRequests++;
       },
-    );
+    });
 
     try {
       await lateServer.start();
@@ -545,7 +530,6 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     const timer = new FakeTimer();
     const acceptanceServer = new UnixSocketServer(
       acceptanceSocketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonStateWithSessions([
         {
           sessionId: "owned-session",
@@ -694,7 +678,6 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
     const timer = new LateCallbackFakeTimer();
     const acceptanceServer = new UnixSocketServer(
       acceptanceSocketPath,
-      "http://localhost:0/mcp",
       createFakeDaemonStateWithSessions([
         {
           sessionId: "owned-session",

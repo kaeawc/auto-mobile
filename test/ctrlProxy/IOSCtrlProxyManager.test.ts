@@ -30,11 +30,9 @@ describe("IOSCtrlProxyManager", function () {
   });
 
   test("setup warns with the underlying failure while returning a retryable status", async function () {
-    const manager = createManagerWithFakeHealthClient(testDevice, fakeTimer);
-    const uninstall = spyOn(
-      manager as unknown as { uninstallLegacyAppIfPresent(): Promise<void> },
-      "uninstallLegacyAppIfPresent",
-    ).mockResolvedValue();
+    const manager = createManagerWithFakeHealthClient(testDevice, fakeTimer, {
+      uninstallLegacyAppIfPresent: async () => {},
+    });
     const checkRunning = spyOn(manager, "isRunning").mockRejectedValue(
       new Error("health probe unavailable"),
     );
@@ -50,7 +48,6 @@ describe("IOSCtrlProxyManager", function () {
       checkRunning.mockResolvedValue(true);
       expect((await manager.setup()).success).toBe(true);
     } finally {
-      uninstall.mockRestore();
       checkRunning.mockRestore();
       warn.mockRestore();
     }
@@ -209,13 +206,14 @@ describe("IOSCtrlProxyManager", function () {
         8765: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId, port: 8765 }),
         // 8767 (service port) returns nothing — the runner bound the default instead.
       });
+      // A non-default service port leaves 8765 as a distinct fallback candidate.
+      PortManager.reserve(testDevice.deviceId, 8767);
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
         undefined,
         fakeExecutor,
       );
-      (manager as unknown as { servicePort: number }).servicePort = 8767;
 
       expect(await manager.getReportedRunnerPort()).toBe(8765);
     });
@@ -224,13 +222,14 @@ describe("IOSCtrlProxyManager", function () {
       installHealthFakes({
         8765: JSON.stringify({ status: "ok", deviceId: "SOME-OTHER-DEVICE", port: 8765 }),
       });
+      // A non-default service port leaves 8765 as a distinct fallback candidate.
+      PortManager.reserve(testDevice.deviceId, 8767);
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
         undefined,
         fakeExecutor,
       );
-      (manager as unknown as { servicePort: number }).servicePort = 8767;
 
       expect(await manager.getReportedRunnerPort()).toBeNull();
     });
@@ -243,13 +242,14 @@ describe("IOSCtrlProxyManager", function () {
       installHealthFakes({
         8765: JSON.stringify({ status: "ok", port: 8765 }),
       });
+      // A non-default service port leaves 8765 as a distinct fallback candidate.
+      PortManager.reserve(testDevice.deviceId, 8767);
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
         undefined,
         fakeExecutor,
       );
-      (manager as unknown as { servicePort: number }).servicePort = 8767;
 
       expect(await manager.getReportedRunnerPort()).toBeNull();
     });
@@ -303,13 +303,14 @@ describe("IOSCtrlProxyManager", function () {
         8767: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId, port: 8767 }),
         8765: JSON.stringify({ status: "ok", deviceId: testDevice.deviceId, port: 8765 }),
       });
+      // A non-default service port leaves 8765 as a distinct fallback candidate.
+      PortManager.reserve(testDevice.deviceId, 8767);
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         testDevice,
         fakeTimer,
         undefined,
         fakeExecutor,
       );
-      (manager as unknown as { servicePort: number }).servicePort = 8767;
 
       expect(await manager.getReportedRunnerPort()).toBe(8767);
     });
@@ -590,82 +591,6 @@ describe("IOSCtrlProxyManager", function () {
       expect((await manager.setup()).success).toBe(true);
       expect(launchCount).toBe(2);
     });
-  });
-
-  describe("cleanup uninstall backend routing", () => {
-    for (const [deviceId, simulator] of [
-      ["A1B2C3D4-E5F6-7890-ABCD-EF1234567890", true],
-      ["00008030-001C2D3E1234567A", false],
-    ] as const) {
-      for (const [method, bundleId] of [
-        ["uninstallLegacyAppIfPresent", "dev.jasonpearson.automobile.XCTestServiceApp"],
-        ["verifyInstalledAppBundle", IOSCtrlProxyManager.APP_BUNDLE_ID],
-      ] as const) {
-        for (const fails of [false, true]) {
-          test(`${method} on ${simulator ? "simulator" : "physical"} skips termination${fails ? " and swallows uninstall failure" : ""}`, async () => {
-            const executor = new FakeProcessExecutor();
-            const uninstalls: unknown[][] = [];
-            const lookups: unknown[][] = [];
-            const failure = new Error("uninstall failed");
-            const appManager = {
-              getInstalledAppBundleHash: async (...args: unknown[]) => {
-                lookups.push(args);
-                return "installed-hash";
-              },
-              uninstallApp: async (...args: unknown[]) => {
-                uninstalls.push(args);
-                if (fails) {
-                  throw failure;
-                }
-              },
-            } as unknown as DeviceAppManager;
-            const builder = createFakeBuilder();
-            builder.getExpectedAppHash = () => "expected-hash";
-            const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-              { ...testDevice, deviceId },
-              fakeTimer,
-              builder,
-              executor,
-              undefined,
-              appManager,
-            );
-            const internal = manager as unknown as {
-              uninstallLegacyAppIfPresent(): Promise<void>;
-              verifyInstalledAppBundle(): Promise<void>;
-            };
-            const previousSkip = process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH;
-            delete process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH;
-            const warn = spyOn(logger, "warn").mockImplementation(() => {});
-            try {
-              await internal[method]();
-              expect(uninstalls).toHaveLength(1);
-              expect(uninstalls[0].slice(0, 3)).toEqual([deviceId, bundleId, simulator]);
-              expect(uninstalls[0][3]).toBeUndefined();
-              expect(lookups[0].slice(0, 3)).toEqual([deviceId, bundleId, simulator]);
-              expect(executor.getExecutedCommands()).toEqual([]);
-              expect(executor.getSpawnedProcesses()).toEqual([]);
-              if (fails) {
-                expect(
-                  warn.mock.calls.some(([message]) => String(message).includes("uninstall failed")),
-                ).toBe(true);
-              }
-              if (method === "uninstallLegacyAppIfPresent") {
-                await internal[method]();
-                expect(lookups).toHaveLength(1);
-                expect(lookups[0][3]).toEqual({ throwOnLookupTimeout: true });
-              }
-            } finally {
-              warn.mockRestore();
-              if (previousSkip === undefined) {
-                delete process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH;
-              } else {
-                process.env.AUTOMOBILE_IOS_SKIP_CTRL_PROXY_APP_HASH = previousSkip;
-              }
-            }
-          });
-        }
-      }
-    }
   });
 
   // #6575: the legacy-app uninstall probe used to run on every setup() call,
@@ -1035,14 +960,14 @@ describe("IOSCtrlProxyManager", function () {
         undefined,
         fakeExecutor,
       );
-      tunnel(manager)["iproxyProcessId"] = fakeProcess.pid;
-      tunnel(manager)["iproxyProcess"] = fakeProcess as unknown as ChildProcess;
+      tunnel(manager).setStateForTesting({ processId: fakeProcess.pid });
+      tunnel(manager).setStateForTesting({ process: fakeProcess as unknown as ChildProcess });
 
       fakeTimer.enableAutoAdvance();
-      await (manager as unknown as { stopIproxyTunnel: () => Promise<void> }).stopIproxyTunnel();
+      await tunnel(manager).stop();
 
       expect(signals).toEqual([undefined, "SIGKILL"]);
-      expect(tunnel(manager)["iproxyProcessId"]).toBeNull();
+      expect(tunnel(manager).diagnostics.processId).toBeNull();
     });
 
     test("restarts iproxy after unexpected exit", async function () {
@@ -1087,7 +1012,7 @@ describe("IOSCtrlProxyManager", function () {
         );
 
         await manager.startIproxyTunnel();
-        await (manager as unknown as { stopIproxyTunnel: () => Promise<void> }).stopIproxyTunnel();
+        await tunnel(manager).stop();
         eventExecutor.setNextSpawnProcess(newProcess);
         await manager.startIproxyTunnel();
 
@@ -1100,8 +1025,8 @@ describe("IOSCtrlProxyManager", function () {
           await Promise.resolve();
         }
 
-        expect(tunnel(manager)["iproxyProcessId"]).toBe(2222);
-        expect(tunnel(manager)["iproxyProcess"]).toBe(newProcess);
+        expect(tunnel(manager).diagnostics.processId).toBe(2222);
+        expect(tunnel(manager).diagnostics.process).toBe(newProcess);
         expect(eventTimer.getPendingTimeoutCount()).toBe(0);
         expect(eventExecutor.getSpawnedProcesses().length).toBe(2);
       }

@@ -18,8 +18,7 @@ import type {
   AccessibilityHierarchy,
   HierarchyDelegateContext,
 } from "../../../src/features/observe/android/types";
-import type { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { makeViewHierarchyCtrlProxy } from "../../helpers/androidViewHierarchyClient";
 import type { XCTestHierarchy } from "../../../src/features/observe/ios/types";
 import { GetBackStack } from "../../../src/features/observe/GetBackStack";
 import { DisplaySelectionError } from "../../../src/features/observe/DisplaySelection";
@@ -44,6 +43,7 @@ import {
   parseSimulatorDisplays,
   simulatorDeviceDisplays,
 } from "../../../src/utils/ios-cmdline-tools/SimulatorDisplays";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const android: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 const ios: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "simulator" };
@@ -425,9 +425,9 @@ describe("observation display stamp", () => {
       hierarchy: { text: "Ready", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
     };
     const converter = new CtrlProxyHierarchy({ timer } as HierarchyDelegateContext);
-    const client = {
+    const client = makeViewHierarchyCtrlProxy({
       getAccessibilityHierarchy: async () => converter.convertToViewHierarchyResult(raw),
-    } as unknown as AndroidCtrlProxyClient;
+    });
     const hierarchy = new ViewHierarchy(
       device,
       new FakeAdbClientFactory(adb),
@@ -473,8 +473,8 @@ describe("observation display stamp", () => {
     };
     const fakeClient = {
       getLatestHierarchy: async () => ({ hierarchy: raw, fresh: true, updatedAt: 1 }),
-    } as unknown as IOSCtrlProxyClient;
-    const getInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
+    };
+    const getInstance = spyOnIosClientInstance(fakeClient);
     try {
       const hierarchy = new ViewHierarchy(device, new FakeAdbClientFactory(adb), undefined, timer);
       const screen = new RealObserveScreen(

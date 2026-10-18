@@ -101,6 +101,7 @@ import {
   swipeScreenSize,
 } from "./iosChromeInsets";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
+import { explicitDuration, withSwipeOnVelocity } from "./swipeDurationReport";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "../touchscreenInput";
 import { IOSCtrlProxyClient } from "../../observe/ios";
@@ -637,6 +638,7 @@ export class SwipeOn extends BaseVisualChange {
       {
         displayFence: { assertCurrent: target.assertCurrent },
         duration,
+        durationExplicit: explicitDuration(options),
         scrollMode: options.scrollMode,
       },
       undefined,
@@ -1177,9 +1179,10 @@ export class SwipeOn extends BaseVisualChange {
     signalArg?: AbortSignal,
   ): Promise<SwipeOnResult> {
     const { progress, signal } = resolveActionCall(progressOrCall, signalArg);
-    return withSwipeObservationReadScope(() =>
+    const result = await withSwipeObservationReadScope(() =>
       this.executeWithReadScope(options, progress, signal),
     );
+    return withSwipeOnVelocity(result, options);
   }
 
   private async executeWithReadScope(
@@ -1678,6 +1681,7 @@ export class SwipeOn extends BaseVisualChange {
           displayFence: fence,
           duration,
           scrollMode: options.scrollMode,
+          durationExplicit: explicitDuration(options),
           timeoutMs: this.iosGestureTimeoutMs?.(),
           lockScreen: this.iosLockScreenSwipe,
         };
@@ -1815,6 +1819,7 @@ export class SwipeOn extends BaseVisualChange {
           displayFence: fence,
           duration,
           scrollMode: options.scrollMode,
+          durationExplicit: explicitDuration(options),
         };
 
         throwIfAborted(signal);

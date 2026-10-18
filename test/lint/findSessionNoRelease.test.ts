@@ -24,12 +24,6 @@ const methods = manager.members.filter(ts.isMethodDeclaration);
 // Counts must shrink with migrations; adding a reader requires an explicit expiry decision.
 const RETAINED_EXPIRY_READERS: Readonly<Record<string, number>> = {
   recoverPersistedRow: 1,
-  getDeviceForSession: 1,
-  updateSessionCache: 1,
-  setDisplayPin: 1,
-  invalidateAutomationReadiness: 1,
-  setDeviceLabels: 1,
-  clearSessionCache: 1,
 };
 
 // The liveness lease and policy moved to SessionLivenessController (#11797). Its lookups reach
@@ -210,8 +204,6 @@ const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "deviceAutolockManager.ts#attachAutolockSessionToMcpSession": 1,
   "deviceAutolockManager.ts#getOwnedAutolockSession": 1,
   "deviceAutolockManager.ts#throwIfFreshStartAlreadyBound": 1,
-  "deviceControlSessionValidity.ts#isDeviceControlRoutingSessionValid": 1,
-  "deviceControlSessionValidity.ts#isDeviceControlTargetOwnerValid": 1,
   "devicePool.ts#assertDeviceCleanupComplete": 1,
   "devicePool.ts#assertNotPreparedForOtherRequest": 1,
   "devicePool.ts#assertSessionReadyForAutomation": 1,
@@ -257,7 +249,7 @@ const RETAINED_DAEMON_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "sessionClockPersistence.ts#getSession": 1,
   "sessionForIngress.ts#sessionForIngress": 1,
   "socketServer.ts#getAssignedDeviceForSession": 1,
-  "socketServer.ts#getDeviceControlSessionIncarnation": 1,
+  "socketServer.ts#getSessionIncarnation": 1,
   "socketServer.ts#grantedDeviceOf": 1,
   "socketServer.ts#hasActiveDaemonSession": 1,
   "socketServer.ts#selectInputTargetDevice": 1,

@@ -60,10 +60,9 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
       resolver: scrollResolver,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (swipeOn as any).awaitIdle = fakeAwaitIdle;
-    (swipeOn as any).window = fakeWindow;
-    (swipeOn as any).timer = fakeTimer;
     (swipeOn as any).scrollUntilVisible.deps.timer = fakeTimer;
     return swipeOn;
   };
@@ -76,9 +75,7 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
       hierarchy: { node: { $: container } },
     });
     // The real TalkBackSwipeExecutor inside SwipeOn talks to this fake service.
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeCtrlProxy as unknown as AndroidCtrlProxyClient,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy);
     fakeObserveScreen = new FakeObserveScreen();
     fakeGesture = new FakeGestureExecutor();
     fakeAwaitIdle = new FakeAwaitIdle();
@@ -232,10 +229,9 @@ describe("SwipeOn boomerang", () => {
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
       timer: fakeTimer,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (swipeOn as any).awaitIdle = fakeAwaitIdle;
-    (swipeOn as any).window = fakeWindow;
-    (swipeOn as any).timer = fakeTimer;
     return swipeOn;
   };
 
@@ -326,10 +322,9 @@ describe("SwipeOn lookFor validation", () => {
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
       accessibilityDetector: fakeAccessibilityDetector,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
     });
-    (swipeOn as any).awaitIdle = fakeAwaitIdle;
-    (swipeOn as any).window = fakeWindow;
-    (swipeOn as any).timer = fakeTimer;
     return swipeOn;
   };
 

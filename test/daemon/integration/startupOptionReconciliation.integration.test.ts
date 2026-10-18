@@ -48,14 +48,10 @@ describe("sequential startup-option reconciliation", () => {
       const requestedOptions: DaemonOptions = {
         enabledTools: ["listDevices", "provisionDevice", "deleteDevice"],
       };
-      server = new UnixSocketServer(
-        socketPath,
-        "http://localhost:0/mcp",
-        createFakeDaemonState(),
-        timer,
-        null,
-        { identityStartedAt: 1, startupOptions: {} },
-      );
+      server = new UnixSocketServer(socketPath, createFakeDaemonState(), timer, null, {
+        identityStartedAt: 1,
+        startupOptions: {},
+      });
       await server.start();
 
       const bareSocketStatus = (await sendSocketRequest(socketPath, "ide/status")).result!;
@@ -73,14 +69,10 @@ describe("sequential startup-option reconciliation", () => {
         restart: async (options): Promise<DaemonRestartResult> => {
           restartedWith = options;
           await server!.close();
-          server = new UnixSocketServer(
-            socketPath,
-            "http://localhost:0/mcp",
-            createFakeDaemonState(),
-            timer,
-            null,
-            { identityStartedAt: 2, startupOptions: options },
-          );
+          server = new UnixSocketServer(socketPath, createFakeDaemonState(), timer, null, {
+            identityStartedAt: 2,
+            startupOptions: options,
+          });
           await server.start();
           const successorStatus = (await sendSocketRequest(socketPath, "ide/status")).result!;
           // Model the real interval after the successor socket is ready but before
@@ -137,16 +129,9 @@ describe("sequential startup-option reconciliation", () => {
     "malformed startup options do not mask a valid socket-owner identity",
     async () => {
       socketPath = join(tmpdir(), `am-malformed-options-${randomUUID()}.sock`);
-      server = new UnixSocketServer(
-        socketPath,
-        "http://localhost:0/mcp",
-        createFakeDaemonState(),
-        new FakeTimer(),
-        null,
-        {
-          startupOptions: JSON.parse('{"enabledTools":"observe"}'),
-        },
-      );
+      server = new UnixSocketServer(socketPath, createFakeDaemonState(), new FakeTimer(), null, {
+        startupOptions: JSON.parse('{"enabledTools":"observe"}'),
+      });
       await server.start();
 
       await expect(new DaemonClient(socketPath).getDaemonStatus()).rejects.toThrow(

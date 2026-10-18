@@ -2,13 +2,15 @@ import {
   AdbExecutor,
   type ForegroundAppReadResult,
   type AdbExecuteOptions,
+  type AdbProcess,
+  type AdbSpawnOptions,
   type DeviceTimestampResult,
   type DeviceTimestampSource,
 } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, ExecResult, AndroidUser, DeviceLockState } from "../../src/models";
 import type { AdbDeviceState } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { resolveExecuteCommandOptions } from "../../src/utils/android-cmdline-tools/executeCommandArgs";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
+import { FakeAdbProcess } from "./FakeAdbProcess";
 
 /**
  * Fake implementation of AdbExecutor for testing
@@ -23,6 +25,8 @@ export class FakeAdbExecutor implements AdbExecutor {
   private defaultError: Error | null = null;
   private executedCommands: string[] = [];
   private executedArgv: string[][] = [];
+  private spawnCalls: string[][] = [];
+  private spawnOptions: Array<AdbSpawnOptions | undefined> = [];
   private commandCalls: Array<{
     command: string;
     timeoutMs?: number;
@@ -72,7 +76,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   /**
    * Create a proper ExecResult with all required methods
    */
-  private createExecResult(stdout: string, stderr: string): ExecResult {
+  protected createExecResult(stdout: string, stderr: string): ExecResult {
     return {
       stdout,
       stderr,
@@ -346,30 +350,32 @@ export class FakeAdbExecutor implements AdbExecutor {
    * assertions, and its space-joined form is also appended to the string
    * command history so existing pattern-based stubs keep matching.
    */
+  /**
+   * Spawn a long-lived ADB command: records the argv and returns a {@link FakeAdbProcess}
+   * that exits cleanly with code 0 once the caller has attached its listeners.
+   */
+  async spawn(args: string[], options?: AdbSpawnOptions): Promise<AdbProcess> {
+    this.spawnCalls.push([...args]);
+    this.spawnOptions.push(options);
+    const proc = new FakeAdbProcess();
+    proc.scheduleExit(0);
+    return proc;
+  }
+
+  /** All recorded spawn argv arrays, in order. */
+  getSpawnCalls(): string[][] {
+    return this.spawnCalls.map((call) => [...call]);
+  }
+
   async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
     await options.beforeDispatch?.(options.timeoutMs);
     this.executedArgv.push([...args]);
     return this.executeCommand(args.join(" "), options);
   }
 
-  async executeCommand(
-    command: string,
-    timeoutMsOrOptions?: number | AdbExecuteOptions,
-    maxBufferArg?: number,
-    noRetryArg?: boolean,
-    signalArg?: AbortSignal,
-    waitForProcessSettlementAfterAbortArg?: boolean,
-    onStdoutArg?: (chunk: string) => void,
-  ): Promise<ExecResult> {
+  async executeCommand(command: string, options: AdbExecuteOptions = {}): Promise<ExecResult> {
     const { timeoutMs, maxBuffer, noRetry, signal, waitForProcessSettlementAfterAbort, onStdout } =
-      resolveExecuteCommandOptions(
-        timeoutMsOrOptions,
-        maxBufferArg,
-        noRetryArg,
-        signalArg,
-        waitForProcessSettlementAfterAbortArg,
-        onStdoutArg,
-      );
+      options;
     this.executedCommands.push(command);
     this.commandCalls.push({
       command,

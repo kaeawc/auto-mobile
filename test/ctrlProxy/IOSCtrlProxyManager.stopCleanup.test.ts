@@ -8,26 +8,17 @@ import { logger } from "../../src/utils/logger";
 import { IosCtrlProxyProcessClient } from "../../src/ctrlProxy/ios/IosCtrlProxyProcessClient";
 import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { FakeIosTunnelClient } from "../fakes/FakeIosTunnelClient";
 import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
 
 const UDID = "00008120-001C2D3E1234567A";
 const device: BootedDevice = { deviceId: UDID, platform: "ios", name: "iPhone" };
 
-interface Internals {
-  runnerAbortController: AbortController | null;
-  xcTestProcessId: number | null;
-  stopIproxyTunnel: () => Promise<void>;
-  terminateTrackedRunner: () => Promise<unknown>;
-}
-
 function makeManager(
   executor: FakeProcessExecutor,
   processClient?: IosCtrlProxyProcessClient,
-): {
-  manager: IOSCtrlProxyManager;
-  internal: Internals;
-} {
-  const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+): IOSCtrlProxyManager {
+  return IOSCtrlProxyManager.createForTestingWithDeps(
     device,
     new FakeTimer(),
     undefined,
@@ -39,7 +30,6 @@ function makeManager(
     undefined,
     processClient,
   );
-  return { manager, internal: manager as unknown as Internals };
 }
 
 describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {
@@ -70,9 +60,9 @@ describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {
         const client = new IosCtrlProxyProcessClient(executor, timer, {
           processGeneration: generation,
         });
-        const { manager } = makeManager(executor, client);
+        const manager = makeManager(executor, client);
         const child = new FakeChildProcess(timer);
-        manager["trackStartedXcodebuild"](child as HostChildProcess);
+        manager.trackStartedXcodebuild(child as HostChildProcess);
         expect(generation.currentCalls).toEqual([child.pid!]);
         generation.token = "later-token";
         const terminate = spyOn(client, "terminateProcessTree").mockResolvedValue(undefined);
@@ -89,13 +79,13 @@ describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {
         );
 
         if (site === "hung") {
-          await manager["terminateHungRunnerProcess"](child.pid!);
+          await manager.terminateHungRunnerProcess(child.pid!);
         } else if (site === "stop") {
-          await manager["terminateTrackedRunner"](null, 250);
+          await manager.terminateTrackedRunner(null, 250);
         } else if (site === "shutdown") {
-          await manager["forceStopForShutdown"](250);
+          await manager.forceStopForShutdown(250);
         } else {
-          await manager["retireTrackedDeviceRunnerBeforeSpawn"]();
+          await manager.retireTrackedDeviceRunnerBeforeSpawn();
         }
 
         expect(terminate).toHaveBeenCalledWith(
@@ -111,7 +101,7 @@ describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {
             : { expectedGenerationToken: "launch-token" },
         );
         if (site !== "hung") {
-          expect(manager["runnerGenerationTokens"].has(child.pid!)).toBe(false);
+          expect(manager.diagnostics.hasRunnerGenerationToken(child.pid!)).toBe(false);
         }
       },
     );
@@ -129,13 +119,13 @@ describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {
         const client = new IosCtrlProxyProcessClient(executor, new FakeTimer(), {
           processGeneration: generation,
         });
-        const { manager } = makeManager(executor, client);
-        const remote = manager["remoteRunner"];
+        const manager = makeManager(executor, client);
+        const remote = manager.diagnostics.remoteRunner;
         const mocks = [
           spyOn(manager, "useRemoteRunner").mockReturnValue(true),
           spyOn(manager, "isRemoteRunnerAvailable").mockResolvedValue(true),
           spyOn(manager, "ensureRemoteServicePortAvailable").mockResolvedValue(undefined),
-          spyOn(manager["builder"], "getXctestrunPath").mockResolvedValue(null),
+          spyOn(manager.diagnostics.builder, "getXctestrunPath").mockResolvedValue(null),
           spyOn(remote, "status").mockResolvedValue({
             success: true,
             data: { running: mode === "adopted", pid: 42, port: 8101 },
@@ -153,14 +143,14 @@ describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {
           () => stop.mockRestore(),
         );
 
-        await manager["startOnSimulator"]();
-        expect(manager["xcTestProcessId"]).toBe(42);
+        await manager.startOnSimulator();
+        expect(manager.diagnostics.xcTestProcessId).toBe(42);
         expect(generation.currentCalls).toEqual([]);
-        expect(manager["runnerGenerationTokens"].has(42)).toBe(false);
+        expect(manager.diagnostics.hasRunnerGenerationToken(42)).toBe(false);
         if (site === "shutdown") {
-          await manager["forceStopForShutdown"](250);
+          await manager.forceStopForShutdown(250);
         } else {
-          await manager["terminateHungRunnerProcess"](42);
+          await manager.terminateHungRunnerProcess(42);
         }
         expect(stop).toHaveBeenCalledWith({ deviceId: UDID, pid: 42 });
         expect(terminate).not.toHaveBeenCalled();
@@ -168,19 +158,24 @@ describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {
     );
 
     test("a throwing tunnel stop still terminates the runner and aborts the retiring controller but retains the port reservation (#11186)", async () => {
-      const executor = new FakeProcessExecutor();
-      const { manager, internal } = makeManager(executor);
+      const tunnelClient = new FakeIosTunnelClient();
+      tunnelClient.stopError = new Error("tunnel stop exploded");
+      let terminateCalls = 0;
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device,
+        timer: new FakeTimer(),
+        processExecutor: new FakeProcessExecutor(),
+        tunnelClient,
+        steps: {
+          terminateTrackedRunner: async () => {
+            terminateCalls += 1;
+            return undefined;
+          },
+        },
+      });
       PortManager.reserve(UDID, 8101);
       const controller = new AbortController();
-      internal.runnerAbortController = controller;
-      let terminateCalls = 0;
-      internal.terminateTrackedRunner = async () => {
-        terminateCalls += 1;
-        return undefined;
-      };
-      internal.stopIproxyTunnel = async () => {
-        throw new Error("tunnel stop exploded");
-      };
+      manager.trackRunnerForTesting({ pid: null, abortController: controller });
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         await expect(manager.stop()).rejects.toThrow("tunnel stop exploded");

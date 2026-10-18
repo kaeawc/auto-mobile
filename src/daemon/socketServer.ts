@@ -13,6 +13,12 @@ import {
   type InputTapParams,
   type InputTypeTextParams,
 } from "./inputRouteParams";
+import {
+  dispatchInputRoute,
+  isOwnerFencedMethod,
+  runPassthroughForward,
+  type InputRouteHandlers,
+} from "./socketServer/controlRoutes";
 import { IDE_DEVICE_MUTATION_METHODS, IDE_ROUTE_PARSERS, STARTUP_PROBE_METHODS } from "./ideRoutes";
 import { ideFeatureRoutes } from "./socketServer/ideRouteModule";
 import { daemonLifecycleRoutes } from "./socketServer/lifecycleRouteModule";
@@ -31,10 +37,6 @@ import { shapeToolCallError } from "../server/shapeToolCallError";
 import type { SessionRecoveryAssignmentDetails } from "../models/SessionRecoveryAssignmentError";
 import { readToolEnvelopePayload } from "../server/toolEnvelopePayload";
 import {
-  isDeviceControlTargetOwnerValid,
-  isDeviceControlRoutingSessionValid,
-} from "./deviceControlSessionValidity";
-import {
   getToolSelectionContext,
   runWithToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
@@ -45,12 +47,7 @@ import { unlink } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import { ensureSecureDir, secureFile } from "../utils/filesystem/securePermissions";
-import {
-  type Client,
-  StreamableHTTPClientTransport,
-  type StreamableHTTPReconnectionOptions,
-} from "@modelcontextprotocol/client";
-import { LoopbackMcpClient } from "./socketServer/loopbackMcpClient";
+import type { Client } from "@modelcontextprotocol/client";
 import { dropToolCallRecording } from "../server/toolCallRecordingManager";
 import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
 import {} from "../server/toolUnavailableError";
@@ -60,7 +57,6 @@ import { GestureOwnershipRegistry } from "./gestureOwnership";
 import { resolveMcpRequestTimeoutMsOnce, ProgressExtendableDeadline } from "./mcpRequestTimeout";
 import { createRequestContext, type RequestContext } from "./requestContext";
 import { McpOverloadError, McpTimeoutError, MCP_QUEUE_TIMEOUT_ERROR_CODE } from "./McpTimeoutError";
-import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { isDebugModeEnabled } from "../utils/debug";
@@ -85,9 +81,6 @@ import {
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
   DAEMON_CANCEL_REQUEST_METHOD,
   DAEMON_HEARTBEAT_METHOD,
-  DAEMON_SESSION_TOOL_BINDING_HEADER,
-  DAEMON_RELEASED_SESSION_HEADER,
-  DAEMON_TOOL_SELECTION_PROFILE_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_ONE_SHOT_CLI_PARAM,
   INTERNAL_ONE_SHOT_CLI_PARAM,
@@ -100,7 +93,6 @@ import {
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-  DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS,
 } from "./constants";
 import {
   isHostInventoryCall,
@@ -153,11 +145,13 @@ import { DaemonState } from "./daemonState";
 import { canonicalizeToolCallDeviceIds, toolCallNamesDeviceId } from "./toolCallDeviceIdentity";
 import { isDeviceInventoryTool } from "./daemonMcpProxy";
 import { DaemonStateAccess, handleDaemonRequest } from "./daemonRequestHandlers";
+import { isDaemonRequestEnvelope, readFramePlatformHint } from "./daemonRequestEnvelope";
 import { deviceIncarnationToken } from "../utils/deviceIncarnation";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES, OutboundWriteGuard } from "./outboundWriteGuard";
+import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES } from "./outboundWriteGuard";
+import { ControlConnection } from "./socketServer/ControlConnection";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
-import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
+import type { FeatureFlagAdmin } from "../features/featureFlags/FeatureFlagService";
 import {
   getSessionToolSelectionService,
   type SessionToolSelectionService,
@@ -267,41 +261,30 @@ import {
   mcpRequestFailureDetails,
   requestFailureCause,
 } from "./socketServer/errorFrames";
+import { isTaskRelayMethod, parseTaskRelayFrame } from "../server/tasks/taskRelay";
 import {
-  clearPooledIdleTimer,
-  closePooledClient,
-  runWithLoopbackSessionKey,
-  withLoopbackSessionKey,
-  discardTimedOutReconnect,
-  getPooledClient,
-  resetPooledClient,
-  resetPooledClientIfCurrent,
-  runWithActivePooledClient,
-  schedulePooledIdleClose,
-  type LoopbackClientPool,
+  callForwardedTool,
+  forwardTaskRequest,
+  taskRelayErrorFrame,
+} from "./socketServer/taskRelayForward";
+import {
+  currentForwardSessionKey,
+  currentForwardTaskOwnerKey,
+  FORWARD_KEY_IDLE_MS,
   type McpClientFactory,
-} from "./socketServer/loopbackMcpClientPool";
+  runWithForwardSessionKey,
+} from "./socketServer/forwardSessionKey";
 import { runKeyedSerial, type McpForwardChainWait } from "./socketServer/keyedSerialQueue";
-import { CONTROL_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
+import {
+  PendingRequestTracker,
+  type PendingSocketRequest,
+} from "./socketServer/PendingRequestTracker";
+import { CONTROL_SOCKET_MAX_FRAME_BYTES } from "./socketServer/LineFramer";
 import {
   SessionReleasedDuringCallError,
   sessionReleaseThatCancelledCall,
 } from "./sessionReleasedDuringCall";
-import {
-  createDeviceSessionErrorResolver,
-  DeviceSessionSupersededByRestoreError,
-} from "./deviceSessionResolver";
-import {
-  DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
-  DeviceControlTransportError,
-  deviceControlToolName,
-  isDeviceControlTransportRequest,
-  isReplaySafeAfterResponseClosure,
-  isLoopbackTransportFailure,
-  loopbackMcpFetch,
-  type DeviceControlTransportFailure,
-  type DeviceControlTransportPhase,
-} from "./deviceControlTransportFailure";
+import { createDaemonMcpDispatcher, type InProcessMcpDispatcher } from "./inProcessMcpDispatcher";
 
 export { mcpRequestFailureDetails };
 
@@ -322,31 +305,8 @@ function socketRequestId(parsed: unknown): string | null {
   return typeof id === "string" ? id : null;
 }
 
-function isDaemonSocketRequest(parsed: unknown): parsed is DaemonRequest {
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return false;
-  }
-  const request = parsed as Record<string, unknown>;
-  return (
-    typeof request.id === "string" &&
-    typeof request.method === "string" &&
-    (request.type === "mcp_request" || request.type === "daemon_request")
-  );
-}
-
 class ClientRequestCancellation extends ActionableError {}
 
-const EXPECTED_PEER_CLOSE_CODES = new Set([
-  "EPIPE",
-  "ECONNRESET",
-  "ERR_STREAM_DESTROYED",
-  "ECONNABORTED",
-]);
-function isExpectedPeerClose(error: Error): boolean {
-  return (
-    "code" in error && typeof error.code === "string" && EXPECTED_PEER_CLOSE_CODES.has(error.code)
-  );
-}
 function isClientForwardCancellation(
   signal: AbortSignal | undefined,
   cause: DaemonRequestFailureCause | undefined,
@@ -555,36 +515,13 @@ function resolveSocketBindGuard(
  * - Manage concurrent client sessions
  *
  * JUnit uses one Unix socket per thread (`DaemonSocketClientManager` ThreadLocal) for parallel
- * tests. MCP forwards are serialized by target key below, and each key gets its own MCP client so
- * independent devices/sessions can run concurrently. The loopback endpoint is stateless: every
- * forwarded request carries the socket session id in the MCP session-key header.
- *
- * The SDK's Streamable HTTP client may auto-reopen a standalone GET (SSE) after a disconnect.
- * The server transport allows only one such stream per session; a second GET while the first
- * is still mapped returns 409 and tears down the session. We disable that auto-reconnect here;
- * the loopback endpoint is stateless, so there is no session to expire or replay.
+ * tests. MCP forwards are serialized by target key below, so independent devices/sessions can
+ * run concurrently. Each forward runs in process (#11820): its own MCP client and stateless
+ * server, named by the socket session id as its MCP session key.
  */
-/** Matches SDK defaults except `maxRetries`, which must stay 0 to avoid duplicate GET SSE. */
-const DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION: StreamableHTTPReconnectionOptions = {
-  initialReconnectionDelay: 1000,
-  maxReconnectionDelay: 30_000,
-  reconnectionDelayGrowFactor: 1.5,
-  maxRetries: 0,
-};
-
 interface SocketFileIdentity {
   dev: number;
   ino: number;
-}
-
-interface PendingSocketRequest {
-  id: string;
-  sessionId: string;
-  socket: Socket;
-  admitted: boolean;
-  terminal: boolean;
-  /** Control frames do not earn an idle exemption; ordinary work has a bounded live deadline. */
-  idleDeadline?: ProgressExtendableDeadline;
 }
 
 /**
@@ -686,6 +623,9 @@ const registeredDeviceReadClassifier: DeviceReadToolCallClassifier = (toolName, 
 const MCP_FORWARD_READ_LANE_SUFFIX = ":read";
 const MCP_FORWARD_DEVICE_KEY_PREFIX = "device:";
 
+/** How long a closed socket's late executions may still write bindings that are then forgotten. */
+const LATE_BINDING_FORGET_WINDOW_MS = 15 * 60 * 1000;
+
 interface McpForwardRoute {
   /** Serializes work that targets the same physical device or session. */
   executionKey: string;
@@ -697,17 +637,7 @@ interface McpForwardRoute {
   releasedSessionUuid?: string;
 }
 
-interface DeviceControlTransportIdentity {
-  sessionUuid?: string;
-  sessionIncarnation?: object;
-  routingSessionUuid?: string;
-  routingSessionIncarnation?: object;
-  deviceId?: string;
-  deviceSessionUuid?: string;
-  deviceLabelResolved?: boolean;
-}
-
-interface McpForwardRecoveryContext {
+interface McpForwardContext {
   request: DaemonRequest;
   route: McpForwardRoute;
   socketSessionId: string;
@@ -722,12 +652,6 @@ interface McpForwardRecoveryContext {
    * value, not the original one.
    */
   deadline: ProgressExtendableDeadline;
-}
-
-interface DeviceControlTransportRecoveryContext extends McpForwardRecoveryContext {
-  phase: DeviceControlTransportPhase;
-  identity: DeviceControlTransportIdentity;
-  failedClient?: Client;
 }
 
 const isNonBlankSessionUuid = (value: unknown): value is string =>
@@ -884,13 +808,6 @@ class InputTypeTextAppendError extends Error {
   }
 }
 
-class McpClientReconnectDeadlineError extends Error {
-  constructor() {
-    super("MCP client reconnect exceeded the request deadline");
-    this.name = "McpClientReconnectDeadlineError";
-  }
-}
-
 export interface SocketFrameTraceEvent {
   event:
     | "frame_parsed"
@@ -1000,15 +917,11 @@ export class UnixSocketServer {
   private clientSockets: Map<string, Socket> = new Map();
   private acceptedClientConnections = 0;
   /** Per-socket outbound byte bound and stall watchdog (issue #10176). */
-  private readonly outboundWriteGuards = new WeakMap<Socket, OutboundWriteGuard>();
-  private readonly backpressuredSocketIdle = new WeakMap<
-    Socket,
-    { start: () => void; refresh: () => void; responseFlushed: () => void }
-  >();
+  private readonly controlConnections = new WeakMap<Socket, ControlConnection>();
   /** Request handlers that can continue after their client socket is destroyed. */
   private activeRequestHandlers: Set<Promise<void>> = new Set();
   /** Parsed requests awaiting their one terminal response to flush, including queued requests. */
-  private pendingSocketRequests = new Set<PendingSocketRequest>();
+  private pendingSocketRequests = new PendingRequestTracker();
   /** Socket sessions that opted in to server-pushed notifications. */
   private notificationSubscribers: Set<string> = new Set();
   private readonly resourceSubscriptions = new Map<string, Set<string>>();
@@ -1023,23 +936,19 @@ export class UnixSocketServer {
   private listChangedUnsubscribe: (() => void) | null = null;
   private sessionReleaseUnsubscribe: (() => void) | null = null;
   private socketPath: string;
-  private mcpEndpoint: string;
   private daemonState: SocketDaemonStateAccess;
-  private mcpClients: Map<string, Client> = new Map();
-  private mcpClientPromises: Map<string, Promise<Client>> = new Map();
   /**
    * The loopback MCP client that a socket transport most recently bound with a
    * device session. Follow-up requests can omit their session UUID, so reuse
    * this client to preserve the selected tool-selection profile.
    */
   private boundMcpClientKeysBySocketSession: Map<string, BoundMcpClient> = new Map();
-  /** Promise tails that serialize MCP HTTP forwards only within the same execution target. */
+  /** Promise tails that serialize MCP forwards only within the same execution target. */
   private mcpForwardTails: Map<string, Promise<void>> = new Map();
   /** Direct device forwards that need cleanup after every successor tail has settled. */
   private mcpForwardIdleCloseKeys: Map<string, Set<string>> = new Map();
-  /** Active forwards by loopback MCP client, which can differ from the execution target. */
-  private activeMcpClientForwardCounts: Map<string, number> = new Map();
-  private mcpClientIdleTimers: Map<string, NodeJS.Timeout> = new Map();
+  /** Execution keys whose chain drained, timed for the append-helper idle eviction. */
+  private forwardKeyIdleTimers: Map<string, NodeJS.Timeout> = new Map();
   private timer: Timer;
   private readonly onFrameTrace?: (event: SocketFrameTraceEvent) => void;
   private readonly idGenerator: IdGenerator;
@@ -1055,7 +964,7 @@ export class UnixSocketServer {
   private readonly socketOwnerLiveness: SocketOwnerLiveness;
   /** Cross-process lock serializing the reclaim → bind sequence against a concurrent binder (issue #6232, W5). */
   private readonly socketReclaimLock: SocketReclaimLock;
-  private featureFlagService: FeatureFlagService | null;
+  private featureFlagService: FeatureFlagAdmin | null;
   private readonly handshakeEnforced: boolean;
   private readonly daemonIdentity: DaemonSelfIdentity;
   private readonly identityStartedAt: number;
@@ -1077,13 +986,10 @@ export class UnixSocketServer {
     SessionToolSelectionService,
     "isEnabled" | "setEnabled"
   >;
+  /** Runs every forward in process: its own MCP client and stateless server (#11820). */
+  private readonly mcpDispatcher: Pick<InProcessMcpDispatcher, "connect">;
   /** Forwarded MCP requests are cancelled when their owner socket disconnects. */
   private readonly mcpRequestAbortControllers = new Map<string, Set<AbortController>>();
-  /**
-   * Factory that `getMcpClient()` calls to open the loopback MCP HTTP client.
-   * Defaults to the real {@link createMcpClient}; tests assign a fake here to
-   * exercise forwarding without a live HTTP endpoint.
-   */
   /** Test seam: the per-args `deviceReadOnly` classification behind the read lane (#10969). */
   deviceReadToolCallClassifier: DeviceReadToolCallClassifier = registeredDeviceReadClassifier;
 
@@ -1149,10 +1055,9 @@ export class UnixSocketServer {
 
   constructor(
     socketPath: string = SOCKET_PATH,
-    mcpEndpoint: string,
     daemonState: SocketDaemonStateAccess = DaemonState.getInstance(),
     timer: Timer = defaultTimer,
-    featureFlagService: FeatureFlagService | null = null,
+    featureFlagService: FeatureFlagAdmin | null = null,
     handshakeConfig: {
       identity?: DaemonSelfIdentity;
       identityStartedAt?: number;
@@ -1170,16 +1075,27 @@ export class UnixSocketServer {
       acceptanceDiscoveryCapability?: string;
       sessionToolSelectionService?: Pick<SessionToolSelectionService, "isEnabled" | "setEnabled">;
       onFrameTrace?: (event: SocketFrameTraceEvent) => void;
+      /**
+       * Runs forwards in process (#11820). The daemon passes its own, so shutdown can close the
+       * forwards still running; without one the server builds a default over the shared state.
+       */
+      mcpDispatcher?: Pick<InProcessMcpDispatcher, "connect">;
     } = {},
     idGenerator: IdGenerator = defaultIdGenerator,
     bindGuard: SocketBindGuardOptions = {},
     adbClientFactory: AdbClientFactory = defaultAdbClientFactory,
   ) {
     this.socketPath = socketPath;
-    this.mcpEndpoint = mcpEndpoint;
     this.daemonState = daemonState;
     this.timer = timer;
     this.onFrameTrace = handshakeConfig.onFrameTrace;
+    this.mcpDispatcher =
+      handshakeConfig.mcpDispatcher ??
+      createDaemonMcpDispatcher({
+        base: () => ({
+          acceptanceDiscoveryCapability: handshakeConfig.acceptanceDiscoveryCapability,
+        }),
+      });
     this.idGenerator = idGenerator;
     // The reclaim lock's per-instance owner token comes from the module default
     // generator, NOT the injected `idGenerator` — that one is reserved for socket
@@ -1226,10 +1142,8 @@ export class UnixSocketServer {
       onRestartAccepted: this.onRestartAccepted,
       liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
     });
-    logger.info(`UnixSocketServer initialized with endpoint: "${mcpEndpoint}"`);
-    if (!mcpEndpoint) {
-      logger.error("ERROR: mcpEndpoint is empty or undefined!");
-    }
+    // Forwards run in process (#11820) through the MCP dispatcher; no HTTP loopback is involved.
+    logger.info(`UnixSocketServer initialized with in-process MCP dispatcher: "${socketPath}"`);
   }
 
   private observeStartupCompletion(): void {
@@ -1397,78 +1311,11 @@ export class UnixSocketServer {
     this.acceptedClientConnections++;
     logger.info(`New client connection: ${sessionId}`);
 
-    // Ordinary idle sockets retain Node's timeout. Once a write backpressures,
-    // writes must no longer extend the lifetime of a peer that is not reading.
-    socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
-    const onIdleTimeout = (): void => {
-      // A silent request may outlive the idle window. Renew only while its
-      // live deadline permits work, never for an unread backpressured write.
-      // A handler that never answers loses this exemption at its deadline and
-      // is disconnected on the next check (at most one further idle window).
-      if (socket.writableLength === 0 && this.hasLiveSocketRequest(socket)) {
-        socket.setTimeout(0);
-        if (idleTimeout) {
-          this.timer.clearTimeout(idleTimeout);
-        }
-        idleTimeout = armIdleTimeout();
-        return;
-      }
-      logger.warn(
-        `Daemon RPC socket ${sessionId} idle timeout after ${DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS}ms, destroying`,
-      );
-      socket.destroy();
-    };
-    socket.on("timeout", onIdleTimeout);
-    const armIdleTimeout = (): NodeJS.Timeout =>
-      this.timer.setTimeout(onIdleTimeout, DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
-    let idleTimeout: NodeJS.Timeout | undefined;
-    const refreshIdle = (): void => {
-      if (!idleTimeout || socket.destroyed) {
-        return;
-      }
-      this.timer.clearTimeout(idleTimeout);
-      idleTimeout = armIdleTimeout();
-    };
-    this.backpressuredSocketIdle.set(socket, {
-      start: () => {
-        if (idleTimeout || socket.destroyed) {
-          return;
-        }
-        socket.setTimeout(0);
-        idleTimeout = armIdleTimeout();
-      },
-      refresh: refreshIdle,
-      responseFlushed: () => {
-        if (socket.destroyed) {
-          return;
-        }
-        if (idleTimeout) {
-          if (socket.writableLength === 0) {
-            refreshIdle();
-          }
-        } else {
-          socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
-        }
-      },
-    });
-    socket.on("drain", refreshIdle);
-    socket.on("drain", () => this.outboundWriteGuards.get(socket)?.flushed());
-
-    if (this.onFrameTrace) {
-      socket.on("drain", () => this.traceFrame("socket_drain", "*"));
-      socket.on("pause", () => this.traceFrame("socket_pause", "*"));
-      socket.on("end", () => this.traceFrame("socket_end", "*"));
-      socket.on("finish", () => this.traceFrame("socket_finish", "*"));
-    }
-
-    // Frames are delivered synchronously from `framer.push`, so every frame of a
-    // chunk sees that chunk's receive time.
-    let receivedAtMs = this.timer.now();
-    const framer = new LineFramer(this.maxInboundFrameBytes, {
+    this.connectionFor(socket, sessionId).start({
       // Parse each frame synchronously and track it on its own. A held device
       // call must not keep another frame attached to its chunk's completion
       // promise (issue #6387).
-      onLine: (line) => {
+      onLine: (line, receivedAtMs) => {
         if (line.trim()) {
           this.trackRequestHandler(
             this.processSocketRequestLine(sessionId, socket, line, receivedAtMs),
@@ -1476,70 +1323,28 @@ export class UnixSocketServer {
         }
       },
       onOverflow: () => this.rejectOversizedFrame(sessionId, socket),
+      hasLiveRequest: () => this.hasLiveSocketRequest(socket),
+      trace: this.onFrameTrace
+        ? (event, extra) => this.traceFrame(event, "*", undefined, undefined, extra)
+        : undefined,
+      onClose: () => {
+        this.controlConnections.delete(socket);
+        logger.info(`Client disconnected: ${sessionId}`);
+        this.pendingSocketRequests.deleteForSocket(socket);
+        this.releaseSocketSession(sessionId, socket);
+      },
+      onError: () => this.releaseSocketSession(sessionId, socket),
     });
-    socket.on("data", (data) => {
-      // After an overflow the socket only waits for its error reply to flush;
-      // further bytes must not keep it alive past the idle timeout.
-      if (framer.hasOverflowed) {
-        return;
-      }
-      refreshIdle();
-      receivedAtMs = this.timer.now();
-      framer.push(data);
-    });
+  }
 
-    // The peer closed its side (#11058). Replies already queued may still flush within the grace;
-    // past it the socket is destroyed, because a reply queued to a peer that is gone can stay
-    // unflushed without an error, so the automatic end would never complete and `close` (and the
-    // owner-disconnect release it triggers) would never run.
-    let peerEndGrace: NodeJS.Timeout | undefined;
-    socket.on("end", () => {
-      if (socket.destroyed || peerEndGrace) {
-        return;
-      }
-      peerEndGrace = this.timer.setTimeout(() => {
-        if (!socket.destroyed) {
-          logger.debug(
-            `Daemon RPC socket ${sessionId} peer closed with ${socket.writableLength} bytes unflushed; destroying`,
-          );
-          socket.destroy();
-        }
-      }, DAEMON_RPC_SOCKET_PEER_END_FLUSH_GRACE_MS);
-    });
-
-    socket.on("close", (hadError) => {
-      if (peerEndGrace) {
-        this.timer.clearTimeout(peerEndGrace);
-      }
-      if (idleTimeout) {
-        this.timer.clearTimeout(idleTimeout);
-      }
-      this.backpressuredSocketIdle.delete(socket);
-      this.outboundWriteGuards.get(socket)?.dispose();
-      if (this.onFrameTrace) {
-        this.traceFrame("socket_close", "*", undefined, undefined, { hadError });
-      }
-      logger.info(`Client disconnected: ${sessionId}`);
-      for (const pending of this.pendingSocketRequests) {
-        if (pending.socket === socket) {
-          this.pendingSocketRequests.delete(pending);
-        }
-      }
-      this.releaseSocketSession(sessionId, socket);
-    });
-
-    socket.on("error", (error) => {
-      if (isExpectedPeerClose(error)) {
-        // The peer has gone away; release and destruction still clean up this socket's work.
-        logger.debug(`Socket peer closed for ${sessionId}: ${errorMessage(error)}`);
-      } else {
-        logger.error(`Socket error for ${sessionId}:`, error);
-      }
-      this.releaseSocketSession(sessionId, socket);
-      if (!socket.destroyed) {
-        socket.destroy();
-      }
-    });
+  /** The socket's connection transport, created on first use (writers may precede `start`). */
+  private connectionFor(socket: Socket, sessionId: string): ControlConnection {
+    let connection = this.controlConnections.get(socket);
+    if (!connection) {
+      connection = new ControlConnection(socket, sessionId, this.timer, this.maxInboundFrameBytes);
+      this.controlConnections.set(socket, connection);
+    }
+    return connection;
   }
 
   /**
@@ -1567,16 +1372,7 @@ export class UnixSocketServer {
   }
 
   private hasLiveSocketRequest(socket: Socket): boolean {
-    for (const pending of this.pendingSocketRequests) {
-      if (
-        pending.socket === socket &&
-        pending.idleDeadline &&
-        pending.idleDeadline.value >= this.timer.now()
-      ) {
-        return true;
-      }
-    }
-    return false;
+    return this.pendingSocketRequests.hasLiveRequest(socket, this.timer.now());
   }
 
   private async processSocketRequestLine(
@@ -1613,7 +1409,7 @@ export class UnixSocketServer {
         throw toActionableError(error, "Parse error in daemon socket request");
       }
       requestId = socketRequestId(parsed);
-      if (!isDaemonSocketRequest(parsed)) {
+      if (!isDaemonRequestEnvelope(parsed)) {
         errorCode = -32600;
         throw new ActionableError("Invalid daemon socket request");
       }
@@ -1668,7 +1464,7 @@ export class UnixSocketServer {
         writeAnswer(response);
       } else {
         this.pendingSocketRequests.delete(tracked);
-        this.backpressuredSocketIdle.get(socket)?.responseFlushed();
+        this.controlConnections.get(socket)?.responseFlushed();
       }
     } catch (error) {
       if (isExpectedSocketFrameAbort(error, socket.destroyed)) {
@@ -1706,7 +1502,7 @@ export class UnixSocketServer {
       response,
       () => {
         this.pendingSocketRequests.delete(pending);
-        this.backpressuredSocketIdle.get(pending.socket)?.responseFlushed();
+        this.controlConnections.get(pending.socket)?.responseFlushed();
       },
       deviceId,
     );
@@ -1787,9 +1583,31 @@ export class UnixSocketServer {
     this.daemonState.getBrokerConnectionScopes?.().unbind(sessionId);
     this.releaseToolCallRecording(sessionId);
     this.forgetSessionToolBindings(sessionId);
+    this.forgetLateSessionToolBindings(sessionId);
     // Lift any streamed gesture this socket left open on the device (issue: streaming gesture
     // input). Tracked so daemon shutdown drains it rather than a fire-and-forget floating promise.
     this.trackRequestHandler(this.ownedGestures.cancelAllFor(sessionId));
+  }
+
+  /**
+   * A handler that ignores its abort can still finish after its socket is gone and write a
+   * session-tool binding under the gone socket's key (#13053): forget the key again once the
+   * executions it ran have ended. Not tracked as a request handler, so shutdown never waits on it.
+   */
+  private forgetLateSessionToolBindings(socketSessionId: string): void {
+    if (!executionTracker.hasActiveSessionExecutions(socketSessionId)) {
+      return;
+    }
+    void executionTracker
+      .waitForSessionExecutionsToEnd(socketSessionId, LATE_BINDING_FORGET_WINDOW_MS)
+      .then((drained) => {
+        this.forgetSessionToolBindings(socketSessionId);
+        if (!drained) {
+          logger.warn(
+            `Socket ${socketSessionId} still had executions ${LATE_BINDING_FORGET_WINDOW_MS}ms after it closed; forgot its bindings anyway`,
+          );
+        }
+      });
   }
 
   private trackRequestHandler(handler: Promise<void>): void {
@@ -2056,7 +1874,7 @@ export class UnixSocketServer {
     try {
       const payload = JSON.stringify(frame) + "\n";
       const byteLength = Buffer.byteLength(payload);
-      const guard = this.outboundWriteGuard(socket, sessionId);
+      const guard = this.connectionFor(socket, sessionId).outboundWriteGuard();
       const queuedBytes = guard.admit(byteLength);
       if (queuedBytes !== undefined) {
         const error = new DaemonSocketQueueOverflowError(
@@ -2072,7 +1890,7 @@ export class UnixSocketServer {
       }
       const ok = socket.write(payload, (error) => {
         if (!error && !socket.destroyed && socket.writableLength === 0) {
-          this.backpressuredSocketIdle.get(socket)?.refresh();
+          this.controlConnections.get(socket)?.refreshIdle();
           guard.flushed();
         }
         onFlushed?.(error);
@@ -2082,7 +1900,7 @@ export class UnixSocketServer {
         onWritten(socket.writableLength, byteLength);
       }
       if (!ok) {
-        this.backpressuredSocketIdle.get(socket)?.start();
+        this.controlConnections.get(socket)?.startBackpressureIdle();
         logger.debug(`Daemon RPC socket ${sessionId} backpressured; awaiting drain`);
       }
     } catch (error) {
@@ -2092,25 +1910,6 @@ export class UnixSocketServer {
         socket.destroy();
       }
     }
-  }
-
-  /**
-   * The socket's outbound guard. A reader that frees no queued bytes for the
-   * stall deadline is destroyed with the reason logged; a reader that is
-   * draining, however slowly, is not.
-   */
-  private outboundWriteGuard(socket: Socket, sessionId: string): OutboundWriteGuard {
-    let guard = this.outboundWriteGuards.get(socket);
-    if (!guard) {
-      guard = new OutboundWriteGuard(socket, this.timer, (stall) => {
-        logger.warn(
-          `Daemon RPC socket ${sessionId} reader stalled: no queued bytes freed for ${stall.stalledMs}ms with ${stall.queuedBytes} bytes queued; destroying`,
-        );
-        socket.destroy();
-      });
-      this.outboundWriteGuards.set(socket, guard);
-    }
-    return guard;
   }
 
   /**
@@ -2176,9 +1975,9 @@ export class UnixSocketServer {
       };
     }
 
-    // Must bypass the queue: queued, it would wait behind the very request it cancels.
-    if (request.method === DAEMON_CANCEL_REQUEST_METHOD) {
-      return this.cancelSocketRequest(session, request);
+    const unqueued = this.unqueuedRequest(session, ownerSocket, request, context);
+    if (unqueued) {
+      return unqueued;
     }
 
     const { totalTimeoutMs, deadline } = context;
@@ -2275,7 +2074,7 @@ export class UnixSocketServer {
               const forwardStartMs = this.timer.now();
               try {
                 const sessionWasActiveBeforeForward = this.wasRequestSessionActive(request);
-                const response = await this.forwardMcpRequestWithRecovery({
+                const response = await this.forwardMcpRequest({
                   request,
                   route,
                   socketSessionId: sessionId,
@@ -2297,9 +2096,6 @@ export class UnixSocketServer {
                 logger.debug(
                   `[McpForward] end executionKey=${route.executionKey} clientKey=${route.clientKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`,
                 );
-                // The idle close is scheduled by runWithActiveMcpClient's wrapper once
-                // this client's active-forward count reaches zero, so it is re-armed
-                // even when a forward throws before reaching this finally (issue #4610).
               }
             },
             {
@@ -2426,6 +2222,66 @@ export class UnixSocketServer {
       });
   }
 
+  /** A request answered without waiting in the socket's admission queue, if this is one. */
+  private unqueuedRequest(
+    session: SessionContext,
+    ownerSocket: Socket,
+    request: DaemonRequest,
+    context: RequestContext,
+  ): DaemonResponse | Promise<DaemonResponse | undefined> | undefined {
+    // Must bypass the queue: queued, it would wait behind the very request it cancels.
+    if (request.method === DAEMON_CANCEL_REQUEST_METHOD) {
+      return this.cancelSocketRequest(session, request);
+    }
+    // Task polling touches no device and must not wait behind this socket's other calls (#4668).
+    if (isTaskRelayMethod(request.method)) {
+      return this.relayTaskRequest(session, ownerSocket, request, context);
+    }
+    return undefined;
+  }
+
+  /**
+   * Relays a `tasks/*` request (#4668) outside the socket's admission queue: it reads or cancels a
+   * stored task and touches no device, so a poll never waits behind a long call on the same
+   * socket. The daemon MCP server's JSON-RPC error is carried on the frame unchanged.
+   */
+  private async relayTaskRequest(
+    session: SessionContext,
+    ownerSocket: Socket,
+    request: DaemonRequest,
+    context: RequestContext,
+  ): Promise<DaemonResponse | undefined> {
+    const sessionId = session.sessionId;
+    const cancellation = this.registerRequestCancellation(session, context);
+    const mcpRequest = this.mcpRequestSignal(sessionId, ownerSocket, cancellation.signal);
+    try {
+      await this.waitForStartup(request, context.deadline, mcpRequest.signal);
+      const result = await this.forwardMcpRequest({
+        request,
+        route: this.sharedMcpForwardRoute(`method:${request.method}`),
+        socketSessionId: sessionId,
+        signal: mcpRequest.signal,
+        totalTimeoutMs: context.totalTimeoutMs,
+        deadline: context.deadline,
+      });
+      return { id: request.id, type: "mcp_response", success: true, result };
+    } catch (error) {
+      return (
+        taskRelayErrorFrame(error, request) ??
+        this.mcpForwardFailureResponse({
+          error,
+          request,
+          sessionId,
+          ownerSocket,
+          signal: mcpRequest.signal,
+        })
+      );
+    } finally {
+      mcpRequest.dispose();
+      cancellation.dispose();
+    }
+  }
+
   /**
    * Runs the provisionDevice handler inside the admission barrier but gives the barrier back as
    * soon as the caller cancels, answering with [cancelledReply]. The handler keeps rolling back in
@@ -2532,7 +2388,6 @@ export class UnixSocketServer {
       type: "mcp_response",
       success: false,
       error: errorMsg,
-      ...(error instanceof DeviceControlTransportError ? { transportFailure: error.failure } : {}),
       ...(error instanceof ReleasedBoundSessionError ? { boundSessionLoss: error.failure } : {}),
       ...mcpRequestFailureDetails(error, preservedCause),
       ...((error instanceof InputTypeTextAppendError ||
@@ -2731,18 +2586,14 @@ export class UnixSocketServer {
         tails: this.mcpForwardTails,
         idleCloseKeys: this.mcpForwardIdleCloseKeys,
         timer: this.timer,
-        onAcquired: (key) => this.clearMcpClientIdleTimer(key),
-        onDrained: (key) => this.scheduleMcpClientIdleClose(key),
+        onAcquired: (key) => this.clearForwardKeyIdleTimer(key),
+        onDrained: (key) => this.scheduleForwardKeyIdle(key),
       },
       executionKey,
       fn,
       idleCloseKey,
       chainWait,
     );
-  }
-
-  private async runWithActiveMcpClient<T>(clientKey: string, fn: () => Promise<T>): Promise<T> {
-    return await runWithActivePooledClient(this.loopbackPool(), clientKey, fn);
   }
 
   /**
@@ -2824,12 +2675,12 @@ export class UnixSocketServer {
       );
       return {
         kind: "done",
-        value: await this.runWithActiveMcpClient(currentRoute.clientKey, () => fn(currentRoute)),
+        value: await fn(currentRoute),
       };
     }
     return {
       kind: "done",
-      value: await this.runWithActiveMcpClient(initialRoute.clientKey, () => fn(initialRoute)),
+      value: await fn(initialRoute),
     };
   }
 
@@ -3581,7 +3432,6 @@ export class UnixSocketServer {
       this.clearBoundMcpClientKey(socketSessionId);
       return;
     }
-    const previousBinding = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
     this.boundMcpClientKeysBySocketSession.set(socketSessionId, {
       clientKey: route.clientKey,
       executionKey: route.executionKey,
@@ -3589,9 +3439,6 @@ export class UnixSocketServer {
       toolSelectionProfileUuid: route.toolSelectionProfileUuid,
       requiresLiveDaemonSession: sessionWasActiveBeforeForward || sessionIsActiveAfterForward,
     });
-    if (previousBinding && previousBinding.clientKey !== route.clientKey) {
-      this.scheduleMcpClientIdleClose(previousBinding.clientKey);
-    }
   }
 
   /**
@@ -3617,16 +3464,12 @@ export class UnixSocketServer {
     if (!toolSelectionProfileUuid) {
       return false;
     }
-    const previousBinding = this.boundMcpClientKeysBySocketSession.get(socketSessionId);
     this.boundMcpClientKeysBySocketSession.set(socketSessionId, {
       clientKey: route.clientKey,
       executionKey: route.executionKey,
       toolSelectionProfileUuid,
       requiresLiveDaemonSession: false,
     });
-    if (previousBinding && previousBinding.clientKey !== route.clientKey) {
-      this.scheduleMcpClientIdleClose(previousBinding.clientKey);
-    }
     return true;
   }
 
@@ -3686,7 +3529,6 @@ export class UnixSocketServer {
       return;
     }
     this.boundMcpClientKeysBySocketSession.delete(socketSessionId);
-    this.scheduleMcpClientIdleClose(boundClient.clientKey);
   }
 
   private clearBoundMcpClientsForReleasedSession(sessionUuid: string): void {
@@ -3706,163 +3548,48 @@ export class UnixSocketServer {
     return false;
   }
 
-  private isDeviceControlLoopbackTransportFailure(request: DaemonRequest, error: unknown): boolean {
-    return isDeviceControlTransportRequest(request) && isLoopbackTransportFailure(error);
-  }
-
-  private async forwardMcpRequestWithRecovery(
-    context: McpForwardRecoveryContext,
-  ): Promise<unknown> {
-    // Every loopback request of this forward names the socket session as its MCP session key.
-    return runWithLoopbackSessionKey(context.socketSessionId, () =>
-      this.forwardKeyedMcpRequest(context),
-    );
-  }
-
-  private async forwardKeyedMcpRequest(context: McpForwardRecoveryContext): Promise<unknown> {
+  /**
+   * Forward one request in process (#11820): its own MCP client and stateless server, named by
+   * the socket session as its MCP session key, closed (cancelling what it left running) when the
+   * forward ends.
+   */
+  private async forwardMcpRequest(context: McpForwardContext): Promise<unknown> {
     context.signal?.throwIfAborted();
-    const identity = this.getDeviceControlTransportIdentity(context);
-    let mcpClient: Client;
-    try {
-      mcpClient = await this.getMcpClient(
-        context.route.clientKey,
-        context.route.sessionUuid,
-        context.route.toolSelectionProfileUuid,
-        context.route.releasedSessionUuid,
-      );
-      context.signal?.throwIfAborted();
-    } catch (error) {
-      if (!this.isDeviceControlLoopbackTransportFailure(context.request, error)) {
-        throw error;
-      }
-      return this.recoverDeviceControlTransport({
-        ...context,
-        phase: "connect",
-        identity,
-      });
-    }
-    const forwardRemainingMs = this.requireRemainingMcpForwardBudget(
-      context.request,
-      context.totalTimeoutMs,
-      context.deadline,
-      "waiting in queues and preparing the MCP client",
+    const mcpClient = await runWithForwardSessionKey(
+      context.socketSessionId,
+      () =>
+        this.mcpClientFactory(
+          context.route.sessionUuid,
+          context.route.toolSelectionProfileUuid,
+          context.route.releasedSessionUuid,
+        ),
+      parseTaskRelayFrame(context.request.tasks)?.ownerKey,
     );
-    return this.forwardConnectedMcpRequest(context, identity, mcpClient, forwardRemainingMs);
-  }
-
-  private async forwardConnectedMcpRequest(
-    context: McpForwardRecoveryContext,
-    identity: DeviceControlTransportIdentity,
-    mcpClient: Client,
-    remainingTimeoutMs: number,
-  ): Promise<unknown> {
     try {
+      context.signal?.throwIfAborted();
+      const forwardRemainingMs = this.requireRemainingMcpForwardBudget(
+        context.request,
+        context.totalTimeoutMs,
+        context.deadline,
+        "waiting in queues and preparing the MCP client",
+      );
       return await this.handleIdeRequest(
         mcpClient,
         context.request,
-        remainingTimeoutMs,
+        forwardRemainingMs,
         context.socketSessionId,
         context.deadline,
         context.totalTimeoutMs,
         context.signal,
       );
-    } catch (error) {
-      if (error instanceof ReleasedBoundSessionError) {
-        throw error;
-      }
-      if (this.isDeviceControlLoopbackTransportFailure(context.request, error)) {
-        const recoveryIdentity = this.getDeviceControlRecoveryFailureIdentity(context, identity);
-        return this.recoverDeviceControlTransport({
-          ...context,
-          phase: "response",
-          identity: recoveryIdentity,
-          failedClient: mcpClient,
+    } finally {
+      // A close failure must never replace the forward's own answer.
+      await Promise.resolve()
+        .then(() => mcpClient.close())
+        .catch((error: unknown) => {
+          logger.warn(`Closing an MCP forward failed: ${errorMessage(error)}`, error);
         });
-      }
-      throw error;
     }
-  }
-
-  private getDeviceControlTransportIdentity(
-    context: McpForwardRecoveryContext,
-  ): DeviceControlTransportIdentity {
-    const args =
-      context.request.method === "tools/call" ? context.request.params?.arguments : undefined;
-    const sessionUuid = this.resolveDeviceControlIdentitySession(
-      args,
-      context.route.sessionUuid,
-      context.socketSessionId,
-    );
-    const routingSessionUuid =
-      args && typeof args === "object" && !Array.isArray(args)
-        ? (this.getSessionUuid(args as Record<string, unknown>) ?? context.route.sessionUuid)
-        : context.route.sessionUuid;
-    const sessionIncarnation = this.getDeviceControlSessionIncarnation(sessionUuid);
-    const routingSessionIncarnation =
-      routingSessionUuid === sessionUuid
-        ? sessionIncarnation
-        : this.getDeviceControlSessionIncarnation(routingSessionUuid);
-    const deviceId = this.resolveDeviceControlDeviceId(args, sessionUuid);
-    const deviceSessionUuid = this.resolveDeviceControlSessionUuid(deviceId);
-    const deviceLabelResolved = this.getDeviceControlLabelResolution(args);
-    return {
-      sessionUuid,
-      sessionIncarnation,
-      routingSessionUuid,
-      routingSessionIncarnation,
-      deviceId,
-      deviceSessionUuid,
-      deviceLabelResolved,
-    };
-  }
-
-  private getDeviceControlLabelResolution(args: unknown): boolean | undefined {
-    if (!args || typeof args !== "object" || Array.isArray(args)) {
-      return undefined;
-    }
-    const record = args as Record<string, unknown>;
-    const baseSessionUuid = this.getSessionUuid(record);
-    const deviceLabel = record.device;
-    if (typeof deviceLabel !== "string" || deviceLabel.length === 0) {
-      return undefined;
-    }
-    if (!baseSessionUuid || !this.daemonState.isInitialized()) {
-      return false;
-    }
-    try {
-      const mappedSession = this.daemonState.getSessionManager().getDeviceLabels(baseSessionUuid)?.[
-        deviceLabel
-      ];
-      return typeof mappedSession === "string" && mappedSession.length > 0;
-    } catch (error) {
-      // A session-manager lookup failure cannot prove the label still maps to a
-      // live session, so treat the label as unresolved and fail recovery closed.
-      logger.debug(
-        `Unable to verify device label ${deviceLabel} for session ${baseSessionUuid}: ${error}`,
-      );
-      return false;
-    }
-  }
-
-  private resolveDeviceControlIdentitySession(
-    args: unknown,
-    routeSessionUuid: string | undefined,
-    socketSessionId: string,
-  ): string | undefined {
-    if (args && typeof args === "object" && !Array.isArray(args)) {
-      const record = args as Record<string, unknown>;
-      const baseSessionUuid = this.getSessionUuid(record);
-      if (baseSessionUuid && typeof record.device === "string" && record.device.length > 0) {
-        return this.resolveDeviceLabelSession(baseSessionUuid, record.device);
-      }
-      if (typeof record.deviceId === "string" && record.deviceId.length > 0) {
-        return this.getSessionForDevice(record.deviceId);
-      }
-      if (baseSessionUuid) {
-        return baseSessionUuid;
-      }
-    }
-    return routeSessionUuid ?? this.resolveImplicitAutolockSession(socketSessionId, args);
   }
 
   private getSessionForDevice(deviceId: string): string | undefined {
@@ -3874,12 +3601,13 @@ export class UnixSocketServer {
     } catch (error) {
       // Without a proven device→session mapping the caller must fall back to no
       // session identity rather than guess an owner, so fail closed to undefined.
-      logger.debug(`Unable to resolve session for transport device ${deviceId}: ${error}`);
+      logger.debug(`Unable to resolve session for device ${deviceId}: ${error}`);
       return undefined;
     }
   }
 
-  private getDeviceControlSessionIncarnation(sessionUuid: string | undefined): object | undefined {
+  /** The session object itself: identity-compared to tell a recreated session from the original. */
+  private getSessionIncarnation(sessionUuid: string | undefined): object | undefined {
     if (!sessionUuid || !this.daemonState.isInitialized()) {
       return undefined;
     }
@@ -3888,585 +3616,13 @@ export class UnixSocketServer {
     } catch (error) {
       // A missing incarnation snapshot is safe: downstream owner validation treats
       // an absent incarnation as unverifiable and fails the ownership check closed.
-      logger.debug(`Unable to capture device-control session ${sessionUuid}: ${error}`);
+      logger.debug(`Unable to capture session ${sessionUuid}: ${error}`);
       return undefined;
     }
-  }
-
-  private resolveDeviceControlDeviceId(args: unknown, sessionUuid?: string): string | undefined {
-    if (sessionUuid) {
-      const assignedDevice = this.getAssignedDeviceForSession(sessionUuid);
-      if (assignedDevice) {
-        return assignedDevice;
-      }
-    }
-    if (args && typeof args === "object" && !Array.isArray(args)) {
-      const explicitDeviceId = (args as Record<string, unknown>).deviceId;
-      if (typeof explicitDeviceId === "string") {
-        return explicitDeviceId;
-      }
-    }
-    return undefined;
-  }
-
-  private resolveDeviceControlSessionUuid(deviceId?: string): string | undefined {
-    if (!deviceId || !this.daemonState.isInitialized()) {
-      return undefined;
-    }
-    try {
-      return this.daemonState
-        .getDeviceSessionRegistry()
-        .list()
-        .find((record) => record.deviceId === deviceId)?.deviceSessionUuid;
-    } catch (error) {
-      // An unresolved device epoch is safe: device-session validation treats an
-      // absent epoch as unestablished and will not admit a replay against it.
-      logger.debug(`Unable to resolve transport device epoch for ${deviceId}: ${error}`);
-      return undefined;
-    }
-  }
-
-  private hasEstablishedDeviceControlTransportIdentity(
-    identity: DeviceControlTransportIdentity,
-  ): boolean {
-    return Boolean(identity.deviceId && identity.deviceSessionUuid);
-  }
-
-  private isDeviceControlSessionValid(identity: DeviceControlTransportIdentity): boolean {
-    if (
-      !this.daemonState.isInitialized() ||
-      (!identity.sessionUuid && !identity.routingSessionUuid)
-    ) {
-      return false;
-    }
-    return (
-      this.isDeviceControlTargetOwnerValid(identity) &&
-      this.isDeviceControlRoutingSessionValid(identity)
-    );
-  }
-
-  private isDeviceControlTargetOwnerValid(identity: DeviceControlTransportIdentity): boolean {
-    if (!identity.sessionUuid) {
-      return true;
-    }
-    try {
-      return isDeviceControlTargetOwnerValid(this.daemonState.getSessionManager(), identity);
-    } catch (error) {
-      // Ownership must be provable to replay; a lookup failure leaves it unproven,
-      // so fail closed to reject the recovery rather than risk a stale-owner replay.
-      logger.debug(`Unable to validate device-control target owner: ${error}`);
-      return false;
-    }
-  }
-
-  private isDeviceControlRoutingSessionValid(identity: DeviceControlTransportIdentity): boolean {
-    if (!identity.routingSessionUuid || identity.routingSessionUuid === identity.sessionUuid) {
-      return true;
-    }
-    try {
-      return isDeviceControlRoutingSessionValid(this.daemonState.getSessionManager(), identity);
-    } catch (error) {
-      // The routing session's grant must be provable to replay; an unverifiable
-      // lookup fails closed so a superseded routing session cannot authorize it.
-      logger.debug(`Unable to validate device-control routing session: ${error}`);
-      return false;
-    }
-  }
-
-  private isDeviceControlDeviceSessionValid(identity: DeviceControlTransportIdentity): boolean {
-    if (!this.daemonState.isInitialized() || !identity.deviceId || !identity.deviceSessionUuid) {
-      return false;
-    }
-    try {
-      const liveDeviceSession = this.daemonState
-        .getDeviceSessionRegistry()
-        .list()
-        .find((record) => record.deviceId === identity.deviceId);
-      return liveDeviceSession?.deviceSessionUuid === identity.deviceSessionUuid;
-    } catch (error) {
-      // A device-epoch lookup failure cannot confirm the captured epoch is still
-      // live, so fail closed to block replay against a possibly-recreated device.
-      logger.debug(`Unable to validate device-control device epoch: ${error}`);
-      return false;
-    }
-  }
-
-  private isDeviceControlTransportIdentityValid(identity: DeviceControlTransportIdentity): boolean {
-    return (
-      this.isDeviceControlCapturedSessionIdentityValid(identity) &&
-      this.isDeviceControlDeviceSessionValid(identity)
-    );
-  }
-
-  private isDeviceControlCapturedSessionIdentityValid(
-    identity: DeviceControlTransportIdentity,
-  ): boolean {
-    const hasSessionIdentity = Boolean(identity.sessionUuid || identity.routingSessionUuid);
-    return !hasSessionIdentity || this.isDeviceControlSessionValid(identity);
-  }
-
-  private isDeviceControlRecoveryIdentityValid(
-    identity: DeviceControlTransportIdentity,
-    phase: DeviceControlTransportPhase,
-  ): boolean {
-    if (phase === "connect" && !this.hasEstablishedDeviceControlTransportIdentity(identity)) {
-      return this.isDeviceControlCapturedSessionIdentityValid(identity);
-    }
-    return this.isDeviceControlTransportIdentityValid(identity);
-  }
-
-  private isDeviceControlReplayResultIdentityValid(
-    identity: DeviceControlTransportIdentity,
-  ): boolean {
-    return this.hasEstablishedDeviceControlTransportIdentity(identity)
-      ? this.isDeviceControlTransportIdentityValid(identity)
-      : this.isDeviceControlCapturedSessionIdentityValid(identity);
-  }
-
-  private deviceControlTransportError(input: {
-    request: DaemonRequest;
-    identity: DeviceControlTransportIdentity;
-    phase: DeviceControlTransportPhase;
-    reconnectAttempted: boolean;
-    replayAttempted: boolean;
-    recoveryExhausted: boolean;
-  }): DeviceControlTransportError {
-    const toolName = deviceControlToolName(input.request);
-    const sessionValid = this.isDeviceControlSessionValid(input.identity);
-    const deviceSessionValid = this.isDeviceControlDeviceSessionValid(input.identity);
-    const capturedSessionIdentityValid = this.isDeviceControlCapturedSessionIdentityValid(
-      input.identity,
-    );
-    const identityValid = capturedSessionIdentityValid && deviceSessionValid;
-    const identityEstablished = this.hasEstablishedDeviceControlTransportIdentity(input.identity);
-    const retryable =
-      input.phase === "connect"
-        ? capturedSessionIdentityValid && (!identityEstablished || deviceSessionValid)
-        : identityValid && isReplaySafeAfterResponseClosure(input.request);
-    const failure: DeviceControlTransportFailure = {
-      code: DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
-      transport: "daemon_loopback_http",
-      toolName,
-      ...(input.identity.deviceId ? { deviceId: input.identity.deviceId } : {}),
-      ...(input.identity.deviceSessionUuid
-        ? { deviceSessionUuid: input.identity.deviceSessionUuid }
-        : {}),
-      ...(input.identity.sessionUuid ? { sessionUuid: input.identity.sessionUuid } : {}),
-      ...(input.identity.routingSessionUuid
-        ? { routingSessionUuid: input.identity.routingSessionUuid }
-        : {}),
-      sessionValid,
-      deviceSessionValid,
-      phase: input.phase,
-      retryable,
-      reconnectAttempted: input.reconnectAttempted,
-      replayAttempted: input.replayAttempted,
-    };
-    const message = input.recoveryExhausted
-      ? `Device-control transport recovery exhausted while handling ${toolName}`
-      : `Device-control transport closed while handling ${toolName}`;
-    // Preserve replay state/code while sharing the restore diagnosis with push requests.
-    return new DeviceControlTransportError(
-      this.deviceControlTransportErrorMessage(input.identity, message),
-      failure,
-    );
-  }
-
-  private deviceControlTransportErrorMessage(
-    identity: DeviceControlTransportIdentity,
-    fallback: string,
-  ): string {
-    if (!identity.deviceSessionUuid || !this.daemonState.isInitialized()) {
-      return fallback;
-    }
-    const error = createDeviceSessionErrorResolver(
-      this.daemonState.getDeviceSessionRegistry(),
-    ).getSessionError(identity.deviceSessionUuid);
-    return error instanceof DeviceSessionSupersededByRestoreError ? error.message : fallback;
   }
 
   private remainingMcpForwardBudget(input: { deadline: ProgressExtendableDeadline }): number {
     return input.deadline.value - this.timer.now();
-  }
-
-  private async reconnectMcpClientWithinDeadline(input: {
-    route: McpForwardRoute;
-    deadline: ProgressExtendableDeadline;
-    signal?: AbortSignal;
-  }): Promise<Client> {
-    input.signal?.throwIfAborted();
-    const remainingMs = this.remainingMcpForwardBudget(input);
-    if (remainingMs <= 0) {
-      throw new McpClientReconnectDeadlineError();
-    }
-
-    let connection!: Promise<Client>;
-    let pendingCreation: Promise<Client> | undefined;
-    try {
-      const client = await raceWithDeadline(
-        () => {
-          connection = this.getMcpClient(
-            input.route.clientKey,
-            input.route.sessionUuid,
-            input.route.toolSelectionProfileUuid,
-            input.route.releasedSessionUuid,
-          );
-          // getMcpClient registers its pending creation synchronously, so this
-          // snapshot fences cleanup to the attempt this wait started (#5499).
-          pendingCreation = this.mcpClientPromises.get(input.route.clientKey);
-          return connection;
-        },
-        {
-          timer: this.timer,
-          timeoutMs: remainingMs,
-          label: "MCP client reconnect",
-          timeoutError: () => new McpClientReconnectDeadlineError(),
-        },
-      );
-      // Do not cancel `connection`: it may be shared by a live sibling. This
-      // owner simply must not reuse the client after its socket was cancelled.
-      input.signal?.throwIfAborted();
-      return client;
-    } catch (error) {
-      if (error instanceof McpClientReconnectDeadlineError) {
-        this.discardTimedOutMcpReconnect(input.route.clientKey, connection, pendingCreation);
-      }
-      throw error;
-    }
-  }
-
-  private isDeviceControlReconnectExhaustion(request: DaemonRequest, error: unknown): boolean {
-    return (
-      error instanceof McpClientReconnectDeadlineError ||
-      this.isDeviceControlLoopbackTransportFailure(request, error)
-    );
-  }
-
-  private getDeviceControlRecoveryFailureIdentity(
-    context: McpForwardRecoveryContext,
-    identity: DeviceControlTransportIdentity,
-  ): DeviceControlTransportIdentity {
-    const refreshedIdentity = this.getDeviceControlTransportIdentity(context);
-    // An incarnation/epoch token only proves ownership as the pair captured with
-    // its identity key. Once the original call captured a session UUID (or device
-    // id), inheriting a *refreshed* token for that same key would let a session
-    // released and recreated on the same device mid-dispatch adopt the replacement
-    // incarnation: the unchanged device epoch and replacement session would then
-    // pass every recovery check and the request would replay and be accepted after
-    // the caller's original ownership ended (issue #5499). So a refreshed token is
-    // only inherited when its key was itself absent at capture — i.e. the key and
-    // its token arrive together from the same refresh, never mixing a captured key
-    // with a post-release token.
-    return {
-      sessionUuid: identity.sessionUuid ?? refreshedIdentity.sessionUuid,
-      sessionIncarnation:
-        identity.sessionUuid !== undefined
-          ? identity.sessionIncarnation
-          : refreshedIdentity.sessionIncarnation,
-      routingSessionUuid: identity.routingSessionUuid ?? refreshedIdentity.routingSessionUuid,
-      routingSessionIncarnation:
-        identity.routingSessionUuid !== undefined
-          ? identity.routingSessionIncarnation
-          : refreshedIdentity.routingSessionIncarnation,
-      deviceId: identity.deviceId ?? refreshedIdentity.deviceId,
-      deviceSessionUuid:
-        identity.deviceId !== undefined
-          ? identity.deviceSessionUuid
-          : refreshedIdentity.deviceSessionUuid,
-      deviceLabelResolved: identity.deviceLabelResolved ?? refreshedIdentity.deviceLabelResolved,
-    };
-  }
-
-  private pinDeviceControlRecoveryRequest(
-    request: DaemonRequest,
-    identity: DeviceControlTransportIdentity,
-    phase: DeviceControlTransportPhase,
-  ): DaemonRequest {
-    const args = request.method === "tools/call" ? request.params?.arguments : undefined;
-    if (
-      phase !== "response" ||
-      !identity.deviceId ||
-      identity.deviceLabelResolved === false ||
-      !args ||
-      typeof args !== "object" ||
-      Array.isArray(args)
-    ) {
-      return request;
-    }
-    return this.pinEstablishedDeviceControlRecoveryRequest(
-      request,
-      identity,
-      args as Record<string, unknown>,
-    );
-  }
-
-  private pinEstablishedDeviceControlRecoveryRequest(
-    request: DaemonRequest,
-    identity: DeviceControlTransportIdentity,
-    originalArguments: Record<string, unknown>,
-  ): DaemonRequest {
-    if (identity.deviceLabelResolved === true) {
-      const pinnedArguments: Record<string, unknown> = {
-        ...originalArguments,
-        deviceId: identity.deviceId,
-        ...(identity.sessionUuid ? { sessionUuid: identity.sessionUuid } : {}),
-      };
-      // Preserve the captured execution session while replacing the mutable
-      // label selector with the captured physical target.
-      delete pinnedArguments.device;
-      return {
-        ...request,
-        params: {
-          ...request.params,
-          arguments: pinnedArguments,
-        },
-      };
-    }
-    if (this.hasStableExplicitDeviceControlTarget(request, identity)) {
-      // deviceId is already immutable; retaining the original routing session also
-      // preserves its tool-selection grant alongside the target device's grant.
-      return request;
-    }
-    const pinnedArguments: Record<string, unknown> = {
-      ...originalArguments,
-      ...(identity.sessionUuid
-        ? { sessionUuid: identity.sessionUuid }
-        : { deviceId: identity.deviceId }),
-    };
-    // Pin implicit/autolocked recovery to the captured target.
-    delete pinnedArguments.device;
-    if (identity.sessionUuid) {
-      delete pinnedArguments.deviceId;
-    }
-    return {
-      ...request,
-      params: {
-        ...request.params,
-        arguments: pinnedArguments,
-      },
-    };
-  }
-
-  private hasStableExplicitDeviceControlTarget(
-    request: DaemonRequest,
-    identity: DeviceControlTransportIdentity,
-  ): boolean {
-    if (identity.deviceLabelResolved === true || request.method !== "tools/call") {
-      return false;
-    }
-    const args = request.params?.arguments;
-    if (!args || typeof args !== "object" || Array.isArray(args)) {
-      return false;
-    }
-    const deviceId = (args as Record<string, unknown>).deviceId;
-    return typeof deviceId === "string" && deviceId.length > 0;
-  }
-
-  private getDeviceControlRecoveryRoute(
-    input: DeviceControlTransportRecoveryContext,
-    replayAfterResponse: boolean,
-  ): McpForwardRoute {
-    if (
-      replayAfterResponse &&
-      input.identity.deviceLabelResolved === true &&
-      input.identity.sessionUuid
-    ) {
-      // Replay the original tool-selection profile verbatim. routingSessionUuid
-      // is a session UUID, not a profile: feeding it here would send a bogus
-      // tool-selection-profile header (createMcpClient forwards this field on the
-      // wire) and drop the generated profile injected by
-      // DaemonMcpProxy.withToolSelectionProfile, so a profile-gated tool admitted
-      // on the original call would be rejected as disabled on replay (issue #5499).
-      return this.sessionScopedForwardRoute(
-        input.socketSessionId,
-        input.identity.sessionUuid,
-        input.route.executionKey,
-        input.route.toolSelectionProfileUuid,
-      );
-    }
-    if (
-      !replayAfterResponse ||
-      !input.identity.sessionUuid ||
-      input.route.sessionUuid === input.identity.sessionUuid ||
-      this.hasStableExplicitDeviceControlTarget(input.request, input.identity)
-    ) {
-      return input.route;
-    }
-    return this.sessionScopedForwardRoute(
-      input.socketSessionId,
-      input.identity.sessionUuid,
-      input.route.executionKey,
-      input.route.toolSelectionProfileUuid,
-    );
-  }
-
-  private scheduleDistinctRecoveryRouteIdleClose(
-    originalRoute: McpForwardRoute,
-    recoveryRoute: McpForwardRoute,
-  ): void {
-    if (
-      recoveryRoute.clientKey !== originalRoute.clientKey &&
-      this.mcpClients.has(recoveryRoute.clientKey)
-    ) {
-      this.scheduleMcpClientIdleClose(recoveryRoute.clientKey);
-    }
-  }
-
-  private async reconnectDeviceControlTransport(
-    input: DeviceControlTransportRecoveryContext,
-  ): Promise<Client> {
-    try {
-      return await this.reconnectMcpClientWithinDeadline(input);
-    } catch (error) {
-      if (!this.isDeviceControlReconnectExhaustion(input.request, error)) {
-        throw error;
-      }
-      logger.warn(
-        `[McpForward] device-control transport reconnect failed for ${deviceControlToolName(input.request)}`,
-      );
-      throw this.deviceControlTransportError({
-        request: input.request,
-        identity: input.identity,
-        phase: input.phase,
-        reconnectAttempted: true,
-        replayAttempted: false,
-        recoveryExhausted: true,
-      });
-    }
-  }
-
-  private async prepareDeviceControlRecoveryReplay(
-    input: DeviceControlTransportRecoveryContext,
-    replayAfterResponse: boolean,
-  ): Promise<{
-    recoveryRoute: McpForwardRoute;
-    freshClient: Client;
-    retryRemainingMs: number;
-  }> {
-    const recoveryRoute = this.getDeviceControlRecoveryRoute(input, replayAfterResponse);
-    const recoveryInput = { ...input, route: recoveryRoute };
-    input.signal?.throwIfAborted();
-    const freshClient = await this.reconnectDeviceControlTransport(recoveryInput);
-    input.signal?.throwIfAborted();
-
-    const retryRemainingMs = this.remainingMcpForwardBudget(input);
-    if (retryRemainingMs <= 0) {
-      this.scheduleDistinctRecoveryRouteIdleClose(input.route, recoveryRoute);
-      throw this.deviceControlTransportError({
-        request: input.request,
-        identity: input.identity,
-        phase: input.phase,
-        reconnectAttempted: true,
-        replayAttempted: false,
-        recoveryExhausted: true,
-      });
-    }
-    if (!this.isDeviceControlRecoveryIdentityValid(input.identity, input.phase)) {
-      await this.resetMcpClientIfCurrent(recoveryRoute.clientKey, freshClient, "detach");
-      throw this.deviceControlTransportError({
-        request: input.request,
-        identity: input.identity,
-        phase: input.phase,
-        reconnectAttempted: true,
-        replayAttempted: false,
-        recoveryExhausted: false,
-      });
-    }
-    if (input.phase === "response" && !replayAfterResponse) {
-      throw this.deviceControlTransportError({
-        request: input.request,
-        identity: input.identity,
-        phase: input.phase,
-        reconnectAttempted: true,
-        replayAttempted: false,
-        recoveryExhausted: false,
-      });
-    }
-    return { recoveryRoute, freshClient, retryRemainingMs };
-  }
-
-  private async recoverDeviceControlTransport(
-    input: DeviceControlTransportRecoveryContext,
-  ): Promise<unknown> {
-    input.signal?.throwIfAborted();
-    if (input.failedClient) {
-      await this.resetMcpClientIfCurrent(input.route.clientKey, input.failedClient, "detach");
-    }
-    input.signal?.throwIfAborted();
-    if (!this.isDeviceControlRecoveryIdentityValid(input.identity, input.phase)) {
-      throw this.deviceControlTransportError({
-        request: input.request,
-        identity: input.identity,
-        phase: input.phase,
-        reconnectAttempted: false,
-        replayAttempted: false,
-        recoveryExhausted: false,
-      });
-    }
-
-    const replayAfterResponse =
-      input.phase === "response" && isReplaySafeAfterResponseClosure(input.request);
-    logger.warn(
-      `[McpForward] device-control loopback transport failed for ${deviceControlToolName(input.request)} during ${input.phase}; reconnecting once`,
-    );
-    if (this.remainingMcpForwardBudget(input) <= 0) {
-      throw this.deviceControlTransportError({
-        request: input.request,
-        identity: input.identity,
-        phase: input.phase,
-        reconnectAttempted: false,
-        replayAttempted: false,
-        recoveryExhausted: true,
-      });
-    }
-
-    const { recoveryRoute, freshClient, retryRemainingMs } =
-      await this.prepareDeviceControlRecoveryReplay(input, replayAfterResponse);
-
-    try {
-      const recoveryRequest = this.pinDeviceControlRecoveryRequest(
-        input.request,
-        input.identity,
-        input.phase,
-      );
-      const response = await this.handleIdeRequest(
-        freshClient,
-        recoveryRequest,
-        retryRemainingMs,
-        input.socketSessionId,
-        input.deadline,
-        input.totalTimeoutMs,
-        input.signal,
-      );
-      if (!this.isDeviceControlReplayResultIdentityValid(input.identity)) {
-        await this.resetMcpClientIfCurrent(recoveryRoute.clientKey, freshClient, "detach");
-        throw this.deviceControlTransportError({
-          request: input.request,
-          identity: input.identity,
-          phase: input.phase,
-          reconnectAttempted: true,
-          replayAttempted: replayAfterResponse,
-          recoveryExhausted: false,
-        });
-      }
-      return response;
-    } catch (error) {
-      if (!isLoopbackTransportFailure(error)) {
-        throw error;
-      }
-      await this.resetMcpClientIfCurrent(recoveryRoute.clientKey, freshClient, "detach");
-      const failureIdentity = this.getDeviceControlRecoveryFailureIdentity(input, input.identity);
-      throw this.deviceControlTransportError({
-        request: input.request,
-        identity: failureIdentity,
-        phase: "response",
-        reconnectAttempted: true,
-        replayAttempted: replayAfterResponse,
-        recoveryExhausted: true,
-      });
-    } finally {
-      this.scheduleDistinctRecoveryRouteIdleClose(input.route, recoveryRoute);
-    }
   }
 
   private wasRequestSessionActive(request: DaemonRequest): boolean {
@@ -4770,7 +3926,7 @@ export class UnixSocketServer {
     }
   }
 
-  private requireFeatureFlagService(): FeatureFlagService {
+  private requireFeatureFlagService(): FeatureFlagAdmin {
     if (!this.featureFlagService) {
       throw new Error("Feature flag service not available");
     }
@@ -4796,7 +3952,7 @@ export class UnixSocketServer {
       onInputDispatch?: () => void;
     },
   ): Promise<unknown> {
-    if (!request.method.startsWith("input/") && !IDE_DEVICE_MUTATION_METHODS.has(request.method)) {
+    if (!isOwnerFencedMethod(request.method, IDE_DEVICE_MUTATION_METHODS)) {
       return await this.handleLocalSocketRequest(request, sessionId);
     }
     const owner = this.mcpRequestSignal(sessionId, ownerSocket, cancelSignal);
@@ -4841,28 +3997,30 @@ export class UnixSocketServer {
     return await this.dispatchIdeSocketRequest(request, socketSessionId, signal);
   }
 
-  /** Runs the handler an `input/*` route table entry names. */
   private async dispatchInputRoute(
     route: InputRouteEntry,
     request: DaemonRequest,
     socketSessionId: string | undefined,
     input: InputRequestContext,
   ): Promise<any | undefined> {
-    switch (route.handler) {
-      case "tap":
-        return await this.handleInputTap(request, socketSessionId, input);
-      case "swipe":
-        return await this.handleInputSwipe(request, socketSessionId, input);
-      case "typeText":
-        return await this.handleInputTypeText(request, socketSessionId, input);
-      case "pressButton":
-        return await this.handleInputPressButton(request, socketSessionId, input);
-      case "key":
-        return await this.handleInputKey(request, socketSessionId, input);
-      case "gesture":
-        return await this.handleInputGesture(request, route.gestureKind, socketSessionId, input);
-    }
+    return await dispatchInputRoute(
+      this.inputRouteHandlers,
+      route,
+      request,
+      socketSessionId,
+      input,
+    );
   }
+
+  /** The handler each `input/*` route table entry names (#11815). */
+  private readonly inputRouteHandlers: InputRouteHandlers<InputRequestContext> = {
+    tap: (request, sid, input) => this.handleInputTap(request, sid, input),
+    swipe: (request, sid, input) => this.handleInputSwipe(request, sid, input),
+    typeText: (request, sid, input) => this.handleInputTypeText(request, sid, input),
+    pressButton: (request, sid, input) => this.handleInputPressButton(request, sid, input),
+    key: (request, sid, input) => this.handleInputKey(request, sid, input),
+    gesture: (request, kind, sid, input) => this.handleInputGesture(request, kind, sid, input),
+  };
 
   /** A route that mutates a device runs as one tracked control call (#11486); the rest run bare. */
   private async dispatchIdeSocketRequest(
@@ -6195,7 +5353,7 @@ export class UnixSocketServer {
     return {
       deviceId,
       ...(holderSessionId !== undefined ? { holderSessionId } : {}),
-      holderIncarnation: this.getDeviceControlSessionIncarnation(holderSessionId),
+      holderIncarnation: this.getSessionIncarnation(holderSessionId),
       ...(signal ? { signal } : {}),
     };
   }
@@ -6213,10 +5371,7 @@ export class UnixSocketServer {
     if (this.getSessionForDevice(admission.deviceId) !== admission.holderSessionId) {
       return false;
     }
-    return (
-      this.getDeviceControlSessionIncarnation(admission.holderSessionId) ===
-      admission.holderIncarnation
-    );
+    return this.getSessionIncarnation(admission.holderSessionId) === admission.holderIncarnation;
   }
 
   /**
@@ -7088,8 +6243,8 @@ export class UnixSocketServer {
       if (explicit || !socketSessionId || !this.daemonState.isInitialized()) {
         return explicit;
       }
-      const platform = (request.params as Record<string, unknown> | undefined)?.platform;
-      if (platform !== "android" && platform !== "ios") {
+      const platform = readFramePlatformHint(request.params);
+      if (!platform) {
         return undefined;
       }
       return this.daemonState
@@ -7652,12 +6807,19 @@ export class UnixSocketServer {
     signal?.throwIfAborted();
     const requestOptions = this.mcpRequestOptions(timeoutMs, signal);
 
+    const passthrough = runPassthroughForward({
+      mcpClient,
+      request,
+      timeoutMs,
+      options: requestOptions,
+      admitted: (args, forward) => this.withAdmittedBoundSession(args, forward),
+      readAdmissionArgs: (r) => this.boundSessionAdmissionArgs(r),
+    });
+    if (passthrough) {
+      return await passthrough;
+    }
+
     switch (request.method) {
-      case "tools/list": {
-        return await this.withAdmittedBoundSession(request.params, () =>
-          mcpClient.listTools(undefined, requestOptions),
-        );
-      }
       case "tools/call": {
         const progressToken = request.progressToken;
         // Cleanup includes the live dispatch evidence on every tools/call and
@@ -7755,11 +6917,10 @@ export class UnixSocketServer {
                 timeoutMs,
               );
               return this.traceCallTool(request, () =>
-                mcpClient.callTool(
-                  {
-                    name: request.params.name,
-                    arguments: this.withLiveDeadlineKey(forwardedArguments, liveDeadlineKey),
-                  },
+                callForwardedTool(
+                  mcpClient,
+                  request,
+                  this.withLiveDeadlineKey(forwardedArguments, liveDeadlineKey),
                   callOptions,
                 ),
               );
@@ -7793,36 +6954,9 @@ export class UnixSocketServer {
           cleanup();
         }
       }
-      case "resources/list": {
-        return await this.withAdmittedBoundSession(request.params, () =>
-          mcpClient.listResources(undefined, requestOptions),
-        );
-      }
-      case "resources/read": {
-        if (!request.params?.uri) {
-          throw new Error("resources/read requires params.uri");
-        }
-        return await this.withAdmittedBoundSession(this.boundSessionAdmissionArgs(request), () =>
-          mcpClient.readResource({ uri: request.params.uri }, requestOptions),
-        );
-      }
-      case "resources/list-templates": {
-        return await this.withAdmittedBoundSession(request.params, () =>
-          mcpClient.listResourceTemplates(undefined, requestOptions),
-        );
-      }
-      case "ide/getNavigationGraph": {
-        const args = {
-          ...(request.params ?? {}),
-          [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
-        };
-        return await mcpClient.callTool(
-          { name: "getNavigationGraph", arguments: args },
-          requestOptions,
-        );
-      }
       default:
-        throw new Error(`Unsupported daemon method: ${request.method}`);
+        // `tasks/get`, `tasks/update` and `tasks/cancel` (#4668); anything else is refused.
+        return await forwardTaskRequest(mcpClient, request, requestOptions);
     }
   }
 
@@ -7939,145 +7073,51 @@ export class UnixSocketServer {
       : {};
   }
 
-  /**
-   * Create an MCP client connected to the HTTP server
-   */
+  /** Open the client one forward runs through: its own in-process server (#11820). */
   private async createMcpClient(
     boundSessionUuid?: string,
     toolSelectionProfileUuid?: string,
     releasedSessionUuid?: string,
   ): Promise<Client> {
-    logger.info(`Creating MCP client with endpoint: "${this.mcpEndpoint}"`);
-    if (!this.mcpEndpoint) {
-      logger.error(`ERROR: mcpEndpoint is empty or undefined when creating client!`);
-      throw new Error("mcpEndpoint is not set");
-    }
-    const transport = new StreamableHTTPClientTransport(new URL(this.mcpEndpoint), {
-      fetch: withLoopbackSessionKey(loopbackMcpFetch),
-      reconnectionOptions: DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION,
-      ...(boundSessionUuid || toolSelectionProfileUuid || releasedSessionUuid
-        ? {
-            requestInit: {
-              headers: {
-                ...(boundSessionUuid
-                  ? { [DAEMON_SESSION_TOOL_BINDING_HEADER]: boundSessionUuid }
-                  : {}),
-                ...(releasedSessionUuid
-                  ? { [DAEMON_RELEASED_SESSION_HEADER]: releasedSessionUuid }
-                  : {}),
-                ...(toolSelectionProfileUuid
-                  ? { [DAEMON_TOOL_SELECTION_PROFILE_HEADER]: toolSelectionProfileUuid }
-                  : {}),
-              },
-            },
-          }
-        : {}),
-    });
-
-    const client = new LoopbackMcpClient(
-      {
-        name: "auto-mobile-daemon-client",
-        version: "1.0.0",
-      },
-      {
-        capabilities: {},
-      },
-    );
-
-    await client.connect(transport);
-    logger.info(`MCP client connected to ${this.mcpEndpoint}`);
-
-    return client;
-  }
-
-  /**
-   * Get or create the MCP client for a target key.
-   */
-  private async getMcpClient(
-    key: string,
-    boundSessionUuid?: string,
-    toolSelectionProfileUuid?: string,
-    releasedSessionUuid?: string,
-  ): Promise<Client> {
-    return await getPooledClient(
-      this.loopbackPool(),
-      key,
+    return await this.mcpDispatcher.connect({
       boundSessionUuid,
       toolSelectionProfileUuid,
       releasedSessionUuid,
-    );
+      sessionKey: currentForwardSessionKey(),
+      taskOwnerKey: currentForwardTaskOwnerKey(),
+    });
   }
 
-  private async resetMcpClient(key: string, closeMode: "wait" | "detach" = "wait"): Promise<void> {
-    await resetPooledClient(this.loopbackPool(), key, closeMode);
+  private scheduleForwardKeyIdle(key: string): void {
+    this.clearForwardKeyIdleTimer(key);
+    const timer = this.timer.setTimeout(() => {
+      this.onForwardKeyIdle(key);
+    }, FORWARD_KEY_IDLE_MS);
+    this.forwardKeyIdleTimers.set(key, timer);
   }
 
-  private async closeMcpClient(key: string, client: Client): Promise<void> {
-    await closePooledClient(client);
-  }
-
-  private async resetMcpClientIfCurrent(
-    key: string,
-    expectedClient: Client,
-    closeMode: "wait" | "detach" = "wait",
-  ): Promise<boolean> {
-    return await resetPooledClientIfCurrent(this.loopbackPool(), key, expectedClient, closeMode);
-  }
-
-  private discardTimedOutMcpReconnect(
-    key: string,
-    connection: Promise<Client>,
-    pendingCreation: Promise<Client> | undefined,
-  ): void {
-    discardTimedOutReconnect(this.loopbackPool(), key, connection, pendingCreation);
-  }
-
-  private scheduleMcpClientIdleClose(key: string): void {
-    schedulePooledIdleClose(this.loopbackPool(), key);
-  }
-
-  private clearMcpClientIdleTimer(key: string): void {
-    clearPooledIdleTimer(this.loopbackPool(), key);
-  }
-
-  /** The loopback client cache's state and hooks; cross-calls re-enter through this server. */
-  private loopbackPool(): LoopbackClientPool {
-    return {
-      clients: this.mcpClients,
-      promises: this.mcpClientPromises,
-      idleTimers: this.mcpClientIdleTimers,
-      activeForwardCounts: this.activeMcpClientForwardCounts,
-      timer: this.timer,
-      factory: () => this.mcpClientFactory,
-      generation: () => this.lifecycleGeneration,
-      isSuperseded: (generation) => this.closing || generation !== this.lifecycleGeneration,
-      closeClient: (key, client) => this.closeMcpClient(key, client),
-      clearIdleTimer: (key) => this.clearMcpClientIdleTimer(key),
-      scheduleIdleClose: (key) => this.scheduleMcpClientIdleClose(key),
-      resetClient: (key, closeMode) => this.resetMcpClient(key, closeMode),
-      resetClientIfCurrent: (key, client, closeMode) =>
-        this.resetMcpClientIfCurrent(key, client, closeMode),
-      onIdle: (key) => this.closeIdleMcpClient(key),
-    };
-  }
-
-  private async closeIdleMcpClient(key: string): Promise<void> {
-    this.mcpClientIdleTimers.delete(key);
-    if (
-      this.mcpForwardTails.has(key) ||
-      this.activeMcpClientForwardCounts.has(key) ||
-      this.isMcpClientKeyBound(key)
-    ) {
+  private clearForwardKeyIdleTimer(key: string): void {
+    const timer = this.forwardKeyIdleTimers.get(key);
+    if (!timer) {
       return;
     }
-    // The append helper shares the device's idle lifecycle: once nothing has
-    // used this device key for the idle window, drop the cached InputText so
-    // its API-level cache cannot go stale across a device swap under the same id.
+    this.timer.clearTimeout(timer);
+    this.forwardKeyIdleTimers.delete(key);
+  }
+
+  /**
+   * Nothing has used this execution key for the idle window. For a device key, drop the cached
+   * append helper so its API-level probe cannot go stale across a device swap under the same id.
+   */
+  private onForwardKeyIdle(key: string): void {
+    this.forwardKeyIdleTimers.delete(key);
+    if (this.mcpForwardTails.has(key) || this.isMcpClientKeyBound(key)) {
+      return;
+    }
     const devicePrefix = "device:";
     if (key.startsWith(devicePrefix)) {
       this.appendTextInputs.delete(key.slice(devicePrefix.length));
     }
-    await this.resetMcpClient(key);
   }
 
   /**
@@ -8312,23 +7352,11 @@ export class UnixSocketServer {
     this.resourceSubscriptions.clear();
     this.server = null;
 
-    // Existing forwards may need their MCP clients throughout the drain. Close
-    // those clients only after every socket has received its terminal frames.
-    const clients = Array.from(this.mcpClients.entries());
-    this.mcpClients.clear();
-    this.mcpClientPromises.clear();
     this.boundMcpClientKeysBySocketSession.clear();
-    for (const timer of this.mcpClientIdleTimers.values()) {
+    for (const timer of this.forwardKeyIdleTimers.values()) {
       this.timer.clearTimeout(timer);
     }
-    this.mcpClientIdleTimers.clear();
-    for (const [key, client] of clients) {
-      try {
-        await this.closeMcpClient(key, client);
-      } catch (error) {
-        logger.warn(`Error closing MCP client for key ${key}:`, error);
-      }
-    }
+    this.forwardKeyIdleTimers.clear();
     this.mcpForwardTails.clear();
     this.mcpForwardIdleCloseKeys.clear();
     this.appendTextInputs.clear();

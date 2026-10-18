@@ -23,6 +23,11 @@ export { stripInternalToolParams } from "./internalToolParams";
 export { enrichAcquisitionResult } from "./pipeline/ingress/acquisition";
 import { createListSessionTools } from "./pipeline/ingress/listSessionTools";
 import { createToolCallExecutor } from "./pipeline/ingress/executeToolCall";
+import { daemonTaskManager } from "./tasks/daemonTaskManager";
+import { installTasksProtocol } from "./tasks/installTasksProtocol";
+import type { TaskManager } from "./tasks/TaskManager";
+import type { TaskLeaseKeepalive } from "./tasks/taskLeaseKeepalive";
+import { createTaskAwareToolCallExecutor, TASK_ELIGIBLE_TOOLS } from "./tasks/toolCallTasks";
 import { namesLiveSessionOfBoundPlan } from "./pipeline/ingress/namesLiveSessionOfBoundPlan";
 
 // Import the tool registry
@@ -126,6 +131,19 @@ export interface McpServerOptions {
    * that explicitly simulate that hop with more than one instance.
    */
   toolSelectionProfileRegistry?: ToolSelectionProfileRegistry;
+  /**
+   * MCP Tasks extension (#4668). The daemon serves tasks from its daemon-scoped manager;
+   * direct stdio does not. Tests inject a manager, the eligible tools and the keepalive.
+   */
+  taskManager?: TaskManager;
+  /**
+   * Who owns the tasks this server creates and serves, when not the request's session key: a
+   * control-socket forward from the stdio proxy names the proxy, so its tasks survive the proxy's
+   * reconnects (a socket session id does not).
+   */
+  taskOwnerKey?: string;
+  taskEligibleTools?: ReadonlySet<string>;
+  taskLeaseKeepalive?: TaskLeaseKeepalive;
 }
 
 // `formatToolParamError` lives in its own module so non-server callers (e.g.
@@ -159,6 +177,30 @@ export function registerMcpTools(daemonMode: boolean): void {
     lastToolRegistration = { daemonMode, removalEpoch: ToolRegistry.removalEpochForRegistration };
   }
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));
+}
+
+let lastResourceRegistration:
+  | { iosDependencies: IosDoctorDependencies; clearEpoch: number }
+  | undefined;
+
+/**
+ * Register every resource once per process (#13068). The registry is keyed by URI, so
+ * re-registering is redundant, and registering app resources starts a booted-device
+ * discovery (adb + simctl), which every stateless request (#4678) used to pay. Device
+ * inventory changes resync app resources through the device lifecycle instead.
+ */
+function registerAllResourcesOnce(iosDependencies: IosDoctorDependencies): void {
+  if (
+    lastResourceRegistration?.iosDependencies === iosDependencies &&
+    lastResourceRegistration.clearEpoch === ResourceRegistry.clearEpochForRegistration
+  ) {
+    return;
+  }
+  registerAllResources(iosDependencies);
+  lastResourceRegistration = {
+    iosDependencies,
+    clearEpoch: ResourceRegistry.clearEpochForRegistration,
+  };
 }
 
 function registerAllResources(iosDependencies: IosDoctorDependencies): void {
@@ -198,6 +240,46 @@ function registerAllResources(iosDependencies: IosDoctorDependencies): void {
  */
 function serverBindingKey(options: McpServerOptions): string | undefined {
   return options.requestMcpSessionId ?? options.sessionContext?.sessionId;
+}
+
+/**
+ * The session key a request's tasks belong to (#4668): the explicit key header on a stateless
+ * daemon server (its scope id is one-off and would orphan the task), else the stateful
+ * transport's session id. Keyless stateless requests own no tasks and run synchronously.
+ */
+function taskOwnerKey(options: McpServerOptions): string | undefined {
+  if (options.taskOwnerKey?.trim()) {
+    return options.taskOwnerKey;
+  }
+  const key = options.stateless ? options.requestMcpSessionId : serverBindingKey(options);
+  return key?.trim() ? key : undefined;
+}
+
+function resolveTaskManager(options: McpServerOptions): TaskManager | undefined {
+  return options.taskManager ?? (options.daemonMode ? daemonTaskManager() : undefined);
+}
+
+/**
+ * Serves the Tasks extension on this server when a task manager is available, and wraps the
+ * `tools/call` executor so an eligible tool can answer a declaring request with a task.
+ */
+function installTasks(
+  server: McpServer,
+  options: McpServerOptions,
+  execute: ReturnType<typeof createToolCallExecutor>,
+): ReturnType<typeof createTaskAwareToolCallExecutor> {
+  const taskManager = resolveTaskManager(options);
+  const ownerKey = taskOwnerKey(options);
+  if (taskManager) {
+    installTasksProtocol(server, { taskManager, ownerKey });
+  }
+  return createTaskAwareToolCallExecutor({
+    execute,
+    taskManager,
+    ownerKey,
+    eligibleTools: options.taskEligibleTools ?? TASK_ELIGIBLE_TOOLS,
+    ...(options.taskLeaseKeepalive && { keepalive: options.taskLeaseKeepalive }),
+  });
 }
 
 function resolveBindingStore(options: McpServerOptions): {
@@ -248,7 +330,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   // Register all resources
   startupBenchmark.startPhase("resourceRegistration");
-  registerAllResources(iosDependencies);
+  registerAllResourcesOnce(iosDependencies);
   startupBenchmark.endPhase("resourceRegistration");
 
   // Create a new MCP server
@@ -310,6 +392,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       try {
         await closeServer();
       } finally {
+        // A never-connected server never fires onclose, which is what detaches its binding.
+        sessionToolBinding.dispose();
         ToolRegistry.untrackServer(server);
         ResourceRegistry.untrackServer(server);
       }
@@ -404,7 +488,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   installToolCallDispatcher(server, {
     progressFailureMessage: "Failed to send progress notification",
     prepare: prepareToolCallRequest,
-    execute: executeToolCall,
+    execute: installTasks(server, options, executeToolCall),
   });
   startupBenchmark.endPhase("serverHandlerRegistration");
 

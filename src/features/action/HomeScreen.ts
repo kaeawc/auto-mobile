@@ -1,7 +1,11 @@
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  ProgressCallback,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import {
   ActionableError,
   BootedDevice,
@@ -10,7 +14,7 @@ import {
   ViewHierarchyResult,
 } from "../../models";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
-import { IOSCtrlProxyClient } from "../observe/ios";
+import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -36,6 +40,7 @@ import {
 import { isForegroundLauncher } from "../observe/androidLauncherPackages";
 import { deviceIncarnationToken } from "../../utils/deviceIncarnation";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
+import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 // Overlay ids come from the Pixel Launcher captures under test/fixtures/android-launcher/.
 const ANDROID_LAUNCHER_OVERLAY_MARKERS = [
@@ -77,8 +82,9 @@ export class HomeScreen extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
     private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(device),
+    collaborators: DisplayFenceDependencies = {},
   ) {
-    super(device, adb, timer);
+    super(device, adb, timer, undefined, collaborators);
     this.device = device;
   }
 
@@ -104,7 +110,7 @@ export class HomeScreen extends BaseVisualChange {
       changeExpected: true,
       foregroundAppMayChange: true,
       usesObservationForResolution: false,
-      timeoutMs: 5000,
+      timeoutMs: SETTLE_BUDGET_MS.lifecycle,
       progress,
       perf,
       signal,
@@ -427,7 +433,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async tryIosRunnerHome(
-    client: IOSCtrlProxyClient,
+    client: IOSCtrlProxy,
     timeoutMs: number,
     perf: PerformanceTracker | undefined,
     frameContext: string | undefined,
@@ -462,7 +468,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async verifyIosHomeForeground(
-    client: IOSCtrlProxyClient,
+    client: IOSCtrlProxy,
     perf?: PerformanceTracker,
     retryDelaysMs: readonly number[] = HomeScreen.IOS_HOME_RETRY_DELAYS_MS,
     timeoutMs: number = HomeScreen.IOS_HOME_VERIFICATION_TIMEOUT_MS,
@@ -537,7 +543,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async readIosHomeForeground(
-    client: IOSCtrlProxyClient,
+    client: IOSCtrlProxy,
     perf: PerformanceTracker | undefined,
     remainingMs: number,
     signal?: AbortSignal,
@@ -562,7 +568,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private throwIosHomeNotForeground(
-    client: IOSCtrlProxyClient,
+    client: IOSCtrlProxy,
     lastHierarchy: CtrlProxyHierarchy | undefined,
   ): never {
     const foregroundApp = lastHierarchy?.packageName ?? "unknown app";

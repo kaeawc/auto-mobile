@@ -1,17 +1,15 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, expect, spyOn } from "bun:test";
 import { DeviceLockRepository } from "../../src/db/deviceLockRepository";
 import { logger, LogLevel } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { SESSION_SETUP_DRAIN_TIMEOUT_MS, SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { defaultDeviceClockRestoreRegistry } from "../../src/features/utility/DeviceClock";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { fixedBackoff } from "../../src/utils/Backoff";
@@ -103,14 +101,11 @@ async function setup(saved = true) {
     releases.push({ reason, identityReplaced: options.deviceIdentityReplaced === true });
   });
   const manager = new FakeDeviceManager([], [original]);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "daemon-test", {
-      timer,
-      deviceManager: manager,
-      emulatorLossIncidentStore: new InMemoryEmulatorLossIncidentStore(timer),
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-    }),
-  );
+  const pool = makePool(sessions, "daemon-test", {
+    timer,
+    deviceManager: manager,
+    emulatorLossIncidentStore: new InMemoryEmulatorLossIncidentStore(timer),
+  });
   await pool.initializeWithDevices([original]);
   await pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
   const holder = sessions.getSession("holder")!;

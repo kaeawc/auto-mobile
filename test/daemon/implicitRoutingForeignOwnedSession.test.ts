@@ -11,6 +11,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { type UnixSocketServer } from "../../src/daemon/socketServer";
+import { currentForwardSessionKey } from "../../src/daemon/socketServer/forwardSessionKey";
 import type { DaemonResponse } from "../../src/daemon/types";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -46,10 +47,10 @@ import { RealToolCallPath } from "../helpers/realToolCallPath";
  *
  * Established:
  * - A connection that sends only public arguments never gets a foreign-owned implicit routing
- *   session. Its sessionless calls route to its own loopback (`socket:<id>`), a read,
- *   `setToolEnabled` or refused control call naming the owner's session never binds its socket
- *   route, and on the loopback both connections share (`device:<id>`, reached by a top-level
- *   `deviceId`) a device call resolves its session per connection from the pool, while every plain
+ *   session. Its sessionless calls run as its own forwards, a read, `setToolEnabled` or refused
+ *   control call naming the owner's session never binds its socket route, and on the route both
+ *   connections share (`device:<id>`, reached by a top-level `deviceId`) a device call resolves
+ *   its session per connection from the pool, while every plain
  *   control tool rejects a top-level `deviceId` in its strict schema before its handler runs.
  * - A marker echoing the named session (`DAEMON_BOUND_SESSION_PARAM`, including the proxy's
  *   `--initial-session-uuid` shape) is honoured unless another connected client owns that session
@@ -71,7 +72,6 @@ const held: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platfor
 const other: BootedDevice = { name: "Pixel B", deviceId: "emulator-5556", platform: "android" };
 const HOLDER = "holder-session";
 const OWNER_TOKEN = "holder-owner-token";
-const SHARED_LOOPBACK = `device:${held.deviceId}`;
 
 interface Connection {
   id: string;
@@ -123,7 +123,10 @@ describe("the implicit routing session of a call that names none", () => {
     };
   };
 
-  const loopbackKeys = (): string[] => [...server["mcpClients"].keys()];
+  /** The session each forward's client was seeded with, keyed by the connection that sent it. */
+  let forwards: Array<{ connection: string | undefined; boundSessionUuid: string | undefined }>;
+  const forwardsOf = (connection: Connection) =>
+    forwards.filter((forward) => forward.connection === connection.id);
   const heldRuns = () => tools.runs.filter((run) => run.deviceId === held.deviceId);
 
   /** The stranger's sessionless control calls on the owner's device: refused, nothing runs. */
@@ -184,14 +187,15 @@ describe("the implicit routing session of a call that names none", () => {
     registerToolSelectionTools();
     server = createTestUnixSocketServer(
       "/fake/implicit-routing.sock",
-      "http://localhost:0/mcp",
       DaemonState.getInstance(),
       timer,
     );
     server["acceptingRequests"] = true;
     loopbacks = [];
+    forwards = [];
     // One real MCP server per loopback client key, seeded as the daemon's HTTP endpoint seeds it.
     server.mcpClientFactory = async (boundSessionUuid, profileUuid, releasedSessionUuid) => {
+      forwards.push({ connection: currentForwardSessionKey(), boundSessionUuid });
       const loopback = new McpTestFixture({
         daemonMode: true,
         sessionContext: {
@@ -281,9 +285,9 @@ describe("the implicit routing session of a call that names none", () => {
 
     await expectStrangerRefused();
 
-    // The plain and the bare call ran on the stranger's own loopback, never one seeded for HOLDER.
-    expect(loopbackKeys()).toContain(`socket:${stranger.id}`);
-    expect(loopbackKeys().some((key) => key.includes(`session:${HOLDER}`))).toBe(false);
+    // The plain and the bare call ran as the stranger's own forwards, never seeded for HOLDER.
+    expect(forwardsOf(stranger).length).toBeGreaterThan(0);
+    expect(forwardsOf(stranger).some((forward) => forward.boundSessionUuid === HOLDER)).toBe(false);
   });
 
   test("a read naming the owner's session does not bind the reader's later sessionless calls", async () => {
@@ -317,9 +321,9 @@ describe("the implicit routing session of a call that names none", () => {
     await expectStrangerRefused();
   });
 
-  test("on the loopback both connections share, the owner's binding does not carry to the other", async () => {
-    // The owner's sessionless calls with a top-level deviceId run on the shared loopback, and its
-    // setActiveDevice binds that loopback's SessionToolBinding to the owner's session.
+  test("on the route both connections share, the owner's binding does not carry to the other", async () => {
+    // The owner's sessionless calls with a top-level deviceId run on the shared device route, and
+    // its setActiveDevice binds the owner's session for the owner's connection.
     const selected = await owner.call("setActiveDevice", {
       deviceId: held.deviceId,
       platform: "android",
@@ -327,7 +331,6 @@ describe("the implicit routing session of a call that names none", () => {
     const ownerTap = await owner.call("tapAt", { x: 1, y: 1, deviceId: held.deviceId });
     expect(payload(selected).sessionUuid).toBe(HOLDER);
     expect(isToolError(ownerTap)).toBe(false);
-    expect(loopbackKeys()).toEqual([SHARED_LOOPBACK]);
 
     const tap = await stranger.call("tapAt", { x: 1, y: 1, deviceId: held.deviceId });
     const labelled = await stranger.call("tapAt", {
@@ -336,8 +339,8 @@ describe("the implicit routing session of a call that names none", () => {
       deviceId: held.deviceId,
       device: "A",
     });
-    // Both of the stranger's calls reached the same loopback the owner bound.
-    expect(loopbackKeys()).toEqual([SHARED_LOOPBACK]);
+    // Each call runs as its own forward (#11820): none of the stranger's carries the owner's binding.
+    expect(forwardsOf(stranger).some((forward) => forward.boundSessionUuid === HOLDER)).toBe(false);
     // A plain control tool cannot be steered there: its strict schema rejects a top-level deviceId.
     const steeredKill = await stranger.call("killDevice", {
       device: held,
@@ -485,7 +488,7 @@ describe("the implicit routing session of a call that names none", () => {
       expect(tap.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
       expect(tap.retryable).toBe(false);
       expect(tools.runs).toEqual([]);
-      expect(loopbackKeys()).toEqual([]);
+      expect(forwards).toEqual([]);
       expect(pool.isSessionOwnedByOtherConnection(HOLDER, owner.id)).toBe(false);
       expect(pool.isSessionOwnedByOtherConnection(HOLDER, stranger.id)).toBe(true);
       expect(sessionManager.peekSession(HOLDER)!.livenessOwnerToken).toBe(OWNER_TOKEN);

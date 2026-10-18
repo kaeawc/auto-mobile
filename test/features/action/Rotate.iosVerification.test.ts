@@ -9,6 +9,7 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("iOS observed rotation verification (#8778)", () => {
   let rotate: Rotate;
@@ -49,14 +50,11 @@ describe("iOS observed rotation verification (#8778)", () => {
       source: "local",
     };
     // Only requestRotate is reachable at this injected seam; no client I/O runs.
-    const client = Object.assign(
-      Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient,
-      {
-        requestRotate: (...args: Parameters<IOSCtrlProxyClient["requestRotate"]>) =>
-          runner.requestRotate(...args),
-      },
-    );
-    instanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+    const client = Object.assign(Object.create(IOSCtrlProxyClient.prototype), {
+      requestRotate: (...args: Parameters<IOSCtrlProxyClient["requestRotate"]>) =>
+        runner.requestRotate(...args),
+    });
+    instanceSpy = spyOnIosClientInstance(client);
     rotate = new Rotate(device, new FakeAdbExecutor(), timer);
     Object.assign(rotate, {
       observeScreen: observe,
@@ -158,6 +156,9 @@ describe("iOS observed rotation verification (#8778)", () => {
       [createObserveResult(1), createObserveResult(1), "landscape", "landscape"],
       [createObserveResult(0), createObserveResult(undefined, false), "portrait", "landscape"],
     ] as const) {
+      // Start each case with a cold cache: a cache read replays the last execute, so the
+      // previous case's "after" must not stand in for this case's "before".
+      observe.clearHistory();
       observe.setObserveResult((index) => (index % 2 === 0 ? before : after));
       const result = await rotate.execute("landscape");
       expect(result.success).toBe(false);

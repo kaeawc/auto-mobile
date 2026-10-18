@@ -8,7 +8,6 @@ import {
   TEXT_REQUEST_RESPONSE_MARGIN_MS,
 } from "../../../src/features/action/textTransportTimeout";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -19,6 +18,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { typedObservation } from "./IosTypedTextTestHarness";
 import { createSendKeysHarness, ios, android } from "./SendKeysTestHarness";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 type Entry = "sendKeys clear" | "sendKeys replace" | "ClearText" | "setUIState";
 type Outcome = {
@@ -126,12 +126,8 @@ beforeEach(() => {
   timer.enableAutoAdvance();
   proxy = new FakeIOSCtrlProxy(timer);
   androidProxy = new FakeCtrlProxy();
-  iosInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-    proxy as unknown as IOSCtrlProxyClient,
-  );
-  androidInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    androidProxy as unknown as AndroidCtrlProxyClient,
-  );
+  iosInstance = spyOnIosClientInstance(proxy);
+  androidInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(androidProxy);
 });
 afterEach(() => {
   iosInstance.mockRestore();

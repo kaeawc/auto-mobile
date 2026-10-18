@@ -31,4 +31,11 @@ describe("tier import direction rules (#11789)", () => {
     expect(isViolation(features, "src/daemon/daemonState")).toBe(false);
     expect(isViolation(features, "src\\server\\toolRegistry")).toBe(true);
   });
+
+  test("daemon is gated only on importing server (#11790)", () => {
+    const daemon = rule("daemon");
+    expect(isViolation(daemon, "src/db/database")).toBe(false);
+    expect(isViolation(daemon, "src/features/video")).toBe(false);
+    expect(isViolation(daemon, "src/server/appearanceManager")).toBe(true);
+  });
 });

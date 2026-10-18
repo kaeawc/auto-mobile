@@ -2,7 +2,6 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import type { ElementBounds, PinchOnOptions, ViewHierarchyResult } from "../../../src/models";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
@@ -13,6 +12,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const restores: Array<() => void> = [];
 afterEach(() =>
@@ -47,12 +47,8 @@ function harness(platform: "android" | "ios", bounds: ElementBounds) {
     activityName: "MainActivity",
     layoutSeqSum: 123,
   });
-  const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    android as unknown as AndroidCtrlProxyClient,
-  );
-  const iosSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-    ios as unknown as IOSCtrlProxyClient,
-  );
+  const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(android);
+  const iosSpy = spyOnIosClientInstance(ios);
   const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
     isAvailable: async () => true,
   } as unknown as AndroidCtrlProxyManager);

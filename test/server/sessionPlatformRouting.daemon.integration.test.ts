@@ -186,7 +186,6 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
   const timer = new FakeTimer();
   const socket = new UnixSocketServer(
     "/private/tmp/unused-6807.sock",
-    "http://localhost:0/mcp",
     DaemonState.getInstance(),
     timer,
   );
@@ -375,7 +374,8 @@ test("proxy and socket route through reused MCP clients using the socket-owned p
     ]);
     const apple = pool.resolveAutolockSessionForMcpSession(socketSessionId, "ios")!;
     const pinned = new DaemonMcpProxy({
-      clientFactory: () => client,
+      // Each proxy owns its client: closing the pinned one must not drop the default proxy's handlers.
+      clientFactory: () => new FakeDaemonClient({ toolResultFor: dispatch }),
       daemonManager: daemon,
       autoStartDaemon: false,
       timer,

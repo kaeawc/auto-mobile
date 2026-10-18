@@ -37,19 +37,11 @@ interface Internals {
   handleConnection(socket: Socket): void;
   clientSockets: Map<string, Socket>;
   activeRequestHandlers: Set<Promise<void>>;
-  forwardMcpRequestWithRecovery(options: {
-    request: DaemonRequest;
-    signal: AbortSignal;
-  }): Promise<unknown>;
+  forwardMcpRequest(options: { request: DaemonRequest; signal: AbortSignal }): Promise<unknown>;
 }
 function harness() {
   const state = { isInitialized: () => false } as DaemonStateAccess;
-  const server = createTestUnixSocketServer(
-    "unused",
-    "http://localhost:0/mcp",
-    state,
-    new FakeTimer(),
-  );
+  const server = createTestUnixSocketServer("unused", state, new FakeTimer());
   const internal = server as unknown as Internals;
   internal.acceptingRequests = true;
   const connect = () => {
@@ -117,7 +109,7 @@ test.each([true, false])(
       ["A", Promise.withResolvers<unknown>()],
       ["B", Promise.withResolvers<unknown>()],
     ]);
-    internal.forwardMcpRequestWithRecovery = async ({ request: frame, signal }) => {
+    internal.forwardMcpRequest = async ({ request: frame, signal }) => {
       signals.set(frame.id, signal);
       if (signals.size === 2) {
         started.resolve();
@@ -157,7 +149,7 @@ test("a live client cancel keeps the error response shape and emits no error-lev
   const { internal, connect } = harness();
   const socket = connect();
   const started = Promise.withResolvers<void>();
-  internal.forwardMcpRequestWithRecovery = async ({ signal }) => {
+  internal.forwardMcpRequest = async ({ signal }) => {
     started.resolve();
     return new Promise<never>((_resolve, reject) =>
       signal.addEventListener("abort", () => reject(signal.reason), { once: true }),

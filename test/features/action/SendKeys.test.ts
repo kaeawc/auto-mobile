@@ -50,7 +50,6 @@ import {
 } from "../../../src/utils/PostActionCaptureContext";
 import { FakeWebSocket } from "../../fakes/FakeWebSocket";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { CtrlProxyText } from "../../../src/features/observe/ios/CtrlProxyText";
 import { CtrlProxyText as AndroidText } from "../../../src/features/observe/android/CtrlProxyText";
 import { createIosDelegateHarness } from "../../helpers/iosDelegateHarness";
@@ -58,6 +57,7 @@ import {
   clearAndroidImeQuarantine,
   withAndroidImeLock,
 } from "../../../src/features/action/androidImeLock";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("SendKeys iOS text transport", () => {
   test.each([5, 1000])("passes a scaled timeout for %s characters", async (length) => {
@@ -111,9 +111,7 @@ describe("SendKeys iOS text transport", () => {
     async (failure) => {
       const h = createIosDelegateHarness();
       const text = new CtrlProxyText(h.context);
-      const getInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        text as unknown as IOSCtrlProxyClient,
-      );
+      const getInstance = spyOnIosClientInstance(text);
       try {
         const observer = createObserver();
         const executor = new DefaultSendKeysCommandExecutor(
@@ -2267,6 +2265,36 @@ describe("DefaultSendKeysCommandExecutor", () => {
       trackedInputTextCommand("shell input text 's%s1'", 31),
     ]);
   });
+
+  // 42 characters with a space, quote, backtick and backslash: the first 32 end at "z".
+  const longRun = "abc def'g h`i\\j klmnopqrstuvwxyz0123456789";
+  const longRunHead =
+    String.raw`input text 'abc%sdef'\''g%sh` + "`" + String.raw`i\j%sklmnopqrstuvwxyz'`;
+  for (const [apiLevel, expected] of [
+    [30, [longRunHead.replace("xyz'", "xyz0123456789'")]],
+    [31, [longRunHead, "input text '0123456789'"]],
+  ] as const) {
+    test(`eventAll types a 42-char run as ${expected.length} input text command(s) on API ${apiLevel}`, async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setAndroidApiLevel(apiLevel);
+      // The per-chunk consume wait (~28 ms per char) must run on a FakeTimer, not the real clock.
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const executor = new DefaultSendKeysCommandExecutor(
+        androidDevice,
+        createAdbFactory(adb),
+        createObserver(focusedAndroidObservation()),
+        { textClient: createTextClient().client, timer },
+      );
+
+      const result = await executor.type({ action: "type", text: longRun, mode: "eventAll" });
+
+      expect(result).toMatchObject({ success: true, resolvedMode: "eventAll" });
+      expect(adb.getExecutedCommands().filter((command) => command.includes("input text"))).toEqual(
+        expected.map((command) => trackedInputTextCommand(`shell ${command}`, apiLevel)),
+      );
+    });
+  }
 
   test("auto password replace is not pre-checked and sets the whole value", async () => {
     const adb = new FakeAdbExecutor();
@@ -4786,9 +4814,7 @@ describe("SendKeys Android non-idempotent outcomes", () => {
         }
         return pending;
       });
-      const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        text as unknown as AndroidCtrlProxyClient,
-      );
+      const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(text);
       const observer = createObserver(focusedAndroidObservation("", {}, 1));
       const executor = new DefaultSendKeysCommandExecutor(
         android,
@@ -4876,9 +4902,7 @@ describe("Android adapter cancellation fence", () => {
         return pending;
       },
     };
-    const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      facade as unknown as AndroidCtrlProxyClient,
-    );
+    const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(facade);
     const executor = new DefaultSendKeysCommandExecutor(
       android,
       createAdbFactory(new FakeAdbExecutor()),

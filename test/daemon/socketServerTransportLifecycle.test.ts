@@ -1,4 +1,3 @@
-import { type Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import {
   ResourceUpdatedBroadcaster,
@@ -29,8 +28,6 @@ interface ServerInternals {
   broadcastResourceUpdated(resolve: ResourceUpdateTargets): void;
 
   handleLocalSocketRequest(request: DaemonRequest): Promise<unknown>;
-  mcpClients: Map<string, Client>;
-  resetMcpClient(key: string): Promise<void>;
   acceptingRequests: boolean;
   clientSockets: Map<string, Socket>;
   releaseSocketSession(sessionId: string, socket: Socket): void;
@@ -54,12 +51,7 @@ function connectedSocketFixture(socketSessionId: string): {
   internals: ServerInternals;
   socket: Socket;
 } {
-  const server = createTestUnixSocketServer(
-    "/fake/socket",
-    "http://127.0.0.1:1/mcp",
-    undefined,
-    new FakeTimer(),
-  );
+  const server = createTestUnixSocketServer("/fake/socket", undefined, new FakeTimer());
   const internals = server as unknown as ServerInternals;
   const socket = new RpcSocket() as unknown as Socket;
   internals.clientSockets.set(socketSessionId, socket);
@@ -70,12 +62,7 @@ describe("daemon socket transport lifecycle", () => {
   afterEach(() => resetToolCallRecordingState());
 
   test("ide/status advertises structured session-not-found errors", async () => {
-    const server = createTestUnixSocketServer(
-      "/fake/socket",
-      "http://127.0.0.1:1/mcp",
-      undefined,
-      new FakeTimer(),
-    );
+    const server = createTestUnixSocketServer("/fake/socket", undefined, new FakeTimer());
     const internals = server as unknown as ServerInternals;
     await expect(
       internals.handleLocalSocketRequest({
@@ -89,12 +76,7 @@ describe("daemon socket transport lifecycle", () => {
 
   test("codes a missing socket session without changing its message", async () => {
     const timer = new FakeTimer();
-    const server = createTestUnixSocketServer(
-      "/fake/socket",
-      "http://127.0.0.1:1/mcp",
-      undefined,
-      timer,
-    );
+    const server = createTestUnixSocketServer("/fake/socket", undefined, timer);
     const internals = server as unknown as ServerInternals;
     await expect(
       internals.handleRequest(
@@ -122,7 +104,6 @@ describe("daemon socket transport lifecycle", () => {
       const timer = new FakeTimer();
       const server = createTestUnixSocketServer(
         "/fake/socket",
-        "http://127.0.0.1:1/mcp",
         undefined,
         timer,
         null,
@@ -144,12 +125,7 @@ describe("daemon socket transport lifecycle", () => {
 
   test("a stale socket release preserves the newer incarnation's recording", () => {
     const timer = new FakeTimer();
-    const server = createTestUnixSocketServer(
-      "/fake/socket",
-      "http://127.0.0.1:1/mcp",
-      undefined,
-      timer,
-    );
+    const server = createTestUnixSocketServer("/fake/socket", undefined, timer);
     const internals = server as unknown as ServerInternals;
     const oldSocket = new RpcSocket() as unknown as Socket;
     const newSocket = new RpcSocket() as unknown as Socket;
@@ -190,43 +166,30 @@ describe("daemon socket transport lifecycle", () => {
     }
   });
 
-  test("reset closes the loopback MCP client without any session termination", async () => {
-    const server = createTestUnixSocketServer(
-      "/fake/socket",
-      "http://127.0.0.1:1/mcp",
-      undefined,
-      new FakeTimer(),
-    );
-    const internals = server as unknown as ServerInternals;
-    const events: string[] = [];
-    const transport = Object.create(
-      StreamableHTTPClientTransport.prototype,
-    ) as StreamableHTTPClientTransport;
-    Object.defineProperty(transport, "sessionId", { value: "http-session" });
-    transport.terminateSession = async () => {
-      events.push("DELETE");
-    };
-    const client = {
-      transport,
-      close: async () => {
-        events.push("close");
-      },
-    } as unknown as Client;
-    internals.mcpClients.set("device:a", client);
+  test("a late binding written by an abort-ignoring handler after disconnect is forgotten when it ends (#13053)", async () => {
+    const { internals, socket } = connectedSocketFixture("late-socket");
+    const store = daemonSessionToolBindingStore();
+    const execution = executionTracker.startExecution("observe", "late-socket");
+    try {
+      internals.releaseSocketSession("late-socket", socket);
+      await Promise.all([...internals.activeRequestHandlers]);
+      expect(execution.abortController.signal.aborted).toBe(true);
+      // The handler ignored the abort and records its acquisition after the socket is gone.
+      store.bind("late-socket", "device-session-late");
+      expect(store.boundSessionUuid("late-socket")).toBe("device-session-late");
 
-    await internals.resetMcpClient("device:a");
+      executionTracker.endExecution(execution.id);
+      await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(events).toEqual(["close"]);
-    expect(internals.mcpClients.size).toBe(0);
+      expect(store.boundSessionUuid("late-socket")).toBeUndefined();
+    } finally {
+      executionTracker.endExecution(execution.id);
+      store.forget("late-socket");
+    }
   });
 
   test("daemon RPC reader preserves UTF-8 split across socket events", async () => {
-    const server = createTestUnixSocketServer(
-      "/fake/socket",
-      "http://127.0.0.1:1/mcp",
-      undefined,
-      new FakeTimer(),
-    );
+    const server = createTestUnixSocketServer("/fake/socket", undefined, new FakeTimer());
     const internals = server as unknown as ServerInternals;
     const socket = new RpcSocket();
     const requests: DaemonRequest[] = [];
@@ -278,7 +241,6 @@ describe("daemon socket resource subscription routing", () => {
     const timer = new FakeTimer();
     const server = createTestUnixSocketServer(
       "/fake/resource-lifecycle/socket",
-      "http://127.0.0.1:1/mcp",
       undefined,
       timer,
       null,
@@ -332,7 +294,6 @@ describe("daemon socket resource subscription routing", () => {
     const timer = new FakeTimer();
     const server = createTestUnixSocketServer(
       "/fake/socket",
-      "http://127.0.0.1:1/mcp",
       undefined,
       timer,
       null,
@@ -384,7 +345,6 @@ describe("daemon socket resource subscription routing", () => {
     const timer = new FakeTimer();
     const server = createTestUnixSocketServer(
       "/fake/socket",
-      "http://127.0.0.1:1/mcp",
       undefined,
       timer,
       null,
@@ -470,7 +430,6 @@ describe("daemon socket resource subscription routing", () => {
     const timer = new FakeTimer();
     const server = createTestUnixSocketServer(
       "/fake/socket",
-      "http://127.0.0.1:1/mcp",
       undefined,
       timer,
       null,

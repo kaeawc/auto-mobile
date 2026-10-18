@@ -33,7 +33,6 @@ function createFakeDaemonState() {
 function createServer(timer: FakeTimer): UnixSocketServer {
   return createTestUnixSocketServer(
     join(tmpdir(), `forward-budget-${randomUUID()}.sock`),
-    "http://localhost:0/mcp",
     createFakeDaemonState(),
     timer,
   );

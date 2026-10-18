@@ -3,7 +3,11 @@ import { resolveTextCtrlProxyTimeoutMs, getTextRequestDeadlineMs } from "./textT
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { imeActionFailedAfterTextEntered } from "./imeActionFailedAfterTextEntered";
-import { BaseVisualChange, type ObservedActionResult } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  type DisplayFenceDependencies,
+  type ObservedActionResult,
+} from "./BaseVisualChange";
 import {
   type AppendTextFailureSource,
   BootedDevice,
@@ -14,7 +18,7 @@ import {
 import { logger } from "../../utils/logger";
 import { executeAndroidInputText } from "../../utils/android-cmdline-tools/AndroidInputText";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { AndroidCtrlProxyClient } from "../observe/android";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
@@ -33,6 +37,7 @@ import {
 import { Keyboard } from "./Keyboard";
 import { TapOnElement } from "./TapOnElement";
 import { getRequestContext } from "../../utils/AbortContext";
+import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 // The UI needs a brief settle after a key event.
 export const KEY_EVENT_SETTLE_MS = 100;
@@ -152,8 +157,9 @@ export class InputText extends BaseVisualChange {
     private readonly keyboardCloserFactory: KeyboardCloserFactory = defaultKeyboardCloserFactory,
     timer: Timer = defaultTimer,
     targetFocuserFactory: TextInputTargetFocuserFactory = defaultTargetFocuserFactory,
+    collaborators: DisplayFenceDependencies = {},
   ) {
-    super(device, adbFactoryOrExecutor, timer);
+    super(device, adbFactoryOrExecutor, timer, undefined, collaborators);
     this.device = device;
     this.targetFocuser = targetFocuserFactory(device);
   }
@@ -266,7 +272,7 @@ export class InputText extends BaseVisualChange {
         usesObservationForResolution: false,
         changeExpected: true,
         tolerancePercent: 0.0,
-        timeoutMs: 5000,
+        timeoutMs: SETTLE_BUDGET_MS.lifecycle,
         perf,
         signal,
         skipUiStability: true, // Skip UI stability wait - a11y service already waits 100ms for tree update
@@ -524,7 +530,7 @@ export class InputText extends BaseVisualChange {
   private async sendAndroidEventAllCharacters(
     text: string,
     chars: string[],
-    a11yClient: Pick<AndroidCtrlProxyClient, "requestSetText">,
+    a11yClient: Pick<AndroidCtrlProxy, "requestSetText">,
     signal?: AbortSignal,
   ): Promise<(SendTextResult & { method?: InputTextMode }) | undefined> {
     let targetText = "";

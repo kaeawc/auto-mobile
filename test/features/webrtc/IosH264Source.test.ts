@@ -19,6 +19,7 @@ import {
   IOS_HELPER_STOP_TIMEOUT_MS,
   IOS_HELPER_PATH_RESOLUTION_TIMEOUT_MS,
   IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS,
+  IOS_SIMULATOR_WINDOW_POLL_INTERVAL_MS,
   IosH264Source,
   ScreenRecordingPermissionError,
   defaultIosBitrateBps,
@@ -2383,8 +2384,11 @@ describe("IosH264Source", () => {
 
   test("rejects startup when the only simulator window does not match the requested device", async () => {
     const helper = new FakeFrameCaptureHelper();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const source = new IosH264Source({
       device: IOS_SIMULATOR,
+      timer,
       helperPath: FAKE_HELPER_PATH,
       helperPathExists: fakeHelperPathExists,
       onData: () => {},
@@ -2413,9 +2417,84 @@ describe("IosH264Source", () => {
     });
 
     await expect(source.start()).rejects.toThrow(
-      /No visible iOS Simulator window matched iPhone 16/,
+      /No visible iOS Simulator window matched iPhone 16 after \d+ lookup\(s\).*"iPad Pro"/,
     );
     expect(helper.started).toBe(false);
+  });
+
+  test("polls for the Simulator window until it becomes discoverable (#12708)", async () => {
+    const helper = new FakeFrameCaptureHelper();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let lookups = 0;
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      timer,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      createHelper: () => helper,
+      spawner: () => {
+        throw new Error("encoder spawn is out of scope for this test");
+      },
+      commandRunner: async (command, args) => {
+        if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
+          lookups += 1;
+          const windows =
+            lookups < 3
+              ? []
+              : [
+                  {
+                    windowID: 42,
+                    title: IOS_SIMULATOR.name,
+                    applicationName: "Simulator",
+                    bundleIdentifier: "com.apple.iphonesimulator",
+                  },
+                ];
+          return { stdout: JSON.stringify({ windows }), stderr: "", exitCode: 0, signal: null };
+        }
+        return successfulCommandRunner(command, args);
+      },
+    });
+
+    const started = source.start();
+    await started.catch(() => undefined);
+    expect(lookups).toBe(3);
+    await source.stop();
+  });
+
+  test("polls for the Simulator window across the whole resolution timeout (#13066)", async () => {
+    const LOOKUP_LATENCY_MS = 100;
+    const helper = new FakeFrameCaptureHelper();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let lookups = 0;
+    const source = new IosH264Source({
+      device: IOS_SIMULATOR,
+      timer,
+      helperPath: FAKE_HELPER_PATH,
+      helperPathExists: fakeHelperPathExists,
+      onData: () => {},
+      createHelper: () => helper,
+      spawner: () => {
+        throw new Error("encoder spawn is out of scope for this test");
+      },
+      commandRunner: async (command, args) => {
+        if (command === FAKE_HELPER_PATH && args.includes("--list-simulators")) {
+          lookups += 1;
+          timer.advanceTime(LOOKUP_LATENCY_MS);
+          return { stdout: JSON.stringify({ windows: [] }), stderr: "", exitCode: 0, signal: null };
+        }
+        return successfulCommandRunner(command, args);
+      },
+    });
+
+    await source.start().catch(() => undefined);
+
+    // Lookups start every (latency + interval) while the next sleep still fits the timeout.
+    const period = LOOKUP_LATENCY_MS + IOS_SIMULATOR_WINDOW_POLL_INTERVAL_MS;
+    expect(lookups).toBe(Math.ceil(IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS / period));
+    await source.stop();
   });
 
   test("rejects audio startup before spawning the helper when multiple Simulator windows are visible", async () => {

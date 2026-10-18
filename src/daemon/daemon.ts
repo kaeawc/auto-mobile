@@ -29,13 +29,19 @@ import {
 } from "node:http";
 import { ActionableError } from "../models/ActionableError";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
-import { createMcpServer } from "../server";
 import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
 import {
   StatelessMcpHttpEndpoint,
   type StatelessMcpRequestScope,
   type StatelessMcpServer,
 } from "./statelessMcpHttpEndpoint";
+import { createDaemonMcpDispatcher, MCP_FORWARD_CLOSED_REASON } from "./inProcessMcpDispatcher";
+import {
+  buildMcpRequestContext,
+  createStatelessMcpServer,
+  type StatelessMcpServerBase,
+} from "./statelessMcpServerFactory";
+import { releaseDaemonTaskLeases } from "../server/tasks/daemonTaskManager";
 import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { createIosDoctorDependencies } from "../doctor/checks/ios";
 import { logger } from "../utils/logger";
@@ -128,9 +134,6 @@ import {
   DEFAULT_SOCKET_PATH,
   SOCKET_PATH,
   MCP_STREAMABLE_PATH,
-  DAEMON_SESSION_TOOL_BINDING_HEADER,
-  DAEMON_RELEASED_SESSION_HEADER,
-  DAEMON_TOOL_SELECTION_PROFILE_HEADER,
   DAEMON_PORT_RANGE_START,
   DAEMON_PORT_RANGE_END,
   DAEMON_LAUNCH_LOG_PATH_ENV,
@@ -294,6 +297,7 @@ import {
   LEGACY_PROVENANCE_SENTINEL,
   NavigationGraphManager,
 } from "../features/navigation/NavigationGraphManager";
+import type { NavigationGraphStreamSource } from "../features/navigation/NavigationGraphStreamSource";
 import {
   convertSummaryToStreamData,
   createNavigationGraphRequestHandler,
@@ -720,6 +724,15 @@ export class Daemon {
         ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
         : "streamable_http_onclose",
   });
+  /** Runs control-socket forwards in process, one client and server each (#11820). */
+  private readonly mcpDispatcher = createDaemonMcpDispatcher({
+    base: () => this.statelessMcpServerBase(),
+    idGenerator: { next: () => this.idGenerator.next() },
+    closeReason: () =>
+      this.shutdownInProgress
+        ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
+        : MCP_FORWARD_CLOSED_REASON,
+  });
   /** HTTP requests whose response is still open (SSE streams included). */
   private openHttpRequests = 0;
   /** HTTP requests ever received. */
@@ -801,10 +814,10 @@ export class Daemon {
     DefaultObservationInitialFrameCoordinator
   >();
   private deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
-  private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphManager>();
+  private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphStreamSource>();
   private readonly navigationGraphSeededStreamManagers = new WeakMap<
     DeviceDataStreamSocketServer,
-    WeakSet<NavigationGraphManager>
+    WeakSet<NavigationGraphStreamSource>
   >();
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
   private unsubscribeSessionExecutionEnded: (() => void) | null = null;
@@ -1095,16 +1108,9 @@ export class Daemon {
         this.sessionManager.getHeldDeviceSessions().find((session) => session.sessionId === id)
           ?.deviceId ?? null,
       onOwnershipLost: (id) => {
-        void this.cancelAndReleaseSession(
-          id,
-          "binding-ownership-lost",
-          false,
-          undefined,
-          undefined,
-          {
-            cutCallsLearnRelease: true,
-          },
-        ).catch((error: unknown) => {
+        void this.cancelAndReleaseSession(id, "binding-ownership-lost", {
+          cutCallsLearnRelease: true,
+        }).catch((error: unknown) => {
           logger.warn(`[Daemon] Lost managed execution ${id} release failed`, error);
         });
       },
@@ -1297,7 +1303,8 @@ export class Daemon {
         shouldCommit,
         releaseOptions,
       ) =>
-        this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit, {
+        this.cancelAndReleaseSession(sessionId, releaseReason, {
+          shouldCommit,
           deferFailureFallback: true,
           releaseOptions,
         }),
@@ -1311,7 +1318,8 @@ export class Daemon {
           }
           // A cut read or a control call past the veto's bound is told the session is gone,
           // as a call arriving after the release is (#11381).
-          await this.cancelAndReleaseSession(session.sessionId, reason, false, session, undefined, {
+          await this.cancelAndReleaseSession(session.sessionId, reason, {
+            expectedSession: session,
             cutCallsLearnRelease: true,
           });
         },
@@ -1352,7 +1360,11 @@ export class Daemon {
       },
       // Subscribers to the booted-device resources learn of status and holder changes (#11413).
       onDeviceStateChanged: this.deviceStateChangeNotifier,
-      emulatorLossIncidentStore: new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
+      emulatorLossIncidentStore: new EmulatorLossIncidentRepository(
+        undefined,
+        this.timer,
+        this.idGenerator,
+      ),
       ambientExecutionIdReader,
       cancelDeviceSessionExecutions: Object.assign(
         (sessionId: string, reason: string, options?: { excludeExecutionId?: string }) =>
@@ -1802,11 +1814,9 @@ export class Daemon {
   private async bindControlSocket(): Promise<UnixSocketServer> {
     logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
     logger.info(`MCP_STREAMABLE_PATH: "${MCP_STREAMABLE_PATH}"`);
-    const mcpEndpoint = `http://${this.host}:${this.port}${MCP_STREAMABLE_PATH}`;
-    logger.info(`Creating UnixSocketServer with endpoint: "${mcpEndpoint}"`);
+    logger.info(`Creating UnixSocketServer at "${SOCKET_PATH}"`);
     this.socketServer = new UnixSocketServer(
       SOCKET_PATH,
-      mcpEndpoint,
       undefined,
       undefined,
       FeatureFlagService.getInstance(),
@@ -1825,6 +1835,7 @@ export class Daemon {
         },
         liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
         acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
+        mcpDispatcher: this.mcpDispatcher,
       },
       this.idGenerator,
       // A hand-launched daemon (no startup lock) must refuse to unlink a live
@@ -2119,40 +2130,6 @@ export class Daemon {
     res.end(JSON.stringify(result.body));
   }
 
-  private createHttpSessionContext(req: IncomingMessage): {
-    sessionId?: string;
-    initialSessionToolBinding?: string;
-    initialReleasedSession?: string;
-    initialToolSelectionProfile?: string;
-  } {
-    const boundSessionUuid = req.headers[DAEMON_SESSION_TOOL_BINDING_HEADER];
-    const boundToolSelectionProfileUuid = req.headers[DAEMON_TOOL_SELECTION_PROFILE_HEADER];
-    const sessionContext: {
-      sessionId?: string;
-      initialSessionToolBinding?: string;
-      initialReleasedSession?: string;
-      initialToolSelectionProfile?: string;
-    } = {
-      ...(typeof boundSessionUuid === "string" &&
-      boundSessionUuid.trim().length > 0 &&
-      !(
-        typeof req.headers[DAEMON_RELEASED_SESSION_HEADER] === "string" &&
-        req.headers[DAEMON_RELEASED_SESSION_HEADER].trim() === boundSessionUuid.trim()
-      )
-        ? { initialSessionToolBinding: boundSessionUuid }
-        : {}),
-      ...(typeof req.headers[DAEMON_RELEASED_SESSION_HEADER] === "string" &&
-      req.headers[DAEMON_RELEASED_SESSION_HEADER].trim().length > 0
-        ? { initialReleasedSession: req.headers[DAEMON_RELEASED_SESSION_HEADER] }
-        : {}),
-      ...(typeof boundToolSelectionProfileUuid === "string" &&
-      boundToolSelectionProfileUuid.trim().length > 0
-        ? { initialToolSelectionProfile: boundToolSelectionProfileUuid }
-        : {}),
-    };
-    return sessionContext;
-  }
-
   /**
    * Refuse a direct HTTP MCP request during shutdown, and hold it until startup
    * (device discovery and session rehydration) completes, as the Unix socket
@@ -2247,25 +2224,25 @@ export class Daemon {
     return this.mcpHttpEndpoint.handle(req, res, parsedBody, sendJsonRpcError);
   }
 
-  /**
-   * Build one request's MCP server (#4678 stateless). The request scope id is its
-   * session-context id, so the executions it starts cancel with its response;
-   * the caller's session key travels as `requestMcpSessionId`.
-   */
+  /** Build one request's MCP server from its headers (#4678 stateless, #11820). */
   private createRequestMcpServer(
     req: IncomingMessage,
     scope: StatelessMcpRequestScope,
-  ): ReturnType<typeof createMcpServer> {
-    // Stateless + daemon mode: keyed bindings live in the daemon-scoped store (#4678).
-    return createMcpServer({
+  ): ReturnType<typeof createStatelessMcpServer> {
+    return createStatelessMcpServer(
+      this.statelessMcpServerBase(),
+      buildMcpRequestContext({ headers: req.headers }),
+      scope,
+    );
+  }
+
+  /** The daemon-wide options every request's MCP server is built with. */
+  private statelessMcpServerBase(): StatelessMcpServerBase {
+    return {
       iosDependencies: this.iosDoctorDependencies,
       debug: this.debug,
-      sessionContext: { ...this.createHttpSessionContext(req), sessionId: scope.requestScopeId },
-      daemonMode: true,
       acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
-      requestMcpSessionId: scope.requestMcpSessionId,
-      stateless: true,
-    });
+    };
   }
 
   private sendHttpJsonRpcError(
@@ -2973,14 +2950,14 @@ export class Daemon {
     logger.info("[Daemon] Navigation graph stream listener configured");
   }
 
-  private resolveUnscopedNavigationGraphManager(): NavigationGraphManager {
+  private resolveUnscopedNavigationGraphManager(): NavigationGraphStreamSource {
     const sessions = this.sessionManager.getAllSessions();
     return sessions.length === 1
       ? NavigationGraphManager.getInstanceForSession(sessions[0]!.sessionId)
       : NavigationGraphManager.getInstance();
   }
 
-  private setupNavigationGraphUpdateListener(navGraphManager: NavigationGraphManager): void {
+  private setupNavigationGraphUpdateListener(navGraphManager: NavigationGraphStreamSource): void {
     const streamServer = this.deviceDataStreamServer;
     if (
       streamServer &&
@@ -2988,7 +2965,7 @@ export class Daemon {
     ) {
       const seededManagers =
         this.navigationGraphSeededStreamManagers.get(streamServer) ??
-        new WeakSet<NavigationGraphManager>();
+        new WeakSet<NavigationGraphStreamSource>();
       seededManagers.add(navGraphManager);
       this.navigationGraphSeededStreamManagers.set(streamServer, seededManagers);
       for (const context of navGraphManager.getBuildContexts()) {
@@ -3181,7 +3158,7 @@ export class Daemon {
         // A call still in flight (a read never keeps the session; a control call only until its
         // veto runs out) learns why it was cancelled: the typed terminal refusal, not a generic
         // abort (#11322). That includes a call that reached the session through autolock (#11400).
-        await this.cancelAndReleaseSession(sessionId, reason, false, undefined, undefined, {
+        await this.cancelAndReleaseSession(sessionId, reason, {
           cutCallsLearnRelease: true,
         });
       },
@@ -4127,8 +4104,7 @@ export class Daemon {
       await this.cancelAndReleaseSession(
         sessionIdAtDisconnect,
         deviceLossCancellationReason(deviceId, incidentId),
-        false,
-        sessionAtDisconnect,
+        { expectedSession: sessionAtDisconnect },
       );
     }
 
@@ -4399,10 +4375,10 @@ export class Daemon {
   async cancelAndReleaseSession(
     sessionId: string,
     releaseReason: SessionReleaseReason = "explicit-release",
-    allowExpired: boolean = false,
-    expectedSession?: Session,
-    shouldCommit?: () => boolean,
     options?: {
+      allowExpired?: boolean;
+      expectedSession?: Session;
+      shouldCommit?: () => boolean;
       deferFailureFallback?: boolean;
       releaseOptions?: SessionReleaseOptions;
       /**
@@ -4413,6 +4389,7 @@ export class Daemon {
       cutCallsLearnRelease?: boolean;
     },
   ): Promise<boolean> {
+    const { allowExpired = false, expectedSession, shouldCommit } = options ?? {};
     const release = async (cancelled: number): Promise<boolean> => {
       // Early identity fence: discovery can replace a same-serial runtime while
       // execution cancellation is in flight. It is not the final one — the
@@ -4580,10 +4557,8 @@ export class Daemon {
         }
 
         // Recreate socket server
-        const mcpEndpoint = `http://${this.host}:${this.port}${MCP_STREAMABLE_PATH}`;
         this.socketServer = new UnixSocketServer(
           SOCKET_PATH,
-          mcpEndpoint,
           undefined,
           undefined,
           FeatureFlagService.getInstance(),
@@ -4602,6 +4577,7 @@ export class Daemon {
             },
             liveAcceptanceStartupSecret: this.liveAcceptanceStartupSecret,
             acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
+            mcpDispatcher: this.mcpDispatcher,
           },
           this.idGenerator,
           // Recovery reuses the same ownership evidence as initial startup. A
@@ -5108,10 +5084,16 @@ export class Daemon {
         // No deadline per transport: one that wedges is covered by this stage's deadline, which
         // also marks the stage as still running for the database stage.
         runShutdownCleanupStages(
-          this.mcpHttpEndpoint.inFlightRequests().map(({ requestScopeId, close }) => ({
-            name: `Streamable HTTP request ${requestScopeId}`,
-            run: close,
-          })),
+          [
+            ...this.mcpHttpEndpoint.inFlightRequests().map(({ requestScopeId, close }) => ({
+              name: `Streamable HTTP request ${requestScopeId}`,
+              run: close,
+            })),
+            ...this.mcpDispatcher.inFlightForwards().map(({ requestScopeId, close }) => ({
+              name: `In-process MCP forward ${requestScopeId}`,
+              run: close,
+            })),
+          ],
           (message, error) => logger.warn(message, error),
         ),
       ),
@@ -5300,6 +5282,7 @@ export class Daemon {
     // The navigation retention monitor's in-flight pass drains via the DB
     // write-barrier stage below; here we only cancel its next scheduled tick.
     navigationRetentionMonitor?.stop();
+    releaseDaemonTaskLeases(); // running MCP tasks stop renewing their leases (#4668)
     const [heartbeatSettled, disconnectSettled] = await Promise.all([
       heartbeatMonitor ? heartbeatMonitor.stop().then(() => true) : true,
       deviceDisconnectMonitor ? deviceDisconnectMonitor.stop() : true,
@@ -5339,6 +5322,9 @@ export class Daemon {
    */
   private async quiesceProvisioningIngress(): Promise<void> {
     this.acceptingHttpSessions = false;
+    this.mcpHttpEndpoint.stopAccepting();
+    // No forward reaches the MCP server from here on: the in-process gate HTTP's 503 was.
+    this.mcpDispatcher.stopAccepting();
     this.shutdownIngressAbort.abort();
     // Start closing the listener now so it cannot admit a connection after the
     // transport snapshot. The later HTTP server stage awaits this close.
@@ -5371,7 +5357,7 @@ export class Daemon {
     const sessionIds = this.sessionManager.getAllKnownSessionIds();
     this.shutdownSessionIds = sessionIds;
     const releases = sessionIds.map(async (sessionId) => {
-      await this.cancelAndReleaseSession(sessionId, "daemon-shutdown", true);
+      await this.cancelAndReleaseSession(sessionId, "daemon-shutdown", { allowExpired: true });
     });
     const reportFailures = (results: PromiseSettledResult<void>[]): void => {
       for (const [index, release] of results.entries()) {

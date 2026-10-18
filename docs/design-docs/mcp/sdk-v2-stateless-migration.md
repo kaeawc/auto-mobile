@@ -1,9 +1,8 @@
 # MCP SDK v2 and stateless daemon layer: decision record
 
-Status: **landed except slice L (#4678)**, epic [#4665](https://github.com/kaeawc/auto-mobile/issues/4665).
-Step 1 (SDK v2 split packages) and the stateless daemon layer (slices A to K) are on
-main. Slice L (device-control transport recovery on the socket server, #11820) is in
-progress; sections that mention it say so.
+Status: **landed (#4678)**, epic [#4665](https://github.com/kaeawc/auto-mobile/issues/4665).
+Step 1 (SDK v2 split packages), the stateless daemon layer (slices A to K) and slice L
+(control-socket forwards in process, #11820) are on main.
 
 This record began as the feasibility spike for #4666 (kept in full at the end as the
 [original spike assessment](#appendix-original-spike-assessment-2026-07-29)). The
@@ -20,6 +19,7 @@ spike's go/no-go has since been replaced by owner decisions, summarised here.
 | 5   | Desktop keeps device binding by sending one generated id per app session on every call.                                                                                                                                               | Landed (#13046)                 |
 | 6   | `tools/list`, `tools/call` and resources stay on our own request handlers, not SDK `registerTool` dispatch.                                                                                                                           | Decided                         |
 | 7   | `tools/list_changed` stays an internal push, with a polling fallback in the proxy.                                                                                                                                                    | Landed (#13048)                 |
+| 8   | Control-socket forwards run in process; the HTTP endpoint serves only the desktop app and external clients.                                                                                                                           | Landed (#11820)                 |
 
 ## Split packages (step 1)
 
@@ -28,14 +28,15 @@ Facts worth knowing here: request handlers are registered by method string; four
 v2 behaviour differences are bridged so the wire is unchanged
 (`src/server/mcpError.ts`, `src/server/sdkMcpServer.ts`,
 `src/server/stdioServerTransport.ts`, `src/daemon/socketServer/loopbackMcpClient.ts`);
-test helpers are `test/helpers/fakeServerContext.ts` and
-`test/helpers/v1ViewMcpClient.ts`.
+the test helper is `test/helpers/fakeServerContext.ts`. Tests drive our servers with the
+plain v2 `Client` (the v1-error-shape test client was retired; the boundary checker
+rejects its reintroduction), so client error assertions see the SDK's unprefixed errors.
 
 ## Stateless daemon MCP layer (landed, #4678)
 
-The daemon's internal HTTP endpoint (`/auto-mobile/streamable`) is the loopback hop the
-socket server uses to reach the tools, and it is also called directly by the desktop app's
-Kotlin client (`McpHttpClient`). After this change:
+The daemon's HTTP endpoint (`/auto-mobile/streamable`) was the loopback hop the socket
+server used to reach the tools until slice L (below); it is also called directly by the
+desktop app's Kotlin client (`McpHttpClient`) and external clients. After this change:
 
 - Each `POST` builds its own server and transport and closes them when the response
   closes. There is no `transports` map, no idle timer, no per-session in-flight
@@ -71,7 +72,7 @@ shared, which cut the `tool-definitions` p50 from 10.07 ms to 0.16 ms (#13051).
 | #13041, #13054 | G      | Wire baseline and its fixes.                                                                                                                                               |
 | #13044         | H1     | Boundary guard (`scripts/check-mcp-sdk-boundary.ts`), now also covering `test/`.                                                                                           |
 | #13046         | K      | Desktop sends the session-key header.                                                                                                                                      |
-| #11820 (open)  | L      | Device-control transport recovery in the socket server: in progress.                                                                                                       |
+| #11820         | L      | Control-socket forwards run in process; the loopback client pool and device-control transport recovery are deleted.                                                        |
 | (this change)  | H2     | Last boundary allowlist entries removed (`sessionIdGenerator` is omitted rather than set to `undefined`); the allowlist is empty.                                          |
 
 ### Restart-404 recovery removed
@@ -81,8 +82,54 @@ socket server detected the resulting `404` ("expired loopback session") and repl
 request on a fresh session. With no transport session there is nothing to expire, so that
 detection and replay (`isExpiredLoopbackMcpSession`, `retryExpiredMcpSession`), the session
 termination step in the loopback client pool, and its timeout constant are deleted. The
-tests that asserted the replay assert there is none. Device-control transport recovery is
-a different mechanism and stays (#11820).
+tests that asserted the replay assert there is none. Device-control transport recovery went
+with the loopback hop in slice L.
+
+## Control-socket forwards in process (slice L, #11820)
+
+The socket server no longer reaches the tools over its own HTTP endpoint. Each forward gets
+its own MCP client and its own stateless server from the factory the endpoint uses
+(`src/daemon/statelessMcpServerFactory.ts`: `buildMcpRequestContext` reads the context from
+headers or from the forward's struct, `createStatelessMcpServer` builds the server), linked by
+an `InMemoryTransport` pair in `InProcessMcpDispatcher` (`src/daemon/inProcessMcpDispatcher.ts`).
+
+What the HTTP hop gave a forward is kept on purpose:
+
+- **Wire bytes.** Every message crosses a JSON boundary (`JsonBoundaryTransport`: stringify,
+  parse, `parseJSONRPCMessage`), as the streamable HTTP transports do, so `undefined` fields
+  drop and shared references break exactly as before. Errors still pass through
+  `LoopbackMcpClient`'s v1 mapping, and an aborted call still rejects with the caller's own
+  abort reason.
+- **Async context.** The HTTP server's request handler ran outside the socket chain's
+  AsyncLocalStorage stores. The dispatcher enters each server from a root `AsyncResource`
+  captured when the daemon builds it, so a handler sees its own request's abort signal, request
+  context, tool selection, acquisition receipt and display pin, never the socket handler's.
+- **Per-request cancellation.** A forward runs under its own request scope, cancelled before
+  its server closes. Because the pair is private to the forward, an aborted call's
+  `notifications/cancelled` reaches the server that is running it, which the stateless HTTP
+  endpoint could only approximate (#13067).
+- **Shutdown.** With no `503`, the dispatcher is the admission gate: shutdown stops it
+  accepting forwards when it quiesces ingress, and closes running forwards with
+  `DaemonHandoffInterruptionError` beside the HTTP requests.
+
+`test/daemon/mcpForwardByteParity.integration.test.ts` pins this: the same socket frames go
+through an MCP client over the real HTTP endpoint and through the dispatcher, and the socket
+lines must be byte-identical (results, tool and protocol errors, lists, progress, socket
+cancel, every refusal fixture), with a context-leak probe that also shows an unrooted pair
+would leak. A forwarded `tools/call` of a trivial tool went from a p50 of about 0.4 to 0.5 ms
+over the HTTP hop to about 0.3 ms in process.
+
+Deleted with the hop: the loopback client pool and its idle close, `loopbackMcpFetch` and
+`LoopbackMcpConnectionError`, the session-key fetch wrapper, the streamable HTTP
+reconnection options and the device-control transport recovery (reconnect, pin, replay). The
+`device_control_transport_failure` wire type stays: the proxy and the daemon client still
+read it from a daemon of an older version. A per-execution-key idle timer remains only to
+drop the cached Android append helper.
+
+The HTTP endpoint now serves only the desktop app and external clients. It keeps the
+admission gate, DNS-rebinding protection, SSE keepalive, session-context headers and its
+`notifications/cancelled` resolution, which also matches a header-less cancellation by
+request id when exactly one in-flight request has it.
 
 ## The one session key
 
@@ -90,7 +137,8 @@ a different mechanism and stays (#11820).
 (`x-auto-mobile-mcp-session-id`) and `readMcpSessionKey(headers)`. This is the only key for
 per-session tool binding and `tools/list` filtering in daemon mode.
 
-- The socket server forwards the socket session id in this header on every loopback request.
+- The socket server keys every forward's server on the socket session id (in process since
+  #11820; it was this header on every loopback request before).
 - The desktop client generates one id per app session and sends it in the same header on
   every call. The header is preferred over the in-band argument.
 - The in-band `__mcpSessionId` argument is still accepted and stripped from tool
@@ -139,6 +187,96 @@ depend on one:
   re-emits `list_changed` only when the hash changes. A push and a poll arriving together
   must not produce two emits.
 - Outer-boundary `subscriptions/listen` support across hosts is unverified and out of scope.
+
+## Tasks extension (#4668)
+
+Owner decisions (2026-10-18): tasks are stored in SQLite so a restarted daemon still answers
+`tasks/get` and `tasks/cancel`; a task holding a device keeps that session's lease alive while
+it is `working` or `input_required`; finished tasks stay readable for minutes (10 by default);
+`startDevice` is the first tool converted.
+
+**SDK support.** `@modelcontextprotocol/server` and `client` 2.3.1 do not implement the
+extension. They ship the 2025-11-25 core task vocabulary (`ttl`, `pollInterval`,
+`tasks/result`, `tasks/list`, `params.task`) only as deprecated types "with no SDK runtime",
+know the `tasks/*` method names for `Mcp-Name` header routing, and lift the per-request
+`_meta` envelope (`io.modelcontextprotocol/clientCapabilities`) into `ctx.mcpReq.envelope` and
+a request's top-level `inputResponses` into `ctx.mcpReq.inputResponses`. `server/discover` is
+installed only on a server serving the 2026-07-28 era; ours serve the 2025 era. The separate
+`@modelcontextprotocol/ext-tasks` package is client-side and not a dependency. The wire is
+therefore implemented on our own handlers, per the extension specification (revision
+2026-07-28 of modelcontextprotocol/ext-tasks).
+
+**Negotiation.** A request declares the extension in its per-request client capabilities;
+declarations are never remembered. A `tools/call` that did not declare it never gets a task,
+and `tasks/get`, `tasks/update` and `tasks/cancel` without it answer `-32021`. Because there is
+no `server/discover` on the 2025 era, the server advertises the extension in its `initialize`
+result, and only to a client whose `initialize` declared it; every other client sees the
+`initialize` result unchanged.
+
+**Pieces** (`src/server/tasks/`):
+
+- `TaskManager` (interface, `DefaultTaskManager`, test `FakeTaskManager`): ids from
+  `IdGenerator`, time from the injected `Timer`, statuses `working`, `input_required`,
+  `completed`, `failed`, `cancelled`; a terminal status never changes. `ttlMs` is null while a
+  task runs and becomes terminal time plus retention minus creation once it settles. On first
+  use, a manager fails every running task another daemon instance left behind ("Task
+  interrupted"). A foreign session's task is reported exactly like a missing one.
+- `McpTaskRepository` (`src/db/mcpTaskRepository.ts`, table `mcp_tasks`, migration
+  `2026_10_18_000_mcp_tasks`): owner key, status, instance id, timestamps, retention, and the
+  JSON result, error or input requests. Status writes are fenced on a running status. The table
+  lives in the daemon's own `auto-mobile.db` (`src/db`), not in the host-wide session broker
+  registry file, because a task is owned by a daemon's session key.
+- `runAsTask(options, work)`: the seam a tool call opts into. When the request declared the
+  extension, carries a session key and tasks are served, it creates the task durably, starts
+  the work in the background under the task's `AbortSignal` (aborted by `tasks/cancel`, which
+  the existing `executionTracker` request-cancellation path turns into cooperative
+  cancellation), turns progress ticks into the task's `statusMessage`, and returns the
+  `CreateTaskResult`; otherwise it runs the work synchronously. `currentTaskContext()` gives
+  code inside the work the task id, `holdDeviceLease(sessionUuid)` and `requestInput(...)`.
+- `TaskLeaseKeepalive`: the hook a task uses to keep a device session's lease alive until it is
+  terminal. `HeartbeatTaskLeaseKeepalive` renews the session through the session manager's own
+  `recordHeartbeat` (the path the socket and HTTP heartbeat routes use, owner lease only, never
+  the idle clocks) at once and then at half the session's heartbeat timeout (at most every
+  second). A hold ends when the task settles (completed, failed or cancelled; expiry follows a
+  terminal state), when the session ends under it, or at daemon shutdown
+  (`releaseDaemonTaskLeases`). The daemon's per-request servers get the daemon-scoped instance
+  from `createStatelessMcpServer`; direct stdio holds nothing.
+- `TASK_ELIGIBLE_TOOLS`: the tools whose call may become a task: `startDevice` and
+  `executePlan`. `startDevice`'s work holds
+  the session it binds (`currentTaskContext()?.holdDeviceLease`) right after the bind, so the
+  session cannot lapse before the client learns its id from `tasks/get`. The boot itself binds
+  no session until it is ready, so `tasks/cancel` during the boot runs the existing
+  undelivered-acquisition rollback: the boot is stopped and nothing stays bound.
+  `executePlan` (#13088) holds its base and routed session as the handler starts and each label
+  session once its label map is published (`holdTaskDeviceLeases`, idempotent per task). Its execution registers
+  under the task's scope with the same binding key and session UUID, so `PlanExecutionLock`
+  keeps blocking that session's calls until the plan ends; `tasks/cancel` aborts the task's
+  signal, which the execution combines with its own, so the plan unwinds and ends its execution
+  (releasing the lock) as a cancelled synchronous call does.
+- `createSdkMcpServer` passes a `CreateTaskResult` through the SDK's `tools/call` result
+  validation, which would otherwise stamp `content: []` on it.
+
+**Scope.** Tasks are served by the daemon's per-request servers (HTTP endpoint and in-process
+forwards); a task's owner is the explicit session key, because a keyless request's scope id is
+one-off. Direct stdio serves no tasks.
+
+**Stdio proxy relay.** The proxy (`src/server/proxyServer.ts`, `DaemonMcpProxy`) is a transparent
+participant. It advertises the extension on `initialize` only to a declaring client, forwards a
+`tools/call`'s declaration as a `tasks` field on the control-socket frame (`{ownerKey,
+declared}`), and relays `tasks/get`, `tasks/update` (with the input responses the SDK lifts to
+`ctx.mcpReq.inputResponses`) and `tasks/cancel`; an undeclared `tasks/*` request is refused with
+the same `-32021` the daemon sends. The owner key is minted once per proxy process
+(`proxy-tasks:<id>`), so a task stays reachable after the proxy reconnects to a restarted daemon;
+the socket's own session id would not be. The daemon's in-process forward passes it to the
+request server as `taskOwnerKey` and replays the declaration. The SDK client on that hop lifts
+`resultType` off every result, so the forward restores it (`resultType: "task"` on a task handle,
+`"complete"` on `tasks/*` results), and a `tasks/*` JSON-RPC error travels on the frame as
+`jsonRpcError` so the proxy answers with the daemon's code, message and data. `tasks/*` frames
+skip the socket's admission queue: a poll never waits behind a long call on the same socket. A
+lost daemon connection is reconnected and the request asked once more; a daemon that stays
+unreachable is an error, never an invented status. Device-binding tools are not relayed as
+declared until the proxy binds the session from a completed task's result.
+`notifications/tasks` push and `subscriptions/listen` are out of scope (polling only).
 
 ## Open questions and resolutions
 

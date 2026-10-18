@@ -7,7 +7,6 @@ const testDevice: BootedDevice = {
   platform: "android",
   deviceId: "emulator-5554",
 };
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -16,6 +15,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import capturedRecents from "../../fixtures/android-launcher/launcher-recents-emulator-5600.json";
 import capturedAppHierarchy from "../../fixtures/android-focus/playground-text-field-pre-tap.json";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("RecentApps", () => {
   let recentApps: RecentApps;
@@ -53,10 +53,11 @@ describe("RecentApps", () => {
     });
 
     // Inject the fakes into the feature
-    recentApps = new RecentApps(testDevice, fakeAdb, fakeTimer);
-    (recentApps as any).observeScreen = fakeObserveScreen;
-    (recentApps as any).window = fakeWindow;
-    (recentApps as any).awaitIdle = fakeAwaitIdle;
+    recentApps = new RecentApps(testDevice, fakeAdb, fakeTimer, {
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+    });
   });
 
   // Helper function to create mock ObserveResult
@@ -204,15 +205,14 @@ describe("RecentApps", () => {
         platform: "ios",
         deviceId: "ios-device",
       };
-      iosRecentApps = new RecentApps(iosDevice, fakeAdb, fakeTimer);
-      (iosRecentApps as any).observeScreen = fakeObserveScreen;
-      (iosRecentApps as any).window = fakeWindow;
-      (iosRecentApps as any).awaitIdle = fakeAwaitIdle;
+      iosRecentApps = new RecentApps(iosDevice, fakeAdb, fakeTimer, {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: fakeAwaitIdle,
+        window: fakeWindow,
+      });
 
       fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any,
-      );
+      getInstanceSpy = spyOnIosClientInstance(fakeIOSCtrlProxy);
     });
 
     afterEach(() => {

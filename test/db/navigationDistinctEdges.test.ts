@@ -51,10 +51,7 @@ describe("navigation_edges distinct-transition readers (#10194)", () => {
   beforeEach(async () => {
     db = await createTestDatabase({ foreignKeys: true });
     repo = new NavigationRepository(db);
-    manager = NavigationGraphManager.createForTesting(
-      repo,
-      new TestCoverageRepository(undefined, db),
-    );
+    manager = NavigationGraphManager.createForTesting(repo, new TestCoverageRepository(db));
     await repo.getOrCreateApp(APP);
     await manager.setCurrentApp(APP);
   });
@@ -390,7 +387,7 @@ describe("navigation_edges traversal retention (#10194)", () => {
   });
 
   test("a row referenced by a test-coverage session is never deleted", async () => {
-    const coverage = new TestCoverageRepository(undefined, db);
+    const coverage = new TestCoverageRepository(db);
     const session = await coverage.startSession("session-1", APP);
     const oldest = await repo.createEdge(APP, "Home", "Settings", "tapOn", { text: "S" }, 1);
     await repo.createEdge(APP, "Home", "Settings", "tapOn", { text: "S" }, 2);

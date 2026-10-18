@@ -4,7 +4,7 @@ import { accessibilityDetector } from "../../accessibility/AccessibilityDetector
 import type { AccessibilityDetector as AccessibilityDetectorContract } from "../../accessibility/interfaces/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
 import type { IosVoiceOverDetector as IosVoiceOverDetectorContract } from "../../accessibility/interfaces/IosVoiceOverDetector";
-import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import { FeatureFlagService, type FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../ios";
 import type { BootedDevice, ObserveResult } from "../../../models";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -13,7 +13,7 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 export interface AccessibilityStateDetectorOptions {
   device: BootedDevice;
   adb: AdbExecutor;
-  featureFlags?: FeatureFlagService;
+  featureFlags?: FeatureFlagReader;
   accessibilityDetector?: AccessibilityDetectorContract;
   /** iOS VoiceOver detector seam; defaults to the shared singleton. */
   iosVoiceOverDetector?: IosVoiceOverDetectorContract;
@@ -28,7 +28,7 @@ export interface AccessibilityStateDetectorOptions {
 export class AccessibilityStateDetector {
   private readonly device: BootedDevice;
   private readonly adb: AdbExecutor;
-  private readonly featureFlags: FeatureFlagService | undefined;
+  private readonly featureFlags: FeatureFlagReader | undefined;
   private readonly detector: AccessibilityDetectorContract;
   private readonly iosDetector: IosVoiceOverDetectorContract;
   private readonly iosClient: IOSCtrlProxy | undefined;

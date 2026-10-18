@@ -14,6 +14,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("Shake", () => {
   let shake: Shake;
@@ -52,10 +53,11 @@ describe("Shake", () => {
     const defaultObserveResult = createObserveResult();
     fakeObserveScreen.setObserveResult(defaultObserveResult);
 
-    shake = new Shake(testDevice, fakeAdb, fakeTimer);
-    (shake as any).observeScreen = fakeObserveScreen;
-    (shake as any).window = fakeWindow;
-    (shake as any).awaitIdle = fakeAwaitIdle;
+    shake = new Shake(testDevice, fakeAdb, fakeTimer, {
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+    });
   });
 
   test("shake dispatches with a not-fresh current pre-read", async () => {
@@ -137,14 +139,13 @@ describe("Shake", () => {
         platform: "ios",
         deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
       };
-      const iosShake = new Shake(iosSimulator, fakeAdb, fakeTimer);
-      (iosShake as any).observeScreen = fakeObserveScreen;
-      (iosShake as any).window = fakeWindow;
-      (iosShake as any).awaitIdle = fakeAwaitIdle;
+      const iosShake = new Shake(iosSimulator, fakeAdb, fakeTimer, {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: fakeAwaitIdle,
+        window: fakeWindow,
+      });
       const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIOSCtrlProxy);
 
       try {
         const result = await iosShake.execute({ duration: 250, intensity: 77 });
@@ -190,15 +191,14 @@ describe("Shake", () => {
         platform: "ios",
         deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
       };
-      const iosShake = new Shake(iosSimulator, fakeAdb, fakeTimer);
-      (iosShake as any).observeScreen = fakeObserveScreen;
-      (iosShake as any).window = fakeWindow;
-      (iosShake as any).awaitIdle = fakeAwaitIdle;
+      const iosShake = new Shake(iosSimulator, fakeAdb, fakeTimer, {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: fakeAwaitIdle,
+        window: fakeWindow,
+      });
       const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
       fakeIOSCtrlProxy.setFailureMode("shake", new Error("runner disconnected"));
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIOSCtrlProxy);
 
       try {
         const result = await iosShake.execute({ duration: 250, intensity: 77 });

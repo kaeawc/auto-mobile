@@ -43,12 +43,7 @@ function useServer(): void {
       },
     }),
   };
-  const server = createTestUnixSocketServer(
-    "unused",
-    "http://localhost:0/mcp",
-    state,
-    new FakeTimer(),
-  );
+  const server = createTestUnixSocketServer("unused", state, new FakeTimer());
   internals = server as unknown as Internals;
   internals.acceptingRequests = true;
 }
@@ -89,13 +84,10 @@ beforeEach(() => {
   unbound = [];
   binding = undefined;
   PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-    () =>
-      ({
-        getScreenScaleMetadata: () => null,
-        requestTapCoordinates: ack,
-      }) as unknown as AndroidCtrlProxyClient,
-  );
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+    getScreenScaleMetadata: () => null,
+    requestTapCoordinates: ack,
+  }));
 });
 
 afterEach(() => {

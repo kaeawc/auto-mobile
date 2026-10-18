@@ -10,7 +10,7 @@ import {
 } from "../../src/daemon/toolCallActivity";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
-import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
+import type { FeatureFlagAdmin } from "../../src/features/featureFlags/FeatureFlagService";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -167,7 +167,7 @@ export function createDirectFrameRig(
         called("clearPreferenceStore");
         await client.clearPreferenceStore?.(...args);
       },
-    } as unknown as AndroidCtrlProxyClient;
+    };
   });
 
   const updateServiceSpy = client.updateService
@@ -191,7 +191,6 @@ export function createDirectFrameRig(
   };
   const server = createTestUnixSocketServer(
     "unused",
-    "http://localhost:0/mcp",
     {
       isInitialized: () => true,
       getSessionManager: () => sessionManager,
@@ -203,7 +202,8 @@ export function createDirectFrameRig(
         client.onRead?.();
         return [];
       },
-    } as unknown as FeatureFlagService,
+      setFlag: async (key: string, enabled: boolean) => ({ key, enabled }),
+    } satisfies FeatureFlagAdmin,
     // The storage tools are enabled, so an `ide/*` storage frame reaches its ownership gate.
     { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
   );

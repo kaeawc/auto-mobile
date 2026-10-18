@@ -86,8 +86,8 @@ import {
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 
 import { logger } from "../../utils/logger";
-import { AndroidCtrlProxyClient } from "../observe/android";
-import { IOSCtrlProxyClient } from "../observe/ios";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
+import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
 import {
   createGlobalPerformanceTracker,
   type PerformanceTracker,
@@ -102,7 +102,7 @@ import { attachRawViewHierarchy } from "../utility/viewHierarchySearch";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
-import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
+import { FeatureFlagService, type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyHierarchy";
 import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyVoiceOver";
 import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
@@ -140,7 +140,7 @@ type TapAnyAccessibilityService = Pick<
   AndroidCtrlProxyClient,
   "requestTapCoordinates" | "requestAction" | "requestNodeAction" | "supportsNodeActionSelectors"
 > &
-  Partial<Pick<AndroidCtrlProxyClient, "supportsCommand">>;
+  Partial<Pick<AndroidCtrlProxy, "supportsCommand">>;
 
 interface TapAnyElementDependencies extends DisplayFenceDependencies {
   lastRenderedObservation?: RenderedObservationReader;
@@ -148,7 +148,7 @@ interface TapAnyElementDependencies extends DisplayFenceDependencies {
   timer?: Timer;
   elementSelector?: ElementSelector;
   iosVoiceOverDetector?: IosVoiceOverDetector;
-  featureFlags?: FeatureFlagService;
+  featureFlags?: FeatureFlagReader;
   accessibilityDetector?: AccessibilityDetector;
   talkBackStrategy?: Pick<
     TalkBackTapStrategy,
@@ -407,11 +407,11 @@ export class TapAnyElement extends BaseVisualChange {
   private geometry: ElementGeometry;
   private elementSelector: ElementSelector;
   private accessibilityService: TapAnyAccessibilityService;
-  private hierarchyAccessibilityService: AndroidCtrlProxyClient;
+  private hierarchyAccessibilityService: AndroidCtrlProxy;
   private viewHierarchy: ViewHierarchy;
   private hierarchyCapture: HierarchyCapture;
   private iosVoiceOverDetector: IosVoiceOverDetector;
-  private featureFlags: FeatureFlagService;
+  private featureFlags: FeatureFlagReader;
   private accessibilityDetector: AccessibilityDetector;
   private talkBackStrategy: Pick<
     TalkBackTapStrategy,
@@ -911,13 +911,17 @@ export class TapAnyElement extends BaseVisualChange {
       iosMultiPanel: this.iosMultiPanel,
     };
     const effectiveScreenSize = screenSizeForOffscreenCheck(viewHierarchy, screenSizeOptions);
-    const selection = this.elementSelector.selectClickable(viewHierarchy, {
-      screenSizeOptions,
-      container: options.container,
-      strategy: options.selectionStrategy,
-      intentAction: options.action === "longPress" ? "long-press" : "tap",
-      scrollableContainer: options.scrollableContainer,
-    });
+    const selection = this.elementSelector.select(
+      viewHierarchy,
+      {},
+      {
+        screenSizeOptions,
+        container: options.container,
+        strategy: options.selectionStrategy,
+        intentAction: options.action === "longPress" ? "long-press" : "tap",
+        scrollableContainer: options.scrollableContainer,
+      },
+    );
     if (selection.element && !hasVisibleScreenPart(selection.element.bounds, effectiveScreenSize)) {
       return { element: null, containerFound };
     }
@@ -1193,7 +1197,7 @@ export class TapAnyElement extends BaseVisualChange {
    * healthy CtrlProxy round trip already had (issue #6306 review, P1).
    */
   private async executeIosTapWithCoordinates(
-    xcTestClient: IOSCtrlProxyClient,
+    xcTestClient: IOSCtrlProxy,
     action: string,
     x: number,
     y: number,
@@ -1288,7 +1292,7 @@ export class TapAnyElement extends BaseVisualChange {
    * identifier-based node-action path rather than a coordinate press.
    */
   private async activateIosByResourceId(
-    xcTestClient: IOSCtrlProxyClient,
+    xcTestClient: IOSCtrlProxy,
     resourceId: string,
     voiceOverAction: "activate" | "long_press",
     timeoutMs: number | undefined,
@@ -1296,7 +1300,7 @@ export class TapAnyElement extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<void> {
     let dispatched = false;
-    let result: Awaited<ReturnType<IOSCtrlProxyClient["requestAction"]>>;
+    let result: Awaited<ReturnType<IOSCtrlProxy["requestAction"]>>;
     try {
       result = await xcTestClient.requestAction(
         voiceOverAction,
@@ -1339,7 +1343,7 @@ export class TapAnyElement extends BaseVisualChange {
   }
 
   private async executeIosTapWithVoiceOver(
-    xcTestClient: IOSCtrlProxyClient,
+    xcTestClient: IOSCtrlProxy,
     action: string,
     element: Element,
     x: number,

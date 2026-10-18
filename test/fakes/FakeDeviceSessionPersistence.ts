@@ -1,5 +1,5 @@
 import type { FaultPlan } from "./FaultPlan";
-import { ignoresManagedExecutionIdleDeadline } from "../../src/daemon/sessionBroker/provisioning/executionLiveness";
+import { ignoresManagedExecutionIdleDeadline } from "../../src/models/managedExecutionLiveness";
 import {
   isReissuableByNameReleaseReason,
   isTerminalReleaseReason,
@@ -133,7 +133,8 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       session_uuid: record.sessionUuid,
       device_id: record.deviceId,
       stable_device_id: record.stableDeviceId ?? null,
-      stable_identity_generation: (existing?.stable_identity_generation ?? 0) + 1,
+      // Like the repository: a fresh insert starts at generation 0, a conflict update advances it.
+      stable_identity_generation: existing ? (existing.stable_identity_generation ?? 0) + 1 : 0,
       platform: record.platform,
       status: record.status ?? "active",
       source: record.source ?? null,
@@ -155,6 +156,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       pre_cli_heartbeat_timeout_source: record.preCliHeartbeatTimeoutSource ?? null,
       pre_cli_session_timeout_ms: record.preCliSessionTimeoutMs ?? null,
       liveness_owner_token: existing?.liveness_owner_token ?? null,
+      liveness_contract_generation: existing?.liveness_contract_generation ?? 0,
       created_at: existing?.created_at ?? new Date(record.createdAtMs).toISOString(),
       updated_at: new Date(record.lastUsedAtMs).toISOString(),
     });

@@ -30,7 +30,6 @@ afterEach(() => DaemonState.getInstance().reset());
 function newServer(): RouteInternals {
   const server = createTestUnixSocketServer(
     "/fake/one-call-session-route.sock",
-    "http://localhost:0/mcp",
     DaemonState.getInstance(),
     new FakeTimer(),
   );

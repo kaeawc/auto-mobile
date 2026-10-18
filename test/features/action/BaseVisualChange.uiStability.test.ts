@@ -26,10 +26,11 @@ describe("BaseVisualChange UI stability platform guard", () => {
 
   function createVisualChange(platform: "android" | "ios"): BaseVisualChange {
     const device: BootedDevice = { name: "test-device", platform, deviceId: "device-123" };
-    const instance = new BaseVisualChange(device, fakeAdb as unknown as any, fakeTimer);
-    (instance as any).awaitIdle = fakeAwaitIdle;
-    (instance as any).observeScreen = fakeObserveScreen;
-    (instance as any).window = fakeWindow;
+    const instance = new BaseVisualChange(device, fakeAdb, fakeTimer, undefined, {
+      awaitIdle: fakeAwaitIdle,
+      observeScreen: fakeObserveScreen,
+      window: fakeWindow,
+    });
     return instance;
   }
 

@@ -49,7 +49,8 @@ import { createStructuredToolResponse } from "../../utils/toolUtils";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { DeviceShutdownTimeoutError } from "../../models/DeviceShutdownTimeoutError";
 import { fixedBackoff } from "../../utils/Backoff";
-import { DaemonState } from "../../daemon/daemonState";
+import { DaemonState, type DaemonStateLike } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { type Session, type SessionManager } from "../../daemon/sessionManager";
 import { reconcileDiscoveryObservation } from "../../daemon/discoveryReconcile";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
@@ -78,7 +79,7 @@ import {
 } from "../../daemon/devicePoolRefresh";
 import { releasePoolDevice, releaseSessionAndDevice } from "../../daemon/releaseSessionAndDevice";
 import { heldDeviceBindRefusal, isSameHolderSession } from "../../daemon/inputDeviceOwnership";
-import { lifecycleRequester } from "../../server/lifecycleDeviceOwnership";
+import { lifecycleRequester } from "./lifecycleRequester";
 import { deviceLossCancellationReason as utilDeviceLossCancellationReason } from "../../utils/deviceLossCancellationReason";
 import { terminateColdBootProcess } from "../../devices/coldBootProcessTermination";
 import { z } from "zod/v4";
@@ -911,9 +912,7 @@ export function listDevicePayloads(
    */
   transitionalHolds: ReadonlyMap<string, TransitionalHold> = new Map(),
 ) {
-  const sessionManager = DaemonState.getInstance().isInitialized()
-    ? DaemonState.getInstance().getSessionManager()
-    : undefined;
+  const sessionManager = defaultDaemonContext.sessionManager();
   const sessions = new Map(
     sessionManager?.getAllSessions().map((session) => [session.sessionId, session]),
   );
@@ -2673,7 +2672,7 @@ export async function rebuildSameIdReplacement(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice,
   replacement: BootedDevice,
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   stopPerformanceMonitoring: (deviceId: string) => void,
 ): Promise<void> {
   const devicePool = daemonState.getDevicePool();
@@ -2984,7 +2983,7 @@ export function captureCurrentShutdownPooledOwnership(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice | null,
 ):
-  | { daemonState: DaemonState; devicePool: DevicePool; expectedPooledDevice: PooledDevice }
+  | { daemonState: DaemonStateLike; devicePool: DevicePool; expectedPooledDevice: PooledDevice }
   | undefined {
   if (!expectedPooledDevice) {
     return undefined;
@@ -3169,7 +3168,7 @@ export function preserveLateShutdownRetirement(
 
 export async function releaseShutdownSessionOwnership(
   context: ShutdownOwnershipContext,
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   observedReplacement: BootedDevice | undefined,
   strictDeadline: boolean,
   options: {
@@ -4216,7 +4215,7 @@ export function resolveRunnerReadinessTimeoutMs(args: StartDeviceArgs): number {
   );
 }
 
-export function parseProvisionDeviceArgs(input: ProvisionDeviceArgs): ProvisionDeviceArgs {
+export function parseProvisionDeviceArgs(input: Partial<ProvisionDeviceArgs>): ProvisionDeviceArgs {
   const __mcpSessionId = input.__mcpSessionId;
   const __oneShotCli = input.__oneShotCli === true;
   const __mcpRequestDeadlineMs = input.__mcpRequestDeadlineMs;
@@ -5605,12 +5604,12 @@ export async function reserveRecoveredDeviceForReadiness(
   clearColdBootShutdownMarker(boot.source, boot.device.deviceId);
 }
 
-export function getStartDevicePool(daemonState: DaemonState): DevicePool | undefined {
+export function getStartDevicePool(daemonState: DaemonStateLike): DevicePool | undefined {
   return daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
 }
 
 export async function reserveInitialDeviceForReadiness(
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   boot: DeviceBootResult,
   releaseReadinessReservations: DeviceReadinessReservation[],
   mcpSessionId: string | undefined,
@@ -5676,7 +5675,7 @@ export interface StartDeviceRunnerReadinessInput {
   operationName: string;
   bootService: DeviceBootService;
   deviceUtils: PlatformDeviceManager;
-  daemonState: DaemonState;
+  daemonState: DaemonStateLike;
   totalDeadlineMs: number;
   readinessTimeoutMs: number;
   timer: Timer;

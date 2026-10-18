@@ -16054,8 +16054,10 @@
           "maximum": 10000
         },
         "rotationDegrees": {
-          "description": "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.",
-          "type": "number"
+          "description": "Degrees (-360 to 360) the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.",
+          "type": "number",
+          "minimum": -360,
+          "maximum": 360
         },
         "includeSystemInsets": {
           "description": "Use full screen including status/nav bars",
@@ -33035,7 +33037,7 @@
   },
   {
     "name": "setToolEnabled",
-    "description": "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
+    "description": "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call, including default-off tools such as pinchOn and prototype that tools/list never shows until enabled; read the automobile:tools resource for every tool's name and default discovery state. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "description": "Control which configurable AutoMobile tools appear in tools/list for an active session. A tool omitted from discovery remains callable directly by name through tools/call.",
@@ -34003,6 +34005,25 @@
           "type": "string",
           "enum": ["app", "prototype"]
         },
+        "pointer": {
+          "description": "Pointer for this gesture; omit for a finger. Fails with a capability error instead of falling back to a finger.",
+          "type": "object",
+          "properties": {
+            "toolType": {
+              "description": "Inject a stylus instead of a finger (Android 12+, API 31+)",
+              "type": "string",
+              "enum": ["stylus"]
+            },
+            "pressure": {
+              "description": "Stylus pressure 0-1; the Android backend injects 1.0 only and refuses other values",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": ["toolType"],
+          "additionalProperties": false
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -34132,7 +34153,7 @@
           "enum": ["slow", "normal", "fast"]
         },
         "durationMs": {
-          "description": "Forward-stroke duration in ms (integer 1-3000); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total). Android may quantize very short strokes.",
+          "description": "Forward-stroke duration in ms (integer 1-3000); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total) and, for a single swipe, velocityPxPerSecond (omitted for boomerang, lookFor, and the TalkBack route that ignores duration; uses effectiveDurationMs when clamped). Android may quantize very short strokes. Limits: the TalkBack semantic-scroll route has no timed stroke and ignores it (durationIgnored + warnings); the iOS XCUICoordinate route clamps velocity to 100-10000 pt/s (effectiveDurationMs + warnings).",
           "type": "integer",
           "minimum": 1,
           "maximum": 3000
@@ -34839,6 +34860,25 @@
           "type": "integer",
           "minimum": 500,
           "maximum": 10000
+        },
+        "pointer": {
+          "description": "Pointer for this gesture; omit for a finger. Fails with a capability error instead of falling back to a finger.",
+          "type": "object",
+          "properties": {
+            "toolType": {
+              "description": "Inject a stylus instead of a finger (Android 12+, API 31+)",
+              "type": "string",
+              "enum": ["stylus"]
+            },
+            "pressure": {
+              "description": "Stylus pressure 0-1; the Android backend injects 1.0 only and refuses other values",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": ["toolType"],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false,

@@ -20,6 +20,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { spyOnIosClientFactory } from "../helpers/iosCtrlProxyClientSpies";
 
 /**
  * One handset reachable over USB and wireless debugging is ONE pooled device (#10201): the pool
@@ -111,44 +112,38 @@ describe("a direct frame naming a held handset by its other transport id", () =>
 
     // The direct frames discover through the process device manager: the raw `adb devices` rows.
     PlatformDeviceManagerFactory.setInstance(manager);
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-      (device) =>
-        ({
-          getScreenScaleMetadata: () => null,
-          requestTapCoordinates: async (
-            ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-          ) => {
-            args[6]?.();
-            driven.push(`tap:${device.deviceId}`);
-            return { success: true };
-          },
-          setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-            if (typeof args[5] === "object") {
-              args[5].onDispatch?.();
-            }
-            driven.push(`setPreference:${device.deviceId}`);
-          },
-        }) as unknown as AndroidCtrlProxyClient,
-    );
-    spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
-      (device) =>
-        ({
-          getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
-          requestTapCoordinates: async (
-            ...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>
-          ) => {
-            args[7]?.();
-            driven.push(`ios-tap:${device.deviceId}`);
-            return { success: true };
-          },
-          setPreference: async (...args: Parameters<IOSCtrlProxyClient["setPreference"]>) => {
-            if (typeof args[5] === "object") {
-              args[5].onDispatch?.();
-            }
-            driven.push(`ios-setPreference:${device.deviceId}`);
-          },
-        }) as unknown as IOSCtrlProxyClient,
-    );
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation((device) => ({
+      getScreenScaleMetadata: () => null,
+      requestTapCoordinates: async (
+        ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+      ) => {
+        args[6]?.();
+        driven.push(`tap:${device.deviceId}`);
+        return { success: true };
+      },
+      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+        if (typeof args[5] === "object") {
+          args[5].onDispatch?.();
+        }
+        driven.push(`setPreference:${device.deviceId}`);
+      },
+    }));
+    spyOnIosClientFactory((device) => ({
+      getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
+      requestTapCoordinates: async (
+        ...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>
+      ) => {
+        args[7]?.();
+        driven.push(`ios-tap:${device.deviceId}`);
+        return { success: true };
+      },
+      setPreference: async (...args: Parameters<IOSCtrlProxyClient["setPreference"]>) => {
+        if (typeof args[5] === "object") {
+          args[5].onDispatch?.();
+        }
+        driven.push(`ios-setPreference:${device.deviceId}`);
+      },
+    }));
     spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
       (device) =>
         ({

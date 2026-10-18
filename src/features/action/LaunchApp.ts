@@ -47,7 +47,7 @@ import {
 } from "../performance/PerformanceMonitor";
 import { serverConfig } from "../../utils/ServerConfig";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { IOSCtrlProxyClient } from "../observe/ios";
+import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
@@ -71,6 +71,10 @@ import type { ActionCall } from "./ActionCall";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
+/** Budget for the Android a11y service to answer a launch-intent request. */
+const A11Y_LAUNCH_INTENT_TIMEOUT_MS = 3_000;
+/** Cold iOS app starts can take a long time before CtrlProxy publishes a hierarchy. */
+const IOS_HIERARCHY_READY_TIMEOUT_MS = 60_000;
 const ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS = 15_000;
 const SHADE_COLLAPSE_RETRY_INTERVAL_MS = 1_000;
 // One bounded lock re-read before a launch timeout names a SystemUI blocker (#10182).
@@ -128,6 +132,12 @@ export interface AndroidColdBootAction {
  * relaunch (terminate + fresh process); there is no standalone device terminate
  * here because devicectl cannot reliably resolve a PID by bundle id (deferred).
  */
+/** The narrow simctl surface LaunchApp consumes; lets tests pass a typed fake (#11865). */
+export type LaunchAppSimctl = Pick<
+  SimCtlClient,
+  "launchApp" | "terminateApp" | "executeCommandArgs" | "listAppsOrThrow"
+>;
+
 export interface DeviceAppLauncher {
   launchApp(
     deviceUdid: string,
@@ -143,7 +153,7 @@ interface LaunchAppDependencies {
   installedAppsCacheStaleMarker?: InstalledAppsCacheStaleMarker;
   performanceTrackerFactory?: () => PerformanceTracker;
   deviceAppLauncher?: DeviceAppLauncher;
-  clearAppDataFactory?: (device: BootedDevice, simctl: SimCtlClient) => IosClearAppDataRunner;
+  clearAppDataFactory?: (device: BootedDevice, simctl: LaunchAppSimctl) => IosClearAppDataRunner;
   createAndroidClearAppData?: (device: BootedDevice) => AndroidClearAppDataAction;
   createAndroidColdBoot?: (device: BootedDevice) => AndroidColdBootAction;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
@@ -215,7 +225,7 @@ type LaunchAppPositionalTail = [
 ];
 
 export class LaunchApp extends BaseVisualChange {
-  private simctl: SimCtlClient;
+  readonly simctl: LaunchAppSimctl;
   private deviceAppLauncher: DeviceAppLauncher;
   private targetUserDetector: TargetUserDetector;
   private installedAppsProvider: InstalledAppsProvider;
@@ -223,7 +233,7 @@ export class LaunchApp extends BaseVisualChange {
   private performanceTrackerFactory: () => PerformanceTracker;
   private clearAppDataFactory: (
     device: BootedDevice,
-    simctl: SimCtlClient,
+    simctl: LaunchAppSimctl,
   ) => IosClearAppDataRunner;
   private createAndroidClearAppData: (device: BootedDevice) => AndroidClearAppDataAction;
   private createAndroidColdBoot: (device: BootedDevice) => AndroidColdBootAction;
@@ -239,7 +249,7 @@ export class LaunchApp extends BaseVisualChange {
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
-    simctl: SimCtlClient | null = null,
+    simctl: LaunchAppSimctl | null = null,
     timer: Timer = defaultTimer,
     dependencies: LaunchAppDependencies = {},
   ) {
@@ -345,8 +355,10 @@ export class LaunchApp extends BaseVisualChange {
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
       const result = perf
-        ? await perf.track("a11yLaunchIntent", () => a11y.requestLaunchIntent(packageName, 3000))
-        : await a11y.requestLaunchIntent(packageName, 3000);
+        ? await perf.track("a11yLaunchIntent", () =>
+            a11y.requestLaunchIntent(packageName, A11Y_LAUNCH_INTENT_TIMEOUT_MS),
+          )
+        : await a11y.requestLaunchIntent(packageName, A11Y_LAUNCH_INTENT_TIMEOUT_MS);
       this.assertLaunchNotAborted(signal);
       if (result.success && result.componentName) {
         const activity = resolveComponentActivity(result.componentName, packageName);
@@ -758,7 +770,7 @@ export class LaunchApp extends BaseVisualChange {
 
           signal?.throwIfAborted();
           await perf.track("waitForHierarchy", () =>
-            this.waitForIosHierarchyReady(60000, bundleId, signal),
+            this.waitForIosHierarchyReady(IOS_HIERARCHY_READY_TIMEOUT_MS, bundleId, signal),
           );
           perf.end();
           return {
@@ -794,7 +806,7 @@ export class LaunchApp extends BaseVisualChange {
   }
 
   private requestIosLaunchRetarget(
-    ctrlProxyClient: IOSCtrlProxyClient,
+    ctrlProxyClient: IOSCtrlProxy,
     bundleId: string,
     perf: PerformanceTracker,
   ) {
@@ -824,7 +836,7 @@ export class LaunchApp extends BaseVisualChange {
   }
 
   private requestIosHierarchyForPackage(
-    xcTestClient: IOSCtrlProxyClient,
+    xcTestClient: IOSCtrlProxy,
     expectedPackageName: string,
     timeoutMs: number,
   ): Promise<string> {
@@ -863,7 +875,8 @@ export class LaunchApp extends BaseVisualChange {
     }
   }
 
-  private async waitForIosHierarchyReady(
+  /** Waits for the iOS CtrlProxy hierarchy to be ready via push or sync. Public test seam (#11865). */
+  async waitForIosHierarchyReady(
     timeoutMs: number = 5000,
     expectedPackageName?: string,
     signal?: AbortSignal,
@@ -1289,8 +1302,8 @@ export class LaunchApp extends BaseVisualChange {
       : null;
     let displayedMetricsStartMs: number | null = null;
 
-    const foregroundWaitTimeoutMs = 5000;
-    const foregroundPollIntervalMs = 200;
+    const foregroundWaitTimeoutMs = LAUNCH_OBSERVATION_TIMEOUT_MS;
+    const foregroundPollIntervalMs = LAUNCH_OBSERVATION_POLL_INTERVAL_MS;
     let observationTimestampMs: number | undefined;
 
     const launchResult = await this.observedInteraction<LaunchAppResult>(
@@ -1564,7 +1577,8 @@ export class LaunchApp extends BaseVisualChange {
     }
   }
 
-  private async ensureLaunchObservationMatchesPackage(
+  /** Polls until the observed foreground matches the launched package or the observation timeout elapses. Public test seam (#11865). */
+  async ensureLaunchObservationMatchesPackage(
     result: LaunchAppResult,
     expectedPackageName: string,
     timeoutMs: number = LAUNCH_OBSERVATION_TIMEOUT_MS,
@@ -2267,7 +2281,8 @@ export class LaunchApp extends BaseVisualChange {
     }
   }
 
-  private async performLaunch(
+  /** Android launch step: intent launch, then monkey/activity fallback. Public test seam (#11865). */
+  async performLaunch(
     packageName: string,
     activityName: string | undefined,
     userId: number,

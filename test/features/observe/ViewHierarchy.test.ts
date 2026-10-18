@@ -8,11 +8,12 @@ import {
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
-import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { makeViewHierarchyCtrlProxy } from "../../helpers/androidViewHierarchyClient";
+import type { ViewHierarchyAndroidCtrlProxy } from "../../../src/features/observe/android/ViewHierarchyAndroidCtrlProxy";
 import { logger, LogLevel } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { recoverRootlessAccessibilityService } from "../../../src/features/observe/android/ObserveAccessibilityRecovery";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 // Note: the previous version of this file patched fs-extra's readFile to mock
 // screenshot reads. That dependency has been removed from production code, so
@@ -36,7 +37,7 @@ describe("ViewHierarchy", function () {
   describe("Unit Tests for Public Methods", function () {
     let viewHierarchy: ViewHierarchy;
     let fakeAdbFactory: FakeAdbClientFactory;
-    let mockCtrlProxyClient: AndroidCtrlProxyClient;
+    let mockCtrlProxyClient: ViewHierarchyAndroidCtrlProxy;
     let mockDevice: BootedDevice;
 
     beforeEach(function () {
@@ -48,12 +49,9 @@ describe("ViewHierarchy", function () {
       // Create fakes for testing
       fakeAdbFactory = new FakeAdbClientFactory();
 
-      mockCtrlProxyClient = {
-        getLatestHierarchy: async () => null,
-        convertToViewHierarchyResult: () => ({ hierarchy: {} }),
-        convertAccessibilityNode: () => ({}),
+      mockCtrlProxyClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => null,
-      } as unknown as AndroidCtrlProxyClient;
+      });
 
       viewHierarchy = new ViewHierarchy(mockDevice, fakeAdbFactory, mockCtrlProxyClient);
       setupReadFileMock();
@@ -235,7 +233,7 @@ describe("ViewHierarchy", function () {
   describe("Error Handling Tests", function () {
     let viewHierarchy: ViewHierarchy;
     let fakeAdb: FakeAdbExecutor;
-    let mockCtrlProxyClient: AndroidCtrlProxyClient;
+    let mockCtrlProxyClient: ViewHierarchyAndroidCtrlProxy;
     let mockDevice: BootedDevice;
 
     beforeEach(function () {
@@ -246,12 +244,9 @@ describe("ViewHierarchy", function () {
       };
       fakeAdb = new FakeAdbExecutor();
 
-      mockCtrlProxyClient = {
-        getLatestHierarchy: async () => null,
-        convertToViewHierarchyResult: () => ({ hierarchy: {} }),
-        convertAccessibilityNode: () => ({}),
+      mockCtrlProxyClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => null,
-      } as unknown as AndroidCtrlProxyClient;
+      });
 
       viewHierarchy = new ViewHierarchy(
         mockDevice,
@@ -276,14 +271,11 @@ describe("ViewHierarchy", function () {
     });
 
     test("should handle accessibility service errors in getViewHierarchy", async function () {
-      const mockCtrlProxyClientError = {
-        getLatestHierarchy: async () => null,
-        convertToViewHierarchyResult: () => ({ hierarchy: {} }),
-        convertAccessibilityNode: () => ({}),
+      const mockCtrlProxyClientError = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => {
           throw new Error("Accessibility service error");
         },
-      } as unknown as AndroidCtrlProxyClient;
+      });
 
       const viewHierarchyWithMocks = new ViewHierarchy(
         mockDevice,
@@ -313,8 +305,8 @@ describe("ViewHierarchy", function () {
       fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: true });
       let starts = 0;
       let waits = 0;
-      (mockCtrlProxyClient as any).ensureRecoveryStarted = () => starts++;
-      (mockCtrlProxyClient as any).awaitRecovery = async () => {
+      mockCtrlProxyClient.ensureRecoveryStarted = () => starts++;
+      mockCtrlProxyClient.awaitRecovery = async () => {
         waits++;
         return "failed";
       };
@@ -326,14 +318,11 @@ describe("ViewHierarchy", function () {
 
     test("names a swipe keyguard as the cause of a hierarchy error (#4281)", async function () {
       fakeAdb.setDeviceLock({ locked: true, keyguardShowing: true, secure: false });
-      const throwingClient = {
-        getLatestHierarchy: async () => null,
-        convertToViewHierarchyResult: () => ({ hierarchy: {} }),
-        convertAccessibilityNode: () => ({}),
+      const throwingClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => {
           throw new Error("Accessibility service error");
         },
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(mockDevice, new FakeAdbClientFactory(fakeAdb), throwingClient);
 
       const result = await vh.getAndroidViewHierarchy();
@@ -444,9 +433,7 @@ describe("ViewHierarchy", function () {
           reconnectMessage: "CtrlProxy reconnecting, retry in 2s",
         }),
       };
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIosClient as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
       try {
         const viewHierarchyWithMocks = new ViewHierarchy(
@@ -479,14 +466,14 @@ describe("ViewHierarchy", function () {
         name: "Test iPhone",
         platform: "ios",
       };
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      const getInstanceSpy = spyOnIosClientInstance({
         getLatestHierarchy: async () => ({
           hierarchy: null,
           fresh: false,
           unavailableReason: reason,
           unavailableDetail: detail,
         }),
-      } as any);
+      });
       try {
         const subject = new ViewHierarchy(
           iosDevice,
@@ -532,7 +519,7 @@ describe("ViewHierarchy", function () {
           return "recovered";
         },
       };
-      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+      const spy = spyOnIosClientInstance(fakeIosClient);
       try {
         const vh = new ViewHierarchy(
           iosDevice,
@@ -571,7 +558,7 @@ describe("ViewHierarchy", function () {
           return "recovered";
         },
       };
-      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as any);
+      const spy = spyOnIosClientInstance(client);
       try {
         const vh = new ViewHierarchy(
           iosDevice,
@@ -616,7 +603,7 @@ describe("ViewHierarchy", function () {
           return "recovered";
         },
       };
-      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as any);
+      const spy = spyOnIosClientInstance(client);
       try {
         const vh = new ViewHierarchy(
           iosDevice,
@@ -659,7 +646,7 @@ describe("ViewHierarchy", function () {
         ensureRecoveryStarted: () => {},
         awaitRecovery: async () => "timed_out",
       };
-      const spy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as any);
+      const spy = spyOnIosClientInstance(client);
       try {
         const vh = new ViewHierarchy(
           iosDevice,
@@ -703,9 +690,7 @@ describe("ViewHierarchy", function () {
           reconnectMessage: "CtrlProxy reconnecting, retry in 2s",
         }),
       };
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIosClient as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
       try {
         const viewHierarchyWithMocks = new ViewHierarchy(
@@ -744,9 +729,7 @@ describe("ViewHierarchy", function () {
           updatedAt: 1750934585218,
         }),
       };
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIosClient as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
       try {
         const viewHierarchyWithMocks = new ViewHierarchy(
@@ -788,9 +771,7 @@ describe("ViewHierarchy", function () {
           updatedAt: 1750934585218,
         }),
       };
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIosClient as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
       try {
         const viewHierarchyWithMocks = new ViewHierarchy(
@@ -834,9 +815,7 @@ describe("ViewHierarchy", function () {
           });
         },
       };
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIosClient as any,
-      );
+      const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
 
       try {
         const viewHierarchyWithMocks = new ViewHierarchy(
@@ -863,7 +842,7 @@ describe("ViewHierarchy", function () {
   describe("FilterViewHierarchy Tests", function () {
     let viewHierarchy: ViewHierarchy;
     let fakeAdb: FakeAdbExecutor;
-    let mockCtrlProxyClient: AndroidCtrlProxyClient;
+    let mockCtrlProxyClient: ViewHierarchyAndroidCtrlProxy;
     let mockDevice: BootedDevice;
 
     beforeEach(function () {
@@ -874,12 +853,9 @@ describe("ViewHierarchy", function () {
       };
       fakeAdb = new FakeAdbExecutor();
 
-      mockCtrlProxyClient = {
-        getLatestHierarchy: async () => null,
-        convertToViewHierarchyResult: () => ({ hierarchy: {} }),
-        convertAccessibilityNode: () => ({}),
+      mockCtrlProxyClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => null,
-      } as unknown as AndroidCtrlProxyClient;
+      });
 
       viewHierarchy = new ViewHierarchy(
         mockDevice,
@@ -981,7 +957,7 @@ describe("ViewHierarchy", function () {
   describe("Edge Cases and Additional Coverage", function () {
     let viewHierarchy: ViewHierarchy;
     let fakeAdb: FakeAdbExecutor;
-    let mockCtrlProxyClient: AndroidCtrlProxyClient;
+    let mockCtrlProxyClient: ViewHierarchyAndroidCtrlProxy;
     let mockDevice: BootedDevice;
 
     beforeEach(function () {
@@ -992,12 +968,9 @@ describe("ViewHierarchy", function () {
       };
       fakeAdb = new FakeAdbExecutor();
 
-      mockCtrlProxyClient = {
-        getLatestHierarchy: async () => null,
-        convertToViewHierarchyResult: () => ({ hierarchy: {} }),
-        convertAccessibilityNode: () => ({}),
+      mockCtrlProxyClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => null,
-      } as unknown as AndroidCtrlProxyClient;
+      });
 
       viewHierarchy = new ViewHierarchy(
         mockDevice,
@@ -1765,9 +1738,9 @@ describe("Offscreen Node Filtering", function () {
     };
 
     test("populates updatedAt when the accessibility service returns null", async function () {
-      const nullClient = {
+      const nullClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => null,
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), nullClient);
 
       const result = await vh.getAndroidViewHierarchy();
@@ -1777,11 +1750,11 @@ describe("Offscreen Node Filtering", function () {
     });
 
     test("populates updatedAt when the accessibility service throws", async function () {
-      const throwingClient = {
+      const throwingClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => {
           throw new Error("ctrlproxy offline");
         },
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), throwingClient);
 
       const result = await vh.getAndroidViewHierarchy();
@@ -1795,10 +1768,10 @@ describe("Offscreen Node Filtering", function () {
     // swallows connection failures into a resolved error rather than
     // throwing. These tests pin that contract at the ViewHierarchy layer.
     test("marks the null-result path as a transport failure (#7534)", async function () {
-      const nullClient = {
+      const nullClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => null,
         isConnected: () => false,
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), nullClient);
 
       const result = await vh.getAndroidViewHierarchy();
@@ -1810,14 +1783,14 @@ describe("Offscreen Node Filtering", function () {
     test("does not start recovery for a null hierarchy while Android transport stays connected", async function () {
       const timer = new FakeTimer();
       let starts = 0;
-      const connectedClient = {
+      const connectedClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => null,
         isConnected: () => true,
         ensureRecoveryStarted: () => {
           starts++;
         },
         awaitRecovery: async () => "failed",
-      } as unknown as AndroidCtrlProxyClient;
+      });
       timer.enableAutoAdvance();
       const recoveryManager = AndroidCtrlProxyManager.createForTestingWithDeps(
         device,
@@ -1841,13 +1814,13 @@ describe("Offscreen Node Filtering", function () {
       let reads = 0;
       let healthChecks = 0;
       let rebinds = 0;
-      const client = {
+      const client = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () =>
           ++reads === 1
             ? { hierarchy: { error: "No windows or root node" } }
             : { hierarchy: { node: { $: { text: "Recovered" } } } },
         isConnected: () => true,
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const manager = {
         isAccessibilityServiceHealthy: async () => ++healthChecks === 2,
         rebindIfUnhealthy: async () => {
@@ -1877,10 +1850,10 @@ describe("Offscreen Node Filtering", function () {
     test("leaves a rootless capture alone when the service is bound", async function () {
       const timer = new FakeTimer();
       let rebinds = 0;
-      const client = {
+      const client = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => null,
         isConnected: () => true,
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer, () => ({
         isAccessibilityServiceHealthy: async () => true,
         rebindIfUnhealthy: async () => {
@@ -1931,7 +1904,7 @@ describe("Offscreen Node Filtering", function () {
     test("waits once and refetches Android after a confirmed recovery", async function () {
       let reads = 0;
       let starts = 0;
-      const recoveringClient = {
+      const recoveringClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () =>
           ++reads === 1 ? null : { hierarchy: { node: { $: { text: "Recovered" } } } },
         isConnected: () => false,
@@ -1943,7 +1916,7 @@ describe("Offscreen Node Filtering", function () {
           return "recovered";
         },
         isRecoveryInFlight: () => false,
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), recoveringClient);
       const result = await vh.getViewHierarchy();
       expect(reads).toBe(2);
@@ -1954,7 +1927,7 @@ describe("Offscreen Node Filtering", function () {
     test("reports service_recovering when this call starts recovery that remains in flight", async function () {
       let reads = 0;
       let recovering = false;
-      const recoveringClient = {
+      const recoveringClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => {
           reads++;
           return null;
@@ -1965,7 +1938,7 @@ describe("Offscreen Node Filtering", function () {
         },
         awaitRecovery: async () => "timed_out",
         isRecoveryInFlight: () => recovering,
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), recoveringClient);
       const result = await vh.getViewHierarchy();
       expect(reads).toBe(1);
@@ -1973,7 +1946,7 @@ describe("Offscreen Node Filtering", function () {
     });
 
     test("reports runner_unavailable with the last failure when the restart budget is exhausted (#11246)", async function () {
-      const exhaustedClient = {
+      const exhaustedClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => null,
         isConnected: () => false,
         ensureRecoveryStarted: () => {},
@@ -1984,7 +1957,7 @@ describe("Offscreen Node Filtering", function () {
           attempts: 3,
           lastFailureReason: "service recovery failed",
         }),
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), exhaustedClient);
       const result = await vh.getViewHierarchy();
       expect(result.hierarchy.unavailableReason).toBe("runner_unavailable");
@@ -1996,7 +1969,7 @@ describe("Offscreen Node Filtering", function () {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       let reads = 0;
-      const client = {
+      const client = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async (...args: unknown[]) => {
           reads++;
           if (reads === 2) {
@@ -2012,7 +1985,7 @@ describe("Offscreen Node Filtering", function () {
           await timer.sleep(budget);
           return "recovered";
         },
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
       await vh.getViewHierarchy(undefined, {
         skipWaitForFresh: false,
@@ -2027,7 +2000,7 @@ describe("Offscreen Node Filtering", function () {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
       let waitBudget = -1;
-      const client = {
+      const client = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => {
           await timer.sleep(800);
           return null;
@@ -2040,7 +2013,7 @@ describe("Offscreen Node Filtering", function () {
           return "failed";
         },
         isRecoveryInFlight: () => false,
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
       await vh.getViewHierarchy(undefined, {
         skipWaitForFresh: false,
@@ -2055,14 +2028,14 @@ describe("Offscreen Node Filtering", function () {
       const timer = new FakeTimer();
       let starts = 0;
       let waits = 0;
-      const client = {
+      const client = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => null,
         ensureRecoveryStarted: () => starts++,
         awaitRecovery: async () => {
           waits++;
           return "recovered";
         },
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer);
       await vh.getViewHierarchy(undefined, {
         skipWaitForFresh: false,
@@ -2073,9 +2046,9 @@ describe("Offscreen Node Filtering", function () {
     });
 
     test("does not mark the null-result path as a transport failure when the caller aborted (#7534)", async function () {
-      const nullClient = {
+      const nullClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => null,
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), nullClient);
       const controller = new AbortController();
       controller.abort();
@@ -2092,11 +2065,11 @@ describe("Offscreen Node Filtering", function () {
     });
 
     test("marks a thrown connection-lost error as a transport failure (#7534)", async function () {
-      const throwingClient = {
+      const throwingClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => {
           throw new Error("WebSocket not connected");
         },
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), throwingClient);
 
       const result = await vh.getAndroidViewHierarchy();
@@ -2105,11 +2078,11 @@ describe("Offscreen Node Filtering", function () {
     });
 
     test("does not mark an ordinary thrown error as a transport failure (#7534)", async function () {
-      const throwingClient = {
+      const throwingClient = makeViewHierarchyCtrlProxy({
         getAccessibilityHierarchy: async () => {
           throw new Error("ctrlproxy offline");
         },
-      } as unknown as AndroidCtrlProxyClient;
+      });
       const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), throwingClient);
 
       const result = await vh.getAndroidViewHierarchy();

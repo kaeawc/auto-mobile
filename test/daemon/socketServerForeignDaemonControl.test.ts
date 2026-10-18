@@ -60,7 +60,6 @@ function useServer(localSessionHoldsDevice = false): void {
   };
   const server = createTestUnixSocketServer(
     "unused",
-    "http://localhost:0/mcp",
     state,
     new FakeTimer(),
     null,
@@ -124,26 +123,23 @@ beforeEach(() => {
       succeededPlatforms: new Set(["android", "ios"]),
     }),
   } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-    () =>
-      ({
-        getScreenScaleMetadata: () => null,
-        requestTapCoordinates: async (
-          ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-        ) => {
-          args[6]?.();
-          deviceCalls.push("tap");
-          return { success: true };
-        },
-        setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-          if (typeof args[5] === "object") {
-            args[5].onDispatch?.();
-          }
-          deviceCalls.push("setPreference");
-          return { success: true };
-        },
-      }) as unknown as AndroidCtrlProxyClient,
-  );
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+    getScreenScaleMetadata: () => null,
+    requestTapCoordinates: async (
+      ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+    ) => {
+      args[6]?.();
+      deviceCalls.push("tap");
+      return { success: true };
+    },
+    setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+      if (typeof args[5] === "object") {
+        args[5].onDispatch?.();
+      }
+      deviceCalls.push("setPreference");
+      return { success: true };
+    },
+  }));
 });
 
 afterEach(() => {

@@ -347,16 +347,15 @@ describe("Android doctor command line tools check", () => {
 describe("post-repair Android doctor checks", () => {
   test("remain device-neutral and never enumerate AVDs", async () => {
     let listAvdsCalls = 0;
-    const adbFactory = {
-      create: () => ({
-        getAdbPathOnly: async () => "/test/android-sdk/platform-tools/adb",
-        executeCommand: async () => ({
-          stdout: adbVersionOutput,
-          stderr: "",
-          exitCode: 0,
-        }),
-      }),
-    } as unknown as AdbClientFactory;
+    const adbExecutor = new FakeAdbExecutor();
+    adbExecutor.setCommandResponse("--version", {
+      stdout: adbVersionOutput,
+      stderr: "",
+      toString: () => adbVersionOutput,
+      trim: () => adbVersionOutput.trim(),
+      includes: (s: string) => adbVersionOutput.includes(s),
+    });
+    const adbFactory = new FakeAdbClientFactory(adbExecutor);
 
     const results = await runPostRepairAndroidChecks(
       {},
@@ -409,11 +408,11 @@ describe("post-repair Android doctor checks", () => {
           return null;
         },
         adbFactory: {
-          create: () => {
+          create: (): never => {
             adbFactoryCalls++;
             throw new Error("post-deadline Android probes must not start");
           },
-        } as unknown as AdbClientFactory,
+        },
       },
     );
 
@@ -581,7 +580,7 @@ describe("checkAdbVersion", () => {
     // FakeAdbClientFactory expects FakeAdbClient, but checkAdbVersion uses
     // executeCommand which is on AdbExecutor. We build a custom factory
     // that returns our FakeAdbExecutor.
-    fakeFactory = new FakeAdbClientFactory(fakeExecutor as any);
+    fakeFactory = new FakeAdbClientFactory(fakeExecutor);
   });
 
   test("reports the platform-tools version from captured ADB output", async () => {
@@ -795,7 +794,7 @@ describe("doctor probe cancellation seam (#7008)", () => {
       trim: () => "",
       includes: () => false,
     });
-    const fakeFactory = new FakeAdbClientFactory(fakeExecutor as any);
+    const fakeFactory = new FakeAdbClientFactory(fakeExecutor);
 
     await checkAdbVersion(fakeFactory, { signal: controller.signal, timeoutMs: 1234 });
 
@@ -812,7 +811,7 @@ describe("doctor probe cancellation seam (#7008)", () => {
 
   test("checkAdbVersion runs the adb command without a signal or deadline by default", async () => {
     const fakeExecutor = new FakeAdbExecutor();
-    const fakeFactory = new FakeAdbClientFactory(fakeExecutor as any);
+    const fakeFactory = new FakeAdbClientFactory(fakeExecutor);
 
     await checkAdbVersion(fakeFactory);
 
@@ -863,7 +862,7 @@ describe("checkConnectedDevices", () => {
 
   beforeEach(() => {
     fakeExecutor = new FakeAdbExecutor();
-    fakeFactory = new FakeAdbClientFactory(fakeExecutor as any);
+    fakeFactory = new FakeAdbClientFactory(fakeExecutor);
   });
 
   test("warns when no devices are connected", async () => {

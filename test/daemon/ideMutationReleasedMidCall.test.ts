@@ -144,24 +144,21 @@ describe("idle release while the holder's device call is in flight", () => {
         succeededPlatforms: new Set(["android", "ios"]),
       }),
     } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-      () =>
-        ({
-          getScreenScaleMetadata: () => null,
-          requestTapCoordinates: (
-            ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-          ) => {
-            args[6]?.();
-            return deviceCall();
-          },
-          setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-            if (typeof args[5] === "object") {
-              args[5].onDispatch?.();
-            }
-            await deviceCall();
-          },
-        }) as unknown as AndroidCtrlProxyClient,
-    );
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+      getScreenScaleMetadata: () => null,
+      requestTapCoordinates: (
+        ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+      ) => {
+        args[6]?.();
+        return deviceCall();
+      },
+      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+        if (typeof args[5] === "object") {
+          args[5].onDispatch?.();
+        }
+        await deviceCall();
+      },
+    }));
     spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
       () =>
         ({
@@ -174,7 +171,6 @@ describe("idle release while the holder's device call is in flight", () => {
     const fakePool = createFakeDaemonState().getDevicePool();
     const server = createTestUnixSocketServer(
       "unused",
-      "http://localhost:0/mcp",
       {
         isInitialized: () => true,
         getSessionManager: () => sessionManager,

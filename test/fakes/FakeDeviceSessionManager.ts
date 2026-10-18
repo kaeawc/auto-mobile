@@ -263,39 +263,47 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
 
     // Use provided device ID if given
     if (providedDeviceId) {
-      selectedDevice = this.connectedDevices.find((d) => d.deviceId === providedDeviceId);
+      selectedDevice = this.connectedDevices.find(
+        (d) =>
+          d.deviceId === providedDeviceId && (platform === "either" || d.platform === platform),
+      );
       if (!selectedDevice) {
         throw new ActionableError(`Device ${providedDeviceId} not found`);
       }
     } else {
-      // Find device for the specified platform
+      // Find device for the specified platform. Like the real readiness, a pin or current device
+      // that is no longer connected is dropped (the pin) or ignored (the current device).
+      const isConnected = (device: BootedDevice | undefined): device is BootedDevice =>
+        !!device && this.connectedDevices.some((d) => d.deviceId === device.deviceId);
+      if (!isConnected(this.explicitDevicePin)) {
+        this.explicitDevicePin = undefined;
+      }
+      const pin = this.explicitDevicePin;
+      const current = isConnected(this.currentDevice) ? this.currentDevice : undefined;
+      const currentPlatform = current ? this.currentPlatform : undefined;
+      const pick = (resolvedPlatform: Platform | undefined): BootedDevice | undefined =>
+        pin?.platform === resolvedPlatform
+          ? pin
+          : currentPlatform === resolvedPlatform
+            ? current
+            : this.connectedDevices.find((device) => device.platform === resolvedPlatform);
       if (platform === "either") {
         const hasAndroid = this.connectedDevices.some((device) => device.platform === "android");
         const hasIos = this.connectedDevices.some((device) => device.platform === "ios");
-        if (hasAndroid && hasIos && !this.currentDevice) {
+        if (hasAndroid && hasIos && !current) {
           throw new ActionableError(
             "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid (from getAndroid/getApple), platform, or a bound device label on this call to select the target. Alternatively, call setActiveDevice to select an active device.",
           );
         }
         const resolvedPlatform =
           hasAndroid && hasIos
-            ? (this.explicitDevicePin?.platform ?? this.currentPlatform)
+            ? (pin?.platform ?? currentPlatform)
             : hasAndroid
               ? "android"
               : "ios";
-        selectedDevice =
-          this.explicitDevicePin?.platform === resolvedPlatform
-            ? this.explicitDevicePin
-            : this.currentPlatform === resolvedPlatform
-              ? this.currentDevice
-              : this.connectedDevices.find((device) => device.platform === resolvedPlatform);
+        selectedDevice = pick(resolvedPlatform);
       } else {
-        selectedDevice =
-          this.explicitDevicePin?.platform === platform
-            ? this.explicitDevicePin
-            : this.currentPlatform === platform
-              ? this.currentDevice
-              : this.connectedDevices.find((d) => d.platform === platform);
+        selectedDevice = pick(platform);
       }
 
       if (!selectedDevice) {

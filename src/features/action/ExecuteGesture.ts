@@ -1,4 +1,5 @@
 import { capLookForTravel } from "./swipeon/lookForScroll";
+import { iosSwipeDurationReport } from "./swipeon/swipeDurationReport";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import type { Element } from "../../models";
 import { executeAndroidSearchDrag, type AndroidSearchDragState } from "./swipeon/androidSearchDrag";
@@ -29,6 +30,8 @@ import type { ActionCall } from "./ActionCall";
 export interface FencedGestureOptions extends GestureOptions {
   /** Internal opt-in for the iOS lock-screen synthesized swipe. */
   lockScreen?: boolean;
+  /** The caller passed durationMs (not a speed preset), so routes that cannot honour it must say so. */
+  durationExplicit?: boolean;
   /** Search-only drag with an endpoint hold, or a slow ADB fallback. */
   searchScroll?: boolean;
   searchScrollBounds?: Element["bounds"];
@@ -422,6 +425,7 @@ export class ExecuteGesture extends BaseVisualChange {
       logger.info(
         `[SWIPE] CtrlProxy iOS swipe successful: deviceTotal=${result.totalTimeMs}ms, gesture=${result.gestureTimeMs}ms`,
       );
+      const durationReport = iosSwipeDurationReport(Math.hypot(x2 - x1, y2 - y1), duration, result);
       return {
         success: true,
         x1,
@@ -431,6 +435,7 @@ export class ExecuteGesture extends BaseVisualChange {
         duration,
         a11yTotalTimeMs: result.totalTimeMs,
         a11yGestureTimeMs: result.gestureTimeMs,
+        ...durationReport,
       };
     } else {
       logger.error(`[SWIPE] CtrlProxy iOS swipe failed: ${result.error}`);
@@ -604,7 +609,6 @@ export class ExecuteGesture extends BaseVisualChange {
   ): Promise<void> {
     throwIfAborted(signal);
     const client = IOSCtrlProxyClient.getInstance(this.device);
-    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
     fence?.assertCurrent();
     const result = await client.requestMultiFingerSwipe(
       swipe.start.x,
@@ -617,6 +621,8 @@ export class ExecuteGesture extends BaseVisualChange {
       undefined,
       swipe.fingerSpacing,
       signal,
+      undefined,
+      () => fence?.assertCurrent(),
     );
     this.throwIfIosGestureUnconfirmed(result);
     throwIfAborted(signal);

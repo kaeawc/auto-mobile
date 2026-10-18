@@ -127,7 +127,7 @@ interface CpuMetricsResult {
   sample: PreviousCpuSample | null;
 }
 
-interface MonitoredDevice {
+export interface MonitoredDevice {
   deviceId: string;
   packageName: string;
   /**
@@ -396,6 +396,15 @@ export class PerformanceMonitor {
   }
 
   /**
+   * Look up the live monitoring record for a device. Public as a test seam so
+   * tests can inspect cached samples without reaching into the private map
+   * (#11865).
+   */
+  getMonitoredDevice(deviceId: string): MonitoredDevice | undefined {
+    return this.monitoredDevices.get(deviceId);
+  }
+
+  /**
    * Check if a device is currently being monitored.
    */
   isMonitoring(deviceId: string): boolean {
@@ -522,8 +531,9 @@ export class PerformanceMonitor {
 
   /**
    * Sample metrics for an Android device.
+   * Public as a test seam (#11865).
    */
-  private async sampleAndroidDevice(
+  async sampleAndroidDevice(
     device: MonitoredDevice,
     now: number,
     server: PerformanceDataPusher,
@@ -988,8 +998,9 @@ export class PerformanceMonitor {
   /**
    * Detect per-metric health changes and emit telemetry events.
    * Only emits when a metric crosses a threshold boundary (healthy→warning→critical or back).
+   * Public as a test seam (#11865).
    */
-  private emitPerformanceTelemetry(
+  emitPerformanceTelemetry(
     device: MonitoredDevice,
     now: number,
     metrics: {
@@ -1094,8 +1105,9 @@ export class PerformanceMonitor {
    * Parses FPS, frame time percentiles, and raw jank counters.
    * Resets gfxinfo after reading to get fresh data for the next interval.
    * Jank delta calculation happens in sampleDevice.
+   * Public as a test seam (#11865).
    */
-  private async collectGfxMetrics(
+  async collectGfxMetrics(
     device: MonitoredDevice,
     signal: AbortSignal,
   ): Promise<GfxMetrics & { rawJankCounters: RawJankCounters | null; resetSucceeded: boolean }> {
@@ -1189,11 +1201,9 @@ export class PerformanceMonitor {
   /**
    * Collect CPU usage from /proc/{pid}/stat and /proc/uptime.
    * Returns the interval percentage and the sample used as the next baseline.
+   * Public as a test seam (#11865).
    */
-  private async collectCpuMetrics(
-    device: MonitoredDevice,
-    signal: AbortSignal,
-  ): Promise<CpuMetricsResult> {
+  async collectCpuMetrics(device: MonitoredDevice, signal: AbortSignal): Promise<CpuMetricsResult> {
     try {
       const adb = this.adbClientFactory.create({
         deviceId: device.deviceId,
@@ -1276,8 +1286,9 @@ export class PerformanceMonitor {
    * is already computed by the same dumpsys pass — dropping the on-device grep
    * transfers a few more KB but adds no work on the target. We deliberately do
    * NOT pass `--unreachable`, which would force a GC on the target process.
+   * Public as a test seam (#11865).
    */
-  private async collectMemoryMetrics(
+  async collectMemoryMetrics(
     device: MonitoredDevice,
     signal: AbortSignal,
   ): Promise<{ totalPssMb: number | null; breakdown: MemoryBreakdownMb | null }> {

@@ -1,0 +1,23 @@
+import { describe, expect, test } from "bun:test";
+import { readToolResponse, toolIsError, toolJson, toolStructured, toolText } from "./toolResponse";
+
+describe("toolResponse helpers", () => {
+  const ok = { content: [{ type: "text", text: '{"a":1}' }], structuredContent: { b: 2 } };
+
+  test("reads text, json, structured content and error flag", () => {
+    expect(toolText(ok)).toBe('{"a":1}');
+    expect(toolJson(ok)).toEqual({ a: 1 });
+    expect(toolStructured(ok)).toEqual({ b: 2 });
+    expect(toolIsError(ok)).toBe(false);
+    expect(toolIsError({ ...ok, isError: true })).toBe(true);
+  });
+
+  test("throws clear errors on shape mismatch", () => {
+    expect(() => readToolResponse("nope")).toThrow("invalid response");
+    expect(() => readToolResponse({ content: "x" })).toThrow("invalid response");
+    expect(() => toolText({ content: [] })).toThrow("no text in content[0]");
+    expect(() => toolText({ content: [{ type: "image" }] })).toThrow("no text");
+    expect(() => toolJson({ content: [{ text: "[1]" }] })).toThrow("not a JSON object");
+    expect(() => toolStructured({ content: [] })).toThrow("no structuredContent");
+  });
+});

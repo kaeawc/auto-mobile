@@ -16,6 +16,8 @@ import {
 } from "../features/action/tapAtGesture";
 import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
 import { dragPathHandler, dragPathSchema } from "./dragPathTool";
+import { pointerSchema } from "./pointerSchema";
+import { validateCoordinateRange } from "./coordinateRangeValidation";
 import { previewHierarchyHitTest } from "../features/observe/HierarchyHitTest";
 import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
 import { TapAnyElement } from "../features/action/TapAnyElement";
@@ -57,6 +59,8 @@ import {
   PINCH_SCALE_EXCLUSIVE_MIN,
   PINCH_DURATION_MIN_MS,
   PINCH_DURATION_MAX_MS,
+  PINCH_ROTATION_MAX_DEGREES,
+  PINCH_ROTATION_MIN_DEGREES,
 } from "../features/action/PinchOn";
 import { Shake } from "../features/action/Shake";
 import {
@@ -122,7 +126,7 @@ import {
   type TapOnSelectedElement,
 } from "../models";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { AndroidCtrlProxyClient } from "../features/observe/android";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import {
   assertActiveWindowWaitForSupportedOnPlatform,
@@ -299,7 +303,7 @@ const KEYBOARD_READ_ACTIONS: ReadonlySet<string> = new Set(["detect", "listImes"
 export async function setKeyboardProfileForTool(
   device: BootedDevice,
   profile: KeyboardArgs["profile"],
-  client?: Pick<AndroidCtrlProxyClient, "supportsCommand" | "setKeyboardProfile">,
+  client?: Pick<AndroidCtrlProxy, "supportsCommand" | "setKeyboardProfile">,
   signal?: AbortSignal,
 ): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
   if (!profile) {
@@ -334,7 +338,7 @@ export async function setKeyboardProfileForTool(
 
 export async function listKeyboardProfilesForTool(
   device: BootedDevice,
-  client?: Pick<AndroidCtrlProxyClient, "supportsCommand" | "listKeyboardProfiles">,
+  client?: Pick<AndroidCtrlProxy, "supportsCommand" | "listKeyboardProfiles">,
   signal?: AbortSignal,
 ): Promise<KeyboardProfileCatalog> {
   if (device.platform !== "android") {
@@ -586,37 +590,6 @@ const coordinatePointInputSchema = () =>
       .strict(),
   );
 
-type CoordinatePointInput = z.infer<ReturnType<typeof coordinatePointInputSchema>>;
-
-function validateCoordinateRange(
-  value: { x?: number; y?: number; coordinateSpace?: CoordinatePointInput["coordinateSpace"] },
-  context: z.RefinementCtx,
-): void {
-  const max =
-    value.coordinateSpace === "normalized"
-      ? 1
-      : value.coordinateSpace === "percent"
-        ? 100
-        : undefined;
-  if (max === undefined) {
-    return;
-  }
-  for (const axis of ["x", "y"] as const) {
-    if (
-      value[axis] === undefined ||
-      !Number.isFinite(value[axis]) ||
-      value[axis] < 0 ||
-      value[axis] > max
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: `${axis} must be between 0 and ${max}`,
-        path: [axis],
-      });
-    }
-  }
-}
-
 export const tapAtSchema = withJsonSchemaOverride(
   coordinatePointInputSchema()
     .extend({
@@ -641,6 +614,7 @@ export const tapAtSchema = withJsonSchemaOverride(
         .describe(
           `Long-press duration in milliseconds (${LONG_PRESS_MIN_MS}–${LONG_PRESS_MAX_MS}; default ${LONG_PRESS_DEFAULT_MS}); only with longPress`,
         ),
+      pointer: pointerSchema.optional(),
     })
     .superRefine((value, context) => {
       if (value.durationMs !== undefined && value.action !== "longPress") {
@@ -900,7 +874,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
           .max(SWIPE_DURATION_MAX_MS)
           .optional()
           .describe(
-            `Forward-stroke duration in ms (integer ${SWIPE_DURATION_MIN_MS}-${SWIPE_DURATION_MAX_MS}); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total). Android may quantize very short strokes.`,
+            `Forward-stroke duration in ms (integer ${SWIPE_DURATION_MIN_MS}-${SWIPE_DURATION_MAX_MS}); exclusive with speed and lookFor. Velocity = swipe distance / duration; the result reports the dispatched duration (boomerang: total) and, for a single swipe, velocityPxPerSecond (omitted for boomerang, lookFor, and the TalkBack route that ignores duration; uses effectiveDurationMs when clamped). Android may quantize very short strokes. Limits: the TalkBack semantic-scroll route has no timed stroke and ignores it (durationIgnored + warnings); the iOS XCUICoordinate route clamps velocity to 100-10000 pt/s (effectiveDurationMs + warnings).`,
           ),
         fromEdge: z
           .enum(["left", "right", "top", "bottom"])
@@ -994,9 +968,11 @@ export const pinchOnSchema = withJsonSchemaOverride(
           ),
         rotationDegrees: z
           .number()
+          .min(PINCH_ROTATION_MIN_DEGREES)
+          .max(PINCH_ROTATION_MAX_DEGREES)
           .optional()
           .describe(
-            "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.",
+            `Degrees (${PINCH_ROTATION_MIN_DEGREES} to ${PINCH_ROTATION_MAX_DEGREES}) the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS. To rotate without zooming set scale: 1 (or equal distanceStart and distanceEnd); direction is then ignored.`,
           ),
         includeSystemInsets: z
           .boolean()
@@ -1657,35 +1633,52 @@ export function formatSwipeOnMessage(
 // gating below is caught by a test — not just the formatter (#6163).
 export type SwipeOnLike = Pick<SwipeOn, "execute">;
 
+/**
+ * Overridable collaborators for the interaction tool handlers. Every field is
+ * optional and defaults to the real implementation; tests pass fakes instead
+ * of mutating module-level state (#11831).
+ */
+export interface InteractionToolDependencies {
+  sendKeysFactory?: (device: BootedDevice) => SendKeysLike;
+  swipeOnFactory?: (device: BootedDevice) => SwipeOnLike;
+  pinchOnFactory?: (device: BootedDevice) => PinchOnLike;
+  tapOnElementFactory?: (device: BootedDevice) => TapOnElementLike;
+  tapAtElementFactory?: (device: BootedDevice) => TapAtElementLike;
+  hitTestObservationFactory?: (device: BootedDevice) => HitTestObservationReader;
+  hitTestDeviceReadFactory?: (device: BootedDevice, display?: string) => HitTestDeviceReader;
+  tapAnyElementFactory?: (device: BootedDevice) => TapAnyElementLike;
+  dragAndDropFactory?: (device: BootedDevice) => DragAndDropLike;
+  selectAllTextFactory?: (device: BootedDevice) => SelectAllTextLike;
+  pressButtonFactory?: (device: BootedDevice) => PressButtonLike;
+  rotateFactory?: (device: BootedDevice, options?: RotateOptions) => RotateLike;
+  setPostureFactory?: (device: BootedDevice) => SetPostureLike;
+  keyboardFactory?: (device: BootedDevice) => Pick<Keyboard, "execute">;
+  openUrlFactory?: (device: BootedDevice) => Pick<OpenURL, "execute">;
+  openLinkChooserFactory?: (device: BootedDevice) => Pick<HandleIntentChooser, "execute">;
+  shakeFactory?: (device: BootedDevice) => Pick<Shake, "execute">;
+  recentAppsFactory?: (device: BootedDevice) => Pick<RecentApps, "execute">;
+  clipboardFactory?: (device: BootedDevice) => Pick<Clipboard, "execute">;
+  wakeAndUnlockFactory?: (device: BootedDevice) => Pick<WakeAndUnlock, "execute">;
+}
+
 type SendKeysLike = Pick<SendKeys, "execute">;
-let sendKeysFactory: (device: BootedDevice) => SendKeysLike = (device) => new SendKeys(device);
+const defaultSendKeysFactory: NonNullable<InteractionToolDependencies["sendKeysFactory"]> = (
+  device,
+) => new SendKeys(device);
 
-export function setSendKeysFactory(factory: (device: BootedDevice) => SendKeysLike): void {
-  sendKeysFactory = factory;
-}
-
-export function resetSendKeysFactory(): void {
-  sendKeysFactory = (device) => new SendKeys(device);
-}
-
-let swipeOnFactory: (device: BootedDevice) => SwipeOnLike = (device) => new SwipeOn(device);
-
-export function setSwipeOnFactory(factory: (device: BootedDevice) => SwipeOnLike): void {
-  swipeOnFactory = factory;
-}
-
-export function resetSwipeOnFactory(): void {
-  swipeOnFactory = (device) => new SwipeOn(device);
-}
+const defaultSwipeOnFactory: NonNullable<InteractionToolDependencies["swipeOnFactory"]> = (
+  device,
+) => new SwipeOn(device);
 
 export async function swipeOnHandler(
   device: BootedDevice,
   args: SwipeOnArgs,
   progress?: ProgressCallback,
   signal?: AbortSignal,
+  deps: InteractionToolDependencies = {},
 ): Promise<StructuredToolResponse<SwipeOnToolPayload> & { isError?: true }> {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-  const swipeOn = swipeOnFactory(device);
+  const swipeOn = (deps.swipeOnFactory ?? defaultSwipeOnFactory)(device);
   const resolvedDirection = resolveSwipeDirection({
     direction: args.direction,
     gestureType: args.gestureType,
@@ -1747,24 +1740,19 @@ export function formatPinchOnMessage(
 // wiring is caught by a test — not just the formatter (#6056).
 export type PinchOnLike = Pick<PinchOn, "execute">;
 
-let pinchOnFactory: (device: BootedDevice) => PinchOnLike = (device) => new PinchOn(device);
-
-export function setPinchOnFactory(factory: (device: BootedDevice) => PinchOnLike): void {
-  pinchOnFactory = factory;
-}
-
-export function resetPinchOnFactory(): void {
-  pinchOnFactory = (device) => new PinchOn(device);
-}
+const defaultPinchOnFactory: NonNullable<InteractionToolDependencies["pinchOnFactory"]> = (
+  device,
+) => new PinchOn(device);
 
 export async function pinchOnHandler(
   device: BootedDevice,
   args: PinchOnArgs,
   progress?: ProgressCallback,
   signal?: AbortSignal,
+  deps: InteractionToolDependencies = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-  const pinchOn = pinchOnFactory(device);
+  const pinchOn = (deps.pinchOnFactory ?? defaultPinchOnFactory)(device);
   const result = await pinchOn.execute(
     {
       display: args.display,
@@ -1884,61 +1872,26 @@ function buildTapOnResultDetails(
 // failure gating below is caught by a test — not just the formatter (#6152).
 export type TapOnElementLike = Pick<TapOnElement, "execute">;
 
-let tapOnElementFactory: (device: BootedDevice) => TapOnElementLike = (device) =>
-  new TapOnElement(device);
-
-export function setTapOnElementFactory(factory: (device: BootedDevice) => TapOnElementLike): void {
-  tapOnElementFactory = factory;
-}
-
-export function resetTapOnElementFactory(): void {
-  tapOnElementFactory = (device) => new TapOnElement(device);
-}
+const defaultTapOnElementFactory: NonNullable<
+  InteractionToolDependencies["tapOnElementFactory"]
+> = (device) => new TapOnElement(device);
 
 export type TapAtElementLike = Pick<TapAtCoordinate, "execute">;
 
-let tapAtElementFactory: (device: BootedDevice) => TapAtElementLike = (device) =>
-  new TapAtCoordinate(device);
-
-export function setTapAtElementFactory(factory: (device: BootedDevice) => TapAtElementLike): void {
-  tapAtElementFactory = factory;
-}
-
-export function resetTapAtElementFactory(): void {
-  tapAtElementFactory = (device) => new TapAtCoordinate(device);
-}
+const defaultTapAtElementFactory: NonNullable<
+  InteractionToolDependencies["tapAtElementFactory"]
+> = (device) => new TapAtCoordinate(device);
 
 type HitTestObservationReader = Pick<RealObserveScreen, "execute">;
-let hitTestObservationFactory: (device: BootedDevice) => HitTestObservationReader = (device) =>
-  new RealObserveScreen(device);
-
-export function setHitTestObservationFactory(
-  factory: (device: BootedDevice) => HitTestObservationReader,
-): void {
-  hitTestObservationFactory = factory;
-}
-
-export function resetHitTestObservationFactory(): void {
-  hitTestObservationFactory = (device) => new RealObserveScreen(device);
-}
+const defaultHitTestObservationFactory: NonNullable<
+  InteractionToolDependencies["hitTestObservationFactory"]
+> = (device) => new RealObserveScreen(device);
 
 type HitTestDeviceReader = Pick<RealObserveScreen, "executeDeviceRead">;
-let hitTestDeviceReadFactory: (device: BootedDevice, display?: string) => HitTestDeviceReader = (
-  device,
-  display,
-) => new RealObserveScreen(device, undefined, { display, deviceReadOnly: true });
-
-/** The observer-capture reader hitTest uses on the read-only device path (#10965). */
-export function setHitTestDeviceReadFactory(
-  factory: (device: BootedDevice, display?: string) => HitTestDeviceReader,
-): void {
-  hitTestDeviceReadFactory = factory;
-}
-
-export function resetHitTestDeviceReadFactory(): void {
-  hitTestDeviceReadFactory = (device, display) =>
-    new RealObserveScreen(device, undefined, { display, deviceReadOnly: true });
-}
+const defaultHitTestDeviceReadFactory: NonNullable<
+  InteractionToolDependencies["hitTestDeviceReadFactory"]
+> = (device, display) =>
+  new RealObserveScreen(device, undefined, { display, deviceReadOnly: true });
 
 /**
  * hitTest's observation. A watcher of a held device (the read-only device path) reads through the
@@ -1949,18 +1902,24 @@ async function readHitTestObservation(
   device: BootedDevice,
   display: string | undefined,
   signal: AbortSignal | undefined,
+  deps: InteractionToolDependencies,
 ) {
   if (isSessionlessDeviceRead()) {
-    return await hitTestDeviceReadFactory(device, display).executeDeviceRead(signal, "none");
+    return await (deps.hitTestDeviceReadFactory ?? defaultHitTestDeviceReadFactory)(
+      device,
+      display,
+    ).executeDeviceRead(signal, "none");
   }
-  return await hitTestObservationFactory(device).execute({
-    display,
-    freshness: "cached-ok",
-    skipScreenshot: true,
-    skipAccessibilityAudit: true,
-    skipPerformanceAudit: true,
-    skipRecompositionTracking: true,
-  });
+  return await (deps.hitTestObservationFactory ?? defaultHitTestObservationFactory)(device).execute(
+    {
+      display,
+      freshness: "cached-ok",
+      skipScreenshot: true,
+      skipAccessibilityAudit: true,
+      skipPerformanceAudit: true,
+      skipRecompositionTracking: true,
+    },
+  );
 }
 
 const VISIBLE_HIERARCHY_TEXT_KEYS = new Set([
@@ -2141,6 +2100,12 @@ async function resolveIosOpenAlert(
   return null;
 }
 
+export interface AcceptIosAppOpenAlertOptions {
+  refreshHierarchy?: OpenAlertHierarchyRefresh;
+  tapSystemAlert?: SystemAlertTap;
+  tapOnElementFactory?: InteractionToolDependencies["tapOnElementFactory"];
+}
+
 /**
  * Tap the system-owned Open button only when the merged SpringBoard hierarchy
  * proves the custom-URL confirmation is present.
@@ -2150,9 +2115,9 @@ export async function acceptIosAppOpenAlert(
   observation: ObserveResult | undefined,
   progress?: ProgressCallback,
   signal?: AbortSignal,
-  refreshHierarchy?: OpenAlertHierarchyRefresh,
-  tapSystemAlert?: SystemAlertTap,
+  options: AcceptIosAppOpenAlertOptions = {},
 ): Promise<TapOnElementResult | null> {
+  const { refreshHierarchy, tapSystemAlert, tapOnElementFactory } = options;
   if (device.platform !== "ios") {
     return null;
   }
@@ -2178,7 +2143,7 @@ export async function acceptIosAppOpenAlert(
     return result;
   }
 
-  const result = await tapOnElementFactory(device).execute(
+  const result = await (tapOnElementFactory ?? defaultTapOnElementFactory)(device).execute(
     { text: "Open", action: "tap" },
     { progress, signal },
   );
@@ -2267,9 +2232,10 @@ export async function tapOnHandler(
   args: TapOnArgs,
   progress?: ProgressCallback,
   signal?: AbortSignal,
+  deps: InteractionToolDependencies = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-  const tapOnTextCommand = tapOnElementFactory(device);
+  const tapOnTextCommand = (deps.tapOnElementFactory ?? defaultTapOnElementFactory)(device);
   const result = await tapOnTextCommand.execute(
     {
       display: args.display,
@@ -2321,9 +2287,10 @@ export async function tapAtHandler(
   args: TapAtArgs,
   progress?: ProgressCallback,
   signal?: AbortSignal,
+  deps: InteractionToolDependencies = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-  const result = await tapAtElementFactory(device).execute(
+  const result = await (deps.tapAtElementFactory ?? defaultTapAtElementFactory)(device).execute(
     {
       ...(args.image !== undefined
         ? { image: args.image }
@@ -2333,7 +2300,8 @@ export async function tapAtHandler(
       action: args.action,
       durationMs: args.durationMs,
       layer: args.layer,
-    },
+      pointer: args.pointer,
+    } as Parameters<TapAtElementLike["execute"]>[0],
     { progress, signal, planContext: args.__tapAtPlanContext ?? args.__tapAtRecordingContext },
   );
   const message = result.success
@@ -2356,8 +2324,9 @@ export async function hitTestHandler(
   args: z.infer<typeof hitTestSchema>,
   _progress?: ProgressCallback,
   signal?: AbortSignal,
+  deps: InteractionToolDependencies = {},
 ) {
-  const observation = await readHitTestObservation(device, args.display, signal);
+  const observation = await readHitTestObservation(device, args.display, signal, deps);
   if (args.snapshotId) {
     const staleReason = snapshotReferences.staleReason(
       args.snapshotId,
@@ -2377,18 +2346,9 @@ export async function hitTestHandler(
 // TapAnyElement whose execute() returns a failure (#6163).
 export type TapAnyElementLike = Pick<TapAnyElement, "execute">;
 
-let tapAnyElementFactory: (device: BootedDevice) => TapAnyElementLike = (device) =>
-  new TapAnyElement(device);
-
-export function setTapAnyElementFactory(
-  factory: (device: BootedDevice) => TapAnyElementLike,
-): void {
-  tapAnyElementFactory = factory;
-}
-
-export function resetTapAnyElementFactory(): void {
-  tapAnyElementFactory = (device) => new TapAnyElement(device);
-}
+const defaultTapAnyElementFactory: NonNullable<
+  InteractionToolDependencies["tapAnyElementFactory"]
+> = (device) => new TapAnyElement(device);
 
 function buildTapAnySearchSummary(
   result: Pick<TapOnElementResult, "searchUntil">,
@@ -2406,9 +2366,10 @@ export async function tapAnyHandler(
   args: TapAnyArgs,
   progress?: ProgressCallback,
   signal?: AbortSignal,
+  deps: InteractionToolDependencies = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-  const tapAnyCommand = tapAnyElementFactory(device);
+  const tapAnyCommand = (deps.tapAnyElementFactory ?? defaultTapAnyElementFactory)(device);
   const result = await tapAnyCommand.execute(
     {
       display: args.display,
@@ -2448,25 +2409,19 @@ export async function tapAnyHandler(
 // failure (#6163).
 export type DragAndDropLike = Pick<DragAndDrop, "execute">;
 
-let dragAndDropFactory: (device: BootedDevice) => DragAndDropLike = (device) =>
-  new DragAndDrop(device);
-
-export function setDragAndDropFactory(factory: (device: BootedDevice) => DragAndDropLike): void {
-  dragAndDropFactory = factory;
-}
-
-export function resetDragAndDropFactory(): void {
-  dragAndDropFactory = (device) => new DragAndDrop(device);
-}
+const defaultDragAndDropFactory: NonNullable<InteractionToolDependencies["dragAndDropFactory"]> = (
+  device,
+) => new DragAndDrop(device);
 
 export async function dragAndDropHandler(
   device: BootedDevice,
   args: DragAndDropArgs,
   progress?: ProgressCallback,
   signal?: AbortSignal,
+  deps: InteractionToolDependencies = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-  const dragAndDrop = dragAndDropFactory(device);
+  const dragAndDrop = (deps.dragAndDropFactory ?? defaultDragAndDropFactory)(device);
   const result: DragAndDropResult = await dragAndDrop.execute(
     {
       display: args.display,
@@ -2496,27 +2451,19 @@ export async function dragAndDropHandler(
 // a failure (#6163).
 export type SelectAllTextLike = Pick<SelectAllText, "execute">;
 
-let selectAllTextFactory: (device: BootedDevice) => SelectAllTextLike = (device) =>
-  new SelectAllText(device);
-
-export function setSelectAllTextFactory(
-  factory: (device: BootedDevice) => SelectAllTextLike,
-): void {
-  selectAllTextFactory = factory;
-}
-
-export function resetSelectAllTextFactory(): void {
-  selectAllTextFactory = (device) => new SelectAllText(device);
-}
+const defaultSelectAllTextFactory: NonNullable<
+  InteractionToolDependencies["selectAllTextFactory"]
+> = (device) => new SelectAllText(device);
 
 export async function selectAllTextHandler(
   device: BootedDevice,
   args: SelectAllTextArgs,
   progress?: ProgressCallback,
   signal?: AbortSignal,
+  deps: InteractionToolDependencies = {},
 ) {
   try {
-    const selectAllText = selectAllTextFactory(device);
+    const selectAllText = (deps.selectAllTextFactory ?? defaultSelectAllTextFactory)(device);
     const result: SelectAllTextResult = await selectAllText.execute(progress, signal, {
       layer: args.layer,
     });
@@ -2540,26 +2487,20 @@ export async function selectAllTextHandler(
 // failure (#6163).
 export type PressButtonLike = Pick<PressButton, "execute">;
 
-let pressButtonFactory: (device: BootedDevice) => PressButtonLike = (device) =>
-  new PressButton(device);
-
-export function setPressButtonFactory(factory: (device: BootedDevice) => PressButtonLike): void {
-  pressButtonFactory = factory;
-}
-
-export function resetPressButtonFactory(): void {
-  pressButtonFactory = (device) => new PressButton(device);
-}
+const defaultPressButtonFactory: NonNullable<InteractionToolDependencies["pressButtonFactory"]> = (
+  device,
+) => new PressButton(device);
 
 export async function pressButtonHandler(
   device: BootedDevice,
   args: PressButtonArgs,
   progress?: ProgressCallback,
   signal?: AbortSignal,
+  deps: InteractionToolDependencies = {},
 ) {
   RecompositionTracker.getInstance().recordInteraction(device.deviceId);
   try {
-    const pressButton = pressButtonFactory(device);
+    const pressButton = (deps.pressButtonFactory ?? defaultPressButtonFactory)(device);
     const result: PressButtonResult = await pressButton.execute(args.button, { progress, signal });
 
     const message = result.success
@@ -2580,33 +2521,16 @@ export async function pressButtonHandler(
 // failures must reach MCP clients as errors rather than success-shaped results.
 export type RotateLike = Pick<Rotate, "execute">;
 
-let rotateFactory: (device: BootedDevice, options?: RotateOptions) => RotateLike = (
+const defaultRotateFactory: NonNullable<InteractionToolDependencies["rotateFactory"]> = (
   device,
   options,
 ) => new Rotate(device, null, defaultTimer, options);
 
-export function setRotateFactory(
-  factory: (device: BootedDevice, options?: RotateOptions) => RotateLike,
-): void {
-  rotateFactory = factory;
-}
-
-export function resetRotateFactory(): void {
-  rotateFactory = (device, options) => new Rotate(device, null, defaultTimer, options);
-}
-
 export type SetPostureLike = Pick<SetPosture, "execute" | "executeHingeAngle">;
 
-let setPostureFactory: (device: BootedDevice) => SetPostureLike = (device) =>
-  new SetPosture(device);
-
-export function setSetPostureFactory(factory: (device: BootedDevice) => SetPostureLike): void {
-  setPostureFactory = factory;
-}
-
-export function resetSetPostureFactory(): void {
-  setPostureFactory = (device) => new SetPosture(device);
-}
+const defaultSetPostureFactory: NonNullable<InteractionToolDependencies["setPostureFactory"]> = (
+  device,
+) => new SetPosture(device);
 
 export function formatSetPostureMessage(result: SetPostureOutput): string {
   if ("status" in result) {
@@ -2634,6 +2558,7 @@ export async function setPostureHandler(
   },
   _progress?: ProgressCallback,
   signal?: AbortSignal,
+  deps: InteractionToolDependencies = {},
 ) {
   try {
     throwIfAborted(signal);
@@ -2647,7 +2572,7 @@ export async function setPostureHandler(
         "displayPreset requires posture and cannot be combined with hingeAngle.",
       );
     }
-    const action = setPostureFactory(device);
+    const action = (deps.setPostureFactory ?? defaultSetPostureFactory)(device);
     const result: SetPostureOutput =
       args.hingeAngle !== undefined
         ? await action.executeHingeAngle(args.hingeAngle, {
@@ -2675,6 +2600,7 @@ export async function rotateHandler(
   args: RotateArgs,
   progress?: ProgressCallback,
   signal?: AbortSignal,
+  deps: InteractionToolDependencies = {},
 ) {
   try {
     if (args.lockOrientation !== undefined && device.platform !== "android") {
@@ -2685,7 +2611,7 @@ export async function rotateHandler(
         ? DaemonState.getInstance().getSessionManager()
         : undefined;
     const deadlineMs = resolveTransportDeadlineMs(args);
-    const rotate = rotateFactory(device, {
+    const rotate = (deps.rotateFactory ?? defaultRotateFactory)(device, {
       ...(deadlineMs === undefined ? {} : { deadlineMs }),
       sessionRotation: (mutation) =>
         runSessionRotationMutation(manager, args.sessionUuid, device.deviceId, mutation),
@@ -2739,80 +2665,33 @@ async function handleInstalledImeAction(
 }
 
 // Per-command factories preserve the default device implementations in production.
-let keyboardFactory: (device: BootedDevice) => Pick<Keyboard, "execute"> = (device) =>
-  new Keyboard(device);
-export function setKeyboardFactory(factory: typeof keyboardFactory): void {
-  keyboardFactory = factory;
-}
-export function resetKeyboardFactory(): void {
-  keyboardFactory = (device) => new Keyboard(device);
-}
-let openUrlFactory: (device: BootedDevice) => Pick<OpenURL, "execute"> = (device) =>
-  new OpenURL(device);
-export function setOpenUrlFactory(factory: typeof openUrlFactory): void {
-  openUrlFactory = factory;
-}
-export function resetOpenUrlFactory(): void {
-  openUrlFactory = (device) => new OpenURL(device);
-}
-let openLinkChooserFactory: (device: BootedDevice) => Pick<HandleIntentChooser, "execute"> = (
+const defaultKeyboardFactory: NonNullable<InteractionToolDependencies["keyboardFactory"]> = (
   device,
-) => new HandleIntentChooser(device);
-export function setOpenLinkChooserFactory(factory: typeof openLinkChooserFactory): void {
-  openLinkChooserFactory = factory;
-}
-export function resetOpenLinkChooserFactory(): void {
-  openLinkChooserFactory = (device) => new HandleIntentChooser(device);
-}
+) => new Keyboard(device);
+const defaultOpenUrlFactory: NonNullable<InteractionToolDependencies["openUrlFactory"]> = (
+  device,
+) => new OpenURL(device);
+const defaultOpenLinkChooserFactory: NonNullable<
+  InteractionToolDependencies["openLinkChooserFactory"]
+> = (device) => new HandleIntentChooser(device);
 
-let shakeFactory: (device: BootedDevice) => Pick<Shake, "execute"> = (device) => new Shake(device);
-export function setShakeFactory(factory: (device: BootedDevice) => Pick<Shake, "execute">): void {
-  shakeFactory = factory;
-}
-export function resetShakeFactory(): void {
-  shakeFactory = (device) => new Shake(device);
-}
-let recentAppsFactory: (device: BootedDevice) => Pick<RecentApps, "execute"> = (device) =>
-  new RecentApps(device);
-export function setRecentAppsFactory(
-  factory: (device: BootedDevice) => Pick<RecentApps, "execute">,
-): void {
-  recentAppsFactory = factory;
-}
-export function resetRecentAppsFactory(): void {
-  recentAppsFactory = (device) => new RecentApps(device);
-}
-let clipboardFactory: (device: BootedDevice) => Pick<Clipboard, "execute"> = (device) =>
-  new Clipboard(device);
-export function setClipboardFactory(
-  factory: (device: BootedDevice) => Pick<Clipboard, "execute">,
-): void {
-  clipboardFactory = factory;
-}
-export function resetClipboardFactory(): void {
-  clipboardFactory = (device) => new Clipboard(device);
-}
-let wakeAndUnlockFactory: (device: BootedDevice) => Pick<WakeAndUnlock, "execute"> = (device) =>
+const defaultShakeFactory: NonNullable<InteractionToolDependencies["shakeFactory"]> = (device) =>
+  new Shake(device);
+const defaultRecentAppsFactory: NonNullable<InteractionToolDependencies["recentAppsFactory"]> = (
+  device,
+) => new RecentApps(device);
+const defaultClipboardFactory: NonNullable<InteractionToolDependencies["clipboardFactory"]> = (
+  device,
+) => new Clipboard(device);
+const defaultWakeAndUnlockFactory: NonNullable<
+  InteractionToolDependencies["wakeAndUnlockFactory"]
+> = (device) =>
   new WakeAndUnlock(device, undefined, {
     credentialStore: new DeviceLockStore(),
     iosUnlocker: device.platform === "ios" ? new IosLockScreenUnlocker(device) : undefined,
     iosRunnerRecovery:
       device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : undefined,
   });
-export function setWakeAndUnlockFactory(
-  factory: (device: BootedDevice) => Pick<WakeAndUnlock, "execute">,
-): void {
-  wakeAndUnlockFactory = factory;
-}
-export function resetWakeAndUnlockFactory(): void {
-  wakeAndUnlockFactory = (device) =>
-    new WakeAndUnlock(device, undefined, {
-      credentialStore: new DeviceLockStore(),
-      iosUnlocker: device.platform === "ios" ? new IosLockScreenUnlocker(device) : undefined,
-      iosRunnerRecovery:
-        device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : undefined,
-    });
-}
 
 /** UI interactions that may cause in-app navigation (the navigation recorder records them). */
 const NAV = { recordsNavigation: true } as const;
@@ -2903,7 +2782,39 @@ export const keyboardTool = defineDeviceTool({
 
 export const keyboardSchema = keyboardTool.schema;
 
-export function registerInteractionTools() {
+function buildIosOpenAlertOptions(
+  iosClient: IOSCtrlProxyClient | null,
+  signal: AbortSignal | undefined,
+  tapOnElementFactory: InteractionToolDependencies["tapOnElementFactory"],
+): AcceptIosAppOpenAlertOptions {
+  return {
+    tapOnElementFactory,
+    refreshHierarchy: iosClient
+      ? async () => {
+          const refreshed = await iosClient.requestHierarchySync(
+            undefined,
+            true,
+            signal,
+            IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
+          );
+          return refreshed ? iosClient.convertToViewHierarchyResult(refreshed.hierarchy) : null;
+        }
+      : undefined,
+    tapSystemAlert: iosClient
+      ? () =>
+          iosClient.requestAction(
+            "system_alert_accept",
+            undefined,
+            undefined,
+            IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
+            undefined,
+            { abortSignal: signal },
+          )
+      : undefined,
+  };
+}
+
+export function registerInteractionTools(deps: InteractionToolDependencies = {}) {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
   // injectable factory) so a unit test can exercise the registered handler
@@ -2936,7 +2847,7 @@ export function registerInteractionTools() {
   ) => {
     await assertSendKeysRunnerCompatible(device);
     RecompositionTracker.getInstance().recordInteraction(device.deviceId);
-    const sendKeys = sendKeysFactory(device);
+    const sendKeys = (deps.sendKeysFactory ?? defaultSendKeysFactory)(device);
     const result = await sendKeys.execute(
       args.commands,
       args.selector,
@@ -2949,7 +2860,10 @@ export function registerInteractionTools() {
       device,
       serverConfig.isDismissKeyboardAfterInputEnabled(),
       result.success,
-      async (closeSignal) => keyboardFactory(device).execute("close", { signal: closeSignal }),
+      async (closeSignal) =>
+        (deps.keyboardFactory ?? defaultKeyboardFactory)(device).execute("close", {
+          signal: closeSignal,
+        }),
       signal,
     );
     const response = createStructuredToolResponse({
@@ -2969,7 +2883,7 @@ export function registerInteractionTools() {
     _progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
-    const wakeAndUnlock = wakeAndUnlockFactory(device);
+    const wakeAndUnlock = (deps.wakeAndUnlockFactory ?? defaultWakeAndUnlockFactory)(device);
     const transportDeadlineMs = (args as Record<string, unknown>)[
       INTERNAL_MCP_REQUEST_DEADLINE_PARAM
     ];
@@ -3006,7 +2920,7 @@ export function registerInteractionTools() {
       throw new ActionableError("chooserAppPackage is supported only on Android.");
     }
 
-    const openUrl = openUrlFactory(device);
+    const openUrl = (deps.openUrlFactory ?? defaultOpenUrlFactory)(device);
     const opened = await openUrl.execute(args.url, { signal });
     throwIfAborted(signal);
     const result = args.chooserAppPackage
@@ -3015,7 +2929,7 @@ export function registerInteractionTools() {
           args.chooserAppPackage,
           opened,
           opened.url,
-          openLinkChooserFactory(device),
+          (deps.openLinkChooserFactory ?? defaultOpenLinkChooserFactory)(device),
           signal,
         )
       : opened;
@@ -3028,30 +2942,7 @@ export function registerInteractionTools() {
             result.observation,
             progress,
             signal,
-            iosClient
-              ? async () => {
-                  const refreshed = await iosClient.requestHierarchySync(
-                    undefined,
-                    true,
-                    signal,
-                    IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
-                  );
-                  return refreshed
-                    ? iosClient.convertToViewHierarchyResult(refreshed.hierarchy)
-                    : null;
-                }
-              : undefined,
-            iosClient
-              ? () =>
-                  iosClient.requestAction(
-                    "system_alert_accept",
-                    undefined,
-                    undefined,
-                    IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
-                    undefined,
-                    { abortSignal: signal },
-                  )
-              : undefined,
+            buildIosOpenAlertOptions(iosClient, signal, deps.tapOnElementFactory),
           )
         : null;
     const effectiveResult: OpenURLResult & { openAlertAccepted?: true } = acceptedOpenAlert
@@ -3093,7 +2984,7 @@ export function registerInteractionTools() {
     signal?: AbortSignal,
   ) => {
     try {
-      const shake = shakeFactory(device);
+      const shake = (deps.shakeFactory ?? defaultShakeFactory)(device);
       const result = await shake.execute(
         {
           duration: args.duration ?? 1000,
@@ -3138,7 +3029,7 @@ export function registerInteractionTools() {
         return handleInstalledImeAction(device, args, signal);
       }
       throwIfAborted(signal);
-      const keyboard = keyboardFactory(device);
+      const keyboard = (deps.keyboardFactory ?? defaultKeyboardFactory)(device);
       const result = await keyboard.execute(args.action, { signal });
       throwIfAborted(signal);
 
@@ -3162,7 +3053,7 @@ export function registerInteractionTools() {
     signal?: AbortSignal,
   ) => {
     try {
-      const recentApps = recentAppsFactory(device);
+      const recentApps = (deps.recentAppsFactory ?? defaultRecentAppsFactory)(device);
       const result = await recentApps.execute({ progress, signal });
 
       const response = createJSONToolResponse({
@@ -3208,7 +3099,7 @@ export function registerInteractionTools() {
     signal?: AbortSignal,
   ) => {
     try {
-      const clipboard = clipboardFactory(device);
+      const clipboard = (deps.clipboardFactory ?? defaultClipboardFactory)(device);
       const result = await clipboard.execute(args.action, args.text, { signal });
 
       let message = formatClipboardMessage(result);
@@ -3228,9 +3119,13 @@ export function registerInteractionTools() {
   };
 
   // Register with the tool registry
-  selectAllTextTool.register(ToolRegistry, selectAllTextHandler);
+  selectAllTextTool.register(ToolRegistry, (device, args, progress, signal) =>
+    selectAllTextHandler(device, args, progress, signal, deps),
+  );
 
-  pressButtonTool.register(ToolRegistry, pressButtonHandler);
+  pressButtonTool.register(ToolRegistry, (device, args, progress, signal) =>
+    pressButtonHandler(device, args, progress, signal, deps),
+  );
 
   ToolRegistry.registerDeviceAware(
     "systemTray",
@@ -3262,7 +3157,7 @@ export function registerInteractionTools() {
     "tapOn",
     "Tap an element by text/content-desc, resource-id, or Android test tag; use sibling for adjacent controls.",
     tapOnSchema,
-    tapOnHandler,
+    (device, args, progress, signal) => tapOnHandler(device, args, progress, signal, deps),
     { defaultEnabled: true, supportsProgress: true, outputSchema: tapOnResultSchema, ...NAV },
   );
 
@@ -3270,7 +3165,7 @@ export function registerInteractionTools() {
     "tapAt",
     "Tap, long press, or double tap at screen coordinates in native, normalized, or percent units.",
     tapAtSchema,
-    tapAtHandler,
+    (device, args, progress, signal) => tapAtHandler(device, args, progress, signal, deps),
     { defaultEnabled: true, supportsProgress: true },
   );
 
@@ -3286,7 +3181,7 @@ export function registerInteractionTools() {
     "hitTest",
     "Preview hierarchy-bounds candidates at a platform-native screen point; no input is dispatched and the actual event recipient is unknown.",
     hitTestSchema,
-    hitTestHandler,
+    (device, args, progress, signal) => hitTestHandler(device, args, progress, signal, deps),
     // Dispatches no input: a read (#10965). On a held device it reads through the observer
     // capture (`readHitTestObservation`), never the holder's session pipeline (#10828).
     { defaultEnabled: false, deviceReadOnly: true },
@@ -3296,7 +3191,7 @@ export function registerInteractionTools() {
     "tapAny",
     "Tap any clickable element; scope with container or scrollableContainer.",
     tapAnySchema,
-    tapAnyHandler,
+    (device, args, progress, signal) => tapAnyHandler(device, args, progress, signal, deps),
     { defaultEnabled: true, supportsProgress: true },
   );
 
@@ -3304,7 +3199,7 @@ export function registerInteractionTools() {
     "dragAndDrop",
     "Drag and drop element",
     dragAndDropSchema,
-    dragAndDropHandler,
+    (device, args, progress, signal) => dragAndDropHandler(device, args, progress, signal, deps),
     { defaultEnabled: false, supportsProgress: true, ...NAV },
   );
 
@@ -3312,15 +3207,21 @@ export function registerInteractionTools() {
     "swipeOn",
     "Swipe/scroll on screen or elements",
     swipeOnSchema,
-    swipeOnHandler,
+    (device, args, progress, signal) => swipeOnHandler(device, args, progress, signal, deps),
     { defaultEnabled: true, supportsProgress: true, ...NAV },
   );
 
-  ToolRegistry.registerDeviceAware("pinchOn", "Pinch to zoom", pinchOnSchema, pinchOnHandler, {
-    defaultEnabled: false,
-    supportsProgress: true,
-    ...NAV,
-  });
+  ToolRegistry.registerDeviceAware(
+    "pinchOn",
+    "Pinch to zoom",
+    pinchOnSchema,
+    (device, args, progress, signal) => pinchOnHandler(device, args, progress, signal, deps),
+    {
+      defaultEnabled: false,
+      supportsProgress: true,
+      ...NAV,
+    },
+  );
 
   shakeTool.register(ToolRegistry, shakeHandler);
 
@@ -3331,13 +3232,15 @@ export function registerInteractionTools() {
   homeScreenTool.register(ToolRegistry, homeScreenHandler);
 
   // Register the new rotate tool
-  rotateTool.register(ToolRegistry, rotateHandler);
+  rotateTool.register(ToolRegistry, (device, args, progress, signal) =>
+    rotateHandler(device, args, progress, signal, deps),
+  );
 
   ToolRegistry.registerDeviceAware(
     "setPosture",
     "Set Android device posture or iPhone Duo simulator posture, with an optional Resizable Android display preset. Specify exactly one of posture or hingeAngle (finite degrees, 0-180 inclusive). Hinge angle is BEST EFFORT, emulator/simulator only, without displayPreset; unsupported returns status: unsupported with a reason and no state change. Android console support is detected at call time; iOS requires a runner advertising set_hinge_angle (#8547). Angle results echo hingeAngle and device posture read-back, or unknown with postureReason. Android strictly parses emu sensor get hinge-angle0 output as hinge-angle0 = <n>; iOS uses the runner angle. Both report observedHingeAngle when available and warn without failing when the resulting angle is unavailable or differs by more than 1 degree.",
     setPostureSchema,
-    setPostureHandler,
+    (device, args, progress, signal) => setPostureHandler(device, args, progress, signal, deps),
     { defaultEnabled: false, outputSchema: setPostureResultSchema },
   );
 

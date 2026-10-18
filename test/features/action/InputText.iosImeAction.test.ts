@@ -3,7 +3,6 @@ import { runWithTextRequestContext } from "../../../src/features/action/textTran
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InputText } from "../../../src/features/action/InputText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import type { BootedDevice, SendTextResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -12,6 +11,7 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("InputText iOS IME action", () => {
   const iosDevice: BootedDevice = {
@@ -58,9 +58,7 @@ describe("InputText iOS IME action", () => {
     fakeAdb = new FakeAdbExecutor();
     fakeAdb.setAndroidApiLevel(34);
     fakeIosCtrlProxy = new FakeIOSCtrlProxy(fakeTimer);
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIosCtrlProxy as unknown as IOSCtrlProxyClient,
-    );
+    iosGetInstanceSpy = spyOnIosClientInstance(fakeIosCtrlProxy);
     imeActionSpy = spyOn(fakeIosCtrlProxy, "requestImeAction");
     inputText = createInputText(iosDevice);
   });
@@ -280,7 +278,7 @@ describe("InputText iOS IME action", () => {
   test("Android also reports failure when text lands but the action fails", async () => {
     const fakeCtrlProxy = new FakeCtrlProxy();
     androidGetInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeCtrlProxy as unknown as AndroidCtrlProxyClient,
+      fakeCtrlProxy,
     );
     fakeAdb.setCommandError("shell input keyevent KEYCODE_TAB", new Error("key event failed"));
     const androidInputText = createInputText({ ...iosDevice, platform: "android" });

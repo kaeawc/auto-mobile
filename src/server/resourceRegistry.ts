@@ -262,6 +262,13 @@ class ResourceRegistryClass {
   private deliveryTails: Map<McpServer, Promise<void>> = new Map();
   private subscriptions: Map<McpServer, Set<string>> = new Map();
   private readContexts = new Map<McpServer, (signal: AbortSignal) => ResourceReadContext>();
+  // Bumped when the registered set is cleared, so a registration skipped while the set
+  // was intact runs again afterwards (#13068).
+  private clearEpoch = 0;
+
+  get clearEpochForRegistration(): number {
+    return this.clearEpoch;
+  }
 
   // Register a new resource
   register(
@@ -713,6 +720,7 @@ class ResourceRegistryClass {
 
   // Clear all registered resources, templates, and subscriptions (for testing)
   clearResources(): void {
+    this.clearEpoch++;
     this.resources.clear();
     this.templates.clear();
     this.subscriptions.clear();

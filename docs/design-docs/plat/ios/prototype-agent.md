@@ -37,6 +37,8 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 | Bottom sheet lifting above the keyboard                                               | Supported, not yet device-verified; see [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Style `weight`, `minWidth`/`maxWidth`/`minHeight`/`maxHeight`, `aspectRatio` (#11543) | Supported, not yet device-verified: sized by `PrototypeSizing` in Android's order (bounds, then `width`/`height`, then aspect ratio); a weight takes exactly its share of a `row`/`column`'s main axis and beats that axis's size and bounds, and is ignored outside a row or column; `min` wins when it exceeds `max`; content on an axis with no authored size (or `wrap`) is centred in the box a min bound grew, as `wrapContentWidth()`/`wrapContentHeight()` do, while an explicit `width`/`height`/`fill` keeps the node's alignment; weighted stacks mirror under RTL via SwiftUI's own Layout mirroring; sizes are fractional points, not rounded to pixels |
 | Data model (#11673)                                                                   | Implemented with `prototype_data_model_v1`: authored tree and repeat-cell guards precede resolution; resolved limits precede repeat expansion; status reports read-only `data`; see [Data model](../android/prototype-ux.md#data-model-11673).                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Data actions (#12519), `prototype_data_actions_v1`                                    | Implemented, not yet device-verified: `setData`, `appendData`, `removeData` through `PrototypeDataWrite`; see [Data actions capability](#data-actions-capability).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Storage (#12522), `prototype_storage_v1`                                              | Implemented, not yet device-verified: per-id values in the app sandbox with the Android precedence rules; see [Storage capability](#storage-capability).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Request action (#12529)                                                               | Implemented, not yet device-verified (`prototype_network_v1` and `prototype_network_device_v1`): `via: "host"` through `prototype_request` / `prototype_response` frames, `via: "device"` through a URLSession client; see [Request action capability](#request-action-capability).                                                                                                                                                                                                                                                                                                                                                                                  |
 | [Patch (#11675)](../android/prototype-ux.md#patch-11675)                              | Implemented: `patch_prototype` applies `/data`, `/state` and `replaceNode` in place, advertised as `prototype_patch_v1` (`PrototypeSession.patch`). Needs device verification.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Non-scalar state values (`null`, array, object)                                       | Refused at `show`, as Android and the host schema do: state is string, number or boolean only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -523,7 +525,8 @@ tree cannot be rebuilt for within the show's limits is refused like any other.
 
 A refused write changes nothing, emits nothing and does not stop the rest of the action list. An
 accepted write bumps the shown id's data revision (monotonic per id, never rewound by a re-show, as
-event sequences are) and emits one `change` event whose `name` is the written `/data/...` path (the
+event sequences are; every show is itself one revision, so the first show reports 1, as on Android,
+#13040) and emits one `change` event whose `name` is the written `/data/...` path (the
 array for an append) and whose payload is `{op, value?, revision}`. The value always travels. The agent
 shares that counter with `prototype_patch_v1` (#11675): device state writes and accepted patches take the next revision too.
 
@@ -619,6 +622,47 @@ viewer template app sets `NSAllowsArbitraryLoads` in `Viewer/Info.plist`, so a v
 an injected agent a `via: "device"` request that ATS blocks
 (`NSURLErrorAppTransportSecurityRequiresSecureConnection`) completes as a typed `network` error whose
 message tells the author to use `via: "host"`, which the AutoMobile host runs without that restriction.
+
+## Data, storage and network (#12531)
+
+This is the iOS view of the data, storage and request features; the shared contract and the capability
+map live in the Android design doc, [Data, storage and network](../android/prototype-ux.md#data-storage-and-network-12531).
+
+| Capability                    | Gates                                                                | iOS agent                                                                                               |
+| ----------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `prototype_data_actions_v1`   | `setData`, `appendData`, `removeData`                                | Advertised; see [Data actions capability](#data-actions-capability)                                     |
+| `prototype_storage_v1`        | root `storage` block, `inspect` `storage`, `clear_prototype_storage` | Advertised; values live under `Application Support/AutoMobilePrototypeAgent/storage` in the app sandbox |
+| `prototype_network_v1`        | `request` with `via: "host"`                                         | Advertised; see [Request action capability](#request-action-capability)                                 |
+| `prototype_network_device_v1` | `request` with `via: "device"`                                       | Advertised; a dedicated ephemeral `URLSession`                                                          |
+
+**`localhost` on a simulator.** An iOS simulator shares the Mac's network stack, so `localhost`,
+`127.0.0.1` and `[::1]` are the Mac for both `via` values and nothing is reversed (Android needs
+`adb reverse` for `via: "device"`).
+
+**Transports.** `via: "host"` is a `prototype_request` frame to exactly one connection, the most
+recently authenticated one, answered by a `prototype_response`; the host runs the fetch and applies no
+allowlist. `via: "device"` runs on `URLSession` inside the target app. There is no URL allowlist on
+either path.
+
+**App Transport Security.** `via: "device"` is subject to the app's ATS: cleartext `http://` to `localhost`
+and IP addresses is exempt, any other cleartext host is blocked and reported as `network` with a message
+that points to `via: "host"` (which the host runs without ATS) or `https://`.
+
+**Storage.** Precedence is the same as Android: a changed `version` discards stored values, stored values
+replace the spec's for listed keys, and values that no longer fit are dropped. A failed disk write keeps
+the keys dirty and retries, and a same-id re-show restores from the unsaved values meanwhile.
+
+**Limits.** The same as Android:
+
+| Limit                                        | Value                                                                                        |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `/data` write (after any action or response) | `MAX_PROTOTYPE_DATA_WRITE_BYTES`, 262144 bytes of data cost                                  |
+| Response body                                | `MAX_PROTOTYPE_RESPONSE_BYTES`, 262144 bytes, 2xx only (a non-2xx body is never read)        |
+| Request `timeoutMs`                          | 1 to 30000, default 10000                                                                    |
+| Requests in flight                           | 4 per device                                                                                 |
+| Header and query entries                     | 16 each, values up to 4096 characters                                                        |
+| Storage                                      | at most 64 keys, 262144 stored bytes per prototype id                                        |
+| Emit payload                                 | 4096 bytes; a larger `change` event drops its `value` and the host stops mirroring that spec |
 
 ## Text field options
 

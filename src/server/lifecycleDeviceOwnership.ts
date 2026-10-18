@@ -1,12 +1,11 @@
 import { holderOf } from "../daemon/deviceBinding";
-import { DaemonState } from "../daemon/daemonState";
+import { DaemonState, type DaemonStateLike } from "../daemon/daemonState";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
-import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import {
   assertInputRequesterHoldsDevice,
   InputDeviceOwnedError,
 } from "../daemon/inputDeviceOwnership";
-import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import type { LifecycleRequester } from "../features/deviceLifecycle/lifecycleRequester";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import type { RestartStopIdentity } from "../daemon/devicePool";
 import {
@@ -23,30 +22,6 @@ import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
 export const LIFECYCLE_TOOL_REMEDY =
   "call it with the holding session's sessionUuid, wait for the holder to release the device, " +
   "or pass force: true to stop it anyway.";
-
-/** Who is asking: the call's routing session and the MCP connection it came over. */
-export interface LifecycleRequester {
-  sessionUuid: string | undefined;
-  mcpSessionId: string | undefined;
-}
-
-/**
- * The requester of a plain (`ToolRegistry.register`) tool call. Such tools never pass through
- * device-aware target resolution, so the routing session (an explicit, admitted `sessionUuid` or
- * the connection's bound session) comes from the ambient tool-selection context.
- */
-export function lifecycleRequester(args: object): LifecycleRequester {
-  const mcpSessionId: unknown = Reflect.get(args, INTERNAL_MCP_SESSION_PARAM);
-  const explicitSessionUuid: unknown = Reflect.get(args, "sessionUuid");
-  return {
-    sessionUuid:
-      getToolSelectionContext()?.routingSessionUuid ??
-      (typeof explicitSessionUuid === "string" && explicitSessionUuid.trim().length > 0
-        ? explicitSessionUuid
-        : undefined),
-    mcpSessionId: typeof mcpSessionId === "string" ? mcpSessionId : undefined,
-  };
-}
 
 /** Resolve once before synchronous stop guards; shutdown reuses this evidence for its capture. */
 export async function resolveRestartStopIdentity(input: {
@@ -316,7 +291,7 @@ async function checkForeignHolder(
  * already holding this device in the pool; a current snapshot still judges the registry first.
  */
 function assertNotForeignBindingFromSnapshot(
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   input: {
     toolName: string;
     device: { deviceId: string; platform: Platform };
@@ -348,7 +323,7 @@ function assertNotForeignBindingFromSnapshot(
 }
 
 function baseRequesterSession(
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   requester: LifecycleRequester,
 ): string | undefined {
   if (!requester.sessionUuid) {

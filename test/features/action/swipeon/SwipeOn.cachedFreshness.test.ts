@@ -31,7 +31,7 @@ describe("SwipeOn cached freshness for scrollable discovery", () => {
 
   beforeEach(() => {
     restoreClient = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      new FakeCtrlProxy() as unknown as AndroidCtrlProxyClient,
+      new FakeCtrlProxy(),
     );
     observe = new FakeObserveScreen();
     const cachedRead = observe.getMostRecentCachedObserveResult.bind(observe);

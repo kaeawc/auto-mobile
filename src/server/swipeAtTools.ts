@@ -12,6 +12,7 @@ import {
 } from "../features/action/swipeon/swipeTiming";
 import { hierarchyLayerSchema } from "./elementSelectorSchemas";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
+import { pointerSchema } from "./pointerSchema";
 import {
   addDeviceTargetingToSchema,
   platformSchema,
@@ -19,11 +20,10 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 
-export type SwipeAtArgs = SwipeAtOptions & {
+// The handler's arguments are the parsed wire schema; its exclusivity refinement (image xor
+// from/to) is narrowed where the options are built.
+export type SwipeAtArgs = z.output<typeof swipeAtSchema> & {
   __swipeAtRecordingContext?: SwipeAtRecordingContext;
-  platform?: "android" | "ios";
-  raw?: boolean;
-  project?: "full" | "skeleton";
 };
 
 const swipeAtPointSchema = z
@@ -127,6 +127,7 @@ export const swipeAtSchema = withJsonSchemaOverride(
             "Target panel key, role, or active; from/to/image resolve against that panel's observed screenSize (Android only)",
           ),
         layer: hierarchyLayerSchema.optional(),
+        pointer: pointerSchema.optional(),
         platform: platformSchema.optional(),
         ...responseShapeControlFields,
       })
@@ -193,6 +194,7 @@ export function createSwipeAtHandler({
         durationMs: args.durationMs,
         layer: args.layer,
         display: args.display,
+        pointer: args.pointer,
       } as SwipeAtOptions,
       { progress, signal, recordingContext: args.__swipeAtRecordingContext },
     );

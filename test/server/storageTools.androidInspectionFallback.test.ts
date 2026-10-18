@@ -11,6 +11,7 @@ import type { BootedDevice } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { toolJson } from "../helpers/toolResponse";
 
 let deps: Partial<StorageToolsDependencies> = {};
 function useStorageToolsDependenciesForTesting(value: Partial<StorageToolsDependencies>): void {
@@ -116,7 +117,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       type: "STRING",
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
     // Issue #6292: a direct-XML fallback edit on a possibly-running app warns that the
     // change may be overwritten from the app's in-memory cache until it is relaunched.
@@ -145,7 +146,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       type: "STRING",
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
     expect(parsed.warning).toBeUndefined();
     // The SDK path handled it; no direct-file write was attempted.
@@ -169,7 +170,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       key: "probeA",
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
 
     const writeCommand = adb
@@ -194,7 +195,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       name: FILE_NAME,
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
   });
 
@@ -267,7 +268,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       type: "STRING",
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
     expect(parsed.warning).toMatch(/relaunch/i);
     expect(parsed.warning).toContain(APP_ID);
@@ -295,7 +296,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       key: "probeA",
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
 
     const writeCommand = adb
@@ -320,7 +321,7 @@ describe("storageTools Android SharedPreferences-inspection fallback (#6292)", (
       name: FILE_NAME,
     });
 
-    const parsed = JSON.parse((result as any).content[0].text);
+    const parsed = toolJson(result);
     expect(parsed.success).toBe(true);
   });
 

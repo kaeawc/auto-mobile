@@ -220,7 +220,11 @@ request, minus 2000 ms of dispatch headroom). `durationMs` cannot be combined wi
 `speed` or `lookFor`; out-of-range values and a `speed` + `durationMs` pair are rejected
 by the schema and the action before any dispatch. Velocity follows from swipe
 distance divided by duration; the result's `duration` (and `x1`/`y1`/`x2`/`y2`) report
-what was dispatched so the fling can be reproduced. With `boomerang`, `durationMs`
+what was dispatched so the fling can be reproduced, and a single successful swipe also
+reports `velocityPxPerSecond` (native px/s, points/s on iOS), computed with the same helper as
+`swipeAt` from `effectiveDurationMs` when the iOS runner clamped the stroke, else `duration`.
+It is omitted when the route ignored the duration (`durationIgnored`, the TalkBack semantic
+scroll), for `boomerang` (`duration` is both legs) and for `lookFor` searches. With `boomerang`, `durationMs`
 applies to the forward stroke only (the return leg keeps `returnSpeed`), and the
 existing 5000 ms boomerang budget still applies. `swipeAt.durationMs` shares these
 bounds; `lookFor` and `boomerang` do not apply to `swipeAt`. Real limits: the value sent is the
@@ -422,6 +426,23 @@ is re-checked before dispatch (a changed or removed display returns `staleDispla
 with the panel's `displayId` (falling back to `input touchscreen -d` if it fails before dispatch, or
 on older APKs). A swipe dispatched but not confirmed returns `outcomeIndeterminate`. iOS refuses
 `display`.
+
+##### Stylus pointer
+
+`tapAt` and `swipeAt` accept `pointer: { toolType: "stylus" }` to inject a stylus instead of a
+finger on Android, through `adb shell input stylus` (no root). `tapAt` supports `tap` and
+`longPress` (a zero-distance stylus swipe with the duration); `swipeAt` is the straight two-point
+swipe. The shell injects a constant pressure of 1.0, so `pressure` may be omitted or `1`; any other
+value is refused, never rounded. Everything else fails with a capability error before any input
+and never falls back to a finger touch: iOS, `doubleTap`, `display`, an Android release before
+API 31, and a device whose API level cannot be read. API 31 (Android 12) is the first release whose
+`input` command sets the injected event's tool type from its source (read from the AOSP tags:
+`android-12.0.0_r1` assigns it, while `android-7.0.0_r36` through `android-11.0.0_r48` build the event
+without one). That minimum is read from source; a probe app on a device that observes `TOOL_TYPE_STYLUS`
+is tracked in #13082. A recorded stylus step keeps its `pointer`, so a replay on a device that cannot
+honor it fails instead of becoming a finger touch. TalkBack routing is bypassed (a stylus tap is a raw `input` event), and whether TalkBack's touch exploration
+intercepts stylus events is unverified (#13082). Tilt, eraser, hover, pressure curves and `dragPath`
+are not supported.
 
 `recordDeviceGestures` exports a swipe that is clearly diagonal (off-axis travel at least
 half the on-axis travel), or a swipe with a known path but no direction, as
@@ -1332,11 +1353,11 @@ settled screenshot is eligible.
 
 | Tool                          | What it does                                                                                                                                                        |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 📍 <code>tapAt</code>         | Taps screen coordinates or a point measured in an observation image; supports long press and double tap.                                                            |
+| 📍 <code>tapAt</code>         | Taps screen coordinates or a point measured in an observation image; supports long press and double tap, and a stylus `pointer` on Android 12+.                     |
 | 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag; supports nested containers and first/random/unique selection; can ensure toggle state.         |
 | 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to nested containers; supports first/random/unique selection.                                                         |
 | 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element; container and lookFor support nested scopes and first/random/unique selection.                                          |
-| ↗️ <code>swipeAt</code>       | Swipes between two screen points, including diagonals; opt-in with `setToolEnabled`.                                                                                |
+| ↗️ <code>swipeAt</code>       | Swipes between two screen points, including diagonals, optionally with a stylus `pointer` on Android 12+; opt-in with `setToolEnabled`.                             |
 | ↔️ <code>dragAndDrop</code>   | Drags one element to another; each endpoint supports nested containers and first/random/unique selection.                                                           |
 | ✍️ <code>dragPath</code>      | Drags one finger along a polyline with per-segment timing, an initial hold and a release hold (Android and iOS).                                                    |
 | 🤏 <code>pinchOn</code>       | Pinches to zoom, optionally scoped by nested containers.                                                                                                            |
@@ -1734,16 +1755,17 @@ and `clear` commands send keys and clear the focused field, respectively.
 <code>pinchOn.rotationDegrees</code> describes how far the two-finger axis rotates
 during the pinch. The fingers start horizontally and finish on the rotated
 axis, so a non-zero value combines pinch and rotation. The default <code>0</code> is
-a plain pinch. Android and iOS share this convention.
+a plain pinch. Android and iOS share this convention. The value must be
+between <code>-360</code> and <code>360</code> degrees; larger magnitudes are rejected.
 
 To rotate **without zooming**, keep the finger distance constant: pass
 <code>scale: 1</code> (or equal <code>distanceStart</code> and <code>distanceEnd</code>)
 together with <code>rotationDegrees</code>. <code>direction</code> is still a required
 argument but is ignored when the distance does not change, so the fingers never
 drift toward a zoom; equal distances are clamped and (on iOS) rounded together
-so they stay equal. Negative and larger-than-360 values are passed through as
-given. This is a two-finger rotate gesture, not the device <code>rotate</code>
-tool, which changes screen orientation.
+so they stay equal. Negative values are passed through as given. This is a
+two-finger rotate gesture, not the device <code>rotate</code> tool, which changes
+screen orientation.
 
 ```json
 { "direction": "out", "scale": 1, "rotationDegrees": 90, "duration": 500 }
@@ -3178,6 +3200,86 @@ An explicit CLI/env choice applies to that connection only: proxies relay it on
 the connection profile, never restart the shared daemon for it, and never persist it.
 Unset or other env values express no preference and use the daemon's effective setting.
 `observe` responses remain full. See [interaction loop](design-docs/mcp/interaction-loop.md).
+
+### Long-running calls as MCP tasks
+
+AutoMobile implements the [MCP Tasks extension](https://modelcontextprotocol.io/extensions/tasks/overview)
+(`io.modelcontextprotocol/tasks`, #4668) on the daemon's MCP endpoint. A tool that opts in can
+answer a `tools/call` with a task handle instead of blocking. `startDevice`, `executePlan` and
+`installApp` opt in; recording start and stop follow. Short interaction tools stay synchronous.
+
+To opt in, a client declares the extension on **every request** that may return a task, and on
+every `tasks/*` request, in the per-request capabilities:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "startDevice",
+    "arguments": {},
+    "_meta": {
+      "io.modelcontextprotocol/clientCapabilities": {
+        "extensions": { "io.modelcontextprotocol/tasks": {} }
+      }
+    }
+  }
+}
+```
+
+- A client that also lists the extension in its `initialize` capabilities sees
+  `capabilities.extensions["io.modelcontextprotocol/tasks"]` in the `initialize` result. The
+  daemon speaks the 2025-era protocol, where `server/discover` does not exist.
+- Tasks belong to the session key (the `x-auto-mobile-mcp-session-id` header). A request without
+  one always runs synchronously, and another session key cannot read or cancel the task.
+- An opted-in call answers `{"resultType": "task", "taskId": …, "status": "working", "ttlMs":
+  null, "pollIntervalMs": 1000, …}`. Poll `tasks/get` with `{"taskId": …}` at `pollIntervalMs`.
+  `completed` carries the same `result` the synchronous call returns (including an `isError`
+  result), `failed` carries the JSON-RPC `error`, and `input_required` carries `inputRequests`
+  to answer with `tasks/update` (`{"taskId": …, "inputResponses": {…}}`).
+- `tasks/cancel` is cooperative: it is acknowledged at once and the running tool is aborted;
+  the task then reports `cancelled`, or `completed` if the tool had already finished.
+- While a `startDevice` task is `working`, the daemon heartbeats the session it bound, so the
+  client need not heartbeat a session it has not seen yet. Once the task is terminal, the
+  client heartbeats that session as after a synchronous `startDevice`. Cancelling during the
+  boot stops it and leaves no session bound, as cancelling a synchronous call does.
+- While an `executePlan` task is `working`, the daemon heartbeats the plan's session and, for a
+  multi-device plan, each label session once it is allocated; the plan keeps its session's plan
+  lock as a synchronous plan does. `tasks/cancel` aborts the running step, unwinds the plan as a
+  cancelled request would (its cleanup and session release still run) and releases the lock.
+  A plan whose steps fail completes with the same `isError` result as the synchronous call;
+  a call the synchronous path answers with a JSON-RPC error (invalid arguments, for one)
+  reports `failed` with that error.
+- An `installApp` task holds the session it installs onto while `working`. `tasks/get` settles
+  with the same result the synchronous call returns (a failed install is a completed task whose
+  result has `isError: true`). `tasks/cancel` aborts the `adb install` / `simctl install` process;
+  the task reports `cancelled` and the installed-app inventory is re-read. An APK only partly
+  transferred is never committed: the device discards the abandoned install session, so the
+  previously installed version (if any) stays as it was. If the transfer had already finished and
+  the device was committing, the install may still land; the re-read inventory shows the truth.
+  The Android uninstall-and-reinstall downgrade recovery, once its uninstall has run, finishes the
+  reinstall even if cancelled, so the app is not left removed.
+- A finished task stays readable for 10 minutes (its `ttlMs` is then set, counted from
+  creation); afterwards `tasks/get` answers `-32602` "Task has expired" or "Task not found".
+- Tasks survive a daemon restart: a restarted daemon still answers `tasks/get`, and a task that
+  was running when the daemon stopped reports `failed` with an "interrupted" error.
+- `tasks/*` requests without the per-request declaration answer `-32021` (Missing Required
+  Client Capability). Progress ticks of a task become its `statusMessage`; no
+  `notifications/progress` is sent for a task.
+- The stdio proxy relays the extension: it advertises it to a client whose `initialize` declared
+  it, forwards each request's declaration and the `tasks/*` requests to the daemon, and answers
+  with the daemon's results and errors unchanged. Its tasks belong to the proxy process rather
+  than to one daemon connection, so polling keeps working after the proxy reconnects.
+- A device-binding call (`startDevice` today) runs as a task through the proxy too. The proxy
+  binds the device session when a `tasks/get` first reports the task `completed`, before it
+  answers that poll, exactly as it binds from the synchronous result; later tool calls route to
+  that session. It binds once per task, however often the task is polled and across proxy
+  reconnects. A `failed` or `cancelled` task binds nothing, and neither does a session the daemon
+  released before the completed poll (that poll answers an error). Poll the task to completion:
+  until then the proxy holds no binding for it, and the proxy stops waiting on a task left
+  unpolled for 10 minutes. A synchronous `startDevice` re-checks a device still finishing its
+  previous session's cleanup; as a task, that refusal is the task's result.
 
 ## Checks
 

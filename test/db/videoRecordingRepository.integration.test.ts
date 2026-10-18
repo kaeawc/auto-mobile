@@ -460,4 +460,50 @@ describe("VideoRecordingRepository", () => {
     expect(result!.highlights).toHaveLength(1);
     expect(result!.highlights![0].description).toBe("swipe gesture");
   });
+
+  describe("behaviour-driving JSON columns are validated on read (#11859)", () => {
+    async function rawUpdate(values: {
+      highlights_json?: string;
+      recorded_panel_json?: string;
+      display_transitions_json?: string;
+    }): Promise<void> {
+      await db
+        .updateTable("video_recordings")
+        .set(values)
+        .where("recording_id", "=", "rec-1")
+        .execute();
+    }
+
+    test("drops highlight entries without a usable timeline and keeps valid ones", async () => {
+      await repo.insertRecording(makeRecord());
+      const good = {
+        shape: { type: "circle", bounds: { x: 1, y: 2, width: 3, height: 4 } },
+        timeline: { appearedAtSeconds: 1 },
+      };
+      await rawUpdate({
+        highlights_json: JSON.stringify([
+          good,
+          null,
+          { shape: good.shape },
+          { shape: good.shape, timeline: { appearedAtSeconds: "soon" } },
+        ]),
+      });
+
+      expect((await repo.getRecording("rec-1"))!.highlights).toEqual([good]);
+    });
+
+    test("reads a recorded panel with an unknown role as undefined", async () => {
+      await repo.insertRecording(makeRecord());
+      await rawUpdate({ recorded_panel_json: JSON.stringify({ key: "11", role: "sideways" }) });
+
+      expect((await repo.getRecording("rec-1"))!.recordedPanel).toBeUndefined();
+    });
+
+    test("reads malformed display transitions as undefined", async () => {
+      await repo.insertRecording(makeRecord());
+      await rawUpdate({ display_transitions_json: JSON.stringify([{ atMs: "late" }]) });
+
+      expect((await repo.getRecording("rec-1"))!.transitions).toBeUndefined();
+    });
+  });
 });

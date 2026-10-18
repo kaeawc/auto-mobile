@@ -19,8 +19,8 @@ export interface Harness {
   appendTextInputs: Map<string, unknown>;
   appendTextFactory: (device: BootedDevice) => AppendTextInput;
   createSocketAppendTextInput?(device: BootedDevice): AppendTextInput;
-  clearMcpClientIdleTimer(): void;
-  scheduleMcpClientIdleClose(): void;
+  clearForwardKeyIdleTimer(): void;
+  scheduleForwardKeyIdle(): void;
   resolveInputTargetDevice(platform: string, deviceId: string): Promise<BootedDevice>;
   requireCurrentFrameContext(): void;
   runTrackedDeviceInput<T>(
@@ -73,8 +73,8 @@ export function harness() {
     confirmedLegacyScaleDevices: new Set(),
     toIosRunnerCoordinates: async (_client: unknown, _id: string, coords: number[]) => coords,
   });
-  handler.clearMcpClientIdleTimer = () => {};
-  handler.scheduleMcpClientIdleClose = () => {};
+  handler.clearForwardKeyIdleTimer = () => {};
+  handler.scheduleForwardKeyIdle = () => {};
   handler.requireCurrentFrameContext = () => {};
   handler.resolveInputTargetDevice = async (platform, deviceId) =>
     ({ platform, deviceId, name: "Fake" }) as BootedDevice;
@@ -200,15 +200,14 @@ export function socketHarness(state?: DaemonStateAccess) {
   const { timer, stamps, handler: admission } = harness();
   const server = createTestUnixSocketServer(
     "unused",
-    "http://localhost:0/mcp",
     state ?? ({ isInitialized: () => false } as DaemonStateAccess),
     timer,
     null,
     { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
   ) as unknown as SocketHarness;
   server.acceptingRequests = true;
-  server.clearMcpClientIdleTimer = admission.clearMcpClientIdleTimer;
-  server.scheduleMcpClientIdleClose = admission.scheduleMcpClientIdleClose;
+  server.clearForwardKeyIdleTimer = admission.clearForwardKeyIdleTimer;
+  server.scheduleForwardKeyIdle = admission.scheduleForwardKeyIdle;
   server.resolveInputTargetDevice = admission.resolveInputTargetDevice;
   server.requireCurrentFrameContext = () => {};
   if (!state) {

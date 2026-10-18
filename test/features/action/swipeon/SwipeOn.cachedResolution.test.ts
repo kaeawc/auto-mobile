@@ -89,9 +89,7 @@ function harness({
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const ctrl = new FakeCtrlProxy(timer);
-  const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    ctrl as unknown as AndroidCtrlProxyClient,
-  );
+  const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrl);
   restores.push(() => client.mockRestore());
   const gesture = new FakeGestureExecutor();
   const observe = new FakeObserveScreen();

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
@@ -12,6 +11,7 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 for (const platform of ["android", "ios"] as const) {
   describe(`PinchOn long duration (${platform})`, () => {
@@ -49,12 +49,8 @@ for (const platform of ["android", "ios"] as const) {
         activityName: "MainActivity",
         layoutSeqSum: 123,
       });
-      const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        android as unknown as AndroidCtrlProxyClient,
-      );
-      const iosSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        ios as unknown as IOSCtrlProxyClient,
-      );
+      const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(android);
+      const iosSpy = spyOnIosClientInstance(ios);
       const availableSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
         isAvailable: async () => true,
       } as unknown as AndroidCtrlProxyManager);

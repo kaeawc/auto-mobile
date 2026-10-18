@@ -19,7 +19,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { DefaultFocusedInputQuery } from "../utility/FocusedInput";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { IOSCtrlProxyClient } from "../observe/ios";
+import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
 import type { CtrlProxyKeyboardResult } from "../observe/ios/types";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
@@ -170,6 +170,8 @@ export class Keyboard {
   private static readonly STATE_CONFIRMATION_TIMEOUT_MS = 2_000;
   private static readonly IOS_KEYBOARD_VISIBILITY_TIMEOUT_MS = 2_000;
   private static readonly STATE_CONFIRMATION_POLL_INTERVAL_MS = 100;
+  /** Bound on the follow-up keyboard detect after a close request. */
+  private static readonly CLOSE_FOLLOW_UP_DETECT_TIMEOUT_MS = 2000;
   private device: BootedDevice;
   private adb: AdbExecutor;
   private hierarchyProvider: KeyboardHierarchyProvider;
@@ -332,7 +334,7 @@ export class Keyboard {
   private async iosFailure(
     action: KeyboardAction,
     result: CtrlProxyKeyboardResult,
-    client: IOSCtrlProxyClient,
+    client: IOSCtrlProxy,
     signal?: AbortSignal,
   ): Promise<KeyboardResult> {
     if (
@@ -357,17 +359,25 @@ export class Keyboard {
   }
 
   private async confirmIOSCloseAfterTimeout(
-    client: IOSCtrlProxyClient,
+    client: IOSCtrlProxy,
     signal?: AbortSignal,
   ): Promise<boolean> {
     try {
       throwIfAborted(signal);
       const detected = await awaitWhileRequestIsLive(
-        raceWithDeadline(client.requestKeyboard("detect", 2000, undefined, signal), {
-          timer: this.timer,
-          timeoutMs: 2000,
-          label: "Keyboard close follow-up detect",
-        }),
+        raceWithDeadline(
+          client.requestKeyboard(
+            "detect",
+            Keyboard.CLOSE_FOLLOW_UP_DETECT_TIMEOUT_MS,
+            undefined,
+            signal,
+          ),
+          {
+            timer: this.timer,
+            timeoutMs: Keyboard.CLOSE_FOLLOW_UP_DETECT_TIMEOUT_MS,
+            label: "Keyboard close follow-up detect",
+          },
+        ),
         signal,
       );
       return detected.success && !detected.open;

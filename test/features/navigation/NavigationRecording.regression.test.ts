@@ -2,9 +2,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "
 import { readFileSync } from "node:fs";
 import { NavigationRepository } from "../../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
-import { stripNavigationToolParams } from "../../../src/daemon/constants";
+import { INTERNAL_TOOL_PARAM_NAMES } from "../../../src/daemon/constants";
+import { stripNavigationToolParams } from "../../../src/models/navigationToolParams";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
-import { edgeReplayKey } from "../../../src/features/navigation/edgeReplayKey";
+import { edgeReplayKey } from "../../../src/db/edgeReplayKey";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import type { ObserveResult } from "../../../src/models";
@@ -46,7 +47,7 @@ describe("navigation recording source state and routing", () => {
     timer.setCurrentTime(100_000);
     manager = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       timer,
     );
     NavigationGraphManager.setInstanceForTesting(manager);
@@ -108,7 +109,7 @@ describe("navigation recording source state and routing", () => {
     test(`unknown start screen preserves selections on dispatch, known app=${knownApp}`, async () => {
       manager = NavigationGraphManager.createForTesting(
         repository,
-        new TestCoverageRepository(undefined, harness.db),
+        new TestCoverageRepository(harness.db),
         timer,
       );
       if (knownApp) {
@@ -162,6 +163,11 @@ describe("navigation recording source state and routing", () => {
     expect(edgeReplayKey(edge)).toBe(
       edgeReplayKey({ ...edge, interaction: { toolName: "tapOn", args: routed } }),
     );
+  });
+
+  test("stripNavigationToolParams drops every canonical internal param by prefix", () => {
+    const internal = Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((name) => [name, 1]));
+    expect(stripNavigationToolParams({ ...internal, text: "x" })).toEqual({ text: "x" });
   });
 
   test("normalization preserves action arguments, inputs, and distinct actions", async () => {

@@ -3,7 +3,6 @@ import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { HomeScreen } from "../../../src/features/action/HomeScreen";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import type { CtrlProxyHierarchy } from "../../../src/features/observe/ios/types";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -25,6 +24,7 @@ import { hideCapturedNode } from "../../helpers/hideCapturedNode";
 import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 import { drainUntil } from "../../helpers/fakeTimerStepping";
 import { IosHomeLaunchTimeoutError } from "../../../src/models/IosHomeLaunchTimeoutError";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 // Helper function to create mock ObserveResult
 // Each call creates a unique viewHierarchy object so change detection works
@@ -95,6 +95,14 @@ describe("HomeScreen", () => {
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
   let previousObserveCacheStore: ReturnType<typeof getObserveCacheStore>;
 
+  // Collaborators are fixed at construction; a test that needs a different window builds its own.
+  const createHomeScreen = (window: WindowInterface = fakeWindow): HomeScreen =>
+    new HomeScreen(mockDevice, fakeAdb, fakeTimer, undefined, {
+      observeScreen: fakeObserveScreen,
+      window,
+      awaitIdle: fakeAwaitIdle,
+    });
+
   beforeEach(() => {
     previousObserveCacheStore = getObserveCacheStore();
     // Foreground changes leave a pending resolution on the store; keep it local to this test.
@@ -132,12 +140,7 @@ describe("HomeScreen", () => {
       platform: "android",
       deviceId: "test-device",
     };
-    homeScreen = new HomeScreen(mockDevice, fakeAdb, fakeTimer);
-
-    // Replace the internal managers with our fakes
-    (homeScreen as any).observeScreen = fakeObserveScreen;
-    (homeScreen as any).window = fakeWindow;
-    (homeScreen as any).awaitIdle = fakeAwaitIdle;
+    homeScreen = createHomeScreen();
   });
 
   afterEach(() => {
@@ -162,13 +165,14 @@ describe("HomeScreen", () => {
       platform: "ios",
       deviceId: options?.simulator ? "A1B2C3D4-E5F6-7890-ABCD-EF1234567890" : "ios-device",
     };
-    const action = new HomeScreen(iosDevice, fakeAdb, fakeTimer, options?.simctl);
-    (action as any).observeScreen = fakeObserveScreen;
-    (action as any).window = fakeWindow;
-    (action as any).awaitIdle = fakeAwaitIdle;
+    const action = new HomeScreen(iosDevice, fakeAdb, fakeTimer, options?.simctl, {
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+    });
 
     const client = new FakeIOSCtrlProxy(fakeTimer);
-    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as any);
+    getInstanceSpy = spyOnIosClientInstance(client);
     return { action, client };
   }
 
@@ -1273,8 +1277,6 @@ describe("HomeScreen", () => {
         platform: "android",
         deviceId: "device-2",
       };
-      const homeScreen2 = new HomeScreen(otherDevice, fakeAdb);
-
       // Set up fakes for the second HomeScreen instance
       const fakeWindow2 = new FakeWindow();
       const fakeObserveScreen2 = new FakeObserveScreen();
@@ -1288,9 +1290,11 @@ describe("HomeScreen", () => {
       });
       fakeObserveScreen2.setObserveResult(() => createObserveResult());
 
-      (homeScreen2 as any).observeScreen = fakeObserveScreen2;
-      (homeScreen2 as any).window = fakeWindow2;
-      (homeScreen2 as any).awaitIdle = fakeAwaitIdle2;
+      const homeScreen2 = new HomeScreen(otherDevice, fakeAdb, undefined, undefined, {
+        observeScreen: fakeObserveScreen2,
+        window: fakeWindow2,
+        awaitIdle: fakeAwaitIdle2,
+      });
 
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
@@ -1312,7 +1316,7 @@ describe("HomeScreen", () => {
     test("reports success when the accessibility global action actually backgrounds the app", async () => {
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: true }),
-      } as unknown as AndroidCtrlProxyClient);
+      });
       // Default fakeWindow already reports "com.android.launcher3" foreground.
 
       const result = await homeScreen.execute();
@@ -1331,8 +1335,8 @@ describe("HomeScreen", () => {
       // must surface a failure rather than false success.
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: true }),
-      } as unknown as AndroidCtrlProxyClient);
-      (homeScreen as any).window = sequencedWindow(["com.android.settings"]);
+      });
+      homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]));
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
       await expect(homeScreen.execute()).rejects.toThrow(/did not background the foreground app/);
@@ -1345,17 +1349,19 @@ describe("HomeScreen", () => {
     test("recovers via the ADB keyevent fallback when the global action is inert but the fallback reaches the launcher", async () => {
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: true }),
-      } as unknown as AndroidCtrlProxyClient);
+      });
       // The post-global-action verification retries internally (initial
       // attempt + 2 backoff retries) before giving up, so it must see the
       // app unchanged on all 3 of those checks; only the post-ADB-keyevent
       // verification's first check sees the launcher.
-      (homeScreen as any).window = sequencedWindow([
-        "com.android.settings",
-        "com.android.settings",
-        "com.android.settings",
-        "com.android.launcher3",
-      ]);
+      homeScreen = createHomeScreen(
+        sequencedWindow([
+          "com.android.settings",
+          "com.android.settings",
+          "com.android.settings",
+          "com.android.launcher3",
+        ]),
+      );
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
       const result = await homeScreen.execute();
@@ -1367,8 +1373,8 @@ describe("HomeScreen", () => {
     test("throws instead of reporting false success when the ADB keyevent fallback also fails to reach the launcher", async () => {
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: false, error: "global action unavailable" }),
-      } as unknown as AndroidCtrlProxyClient);
-      (homeScreen as any).window = sequencedWindow(["com.android.settings"]);
+      });
+      homeScreen = createHomeScreen(sequencedWindow(["com.android.settings"]));
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
       await expect(homeScreen.execute()).rejects.toThrow(/did not background the foreground app/);
@@ -1385,9 +1391,9 @@ describe("HomeScreen", () => {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      } as unknown as AndroidCtrlProxyClient);
+      });
 
-      await (homeScreen as any).executeAndroidHome();
+      await homeScreen.execute();
 
       const keyeventCall = fakeAdb.getCommandCalls().find((c) => c.command.includes("keyevent 3"));
       expect(keyeventCall).toBeDefined();
@@ -1405,7 +1411,7 @@ describe("HomeScreen", () => {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      } as unknown as AndroidCtrlProxyClient);
+      });
       fakeAdb.setThrowOnAbortedSignal();
       const controller = new AbortController();
       controller.abort();

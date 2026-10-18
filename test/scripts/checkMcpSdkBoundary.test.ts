@@ -27,6 +27,15 @@ describe("check-mcp-sdk-boundary", () => {
     ]);
   });
 
+  test("flags a reintroduced v1-view test client import", () => {
+    expect(
+      importCounts('import { Client } from "../helpers/v1ViewMcpClient";')["f.ts"]?.[
+        "v1-view-client"
+      ],
+    ).toBe(1);
+    expect(importCounts('import { Client } from "@modelcontextprotocol/client";')).toEqual({});
+  });
+
   test("flags every v1 SDK import form", () => {
     const source = [
       'import { Server } from "@modelcontextprotocol/sdk/server/index.js";',

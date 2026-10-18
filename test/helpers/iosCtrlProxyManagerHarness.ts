@@ -1,15 +1,27 @@
 import { afterEach, beforeEach } from "bun:test";
 import { DefaultIosTunnelClient } from "../../src/ctrlProxy/ios/IosTunnelClient";
-import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
+import {
+  IOSCtrlProxyManager,
+  type IosCtrlProxyManagerTestOptions,
+} from "../../src/ctrlProxy/IOSCtrlProxyManager";
+import type {
+  IosCtrlProxyLifecycleSteps,
+  IosCtrlProxyStepOverrides,
+} from "../../src/ctrlProxy/ios/IosCtrlProxyLifecycleSteps";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { createExecResult } from "../../src/utils/execResult";
 import { PortManager } from "../../src/utils/PortManager";
+import {
+  DefaultProcessSupervisor,
+  type ProcessSupervisor,
+  type ProcessSupervisorOptions,
+} from "../../src/utils/ProcessSupervisor";
 import { createStartableBuilder } from "./iosCtrlProxyBuilderFake";
 
 export function tunnel(manager: IOSCtrlProxyManager): DefaultIosTunnelClient {
-  const client = manager["tunnelClient"];
+  const client = manager.diagnostics.tunnelClient;
   if (!(client instanceof DefaultIosTunnelClient)) {
     throw new Error("Expected default tunnel");
   }
@@ -222,8 +234,87 @@ export function installIosManagerSuiteHooks(assign: (ctx: IosManagerSuiteContext
 export function createManagerWithFakeHealthClient(
   testDevice: BootedDevice,
   fakeTimer: FakeTimer,
+  steps?: IosCtrlProxyStepOverrides,
 ): IOSCtrlProxyManager {
   const executor = new FakeProcessExecutor();
   executor.setCommandResponse("curl -s", createExecResult("", ""));
-  return IOSCtrlProxyManager.createForTestingWithDeps(testDevice, fakeTimer, undefined, executor);
+  return IOSCtrlProxyManager.createForTestingWithOptions({
+    device: testDevice,
+    timer: fakeTimer,
+    processExecutor: executor,
+    steps,
+  });
+}
+
+/**
+ * Wraps the manager's real runner supervisor so a test can start it, signal an
+ * exit, or probe its liveness through the public `ProcessSupervisor` contract.
+ * Pass `factory` as `processSupervisorFactory`; `supervisor` is set once the
+ * manager has been constructed.
+ */
+export function createSupervisorProbe(): {
+  factory: (options: ProcessSupervisorOptions) => ProcessSupervisor;
+  readonly supervisor: ProcessSupervisor;
+} {
+  let captured: ProcessSupervisor | undefined;
+  return {
+    factory: (options) => {
+      captured = new DefaultProcessSupervisor(options);
+      return captured;
+    },
+    get supervisor(): ProcessSupervisor {
+      if (!captured) {
+        throw new Error("The manager has not built its supervisor yet");
+      }
+      return captured;
+    },
+  };
+}
+
+/**
+ * Captures the manager's own lifecycle steps (the ones it would run without any
+ * replacement) so a test can invoke one directly. Pass `overrides` as `steps`;
+ * `steps` is available once the manager has been constructed.
+ */
+export function captureLifecycleSteps(): {
+  overrides: IosCtrlProxyStepOverrides;
+  readonly steps: IosCtrlProxyLifecycleSteps;
+} {
+  let captured: IosCtrlProxyLifecycleSteps | undefined;
+  return {
+    overrides: (defaults) => {
+      captured = defaults;
+      return {};
+    },
+    get steps(): IosCtrlProxyLifecycleSteps {
+      if (!captured) {
+        throw new Error("The manager has not built its lifecycle steps yet");
+      }
+      return captured;
+    },
+  };
+}
+
+/**
+ * A manager plus its own lifecycle steps, so a test can run one real launch step
+ * (for example `startOnSimulator`) without driving the whole `start()` flow.
+ * `options.steps` still applies on top of the manager's own steps.
+ */
+export function createManagerWithOwnSteps(options: IosCtrlProxyManagerTestOptions): {
+  manager: IOSCtrlProxyManager;
+  steps: IosCtrlProxyLifecycleSteps;
+} {
+  let own: IosCtrlProxyLifecycleSteps | undefined;
+  const { steps: requested } = options;
+  const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+    ...options,
+    steps: (defaults) => {
+      own = defaults;
+      return typeof requested === "function" ? requested(defaults) : (requested ?? {});
+    },
+  });
+  if (!own) {
+    throw new Error("The manager did not build its lifecycle steps");
+  }
+  return { manager, steps: own };
 }

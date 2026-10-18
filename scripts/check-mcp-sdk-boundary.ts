@@ -4,6 +4,7 @@
  * Fails on:
  *   - any import/export-from/dynamic import/require of `@modelcontextprotocol/sdk` (v1) in src/, scripts/ and test/
  *   - any `require("@modelcontextprotocol/...")` in src/, scripts/ and test/
+ *   - any import of the retired `v1ViewMcpClient` test helper (use the plain v2 `Client`)
  *   - the stateful-session tokens `mcp-session-id`, `sessionIdGenerator`, `onsessioninitialized`
  *     and `sessionContext.sessionId` under src/
  *
@@ -20,6 +21,7 @@ import { sortedReaddirEntriesSync } from "../src/utils/io";
 export type RuleId =
   | "sdk-import"
   | "sdk-require"
+  | "v1-view-client"
   | "mcp-session-id"
   | "sessionIdGenerator"
   | "onsessioninitialized"
@@ -32,6 +34,8 @@ export const ALLOWLIST_PATH = "scripts/mcp-sdk-boundary-allowlist.json";
 export const IMPORT_ROOTS = ["src", "scripts", "test"];
 const TOKEN_ROOT = "src";
 const SDK_V1 = /^@modelcontextprotocol\/sdk(?:\/|$)/;
+/** The retired test-only v1-error-shape client (test/helpers/v1ViewMcpClient.ts); tests use the plain v2 Client. */
+const V1_VIEW_CLIENT = /(?:^|\/)v1ViewMcpClient(?:\.[cm]?[jt]s)?$/;
 const MCP_SCOPE = /^@modelcontextprotocol\//;
 const TOKEN_RULES: ReadonlyArray<readonly [RuleId, RegExp]> = [
   ["mcp-session-id", /(?<!x-auto-mobile-)mcp-session-id/gi],
@@ -60,7 +64,7 @@ function bump(counts: Counts, file: string, rule: RuleId, n = 1): void {
 
 /** Count module-specifier violations using the TypeScript parser (no line regexes). */
 export function countImportViolations(file: string, source: string, counts: Counts): void {
-  if (!source.includes("@modelcontextprotocol/")) {
+  if (!source.includes("@modelcontextprotocol/") && !source.includes("v1ViewMcpClient")) {
     return;
   }
   const sourceFile = ts.createSourceFile(
@@ -75,6 +79,9 @@ export function countImportViolations(file: string, source: string, counts: Coun
   const checkStatic = (specifier: string | undefined): void => {
     if (specifier !== undefined && SDK_V1.test(specifier)) {
       bump(counts, file, "sdk-import");
+    }
+    if (specifier !== undefined && V1_VIEW_CLIENT.test(specifier)) {
+      bump(counts, file, "v1-view-client");
     }
   };
   const visit = (node: ts.Node): void => {

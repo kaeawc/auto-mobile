@@ -8,7 +8,7 @@ import {
   computeBindingScopeKey,
   type ManagedDeviceEntry,
 } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
-import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
+import type { FeatureFlagAdmin } from "../../src/features/featureFlags/FeatureFlagService";
 import { BrokerConnectionScopes } from "../../src/daemon/sessionBroker/connectionScope";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DaemonResponse } from "../../src/daemon/types";
@@ -137,41 +137,36 @@ describe("direct frames from a managed connection outside its slots", () => {
         succeededPlatforms: new Set(["android", "ios"]),
       }),
     } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-      () =>
-        ({
-          getScreenScaleMetadata: () => null,
-          requestTapCoordinates: async (
-            ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-          ) => {
-            args[6]?.();
-            taps++;
-            return { success: true };
-          },
-          setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-            if (typeof args[5] === "object") {
-              args[5].onDispatch?.();
-            }
-            writes.push("setPreference");
-          },
-          removePreference: async (
-            ...args: Parameters<AndroidCtrlProxyClient["removePreference"]>
-          ) => {
-            if (typeof args[3] === "object") {
-              args[3].onDispatch?.();
-            }
-            writes.push("removePreference");
-          },
-          clearPreferenceStore: async (
-            ...args: Parameters<AndroidCtrlProxyClient["clearPreferenceStore"]>
-          ) => {
-            if (typeof args[2] === "object") {
-              args[2].onDispatch?.();
-            }
-            writes.push("clearPreferenceStore");
-          },
-        }) as unknown as AndroidCtrlProxyClient,
-    );
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+      getScreenScaleMetadata: () => null,
+      requestTapCoordinates: async (
+        ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+      ) => {
+        args[6]?.();
+        taps++;
+        return { success: true };
+      },
+      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+        if (typeof args[5] === "object") {
+          args[5].onDispatch?.();
+        }
+        writes.push("setPreference");
+      },
+      removePreference: async (...args: Parameters<AndroidCtrlProxyClient["removePreference"]>) => {
+        if (typeof args[3] === "object") {
+          args[3].onDispatch?.();
+        }
+        writes.push("removePreference");
+      },
+      clearPreferenceStore: async (
+        ...args: Parameters<AndroidCtrlProxyClient["clearPreferenceStore"]>
+      ) => {
+        if (typeof args[2] === "object") {
+          args[2].onDispatch?.();
+        }
+        writes.push("clearPreferenceStore");
+      },
+    }));
     spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
       () =>
         ({
@@ -214,7 +209,6 @@ describe("direct frames from a managed connection outside its slots", () => {
     };
     const server = createTestUnixSocketServer(
       "unused",
-      "http://localhost:0/mcp",
       {
         isInitialized: () => true,
         getSessionManager: () => sessionManager,
@@ -229,7 +223,7 @@ describe("direct frames from a managed connection outside its slots", () => {
           return { key, enabled };
         },
         listFlags: async () => flags,
-      } as unknown as FeatureFlagService,
+      } satisfies FeatureFlagAdmin,
       // The storage tools are enabled, so the frames reach the ownership gate.
       {
         sessionToolSelectionService: {

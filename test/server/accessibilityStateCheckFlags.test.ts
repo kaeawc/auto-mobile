@@ -7,7 +7,6 @@ import { accessibilityDetector } from "../../src/features/accessibility/Accessib
 import { iosVoiceOverDetector } from "../../src/features/accessibility/IosVoiceOverDetector";
 import { AndroidTapStrategy } from "../../src/features/action/strategies/AndroidTapStrategy";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
-import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { accessibilityStateSchema } from "../../src/server/toolOutputSchemas";
 import type { BootedDevice } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -15,6 +14,7 @@ import { FakeFeatureFlagApplier } from "../fakes/FakeFeatureFlagApplier";
 import { FakeFeatureFlagRepository } from "../fakes/FakeFeatureFlagRepository";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 
 const ANDROID_DEVICE: BootedDevice = { name: "a", deviceId: "emulator-5554", platform: "android" };
 const IOS_DEVICE: BootedDevice = { name: "i", deviceId: "00008130-001", platform: "ios" };
@@ -91,7 +91,7 @@ describe("accessibility state check ignores feature flags for `enabled` (#10222)
     client.setVoiceOverState(voiceOverOn);
     restores.push(
       spyOn(FeatureFlagService, "getInstance").mockReturnValue(service),
-      spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as IOSCtrlProxyClient),
+      spyOnIosClientInstance(client),
     );
     registerAccessibilityTools();
     return accessibilityHandler()(IOS_DEVICE, {});

@@ -8,8 +8,7 @@ import type {
   DeviceTimestampSource,
   DeviceTimestampResult,
 } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { resolveExecuteCommandOptions } from "../../src/utils/android-cmdline-tools/executeCommandArgs";
-import type { BootedDevice, DeviceLockState, ExecResult } from "../../src/models";
+import type { AndroidUser, BootedDevice, DeviceLockState, ExecResult } from "../../src/models";
 import { FakeAdbProcess } from "./FakeAdbProcess";
 
 /** How a spawned command should terminate, keyed by a substring of its argv. */
@@ -78,12 +77,7 @@ export class FakeAdbClient implements AdbExecutor {
    */
   async executeCommand(
     command: string,
-    timeoutMsOrOptions?: number | AdbExecuteOptions,
-    maxBufferArg?: number,
-    noRetryArg?: boolean,
-    signalArg?: AbortSignal,
-    waitForProcessSettlementAfterAbortArg?: boolean,
-    onStdoutArg?: (chunk: string) => void,
+    options: AdbExecuteOptions = {},
   ): Promise<{
     stdout: string;
     stderr: string;
@@ -92,14 +86,7 @@ export class FakeAdbClient implements AdbExecutor {
     includes: (search: string) => boolean;
   }> {
     const { timeoutMs, maxBuffer, noRetry, signal, waitForProcessSettlementAfterAbort, onStdout } =
-      resolveExecuteCommandOptions(
-        timeoutMsOrOptions,
-        maxBufferArg,
-        noRetryArg,
-        signalArg,
-        waitForProcessSettlementAfterAbortArg,
-        onStdoutArg,
-      );
+      options;
     this.commandCalls.push({
       command,
       timeoutMs,
@@ -376,10 +363,12 @@ export class FakeAdbClient implements AdbExecutor {
   /**
    * Return the list of users
    */
-  async listUsers(): Promise<
-    Array<{ userId: number; name: string; flags?: number; running?: boolean }>
-  > {
-    return [...this.users];
+  async listUsers(): Promise<AndroidUser[]> {
+    return this.users.map((user) => ({
+      ...user,
+      flags: user.flags ?? 0,
+      running: user.running ?? false,
+    }));
   }
 
   /**

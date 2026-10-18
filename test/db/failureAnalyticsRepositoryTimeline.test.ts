@@ -25,7 +25,7 @@ describe("FailureAnalyticsRepository.getTimelineData bucket basis (#10120)", () 
   beforeEach(async () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
-    repo = new FailureAnalyticsRepository(timer, db);
+    repo = new FailureAnalyticsRepository(db, timer);
   });
 
   afterEach(async () => {

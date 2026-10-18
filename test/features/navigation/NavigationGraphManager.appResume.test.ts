@@ -33,7 +33,7 @@ describe("NavigationGraphManager app resume (#10193)", () => {
     timer.setCurrentTime(T0);
     manager = NavigationGraphManager.createForTesting(
       repository,
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       timer,
     );
   });

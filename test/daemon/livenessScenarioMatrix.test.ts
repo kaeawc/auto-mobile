@@ -1682,7 +1682,6 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
     const socketPath = join(tmpdir(), `matrix-same-tick-${randomUUID()}.sock`);
     const server = createTestUnixSocketServer(
       socketPath,
-      "http://localhost:0/mcp",
       scenario.daemon.state as never,
       scenario.timer,
     );
@@ -2060,7 +2059,6 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
   const WATCHED_RESOURCE = "automobile:scenario/watched";
   const OTHER_RESOURCE = "automobile:scenario/other";
   /** How long the socket server keeps an unbound, unused loopback transport (its idle close). */
-  const MCP_TRANSPORT_IDLE_CLOSE_MS = 5 * 60_000;
 
   test("an acquisition of a device a peer daemon claims is refused before this daemon looks at the device; once the peer lets go it is acquired", async () => {
     scenario = await LivenessScenario.start({ sharedDeviceClaims: true });
@@ -2166,23 +2164,17 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
     expectFreed();
   });
 
-  test("a released session's MCP transport is closed five minutes after the release although its proxy stays connected; a held session's stays open", async () => {
+  test("a forward's MCP client closes when the forward ends, for a held session and after its release (#11820)", async () => {
     scenario = await LivenessScenario.start();
     const session = await scenario.acquire();
     await scenario.toolCall(session);
 
-    // Held side: the transport is the session's for as long as the session is held.
-    await scenario.idle(IDLE_WINDOW_MS / 2);
+    // Each forward opens its own in-process client and closes it with the forward: a held
+    // session keeps no transport open between calls, and its release has none to let go of.
     expectHeld(session);
-    expect(scenario.sessionsWithOpenTransport).toEqual([session]);
-
-    // Released side: the proxy never calls again and never disconnects, so only the release
-    // itself can let go of the transport.
+    expect(scenario.sessionsWithOpenTransport).toEqual([]);
     const releasedAt = await scenario.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
     expect(releasedAt).toBeDefined();
-    await scenario.idle(MCP_TRANSPORT_IDLE_CLOSE_MS - RELEASE_SLACK_MS);
-    expect(scenario.sessionsWithOpenTransport).toEqual([session]);
-    await scenario.idle(RELEASE_SLACK_MS);
     expect(scenario.sessionsWithOpenTransport).toEqual([]);
   });
 

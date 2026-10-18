@@ -139,7 +139,7 @@ describe("tracked Android input text", () => {
     await drainMicrotasks(50);
     expect(h.settled()).toBe(false);
     h.timer.advanceTime(1);
-    expect(await h.result).toEqual({ stdout: "", stderr: "" });
+    expect(await h.result).toMatchObject({ stdout: "", stderr: "" });
   });
 
   test("API 31+ cancel while pacing still settles before rethrowing", async () => {

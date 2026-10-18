@@ -20,8 +20,8 @@ test/daemon/deviceBindingWriters.test.ts	heavy-harness
 test/daemon/deviceGestureRecordingSocketServerStartOwnership.test.ts	heavy-harness
 test/daemon/deviceHoldCharacterization.test.ts	heavy-harness
 test/daemon/deviceLeaseOwnerQuery.test.ts	recursive-rm
-test/daemon/devicePool.assignDevice.test.ts	heavy-harness
 test/daemon/devicePool.autolock.test.ts	heavy-harness
+test/daemon/devicePool.bindDevice.rebind.test.ts	heavy-harness
 test/daemon/devicePool.criteriaRollback.test.ts	heavy-harness
 test/daemon/devicePool.evictionCatch.test.ts	heavy-harness
 test/daemon/devicePool.idleEvictionStaleSnapshot.test.ts	heavy-harness
@@ -140,6 +140,7 @@ test/server/setActiveDevice.refusedBeforeResume.test.ts	heavy-harness
 test/server/setActiveDevice.sessionlessOwnership.test.ts	heavy-harness
 test/server/setActiveDeviceDiscoveryIncompleteWire.test.ts	heavy-harness
 test/server/snapshotOfTools.test.ts	recursive-rm
+test/server/tasks/startDeviceTask.test.ts	heavy-harness
 test/server/toolRegistry.bindingEnforcement.test.ts	heavy-harness
 test/server/toolRegistry.deviceOwnership.test.ts	heavy-harness
 test/server/toolRegistry.foreignDaemonControl.test.ts	heavy-harness

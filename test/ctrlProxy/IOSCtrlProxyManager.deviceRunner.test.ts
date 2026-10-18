@@ -6,9 +6,12 @@ import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { FakeIosTunnelClient } from "../fakes/FakeIosTunnelClient";
+import type { IosTunnelClient, IosTunnelStart } from "../../src/ctrlProxy/ios/IosTunnelClient";
 import { createExecResult } from "../../src/utils/execResult";
 import { PortManager } from "../../src/utils/PortManager";
 import type { Xcodebuild } from "../../src/utils/ios-cmdline-tools/XcodebuildClient";
+import { createManagerWithOwnSteps } from "../helpers/iosCtrlProxyManagerHarness";
 import type { XcodeSigningManager } from "../../src/utils/ios-cmdline-tools/XcodeSigning";
 
 /**
@@ -221,22 +224,30 @@ describe("IOSCtrlProxyManager physical-device runner lifecycle", function () {
   let runnerEnvPorts: number[];
   let prevHealthMaxAttempts: string | undefined;
 
-  function createManager(signing: XcodeSigningManager = defaultSigning): IOSCtrlProxyManager {
-    const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-      DEVICE,
-      fakeTimer,
-      createBuilder(runnerEnvPorts),
-      world.executor,
-      signing,
-      undefined,
-      undefined,
-      undefined,
-      world.createXcodebuild(),
-    );
+  function createManagerWithSteps(
+    signing: XcodeSigningManager = defaultSigning,
+    tunnelClient?: IosTunnelClient,
+  ): ReturnType<typeof createManagerWithOwnSteps> {
+    const created = createManagerWithOwnSteps({
+      device: DEVICE,
+      timer: fakeTimer,
+      builder: createBuilder(runnerEnvPorts),
+      processExecutor: world.executor,
+      signingManager: signing,
+      xcodebuild: world.createXcodebuild(),
+      tunnelClient,
+    });
     // A runner exit would otherwise schedule the supervisor's own restart; each test
     // drives the second start explicitly instead.
-    manager.setAutoRestart(false);
-    return manager;
+    created.manager.setAutoRestart(false);
+    return created;
+  }
+
+  function createManager(
+    signing: XcodeSigningManager = defaultSigning,
+    tunnelClient?: IosTunnelClient,
+  ): IOSCtrlProxyManager {
+    return createManagerWithSteps(signing, tunnelClient).manager;
   }
 
   beforeEach(function () {
@@ -315,34 +326,29 @@ describe("IOSCtrlProxyManager physical-device runner lifecycle", function () {
       const firstPort = manager.getServicePort();
       const staleTunnel = world.alive("iproxy")[0];
 
-      // The service port changes for another reason (e.g. adopting a runner's port).
-      const adoptedPort = firstPort + 100;
-      (manager as unknown as { adoptServicePort(port: number): void }).adoptServicePort(
-        adoptedPort,
-      );
+      // The device's port reservation moves for another reason (a competing allocation),
+      // so the next launch must pick a new service port while the old tunnel is still up.
+      PortManager.release(DEVICE.deviceId);
+      PortManager.reserve(DEVICE.deviceId, firstPort + 100);
       world.exitOnItsOwn(world.alive("xcodebuild")[0]);
       await flushMicrotasks();
       await manager.start();
 
+      const movedPort = manager.getServicePort();
+      expect(movedPort).not.toBe(firstPort);
       expect(staleTunnel.alive).toBe(false);
-      expect(world.alive("iproxy").map((tunnel) => tunnel.port)).toEqual([adoptedPort]);
-      expect(world.alive("xcodebuild").map((runner) => runner.port)).toEqual([adoptedPort]);
+      expect(world.alive("iproxy").map((tunnel) => tunnel.port)).toEqual([movedPort]);
+      expect(world.alive("xcodebuild").map((runner) => runner.port)).toEqual([movedPort]);
     });
 
     test("fails fast, without launching a runner, when the tunnel and service port disagree", async function () {
-      const created: IOSCtrlProxyManager[] = [];
-      const signing = {
-        resolveSigningForDevice: async () => {
-          // The port moves after the tunnel was started and before the launch.
-          const [moving] = created;
-          (moving as unknown as { adoptServicePort(port: number): void }).adoptServicePort(
-            moving.getServicePort() + 1,
-          );
-          return { buildSettings: [], allowProvisioningUpdates: false, warnings: [] };
-        },
-      } as unknown as XcodeSigningManager;
-      const manager = createManager(signing);
-      created.push(manager);
+      // The tunnel ends up forwarding a different host port than the runner is told to use.
+      class MisforwardingTunnel extends FakeIosTunnelClient {
+        override async start(options: IosTunnelStart): Promise<void> {
+          await super.start({ ...options, localPort: options.localPort + 1 });
+        }
+      }
+      const manager = createManager(defaultSigning, new MisforwardingTunnel());
 
       await expect(manager.start()).rejects.toThrow(/iproxy tunnel forwards localhost:\d+ but/);
 
@@ -406,10 +412,8 @@ describe("IOSCtrlProxyManager physical-device runner lifecycle", function () {
     });
 
     test("stop() after two launches leaves no runner or tunnel behind", async function () {
-      const manager = createManager();
-      const launch = (manager as unknown as { startOnDevice(): Promise<void> }).startOnDevice.bind(
-        manager,
-      );
+      const { manager, steps } = createManagerWithSteps();
+      const launch = steps.startOnDevice;
       await launch();
       const first = world.alive("xcodebuild")[0];
       await launch();

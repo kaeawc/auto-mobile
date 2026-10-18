@@ -2,6 +2,7 @@ import { ChildProcess } from "child_process";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import {
   BootedDeviceDiscovery,
+  DeviceDestroyOptions,
   DeviceImageDiscovery,
   DeviceImageDiscoveryOptions,
   DeviceStartResult,
@@ -234,6 +235,16 @@ export class FakeDeviceManager implements PlatformDeviceManager {
   }
 
   async killDevice(_: BootedDevice): Promise<void> {}
+
+  destroyedDevices: DeviceInfo[] = [];
+
+  /** Deleting a device image removes it from the image list, as the real manager does. */
+  async destroyDevice(device: DeviceInfo, _options?: DeviceDestroyOptions): Promise<void> {
+    this.destroyedDevices.push(device);
+    this.deviceImages = this.deviceImages.filter(
+      (image) => !(image.platform === device.platform && image.name === device.name),
+    );
+  }
 
   async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
     const id =

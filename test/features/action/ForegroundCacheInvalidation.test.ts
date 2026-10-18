@@ -64,7 +64,7 @@ describe("shared foreground cache invalidation", () => {
       invalidateCache: () => {
         invalidations++;
       },
-    } as unknown as AndroidCtrlProxyClient);
+    });
     try {
       new DefaultDeviceWindowCacheInvalidator().invalidate(device, true);
       expect(invalidations).toBe(1);

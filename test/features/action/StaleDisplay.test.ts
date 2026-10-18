@@ -650,9 +650,7 @@ describe("selector tools retry once after a fold", () => {
       spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
         isAvailable: async () => true,
       } as unknown as AndroidCtrlProxyManager),
-      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        new FakeCtrlProxy() as unknown as AndroidCtrlProxyClient,
-      ),
+      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(new FakeCtrlProxy()),
     );
   });
   afterEach(() => {
@@ -765,9 +763,7 @@ describe("swipeOn lookFor and auto-target retry once after a fold", () => {
       spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
         isAvailable: async () => true,
       } as unknown as AndroidCtrlProxyManager),
-      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        new FakeCtrlProxy(h.timer) as unknown as AndroidCtrlProxyClient,
-      ),
+      spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(new FakeCtrlProxy(h.timer)),
     );
     const gesture = new FakeGestureExecutor();
     const action = new SwipeOn(h.targetDevice, h.adb, {

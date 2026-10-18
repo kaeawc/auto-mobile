@@ -10,7 +10,7 @@ import type { FencedGestureOptions } from "../ExecuteGesture";
 import { ActionableError, BootedDevice, Element, SwipeDirection } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
-import { AndroidCtrlProxyClient } from "../../observe/android";
+import type { AndroidCtrlProxyClient } from "../../observe/android";
 import type { AccessibilityNodeSelector } from "../../observe/android/types";
 import {
   TALKBACK_STATE_UNKNOWN_WARNING,
@@ -26,6 +26,7 @@ import {
 } from "./swipeTiming";
 import { Timer } from "../../../utils/interfaces/Timer";
 import { throwIfAborted } from "../../../utils/toolUtils";
+import { semanticScrollSuccess } from "./swipeDurationReport";
 import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 
 export type AccessibilityScrollAction = "scroll_forward" | "scroll_backward";
@@ -51,11 +52,21 @@ export function scrollActionForFingerDirection(
     : "scroll_backward";
 }
 
+/** The CtrlProxy surface the TalkBack swipe path calls. */
+export type TalkBackSwipeCtrlProxy = Pick<
+  AndroidCtrlProxyClient,
+  | "requestAction"
+  | "requestNodeAction"
+  | "requestTwoFingerSwipe"
+  | "supportsNodeActionSelectors"
+  | "getAccessibilityHierarchy"
+>;
+
 export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
   constructor(
     private readonly device: BootedDevice,
     private readonly executeGesture: GestureExecutor,
-    private readonly accessibilityService: AndroidCtrlProxyClient,
+    private readonly accessibilityService: TalkBackSwipeCtrlProxy,
     private readonly accessibilityDetector: AccessibilityDetector,
     private readonly adb: AdbExecutor,
     private readonly timer: Timer,
@@ -436,14 +447,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
 
       if (result.success) {
         logger.info("[SwipeOn] ACTION_SCROLL succeeded");
-        return {
-          success: true,
-          x1,
-          y1,
-          x2,
-          y2,
-          duration: gestureOptions?.duration || 300,
-        };
+        return semanticScrollSuccess({ x1, y1, x2, y2 }, gestureOptions);
       }
       if (result.dispatched && result.acknowledged !== true) {
         logger.warn(`[SwipeOn] ACTION_SCROLL outcome indeterminate: ${result.error}`);

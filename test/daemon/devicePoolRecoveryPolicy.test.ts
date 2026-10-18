@@ -1,26 +1,21 @@
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { makePool } from "../helpers/makePool";
 import { describe, expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 
 describe("DevicePool recovery eligibility", () => {
   test("only reports AutoMobile-started Android virtual devices as recovery eligible", async () => {
     const timer = new FakeTimer();
-    const pool = new DevicePool(
-      createDevicePoolDependencies(
-        new SessionManager(timer, new FakeDeviceSessionPersistence()),
-        "daemon-session",
-        {
-          timer: timer,
-          installedAppsRepository: new FakeInstalledAppsRepository(),
-          deviceManager: new FakeDeviceManager(),
-          recoveryPolicy: { onLoss: true, maxAttempts: 1 },
-        },
-      ),
+    const pool = makePool(
+      new SessionManager(timer, new FakeDeviceSessionPersistence()),
+      "daemon-session",
+      {
+        timer: timer,
+        deviceManager: new FakeDeviceManager(),
+        recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+      },
     );
 
     await pool.initializeWithDevices([

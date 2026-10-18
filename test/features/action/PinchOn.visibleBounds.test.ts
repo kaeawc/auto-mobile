@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import type { BootedDevice, ElementBounds, ObserveResult } from "../../../src/models";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
@@ -14,6 +13,7 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 // Measured bounds from #9186: element [0,-361,855,1456], screen 402x874.
 // Unclipped centerX 428 / distanceStart 513 did nothing; expected centre (201,437).
@@ -112,12 +112,8 @@ for (const platform of ["android", "ios"] as const) {
         activityName: "MainActivity",
         layoutSeqSum: 123,
       });
-      const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        android as unknown as AndroidCtrlProxyClient,
-      );
-      const iosSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        ios as unknown as IOSCtrlProxyClient,
-      );
+      const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(android);
+      const iosSpy = spyOnIosClientInstance(ios);
       const managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
         isAvailable: async () => true,
       } as unknown as AndroidCtrlProxyManager);

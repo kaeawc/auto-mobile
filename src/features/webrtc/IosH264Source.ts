@@ -119,6 +119,12 @@ export function resolveSimulatorWindowTimeoutMs(env: NodeJS.ProcessEnv = process
  * pipeline actually runs.
  */
 export const IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS = resolveSimulatorWindowTimeoutMs();
+/**
+ * Spacing between Simulator window lookups while the window is not yet (or
+ * transiently no longer) listed by ScreenCaptureKit. A single lookup raced the
+ * window becoming discoverable on the mac-heavy runner (#12708).
+ */
+export const IOS_SIMULATOR_WINDOW_POLL_INTERVAL_MS = 500;
 const NO_FRAMES_PERMISSION_WARNING = "warn: no frames received";
 /** Target seconds between IDRs in the ffmpeg GOP (see buildFfmpegArgs). */
 const IOS_KEYFRAME_INTERVAL_SECONDS = 2;
@@ -537,6 +543,12 @@ export class IosH264Source implements H264CaptureSource {
           this.commandRunner,
           audioEnabled,
           signal,
+          {
+            timer: this.timer,
+            // The loop reserves one interval before each sleep, so the budget is the whole
+            // timeout; subtracting an interval here too wasted one (#13066).
+            pollBudgetMs: Math.max(0, IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS),
+          },
         ));
     this.forceRaw = options.forceRawPipeline ?? readForceRawPipeline(process.env);
   }
@@ -2292,7 +2304,47 @@ async function defaultResolveSimulatorWindowId(
   commandRunner: CommandRunner,
   audioEnabled: boolean,
   signal: AbortSignal,
+  poll: { timer: Timer; pollBudgetMs: number },
 ): Promise<number> {
+  const startedAt = poll.timer.now();
+  let lookups = 0;
+  for (;;) {
+    lookups += 1;
+    const outcome = await lookupSimulatorWindowId(
+      helperPath,
+      device,
+      commandRunner,
+      audioEnabled,
+      signal,
+    );
+    if (outcome.kind === "found") {
+      return outcome.windowID;
+    }
+    const exhausted =
+      signal.aborted ||
+      poll.timer.now() - startedAt + IOS_SIMULATOR_WINDOW_POLL_INTERVAL_MS >= poll.pollBudgetMs;
+    if (exhausted) {
+      throw new ActionableError(
+        `No visible iOS Simulator window matched ${device.name} after ${lookups} lookup(s) over ` +
+          `${poll.timer.now() - startedAt}ms; windows seen: ${outcome.seen}. ` +
+          "Open the simulator window and grant Screen Recording permission if prompted.",
+      );
+    }
+    await poll.timer.sleep(IOS_SIMULATOR_WINDOW_POLL_INTERVAL_MS);
+  }
+}
+
+type SimulatorWindowLookup =
+  | { kind: "found"; windowID: number }
+  | { kind: "missing"; seen: string };
+
+async function lookupSimulatorWindowId(
+  helperPath: string,
+  device: BootedDevice,
+  commandRunner: CommandRunner,
+  audioEnabled: boolean,
+  signal: AbortSignal,
+): Promise<SimulatorWindowLookup> {
   const result = await commandRunner(helperPath, ["--list-simulators"], signal);
   if (result.exitCode !== 0) {
     if (hasScreenRecordingPermissionDenial(result.stderr)) {
@@ -2338,12 +2390,11 @@ async function defaultResolveSimulatorWindowId(
       ? exactMatches
       : titledWindows.filter((window) => window.title.toLowerCase().includes(deviceName));
   if (matches.length === 1) {
-    return matches[0].windowID;
+    return { kind: "found", windowID: matches[0].windowID };
   }
   if (matches.length === 0) {
-    throw new ActionableError(
-      `No visible iOS Simulator window matched ${device.name}. Open the simulator window and grant Screen Recording permission if prompted.`,
-    );
+    const seen = windows.map((window) => JSON.stringify(window.title ?? null)).join(", ");
+    return { kind: "missing", seen: `[${seen}]` };
   }
   throw new ActionableError(
     `Multiple iOS Simulator windows matched ${device.name}; close extras or use a more specific device.`,

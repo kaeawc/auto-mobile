@@ -384,4 +384,27 @@ describe("TouchFrameReconstructor", () => {
     expect(isFrame(frame!)).toBe(true);
     expect((frame as RawTouchFrame).activeSlots[0].pressure).toBe(100);
   });
+
+  test("a tracking id replaced in an active slot ends the old contact (#13129)", () => {
+    // Derived from the captured API 36 taps: the intermediate "ffffffff" + SYN_REPORT
+    // pair between the two contacts is dropped, so 0x322 replaces 0x321 directly.
+    const capture = readFileSync(
+      `${import.meta.dir}/../../../fixtures/android-getevent/same-coordinate-taps-api36.txt`,
+      "utf8",
+    )
+      .trim()
+      .split("\n");
+    const lines = [...capture.slice(0, 4), ...capture.slice(6)];
+    const classifier = new GestureClassifier({ toScreenPoint: (x, y) => ({ x, y }) }, 1);
+    const frames = feedLines(r, lines).filter(isFrame);
+    expect(frames[0].releasedSlots).toEqual([]);
+    expect(frames[1].releasedSlots).toEqual([0]);
+    expect(frames[1].activeSlots).toEqual([]);
+    expect(frames[2].activeSlots[0].trackingId).toBe(0x322);
+    expect(frames[2].releasedSlots).toEqual([]);
+    expect(frames[3].releasedSlots).toEqual([0]);
+    const gestures = frames.map((f) => classifier.feedFrame(f)).filter((g) => g !== null);
+    // Both contacts complete; the compressed test clock makes the second read as a double tap.
+    expect(gestures.map((g) => g.type)).toEqual(["tap", "doubleTap"]);
+  });
 });

@@ -47,7 +47,6 @@ function createFakeDaemonState() {
 function createServer(fakeTimer: FakeTimer): UnixSocketServer {
   return createTestUnixSocketServer(
     join(tmpdir(), `progress-deadline-${randomUUID()}.sock`),
-    "http://localhost:0/mcp",
     createFakeDaemonState(),
     fakeTimer,
   );
@@ -207,16 +206,16 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
     expect(callTool.mock.calls).toEqual([[expect.objectContaining({ name: "observe" }), options]]);
   });
 
-  test("device-control recovery reconnects after the original budget when progress extends the live deadline", async () => {
+  test("a forward opened after the original budget runs on the progress-extended live deadline", async () => {
     const fakeTimer = new FakeTimer();
     const server = createServer(fakeTimer);
     const timeoutMs = 30_000;
     const deadline = new ProgressExtendableDeadline(fakeTimer.now(), timeoutMs);
     const originalRemainingMs = deadline.value - fakeTimer.now();
-    const result = { content: [{ type: "text", text: "recovered" }] };
-    let reconnects = 0;
+    const result = { content: [{ type: "text", text: "forwarded" }] };
+    let opened = 0;
     server.mcpClientFactory = async () => {
-      reconnects++;
+      opened++;
       return {
         callTool: async () => result,
         listTools: async () => ({ tools: [] }),
@@ -239,7 +238,7 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
         phase: string,
       ) => number;
       remainingMcpForwardBudget: (input: { deadline: ProgressExtendableDeadline }) => number;
-      recoverDeviceControlTransport: (input: unknown) => Promise<unknown>;
+      forwardMcpRequest: (input: unknown) => Promise<unknown>;
     };
     const request: DaemonRequest = {
       id: "recovery-request",
@@ -253,17 +252,15 @@ describe("UnixSocketServer.handleIdeRequest extends the deadline on progress (#6
       internals.requireRemainingMcpForwardBudget(request, timeoutMs, deadline, "recovery"),
     ).toBe(15_000);
     await expect(
-      internals.recoverDeviceControlTransport({
+      internals.forwardMcpRequest({
         request,
-        route: { executionKey: "execution", clientKey: "recovery-client" },
-        socketSessionId: "socket-recovery",
+        route: { executionKey: "execution", clientKey: "forward-client" },
+        socketSessionId: "socket-forward",
         totalTimeoutMs: timeoutMs,
         deadline,
-        phase: "connect",
-        identity: {},
       }),
     ).resolves.toEqual(result);
-    expect(reconnects).toBe(1);
+    expect(opened).toBe(1);
   });
 
   test("propagates owner-socket cancellation to an abort-ignoring late acquisition", async () => {
@@ -683,7 +680,6 @@ describe("pushProgressNotification is independent of the general notification su
   } {
     const server = createTestUnixSocketServer(
       join(tmpdir(), `progress-subscription-${randomUUID()}.sock`),
-      "http://localhost:0/mcp",
       { isInitialized: () => false },
       new FakeTimer(),
     );

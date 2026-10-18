@@ -67,6 +67,11 @@ export interface StatelessMcpRequestScope {
   readonly requestScopeId: string;
   /** The caller's session key: the header, else the in-band `__mcpSessionId` argument. */
   readonly requestMcpSessionId: string | undefined;
+  /**
+   * Who owns the request's MCP tasks (#4668), when not its session key: a control-socket forward
+   * from the stdio proxy names the proxy. The HTTP endpoint never sets it.
+   */
+  readonly taskOwnerKey?: string;
 }
 
 export interface StatelessMcpHttpEndpointDeps<
@@ -108,6 +113,8 @@ const METHOD_NOT_ALLOWED_BODY = JSON.stringify({
   id: null,
 });
 
+const SHUTTING_DOWN_BODY = JSON.stringify({ error: "Daemon is shutting down" });
+
 type JsonRpcId = string | number;
 
 function jsonRpcMessages(parsedBody: unknown): readonly Record<string, unknown>[] {
@@ -140,8 +147,12 @@ export function readInBandMcpSessionId(parsedBody: unknown): string | undefined 
   return undefined;
 }
 
+function cancelKeySuffix(id: JsonRpcId): string {
+  return `\u0000${typeof id}:${String(id)}`;
+}
+
 function cancelKey(sessionKey: string, id: JsonRpcId): string {
-  return `${sessionKey}\u0000${typeof id}:${String(id)}`;
+  return `${sessionKey}${cancelKeySuffix(id)}`;
 }
 
 export class StatelessMcpHttpEndpoint<
@@ -152,6 +163,7 @@ export class StatelessMcpHttpEndpoint<
   private readonly inFlight = new Map<string, InFlightRequest>();
   /** session key + JSON-RPC id → request scope, for `notifications/cancelled`. */
   private readonly byCancelKey = new Map<string, string>();
+  private accepting = true;
 
   constructor(private readonly deps: StatelessMcpHttpEndpointDeps<Req, Res, T>) {}
 
@@ -181,8 +193,18 @@ export class StatelessMcpHttpEndpoint<
     });
   }
 
+  /**
+   * Serve nothing more (#13049): shutdown calls this when it stops admitting HTTP requests. A
+   * request admitted earlier that is still awaiting a cancellation it carried is answered 503
+   * instead of building a server after the shutdown snapshot.
+   */
+  stopAccepting(): void {
+    this.accepting = false;
+  }
+
   /** Drop all tracking after shutdown closed the requests (or gave up on them). */
   clear(): void {
+    this.accepting = false;
     this.inFlight.clear();
     this.byCancelKey.clear();
   }
@@ -204,6 +226,12 @@ export class StatelessMcpHttpEndpoint<
     }
     const headerSessionKey = readMcpSessionKey(req.headers);
     await this.cancelNotifiedRequests(headerSessionKey, parsedBody);
+    if (!this.accepting) {
+      // Shutdown began while this request's cancellation was closing its target (#13049).
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(SHUTTING_DOWN_BODY);
+      return;
+    }
     const scope: StatelessMcpRequestScope = {
       requestScopeId: this.deps.idGenerator.next(),
       requestMcpSessionId: headerSessionKey ?? readInBandMcpSessionId(parsedBody),
@@ -252,15 +280,13 @@ export class StatelessMcpHttpEndpoint<
     transport: T,
   ): InFlightRequest {
     const { requestScopeId } = scope;
-    // Only the header key indexes cancellation: a `notifications/cancelled` carries no
-    // in-band arguments, and JSON-RPC ids are only unique within one client.
-    const cancelKeys =
-      headerSessionKey === undefined
-        ? []
-        : jsonRpcMessages(parsedBody)
-            .map((message) => message.id)
-            .filter(isJsonRpcId)
-            .map((id) => cancelKey(headerSessionKey, id));
+    // A `notifications/cancelled` carries no in-band arguments, so the header key indexes
+    // cancellation; a keyless request is indexed under the empty key, which only the id-alone
+    // fallback reaches (JSON-RPC ids are unique only within one client).
+    const cancelKeys = jsonRpcMessages(parsedBody)
+      .map((message) => message.id)
+      .filter(isJsonRpcId)
+      .map((id) => cancelKey(headerSessionKey ?? "", id));
     let closing: Promise<void> | undefined;
     const request: InFlightRequest = {
       requestScopeId,
@@ -336,9 +362,6 @@ export class StatelessMcpHttpEndpoint<
     headerSessionKey: string | undefined,
     parsedBody: unknown,
   ): Promise<void> {
-    if (headerSessionKey === undefined) {
-      return;
-    }
     const cancellations = jsonRpcMessages(parsedBody).filter(
       (message) => message.method === "notifications/cancelled",
     );
@@ -348,7 +371,7 @@ export class StatelessMcpHttpEndpoint<
         if (!isJsonRpcId(requestId)) {
           return;
         }
-        const scopeId = this.byCancelKey.get(cancelKey(headerSessionKey, requestId));
+        const scopeId = this.cancelledScopeId(headerSessionKey, requestId);
         const request = scopeId === undefined ? undefined : this.inFlight.get(scopeId);
         if (!request) {
           // The request already answered (or never reached this daemon): nothing to cancel.
@@ -359,6 +382,23 @@ export class StatelessMcpHttpEndpoint<
         await request.close(typeof reason === "string" ? reason : "notifications/cancelled");
       }),
     );
+  }
+
+  /**
+   * The in-flight request a cancellation names. With the session-key header it is the request
+   * that key sent under that id. Without it (#13067), the id alone decides, and only when exactly
+   * one in-flight request carries it: JSON-RPC ids are unique only within one client.
+   */
+  private cancelledScopeId(
+    headerSessionKey: string | undefined,
+    requestId: JsonRpcId,
+  ): string | undefined {
+    if (headerSessionKey !== undefined) {
+      return this.byCancelKey.get(cancelKey(headerSessionKey, requestId));
+    }
+    const suffix = cancelKeySuffix(requestId);
+    const matches = Array.from(this.byCancelKey.entries()).filter(([key]) => key.endsWith(suffix));
+    return matches.length === 1 ? matches[0][1] : undefined;
   }
 
   private async dispatch(

@@ -93,15 +93,12 @@ function installClient(): void {
         calls.push({ label, args, release: resolve });
       });
   };
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-    () =>
-      ({
-        getScreenScaleMetadata: () => null,
-        requestTapCoordinates: record("tap"),
-        requestGestureStart: record("gestureStart"),
-        requestGestureEnd: record("gestureEnd"),
-      }) as unknown as AndroidCtrlProxyClient,
-  );
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+    getScreenScaleMetadata: () => null,
+    requestTapCoordinates: record("tap"),
+    requestGestureStart: record("gestureStart"),
+    requestGestureEnd: record("gestureEnd"),
+  }));
 }
 
 beforeEach(() => {
@@ -111,7 +108,6 @@ beforeEach(() => {
   installClient();
   server = createTestUnixSocketServer(
     "unused",
-    "http://localhost:0/mcp",
     { isInitialized: () => false } as DaemonStateAccess,
     new FakeTimer(),
   );
@@ -272,12 +268,7 @@ describe("(c) order of #9958 ownership refusal and #10006 abort in runTrackedDev
   function useSessionState(assignedDevice: string): void {
     const session = createFakeSession("session-c", assignedDevice, "android");
     const state = createFakeDaemonState(new Map([["session-c", session]]));
-    const stateServer = createTestUnixSocketServer(
-      "unused",
-      "http://localhost:0/mcp",
-      state,
-      new FakeTimer(),
-    );
+    const stateServer = createTestUnixSocketServer("unused", state, new FakeTimer());
     server = stateServer;
     internals = stateServer as unknown as Internals;
   }

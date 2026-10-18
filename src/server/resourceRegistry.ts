@@ -265,9 +265,27 @@ class ResourceRegistryClass {
   // Bumped when the registered set is cleared, so a registration skipped while the set
   // was intact runs again afterwards (#13068).
   private clearEpoch = 0;
+  // Run before every resources/list reply so a source that only changes outside
+  // AutoMobile (devices booted by hand) can refresh the roster it contributes.
+  private listRefreshers = new Map<string, () => Promise<void>>();
 
   get clearEpochForRegistration(): number {
     return this.clearEpoch;
+  }
+
+  /** Register (or replace) a named hook awaited before each resources/list reply. */
+  registerListRefresher(name: string, refresh: () => Promise<void>): void {
+    this.listRefreshers.set(name, refresh);
+  }
+
+  private async refreshBeforeList(): Promise<void> {
+    for (const [name, refresh] of this.listRefreshers) {
+      try {
+        await refresh();
+      } catch (error) {
+        logger.warn(`[ResourceRegistry] List refresher ${name} failed: ${error}`);
+      }
+    }
   }
 
   // Register a new resource
@@ -431,6 +449,7 @@ class ResourceRegistryClass {
 
     // Set handler for listing resources
     server.server.setRequestHandler("resources/list", async () => {
+      await this.refreshBeforeList();
       return {
         resources: this.getResourceDefinitions(),
       };
@@ -721,6 +740,7 @@ class ResourceRegistryClass {
   // Clear all registered resources, templates, and subscriptions (for testing)
   clearResources(): void {
     this.clearEpoch++;
+    this.listRefreshers.clear();
     this.resources.clear();
     this.templates.clear();
     this.subscriptions.clear();

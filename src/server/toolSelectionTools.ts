@@ -311,7 +311,7 @@ async function getEnabledToolsResponse(
 export function registerToolSelectionTools(): void {
   ToolRegistry.register(
     SET_TOOL_ENABLED_TOOL_NAME,
-    "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
+    "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call, including default-off tools such as pinchOn and prototype that tools/list never shows until enabled; read the automobile:tools resource for every tool's name and default discovery state. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
     setToolEnabledSchema,
     async (args) => {
       const context = getToolSelectionContext();

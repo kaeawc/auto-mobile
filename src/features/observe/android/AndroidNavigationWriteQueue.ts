@@ -4,12 +4,12 @@
  */
 import type {
   NavigationEvent,
-  NavigationGraphManager,
+  NavigationGraphService,
 } from "../../navigation/NavigationGraphManager";
 
 export interface AndroidNavigationWriteQueueContext {
   readonly deviceId: string;
-  getNavigationGraphManager(): Pick<NavigationGraphManager, "recordNavigationEvent">;
+  getNavigationGraphManager(): Pick<NavigationGraphService, "recordNavigationEvent">;
 }
 
 export class AndroidNavigationWriteQueue {

@@ -118,8 +118,12 @@ internal class GestureStreamCoordinator(
    */
   fun move(x: Float, y: Float) {
     if (ended || cancelled || finished) return
+    val point = GesturePoint(x, y)
+    // Coalesce an exact repeat of the newest queued point: it would only replay a stationary
+    // continuing segment. A repeat of the already-dispatched point is a genuine hold and is kept.
+    if (point == pending.lastOrNull()) return
     if (pending.size >= maxPendingMoves) pending.removeFirst()
-    pending.addLast(GesturePoint(x, y))
+    pending.addLast(point)
   }
 
   /**
@@ -202,7 +206,11 @@ internal class GestureStreamCoordinator(
     /** The initial finger-down press. Brief; the touch is then held open by `willContinue`. */
     const val DEFAULT_PRESS_SEGMENT_MS: Long = 32
 
-    /** Backlog cap: ~1 s of segments at [DEFAULT_MOVE_SEGMENT_MS]; far above any waypoint path. */
-    const val DEFAULT_MAX_PENDING_MOVES: Int = 64
+    /**
+     * Backlog cap. Must stay at or above the largest scripted dragPath (the TS side's
+     * `DRAG_PATH_MAX_POINTS` = 100 points = 99 moves) so a legitimate path never loses waypoints
+     * (#13280); only a live drag far beyond that is thinned to catch up.
+     */
+    const val DEFAULT_MAX_PENDING_MOVES: Int = 128
   }
 }

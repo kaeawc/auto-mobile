@@ -1763,9 +1763,9 @@ To rotate **without zooming**, keep the finger distance constant: pass
 together with <code>rotationDegrees</code>. <code>direction</code> is still a required
 argument but is ignored when the distance does not change, so the fingers never
 drift toward a zoom; equal distances are clamped and (on iOS) rounded together
-so they stay equal. Negative and larger-than-360 values are passed through as
-given. This is a two-finger rotate gesture, not the device <code>rotate</code>
-tool, which changes screen orientation.
+so they stay equal. Negative values are passed through as given. This is a
+two-finger rotate gesture, not the device <code>rotate</code> tool, which changes
+screen orientation.
 
 ```json
 { "direction": "out", "scale": 1, "rotationDegrees": 90, "duration": 500 }

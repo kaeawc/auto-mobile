@@ -79,13 +79,12 @@ export class FakeAndroidInventoryLoad implements HostProcessExecutor {
   }
 
   emulator(): AndroidEmulatorClient {
-    const client = new AndroidEmulatorClient(
-      async () => createExecResult("", ""),
-      null,
-      this.timer,
-      this.adbFactory,
-      new FakeAvdConfigReader(),
-    );
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => createExecResult("", ""),
+      timer: this.timer,
+      adbFactory: this.adbFactory,
+      avdConfigReader: new FakeAvdConfigReader(),
+    });
     Object.defineProperty(client, "ensureEmulatorPath", { value: async () => "fake-emulator" });
     // Typed identity/enumeration seams isolate workload behavior from console/AVD text parsing.
     const enumerate = async () => {

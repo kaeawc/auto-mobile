@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { z } from "zod/v4";
+import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
   StatelessMcpHttpEndpoint,
@@ -252,6 +253,57 @@ describe("socket loopback through the real stateless MCP endpoint", () => {
       expect(sent.map((post) => post.method)).toEqual(["tools/call"]);
       expect(sent[0].status()).toBe(200);
     } finally {
+      socket.destroy();
+    }
+  });
+
+  test("a socket cancel frame stops the forwarded call on the endpoint at once (#13067)", async () => {
+    const started = new Promise<AbortSignal | undefined>((resolve) => {
+      holdStarted = resolve;
+    });
+    const aborted = new Promise<void>((resolve) => {
+      holdAborted = resolve;
+    });
+    const socket = new Socket();
+    const deadline = defaultTimer.setTimeout(() => socket.destroy(), SOCKET_REQUEST_DEADLINE_MS);
+    const frames: string[] = [];
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once("error", reject);
+        socket.connect(socketPath, resolve);
+      });
+      socket.on("data", (chunk: Buffer) => frames.push(chunk.toString("utf8")));
+      const send = (frame: Record<string, unknown>) => socket.write(`${JSON.stringify(frame)}\n`);
+      send({
+        id: "hold",
+        type: "mcp_request",
+        method: "tools/call",
+        params: { name: HOLD_TOOL, arguments: {} },
+      });
+      const signal = await started;
+      const socketSessionId = harness.scopes.at(-1)?.requestMcpSessionId ?? "";
+      expect(executionTracker.hasActiveSessionExecutions(socketSessionId)).toBe(true);
+      const postsBefore = harness.posts.length;
+
+      send({
+        id: "cancel",
+        type: "daemon_request",
+        method: DAEMON_CANCEL_REQUEST_METHOD,
+        params: { requestId: "hold" },
+      });
+      // The handler stops while the socket is still open: the cancel, not a disconnect.
+      await aborted;
+
+      expect(signal?.aborted).toBe(true);
+      expect(socket.destroyed).toBe(false);
+      const cancelPost = harness.posts
+        .slice(postsBefore)
+        .findIndex((post) => post.method === "notifications/cancelled");
+      expect(cancelPost).toBeGreaterThanOrEqual(0);
+      // The cancellation POST names the forward's socket session, as its tools/call did.
+      expect(harness.headerKeys[postsBefore + cancelPost]).toBe(socketSessionId);
+    } finally {
+      defaultTimer.clearTimeout(deadline);
       socket.destroy();
     }
   });

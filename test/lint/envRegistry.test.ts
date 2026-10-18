@@ -2,7 +2,13 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Visitor, type Expression } from "oxc-parser";
-import { ENV_REGISTRY, readEnvRaw, readEnvTrimmed, ENV } from "../../src/config/env";
+import {
+  AMBIENT_ENV_REGISTRY,
+  ENV_REGISTRY,
+  readEnvRaw,
+  readEnvTrimmed,
+  ENV,
+} from "../../src/config/env";
 import { parseGuardSource, relativePosix, typeScriptFiles } from "./astGuard";
 
 /**
@@ -98,7 +104,12 @@ function findEnvNames(file: string, source: string): Set<string> {
 }
 
 function registeredNames(): Set<string> {
-  return new Set(ENV_REGISTRY.flatMap((spec) => [spec.name, spec.legacyName ?? spec.name]));
+  return new Set(
+    [...ENV_REGISTRY, ...AMBIENT_ENV_REGISTRY].flatMap((spec) => [
+      spec.name,
+      spec.legacyName ?? spec.name,
+    ]),
+  );
 }
 
 function readBaseline(): string[] {
@@ -173,14 +184,14 @@ describe("environment variable registry", () => {
   });
 
   test("registry entries are unique, documented and listed in the environment docs", () => {
-    const names = ENV_REGISTRY.flatMap((spec) =>
+    const names = [...ENV_REGISTRY, ...AMBIENT_ENV_REGISTRY].flatMap((spec) =>
       spec.legacyName ? [spec.name, spec.legacyName] : [spec.name],
     );
     expect(new Set(names).size).toBe(names.length);
     const docs = readFileSync(DOCS, "utf8");
     const missing = names.filter((name) => !docs.includes(`\`${name}\``));
     expect(missing, `Add to ${path.relative(ROOT, DOCS)}`).toEqual([]);
-    for (const spec of ENV_REGISTRY) {
+    for (const spec of [...ENV_REGISTRY, ...AMBIENT_ENV_REGISTRY]) {
       expect(spec.doc.length).toBeGreaterThan(0);
       expect(spec.default.length).toBeGreaterThan(0);
     }

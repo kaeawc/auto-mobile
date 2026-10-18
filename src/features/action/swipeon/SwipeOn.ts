@@ -101,6 +101,7 @@ import {
   swipeScreenSize,
 } from "./iosChromeInsets";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
+import { explicitDuration } from "./swipeDurationReport";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "../touchscreenInput";
 import { IOSCtrlProxyClient } from "../../observe/ios";
@@ -1678,6 +1679,7 @@ export class SwipeOn extends BaseVisualChange {
           displayFence: fence,
           duration,
           scrollMode: options.scrollMode,
+          durationExplicit: explicitDuration(options),
           timeoutMs: this.iosGestureTimeoutMs?.(),
           lockScreen: this.iosLockScreenSwipe,
         };
@@ -1815,6 +1817,7 @@ export class SwipeOn extends BaseVisualChange {
           displayFence: fence,
           duration,
           scrollMode: options.scrollMode,
+          durationExplicit: explicitDuration(options),
         };
 
         throwIfAborted(signal);

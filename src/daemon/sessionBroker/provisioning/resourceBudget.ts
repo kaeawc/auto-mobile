@@ -294,10 +294,15 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
 
 /**
  * A known powered-off image with no registry commitment holds no live resource and is never
- * deleted by the budget, so it must not block creation (#13017). Unknown power state still counts.
+ * deleted by the budget, so it must not block creation (#13017). Unknown power state still counts,
+ * and so does an iOS simulator in a transitional simctl state (`Booting` / `Shutting Down`): the
+ * inventory reports `isRunning: false` for it, but it still holds host resources (#13060).
  */
 function isPoweredOffLeftover(device: DeviceInfo): boolean {
-  return device.isRunning === false && device.isRunningStateKnown !== false;
+  if (device.isRunning !== false || device.isRunningStateKnown === false) {
+    return false;
+  }
+  return !(device.platform === "ios" && device.state !== undefined && device.state !== "Shutdown");
 }
 
 function chargeOrphans(input: LedgerInput, charges: ResourceCharge[], seen: Set<string>): void {

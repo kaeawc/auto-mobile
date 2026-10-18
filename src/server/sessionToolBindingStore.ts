@@ -67,6 +67,11 @@ export class SessionToolBindingStore {
     this.attached.clear();
   }
 
+  /** Live bindings attached to this store; exposed so tests can assert nothing leaks. */
+  get attachedCountForTesting(): number {
+    return this.attached.size;
+  }
+
   /** Distinct keys holding any binding state; a key gone for good must not stay counted. */
   get keyCount(): number {
     return new Set([

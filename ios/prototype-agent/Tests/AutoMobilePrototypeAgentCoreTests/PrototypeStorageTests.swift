@@ -257,7 +257,7 @@ final class PrototypeStorageTests: XCTestCase {
         try harness.show(makeSpec())
         XCTAssertEqual(harness.session.state["dark"], .bool(true))
         XCTAssertEqual(harness.session.data?["note"], .string("restored"))
-        XCTAssertEqual(harness.session.dataRevision, 0)
+        XCTAssertEqual(harness.session.dataRevision, 1, "the show is revision 1; the restore adds none")
         XCTAssertEqual(harness.session.lastSequence, 0)
         XCTAssertTrue(harness.events.isEmpty)
         // The drawn tree follows the restored data, before the first draw.
@@ -319,7 +319,7 @@ final class PrototypeStorageTests: XCTestCase {
         let harness = StorageHarness()
         try harness.show(makeSpec())
         try harness.tap("Add")
-        XCTAssertEqual(harness.session.dataRevision, 1)
+        XCTAssertEqual(harness.session.dataRevision, 2)
         XCTAssertEqual(harness.store.saves, 0, "nothing is written before the delay")
         XCTAssertEqual(harness.clock.live.count, 1)
         XCTAssertEqual(harness.clock.live.first?.delay, PrototypeStorageCoordinator.defaultDebounceMilliseconds)
@@ -453,8 +453,8 @@ final class PrototypeStorageTests: XCTestCase {
         try harness.tap("Dark")
         try harness.tap("Add")
         harness.clock.elapse()
-        // One device revision counter (#11675): the Dark tap took 1, the data write 2.
-        XCTAssertEqual(harness.session.dataRevision, 2, "the write applied on screen")
+        // One device revision counter (#11675): the show took 1, the Dark tap 2, the data write 3.
+        XCTAssertEqual(harness.session.dataRevision, 3, "the write applied on screen")
         XCTAssertEqual(harness.store.records["shop"], stored(1, ["state:dark": .bool(true)]))
         let report = try XCTUnwrap(harness.coordinator.report(id: "shop"))
         XCTAssertEqual(report.skippedKeys, ["data:/cart"])

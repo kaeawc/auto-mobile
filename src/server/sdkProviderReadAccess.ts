@@ -1,4 +1,4 @@
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { isSameHolderSession } from "../daemon/inputDeviceOwnership";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 
@@ -20,12 +20,12 @@ export interface SdkReadRequester {
 export function isNonOwnerReaderOfHeldDevice(
   deviceId: string,
   requester?: SdkReadRequester,
+  daemon: DaemonContext = defaultDaemonContext,
 ): boolean {
-  const daemonState = DaemonState.getInstance();
-  if (!daemonState.isInitialized()) {
+  const sessionManager = daemon.sessionManager();
+  if (!sessionManager) {
     return false;
   }
-  const sessionManager = daemonState.getSessionManager();
   const owner = sessionManager.getSessionForDevice(deviceId) ?? undefined;
   if (!owner) {
     return false;

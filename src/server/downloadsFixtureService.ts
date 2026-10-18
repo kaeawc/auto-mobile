@@ -1,5 +1,5 @@
 import { ActionableError } from "../models";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { resolveActiveSessionDevice, type ActiveSessionResolver } from "./activeSessionDevice";
 import {
   getSharedStorageService,
@@ -66,11 +66,12 @@ export function createDownloadsFixtureService(
   );
 }
 
-export function registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
-  const daemonState = DaemonState.getInstance();
-  if (daemonState.isInitialized()) {
-    daemonState.getSessionManager().registerPendingDeviceCleanup(deviceId, cleanup);
-  }
+export function registerPendingDeviceCleanup(
+  deviceId: string,
+  cleanup: Promise<unknown>,
+  daemon: DaemonContext = defaultDaemonContext,
+): void {
+  daemon.sessionManager()?.registerPendingDeviceCleanup(deviceId, cleanup);
 }
 
 class DefaultDownloadsFixtureService implements DownloadsFixtureService {

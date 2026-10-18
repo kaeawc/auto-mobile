@@ -4965,9 +4965,9 @@ describe("Android insertion stops mixed typing after an unconfirmed suffix or ru
 describe("Android clear, eventLast caret and eventAll case read-backs", () => {
   function sequencedObserver(texts: Array<string | undefined>, order: string[] = []) {
     const options: Array<Parameters<SendKeysObserver["execute"]>[0]> = [];
-    const observer = {
-      captureScreenshot: async () => null,
-      execute: async (callOptions: Parameters<SendKeysObserver["execute"]>[0]) => {
+    const observer: SendKeysObserver = {
+      captureScreenshot: async () => {},
+      execute: async (callOptions) => {
         options.push(callOptions);
         order.push("read");
         const text = texts[Math.min(options.length - 1, texts.length - 1)];
@@ -4975,7 +4975,7 @@ describe("Android clear, eventLast caret and eventAll case read-backs", () => {
           ? ({ timestamp: 0 } as ObserveResult)
           : focusedAndroidObservation(text, {}, 0);
       },
-    } as unknown as SendKeysObserver;
+    };
     return { observer, options, reads: () => options.length };
   }
 

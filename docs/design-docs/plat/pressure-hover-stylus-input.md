@@ -21,19 +21,25 @@ carried into the [verification plan](#verification-plan).
 
 ## Android
 
-### What CtrlProxy can carry today: fingers only
+### What AutoMobile can carry today: fingers only
 
-CtrlProxy dispatches every tap, swipe, drag and pinch through
-`AccessibilityService.dispatchGesture` (`CtrlProxy.kt`: `performTapCoordinates`,
-`performSwipe`, `performDrag`, `performPinch`, and the streaming
-`StrokeDescription` coordinator).
+Android touch input reaches the device two ways, and both inject a finger:
+
+- CtrlProxy's `AccessibilityService.dispatchGesture` (`CtrlProxy.kt`:
+  `performTapCoordinates`, `performSwipe`, `performDrag`, `performPinch`, and the
+  streaming `StrokeDescription` coordinator).
+- `adb shell input swipe`, with no source prefix so the shell defaults to
+  `touchscreen`. `ExecuteGesture.ts` uses it as its default swipe mode (the
+  accessibility swipe is the opt-in `a11y` mode), and `androidLongPress.ts` expresses
+  a long press as a zero-distance swipe with a duration.
 
 **Source:** `GestureDescription` carries no input-device data. A stroke is a `Path`
 with a start time and duration. The internal `TouchPoint` has only a stroke id,
 continuation id, start/end-of-path flags and `x`/`y`. There is no field for tool
 type, pressure, tilt, button state or hover, so no change inside CtrlProxy's
-accessibility dispatch can produce a stylus event. The only per-gesture knob beyond
-geometry and timing is the target display (`Builder.setDisplayId`, API 30).
+accessibility dispatch can produce a stylus event. Beyond geometry, timing and stroke
+continuation, the only per-gesture knob is the target display
+(`Builder.setDisplayId`, API 30).
 
 ### `adb shell input`: stylus tool type, fixed pressure, no hover
 
@@ -64,7 +70,7 @@ for the whole stroke). It cannot produce a pressure curve, tilt, an eraser or ho
 
 | Route                                             | Pressure curve             | Tilt / buttons / eraser | Hover           | Needs                                                                  |
 | ------------------------------------------------- | -------------------------- | ----------------------- | --------------- | ---------------------------------------------------------------------- |
-| Accessibility `dispatchGesture` (today)           | No (**Source**)            | No (**Source**)         | No              | Accessibility service                                                  |
+| Accessibility `dispatchGesture` (today)           | No (**Source**)            | No (**Source**)         | No (**Source**) | Accessibility service                                                  |
 | `adb shell input stylus ...`                      | No, fixed 1.0 (**Source**) | No (**Source**)         | No (**Source**) | `adb` only                                                             |
 | Virtual stylus through `uinput` (kernel evdev)    | **Unverified**             | **Unverified**          | **Unverified**  | `/dev/uinput` write access; likely root or an emulator/userdebug image |
 | Emulator console `event send` raw evdev           | **Unverified**             | **Unverified**          | **Unverified**  | Emulator only                                                          |
@@ -84,8 +90,8 @@ Whether the emulator exposes a stylus-capable input device to apps (an
 `recordDeviceGestures` reads kernel events with `getevent`. The reconstruction
 (`TouchFrameReconstructor.ts`) keeps position and `ABS_MT_PRESSURE` per slot, and
 nothing else: it ignores `ABS_MT_TOOL_TYPE`, `BTN_TOOL_PEN`, `BTN_STYLUS`,
-`ABS_TILT_X`/`ABS_TILT_Y`, and `ABS_DISTANCE`/`ABS_MT_DISTANCE` (hover distance). The pressure it
-keeps is not used by the gesture classifier. A recorded stylus stroke is therefore
+`ABS_TILT_X`/`ABS_TILT_Y`, and `ABS_DISTANCE`/`ABS_MT_DISTANCE` (hover distance).
+The pressure it keeps is not used by the gesture classifier. A recorded stylus stroke is therefore
 exported as an ordinary finger swipe, and hover is invisible.
 
 Two structural limits sit underneath that, and extending the axes alone does not
@@ -153,11 +159,11 @@ platforms), so there is no iOS recorder representation to extend.
 
 | Capability                          | Android emulator                                    | Android device                   | iOS simulator                                                                       | iOS device                  |
 | ----------------------------------- | --------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------- | --------------------------- |
-| Stylus tool type, constant pressure | Supported via `adb shell input stylus` (**Source**) | Same (**Source**)                | Unverified (no stylus type in the path API)                                         | Unverified                  |
+| Stylus tool type, constant pressure | Supported via `adb shell input stylus` (**Source**) | Same (**Source**)                | Unverified (no stylus selector in the header)                                       | Unverified                  |
 | Pressure curve                      | Unverified (`uinput`/console)                       | Root-only, unverified (`uinput`) | Unverified (private `pressDownWithPressure`; **Reported** no effect through Appium) | Unverified                  |
 | Tilt, eraser, barrel button         | Unverified                                          | Root-only, unverified            | Impossible via known paths (**Source**)                                             | Impossible without a Pencil |
 | Hover                               | Unverified (evdev only)                             | Root-only, unverified            | Unverified (mouse path)                                                             | Unverified                  |
-| Records the above                   | No (**Source**)                                     | No (**Source**)                  | No                                                                                  | No                          |
+| Records the above                   | No (**Source**)                                     | No (**Source**)                  | No (**Source**, Android-only recorder)                                              | No (**Source**)             |
 
 "Supported" means a documented path exists in source. Nothing in the table other
 than the `adb shell input stylus` cells has been demonstrated.
@@ -193,7 +199,12 @@ than the `adb shell input stylus` cells has been demonstrated.
 5. **Stage by what is proven.** First slice: `pointer.toolType: "stylus"` at the
    backend's fixed pressure (`1.0`) on `tapAt` and a straight two-point `swipeAt`, on
    Android through the `adb shell input` source prefix (the only path demonstrated in
-   source, no root). `dragPath` is deferred: the shell offers a two-point `swipe` that
+   source, no root), which changes the source of a path AutoMobile already uses for
+   swipes and long presses. `tapAt` covers `tap` and `longPress` (a zero-distance
+   swipe with a duration); `doubleTap` is excluded until the experiment shows two
+   shell invocations hold the double-tap interval despite host latency. The `display`
+   option takes a panel key or role, not a raw display id, so mapping it onto the
+   shell's `-d DISPLAY_ID` is part of the slice and is checked in the experiment. `dragPath` is deferred: the shell offers a two-point `swipe` that
    interpolates a single segment, and `motionevent` calls that each get a fresh
    timestamp and down-time, and nothing in the source shows a 2–100-point,
    per-segment-timed path staying one continuous contact instead of lifting between
@@ -207,8 +218,8 @@ pressure series, and the exported `tapAt`, `swipeAt` or `dragPath` step to carry
 `pointer`:
 
 - `GetEventReader`/`TouchFrameReconstructor` must read `ABS_MT_TOOL_TYPE`,
-  `BTN_TOOL_PEN`, `ABS_TILT_X`/`ABS_TILT_Y` and `ABS_DISTANCE`/`ABS_MT_DISTANCE`, and keep per-contact pressure over
-  time, not just the last value.
+  `BTN_TOOL_PEN`, `ABS_TILT_X`/`ABS_TILT_Y` and `ABS_DISTANCE`/`ABS_MT_DISTANCE`, and
+  keep per-contact pressure over time, not just the last value.
 - Event-node discovery must find and read the pen's node as well as the multitouch
   one, and handle non-multitouch contact coordinates (`ABS_X`/`ABS_Y`).
 - Recorded pressure is a raw integer in the device's own range, but the contract is
@@ -236,8 +247,9 @@ follow-up issue (see below) so it can be done where the hardware exists:
 
 1. **Android emulator and device:** run `adb shell input stylus swipe` and
    `motionevent` against a small app that logs `MotionEvent` tool type, pressure and
-   source; confirm the lowest supported API level; check `InputDevice` capability on
-   an AVD; try `uinput` and emulator-console evdev for a pressure curve, tilt and
+   source; confirm the lowest supported API level; confirm how a panel key or role maps
+   onto `-d DISPLAY_ID` and whether two shell invocations hold a double-tap interval;
+   check `InputDevice` capability on an AVD; try `uinput` and emulator-console evdev for a pressure curve, tilt and
    `BTN_TOOL_PEN` hover, recording the root and image requirements.
 2. **iOS simulator:** declare the pressure and mouse selectors in the runner (behind the
    existing selector probes), then call `pressDownWithPressure` and a mouse-style path
@@ -252,8 +264,8 @@ The feasible parts, filed from this note:
 
 - #13081: `pointer.toolType` (stylus, pressure fixed at `1.0`) on `tapAt` and a
   straight `swipeAt` through `adb shell input`, with capability-gated errors;
-  `dragPath` waits for #13082. Per-device capability
-  reporting (recommendation 4) starts here, as the data those errors are derived from.
+  `dragPath` waits for #13082. Per-device capability reporting (recommendation 4)
+  starts here, as the data those errors are derived from.
 - #13082: Android emulator and device experiments (pressure curve, tilt, hover,
   `uinput`, minimum API level).
 - #13083: iOS simulator and device experiments (pressure, hover, `XCUIElement.hover()`).

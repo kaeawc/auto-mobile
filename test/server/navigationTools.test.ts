@@ -31,6 +31,9 @@ import { createTestDatabase } from "../db/testDbHelper";
 import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("navigation tool session graph selection", () => {
   const device: BootedDevice = {

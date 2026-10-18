@@ -63,6 +63,9 @@ import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { logger } from "../../src/utils/logger";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 class FakeDeviceSessionRepository extends DeviceSessionRepository {
   override async upsertActiveSession(): Promise<void> {}

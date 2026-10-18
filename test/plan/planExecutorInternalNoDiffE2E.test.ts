@@ -17,6 +17,9 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * End-to-end guard for issue #3053 part 2: run a real `DefaultPlanExecutor` step

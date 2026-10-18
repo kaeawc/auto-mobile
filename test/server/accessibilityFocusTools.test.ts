@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerAccessibilityFocusTools } from "../../src/server/accessibilityFocusTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * accessibilityFocus is a debug-only device-aware tool. `getTool`/the default

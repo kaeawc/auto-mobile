@@ -24,6 +24,9 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import type { ScreenReaderToggleOptions } from "../../src/models/AccessibilityResult";
 import { spyOnIosClientFactory, spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const ANDROID_DEVICE = {
   name: "a",

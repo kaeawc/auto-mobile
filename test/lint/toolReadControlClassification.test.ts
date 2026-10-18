@@ -8,6 +8,9 @@ import {
 } from "../../src/server/toolRegistry";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * Every device-aware tool is a read or control, and says which (#10965).

@@ -23,6 +23,9 @@ import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagS
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // Exercise plain registered handlers and the existing protocol onclose hook
 // directly: no live transport, SDK request timers, device, or database needed.

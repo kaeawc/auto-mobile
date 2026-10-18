@@ -48,16 +48,33 @@ class GestureStreamCoordinatorTest {
   }
 
   @Test
-  fun `moves are last-wins so a backlog jumps to the newest target`() {
+  fun `a burst of moves is dispatched as one segment per waypoint in order`() {
     val c = coordinator()
     c.start(0f, 0f)
     c.move(0f, 10f)
     c.move(0f, 20f)
-    c.move(0f, 30f) // three moves arrived during one in-flight segment
+    c.move(0f, 30f) // three waypoints arrived during one in-flight segment
 
-    val seg = dispatch(c.next())
-    assertEquals("only the newest target is used", GesturePoint(0f, 30f), seg.to)
-    // Nothing left buffered: with no further move and not ended, the next action is Wait.
+    val first = dispatch(c.next())
+    val second = dispatch(c.next())
+    val third = dispatch(c.next())
+    assertEquals(GesturePoint(0f, 10f), first.to)
+    assertEquals(GesturePoint(0f, 10f), second.from)
+    assertEquals(GesturePoint(0f, 20f), second.to)
+    assertEquals(GesturePoint(0f, 30f), third.to)
+    assertTrue(c.next() is GestureStreamAction.Wait)
+  }
+
+  @Test
+  fun `a backlog past the cap drops the oldest waypoints and keeps the newest`() {
+    val c = GestureStreamCoordinator(maxPendingMoves = 2)
+    c.start(0f, 0f)
+    c.move(0f, 10f)
+    c.move(0f, 20f)
+    c.move(0f, 30f)
+
+    assertEquals(GesturePoint(0f, 20f), dispatch(c.next()).to)
+    assertEquals(GesturePoint(0f, 30f), dispatch(c.next()).to)
     assertTrue(c.next() is GestureStreamAction.Wait)
   }
 

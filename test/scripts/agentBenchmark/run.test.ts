@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadSuite } from "../../../scripts/agent-benchmark/config";
 import {
   adbClientIdentity,
   bundleDigest,
   dryRunReport,
+  fileSha256,
   harnessAdbIdentity,
   importClosure,
   killProcessGroupRemnants,
@@ -59,6 +63,21 @@ describe("agent benchmark process tree kill", () => {
     const windows: number[] = [];
     killProcessGroupRemnants(42, "win32", (pid) => windows.push(pid));
     expect(windows).toEqual([]);
+  });
+});
+
+describe("agent benchmark --claude identity", () => {
+  test("hashes a wrapper larger than one read chunk by its whole content", () => {
+    const dir = mkdtempSync(join(tmpdir(), "amb-sha-"));
+    try {
+      // Past 1 MiB, so the hash spans more than one chunk, as a bundled wrapper would.
+      const content = Buffer.alloc(1024 * 1024 + 7, 1);
+      const path = join(dir, "claude");
+      writeFileSync(path, content);
+      expect(fileSha256(path)).toBe(createHash("sha256").update(content).digest("hex"));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

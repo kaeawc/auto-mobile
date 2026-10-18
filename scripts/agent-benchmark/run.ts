@@ -29,6 +29,7 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  readSync,
   readdirSync,
   rmSync,
   statSync,
@@ -601,20 +602,34 @@ function harnessSources(): string[] {
  * changes with every unrelated commit, which would flag every baseline as mismatched.
  */
 /**
- * A `--claude` wrapper script can inject flags or prompts while the stream still reports
- * the same CLI version, so a small file-backed command is hashed by content. A large
- * binary (the CLI itself) is identified by its resolved path; its version is fingerprinted
- * separately from the stream.
+ * A `--claude` wrapper (a script or a compiled or bundled binary) can inject flags or prompts
+ * while the stream still reports the same CLI version, so the resolved command is hashed by
+ * content, streamed in chunks so a large binary is not read into memory at once.
  */
 function claudeCommandIdentity(command: string): Uint8Array {
   const path = Bun.which(command) ?? command;
   const encode = (text: string) => new TextEncoder().encode(text);
   try {
-    return statSync(path).size <= 1024 * 1024 ? readFileSync(path) : encode(`binary:${path}`);
+    return encode(`sha256:${fileSha256(path)}`);
   } catch {
     // An unresolvable command fails at launch; record its name so the digest still differs.
     return encode(`unresolved:${command}`);
   }
+}
+
+/** SHA-256 of a file's content, read in 1 MiB chunks. */
+export function fileSha256(path: string): string {
+  const hash = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  const fd = openSync(path, "r");
+  try {
+    for (let read = readSync(fd, buffer); read > 0; read = readSync(fd, buffer)) {
+      hash.update(buffer.subarray(0, read));
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return hash.digest("hex");
 }
 
 /**

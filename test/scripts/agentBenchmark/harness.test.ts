@@ -541,7 +541,7 @@ describe("agent benchmark harness", () => {
       })
       .onAdb("getprop", {
         stdout:
-          "36\npixel\nen-US\nAP4A\nnull\n0\nnull\nPhysical size: 1x2\nPhysical density: 3\n1.0\n1\n1\n1\nNight mode: no\n",
+          "36\npixel\nen-US\nAP4A\nnull\n0\nnull\nGMT\nPhysical size: 1x2\nPhysical density: 3\n1.0\n1\n1\n1\nNight mode: no\n",
       });
     const suite = loadedSuite({
       preflight: { launchUri: "example:start", startScreenIncludes: ["Bug repro"] },
@@ -550,7 +550,7 @@ describe("agent benchmark harness", () => {
     const result = await runSuite(suite, options, deps);
     expect(result.comparison.verdict).toBe("passed");
     expect(result.preflight.device).toBe(
-      "sdk=36 model=pixel locale=en-US build=AP4A a11y=none nav=3button ime=none size=1x2 density=3 font=1 anim=1/1/1 theme=light rotation=0",
+      "sdk=36 model=pixel locale=en-US build=AP4A a11y=none nav=3button ime=none tz=GMT size=1x2 density=3 font=1 anim=1/1/1 theme=light rotation=0",
     );
     // Fingerprinting runs before the settle and start-screen check, never between it and launch.
     const calls = runner.adbCalls();

@@ -307,7 +307,7 @@ async function verifyInstalledApk(
 // persist.sys.locale is unset until someone changes the locale (common on emulators), so
 // fall back to ro.product.locale on the device while still printing exactly one line.
 const DEVICE_PROPERTIES =
-  'getprop ro.build.version.sdk; getprop ro.product.model; l=$(getprop persist.sys.locale); echo "${l:-$(getprop ro.product.locale)}"; getprop ro.build.id; settings get secure enabled_accessibility_services; settings get secure navigation_mode; settings get secure default_input_method; wm size; wm density; settings get system font_scale; settings get global window_animation_scale; settings get global transition_animation_scale; settings get global animator_duration_scale; cmd uimode night';
+  'getprop ro.build.version.sdk; getprop ro.product.model; l=$(getprop persist.sys.locale); echo "${l:-$(getprop ro.product.locale)}"; getprop ro.build.id; settings get secure enabled_accessibility_services; settings get secure navigation_mode; settings get secure default_input_method; z=$(getprop persist.sys.timezone); echo "${z:-GMT}"; wm size; wm density; settings get system font_scale; settings get global window_animation_scale; settings get global transition_animation_scale; settings get global animator_duration_scale; cmd uimode night';
 
 /** The shared WindowManager reader, over this harness's command runner. */
 function adbCommands(runner: CommandRunner, serial: string): AdbCommandRunner {
@@ -442,6 +442,9 @@ export async function describeDevice(runner: CommandRunner, serial: string): Pro
     ["nav", navigationMode(lines[5])],
     // The active keyboard changes the IME hierarchy and how text entry behaves.
     ["ime", inputMethod(lines[6])],
+    // Dates, relative-day labels, and opening hours render from the device's zone (Android
+    // falls back to GMT when none is set).
+    ["tz", lines[7]],
     ["size", lastValue("size")],
     ["density", lastValue("density")],
     ["font", scales.font],
@@ -451,7 +454,7 @@ export async function describeDevice(runner: CommandRunner, serial: string): Pro
     ["theme", parseNightMode(lines.filter(Boolean).at(-1) ?? "")],
     ["rotation", await liveRotation(runner, serial)],
   ].filter((entry): entry is [string, string] => Boolean(entry[1]));
-  return result.exitCode === 0 && parts.length === 13
+  return result.exitCode === 0 && parts.length === 14
     ? parts.map(([key, value]) => `${key}=${value}`).join(" ")
     : "unknown";
 }

@@ -32,17 +32,17 @@ bun scripts/agent-benchmark/run.ts --suite ux-flow --model claude-sonnet-5-5 --j
 bun scripts/agent-benchmark/run.ts --from-result scratch/agent-benchmarks/bug-repro/20261016T010203Z-1a2b3c4d
 ```
 
-| Option                             | Meaning                                                                                                                                                   |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--suite <name\|path.yml>`         | Run a committed suite by name or any suite file by path (repeatable).                                                                                     |
-| `--all`                            | Run every suite in `benchmark/agent/suites/` (not combinable with `--suite`).                                                                             |
-| `--device <serial>`                | Assert which device is the target. Exactly one online device is always required.                                                                          |
-| `--model <model>`                  | Override the suite's `claude.model` for a controlled comparison.                                                                                          |
-| `--json`                           | Print the full result JSON instead of the text report.                                                                                                    |
-| `--dry-run`                        | Validate suites and print the Claude command and MCP config; touches no device or API.                                                                    |
-| `--from-result <dir\|result.json>` | Re-render an earlier run without re-running Claude.                                                                                                       |
-| `--claude <command>`               | Claude Code executable (default `claude`). Claude runs in its own process group, so a timeout or Ctrl+C stops a wrapper script and everything it started. |
-| `--output <dir>`                   | Artifact root (default `scratch/agent-benchmarks`).                                                                                                       |
+| Option                             | Meaning                                                                                                                                                                                                                                                                                                       |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--suite <name\|path.yml>`         | Run a committed suite by name or any suite file by path (repeatable).                                                                                                                                                                                                                                         |
+| `--all`                            | Run every suite in `benchmark/agent/suites/` (not combinable with `--suite`).                                                                                                                                                                                                                                 |
+| `--device <serial>`                | Assert which device is the target. Exactly one online device is always required.                                                                                                                                                                                                                              |
+| `--model <model>`                  | Override the suite's `claude.model` for a controlled comparison.                                                                                                                                                                                                                                              |
+| `--json`                           | Print the full result JSON instead of the text report.                                                                                                                                                                                                                                                        |
+| `--dry-run`                        | Validate suites and print the Claude command and MCP config; touches no device or API.                                                                                                                                                                                                                        |
+| `--from-result <dir\|result.json>` | Re-render an earlier run without re-running Claude.                                                                                                                                                                                                                                                           |
+| `--claude <command>`               | Claude Code executable (default `claude`). Claude runs in its own process group, so a timeout, Ctrl+C, or the wrapper's exit stops a wrapper script and everything it started. On Windows, a wrapper must wait for Claude: if it exits while Claude keeps running, the harness cannot find Claude to stop it. |
+| `--output <dir>`                   | Artifact root (default `scratch/agent-benchmarks`).                                                                                                                                                                                                                                                           |
 
 The exit code is `0` when every run passed, `1` when any run failed or was incomplete, and `2`
 for a usage error.
@@ -235,12 +235,12 @@ the baseline itself, and the requested model. If the prompt, preflight, tool per
 patterns, or timeout change, the report flags that the baseline measured a different task.
 It also records `baseline.deviceFingerprint` (SDK level, model, locale, effective screen
 size and density, font and animation scales, light or dark theme, enabled accessibility
-services such as TalkBack, navigation mode (gesture or buttons), the active input method (keyboard), Android build ID, and live rotation, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
+services such as TalkBack, navigation mode (gesture or buttons), the active input method (keyboard), time zone, Android build ID, and live rotation, since hierarchy shape and timing depend on them), `baseline.claudeCodeVersion` (CLI releases change system prompts and
 tool handling), `baseline.serverBuild` (a SHA-256 prefix over what executes and scores the run: the
 built `dist/` with the schemas and vendor tools it loads at runtime, `bun.lock` for the image
 libraries the build leaves external, `package.json`, the harness sources under
 `scripts/agent-benchmark/` with every repository module they import (they run unbundled), the
-Bun version, and the host platform, architecture, and libc (which pick the native image build), the `--claude` command (a wrapper script by content), and a non-secret provider identity
+Bun version, and the host platform, architecture, and libc (which pick the native image build), the `--claude` command (by content, so an edited wrapper or binary counts), and a non-secret provider identity
 (provider selection, the scheme and host of every provider base URL and proxy with a digest of each path, proxy bypass list, regions, provider-specific region routing and service tiers, adb server endpoint, and model-routing variables), the `adb version` of the adb client the server will run (SDK platform-tools when it answers, else the adb on PATH, else the SDK the server's command-line tools detection finds, as the server resolves it) and of the `adb` on PATH that the harness itself runs for preflight and the screen oracle. A stale build or changed scoring code is
 flagged rather than silently measured. The git commit is deliberately left out, since every
 unrelated commit would change it), and

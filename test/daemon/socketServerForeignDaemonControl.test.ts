@@ -1,5 +1,3 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
@@ -7,13 +5,19 @@ import {
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   androidDevice,
   createFakeDaemonState,
+  createFakeDeviceManager,
   createFakeSession,
 } from "./helpers/inputSocketHarness";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
 import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 /**
@@ -22,16 +26,10 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * claims it, before anything reaches the device.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-
 const FOREIGN_PID = 4242;
 const LOCAL_SESSION = "local-session";
 
-let internals: Internals;
+let internals: UnixSocketServerHarness;
 let sockets: FakeSocket[];
 /** Device ids another daemon claims, as the pool's foreign-ownership view reports them. */
 let foreignClaimed: Set<string>;
@@ -58,7 +56,7 @@ function useServer(localSessionHoldsDevice = false): void {
       },
     }),
   };
-  const server = createTestUnixSocketServer(
+  internals = createHarnessServer(
     "unused",
     state,
     new FakeTimer(),
@@ -66,14 +64,13 @@ function useServer(localSessionHoldsDevice = false): void {
     // The storage tool is enabled, so the frame reaches the ownership gate.
     { sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} } },
   );
-  internals = server as unknown as Internals;
-  internals.acceptingRequests = true;
+  internals.allowRequests();
 }
 
 function connect(): FakeSocket {
   const socket = new FakeSocket();
   sockets.push(socket);
-  internals.handleConnection(socket as unknown as Socket);
+  internals.connect(socket);
   return socket;
 }
 
@@ -81,7 +78,7 @@ async function drain(): Promise<void> {
   for (let i = 0; i < 4; i++) {
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  await Promise.all([...internals.activeRequestHandlers]);
+  await Promise.all([...internals.state.activeRequestHandlers]);
 }
 
 async function answer(method: string, params: Record<string, unknown>): Promise<DaemonResponse> {
@@ -116,30 +113,21 @@ beforeEach(() => {
   foreignClaimed = new Set();
   claimChecks = [];
   deviceCalls = [];
-  PlatformDeviceManagerFactory.setInstance({
-    getBootedDevices: async () => [androidDevice],
-    getBootedDevicesDetailed: async () => ({
-      devices: [androidDevice],
-      succeededPlatforms: new Set(["android", "ios"]),
-    }),
-  } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+  PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+  spyOnAndroidClientInstance(androidDevice, {
     getScreenScaleMetadata: () => null,
-    requestTapCoordinates: async (
-      ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-    ) => {
+    requestTapCoordinates: async (...args) => {
       args[6]?.();
       deviceCalls.push("tap");
-      return { success: true };
+      return { success: true, totalTimeMs: 0 };
     },
-    setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+    setPreference: async (...args) => {
       if (typeof args[5] === "object") {
         args[5].onDispatch?.();
       }
       deviceCalls.push("setPreference");
-      return { success: true };
     },
-  }));
+  });
 });
 
 afterEach(() => {

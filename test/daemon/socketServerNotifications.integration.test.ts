@@ -5,7 +5,6 @@ import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
 import {
   SessionReleaseBroadcaster,
@@ -14,7 +13,11 @@ import {
 import { DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { defaultTimer } from "../../src/utils/SystemTimer";
-import type { DaemonResponse } from "../../src/daemon/types";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
+import { isDaemonResponse, parseWireFrameLine } from "./helpers/parseDaemonResponseLine";
 
 // Issue #3223: the daemon's Unix socket server pushes list-changed notification
 // frames to clients that opted in via daemon/subscribe-notifications, and only
@@ -24,6 +27,7 @@ function createFakeDaemonState() {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getDeviceSessionRegistry: () => ({ list: () => [] }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -34,7 +38,7 @@ function createFakeDaemonState() {
 
 /** Persistent test client that collects every newline-delimited frame it receives. */
 class FrameCollectingClient {
-  readonly frames: any[] = [];
+  readonly frames: unknown[] = [];
   private socket = new Socket();
   private buffer = "";
   private frameWaiters: Array<() => void> = [];
@@ -51,7 +55,7 @@ class FrameCollectingClient {
         this.buffer = lines.pop() || "";
         for (const line of lines) {
           if (line.trim()) {
-            this.frames.push(JSON.parse(line));
+            this.frames.push(parseWireFrameLine(line));
           }
         }
         const waiters = this.frameWaiters;
@@ -115,12 +119,12 @@ class FrameCollectingClient {
 
 describe("UnixSocketServer notification broadcast", () => {
   let socketPath: string;
-  let server: UnixSocketServer;
+  let server: UnixSocketServerHarness;
   const clients: FrameCollectingClient[] = [];
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `test-notify-${randomUUID()}.sock`);
-    server = new UnixSocketServer(socketPath, createFakeDaemonState(), new FakeTimer());
+    server = createHarnessServer(socketPath, createFakeDaemonState(), new FakeTimer());
     await server.start();
   });
 
@@ -144,7 +148,10 @@ describe("UnixSocketServer notification broadcast", () => {
     client.send(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD);
     await client.waitForFrames(1);
 
-    const response = client.frames[0] as DaemonResponse;
+    const response = client.frames[0];
+    if (!isDaemonResponse(response)) {
+      throw new Error("Expected the first frame to be a daemon response");
+    }
     expect(response.success).toBe(true);
     expect(response.result).toEqual({ subscribed: true });
   });
@@ -312,9 +319,7 @@ describe("UnixSocketServer notification broadcast", () => {
     subscriber.close();
     await server.close();
 
-    expect(
-      (server as unknown as { sessionReleaseUnsubscribe: unknown }).sessionReleaseUnsubscribe,
-    ).toBeNull();
+    expect(server.broadcasterSubscriptions.sessionRelease).toBe(false);
     expect(() => SessionReleaseBroadcaster.emit("session-a")).not.toThrow();
     expect(subscriber.frames).toHaveLength(1);
   });
@@ -330,9 +335,7 @@ describe("UnixSocketServer notification broadcast", () => {
 
     // The broadcaster subscription is released on close, so emitting after
     // close must not throw and must not attempt any socket writes.
-    expect(
-      (server as unknown as { listChangedUnsubscribe: unknown }).listChangedUnsubscribe,
-    ).toBeNull();
+    expect(server.broadcasterSubscriptions.listChanged).toBe(false);
     expect(() => ListChangedBroadcaster.emit("tools")).not.toThrow();
     expect(subscriber.frames).toHaveLength(1);
   });

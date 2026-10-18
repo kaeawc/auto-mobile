@@ -13,7 +13,6 @@ import {
 } from "../../src/daemon/deviceDataStreamSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
-import { Socket } from "node:net";
 
 const EMPTY_SUMMARY: NavigationGraphSummary = {
   appId: null,
@@ -64,7 +63,7 @@ class TestableServer extends DeviceDataStreamSocketServer {
   }
 
   async processLineForTest(socket: FakeSocket, line: string): Promise<void> {
-    await this.processLine(socket as unknown as Socket, line);
+    await this.processLine(socket, line);
   }
 }
 
@@ -192,13 +191,12 @@ describe("createNavigationGraphRequestHandler", () => {
       );
 
       // Round-trip the raw wire bytes exactly as a client would receive them.
-      const rawLine = socket.getWrittenDataString().trim();
-      const decoded = JSON.parse(rawLine) as {
+      const [decoded] = socket.getWrittenMessages<{
         type: string;
         success?: boolean;
         error?: string;
         id?: string;
-      };
+      }>();
 
       // Mirror the desktop client's `when (type) { ... else -> ignore }` dispatch: every known
       // frame type routes, and any unrecognized type is silently ignored rather than throwing.

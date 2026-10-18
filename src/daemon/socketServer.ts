@@ -888,7 +888,7 @@ type IdeServerRouteHandler = (
 ) => Promise<any | undefined> | any;
 
 export class UnixSocketServer {
-  private server: NetServer | null = null;
+  protected server: NetServer | null = null;
   private serverClosePromise: Promise<void> | null = null;
   private closing = false;
   protected acceptingRequests = false;
@@ -918,8 +918,8 @@ export class UnixSocketServer {
   private resourceUpdatedUnsubscribe: (() => void) | null = null;
   /** Session-release frames written but not yet flushed to their client sockets. */
   private pendingSessionReleaseWrites: Set<Promise<void>> = new Set();
-  private listChangedUnsubscribe: (() => void) | null = null;
-  private sessionReleaseUnsubscribe: (() => void) | null = null;
+  protected listChangedUnsubscribe: (() => void) | null = null;
+  protected sessionReleaseUnsubscribe: (() => void) | null = null;
   private socketPath: string;
   private daemonState: SocketDaemonStateAccess;
   /**
@@ -2483,7 +2483,7 @@ export class UnixSocketServer {
    * Run one MCP forward at a time for a single execution target. Calls for different devices or
    * sessions can proceed concurrently while their loopback transports remain session-local.
    */
-  private runKeyedMcpForward<T>(
+  protected runKeyedMcpForward<T>(
     executionKey: string,
     fn: () => Promise<T>,
     idleCloseKey?: string,
@@ -3652,7 +3652,7 @@ export class UnixSocketServer {
     }
   }
 
-  private getRequestArgumentScopeKey(args: unknown): string | undefined {
+  protected getRequestArgumentScopeKey(args: unknown): string | undefined {
     if (!args || typeof args !== "object" || Array.isArray(args)) {
       return undefined;
     }

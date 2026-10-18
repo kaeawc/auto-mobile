@@ -645,7 +645,6 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
    * restores every symbol it installs.
    */
   const INSTALLERS: readonly string[] = [
-    "test/daemon/socketServerInputGesture.integration.test.ts",
     "test/daemon/socketServerToolCapabilities.integration.test.ts",
     "test/features/action/ClearText.adbFactory.test.ts",
     "test/features/action/InputText.test.ts",

@@ -658,7 +658,7 @@ export class DaemonMcpProxy {
   private set livenessOwnershipClaimSent(value: boolean) {
     this.sessionState.livenessOwnershipClaimSent = value;
   }
-  private get otherHeldSessions(): Map<string, OtherHeldSession> {
+  protected get otherHeldSessions(): Map<string, OtherHeldSession> {
     return this.sessionState.otherHeldSessions;
   }
   private get livenessSupersessionLogged(): boolean {
@@ -721,7 +721,7 @@ export class DaemonMcpProxy {
     return this.sessionState.daemonIdleReports;
   }
   /** Device each held session runs on, learned from acquisition results and explicit calls. */
-  private readonly sessionDeviceIds = new Map<string, string>();
+  protected readonly sessionDeviceIds = new Map<string, string>();
   /** Platform each acquired session runs on; absent when its result did not describe one. */
   private readonly sessionPlatforms = new Map<string, "android" | "ios">();
   private get stallHandovers(): Map<string, StallHandoverRecord> {
@@ -849,7 +849,7 @@ export class DaemonMcpProxy {
     this.sessionState.terminalBoundSession = value;
   }
   /** A recoverable daemon release needs a replacement transport, not a UUID fence. */
-  private recoverableBoundSessionHandoff: string | undefined;
+  protected recoverableBoundSessionHandoff: string | undefined;
   /** Only a device-restart handoff presents the binding on a fresh acquisition. */
   private recoverableBoundSessionHandoffIsDeviceRestart = false;
   private get initialSessionBindingConfigured(): boolean {

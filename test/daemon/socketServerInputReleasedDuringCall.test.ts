@@ -1,5 +1,3 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import type { Socket } from "node:net";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
@@ -14,6 +12,11 @@ import {
   createFakeDeviceManager,
   createFakeSession,
 } from "./helpers/inputSocketHarness";
+import { spyOnAndroidClientInstance } from "../helpers/androidCtrlProxyClientSpies";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
 import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
 
 /**
@@ -23,19 +26,15 @@ import { NonThrowingFakeSocket as FakeSocket } from "../fakes/FakeNetServer";
  * the real socket request path; only the device client is a fake.
  */
 
-interface Internals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
+type TapResult = Awaited<ReturnType<AndroidCtrlProxyClient["requestTapCoordinates"]>>;
 
 const OWNER = "released-mid-input-session";
 
 describe("input/* cut by a session release (#11381)", () => {
-  let internals: Internals;
+  let server: UnixSocketServerHarness;
   let socket: FakeSocket;
   let tapEntered: PromiseWithResolvers<void>;
-  let tapOutcome: PromiseWithResolvers<{ success: boolean }>;
+  let tapOutcome: PromiseWithResolvers<TapResult>;
 
   const tapFrame: DaemonRequest = {
     id: "tap",
@@ -62,15 +61,15 @@ describe("input/* cut by a session release (#11381)", () => {
     for (let i = 0; i < 4; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    await Promise.all([...internals.activeRequestHandlers]);
+    await Promise.all([...server.state.activeRequestHandlers]);
     return socket.responses.find((frame) => frame.id === "tap");
   }
 
   function setUp(): void {
     tapEntered = Promise.withResolvers<void>();
-    tapOutcome = Promise.withResolvers<{ success: boolean }>();
+    tapOutcome = Promise.withResolvers<TapResult>();
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+    spyOnAndroidClientInstance(androidDevice, {
       getScreenScaleMetadata: () => null,
       requestTapCoordinates: (
         ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
@@ -79,18 +78,17 @@ describe("input/* cut by a session release (#11381)", () => {
         tapEntered.resolve();
         return tapOutcome.promise;
       },
-    }));
-    const server = createTestUnixSocketServer(
+    });
+    server = createHarnessServer(
       "unused",
       createFakeDaemonState(
         new Map([[OWNER, createFakeSession(OWNER, androidDevice.deviceId, "android")]]),
       ),
       new FakeTimer(),
     );
-    internals = server as unknown as Internals;
-    internals.acceptingRequests = true;
+    server.allowRequests();
     socket = new FakeSocket();
-    internals.handleConnection(socket as unknown as Socket);
+    server.connect(socket);
   }
 
   function tearDown(): void {

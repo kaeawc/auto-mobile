@@ -46,6 +46,7 @@ import { isCliToolFailure } from "../src/cli/index";
 import { coerceCliValue, getDeclaredParamTypes } from "../src/cli/cliValueCoercion";
 import { getDeviceSessionIdFromResult } from "../src/server/deviceSessionResult";
 import { readToolEnvelopePayload } from "../src/server/toolEnvelopePayload";
+import { withV1ClientErrors } from "../src/server/mcpError";
 
 export interface DriveStep {
   tool: string;
@@ -399,13 +400,16 @@ async function createSdkClient(serverPath: string, timeoutMs: number): Promise<D
   });
   await client.connect(transport);
   return {
+    // The v1 error shape keeps a timeout reported as "MCP error -32001: Request timed out".
     callTool: (name, args) =>
-      client.callTool(
-        { name, arguments: args },
-        {
-          timeout: timeoutMs,
-          resetTimeoutOnProgress: true,
-        },
+      withV1ClientErrors(
+        client.callTool(
+          { name, arguments: args },
+          {
+            timeout: timeoutMs,
+            resetTimeoutOnProgress: true,
+          },
+        ),
       ),
     close: () => client.close(),
   };

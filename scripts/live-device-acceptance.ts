@@ -1099,26 +1099,44 @@ function toolDiagnostic(response: ToolResponse, tool: string): string {
  * Direct MCP SDK calls may render a JSON-RPC failure as an Error string instead
  * of the usual structured `isError` tool envelope. Preserve exact product
  * diagnostics while removing only that leading, validated transport rendering.
+ * The SDK v1 client prefixed the server's already-prefixed message again
+ * ("MCP error -32603: MCP error -32603: …"); the v2 client does not (issue
+ * #4678), so every leading validated prefix is removed.
  */
 export function normalizeMcpTransportDiagnostic(diagnostic: string): string {
   const renderedErrorPrefix = "Error: ";
+  let remainder = stripMcpErrorPrefix(
+    diagnostic.startsWith(renderedErrorPrefix)
+      ? diagnostic.slice(renderedErrorPrefix.length)
+      : diagnostic,
+  );
+  if (remainder === undefined) {
+    return diagnostic;
+  }
+  let next = stripMcpErrorPrefix(remainder);
+  while (next !== undefined) {
+    remainder = next;
+    next = stripMcpErrorPrefix(remainder);
+  }
+  return remainder;
+}
+
+/** Removes one leading `MCP error <negative integer code>: `, or returns undefined. */
+function stripMcpErrorPrefix(text: string): string | undefined {
   const mcpErrorPrefix = "MCP error ";
-  const candidate = diagnostic.startsWith(renderedErrorPrefix)
-    ? diagnostic.slice(renderedErrorPrefix.length)
-    : diagnostic;
-  if (!candidate.startsWith(mcpErrorPrefix)) {
-    return diagnostic;
+  if (!text.startsWith(mcpErrorPrefix)) {
+    return undefined;
   }
-  const separator = candidate.indexOf(": ", mcpErrorPrefix.length);
+  const separator = text.indexOf(": ", mcpErrorPrefix.length);
   if (separator === -1) {
-    return diagnostic;
+    return undefined;
   }
-  const code = candidate.slice(mcpErrorPrefix.length, separator);
+  const code = text.slice(mcpErrorPrefix.length, separator);
   const parsedCode = Number(code);
   if (!code.startsWith("-") || !Number.isInteger(parsedCode) || String(parsedCode) !== code) {
-    return diagnostic;
+    return undefined;
   }
-  return candidate.slice(separator + 2);
+  return text.slice(separator + 2);
 }
 
 function toolPayload(response: ToolResponse, tool: string): JsonObject {

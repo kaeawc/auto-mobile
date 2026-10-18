@@ -51,6 +51,7 @@ import {
   resolveBrokerClient,
   type BrokerClientFiles,
 } from "./brokerClientFiles";
+import { withV1ClientErrors } from "../../src/server/mcpError";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { defaultIdGenerator, type IdGenerator } from "../../src/utils/IdGenerator";
 import { isProcessRunning } from "../../src/utils/processLiveness";
@@ -1298,15 +1299,19 @@ export function createProxySessionDeps(): ProxySessionDeps {
         pid: () => transport.pid ?? undefined,
         capabilities: () => client.getServerCapabilities() as Record<string, unknown> | undefined,
         serverInfo: () => client.getServerVersion(),
+        // The v1 error shape keeps out/*.json error codes numeric (a timeout is -32001).
         callTool: (name, args, timeout) =>
-          client.callTool({ name, arguments: args }, requestOptions(timeout)),
-        readResource: (uri, timeout) => client.readResource({ uri }, requestOptions(timeout)),
-        listTools: (timeout) => client.listTools(undefined, requestOptions(timeout)),
-        listResources: (timeout) => client.listResources(undefined, requestOptions(timeout)),
+          withV1ClientErrors(client.callTool({ name, arguments: args }, requestOptions(timeout))),
+        readResource: (uri, timeout) =>
+          withV1ClientErrors(client.readResource({ uri }, requestOptions(timeout))),
+        listTools: (timeout) =>
+          withV1ClientErrors(client.listTools(undefined, requestOptions(timeout))),
+        listResources: (timeout) =>
+          withV1ClientErrors(client.listResources(undefined, requestOptions(timeout))),
         listResourceTemplates: (timeout) =>
-          client.listResourceTemplates(undefined, requestOptions(timeout)),
+          withV1ClientErrors(client.listResourceTemplates(undefined, requestOptions(timeout))),
         subscribeResource: (uri, timeout) =>
-          client.subscribeResource({ uri }, requestOptions(timeout)),
+          withV1ClientErrors(client.subscribeResource({ uri }, requestOptions(timeout))),
       };
     },
     spawnServe: (command, env) => {

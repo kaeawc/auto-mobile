@@ -5,7 +5,11 @@ import { unsupportedPlatformError } from "../../models/ActionableError";
 import { typedRefusalFields } from "../../models/typedRefusalFields";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  ProgressCallback,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import { BootedDevice, PressButtonResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
@@ -39,8 +43,9 @@ export class PressButton extends BaseVisualChange {
     timer: Timer = defaultTimer,
     private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(device),
     private readonly holdRequest?: DispatchedRequestHold,
+    collaborators: DisplayFenceDependencies = {},
   ) {
-    super(device, adb, timer);
+    super(device, adb, timer, undefined, collaborators);
     this.device = device;
   }
 

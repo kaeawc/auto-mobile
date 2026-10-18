@@ -96,16 +96,15 @@ describe("PinchOn", () => {
     );
     iosGetInstanceSpy = spyOnIosClientInstance(fakeIosService);
 
-    pinchOn = new PinchOn(device, null, {
+    pinchOn = new PinchOn(device, fakeAdb, {
       capture: new FakeHierarchyCapture(
         async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
       ),
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+      timer: fakeTimer,
     });
-    (pinchOn as any).observeScreen = fakeObserveScreen;
-    (pinchOn as any).awaitIdle = fakeAwaitIdle;
-    (pinchOn as any).window = fakeWindow;
-    (pinchOn as any).adb = fakeAdb;
-    (pinchOn as any).timer = fakeTimer;
   });
 
   afterEach(() => {
@@ -545,17 +544,16 @@ describe("PinchOn", () => {
       isAvailable: async () => false,
     } as any);
     fakeIosService.setPinchResult({ success: true, totalTimeMs: 710, gestureTimeMs: 700 });
-    pinchOn = new PinchOn(iosDevice, null, {
+    pinchOn = new PinchOn(iosDevice, fakeAdb, {
       capture: new FakeHierarchyCapture(
         async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
         "ios",
       ),
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+      timer: fakeTimer,
     });
-    (pinchOn as any).observeScreen = fakeObserveScreen;
-    (pinchOn as any).awaitIdle = fakeAwaitIdle;
-    (pinchOn as any).window = fakeWindow;
-    (pinchOn as any).adb = fakeAdb;
-    (pinchOn as any).timer = fakeTimer;
 
     const result = await pinchOn.execute({
       direction: "out",
@@ -595,17 +593,16 @@ describe("PinchOn", () => {
       viewHierarchy: createHierarchy(),
     }));
     fakeIosService.setPinchResult({ success: true, totalTimeMs: 300, gestureTimeMs: 300 });
-    pinchOn = new PinchOn(iosDevice, null, {
+    pinchOn = new PinchOn(iosDevice, fakeAdb, {
       capture: new FakeHierarchyCapture(
         async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
         "ios",
       ),
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+      timer: fakeTimer,
     });
-    (pinchOn as any).observeScreen = fakeObserveScreen;
-    (pinchOn as any).awaitIdle = fakeAwaitIdle;
-    (pinchOn as any).window = fakeWindow;
-    (pinchOn as any).adb = fakeAdb;
-    (pinchOn as any).timer = fakeTimer;
 
     const result = await pinchOn.execute({
       direction: "out",
@@ -629,17 +626,16 @@ describe("PinchOn", () => {
       name: "iPhone 16 Pro",
     };
     fakeIosService.setPinchResult({ success: false, error: "Pinch failed on runner" });
-    pinchOn = new PinchOn(iosDevice, null, {
+    pinchOn = new PinchOn(iosDevice, fakeAdb, {
       capture: new FakeHierarchyCapture(
         async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
         "ios",
       ),
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+      timer: fakeTimer,
     });
-    (pinchOn as any).observeScreen = fakeObserveScreen;
-    (pinchOn as any).awaitIdle = fakeAwaitIdle;
-    (pinchOn as any).window = fakeWindow;
-    (pinchOn as any).adb = fakeAdb;
-    (pinchOn as any).timer = fakeTimer;
 
     const result = await pinchOn.execute({
       direction: "in",
@@ -664,17 +660,16 @@ describe("PinchOn", () => {
       gestureTimeMs: 300,
       pinchPath: "element-anchored",
     });
-    pinchOn = new PinchOn(iosDevice, null, {
+    pinchOn = new PinchOn(iosDevice, fakeAdb, {
       capture: new FakeHierarchyCapture(
         async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
         "ios",
       ),
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+      timer: fakeTimer,
     });
-    (pinchOn as any).observeScreen = fakeObserveScreen;
-    (pinchOn as any).awaitIdle = fakeAwaitIdle;
-    (pinchOn as any).window = fakeWindow;
-    (pinchOn as any).adb = fakeAdb;
-    (pinchOn as any).timer = fakeTimer;
 
     const result = await pinchOn.execute({ direction: "out", autoTarget: false });
 
@@ -694,17 +689,16 @@ describe("PinchOn", () => {
       gestureTimeMs: 300,
       pinchPath: "event-path",
     });
-    pinchOn = new PinchOn(iosDevice, null, {
+    pinchOn = new PinchOn(iosDevice, fakeAdb, {
       capture: new FakeHierarchyCapture(
         async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
         "ios",
       ),
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+      timer: fakeTimer,
     });
-    (pinchOn as any).observeScreen = fakeObserveScreen;
-    (pinchOn as any).awaitIdle = fakeAwaitIdle;
-    (pinchOn as any).window = fakeWindow;
-    (pinchOn as any).adb = fakeAdb;
-    (pinchOn as any).timer = fakeTimer;
 
     const result = await pinchOn.execute({ direction: "out", autoTarget: false });
 

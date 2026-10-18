@@ -162,33 +162,14 @@ import {
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
 export type { DaemonManagerOptions } from "./managerOptions";
 import type { DaemonManagerOptions } from "./managerOptions";
-export {
-  DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
-  PsDaemonProcessFinder,
-  WindowsDaemonProcessFinder,
-  createDefaultDaemonProcessFinder,
-  parseBusyBoxDaemonProcessTable,
-  parseDaemonProcessTable,
-  parseDarwinDaemonProcessTable,
-  parseWindowsDaemonProcessTable,
-} from "./processTable";
 export type {
   DaemonProcessFinder,
   DaemonProcessLivenessChecker,
   DaemonProcessRecord,
   DaemonProcessSignaler,
 } from "./processTable";
-export { NetDaemonPortAvailabilityChecker } from "./portAvailability";
-export type { DaemonPortAvailabilityChecker, ProbeListener } from "./portAvailability";
-export { parseDaemonArgs } from "./cli/daemonArgs";
-export {
-  daemonBuildIdentityStatusLines,
-  daemonCommandOptions,
-  parseAcceptanceSessionRestartScope,
-  parseDaemonHeartbeatCommandArgs,
-  parseRestartAdmittedMaintenanceToken,
-} from "./cli/runDaemonCommand";
-export type { DaemonHeartbeatCommandArgs, RunDaemonCommandOptions } from "./cli/runDaemonCommand";
+export type { DaemonPortAvailabilityChecker } from "./portAvailability";
+export type { RunDaemonCommandOptions } from "./cli/runDaemonCommand";
 
 /**
  * Write a message to stderr so it never corrupts the MCP stdio channel.

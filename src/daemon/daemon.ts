@@ -410,15 +410,9 @@ import {
   type DaemonDependencies,
   type DatabaseHealthFailureRecovery,
   type ManagedAdbServerShutdown,
-  type DaemonProcessBirthTimeProvider,
-  type DaemonProcessGenerationTokenProvider,
 } from "./daemonDependencies";
 
-export type {
-  DaemonDependencies,
-  DaemonProcessBirthTimeProvider,
-  DaemonProcessGenerationTokenProvider,
-};
+export type { DaemonDependencies };
 
 const HTTP_BODY_TIMEOUT_MS = 60_000;
 const HTTP_BODY_MAX_BYTES = 256 * 1024 * 1024;

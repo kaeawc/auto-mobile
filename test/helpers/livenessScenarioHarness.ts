@@ -1611,9 +1611,9 @@ export class LivenessScenario {
   /** Who the host registry records as owning the slot `sessionId` executes in, if any. */
   async holdBrokerExecution(sessionId: string): Promise<void> {
     const keeper = this.proxy as unknown as {
-      holdBrokerSession(requestId: string, sessionUuid: string): Promise<void>;
+      brokerSessions: { hold(requestId: string, sessionUuid: string): Promise<void> };
     };
-    await keeper.holdBrokerSession(`request-${sessionId}`, sessionId);
+    await keeper.brokerSessions.hold(`request-${sessionId}`, sessionId);
   }
 
   async bindingOwnerOf(sessionId: string): Promise<BindingExecOwner | undefined> {

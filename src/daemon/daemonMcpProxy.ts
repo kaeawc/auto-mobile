@@ -97,6 +97,7 @@ import { SessionOutsideBoundSessionError } from "../server/deviceOutsideBoundSes
 import { errorMessage } from "../utils/describeUnknownError";
 import { ToolListPoller } from "./proxy/ToolListPoller";
 import { DiscoveryListCache } from "./proxy/DiscoveryListCache";
+import { BrokerSessions, type BrokerSessionsPort } from "./proxy/BrokerSessions";
 import { getRemovedToolHint } from "../models/removedTools";
 import {
   DaemonBoundSessionLostError,
@@ -131,7 +132,6 @@ import {
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
-  DAEMON_REGISTER_SESSION_METHOD,
   CLI_SESSION_LIVENESS_POLICY,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
   getCliSessionIdleTimeoutMs,
@@ -153,7 +153,6 @@ import {
   type ListChangedKind,
 } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
-import { SESSION_OWNERSHIP_LOST_CODE } from "./sessionReleasedDuringCall";
 import {
   declaresDeviceSessionSuspect,
   readDeviceSessionSuspectRefusal,
@@ -199,17 +198,11 @@ import {
   buildIdentityFromStatus,
   getCurrentBuildIdentity,
 } from "./buildIdentity";
-import { ActionableError, toActionableError } from "../models";
+import { ActionableError } from "../models";
 import { BROKER_EXECUTION_RELEASE_TIMEOUT_MS } from "./sessionBroker/provisioning/executionLiveness";
-import {
-  acquireSessionThroughDaemon,
-  DAEMON_RELEASE_BROKER_SESSION_METHOD,
-} from "./sessionBrokerProxyAcquisition";
 import type { SessionConfig } from "../devices/sessionConfig";
 import {
   SESSION_OWNER_EXITED_CODE,
-  type SessionBrokerReleaseReason,
-  type SessionBrokerReleaseResult,
   type SessionBrokerResult,
 } from "../devices/sessionBrokerResult";
 import { DeviceControlTransportError } from "./deviceControlTransportFailure";
@@ -245,7 +238,6 @@ import {
 export { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 const CLI_SESSION_FINALIZATION_TIMEOUT_MS = 2_000;
 
-const SESSION_BROKER_PROXY_CLIENT_NAME = "auto-mobile-session-broker-proxy";
 const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 // These inventory tools never operate a device or mint a device session. They
 // normally retain a live binding's policy, but after that binding is terminally
@@ -346,15 +338,6 @@ function sessionScopedObservationUriSessionUuid(uri: string): string | undefined
  */
 export function resourceUriNamesSession(uri: string): boolean {
   return /^automobile:(?:device-session|observation\/session)\/[^/?#]+/.test(uri);
-}
-
-function isSessionOwnershipLostError(error: unknown): boolean {
-  return (
-    error !== null &&
-    typeof error === "object" &&
-    "code" in error &&
-    error.code === SESSION_OWNERSHIP_LOST_CODE
-  );
 }
 
 /** Append the resumed-session warning as one more text block of a tool result (#10989). */
@@ -832,14 +815,11 @@ export class DaemonMcpProxy {
   private get claimableSessions(): Set<string> {
     return this.sessionState.claimableSessions;
   }
-  /** The durable session broker result exposed by this proxy. */
-  private sessionBrokerResult: SessionBrokerResult | undefined;
-  /** A ready broker receipt currently held by the heartbeat keeper. */
-  private sessionBrokerBinding: { requestId: string; sessionUuid: string } | undefined;
-  /** Broker sessions are excluded from generic release until their broker release settles. */
-  private readonly sessionBrokerSessions = new Map<string, string>();
-  /** Aborts preparation and same-request status polling when the proxy closes. */
-  private sessionBrokerAcquisitionAbort: AbortController | undefined;
+  private brokerSessionsInstance: BrokerSessions | undefined;
+  /** Built on first use: it reads the timer and liveness owner token the constructor sets. */
+  private get brokerSessions(): BrokerSessions {
+    return (this.brokerSessionsInstance ??= this.createBrokerSessions());
+  }
   /**
    * Aborts every tool call and resource read this proxy has in flight when it closes (#11642).
    * Each one's daemon request is cancelled on its own socket (`daemon/cancelRequest`), so nothing
@@ -1151,239 +1131,14 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * Prepare one durable broker request before serving MCP. The helper owns bounded same-request
-   * status recovery; a ready result is bound, claimed and heartbeated here.
+   * Prepare one durable broker request before serving MCP. See {@link BrokerSessions.acquire}.
    */
   async acquireBrokerSession(config: SessionConfig): Promise<SessionBrokerResult> {
-    const abort = new AbortController();
-    this.sessionBrokerAcquisitionAbort = abort;
-    try {
-      const result = await acquireSessionThroughDaemon(
-        config,
-        {
-          ensureConnected: () => this.ensureConnected(),
-          callDaemonMethod: (method, params, options) =>
-            this.requireClient().callDaemonMethod(method, params, options),
-          holdSession: (requestId, sessionUuid) => this.holdBrokerSession(requestId, sessionUuid),
-          releaseSession: (sessionUuid) => this.releasePreparedBrokerSession(sessionUuid),
-          livenessOwnerToken: this.livenessOwnerToken,
-          timer: this.timer,
-        },
-        abort.signal,
-      );
-      this.sessionBrokerResult = result;
-      return result;
-    } finally {
-      if (this.sessionBrokerAcquisitionAbort === abort) {
-        this.sessionBrokerAcquisitionAbort = undefined;
-      }
-    }
-  }
-
-  /** Bind a ready receipt to the existing keeper without enrolling it in broker binding release. */
-  private async holdBrokerSession(requestId: string, sessionUuid: string): Promise<void> {
-    const trimmedRequestId = requestId.trim();
-    const trimmedSessionUuid = sessionUuid.trim();
-    if (trimmedRequestId.length === 0 || trimmedSessionUuid.length === 0) {
-      throw new ActionableError("A session broker request ID and session UUID are required.");
-    }
-    if (this.closing) {
-      throw new DaemonUnavailableError("MCP proxy is closing");
-    }
-    const existing = this.sessionBrokerBinding;
-    if (
-      existing &&
-      (existing.requestId !== trimmedRequestId || existing.sessionUuid !== trimmedSessionUuid)
-    ) {
-      throw new ActionableError(
-        `Cannot hold broker session ${trimmedSessionUuid}: request ${existing.requestId} already ` +
-          `holds session ${existing.sessionUuid}.`,
-      );
-    }
-    if (this.boundSessionUuid !== undefined && this.boundSessionUuid !== trimmedSessionUuid) {
-      throw new ActionableError(
-        `Cannot hold broker session ${trimmedSessionUuid}: this proxy is already bound to ` +
-          `session ${this.boundSessionUuid}.`,
-      );
-    }
-    this.bindStartupSession(trimmedSessionUuid);
-    this.sessionBrokerSessions.set(trimmedSessionUuid, trimmedRequestId);
-    this.sessionBrokerBinding = {
-      requestId: trimmedRequestId,
-      sessionUuid: trimmedSessionUuid,
-    };
-    try {
-      await this.ensureConnected();
-      await this.establishBoundSessionHeartbeat();
-      this.assertBrokerBindingStillHeld(trimmedRequestId, trimmedSessionUuid);
-    } catch (error) {
-      this.sessionBrokerBinding = undefined;
-      throw toActionableError(error, `Failed to hold broker session ${trimmedSessionUuid}`);
-    }
-  }
-
-  /** Fence after the awaited claim: close or terminal evidence may have ended this binding (#12770). */
-  private assertBrokerBindingStillHeld(requestId: string, sessionUuid: string): void {
-    const held = this.heldSessionBrokerBinding();
-    if (this.closing || held?.requestId !== requestId || held.sessionUuid !== sessionUuid) {
-      throw new ActionableError(
-        `Broker session ${sessionUuid} was released or fenced while its ownership was being established.`,
-      );
-    }
-  }
-
-  private heldSessionBrokerBinding(): { requestId: string; sessionUuid: string } | undefined {
-    const binding = this.sessionBrokerBinding;
-    if (
-      !binding ||
-      this.sessionBrokerSessions.get(binding.sessionUuid) !== binding.requestId ||
-      this.boundSessionUuid !== binding.sessionUuid ||
-      this.terminalBoundSession?.sessionUuid === binding.sessionUuid
-    ) {
-      return undefined;
-    }
-    return binding;
-  }
-
-  /** Rebind only the still-current durable receipt; the daemon derives its private scope. */
-  private async rebindSessionBrokerConnection(client: DaemonClientLike): Promise<void> {
-    const binding = this.heldSessionBrokerBinding();
-    if (!binding || this.closing || this.client !== client) {
-      return;
-    }
-    try {
-      await client.callDaemonMethod(DAEMON_REGISTER_SESSION_METHOD, {
-        sessionId: binding.sessionUuid,
-        clientName: SESSION_BROKER_PROXY_CLIENT_NAME,
-        sessionBroker: {
-          requestId: binding.requestId,
-          livenessOwnerToken: this.livenessOwnerToken,
-        },
-      });
-    } catch (error) {
-      if (isSessionOwnershipLostError(error) && this.isCurrentBrokerBinding(binding)) {
-        this.sessionBrokerBinding = undefined;
-        this.fenceBoundSessionUuid(binding.sessionUuid, SESSION_OWNERSHIP_LOST_CODE);
-        logger.warn(
-          `[DaemonMcpProxy] Broker request ${binding.requestId} no longer grants session ` +
-            `${binding.sessionUuid}; the binding is terminal.`,
-          error,
-        );
-        return;
-      }
-      logger.warn(
-        `[DaemonMcpProxy] Re-binding broker request ${binding.requestId} failed: ${errorMessage(error)}`,
-        error,
-      );
-    }
-  }
-
-  private isCurrentBrokerBinding(binding: { requestId: string; sessionUuid: string }): boolean {
-    return (
-      this.sessionBrokerBinding?.requestId === binding.requestId &&
-      this.sessionBrokerBinding.sessionUuid === binding.sessionUuid &&
-      this.sessionBrokerSessions.get(binding.sessionUuid) === binding.requestId
-    );
+    return this.brokerSessions.acquire(config);
   }
 
   getSessionBrokerResult(): SessionBrokerResult | undefined {
-    return this.sessionBrokerResult;
-  }
-
-  private async callBrokerRelease(
-    sessionUuid: string,
-    reason?: SessionBrokerReleaseReason,
-  ): Promise<unknown> {
-    const client = this.client;
-    if (!client) {
-      throw new DaemonUnavailableError("Cannot release broker session without a daemon connection");
-    }
-    return raceWithDeadline(
-      () =>
-        client.callDaemonMethod(
-          DAEMON_RELEASE_BROKER_SESSION_METHOD,
-          {
-            sessionId: sessionUuid,
-            livenessOwnerToken: this.livenessOwnerToken,
-            ...(reason ? { reason } : {}),
-          },
-          { timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS },
-        ),
-      {
-        timer: this.timer,
-        timeoutMs: BROKER_EXECUTION_RELEASE_TIMEOUT_MS,
-        label: `Release broker session ${sessionUuid}`,
-      },
-    );
-  }
-
-  private forgetBrokerSession(sessionUuid: string): void {
-    const requestId = this.sessionBrokerSessions.get(sessionUuid);
-    this.sessionBrokerSessions.delete(sessionUuid);
-    if (
-      requestId !== undefined &&
-      this.sessionBrokerBinding?.requestId === requestId &&
-      this.sessionBrokerBinding.sessionUuid === sessionUuid
-    ) {
-      this.sessionBrokerBinding = undefined;
-    }
-    this.ownedDeviceSessions.delete(sessionUuid);
-    this.claimableSessions.delete(sessionUuid);
-    this.dropHeldSession(sessionUuid);
-    if (this.boundSessionUuid === sessionUuid) {
-      this.clearBoundSessionUuid();
-    }
-    this.latestBindingKeeper.syncHeartbeatKeeper();
-  }
-
-  private async releasePreparedBrokerSession(sessionUuid: string): Promise<unknown> {
-    try {
-      return await this.callBrokerRelease(sessionUuid);
-    } finally {
-      this.forgetBrokerSession(sessionUuid);
-    }
-  }
-
-  /**
-   * Broker teardown remains durable in the daemon even when this bounded call cannot confirm it.
-   * An execution-owner loss reports `session_owner_exited` (#12791): the daemon records that
-   * terminal receipt and answers before device destruction, which outlasts this bound.
-   */
-  private async releaseBrokerSessions(reason?: SessionBrokerReleaseReason): Promise<void> {
-    const sessions = [...this.sessionBrokerSessions.keys()];
-    this.sessionBrokerBinding = undefined;
-    await Promise.all(
-      sessions.map(async (sessionUuid) => {
-        try {
-          const result = await this.callBrokerRelease(sessionUuid, reason);
-          const release = result as Partial<SessionBrokerReleaseResult> | undefined;
-          if (
-            release?.sessionUuid !== sessionUuid ||
-            !["released", "cleanup_pending", "unknown_session"].includes(String(release?.outcome))
-          ) {
-            logger.warn(
-              `[DaemonMcpProxy] Broker release for ${sessionUuid} returned a stale or malformed result`,
-            );
-          } else if (release.outcome === "unknown_session") {
-            logger.warn(
-              `[DaemonMcpProxy] Broker release for ${sessionUuid} did not find its durable receipt`,
-            );
-          } else {
-            logger.info(
-              `[DaemonMcpProxy] Released broker session ${sessionUuid}: ${release.outcome}`,
-            );
-          }
-        } catch (error) {
-          logger.warn(
-            `[DaemonMcpProxy] Releasing broker session ${sessionUuid} failed; durable daemon ` +
-              `cleanup remains pending: ${errorMessage(error)}`,
-            error,
-          );
-        } finally {
-          this.forgetBrokerSession(sessionUuid);
-        }
-      }),
-    );
+    return this.brokerSessions.result;
   }
 
   /** The terminally released binding, excluding a resumable daemon stall, for reporting surfaces (#11712). */
@@ -1409,7 +1164,7 @@ export class DaemonMcpProxy {
       .filter(
         (sessionId) =>
           sessionId !== this.config.initialSessionUuid?.trim() &&
-          !this.sessionBrokerSessions.has(sessionId) &&
+          !this.brokerSessions.sessions.has(sessionId) &&
           !this.releasedSessionReasons.has(sessionId),
       );
     await Promise.all(
@@ -1880,10 +1635,10 @@ export class DaemonMcpProxy {
     // A broker binding connection that reconnects re-binds the new socket to its binding sessions
     // (#11178); the daemon dropped the old socket's binding when it closed. Other proxies keep
     // their establishment exactly as before.
-    const establishOwnership = this.heldSessionBrokerBinding()
+    const establishOwnership = this.brokerSessions.heldBinding()
       ? async () => {
           await establishBaseOwnership();
-          await this.rebindSessionBrokerConnection(client);
+          await this.brokerSessions.rebindConnection(client);
         }
       : establishBaseOwnership;
 
@@ -2207,7 +1962,7 @@ export class DaemonMcpProxy {
     }
     const handleStallHandoverRelease = (): boolean => {
       const keepsHandover =
-        this.sessionBrokerSessions.has(releasedSessionUuid) &&
+        this.brokerSessions.sessions.has(releasedSessionUuid) &&
         this.stallHandovers.get(releasedSessionUuid)?.handover.code === DAEMON_STALLED_CODE &&
         isRecoverableDaemonHandoffReason(notification.reason ?? "");
       if (!keepsHandover) {
@@ -2995,16 +2750,16 @@ export class DaemonMcpProxy {
   }
 
   private refuseBrokerGenericAcquisition(name: string): void {
-    if (!this.sessionBrokerResult || !isDeviceSessionAcquisitionTool(name)) {
+    if (!this.brokerSessions.result || !isDeviceSessionAcquisitionTool(name)) {
       return;
     }
     const terminal = this.terminalBoundSession;
-    if (terminal && this.sessionBrokerSessions.has(terminal.sessionUuid)) {
+    if (terminal && this.brokerSessions.sessions.has(terminal.sessionUuid)) {
       throw this.boundSessionExpiredError();
     }
     throw new ActionableError(
       `Tool ${name} cannot acquire a generic device on a session-broker connection. ` +
-        `Use the exact bound session ${this.sessionBrokerResult.sessionUuid ?? "reported by initialize"}.`,
+        `Use the exact bound session ${this.brokerSessions.result.sessionUuid ?? "reported by initialize"}.`,
     );
   }
 
@@ -4855,6 +4610,37 @@ export class DaemonMcpProxy {
     };
   }
 
+  private createBrokerSessions(): BrokerSessions {
+    return new BrokerSessions({
+      timer: this.timer,
+      livenessOwnerToken: this.livenessOwnerToken,
+      port: this.createBrokerSessionsPort(),
+    });
+  }
+
+  private createBrokerSessionsPort(): BrokerSessionsPort {
+    return {
+      ensureConnected: () => this.ensureConnected(),
+      requireClient: () => this.requireClient(),
+      client: () => this.client,
+      isClosing: () => this.closing,
+      boundSessionUuid: () => this.boundSessionUuid,
+      terminalBoundSessionUuid: () => this.terminalBoundSession?.sessionUuid,
+      bindStartupSession: (sessionUuid) => this.bindStartupSession(sessionUuid),
+      establishBoundSessionHeartbeat: () => this.establishBoundSessionHeartbeat(),
+      fenceBoundSession: (sessionUuid, code) => this.fenceBoundSessionUuid(sessionUuid, code),
+      forgetBoundSession: (sessionUuid) => {
+        this.ownedDeviceSessions.delete(sessionUuid);
+        this.claimableSessions.delete(sessionUuid);
+        this.dropHeldSession(sessionUuid);
+        if (this.boundSessionUuid === sessionUuid) {
+          this.clearBoundSessionUuid();
+        }
+        this.latestBindingKeeper.syncHeartbeatKeeper();
+      },
+    };
+  }
+
   private createSessionBindingDependencies(): SessionBindingDependencies {
     return {
       timer: this.timer,
@@ -4862,7 +4648,7 @@ export class DaemonMcpProxy {
       ownedDeviceSessions: this.ownedDeviceSessions,
       sessionPlatforms: this.sessionPlatforms,
       sessionDeviceIds: this.sessionDeviceIds,
-      sessionBrokerSessions: this.sessionBrokerSessions,
+      sessionBrokerSessions: this.brokerSessions.sessions,
       plainRestartSessionLosses: this.plainRestartSessionLosses,
       pendingHeldSessionPlatformLosses: this.pendingHeldSessionPlatformLosses,
       initialSessionUuid: () => this.config.initialSessionUuid,
@@ -5780,7 +5566,7 @@ export class DaemonMcpProxy {
     const ownerLost = this.executionOwnerLost(options);
     this.closing = true;
     const closingError = new DaemonUnavailableError("MCP proxy is closing");
-    this.sessionBrokerAcquisitionAbort?.abort(closingError);
+    this.brokerSessions.abortAcquisition(closingError);
     this.closeAbort.abort(closingError);
     this.connected = false;
     this.livenessRecovery.stop();
@@ -5802,7 +5588,7 @@ export class DaemonMcpProxy {
     // Before the keeper stops, so the lease stays live until the release lands (#11176).
     await Promise.all([
       this.releaseOwnedSessions(connectedClient),
-      this.releaseBrokerSessions(ownerLost ? SESSION_OWNER_EXITED_CODE : undefined),
+      this.brokerSessions.releaseAll(ownerLost ? SESSION_OWNER_EXITED_CODE : undefined),
       this.joinConnectionAttempt(),
     ]);
     await this.latestBindingKeeper.stopBoundSessionHeartbeat();
@@ -5818,8 +5604,7 @@ export class DaemonMcpProxy {
     this.connected = false;
     this.clearBoundSessionUuid();
     this.otherHeldSessions.clear();
-    this.sessionBrokerSessions.clear();
-    this.sessionBrokerBinding = undefined;
+    this.brokerSessions.clear();
     // Every not-found window ends with the proxy: nothing is heartbeated or asked again (#11570).
     this.notFoundWindows.clear();
     this.notFoundStopped.clear();

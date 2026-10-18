@@ -7,6 +7,7 @@ import {
   type StreamAuthorizeInput,
 } from "../../src/daemon/streamSocketAuth";
 import { FakeFailuresStreamRepository } from "../fakes/FakeFailuresStreamRepository";
+import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FailuresStreamSocketServer } from "../../src/daemon/failuresStreamSocketServer";
 import type {
@@ -23,6 +24,14 @@ import type {
 class TestableServer extends FailuresStreamSocketServer {
   run(request: FailuresStreamSocketRequest): Promise<FailuresStreamSocketResponse> {
     return this.handleRequest(request);
+  }
+
+  /** Sends `value` down the real wire path (serialized line in, response frame out). */
+  async wire(value: unknown): Promise<FailuresStreamSocketResponse> {
+    const socket = new FakeSocket<FailuresStreamSocketResponse>();
+    await this.processLine(socket, JSON.stringify(value));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    return socket.responses[0];
   }
 }
 
@@ -71,18 +80,18 @@ describe("FailuresStreamSocketServer sinceTimestamp normalization", () => {
   for (const row of rows) {
     test(`poll_notifications forwards ${row.name}`, async () => {
       const { server, repo } = makeServer();
-      const request = {
+      const response = await server.wire({
         command: "poll_notifications",
         sinceTimestamp: row.input,
-      } as unknown as FailuresStreamSocketRequest;
+      });
 
       if (row.throws) {
-        await expect(server.run(request)).rejects.toThrow(/Invalid sinceTimestamp/);
+        expect(response.success).toBe(false);
+        expect(response.error).toMatch(/Invalid sinceTimestamp/);
         expect(repo.lastNotificationsQuery).toBeUndefined();
         return;
       }
 
-      const response = await server.run(request);
       expect(response.success).toBe(true);
       expect(repo.lastNotificationsQuery?.sinceTimestamp).toBe(row.expected as number | undefined);
     });
@@ -92,12 +101,10 @@ describe("FailuresStreamSocketServer sinceTimestamp normalization", () => {
 describe("FailuresStreamSocketServer command validation", () => {
   test("poll_timeline rejects an unknown aggregation before touching the repository", async () => {
     const { server, repo } = makeServer();
-    const request = {
-      command: "poll_timeline",
-      aggregation: "fortnight",
-    } as unknown as FailuresStreamSocketRequest;
+    const response = await server.wire({ command: "poll_timeline", aggregation: "fortnight" });
 
-    await expect(server.run(request)).rejects.toThrow(/Invalid aggregation: fortnight/);
+    expect(response.success).toBe(false);
+    expect(response.error).toMatch(/Invalid aggregation: fortnight/);
     expect(repo.lastTimelineQuery).toBeUndefined();
   });
 
@@ -114,12 +121,10 @@ describe("FailuresStreamSocketServer command validation", () => {
 
   test("acknowledge rejects a non-integer id before touching the repository", async () => {
     const { server, repo } = makeServer();
-    const request = {
-      command: "acknowledge",
-      notificationIds: [1, 2.5],
-    } as unknown as FailuresStreamSocketRequest;
+    const response = await server.wire({ command: "acknowledge", notificationIds: [1, 2.5] });
 
-    await expect(server.run(request)).rejects.toThrow(/Invalid notification ID/);
+    expect(response.success).toBe(false);
+    expect(response.error).toMatch(/Invalid notification ID/);
     expect(repo.acknowledgedIds).toBeUndefined();
   });
 
@@ -136,9 +141,10 @@ describe("FailuresStreamSocketServer command validation", () => {
 
   test("an unsupported command is rejected", async () => {
     const { server } = makeServer();
-    const request = { command: "poll_everything" } as unknown as FailuresStreamSocketRequest;
+    const response = await server.wire({ command: "poll_everything" });
 
-    await expect(server.run(request)).rejects.toThrow(/Unsupported command: poll_everything/);
+    expect(response.success).toBe(false);
+    expect(response.error).toMatch(/Unsupported command: poll_everything/);
   });
 });
 

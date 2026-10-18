@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
+import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
@@ -18,7 +19,8 @@ describe("Daemon UUID source", function () {
 
   test("routes the daemon session id through the injected IdGenerator", function () {
     const idGenerator = new CountingIdGenerator("daemon-session");
-    const daemon = new Daemon(
+    const attach = spyOn(SessionManager.prototype, "attachDaemonSessionId");
+    new Daemon(
       {},
       {
         timer: new FakeTimer(),
@@ -28,9 +30,11 @@ describe("Daemon UUID source", function () {
     );
 
     // First id minted during construction (daemonSessionId).
-    expect((daemon as unknown as { daemonSessionId: string }).daemonSessionId).toBe(
-      "daemon-session-1",
-    );
+    try {
+      expect(attach).toHaveBeenCalledWith("daemon-session-1");
+    } finally {
+      attach.mockRestore();
+    }
   });
 
   test("retires a removed device epoch and mints a replacement through daemon wiring", async () => {
@@ -41,14 +45,7 @@ describe("Daemon UUID source", function () {
       { installedAppsRepository: new FakeInstalledAppsRepository(), timer, idGenerator },
     );
     const pool = daemon.getDevicePool();
-    const registry = (
-      daemon as unknown as {
-        deviceSessionRegistry: {
-          getByDeviceId(deviceId: string): { deviceSessionUuid: string } | undefined;
-          getByUuid(deviceSessionUuid: string): unknown;
-        };
-      }
-    ).deviceSessionRegistry;
+    const registry = DaemonState.getInstance().getDeviceSessionRegistry();
     const bootedDevice = {
       name: "emulator-5554",
       deviceId: "emulator-5554",

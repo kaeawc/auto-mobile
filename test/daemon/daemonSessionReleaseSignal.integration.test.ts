@@ -14,7 +14,6 @@ import {
   SUSPECT_GRACE_MS,
 } from "../../src/daemon/sessionLivenessWindows";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import type { DevicePool } from "../../src/daemon/devicePool";
 import type { BootedDevice } from "../../src/models";
 import { executionTracker } from "../../src/server/executionTracker";
@@ -23,10 +22,6 @@ import { executionTracker } from "../../src/server/executionTracker";
 // observe-cache cleanup) that fans the released session key out to the
 // SessionReleaseBroadcaster, so a connected proxy learns of a real release
 // instead of guessing with the replay TTL.
-
-interface DaemonSessionReleaseInternals {
-  cancelAndReleaseSession(sessionId: string, releaseReason: string): Promise<void>;
-}
 
 /**
  * Point a daemon-owned pool's discovery at a fake that lists exactly these
@@ -129,7 +124,6 @@ describe("Daemon session-release signal wiring", () => {
     const daemon = new Daemon({}, { deviceSessionRepository: repository });
     const sessionManager = daemon.getSessionManager();
     const devicePool = daemon.getDevicePool();
-    const internals = daemon as unknown as DaemonSessionReleaseInternals;
     const sessionId = "terminal-persistence-failure";
     const deviceId = "physical-device";
     const emitted: string[] = [];
@@ -147,7 +141,7 @@ describe("Daemon session-release signal wiring", () => {
       await devicePool.assignDeviceToSession(sessionId, "android");
 
       await expect(
-        internals.cancelAndReleaseSession(
+        daemon.cancelAndReleaseSession(
           sessionId,
           deviceLossCancellationReason(deviceId, "incident-1"),
         ),
@@ -166,7 +160,7 @@ describe("Daemon session-release signal wiring", () => {
       expect(emitted).toEqual([]);
 
       markReleasedSpy.mockResolvedValue(undefined);
-      await internals.cancelAndReleaseSession(
+      await daemon.cancelAndReleaseSession(
         sessionId,
         deviceLossCancellationReason(deviceId, "incident-1"),
       );
@@ -183,13 +177,10 @@ describe("Daemon session-release signal wiring", () => {
 
   test("keeps a session when a newer identity arrives during daemon release cancellation", async () => {
     const timer = new FakeTimer();
+    const db = await createTestDatabase();
     const daemon = new Daemon(
       {},
-      {
-        timer,
-        deviceSessionRepository:
-          new FakeDeviceSessionPersistence() as unknown as DeviceSessionRepository,
-      },
+      { timer, deviceSessionRepository: new DeviceSessionRepository(db) },
     );
     const devicePool = daemon.getDevicePool();
     const sessionManager = daemon.getSessionManager();
@@ -239,6 +230,7 @@ describe("Daemon session-release signal wiring", () => {
       finishCancellation.resolve(0);
       cancelSpy.mockRestore();
       sessionManager.stopCleanupTimer();
+      await db.destroy();
     }
   });
 

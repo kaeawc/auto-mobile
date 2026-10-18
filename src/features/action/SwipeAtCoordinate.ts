@@ -26,7 +26,7 @@ import {
   supportsCtrlProxyGestureDisplay,
 } from "./touchscreenInput";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { AndroidCtrlProxyClient } from "../observe/android";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import {
   selectedDisplayPin,
   unsupportedDisplayOptionMessage,
@@ -41,7 +41,7 @@ export interface SwipeAtCoordinateDependencies extends DisplayFenceDependencies 
   geometry?: Pick<ElementGeometry, "getSwipeDurationFromSpeed">;
   invalidateIosCache?: () => void;
   /** CtrlProxy client that carries `displayId` for an explicit-display swipe. */
-  androidClient?: Pick<AndroidCtrlProxyClient, "requestSwipe" | "supportsCommand">;
+  androidClient?: Pick<AndroidCtrlProxy, "requestSwipe" | "supportsCommand">;
   lastRenderedObservation?: RenderedObservationReader;
 }
 
@@ -123,7 +123,7 @@ export class SwipeAtCoordinate extends BaseVisualChange {
   private readonly geometry: Pick<ElementGeometry, "getSwipeDurationFromSpeed">;
   private readonly snapshotReferences: SnapshotReferenceStore;
   private readonly invalidateIosCache: () => void;
-  private readonly androidClient: Pick<AndroidCtrlProxyClient, "requestSwipe" | "supportsCommand">;
+  private readonly androidClient: Pick<AndroidCtrlProxy, "requestSwipe" | "supportsCommand">;
   private readonly lastRenderedObservation?: RenderedObservationReader;
 
   constructor(

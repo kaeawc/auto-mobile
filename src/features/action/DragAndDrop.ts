@@ -28,7 +28,7 @@ import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { DRAG_INTENT } from "../utility/SelectionPolicy";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { AndroidCtrlProxyClient } from "../observe/android";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import {
   createGlobalPerformanceTracker,
@@ -137,7 +137,7 @@ export class DragAndDrop extends BaseVisualChange {
   private selector: ElementSelector;
   private hierarchyCapture: HierarchyCapture;
   private geometry: ElementGeometry;
-  private accessibilityService: AndroidCtrlProxyClient;
+  private accessibilityService: AndroidCtrlProxy;
   private visionConfig: VisionFallbackConfig;
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;

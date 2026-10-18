@@ -4786,9 +4786,7 @@ describe("SendKeys Android non-idempotent outcomes", () => {
         }
         return pending;
       });
-      const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        text as unknown as AndroidCtrlProxyClient,
-      );
+      const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(text);
       const observer = createObserver(focusedAndroidObservation("", {}, 1));
       const executor = new DefaultSendKeysCommandExecutor(
         android,
@@ -4876,9 +4874,7 @@ describe("Android adapter cancellation fence", () => {
         return pending;
       },
     };
-    const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      facade as unknown as AndroidCtrlProxyClient,
-    );
+    const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(facade);
     const executor = new DefaultSendKeysCommandExecutor(
       android,
       createAdbFactory(new FakeAdbExecutor()),

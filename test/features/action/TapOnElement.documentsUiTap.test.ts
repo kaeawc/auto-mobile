@@ -36,9 +36,7 @@ function createTap(
     }
     return requestTap(...args);
   };
-  const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    service as unknown as AndroidCtrlProxyClient,
-  );
+  const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(service);
   let tap: TapOnElement;
   try {
     tap = new TapOnElement(

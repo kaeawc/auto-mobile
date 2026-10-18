@@ -86,7 +86,7 @@ import {
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 
 import { logger } from "../../utils/logger";
-import { AndroidCtrlProxyClient } from "../observe/android";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import {
   createGlobalPerformanceTracker,
@@ -140,7 +140,7 @@ type TapAnyAccessibilityService = Pick<
   AndroidCtrlProxyClient,
   "requestTapCoordinates" | "requestAction" | "requestNodeAction" | "supportsNodeActionSelectors"
 > &
-  Partial<Pick<AndroidCtrlProxyClient, "supportsCommand">>;
+  Partial<Pick<AndroidCtrlProxy, "supportsCommand">>;
 
 interface TapAnyElementDependencies extends DisplayFenceDependencies {
   lastRenderedObservation?: RenderedObservationReader;
@@ -407,7 +407,7 @@ export class TapAnyElement extends BaseVisualChange {
   private geometry: ElementGeometry;
   private elementSelector: ElementSelector;
   private accessibilityService: TapAnyAccessibilityService;
-  private hierarchyAccessibilityService: AndroidCtrlProxyClient;
+  private hierarchyAccessibilityService: AndroidCtrlProxy;
   private viewHierarchy: ViewHierarchy;
   private hierarchyCapture: HierarchyCapture;
   private iosVoiceOverDetector: IosVoiceOverDetector;

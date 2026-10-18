@@ -116,25 +116,22 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
     await sessionManager.createSession(SESSION, DEVICE, "android", { timeoutMs: IDLE_MS });
 
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-      () =>
-        ({
-          getScreenScaleMetadata: () => null,
-          requestGestureStart: () => {
-            strokes.push("start");
-            startOnDevice.resolve();
-            return startAck.promise;
-          },
-          requestGestureMove: async () => {
-            strokes.push("move");
-            return { success: true };
-          },
-          requestGestureEnd: async (_id: string, _x: number, _y: number, cancel?: unknown) => {
-            strokes.push(cancel === true ? "cancel" : "end");
-            return { success: true };
-          },
-        }) as unknown as AndroidCtrlProxyClient,
-    );
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+      getScreenScaleMetadata: () => null,
+      requestGestureStart: () => {
+        strokes.push("start");
+        startOnDevice.resolve();
+        return startAck.promise;
+      },
+      requestGestureMove: async () => {
+        strokes.push("move");
+        return { success: true };
+      },
+      requestGestureEnd: async (_id: string, _x: number, _y: number, cancel?: unknown) => {
+        strokes.push(cancel === true ? "cancel" : "end");
+        return { success: true };
+      },
+    }));
     const fakePool = createFakeDaemonState().getDevicePool();
     const server = createTestUnixSocketServer(
       "unused",

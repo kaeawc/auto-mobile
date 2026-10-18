@@ -243,9 +243,7 @@ describe("ClearText Android ADB fallback", () => {
     fakeAdb = new FakeAdbExecutor();
     fakeAdb.setAndroidApiLevel(30);
     fakeA11yService = new FakeCtrlProxy();
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as unknown as AndroidCtrlProxyClient,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
   });
 
   afterEach(() => {

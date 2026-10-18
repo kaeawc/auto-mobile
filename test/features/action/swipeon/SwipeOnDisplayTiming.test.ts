@@ -56,9 +56,7 @@ function harness({
   );
   const ctrl = new FakeCtrlProxy();
   ctrl.setSupportedCommands(route === "ctrlproxy" ? ["gesture_display_id_v1"] : []);
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    ctrl as unknown as AndroidCtrlProxyClient,
-  );
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(ctrl);
   const observe = new FakeObserveScreen();
   // iOS captures do not carry Android logical display ids. Without this,
   // the canonical size resolver correctly refuses an unidentified size fallback.

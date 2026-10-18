@@ -155,15 +155,12 @@ describe("an open input stroke vs. a release of its holder session", () => {
         strokes.push(kind === "end" && last === true ? "cancel" : kind);
         return { success: true };
       };
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-      () =>
-        ({
-          getScreenScaleMetadata: () => null,
-          requestGestureStart: stroke("start"),
-          requestGestureMove: stroke("move"),
-          requestGestureEnd: stroke("end"),
-        }) as unknown as AndroidCtrlProxyClient,
-    );
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+      getScreenScaleMetadata: () => null,
+      requestGestureStart: stroke("start"),
+      requestGestureMove: stroke("move"),
+      requestGestureEnd: stroke("end"),
+    }));
     const fakePool = createFakeDaemonState().getDevicePool();
     const server = createTestUnixSocketServer(
       "unused",

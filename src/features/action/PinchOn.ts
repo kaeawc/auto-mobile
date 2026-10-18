@@ -35,7 +35,7 @@ import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
 import { nodeBounds } from "../../models/ViewHierarchyResult";
 import { getProjectedHierarchyScreenSize } from "../observe/HierarchyNormalization";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
-import { AndroidCtrlProxyClient } from "../observe/android";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { isRunnerGestureOutcomeUnknown } from "../observe/ios/runnerErrorCodes";
 import { serverConfig } from "../../utils/ServerConfig";
@@ -114,7 +114,7 @@ type PinchExecutionContext = {
   displayTarget?: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
 };
 
-type ObservedPinchResult = Awaited<ReturnType<AndroidCtrlProxyClient["requestPinch"]>> & {
+type ObservedPinchResult = Awaited<ReturnType<AndroidCtrlProxy["requestPinch"]>> & {
   observation?: ObserveResult;
   staleDisplay?: PinchOnResult["staleDisplay"];
   pinchPath?: string;

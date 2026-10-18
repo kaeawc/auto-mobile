@@ -89,13 +89,10 @@ beforeEach(() => {
   unbound = [];
   binding = undefined;
   PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-    () =>
-      ({
-        getScreenScaleMetadata: () => null,
-        requestTapCoordinates: ack,
-      }) as unknown as AndroidCtrlProxyClient,
-  );
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+    getScreenScaleMetadata: () => null,
+    requestTapCoordinates: ack,
+  }));
 });
 
 afterEach(() => {

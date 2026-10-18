@@ -72,16 +72,12 @@ beforeEach(() => {
   sockets = [];
   ended = [];
   PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-    () =>
-      ({
-        getScreenScaleMetadata: () => null,
-        requestTapCoordinates: (
-          ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-        ) => ack(args[6]),
-        requestSwipe: (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => ack(args[8]),
-      }) as unknown as AndroidCtrlProxyClient,
-  );
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+    getScreenScaleMetadata: () => null,
+    requestTapCoordinates: (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) =>
+      ack(args[6]),
+    requestSwipe: (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => ack(args[8]),
+  }));
   unsubscribe = executionTracker.onSessionExecutionEnded((uuids) => {
     ended.push([...uuids]);
   });

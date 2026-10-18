@@ -110,38 +110,35 @@ export class RealToolCallPath {
       Reflect.set(ToolRegistry, field, fake);
       this.restorers.push(() => Reflect.set(ToolRegistry, field, original));
     }
-    const ctrlProxy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-      () =>
-        ({
-          bindSession: () => undefined,
-          getScreenScaleMetadata: () => null,
-          requestTapCoordinates: async (
-            ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-          ) => {
-            args[6]?.();
-            return { success: true };
-          },
-          setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-            if (typeof args[5] === "object") {
-              args[5].onDispatch?.();
-            }
-            this.ctrlProxyWrites.push("setPreference");
-            return { success: true };
-          },
-          requestGestureStart: async (gestureId: string) => {
-            this.gestureFrames.push(`start:${gestureId}`);
-            return { success: true };
-          },
-          requestGestureMove: async (gestureId: string) => {
-            this.gestureFrames.push(`move:${gestureId}`);
-            return { success: true };
-          },
-          requestGestureEnd: async (gestureId: string, _x: number, _y: number, cancel: boolean) => {
-            this.gestureFrames.push(`${cancel ? "cancel" : "end"}:${gestureId}`);
-            return { success: true };
-          },
-        }) as unknown as AndroidCtrlProxyClient,
-    );
+    const ctrlProxy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+      bindSession: () => undefined,
+      getScreenScaleMetadata: () => null,
+      requestTapCoordinates: async (
+        ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+      ) => {
+        args[6]?.();
+        return { success: true };
+      },
+      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+        if (typeof args[5] === "object") {
+          args[5].onDispatch?.();
+        }
+        this.ctrlProxyWrites.push("setPreference");
+        return { success: true };
+      },
+      requestGestureStart: async (gestureId: string) => {
+        this.gestureFrames.push(`start:${gestureId}`);
+        return { success: true };
+      },
+      requestGestureMove: async (gestureId: string) => {
+        this.gestureFrames.push(`move:${gestureId}`);
+        return { success: true };
+      },
+      requestGestureEnd: async (gestureId: string, _x: number, _y: number, cancel: boolean) => {
+        this.gestureFrames.push(`${cancel ? "cancel" : "end"}:${gestureId}`);
+        return { success: true };
+      },
+    }));
     this.restorers.push(() => ctrlProxy.mockRestore());
     // Focused admission suites register their own tool and keep the real pipeline above.
     if (!registerDefaultTools) {

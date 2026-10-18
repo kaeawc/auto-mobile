@@ -225,23 +225,20 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
         strokes.push(kind === "end" && last === true ? "cancel" : kind);
         return { success: true };
       };
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-      () =>
-        ({
-          getScreenScaleMetadata: () => null,
-          requestTapCoordinates: async (
-            ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-          ) => {
-            args[6]?.();
-            taps++;
-            tapEntered.resolve();
-            return (await tapOnDevice?.promise) ?? { success: true };
-          },
-          requestGestureStart: stroke("start"),
-          requestGestureMove: stroke("move"),
-          requestGestureEnd: stroke("end"),
-        }) as unknown as AndroidCtrlProxyClient,
-    );
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+      getScreenScaleMetadata: () => null,
+      requestTapCoordinates: async (
+        ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+      ) => {
+        args[6]?.();
+        taps++;
+        tapEntered.resolve();
+        return (await tapOnDevice?.promise) ?? { success: true };
+      },
+      requestGestureStart: stroke("start"),
+      requestGestureMove: stroke("move"),
+      requestGestureEnd: stroke("end"),
+    }));
     const fakePool = createFakeDaemonState().getDevicePool();
     const server = createTestUnixSocketServer(
       "unused",

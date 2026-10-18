@@ -1530,7 +1530,7 @@ describe("LaunchApp", () => {
         controller.abort(deviceLoss);
         throw new Error("CtrlProxy disconnected");
       },
-    } as unknown as AndroidCtrlProxyClient);
+    });
 
     try {
       await expect(

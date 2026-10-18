@@ -1312,7 +1312,7 @@ describe("HomeScreen", () => {
     test("reports success when the accessibility global action actually backgrounds the app", async () => {
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: true }),
-      } as unknown as AndroidCtrlProxyClient);
+      });
       // Default fakeWindow already reports "com.android.launcher3" foreground.
 
       const result = await homeScreen.execute();
@@ -1331,7 +1331,7 @@ describe("HomeScreen", () => {
       // must surface a failure rather than false success.
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: true }),
-      } as unknown as AndroidCtrlProxyClient);
+      });
       (homeScreen as any).window = sequencedWindow(["com.android.settings"]);
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
@@ -1345,7 +1345,7 @@ describe("HomeScreen", () => {
     test("recovers via the ADB keyevent fallback when the global action is inert but the fallback reaches the launcher", async () => {
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: true }),
-      } as unknown as AndroidCtrlProxyClient);
+      });
       // The post-global-action verification retries internally (initial
       // attempt + 2 backoff retries) before giving up, so it must see the
       // app unchanged on all 3 of those checks; only the post-ADB-keyevent
@@ -1367,7 +1367,7 @@ describe("HomeScreen", () => {
     test("throws instead of reporting false success when the ADB keyevent fallback also fails to reach the launcher", async () => {
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: false, error: "global action unavailable" }),
-      } as unknown as AndroidCtrlProxyClient);
+      });
       (homeScreen as any).window = sequencedWindow(["com.android.settings"]);
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
@@ -1385,7 +1385,7 @@ describe("HomeScreen", () => {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      } as unknown as AndroidCtrlProxyClient);
+      });
 
       await (homeScreen as any).executeAndroidHome();
 
@@ -1405,7 +1405,7 @@ describe("HomeScreen", () => {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      } as unknown as AndroidCtrlProxyClient);
+      });
       fakeAdb.setThrowOnAbortedSignal();
       const controller = new AbortController();
       controller.abort();

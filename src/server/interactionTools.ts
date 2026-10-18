@@ -124,7 +124,7 @@ import {
   type TapOnSelectedElement,
 } from "../models";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { AndroidCtrlProxyClient } from "../features/observe/android";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import {
   assertActiveWindowWaitForSupportedOnPlatform,
@@ -301,7 +301,7 @@ const KEYBOARD_READ_ACTIONS: ReadonlySet<string> = new Set(["detect", "listImes"
 export async function setKeyboardProfileForTool(
   device: BootedDevice,
   profile: KeyboardArgs["profile"],
-  client?: Pick<AndroidCtrlProxyClient, "supportsCommand" | "setKeyboardProfile">,
+  client?: Pick<AndroidCtrlProxy, "supportsCommand" | "setKeyboardProfile">,
   signal?: AbortSignal,
 ): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
   if (!profile) {
@@ -336,7 +336,7 @@ export async function setKeyboardProfileForTool(
 
 export async function listKeyboardProfilesForTool(
   device: BootedDevice,
-  client?: Pick<AndroidCtrlProxyClient, "supportsCommand" | "listKeyboardProfiles">,
+  client?: Pick<AndroidCtrlProxy, "supportsCommand" | "listKeyboardProfiles">,
   signal?: AbortSignal,
 ): Promise<KeyboardProfileCatalog> {
   if (device.platform !== "android") {

@@ -1,3 +1,4 @@
+import AutoMobileSdkWire
 import Foundation
 
 /// Async HTTP client relaying SQLite inspection to the SDK's in-app server.
@@ -60,12 +61,15 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
     }
 
     public func listDatabases() async throws -> [SdkDatabaseInfo] {
-        let payload: ListDatabasesPayload = try await post(path: "/db/list", body: EmptyRequest())
+        let payload: ListDatabasesPayload = try await post(path: SdkRoute.dbList.path, body: EmptyRequest())
         return payload.databases
     }
 
     public func storageCapabilities() async throws -> SdkStorageCapabilities {
-        let payload: StorageCapabilitiesPayload = try await post(path: "/db/capabilities", body: EmptyRequest())
+        let payload: StorageCapabilitiesPayload = try await post(
+            path: SdkRoute.dbCapabilities.path,
+            body: EmptyRequest()
+        )
         return SdkStorageCapabilities(
             readOnly: payload.readOnly,
             mutationAuthorized: payload.mutationAuthorized,
@@ -77,7 +81,7 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
 
     public func listTables(databasePath: String) async throws -> [String] {
         let payload: ListTablesPayload = try await post(
-            path: "/db/tables",
+            path: SdkRoute.dbTables.path,
             body: DatabasePathRequest(databasePath: databasePath)
         )
         return payload.tables
@@ -92,14 +96,14 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
         async throws -> SdkTableDataResult
     {
         try await post(
-            path: "/db/table-data",
+            path: SdkRoute.dbTableData.path,
             body: TableDataRequest(databasePath: databasePath, table: table, limit: limit, offset: offset)
         )
     }
 
     public func getTableStructure(databasePath: String, table: String) async throws -> SdkTableStructureResult {
         try await post(
-            path: "/db/table-structure",
+            path: SdkRoute.dbTableStructure.path,
             body: TableStructureRequest(databasePath: databasePath, table: table)
         )
     }
@@ -151,7 +155,7 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
     /// The SDK's `busy_lock` wire code (HTTP 503), kept in step with `SdkDatabaseRouteHandler.busyCode`.
     static let busyCode = "busy_lock"
 
-    private static let executePath = "/db/execute"
+    private static let executePath = SdkRoute.dbExecute.path
 
     /// Timeout and a dropped connection both happen after the request left the runner.
     private static func mayHaveReachedTheSdk(_ error: URLError) -> Bool {
@@ -160,10 +164,6 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
 
     private static let unavailableMessage =
         "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)"
-}
-
-private struct SdkDatabaseErrorPayload: Codable {
-    let error: String
 }
 
 private struct ExecuteSqlRequest: Codable {

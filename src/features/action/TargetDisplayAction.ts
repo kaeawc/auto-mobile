@@ -207,11 +207,15 @@ export async function prepareTargetDisplayAction(
   display: string,
   observe: Pick<ObserveScreen, "execute">,
   adb: AdbCommandRunner,
-  lastRenderedObservation: RenderedObservationReader = sessionRenderedObservation,
+  lastRenderedObservation?: RenderedObservationReader,
   signal?: AbortSignal,
   transitions: DisplayTransitionReader = displayTransitions,
+  daemon: DaemonContext = defaultDaemonContext,
 ): Promise<{ observation: ObserveResult; displayId?: number; assertCurrent: () => void }> {
-  const previous = lastRenderedObservation(device.deviceId);
+  // The default reader and the post-observe revision re-read must share one session store.
+  const readRendered: RenderedObservationReader =
+    lastRenderedObservation ?? ((deviceId) => sessionRenderedObservation(deviceId, daemon));
+  const previous = readRendered(device.deviceId);
   const revision = transitions.revision(device.deviceId);
   const { stale, assertCurrent, assertCallerCurrent } = targetRevisionFence(
     device.deviceId,
@@ -236,7 +240,7 @@ export async function prepareTargetDisplayAction(
       `Coordinates for display "${panel.key}" require a prior observation of that panel. Re-observe display "${panel.key}" and retry.`,
     );
   }
-  const callerRevision = renderedRevision(device.deviceId, previous);
+  const callerRevision = renderedRevision(device.deviceId, previous, daemon);
   assertCallerCurrent(callerRevision);
   const observation = iosObservation ?? (await observe.execute(targetDisplayRead(display, signal)));
   assertCurrent();

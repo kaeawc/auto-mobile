@@ -98,8 +98,9 @@ Whether the emulator exposes a stylus-capable input device to apps (an
 ### What the recorder sees
 
 `recordDeviceGestures` reads kernel events with `getevent`. The reconstruction
-(`TouchFrameReconstructor.ts`) keeps position and `ABS_MT_PRESSURE` per slot, and
-nothing else: it ignores `ABS_MT_TOOL_TYPE`, `BTN_TOOL_PEN`, `BTN_STYLUS`,
+(`TouchFrameReconstructor.ts`) keeps position and `ABS_MT_PRESSURE` per slot (the raw
+integer, not normalized), and nothing else. It never reads the single-touch `ABS_PRESSURE`
+axis that a tablet-style pen node reports, and it ignores `ABS_MT_TOOL_TYPE`, `BTN_TOOL_PEN`, `BTN_STYLUS`,
 `ABS_TILT_X`/`ABS_TILT_Y`, and `ABS_DISTANCE`/`ABS_MT_DISTANCE` (hover distance).
 The pressure it keeps is not used by the gesture classifier. A recorded stylus stroke is therefore
 exported as an ordinary finger swipe, and hover is invisible.
@@ -110,7 +111,13 @@ remove them (**Source**):
 - **One event node.** `TouchNodeDiscovery.ts` selects only a node that exposes
   `ABS_MT_POSITION_X`/`ABS_MT_POSITION_Y`, and `GetEventReader` reads only that node.
   A pen that reports through a separate tablet-style node, commonly with `ABS_X`/`ABS_Y`
-  plus `BTN_TOOL_PEN` and `BTN_TOUCH`, is never seen.
+  plus `BTN_TOOL_PEN` and `BTN_TOUCH`, is never seen. That node reports pressure on
+  `ABS_PRESSURE`, not `ABS_MT_PRESSURE`, so following the axis list above alone exports no
+  pressure series for it: #13084 must add `ABS_PRESSURE` beside the node discovery.
+- **No pressure scale.** Raw pressure is a device-specific integer. Turning it into a
+  0-1 value needs the axis range (minimum and maximum) that `getevent -p` prints for
+  `ABS_MT_PRESSURE` or `ABS_PRESSURE`; the recorder does not read it today, so #13084
+  must discover the range per node before exporting a normalized value.
 - **No drag event.** `GestureEventType` has no drag, and `DualTrackRecorder` maps a
   moving single-contact gesture to `swipeAt` or `swipeOn`, which keep only the
   endpoints. A drawn stroke loses its path.

@@ -35,6 +35,7 @@ import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { registerNetworkTools } from "./networkTools";
 import { registerToolSelectionTools } from "./toolSelectionTools";
+import type { DaemonContext } from "../daemon/daemonContext";
 
 export interface RegisterAllToolsOptions {
   /**
@@ -47,6 +48,8 @@ export interface RegisterAllToolsOptions {
   includeDoctor?: boolean;
   /** Register the session tool-selection tools. The CLI has no session to select for. Default true. */
   includeToolSelection?: boolean;
+  /** Daemon context threaded to tools that read session state. Defaults to the singleton bridge. */
+  daemon?: DaemonContext;
 }
 
 /**
@@ -81,7 +84,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerVideoRecordingTools();
   registerSnapshotTools();
   registerSnapshotOfTools();
-  registerBiometricTools();
+  registerBiometricTools(options.daemon);
   registerTelephonyTools();
   registerHighlightTools();
   registerPrototypeTools({
@@ -97,7 +100,7 @@ export function registerAllTools(options: RegisterAllToolsOptions): void {
   registerSessionLogTools();
   registerDownloadsFixtureTools();
   registerFormTools();
-  registerAccessibilityTools();
+  registerAccessibilityTools(options.daemon);
   registerAccessibilityFocusTools();
   registerNetworkTools();
   if (options.includeToolSelection ?? true) {

@@ -74,7 +74,7 @@ interface BiometricEnrollmentCapture {
 async function captureBiometricEnrollment(
   device: BootedDevice,
   args: BiometricAuthArgs,
-  daemon: DaemonContext = defaultDaemonContext,
+  daemon: DaemonContext,
 ): Promise<BiometricEnrollmentCapture> {
   const changesEnrollment = args.action === "enroll" || args.action === "unenroll";
   const sessionManager =
@@ -97,7 +97,7 @@ async function captureBiometricEnrollment(
 /**
  * Register biometric authentication tools
  */
-export function registerBiometricTools() {
+export function registerBiometricTools(daemon: DaemonContext = defaultDaemonContext) {
   // Biometric auth handler
   const biometricAuthHandler = async (
     device: BootedDevice,
@@ -105,7 +105,7 @@ export function registerBiometricTools() {
     progress?: ProgressCallback,
   ) => {
     try {
-      const capture = await captureBiometricEnrollment(device, args);
+      const capture = await captureBiometricEnrollment(device, args, daemon);
       const biometricAuth = new BiometricAuth(device);
       const result = await runSessionBiometricMutation(
         capture.sessionManager,

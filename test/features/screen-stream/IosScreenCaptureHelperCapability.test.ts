@@ -4,7 +4,6 @@ import { FakeNativeHelperProcessControl } from "../../fakes/FakeNativeHelperProc
 import { FakeLogger } from "../../fakes/FakeLogger";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
@@ -28,7 +27,7 @@ function withFakeSpawner(target: CaptureTarget = { kind: "simulator", windowID: 
     }),
     binaryPath: "/fake/screen-capture-helper",
     target,
-    spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+    spawner: () => fake,
   });
   return { fake, helper };
 }

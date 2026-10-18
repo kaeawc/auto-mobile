@@ -408,9 +408,12 @@ describe("TelemetryRecorder", () => {
     expect(pushTarget.pushedEvents).toHaveLength(1);
     expect(pushTarget.pushedEvents[0].category).toBe("navigation");
     expect(pushTarget.pushedEvents[0].timestamp).toBe(5000);
-    const data = pushTarget.pushedEvents[0].data as any;
-    expect(data.triggeringInteraction).toEqual({ type: "tap", elementText: "Settings" });
-    expect(data.screenshotUri).toBe("file:///tmp/screenshot.png");
+    expect(pushTarget.pushedEvents[0].data).toEqual(
+      expect.objectContaining({
+        triggeringInteraction: { type: "tap", elementText: "Settings" },
+        screenshotUri: "file:///tmp/screenshot.png",
+      }),
+    );
   });
 
   it("recordStorageEvent stores to repository with context", async () => {
@@ -549,9 +552,9 @@ describe("TelemetryRecorder", () => {
     expect(pushTarget.pushedEvents[0].category).toBe("crash");
     expect(pushTarget.pushedEvents[0].timestamp).toBe(8000);
     expect(pushTarget.pushedEvents[0].deviceId).toBe("d1");
-    const data = pushTarget.pushedEvents[0].data as any;
-    expect(data.stackTrace).toHaveLength(1);
-    expect(data.stackTrace[0].className).toBe("com.example.MainActivity");
+    expect(pushTarget.pushedEvents[0].data).toMatchObject({
+      stackTrace: [{ className: "com.example.MainActivity" }],
+    });
   });
 
   it("recordFailureTelemetry pushes anr event to socket", () => {
@@ -620,9 +623,12 @@ describe("TelemetryRecorder", () => {
 
     expect(pushTarget.pushedEvents).toHaveLength(1);
     expect(pushTarget.pushedEvents[0].category).toBe("network");
-    const data = pushTarget.pushedEvents[0].data as any;
-    expect(data.requestHeaders).toEqual({ "Content-Type": "application/json" });
-    expect(data.responseBody).toBe('{"id":1}');
+    expect(pushTarget.pushedEvents[0].data).toEqual(
+      expect.objectContaining({
+        requestHeaders: { "Content-Type": "application/json" },
+        responseBody: '{"id":1}',
+      }),
+    );
   });
 
   describe("batched ingestion (issue #3138)", () => {

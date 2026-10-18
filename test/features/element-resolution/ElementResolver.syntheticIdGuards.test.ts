@@ -1,16 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import type { ViewHierarchyResult } from "../../../src/models";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { wireCapture } from "../../helpers/wireCapture";
 
 const base = "s2-0123456789abcdef";
 const bounds = { left: 0, top: 0, right: 100, bottom: 100 };
 const lower = { ...bounds, top: 120, bottom: 220 };
 const snapshot = (nodes: unknown[]) => ({
   id: "capture",
-  nodes: new SearchableHierarchy().project({
-    hierarchy: { node: nodes },
-  } as unknown as ViewHierarchyResult),
+  nodes: new SearchableHierarchy().project(wireCapture({ hierarchy: { node: nodes } })),
 });
 const resolver = new ElementResolver(() => 0);
 const tap = { action: "tap" as const };

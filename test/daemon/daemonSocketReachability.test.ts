@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { existsSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   DaemonSocketReachability,
@@ -12,12 +12,11 @@ import type { Timer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("DaemonSocketReachability", () => {
-  const tempDirs: string[] = [];
+  const scratch = useScratchRoot("daemon-reachability-test-");
   const servers: Server[] = [];
 
   function createTempDir(): string {
-    const dir = mkdtempSync(join(tmpdir(), "daemon-reachability-test-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     return dir;
   }
 
@@ -26,10 +25,6 @@ describe("DaemonSocketReachability", () => {
       servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
     );
     servers.length = 0;
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
   });
 
   test("attempts the connection on Windows even though the named pipe has no filesystem entry (#6103 #1)", async () => {

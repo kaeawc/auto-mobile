@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import {
   DeviceSnapshotStore,
   findReservedSnapshotNameReason,
@@ -9,7 +10,6 @@ import {
 } from "../../src/utils/DeviceSnapshotStore";
 import { promises as fs } from "fs";
 import * as path from "path";
-import * as os from "os";
 import { logger } from "../../src/utils/logger";
 import {
   noOpSnapshotDirectorySync,
@@ -57,18 +57,11 @@ describe("DeviceSnapshotStore", () => {
   let store: DeviceSnapshotStore;
   let testBasePath: string;
 
+  const scratch = useScratchRoot("snapshot-store-test-");
   beforeEach(async () => {
-    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-store-test-"));
+    testBasePath = scratch.next();
     store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
     await store.ensureSnapshotsDirectory();
-  });
-
-  afterEach(async () => {
-    try {
-      await fs.rm(testBasePath, { recursive: true, force: true });
-    } catch (error) {
-      // Ignore cleanup errors
-    }
   });
 
   for (const envKey of ["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR"]) {

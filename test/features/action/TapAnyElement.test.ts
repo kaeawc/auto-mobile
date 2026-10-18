@@ -63,7 +63,7 @@ describe("TapAnyElement", () => {
       adb,
       { timer, elementSelector: new FakeElementSelector(makeElement()) },
     );
-    tapAny.setRefreshViewHierarchyForTesting(async () => null);
+    tapAny.testHooks.setRefreshViewHierarchy(async () => null);
     tapAny.observedInteraction = (action) =>
       action(
         recordObservationRead({
@@ -238,7 +238,7 @@ describe("TapAnyElement", () => {
       const viewHierarchy = { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100 };
       tapAny.observedInteraction = (action) =>
         action(recordObservationRead({ viewHierarchy, screenSize: { width: 10, height: 10 } }));
-      tapAny.setRefreshViewHierarchyForTesting(async () => null);
+      tapAny.testHooks.setRefreshViewHierarchy(async () => null);
 
       const result = await tapAny.execute({ action: "tap" });
 
@@ -320,7 +320,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
         }),
       );
     let refreshCount = 0;
-    tapAny.setRefreshViewHierarchyForTesting(async () => ({
+    tapAny.testHooks.setRefreshViewHierarchy(async () => ({
       hierarchy: { node: { marker: `after-${++refreshCount}` } },
     }));
     return {
@@ -447,7 +447,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
       method: "coordinate-fallback",
       warnings: [warning],
     });
-    tapAny.setRefreshViewHierarchyForTesting(async () => hierarchy);
+    tapAny.testHooks.setRefreshViewHierarchy(async () => hierarchy);
     const result = await tapAny.execute({ action: "tap" });
     expect(result.success).toBe(true);
     expect(strategy.preciseTapCalls).toHaveLength(2);
@@ -456,7 +456,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
 
   test("unchanged hierarchy retries exactly once", async () => {
     const { tapAny, calls } = setup();
-    tapAny.setRefreshViewHierarchyForTesting(async () => hierarchy);
+    tapAny.testHooks.setRefreshViewHierarchy(async () => hierarchy);
     const result = await tapAny.execute({ action: "tap" });
     expect(result.success).toBe(true);
     expect(calls).toHaveLength(2);
@@ -472,7 +472,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
       };
       const { tapAny, calls, observedHierarchy } = setup({ success: true }, false, element);
       Object.assign(observedHierarchy, { displayId });
-      tapAny.setRefreshViewHierarchyForTesting(async () => observedHierarchy);
+      tapAny.testHooks.setRefreshViewHierarchy(async () => observedHierarchy);
       const result = await tapAny.execute({ action: "tap" });
       expect(result.success).toBe(true);
       expect(calls).toHaveLength(2);
@@ -486,7 +486,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
   test("unchanged hierarchy never retries a double tap or probes for a change", async () => {
     const { tapAny, calls } = setup();
     let probes = 0;
-    tapAny.setRefreshViewHierarchyForTesting(async () => {
+    tapAny.testHooks.setRefreshViewHierarchy(async () => {
       probes++;
       return hierarchy;
     });
@@ -499,7 +499,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
   test("unchanged hierarchy never retries a long press or probes for a change", async () => {
     const { tapAny, adb } = setup();
     let probes = 0;
-    tapAny.setRefreshViewHierarchyForTesting(async () => {
+    tapAny.testHooks.setRefreshViewHierarchy(async () => {
       probes++;
       return hierarchy;
     });
@@ -513,7 +513,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
 
   test("rejects a changed capture before dispatching the selected target", async () => {
     const { tapAny, adb, calls, timer, observedHierarchy } = setup();
-    tapAny.setBeforeAndroidTapForTesting(() => {
+    tapAny.testHooks.setBeforeAndroidTap(() => {
       const selected = getHierarchySnapshot(observedHierarchy);
       expect(selected).toBeDefined();
       const replacement = identifyObservedHierarchy(
@@ -622,7 +622,7 @@ test.each([false, true])(
       },
     );
     let searchFinished = false;
-    tapAny.setRefreshViewHierarchyForTesting(async (refresh, ...args) =>
+    tapAny.testHooks.setRefreshViewHierarchy(async (refresh, ...args) =>
       searchFinished ? { hierarchy: { node: { marker: "after" } } } : refresh(...args),
     );
     const cached = {
@@ -632,7 +632,7 @@ test.each([false, true])(
     };
     tapAny.observedInteraction = (action) => action(cached);
     // The search capture completes before the gesture; only the post-tap probe changes.
-    tapAny.setBeforeAndroidTapForTesting(() => {
+    tapAny.testHooks.setBeforeAndroidTap(() => {
       searchFinished = true;
     });
     const result = await tapAny.execute({ action: "tap", searchUntil: { duration: 500 } });
@@ -681,7 +681,7 @@ describe("TapAnyElement node long press fallbacks", () => {
           screenSize: { width: 500, height: 500 },
         }),
       );
-    tapAny.setRefreshViewHierarchyForTesting(async () => target?.fresh ?? null);
+    tapAny.testHooks.setRefreshViewHierarchy(async () => target?.fresh ?? null);
     return { proxy, adb, tapAny };
   }
 
@@ -849,7 +849,7 @@ describe("tapAny long press safety", () => {
           screenSize: { width: 500, height: 500 },
         }),
       );
-    action.setRefreshViewHierarchyForTesting(async () => null);
+    action.testHooks.setRefreshViewHierarchy(async () => null);
     return { adb, timer, action, displayLookup };
   }
 

@@ -519,7 +519,7 @@ function cachedTapAny(current: ObserveResult, cached = page([row("Old", 1700)], 
   });
   tap.observedInteraction = (callback) => callback({ ...cached });
   const captures = new FakeHierarchyCapture(() => current.viewHierarchy!);
-  tap.setRefreshViewHierarchyForTesting(
+  tap.testHooks.setRefreshViewHierarchy(
     async (_defaultRefresh, timeoutMs) =>
       (await captures.capture({ freshness: "fresh", timeoutMs })).hierarchy,
   );
@@ -581,7 +581,7 @@ describe("tapAny TalkBack fresh selection", () => {
       });
       tap.observedInteraction = (callback) => callback({ ...cached });
       let reads = 0;
-      tap.setRefreshViewHierarchyForTesting(async () =>
+      tap.testHooks.setRefreshViewHierarchy(async () =>
         ++reads === 1 ? fresh.viewHierarchy! : null,
       );
       const result = await tap.execute({ action, selectionStrategy: "first" });
@@ -612,7 +612,7 @@ describe("tapAny TalkBack fresh selection", () => {
       elementSelector: new ResolverElementSelector(),
     });
     tap.observedInteraction = (callback) => callback({ ...cached });
-    tap.setRefreshViewHierarchyForTesting(async () => null);
+    tap.testHooks.setRefreshViewHierarchy(async () => null);
     const result = await tap.execute({ action: "longPress" });
     expect(result.success).toBe(false);
     expect(result.error).toContain("accessibility service while TalkBack is on");
@@ -693,7 +693,7 @@ describe("tapAny TalkBack retry freshness", () => {
     });
     tap.observedInteraction = (callback) => callback({ ...before });
     let reads = 0;
-    tap.setRefreshViewHierarchyForTesting(async () =>
+    tap.testHooks.setRefreshViewHierarchy(async () =>
       ++reads <= 2 ? before.viewHierarchy! : after.viewHierarchy!,
     );
     const result = await tap.execute({ action: "tap", selectionStrategy: "first" });
@@ -809,7 +809,7 @@ for (const tool of ["tapOn", "tapAny"] as const) {
           effect: { screenChanged: true, basis: "viewHierarchy changed" },
         });
       } else {
-        tap.setBeforeAndroidTapForTesting(() => {
+        tap.testHooks.setBeforeAndroidTap(() => {
           dispatched = true;
         });
       }
@@ -853,7 +853,7 @@ function revalidationHarness(tool: "tapOn" | "tapAny") {
     return read(timeout);
   };
   on.tap.refreshViewHierarchy = refresh;
-  any.tap.setRefreshViewHierarchyForTesting(async (_defaultRefresh, timeout) => refresh(timeout));
+  any.tap.testHooks.setRefreshViewHierarchy(async (_defaultRefresh, timeout) => refresh(timeout));
   return {
     current,
     timer,

@@ -504,29 +504,23 @@ export class TapAnyElement extends BaseVisualChange {
       new TalkBackTapStrategy({ timer: this.timer, driverFactory: this.talkBackDriverFactory });
   }
 
+  /** @internal Typed view of private seams for unit tests; not part of the public API. */
   get testHooks() {
     return {
       findClickableElement: this.findClickableElement.bind(this),
       refreshViewHierarchy: this.refreshViewHierarchy.bind(this),
       readFreshHierarchy: this.readFreshHierarchy.bind(this),
+      /** Supplies the post-gesture hierarchy probe result. */
+      setRefreshViewHierarchy: (
+        refresh: NonNullable<typeof this.refreshViewHierarchyOverrideForTesting>,
+      ): void => {
+        this.refreshViewHierarchyOverrideForTesting = refresh;
+      },
+      /** Observes when Android gesture dispatch begins. */
+      setBeforeAndroidTap: (callback: () => void): void => {
+        this.beforeAndroidTapForTesting = callback;
+      },
     };
-  }
-
-  /** Test-only seam for supplying the post-gesture hierarchy probe result. */
-  setRefreshViewHierarchyForTesting(
-    refresh: (
-      defaultRefresh: RefreshViewHierarchy,
-      timeoutMs: number,
-      screenSize?: ObserveResult["screenSize"],
-      signal?: AbortSignal,
-    ) => Promise<ViewHierarchyResult | null>,
-  ): void {
-    this.refreshViewHierarchyOverrideForTesting = refresh;
-  }
-
-  /** Test-only seam for observing when Android gesture dispatch begins. */
-  setBeforeAndroidTapForTesting(callback: () => void): void {
-    this.beforeAndroidTapForTesting = callback;
   }
 
   private async executeAndroidTap(

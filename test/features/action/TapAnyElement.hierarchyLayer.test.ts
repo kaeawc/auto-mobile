@@ -28,7 +28,7 @@ function createCommand(viewHierarchy: ViewHierarchyResult) {
     new FakeAdbExecutor(),
     { timer, accessibilityDetector: detector },
   );
-  command.setRefreshViewHierarchyForTesting(async () => null);
+  command.testHooks.setRefreshViewHierarchy(async () => null);
   command.observedInteraction = (action) =>
     action(recordObservationRead(observationOf(viewHierarchy)));
   return { command, service };

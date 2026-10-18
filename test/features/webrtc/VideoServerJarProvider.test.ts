@@ -1,5 +1,5 @@
 import AdmZip from "adm-zip";
-import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { useScratchRoot } from "../../helpers/scratchRoot";
 import { logger } from "../../../src/utils/logger";
 import * as fs from "node:fs/promises";
@@ -49,10 +49,15 @@ describe("VideoServerJarProvider (#3831)", function () {
   }
 
   const scratch = useScratchRoot("video-jar-test-");
+  // The jar bytes are never mutated, so one zip serves every test (built outside the per-test budget).
+  let validJar: Buffer;
+  beforeAll(function () {
+    validJar = validJarBuffer();
+  });
   beforeEach(async function () {
     cacheDir = scratch.next();
     downloader = new FakeFileDownloader();
-    downloader.payload = validJarBuffer();
+    downloader.payload = validJar;
     checksum = new FakeChecksumCalculator();
     checksum.checksum = EXPECTED_SHA;
     timer = new FakeTimer();

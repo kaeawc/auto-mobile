@@ -2,6 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import {
   cleanupDaemonFiles,
   cleanupDaemonFilesSync,
@@ -458,14 +459,7 @@ describe("atomic PID file writes", () => {
 });
 
 describe("listDaemonPidFilePathsOrThrow", () => {
-  const tempDirs: string[] = [];
-
-  afterEach(() => {
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
-  });
+  const scratch = useScratchRoot("daemonFiles-");
 
   test("treats an absent PID directory as no co-located peers", () => {
     const missing = join(tmpdir(), `no-such-peer-dir-${Date.now()}-${Math.random()}`, "daemon.pid");
@@ -474,8 +468,7 @@ describe("listDaemonPidFilePathsOrThrow", () => {
   });
 
   test("throws when the PID directory exists but cannot be enumerated", () => {
-    const dir = mkdtempSync(join(tmpdir(), "daemon-peer-enum-error-test-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     const notDirectory = join(dir, "not-a-directory");
     writeFileSync(notDirectory, "x");
 
@@ -484,9 +477,8 @@ describe("listDaemonPidFilePathsOrThrow", () => {
   });
 
   test("discovers this uid's own default-namespace peer from a custom PID namespace", () => {
-    const customDir = mkdtempSync(join(tmpdir(), "daemon-custom-pid-dir-test-"));
-    const defaultDir = mkdtempSync(join(tmpdir(), "daemon-default-pid-dir-test-"));
-    tempDirs.push(customDir, defaultDir);
+    const customDir = scratch.next();
+    const defaultDir = scratch.next();
     const customPidFile = join(customDir, "custom-daemon.pid");
     const defaultPidFile = join(defaultDir, "auto-mobile-daemon-1000.pid");
     writeFileSync(defaultPidFile, "{}");
@@ -499,9 +491,8 @@ describe("listDaemonPidFilePathsOrThrow", () => {
   });
 
   test("never enumerates a foreign-uid sibling in the default PID directory", () => {
-    const customDir = mkdtempSync(join(tmpdir(), "daemon-custom-pid-dir-test-"));
-    const defaultDir = mkdtempSync(join(tmpdir(), "daemon-default-pid-dir-test-"));
-    tempDirs.push(customDir, defaultDir);
+    const customDir = scratch.next();
+    const defaultDir = scratch.next();
     const customPidFile = join(customDir, "custom-daemon.pid");
     // This uid's own default pid file, per constants.ts's exact-filename shape.
     const defaultPidFile = join(defaultDir, "auto-mobile-daemon-1000.pid");
@@ -579,11 +570,10 @@ describe("listDaemonPidFilePathsOrThrow", () => {
 });
 
 describe("daemon file cleanup", () => {
-  const tempDirs: string[] = [];
+  const scratch = useScratchRoot("daemonFiles-");
 
   function createTempFiles(): { dir: string; socketPath: string; pidFilePath: string } {
-    const dir = mkdtempSync(join(tmpdir(), "daemon-file-cleanup-test-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     const socketPath = join(dir, "daemon.sock");
     const pidFilePath = join(dir, "daemon.pid");
     writeFileSync(socketPath, "");
@@ -599,13 +589,6 @@ describe("daemon file cleanup", () => {
     );
     return { dir, socketPath, pidFilePath };
   }
-
-  afterEach(() => {
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
-  });
 
   test("cleanupDaemonFiles removes configured socket and PID paths", async () => {
     const { socketPath, pidFilePath } = createTempFiles();
@@ -899,18 +882,10 @@ describe("isProcessRunning", () => {
 });
 
 describe("listDaemonPidFilesSync (cross-namespace enumeration, issue #6194)", () => {
-  const tempDirs: string[] = [];
-
-  afterEach(() => {
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
-  });
+  const scratch = useScratchRoot("daemonFiles-");
 
   function makeDir(): string {
-    const dir = mkdtempSync(join(tmpdir(), "daemon-pidfile-enum-test-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     return dir;
   }
 
@@ -985,18 +960,10 @@ describe("listDaemonPidFilesSync (cross-namespace enumeration, issue #6194)", ()
 });
 
 describe("readDaemonOwnerForRetentionSync (ambiguity vs absence, issue #6194)", () => {
-  const tempDirs: string[] = [];
-
-  afterEach(() => {
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
-  });
+  const scratch = useScratchRoot("daemonFiles-");
 
   function makeDir(): string {
-    const dir = mkdtempSync(join(tmpdir(), "daemon-pidfile-read-test-"));
-    tempDirs.push(dir);
+    const dir = scratch.next();
     return dir;
   }
 

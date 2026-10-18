@@ -1,9 +1,10 @@
 import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
-import { mkdtempSync, rmSync } from "node:fs";
+
 import type { Socket } from "node:net";
-import { tmpdir } from "node:os";
+
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { DaemonSocketReachability } from "../../src/daemon/daemonSocketReachability";
 import { type UnixSocketServer } from "../../src/daemon/socketServer";
 import { BaseSocketServer } from "../../src/daemon/socketServer/BaseSocketServer";
@@ -355,18 +356,18 @@ describe("the real reachability probe against a framer-backed server (#10107 x #
     }
   }
 
+  const scratch = useScratchRoot("framer-probe-");
   let dir: string;
   let target: ProbeTarget;
 
   beforeEach(async () => {
-    dir = mkdtempSync(join(tmpdir(), "framer-probe-"));
+    dir = scratch.next();
     target = new ProbeTarget(join(dir, "p.sock"), new FakeTimer(), "ProbeTarget", 0);
     await target.start();
   });
 
   afterEach(async () => {
     await target.close();
-    rmSync(dir, { recursive: true, force: true });
   });
 
   test("a reachable answer is not logged as a frame overflow and every probe connection closes", async () => {

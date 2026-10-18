@@ -9,6 +9,7 @@ import {
   spyOn,
   test,
 } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1913,19 +1914,9 @@ describe("AndroidCtrlProxyClient", function () {
   });
 
   describe("forward ownership across coordination directories (#10690)", function () {
-    const coordinationDirs: string[] = [];
+    const scratch = useScratchRoot("ctrlproxy-forward-owner-");
 
-    afterEach(function () {
-      for (const dir of coordinationDirs.splice(0)) {
-        rmSync(dir, { recursive: true, force: true });
-      }
-    });
-
-    const newCoordinationDir = (): string => {
-      const dir = mkdtempSync(join(tmpdir(), "ctrlproxy-forward-owner-"));
-      coordinationDirs.push(dir);
-      return dir;
-    };
+    const newCoordinationDir = (): string => scratch.next();
 
     /** One daemon's lease, as seen from its own coordination directory. */
     const daemonLease = (dir: string, pid: number = process.pid): FileCtrlProxyForwardLease =>

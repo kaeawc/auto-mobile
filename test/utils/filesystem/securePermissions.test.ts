@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import { promises as fsPromises, statSync } from "node:fs";
-import { platform, tmpdir } from "node:os";
+import { platform } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import {
   SECURE_DIR_MODE,
   SECURE_FILE_MODE,
@@ -12,19 +12,11 @@ import {
 } from "../../../src/utils/filesystem/securePermissions";
 
 const isWindows = platform() === "win32";
-const created: string[] = [];
+const scratch = useScratchRoot("secure-permissions-");
 
 function tempPath(prefix: string): string {
-  const p = join(tmpdir(), `${prefix}-${randomUUID()}`);
-  created.push(p);
-  return p;
+  return join(scratch.next(), prefix);
 }
-
-afterEach(async () => {
-  for (const p of created.splice(0)) {
-    await fsPromises.rm(p, { recursive: true, force: true }).catch(() => undefined);
-  }
-});
 
 describe("securePermissions", () => {
   test("exposes the owner-only mode constants", () => {

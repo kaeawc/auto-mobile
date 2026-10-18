@@ -44,6 +44,16 @@ export function holdTaskDeviceLeases(sessionUuids: Iterable<string | undefined>)
   }
 }
 
+/**
+ * As an MCP task the client does not heartbeat for the call: keep the device session it runs on
+ * alive until the task settles (#4668). A no-op outside a task or without a session.
+ */
+export function holdSessionForCurrentTask(sessionUuid: string | undefined): void {
+  if (sessionUuid) {
+    currentTaskContext()?.holdDeviceLease(sessionUuid);
+  }
+}
+
 export interface TaskRunOptions {
   /** Whether THIS request declared `io.modelcontextprotocol/tasks` in its `_meta` capabilities. */
   readonly declared: boolean;

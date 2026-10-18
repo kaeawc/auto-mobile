@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { buildAsciiKeyEventPlan } from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
 import {
   buildAndroidInputTextCommand,
+  ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS,
   buildAndroidInputTextPlan,
   canJoinAndroidInputText,
 } from "../../../src/utils/android-cmdline-tools/asciiKeyEvents";
@@ -105,6 +106,16 @@ describe("buildAndroidInputTextPlan", () => {
         textLength: text.length,
       });
     }
+  });
+
+  test("bounds each command below the argv limit on API 30 and older", () => {
+    const long = "a".repeat(ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS * 2 + 10);
+    const plan = buildAndroidInputTextPlan(long, 30);
+    expect(plan.commands).toEqual([
+      buildAndroidInputTextCommand("a".repeat(ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS)),
+      buildAndroidInputTextCommand("a".repeat(ANDROID_INPUT_TEXT_PRE31_CHUNK_CHARS)),
+      buildAndroidInputTextCommand("a".repeat(10)),
+    ]);
   });
 
   test("chunks at 32 characters on API 31+ and when the level is unknown", () => {

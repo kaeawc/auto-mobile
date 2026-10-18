@@ -19,7 +19,7 @@
 1002	src/daemon/sessionBroker/sqliteStore.ts
 2339	src/daemon/sessionDeviceStateRestore.ts
 10394	src/daemon/sessionManager.ts
-7128	src/daemon/socketServer.ts
+7113	src/daemon/socketServer.ts
 1808	src/daemon/videoStreamSocketServer.ts
 1147	src/db/deviceSessionRepository.ts
 1089	src/db/failureAnalyticsRepository.ts
@@ -42,7 +42,7 @@
 1423	src/features/action/swipeon/ScrollUntilVisible.ts
 1835	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
-5888	src/features/deviceLifecycle/deviceLifecycleCore.ts
+5887	src/features/deviceLifecycle/deviceLifecycleCore.ts
 1385	src/features/navigation/Explore.ts
 2576	src/features/navigation/NavigationGraphManager.ts
 1568	src/features/observe/DeviceServiceClient.ts
@@ -71,7 +71,7 @@
 1005	src/features/webrtc/WebRtcPublisher.ts
 2370	src/server/appFileService.ts
 1431	src/server/appResources.ts
-1524	src/server/appTools.ts
+1508	src/server/appTools.ts
 1985	src/server/bootedDeviceResources.ts
 2426	src/server/deviceSnapshotManager.ts
 2530	src/server/deviceToolsProvisioning.ts
@@ -84,9 +84,9 @@
 2851	src/server/prototypeTools.ts
 1894	src/server/toolOutputSchemas.ts
 1135	src/server/toolRegistry.ts
-1043	src/server/utilityTools.ts
+1032	src/server/utilityTools.ts
 2185	src/server/videoRecordingManager.ts
-1459	src/server/videoRecordingTools.ts
+1434	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts
 1839	src/utils/android-cmdline-tools/AdbClient.ts
 1415	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts

@@ -86,18 +86,33 @@ Whether the emulator exposes a stylus-capable input device to apps (an
 nothing else: it ignores `ABS_MT_TOOL_TYPE`, `BTN_TOOL_PEN`, `BTN_STYLUS`,
 `ABS_MT_TILT_*`/`ABS_TILT_*` and `ABS_DISTANCE` (hover distance). The pressure it
 keeps is not used by the gesture classifier. A recorded stylus stroke is therefore
-exported as an ordinary finger swipe or drag, and hover is invisible.
+exported as an ordinary finger swipe, and hover is invisible.
+
+Two structural limits sit underneath that, and extending the axes alone does not
+remove them (**Source**):
+
+- **One event node.** `TouchNodeDiscovery.ts` selects only a node that exposes
+  `ABS_MT_POSITION_X`/`ABS_MT_POSITION_Y`, and `GetEventReader` reads only that node.
+  A pen that reports through a separate tablet-style node, commonly with `ABS_X`/`ABS_Y`
+  plus `BTN_TOOL_PEN` and `BTN_TOUCH`, is never seen.
+- **No drag event.** `GestureEventType` has no drag, and `DualTrackRecorder` maps a
+  moving single-contact gesture to `swipeAt` or `swipeOn`, which keep only the
+  endpoints. A drawn stroke loses its path.
 
 ## iOS
 
-### What the runner can carry today: touches and mouse-style paths
+### What the runner can carry today: touches only
 
 **Source:** CtrlProxy already drives private `XCPointerEventPath` /
 `XCSynthesizedEventRecord` for pinch and multi-finger swipe
 (`ObjCExceptionCatcher.m`), guarded by selector probes so a missing symbol is
-reported as an availability gap, not a crash. The header from the WebDriverAgent
-fork of those private classes (`PrivateHeaders/XCTest/XCPointerEventPath.h`)
-declares:
+reported as an availability gap, not a crash. Its own declaration of
+`XCPointerEventPath` (`ObjCExceptionCatcher.h`) exposes only touch initialization,
+`moveToPoint:atOffset:` and `liftUpAtOffset:`. The pressure and mouse selectors below
+come from the header of the WebDriverAgent fork of those private classes
+(`PrivateHeaders/XCTest/XCPointerEventPath.h`); CtrlProxy neither declares nor calls
+them, so they are only a _potential_ private API until the runner adds and exercises
+them. That header declares:
 
 - touch paths: `initForTouchAtPoint:offset:`, `moveToPoint:atOffset:`,
   `liftUpAtOffset:`;
@@ -120,8 +135,9 @@ Two consequences, both **unverified** until run:
   **Reported:** force touch in the Simulator is enabled through the Simulator's
   _I/O → Touch Pressure_ menu with trackpad force, not through XCUITest
   ([Apple developer forums](https://developer.apple.com/forums/thread/705708)).
-- **Hover.** A mouse-style path moved without a pressed button is the natural way to
-  produce pointer hover on an iPad simulator; whether the simulator's iPadOS
+- **Hover.** A mouse-style path moved without a pressed button, which needs the runner
+  to declare and call the mouse selectors first, is the natural way to produce pointer
+  hover on an iPad simulator; whether the simulator's iPadOS
   delivers hover to the app for it is unknown. Whether the public
   `XCUIElement.hover()` is available on iOS and iPadOS was **not confirmed**.
 
@@ -180,8 +196,13 @@ pressure series, and the exported `swipeAt`/`dragPath` step to carry `pointer`:
 - `GetEventReader`/`TouchFrameReconstructor` must read `ABS_MT_TOOL_TYPE`,
   `BTN_TOOL_PEN` and the tilt and distance axes, and keep per-contact pressure over
   time, not just the last value.
+- Event-node discovery must find and read the pen's node as well as the multitouch
+  one, and handle non-multitouch contact coordinates (`ABS_X`/`ABS_Y`).
 - `GestureClassifier` must keep the tool type through classification, and
   hover-only sequences (pen in range, no `BTN_TOUCH`) must not be dropped as noise.
+- A drawn stroke needs path sampling and a drag classification (a new
+  `GestureEventType`) exported as `dragPath`; attaching `pointer` to a `swipeAt`
+  keeps only the endpoints.
 - Export must degrade visibly: a plan step recorded from stylus input and replayed
   on a platform that cannot honor it should warn at export (as the existing geometry
   warnings do), not silently become a finger step.
@@ -196,8 +217,9 @@ follow-up issue (see below) so it can be done where the hardware exists:
    source; confirm the lowest supported API level; check `InputDevice` capability on
    an AVD; try `uinput` and emulator-console evdev for a pressure curve, tilt and
    `BTN_TOOL_PEN` hover, recording the root and image requirements.
-2. **iOS simulator:** call `pressDownWithPressure` and a mouse-style path from the
-   runner against a probe view that logs `UITouch.force`, `maximumPossibleForce`,
+2. **iOS simulator:** declare the pressure and mouse selectors in the runner (behind the
+   existing selector probes), then call `pressDownWithPressure` and a mouse-style path
+   against a probe view that logs `UITouch.force`, `maximumPossibleForce`,
    `UITouch.type` and hover callbacks; confirm `XCUIElement.hover()` availability.
 3. **Physical iOS device:** repeat the probe if a device is available; otherwise
    record Pencil as out of scope.

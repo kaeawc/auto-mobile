@@ -12,7 +12,12 @@ import { acquireUndoneIfUndelivered } from "./undeliveredAcquisition";
 import { MAX_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { createProvisionDeviceHandlers } from "./deviceToolsProvisioning";
 import { createAcquisitionHandlers } from "./deviceToolsAcquisition";
-import { createStartDeviceHandlers } from "./deviceToolsStartDevice";
+import {
+  bindBootedDeviceSession,
+  createBootAndPrepareDevice,
+  createStartDeviceHandlers,
+  ensureCtrlProxyReady,
+} from "./deviceToolsStartDevice";
 import { createLifecycleHandlers } from "./deviceToolsLifecycle";
 import { createListingHandlers } from "./deviceToolsListing";
 import {
@@ -220,21 +225,6 @@ export function getDaemonDeviceDeletion(): DaemonDeviceDeletion | undefined {
 export function registerDeviceTools() {
   const { listDeviceImagesHandler, listDevicesHandler } = createListingHandlers();
 
-  let startDeviceHandlers: ReturnType<typeof createStartDeviceHandlers> | undefined = undefined;
-  const acquisitionHandlers = createAcquisitionHandlers({
-    getBootAndPrepareDevice: () => startDeviceHandlers!.bootAndPrepareDevice,
-  });
-  let provisionHandlers: ReturnType<typeof createProvisionDeviceHandlers> | undefined = undefined;
-  startDeviceHandlers = createStartDeviceHandlers({
-    prepareDevice: acquisitionHandlers.prepareDevice,
-    stripInternalAcquisitionParams: acquisitionHandlers.stripInternalAcquisitionParams,
-    // createIfMissing rolls back through provisionDevice's cleanup (#11100).
-    rollbackCreatedDevice: (device, failure, options) =>
-      provisionHandlers!.rollbackCreatedDevice(device, failure, options),
-  });
-  const { startDeviceHandler, bindBootedDeviceSession, ensureCtrlProxyReady } = startDeviceHandlers;
-  const { getAndroidHandler, getAppleHandler } = acquisitionHandlers;
-
   const { killDeviceHandler, executeDeleteDevice, deleteDeviceHandler } = createLifecycleHandlers();
   // The daemon's own deletions (abandoned broker bindings, #11174) run the same verified workflow with
   // no caller: the broker binding and session-holder refusals guard callers, not the daemon itself.
@@ -243,11 +233,20 @@ export function registerDeviceTools() {
     return executeDeleteDevice(args, deps, signal, getDeviceTeardownService(deps));
   };
 
-  provisionHandlers = createProvisionDeviceHandlers({
+  const provisionHandlers = createProvisionDeviceHandlers({
     bindBootedDeviceSession,
     ensureCtrlProxyReady,
     executeDeleteDevice,
   });
+  // createIfMissing rolls back through provisionDevice's cleanup (#11100).
+  const acquisitionHandlers = createAcquisitionHandlers({
+    bootAndPrepareDevice: createBootAndPrepareDevice(provisionHandlers.rollbackCreatedDevice),
+  });
+  const { startDeviceHandler } = createStartDeviceHandlers({
+    prepareDevice: acquisitionHandlers.prepareDevice,
+    stripInternalAcquisitionParams: acquisitionHandlers.stripInternalAcquisitionParams,
+  });
+  const { getAndroidHandler, getAppleHandler } = acquisitionHandlers;
   const { provisionDeviceHandler } = provisionHandlers;
 
   // Register with the tool registry

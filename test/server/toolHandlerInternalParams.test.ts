@@ -168,7 +168,7 @@ describe("handler internal metadata regression guard", () => {
       });
       const calls: unknown[] = [];
       const handlers = createAcquisitionHandlers({
-        getBootAndPrepareDevice: () => async (args) => {
+        bootAndPrepareDevice: async (args) => {
           calls.push(args);
           return createStructuredToolResponse({ message: "fake device boundary" });
         },
@@ -195,7 +195,7 @@ describe("handler internal metadata regression guard", () => {
   test("startDevice accepts full metadata and retains the session before stripping", async () => {
     setDeviceToolsDependencies({ timer: new FakeTimer() });
     const acquisition = createAcquisitionHandlers({
-      getBootAndPrepareDevice: () => {
+      bootAndPrepareDevice: async () => {
         throw new Error("Unexpected boot");
       },
     });

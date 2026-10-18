@@ -238,7 +238,6 @@
 1	test/features/action/swipeon/swipeOnUtils.property.test.ts
 1	test/features/action/swipeon/swipeOnUtils.test.ts
 1	test/features/debug/SimulatorHighlights.test.ts
-1	test/features/debug/VisualHighlight.test.ts
 1	test/features/element-resolution/ElementResolver.syntheticIdGuards.test.ts
 1	test/features/element-resolution/hierarchyScreenSize.test.ts
 1	test/features/element-resolution/testTagResourceIdFallback.test.ts
@@ -295,7 +294,6 @@
 18	test/features/observe/output/ObserveResultOutput.test.ts
 3	test/features/observe/output/ObserveScopeExperiments.test.ts
 3	test/features/observe/output/skeletonProjection.test.ts
-4	test/features/performance/DisplayedTimeMetricsCollector.test.ts
 2	test/features/performance/PerformanceAudit.characterization.test.ts
 1	test/features/performance/PerformanceAudit.test.ts
 1	test/features/performance/PerformanceMonitor.characterization.test.ts

@@ -30,7 +30,6 @@ import type { Element } from "../../models/Element";
 import { nodeBounds, type ViewHierarchyNode } from "../../models/ViewHierarchyResult";
 import type { Timer } from "../../utils/interfaces/Timer";
 import { defaultTimer } from "../../utils/SystemTimer";
-import { DefaultElementParser } from "./ElementParser";
 import {
   capturedLabelFields,
   isButtonLikeWithText,
@@ -38,7 +37,7 @@ import {
   textOrDescription,
   toSearchable,
 } from "./SearchableNode";
-import { DefaultElementGeometry } from "./ElementGeometry";
+import { resolveElementServices, type DeepLinkElementServices } from "./DeepLinkElementServices";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import {
   STABLE_VIEW_ID_HASH_LENGTH,
@@ -324,6 +323,7 @@ export class DeepLinkManager implements DeepLinkManager {
     private readonly timer: Timer = defaultTimer,
     // HandleIntentChooser creates a manager per execution; never share a request signal across calls.
     private readonly chooserSignal?: AbortSignal,
+    elementServices: DeepLinkElementServices = {},
   ) {
     const adb = this.configureAdb(device, adbFactoryOrExecutor);
     this.adbFactory = adb.factory;
@@ -333,8 +333,7 @@ export class DeepLinkManager implements DeepLinkManager {
     this.hostExec = hostExec ?? defaultHostExec;
     this.plist = plist;
     this.appBundleMetadata = appBundleMetadata;
-    this.parser = new DefaultElementParser();
-    this.geometry = new DefaultElementGeometry();
+    ({ parser: this.parser, geometry: this.geometry } = resolveElementServices(elementServices));
   }
 
   /**

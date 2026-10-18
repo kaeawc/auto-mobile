@@ -2,7 +2,38 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>ComplexCondition:AutoMobilePlanExecutor.kt:AutoMobilePlanExecutor$element.className.startsWith("java.") || element.className.startsWith("kotlin.") || element.className.startsWith("jdk.") || element.className.startsWith("sun.") || element.className.contains("AutoMobilePlan")</ID>
+    <ID>ComplexCondition:PlanExecutor.kt:PlanExecutor$!options.aiAssistance || !recoveryFlagEnabled || ciMode || recoveryAlreadyAttempted || failedStepContext == null</ID>
+    <ID>ComplexCondition:PlanExecutor.kt:PlanExecutor$attempt &gt; maxRetries || !(parsed.retryable || parsed.acquireNewSession || // An explicit `retryable: false` on a typed frame is the daemon's verdict (#11544); any // other failure falls back to matching the message text. (!parsed.terminal &amp;&amp; isTransientError(errorMessage)))</ID>
+    <ID>ComplexCondition:SecretRedactor.kt:SecretRedactor$(first == '"' &amp;&amp; last == '"') || (first == '\'' &amp;&amp; last == '\'')</ID>
+    <ID>ComplexCondition:SecretRedactor.kt:SecretRedactor$character == '#' &amp;&amp; (previous == null || previous == ' ' || previous == '\t')</ID>
+    <ID>CyclomaticComplexMethod:AutoMobilePlanExecutor.kt:AutoMobilePlanExecutor$internal fun buildFailedStepContext: FailedStepContext?</ID>
+    <ID>CyclomaticComplexMethod:AutoMobilePlanExecutor.kt:AutoMobilePlanExecutor$private fun parseToolPayload: ParsedToolResult</ID>
+    <ID>CyclomaticComplexMethod:AutoMobilePlanExecutor.kt:AutoMobilePlanExecutor$private fun parseToolResultStep: ToolResultEntry</ID>
+    <ID>CyclomaticComplexMethod:AutoMobilePlanExecutor.kt:AutoMobilePlanExecutor$private fun planFailureMessage: String</ID>
+    <ID>CyclomaticComplexMethod:DaemonLauncher.kt:DaemonLauncher$private fun ensureRunningLocked</ID>
+    <ID>CyclomaticComplexMethod:MemoryMonitor.kt:MemoryMonitor$fun onTestFinish</ID>
+    <ID>CyclomaticComplexMethod:PlanExecutor.kt:PlanExecutor$private fun executePlanFromStep: InternalExecutionResult</ID>
+    <ID>CyclomaticComplexMethod:PlanExecutor.kt:PlanExecutor$private fun handleFailure: InternalExecutionResult</ID>
+    <ID>CyclomaticComplexMethod:SecretRedactor.kt:SecretRedactor$fun secretParameterValues: List&lt;String&gt;</ID>
+    <ID>CyclomaticComplexMethod:SecretRedactor.kt:SecretRedactor$internal fun parsePlanSecretKeysBestEffort: Set&lt;String&gt;</ID>
+    <ID>CyclomaticComplexMethod:SecretRedactor.kt:SecretRedactor$private fun parseSecretFlowSequence: Pair&lt;List&lt;String&gt;, Int&gt;</ID>
+    <ID>CyclomaticComplexMethod:SecretRedactor.kt:SecretRedactor$private fun stripFlowComment: String</ID>
     <ID>EmptyCatchBlock:TestTimingCache.kt:TestTimingStore${}</ID>
+    <ID>LargeClass:AutoMobilePlanExecutor.kt:AutoMobilePlanExecutor</ID>
+    <ID>LongMethod:AutoMobileAgent.kt:AutoMobileAgent$internal open fun attemptAiRecovery: RecoveryOutcome</ID>
+    <ID>LongMethod:AutoMobilePlanExecutor.kt:AutoMobilePlanExecutor$internal fun buildTestMetadata: JsonObject</ID>
+    <ID>LongMethod:AutoMobilePlanExecutor.kt:AutoMobilePlanExecutor$private fun parseToolResultStep: ToolResultEntry</ID>
+    <ID>LongMethod:DaemonLauncher.kt:DaemonLauncher$private fun ensureRunningLocked</ID>
+    <ID>LongMethod:MemoryDiagnostics.kt:MemoryDiagnostics$fun captureDiagnostics: File?</ID>
+    <ID>LongMethod:PlanExecutor.kt:PlanExecutor$private fun executePlanFromStep: InternalExecutionResult</ID>
+    <ID>LongMethod:PlanExecutor.kt:PlanExecutor$private fun handleFailure: InternalExecutionResult</ID>
+    <ID>LongMethod:SecretRedactor.kt:SecretRedactor$private fun parseSecretFlowSequence: Pair&lt;List&lt;String&gt;, Int&gt;</ID>
+    <ID>LongParameterList:AutoMobileAgent.kt:private fun callElementOrCoordinateTap: String</ID>
+    <ID>LongParameterList:PlanExecutor.kt:PlanExecutor$private fun executePlanFromStep: InternalExecutionResult</ID>
+    <ID>LongParameterList:PlanExecutor.kt:PlanExecutor$private fun handleFailure: InternalExecutionResult</ID>
+    <ID>LongParameterList:PlanExecutor.kt:PlanExecutor$private fun sessionLossFailure: InternalExecutionResult?</ID>
+    <ID>NestedBlockDepth:SecretRedactor.kt:SecretRedactor$private fun parseSecretFlowSequence: Pair&lt;List&lt;String&gt;, Int&gt;</ID>
     <ID>SleepInsteadOfDelay:AutoMobileAgent.kt:AutoMobileAgent.WaitForTool$sleep(500)</ID>
     <ID>SwallowedException:DaemonSocketClient.kt:DaemonSocketClient$e: Exception</ID>
     <ID>SwallowedException:DaemonSocketClient.kt:DaemonSocketClient.Companion$e: Exception</ID>
@@ -48,5 +79,14 @@
     <ID>TooGenericExceptionThrown:FailureRedactingMCPClient.kt:FailureRedactingMCPClient$throw RuntimeException(SecretRedactor.redact(e.message ?: e.toString(), secretValues))</ID>
     <ID>TooGenericExceptionThrown:HeldDeviceWaitingMCPClient.kt:HeldDeviceWaitingMCPClient$throw RuntimeException( "The device session held for AI recovery was released by the daemon's idle window " + "before recovery's first call ($message)", error, )</ID>
     <ID>TooGenericExceptionThrown:RedactingMCPClient.kt:RedactingMCPClient$throw RuntimeException(SecretRedactor.redact(e.message ?: e.toString(), secretValues))</ID>
+    <ID>TooManyFunctions:AutoMobilePlanExecutor.kt:AutoMobilePlanExecutor</ID>
+    <ID>TooManyFunctions:AutoMobileSharedUtils.kt:DeviceAvailabilityChecker : DeviceChecker</ID>
+    <ID>TooManyFunctions:BackgroundHeartbeatManager.kt:BackgroundHeartbeatManager</ID>
+    <ID>TooManyFunctions:DaemonHeartbeat.kt:DaemonHeartbeat : DaemonHeartbeatController</ID>
+    <ID>TooManyFunctions:DaemonSocketClient.kt:DaemonSocketClient : CloseableDaemonToolClient</ID>
+    <ID>TooManyFunctions:DaemonSocketClient.kt:DaemonSocketPaths</ID>
+    <ID>TooManyFunctions:MemoryDiagnostics.kt:MemoryDiagnostics</ID>
+    <ID>TooManyFunctions:SecretRedactor.kt:SecretRedactor</ID>
+    <ID>TooManyFunctions:TestTimingCache.kt:TestTimingStore : TestTimingSource</ID>
   </CurrentIssues>
 </SmellBaseline>

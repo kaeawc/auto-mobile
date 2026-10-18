@@ -308,15 +308,10 @@ describe("typed explicit-display fences G", () => {
         });
       }
       const run = async () => {
-        const target = await prepareTargetDisplayAction(
-          h.targetDevice,
-          "inner",
-          h.observe,
-          h.adb,
-          previous,
-          undefined,
-          h.transitions,
-        );
+        const target = await prepareTargetDisplayAction(h.targetDevice, "inner", h.observe, h.adb, {
+          lastRenderedObservation: previous,
+          transitions: h.transitions,
+        });
         if (site === "dispatch" && scenario.count) {
           h.transitions.transition(scenario.count);
         }
@@ -349,15 +344,10 @@ describe("typed explicit-display fences G", () => {
   test("G still requires observation of the requested panel", async () => {
     const h = harness(cases[4]);
     await expect(
-      prepareTargetDisplayAction(
-        device,
-        "inner",
-        h.observe,
-        h.adb,
-        () => undefined,
-        undefined,
-        h.transitions,
-      ),
+      prepareTargetDisplayAction(device, "inner", h.observe, h.adb, {
+        lastRenderedObservation: () => undefined,
+        transitions: h.transitions,
+      }),
     ).rejects.toThrow(
       'Coordinates for display "inner" require a prior observation of that panel. Re-observe display "inner" and retry.',
     );

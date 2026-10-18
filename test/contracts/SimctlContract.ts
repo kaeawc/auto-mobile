@@ -62,6 +62,16 @@ export function runSimctlContract(
       expect(ids(await scripted.simctl.getRuntimes())).toEqual(ids(data.runtimes));
     });
 
+    test("listings carry every field of the scripted entries, not only identifiers", async () => {
+      const scripted = make();
+      scripted.scriptRuntimes([...data.runtimes, unavailable]);
+      scripted.scriptDeviceTypes(data.deviceTypes);
+      expect(await scripted.simctl.getRuntimes()).toEqual(data.runtimes);
+      expect(await scripted.simctl.getRuntimesChecked()).toEqual([...data.runtimes, unavailable]);
+      expect(await scripted.simctl.getDeviceTypes()).toEqual(data.deviceTypes);
+      expect(await scripted.simctl.getDeviceTypesChecked()).toEqual(data.deviceTypes);
+    });
+
     test("getRuntimes drops unavailable runtimes but getRuntimesChecked keeps them", async () => {
       const scripted = make();
       scripted.scriptRuntimes([...data.runtimes, unavailable]);

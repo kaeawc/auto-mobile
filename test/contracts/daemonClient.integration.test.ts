@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import path from "node:path";
 import { DaemonClient } from "../../src/daemon/client";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -136,5 +136,9 @@ async function fakeHarness(options: DaemonClientHarnessOptions): Promise<DaemonC
   };
 }
 
-runDaemonClientContract("DaemonClient (unix socket in a temp dir)", realHarness);
+// The real harness listens on a unix-domain socket path (client forced to "linux"), which the
+// Windows runners cannot bind in a temp dir; the sibling handshake test skips there too.
+if (platform() !== "win32") {
+  runDaemonClientContract("DaemonClient (unix socket in a temp dir)", realHarness);
+}
 runDaemonClientContract("FakeDaemonClient", fakeHarness);

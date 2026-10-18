@@ -366,7 +366,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   });
   private geometry: ElementGeometry;
   private elementParser: ElementParser;
-  private accessibilityService: AndroidCtrlProxyClient;
+  private accessibilityService: import("./tapHierarchyRead").TapOnCtrlProxy;
   private visionConfig: VisionFallbackConfig;
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;
@@ -2284,9 +2284,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           display,
           this.observeScreen,
           this.adb,
-          this.lastRenderedObservation,
-          signal,
-          this.displayTransitionReader,
+          {
+            lastRenderedObservation: this.lastRenderedObservation,
+            signal,
+            transitions: this.displayTransitionReader,
+          },
         );
         if (this.device.platform === "android") {
           return await this.observedAndroidDisplayInteraction(options, {

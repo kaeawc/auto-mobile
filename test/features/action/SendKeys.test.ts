@@ -2283,7 +2283,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
       const executor = new DefaultSendKeysCommandExecutor(
         androidDevice,
         createAdbFactory(adb),
-        createObserver(focusedAndroidObservation()),
+        createObserver(focusedAndroidObservation(longRun)),
         { textClient: createTextClient().client, timer },
       );
 

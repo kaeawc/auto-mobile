@@ -144,7 +144,7 @@ async function main(): Promise<void> {
   const call = async (method: string): Promise<void> => {
     await Reflect.get(daemon, method).call(daemon);
   };
-  await call("startHttpServer");
+  await Reflect.get(daemon, "httpIngress").start();
   await call("resolveStartupCompletion");
 
   const url = `http://127.0.0.1:${port}${MCP_STREAMABLE_PATH}`;
@@ -197,7 +197,7 @@ async function main(): Promise<void> {
       }),
     ];
   } finally {
-    await call("closeHttpListener");
+    await Reflect.get(daemon, "httpIngress").closeListener();
   }
 
   report(options, results);

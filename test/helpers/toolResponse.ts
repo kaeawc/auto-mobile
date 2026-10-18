@@ -23,7 +23,7 @@ export function readToolResponse(response: unknown): CallToolResult {
 /** Text of the first content block; throws if it is absent or not a text block. */
 export function toolText(response: unknown): string {
   const first: unknown = readToolResponse(response).content[0];
-  if (!isRecord(first) || typeof first.text !== "string") {
+  if (!isRecord(first) || first.type !== "text" || typeof first.text !== "string") {
     throw new Error(`tool response has no text in content[0]: ${JSON.stringify(response)}`);
   }
   return first.text;

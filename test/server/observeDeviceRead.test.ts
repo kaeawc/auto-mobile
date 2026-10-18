@@ -11,7 +11,7 @@ import {
   type DeviceObservationAccess,
 } from "../../src/server/deviceObservationAccess";
 import { observeSchema, registerObserveTools } from "../../src/server/observeTools";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -50,16 +50,15 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { DeviceReadOptions } from "../../src/features/observe/interfaces/ObserveScreen";
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
-const originalManager = Reflect.get(ToolRegistry, "deviceSessionManager");
 const callDeviceRead = (args: Record<string, unknown>) =>
   runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
     ToolRegistry.getTool("observe")!.handler(args),
   );
 
 let restoreInventory: () => void;
-let originalRepository: Parameters<typeof ToolRegistry.setToolCallRepositoryForTesting>[0];
+let originalCollaborators: ToolRegistryCollaborators;
 beforeEach(() => {
-  originalRepository = ToolRegistry["toolCallRepository"];
+  originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
   ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
   restoreInventory = ToolRegistry.setPipelineOverridesForTesting({
     displayInventory: new FakeDisplayInventoryProvider(),
@@ -68,8 +67,7 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreInventory();
-  ToolRegistry.setToolCallRepositoryForTesting(originalRepository);
-  Reflect.set(ToolRegistry, "deviceSessionManager", originalManager);
+  ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
   DaemonState.getInstance().reset();
   ToolRegistry.clearTools();
   resetObserveCacheStore();
@@ -205,7 +203,7 @@ describe("session-free observe device read", () => {
 
   test("returns observation and screenshot path without session acquisition or ownership changes", async () => {
     const manager = new FakeDeviceSessionManager();
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     const calls: string[] = [];
     const ownershipCalls: string[] = [];
@@ -401,11 +399,11 @@ describe("session-free observe device read", () => {
     const sessionUuid = "aggregate-owner";
     const manager = new FakeDeviceSessionManager();
     manager.setConnectedDevices([device]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     registerDirectSessionDevice(sessionUuid, device);
     const capture = spyOn(snapshotReferences, "capture");
     const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue();
-    const recorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
+    const recorder = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
     const record = spyOn(recorder, "record").mockImplementation(() => {});
     const restore = ToolRegistry.setPipelineOverridesForTesting({
       auditRunner: {
@@ -450,12 +448,12 @@ describe("session-free observe device read", () => {
     const sessionUuid = "observe-session";
     const manager = new FakeDeviceSessionManager();
     manager.setConnectedDevices([device]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     registerDirectSessionDevice(sessionUuid, device);
     const reads: string[] = [];
     const events: string[] = [];
-    const navigationRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
+    const navigationRecorder = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
     const record = spyOn(navigationRecorder, "record").mockImplementation(
       (_name, _args, _device, routedSessionUuid) => {
         expect(routedSessionUuid).toBe(sessionUuid);
@@ -539,12 +537,13 @@ describe("session-free observe device read", () => {
       const sessionUuid = "ios-observe-session";
       const manager = new FakeDeviceSessionManager();
       manager.setConnectedDevices([iosDevice]);
-      Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+      ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
       ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
       registerDirectSessionDevice(sessionUuid, iosDevice);
       // The existing iOS fixture predates runner frame metadata; supply the typed fields
       // emitted by current CtrlProxy without inventing a second hierarchy fixture.
-      const navigationRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
+      const navigationRecorder =
+        ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
       const record = spyOn(navigationRecorder, "record").mockImplementation(() => {});
       const restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
         displayInventory: new FakeDisplayInventoryProvider(),
@@ -633,7 +632,7 @@ describe("session-free observe device read", () => {
   test("a plan observe step with injected deviceId keeps normal readiness and screenshot mode", async () => {
     const manager = new FakeDeviceSessionManager();
     manager.setConnectedDevices([device]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     const modes: Array<string | undefined> = [];
     registerObserveTools({
@@ -658,7 +657,7 @@ describe("session-free observe device read", () => {
 
   test("real screen device read returns hierarchy without shared-state writes or session calls", async () => {
     const manager = new FakeDeviceSessionManager();
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     const timer = new FakeTimer();
     const cache = new FakeObserveCacheStore(timer);
@@ -946,7 +945,7 @@ describe("session-free observe device read", () => {
 
   test("denies a device read before capture and does not acquire a session", async () => {
     const manager = new FakeDeviceSessionManager();
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     let captures = 0;
     registerObserveTools({
@@ -977,9 +976,9 @@ describe("session-free observe device read", () => {
 
   test("withholds an observation if ownership changes during capture", async () => {
     const manager = new FakeDeviceSessionManager();
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: manager });
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
-    const after = spyOn(Reflect.get(ToolRegistry, "afterToolCall"), "handle");
+    const after = spyOn(ToolRegistry.getCollaboratorsForTesting().afterToolCall, "handle");
     let authorized = true;
     registerObserveTools({
       deviceReadAccess: {

@@ -9,8 +9,7 @@ isolateToolRegistry();
 
 /** Names of the registered tools declaring `trait`, sorted. */
 function toolsWith(trait: "stopsApp" | "replacesProcess" | "loudArtifactWrites"): string[] {
-  const tools = ToolRegistry["tools"];
-  return [...tools.values()]
+  return ToolRegistry.getEveryRegisteredTool()
     .filter((tool) => tool[trait] === true)
     .map((tool) => tool.name)
     .sort();

@@ -45,7 +45,7 @@ for (const platform of ["android", "ios"] as const) {
     const failure = new ActionableError("characterized preparation failure");
     const controller = new AbortController();
     const handlers = createAcquisitionHandlers({
-      getBootAndPrepareDevice: () => async (args, budgets, _deps, _utils, context) => {
+      bootAndPrepareDevice: async (args, budgets, _deps, _utils, context) => {
         events.push("prepare");
         expect(args).toMatchObject({
           platform,
@@ -109,7 +109,7 @@ for (const changed of [false, true]) {
       },
     });
     const handlers = createAcquisitionHandlers({
-      getBootAndPrepareDevice: () => async () => {
+      bootAndPrepareDevice: async () => {
         events.push("prepare");
         throw new ActionableError("reached preparation");
       },

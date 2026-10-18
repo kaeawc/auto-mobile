@@ -145,8 +145,8 @@ describe("a gated tool through socket server, DaemonClient and proxy (#10179)", 
       null,
       new FakeIdGenerator(),
     );
-    daemonClient.attachSocketForTesting(clientSide as never);
-    daemonSide.deliver = (frame) => daemonClient.simulateIncomingDataForTesting(Buffer.from(frame));
+    daemonClient.testHooks.attachSocket(clientSide as never);
+    daemonSide.deliver = (frame) => daemonClient.testHooks.simulateIncomingData(Buffer.from(frame));
     const manager = new FakeDaemonManager();
     manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
     proxy = new DaemonMcpProxy({

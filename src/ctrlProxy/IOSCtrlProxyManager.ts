@@ -393,33 +393,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.xcTestProcessId;
   }
 
-  /** @internal Test seam: record (or clear) the owned runner process id without launching a runner. */
-  setXcTestProcessIdForTesting(pid: number | null): void {
-    this.xcTestProcessId = pid;
-  }
-
-  /**
-   * @internal Test seam: record the runner a launch step would have published, without
-   * spawning one. Pass `process`/`abortController` when the test exercises the
-   * stop and exit paths that read them.
-   */
-  trackRunnerForTesting(runner: {
-    pid: number | null;
-    process?: ChildProcess | null;
-    abortController?: AbortController | null;
-  }): void {
-    this.xcTestProcessId = runner.pid;
-    this.xcTestProcess = runner.process ?? null;
-    this.runnerAbortController = runner.abortController ?? null;
-  }
-
-  /** @internal Test seam: make this injected-dependency manager the one `getInstance`/`shutdownAll` see. */
-  registerForTesting(): this {
-    IOSCtrlProxyManager.registry.invalidate(this.device.deviceId);
-    IOSCtrlProxyManager.registry.get(this.device.deviceId, () => this);
-    return this;
-  }
-
   /** A read-only view of the runner bookkeeping, for leak and ownership assertions. */
   runnerSnapshot(): IosCtrlProxyRunnerSnapshot {
     return {
@@ -869,17 +842,40 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     };
   }
 
-  /** Seed lifecycle state a test would otherwise reach only through a long start sequence. */
-  public setStateForTesting(state: {
-    servicePort?: number;
-    xcTestProcessId?: number | null;
-    isStopping?: boolean;
-  }): void {
-    this.servicePort = state.servicePort ?? this.servicePort;
-    if (state.xcTestProcessId !== undefined) {
-      this.xcTestProcessId = state.xcTestProcessId;
-    }
-    this.isStopping = state.isStopping ?? this.isStopping;
+  /**
+   * @internal Typed view of the test seams over private lifecycle state; not part of the public API.
+   * `trackRunner` records the runner a launch step would have published without spawning one;
+   * `register` makes this injected-dependency manager the one `getInstance`/`shutdownAll` see;
+   * `setState` seeds state a test would otherwise reach only through a long start sequence.
+   */
+  get testHooks() {
+    return {
+      trackRunner: (runner: {
+        pid: number | null;
+        process?: ChildProcess | null;
+        abortController?: AbortController | null;
+      }): void => {
+        this.xcTestProcessId = runner.pid;
+        this.xcTestProcess = runner.process ?? null;
+        this.runnerAbortController = runner.abortController ?? null;
+      },
+      register: (): this => {
+        IOSCtrlProxyManager.registry.invalidate(this.device.deviceId);
+        IOSCtrlProxyManager.registry.get(this.device.deviceId, () => this);
+        return this;
+      },
+      setState: (state: {
+        servicePort?: number;
+        xcTestProcessId?: number | null;
+        isStopping?: boolean;
+      }): void => {
+        this.servicePort = state.servicePort ?? this.servicePort;
+        if (state.xcTestProcessId !== undefined) {
+          this.xcTestProcessId = state.xcTestProcessId;
+        }
+        this.isStopping = state.isStopping ?? this.isStopping;
+      },
+    };
   }
 
   /**

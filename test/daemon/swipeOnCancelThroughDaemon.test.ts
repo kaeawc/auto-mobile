@@ -190,8 +190,8 @@ describe("swipeOn lookFor cancellation through the daemon request path (#10151)"
       null,
       new FakeIdGenerator(),
     );
-    daemonClient.attachSocketForTesting(clientSide as never);
-    daemonSide.deliver = (frame) => daemonClient.simulateIncomingDataForTesting(Buffer.from(frame));
+    daemonClient.testHooks.attachSocket(clientSide as never);
+    daemonSide.deliver = (frame) => daemonClient.testHooks.simulateIncomingData(Buffer.from(frame));
   });
 
   afterEach(async () => {

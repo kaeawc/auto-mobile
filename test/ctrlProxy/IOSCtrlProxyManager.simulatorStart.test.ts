@@ -760,7 +760,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
         };
         spawn.options?.signal?.addEventListener("abort", () => {
           expect(terminated).toBe(true);
-          manager.setXcTestProcessIdForTesting(null);
+          manager.testHooks.setState({ xcTestProcessId: null });
         });
         await manager.stop();
         expect(terminated).toBe(true);
@@ -1006,7 +1006,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
       const staleChild = fakeExecutor.getSpawnedProcesses()[0].process as FakeChildProcess;
       const replacement = new FakeChildProcess();
       replacement.pid = 41002;
-      manager.trackRunnerForTesting({
+      manager.testHooks.trackRunner({
         pid: replacement.pid,
         process: replacement as unknown as ChildProcess,
       });
@@ -1039,7 +1039,7 @@ describe("IOSCtrlProxyManager simulator start", function () {
       fakeTimer.enableAutoAdvance();
       const child = new FakeChildProcess();
       child.pid = process.pid;
-      manager.trackRunnerForTesting({
+      manager.testHooks.trackRunner({
         pid: process.pid,
         process: child as unknown as ChildProcess,
       });

@@ -132,7 +132,10 @@ export async function getAndroidAppMetadataFromAdb(
     throw toActionableError(error, `Failed to run dumpsys package for ${packageName}`);
   }
 
-  const output = result.stdout;
+  return parseAndroidPackageDump(result.stdout, packageName);
+}
+
+function parseAndroidPackageDump(output: string, packageName: string): AppMetadataResult | null {
   if (!output || outputReportsMissingPackage(output)) {
     return null;
   }

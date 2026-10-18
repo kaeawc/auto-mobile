@@ -47,7 +47,7 @@ class SetTextAcknowledgementOrderTest {
     val serviceSource = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     assertTrue(
       "the service's settled-hierarchy hook must wait for quiescence",
-      "hierarchyDebouncer.extractAfterQuiescenceSuspending(" in
+      "hierarchyController.debouncer.extractAfterQuiescenceSuspending(" in
         functionBody(serviceSource, "override suspend fun publishSettledHierarchy()"),
     )
 

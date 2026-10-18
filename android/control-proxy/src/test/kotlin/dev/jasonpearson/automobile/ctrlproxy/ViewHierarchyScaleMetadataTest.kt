@@ -121,7 +121,7 @@ class ViewHierarchyScaleMetadataTest {
     val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
     val marker = "private fun withScaleMetadata"
     val start = source.indexOf(marker)
-    assertTrue("withScaleMetadata not found in CtrlProxy.kt", start >= 0)
+    assertTrue("withScaleMetadata not found in HierarchyController.kt", start >= 0)
     // The helper is a single-expression `copy(...)`; carve out its argument list.
     val parenOpen = source.indexOf('(', source.indexOf("hierarchy?.copy", start))
     val body = source.substring(parenOpen, KotlinSourceScan.matchParen(source, parenOpen))
@@ -144,9 +144,9 @@ class ViewHierarchyScaleMetadataTest {
   fun `every hierarchy route enriches scale metadata through the shared helper`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
 
-    for (route in listOf("private fun extractHierarchyDirect", "private fun extractHierarchy(")) {
+    for (route in listOf("private fun extractHierarchyDirect", "internal fun extractHierarchy(")) {
       val start = source.indexOf(route)
-      assertTrue("$route not found in CtrlProxy.kt", start >= 0)
+      assertTrue("$route not found in HierarchyController.kt", start >= 0)
       val bodyOpen = source.indexOf('{', start)
       val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
       assertTrue(
@@ -159,9 +159,9 @@ class ViewHierarchyScaleMetadataTest {
   @Test
   fun `adb hierarchy fallback brackets and stamps rotation`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
-    val marker = "private fun extractHierarchy("
+    val marker = "internal fun extractHierarchy("
     val start = source.indexOf(marker)
-    assertTrue("ADB hierarchy route not found in CtrlProxy.kt", start >= 0)
+    assertTrue("ADB hierarchy route not found in HierarchyController.kt", start >= 0)
     val bodyOpen = source.indexOf('{', start)
     val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
 
@@ -184,7 +184,7 @@ class ViewHierarchyScaleMetadataTest {
   }
 
   private fun locateCtrlProxySource(): File {
-    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/CtrlProxy.kt"
+    val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/HierarchyController.kt"
     // The Gradle working directory may be the module root, `android`, or the repo root.
     val direct =
       listOf(File(rel), File("control-proxy/$rel"), File("android/control-proxy/$rel"))
@@ -204,7 +204,7 @@ class ViewHierarchyScaleMetadataTest {
       }
       dir = dir.parentFile
     }
-    fail("Could not locate CtrlProxy.kt from user.dir=$userDir")
+    fail("Could not locate HierarchyController.kt from user.dir=$userDir")
     error("unreachable")
   }
 }

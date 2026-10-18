@@ -80,7 +80,7 @@ class HoldingAdb extends FakeAdbExecutor {
     }
     this.started.get(args[0])!.resolve();
     await pending.promise;
-    args[4]?.throwIfAborted();
+    args[1]?.signal?.throwIfAborted();
     return result;
   }
   release(command: string): void {

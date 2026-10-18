@@ -1,5 +1,5 @@
 # AutoMobile file-size ratchet baseline (non-blank lines, cap 1000) -- see scripts/file-size-baseline.sh
-2876	src/ctrlProxy/CtrlProxyManager.ts
+2873	src/ctrlProxy/CtrlProxyManager.ts
 4089	src/ctrlProxy/IOSCtrlProxyManager.ts
 1790	src/ctrlProxy/IosCtrlProxyBuilder.ts
 1752	src/ctrlProxy/RunnerReadinessService.ts
@@ -64,7 +64,7 @@
 2886	src/features/systemTray/systemTrayHelpers.ts
 1689	src/features/utility/DeepLinkManager.ts
 1399	src/features/utility/ElementResolver.ts
-1712	src/features/video/FfmpegVideoProcessingBackend.ts
+1733	src/features/video/FfmpegVideoProcessingBackend.ts
 1163	src/features/video/IosPhysicalVideoCaptureBackend.ts
 2322	src/features/webrtc/IosH264Source.ts
 2259	src/features/webrtc/PersistentEncoderH264Source.ts

@@ -2,8 +2,8 @@
  * MCP SDK / stateless-session boundary guard (issue #4678, slice H phase 1).
  *
  * Fails on:
- *   - any import/export-from/dynamic import/require of `@modelcontextprotocol/sdk` (v1) in src/ and scripts/
- *   - any `require("@modelcontextprotocol/...")` in src/ and scripts/
+ *   - any import/export-from/dynamic import/require of `@modelcontextprotocol/sdk` (v1) in src/, scripts/ and test/
+ *   - any `require("@modelcontextprotocol/...")` in src/, scripts/ and test/
  *   - the stateful-session tokens `mcp-session-id`, `sessionIdGenerator`, `onsessioninitialized`
  *     and `sessionContext.sessionId` under src/
  *
@@ -28,7 +28,8 @@ export type RuleId =
 export type Counts = Record<string, Partial<Record<RuleId, number>>>;
 
 export const ALLOWLIST_PATH = "scripts/mcp-sdk-boundary-allowlist.json";
-const IMPORT_ROOTS = ["src", "scripts"];
+/** Import rules cover test/ too: v1 SDK imports only resolve through a parent checkout's node_modules. */
+export const IMPORT_ROOTS = ["src", "scripts", "test"];
 const TOKEN_ROOT = "src";
 const SDK_V1 = /^@modelcontextprotocol\/sdk(?:\/|$)/;
 const MCP_SCOPE = /^@modelcontextprotocol\//;

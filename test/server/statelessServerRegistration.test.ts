@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { createMcpServer } from "../../src/server";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";

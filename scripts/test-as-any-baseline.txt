@@ -127,7 +127,6 @@
 4	test/features/observe/android/CtrlProxyText.test.ts
 8	test/features/observe/audits/AccessibilityAuditor.test.ts
 1	test/features/observe/audits/AccessibilityStateDetector.test.ts
-80	test/features/observe/audits/PerformanceAuditor.test.ts
 13	test/features/observe/audits/SafeAreaAuditor.test.ts
 2	test/features/observe/collectors/DeviceStateCollector.test.ts
 17	test/features/observe/collectors/HierarchyCollector.test.ts
@@ -150,7 +149,6 @@
 1	test/features/systemTray/systemTray.test.ts
 2	test/features/systemTray/systemTrayList.test.ts
 3	test/features/telemetry/TelemetryRecorder.test.ts
-95	test/features/utility/DeepLinkManager.chooser.test.ts
 11	test/features/utility/DeepLinkManager.test.ts
 5	test/features/utility/ElementParser.test.ts
 2	test/features/utility/GetDeepLinks.test.ts

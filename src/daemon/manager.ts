@@ -162,6 +162,7 @@ import {
 export type { DaemonLaunchCommand, DaemonProcessSpawner } from "./DaemonLauncher";
 export type { DaemonManagerOptions } from "./managerOptions";
 import type { DaemonManagerOptions } from "./managerOptions";
+import { ENV } from "../config/env";
 export {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
   PsDaemonProcessFinder,
@@ -1696,13 +1697,13 @@ export class DaemonManager implements DaemonManagerLike {
     }
     childEnv[DAEMON_LAUNCH_CWD_ENV] = resolveDaemonLaunchWorkingDirectory();
     if (this.pidFilePath !== PID_FILE_PATH) {
-      childEnv.AUTOMOBILE_DAEMON_PID_FILE_PATH = this.pidFilePath;
+      childEnv[ENV.DAEMON_PID_FILE_PATH.name] = this.pidFilePath;
     }
     if (this.lockFilePath !== LOCK_FILE_PATH) {
-      childEnv.AUTOMOBILE_DAEMON_LOCK_FILE_PATH = this.lockFilePath;
+      childEnv[ENV.DAEMON_LOCK_FILE_PATH.name] = this.lockFilePath;
     }
     if (this.socketPath !== SOCKET_PATH) {
-      childEnv.AUTOMOBILE_DAEMON_SOCKET_PATH = this.socketPath;
+      childEnv[ENV.DAEMON_SOCKET_PATH.name] = this.socketPath;
     }
     if (options.toolOutputsDir) {
       childEnv[TOOL_OUTPUTS_DIR_ENV] = options.toolOutputsDir;

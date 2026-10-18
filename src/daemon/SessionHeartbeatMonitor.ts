@@ -6,6 +6,7 @@ import {
 export { MAX_CREDIBLE_DAEMON_STALL_MS } from "./timerLateness";
 import { Timer, defaultTimer, monotonicClockSemanticsDrift } from "../utils/SystemTimer";
 import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
+import { ENV, type EnvVarSpec } from "../config/env";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
@@ -172,8 +173,8 @@ const REAP_STOP_TIMEOUT_MS = 5_000;
 export const STUCK_REAP_WARN_MS = SESSION_RELEASE_STUCK_DEADLINE_MS;
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
 
-function readPositiveMsEnv(primaryName: string, legacyName: string): number | undefined {
-  return readOptionalEnvPositiveInteger(primaryName, legacyName);
+function readPositiveMsEnv(spec: EnvVarSpec): number | undefined {
+  return readOptionalEnvPositiveInteger(spec.name, spec.legacyName);
 }
 
 /**
@@ -247,19 +248,13 @@ export class SessionHeartbeatMonitor {
     this.checkIntervalMs = config.checkIntervalMs ?? getSessionHeartbeatCheckIntervalMs();
     this.graceMs =
       config.graceMs ??
-      readPositiveMsEnv(
-        "AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
-        "AUTO_MOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
-      ) ??
+      readPositiveMsEnv(ENV.SESSION_HEARTBEAT_INITIAL_GRACE_MS) ??
       DEFAULT_INITIAL_GRACE_MS;
     this.preFirstHeartbeatGraceMs =
       config.preFirstHeartbeatGraceMs ?? getDefaultPreFirstHeartbeatGraceMs();
     this.defaultHeartbeatTimeoutMs =
       config.heartbeatTimeoutMs ??
-      readPositiveMsEnv(
-        "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
-        "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
-      ) ??
+      readPositiveMsEnv(ENV.SESSION_HEARTBEAT_TIMEOUT_MS) ??
       getDefaultSessionHeartbeatTimeoutMs();
     this.stallThresholdMs = config.stallThresholdMs ?? DEFAULT_STALL_MARGIN_MS;
     this.forceStuckRelease = config.forceStuckRelease;

@@ -413,6 +413,7 @@ import {
   type DaemonProcessBirthTimeProvider,
   type DaemonProcessGenerationTokenProvider,
 } from "./daemonDependencies";
+import { ENV } from "../config/env";
 
 export type {
   DaemonDependencies,
@@ -2556,8 +2557,8 @@ export class Daemon {
   ): void {
     const optInEnv =
       platform === "android"
-        ? "AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES"
-        : "AUTOMOBILE_IOS_WARMUP_DEVICES";
+        ? ENV.ANDROID_OBSERVATION_STREAM_DEVICES.name
+        : ENV.IOS_WARMUP_DEVICES.name;
     logger.info(
       `[Daemon] Skipping observation-stream ${action} for ${platform} device ${deviceId}: passive-work policy filtered it; set ${optInEnv} to opt in`,
     );

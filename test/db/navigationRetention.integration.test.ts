@@ -275,11 +275,9 @@ describe("NavigationRetention prune", () => {
     const spy = spyOn(db, "transaction").mockImplementation(() => {
       txnCalls += 1;
       if (txnCalls >= 2) {
-        return {
-          execute: async () => {
-            throw new Error("simulated later-tier DB failure");
-          },
-        } as unknown as ReturnType<typeof db.transaction>;
+        const failing = originalTransaction();
+        spyOn(failing, "execute").mockRejectedValue(new Error("simulated later-tier DB failure"));
+        return failing;
       }
       return originalTransaction();
     });

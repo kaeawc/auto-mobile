@@ -5,7 +5,7 @@ import { type Kysely, sql } from "kysely";
  * payload retains the evolving recovery attempts while the indexed columns make
  * incident lookup and retention pruning cheap.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema
     .createTable("emulator_loss_incidents")
     .ifNotExists()
@@ -34,6 +34,6 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("emulator_loss_incidents").execute();
 }

@@ -1,8 +1,8 @@
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
 
-async function columnExists(
-  db: Kysely<unknown>,
+async function columnExists<DB>(
+  db: Kysely<DB>,
   tableName: string,
   columnName: string,
 ): Promise<boolean> {
@@ -12,13 +12,13 @@ async function columnExists(
   return result.rows.length > 0;
 }
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   const exists = await columnExists(db, "video_recordings", "highlights_json");
   if (!exists) {
     await db.schema.alterTable("video_recordings").addColumn("highlights_json", "text").execute();
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.alterTable("video_recordings").dropColumn("highlights_json").execute();
 }

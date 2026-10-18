@@ -34005,6 +34005,25 @@
           "type": "string",
           "enum": ["app", "prototype"]
         },
+        "pointer": {
+          "description": "Pointer for this gesture; omit for a finger. Fails with a capability error instead of falling back to a finger.",
+          "type": "object",
+          "properties": {
+            "toolType": {
+              "description": "Inject a stylus instead of a finger (Android 12+, API 31+)",
+              "type": "string",
+              "enum": ["stylus"]
+            },
+            "pressure": {
+              "description": "Stylus pressure 0-1; the Android backend injects 1.0 only and refuses other values",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": ["toolType"],
+          "additionalProperties": false
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -34841,6 +34860,25 @@
           "type": "integer",
           "minimum": 500,
           "maximum": 10000
+        },
+        "pointer": {
+          "description": "Pointer for this gesture; omit for a finger. Fails with a capability error instead of falling back to a finger.",
+          "type": "object",
+          "properties": {
+            "toolType": {
+              "description": "Inject a stylus instead of a finger (Android 12+, API 31+)",
+              "type": "string",
+              "enum": ["stylus"]
+            },
+            "pressure": {
+              "description": "Stylus pressure 0-1; the Android backend injects 1.0 only and refuses other values",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "required": ["toolType"],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false,

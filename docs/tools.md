@@ -423,6 +423,22 @@ with the panel's `displayId` (falling back to `input touchscreen -d` if it fails
 on older APKs). A swipe dispatched but not confirmed returns `outcomeIndeterminate`. iOS refuses
 `display`.
 
+##### Stylus pointer
+
+`tapAt` and `swipeAt` accept `pointer: { toolType: "stylus" }` to inject a stylus instead of a
+finger on Android, through `adb shell input stylus` (no root). `tapAt` supports `tap` and
+`longPress` (a zero-distance stylus swipe with the duration); `swipeAt` is the straight two-point
+swipe. The shell injects a constant pressure of 1.0, so `pressure` may be omitted or `1`; any other
+value is refused, never rounded. Everything else fails with a capability error before any input
+and never falls back to a finger touch: iOS, `doubleTap`, `display`, an Android release before
+API 31, and a device whose API level cannot be read. API 31 (Android 12) is the first release whose
+`input` command sets the injected event's tool type from its source (read from the AOSP tags:
+`android-12.0.0_r1` assigns it, while `android-9.0.0_r61` through `android-11.0.0_r48` build the event
+without one). That minimum is read from source; a probe app on a device that observes `TOOL_TYPE_STYLUS`
+is tracked in #13082. A recorded stylus step keeps its `pointer`, so a replay on a device that cannot
+honor it fails instead of becoming a finger touch. Tilt, eraser, hover, pressure curves and `dragPath`
+are not supported.
+
 `recordDeviceGestures` exports a swipe that is clearly diagonal (off-axis travel at least
 half the on-axis travel), or a swipe with a known path but no direction, as
 `swipeAt` with `coordinateSpace: "normalized"` fractions of the recorded screen, so

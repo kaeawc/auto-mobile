@@ -26,6 +26,7 @@ import {
   supportsCtrlProxyGestureDisplay,
 } from "./touchscreenInput";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { checkStylusPointer, dispatchStylusSwipe } from "./stylusPointer";
 import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import {
   selectedDisplayPin,
@@ -370,6 +371,52 @@ export class SwipeAtCoordinate extends BaseVisualChange {
     return { success: true, x1: from.x, y1: from.y, x2: to.x, y2: to.y, duration };
   }
 
+  /**
+   * Stylus swipe through `adb shell input stylus`. It reports its own failure and never retries as
+   * a finger: once the command was dispatched, an error leaves the outcome indeterminate.
+   */
+  private async dispatchStylus(
+    resolved: { from: NativePoint; to: NativePoint },
+    duration: number,
+    fence: { assertCurrent: () => void } | undefined,
+    signal?: AbortSignal,
+  ): Promise<SwipeResult> {
+    const { from, to } = resolved;
+    const base = { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
+    let dispatched = false;
+    try {
+      await dispatchStylusSwipe(
+        this.adb,
+        { from, to, duration },
+        {
+          signal,
+          assertCurrent: fence?.assertCurrent,
+          onDispatch: () => {
+            dispatched = true;
+          },
+        },
+      );
+      return { success: true, ...base, duration };
+    } catch (error) {
+      if (
+        error instanceof StaleDisplayError ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        throw error;
+      }
+      logger.warn(`${TOOL_NAME} stylus dispatch failed: ${errorMessage(error)}`, error);
+      return dispatched
+        ? {
+            success: false,
+            ...base,
+            duration,
+            error: `${errorMessage(error)} (the swipe was dispatched and may have been applied; do not retry automatically)`,
+            outcomeIndeterminate: true,
+          }
+        : { success: false, ...base, duration: 0, error: errorMessage(error) };
+    }
+  }
+
   async execute(
     options: SwipeAtOptions,
     call: ActionCall & { recordingContext?: SwipeAtRecordingContext } = {},
@@ -393,6 +440,19 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       const durationError = validateDurationMs(options);
       if (durationError) {
         return failure(durationError);
+      }
+      const stylusRefusal = await checkStylusPointer(
+        this.adb,
+        {
+          pointer: options.pointer,
+          platform: this.device.platform,
+          gesture: "swipe",
+          display: options.display,
+        },
+        signal,
+      );
+      if (stylusRefusal) {
+        return failure(stylusRefusal);
       }
       if (options.display !== undefined) {
         return await this.executeOnDisplay(options, options.display, {
@@ -423,19 +483,21 @@ export class SwipeAtCoordinate extends BaseVisualChange {
           const duration =
             options.durationMs ?? this.geometry.getSwipeDurationFromSpeed(options.speed);
           const result = await perf.track("executeSwipe", () =>
-            this.executeGesture.swipe(
-              resolved.from.x,
-              resolved.from.y,
-              resolved.to.x,
-              resolved.to.y,
-              {
-                duration,
-                // A display change since the pre-dispatch read refuses just before the finger goes down.
-                displayFence: fence,
-              },
-              perf,
-              signal,
-            ),
+            options.pointer
+              ? this.dispatchStylus(resolved, duration, fence, signal)
+              : this.executeGesture.swipe(
+                  resolved.from.x,
+                  resolved.from.y,
+                  resolved.to.x,
+                  resolved.to.y,
+                  {
+                    duration,
+                    // A display change since the pre-dispatch read refuses just before the finger goes down.
+                    displayFence: fence,
+                  },
+                  perf,
+                  signal,
+                ),
           );
           if (this.device.platform === "ios" && result.success) {
             iosDispatchTimestamp = this.timer.now();

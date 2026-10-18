@@ -12,6 +12,7 @@ import {
 } from "../features/action/swipeon/swipeTiming";
 import { hierarchyLayerSchema } from "./elementSelectorSchemas";
 import { imageRelativePointSchema } from "./imageRelativePointSchema";
+import { pointerSchema } from "./pointerSchema";
 import {
   addDeviceTargetingToSchema,
   platformSchema,
@@ -127,6 +128,7 @@ export const swipeAtSchema = withJsonSchemaOverride(
             "Target panel key, role, or active; from/to/image resolve against that panel's observed screenSize (Android only)",
           ),
         layer: hierarchyLayerSchema.optional(),
+        pointer: pointerSchema.optional(),
         platform: platformSchema.optional(),
         ...responseShapeControlFields,
       })
@@ -193,6 +195,7 @@ export function createSwipeAtHandler({
         durationMs: args.durationMs,
         layer: args.layer,
         display: args.display,
+        pointer: args.pointer,
       } as SwipeAtOptions,
       { progress, signal, recordingContext: args.__swipeAtRecordingContext },
     );

@@ -134,7 +134,7 @@ export interface PlanExecutionDependencies {
   /** Factory for the schema validator (lets tests skip schema loading). */
   createSchemaValidator?: () => Pick<PlanSchemaValidator, "loadSchema" | "validateYaml">;
   /** Repository used to record per-execution timing rows. */
-  testExecutionRepository?: TestExecutionRepository;
+  testExecutionRepository?: Pick<TestExecutionRepository, "recordExecution">;
   /** Clock + scheduled-task primitives, replaced by FakeTimer in tests. */
   timer?: Timer;
   /** Video recording manager surface — replaced by a fake in tests. */
@@ -472,7 +472,7 @@ export class PlanExecutionOrchestrator {
   private readonly progress?: ProgressCallback;
   private readonly signal?: AbortSignal;
   private readonly timer: Timer;
-  private readonly testExecutionRepository: TestExecutionRepository;
+  private readonly testExecutionRepository: Pick<TestExecutionRepository, "recordExecution">;
   private readonly createSchemaValidator: () => Pick<
     PlanSchemaValidator,
     "loadSchema" | "validateYaml"

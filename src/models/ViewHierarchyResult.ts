@@ -287,6 +287,13 @@ export type ViewHierarchyNode = {
   occludedByViewId?: string;
   "test-tag"?: string;
   "view-id"?: string;
+  /** Flat Android attributes real dumps put on the node itself (see {@link NodeAttributes}). */
+  "resource-id"?: string;
+  "content-desc"?: string;
+  clickable?: boolean | string;
+  text?: string;
+  class?: string;
+  checked?: boolean | string;
   extras?: Record<string, string>;
 };
 

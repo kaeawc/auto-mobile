@@ -859,6 +859,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return needed ? this.textClient.readInsertTextState?.() : undefined;
   }
 
+  /** @internal Typed view of private execution paths for unit tests; not part of the public API. */
+  get testHooks() {
+    return { executeKeyEventPlan: this.executeKeyEventPlan.bind(this) };
+  }
+
   private executeKeyEventPlanSafely(
     plan: KeyEventPlan,
     previouslyMutated: boolean,

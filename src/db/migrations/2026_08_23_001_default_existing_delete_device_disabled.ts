@@ -5,7 +5,7 @@ import { type Kysely, sql } from "kysely";
  * tool. Preserve those profiles without granting a new destructive capability;
  * callers must explicitly enable deleteDevice after this migration.
  */
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await sql`
     insert into session_tool_overrides (
       session_uuid,
@@ -20,7 +20,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   `.execute(db);
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   // Preserve explicit post-migration choices; the created disabled row is safe to retain.
   void db;
 }

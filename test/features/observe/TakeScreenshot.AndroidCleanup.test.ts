@@ -33,7 +33,7 @@ interface Base64Capture {
 
 function captureFor(adb: FakeAdbExecutor): Base64Capture {
   const timer = new FakeTimer();
-  return new TakeScreenshot(
+  const screenshot = new TakeScreenshot(
     androidDevice("base64-cleanup"),
     new FakeAdbClientFactory(adb),
     timer,
@@ -44,7 +44,11 @@ function captureFor(adb: FakeAdbExecutor): Base64Capture {
     new FakeAndroidPhysicalDisplayIdResolver(new Map([[0, "4619827259835644672"]])),
     false,
     { pathProtection: new FakeScreenshotPathProtection(timer) },
-  ) as unknown as Base64Capture;
+  );
+  return {
+    captureScreenshotBase64: (finalPath, options, signal, readOnly) =>
+      screenshot.testHooks.base64(finalPath, options, signal, readOnly),
+  };
 }
 
 const tempFile = `/data/local/tmp/am-shot-${screenshotTempIdToken("cleanup")}.png`;
@@ -189,14 +193,6 @@ describe("Android base64 screenshot cleanup", () => {
   });
 });
 
-interface FilePullCapture {
-  captureScreenshotFilePull(
-    finalPath: string,
-    options: ScreenshotOptions,
-    signal?: AbortSignal,
-  ): Promise<ScreenshotResult>;
-}
-
 function filePullHarness(
   controller: AbortController,
   captureOutcome:
@@ -267,7 +263,7 @@ function filePullHarness(
     new FakeAndroidPhysicalDisplayIdResolver(new Map([[0, "4619827259835644672"]])),
     false,
     { pathProtection: new FakeScreenshotPathProtection(timer) },
-  ) as unknown as FilePullCapture;
+  );
   return {
     commands,
     execute,
@@ -277,7 +273,7 @@ function filePullHarness(
     finalPath,
     capture: () =>
       runWithAbortSignal(controller.signal, () =>
-        screenshot.captureScreenshotFilePull(finalPath, options, controller.signal),
+        screenshot.testHooks.filePull(finalPath, options, controller.signal),
       ),
   };
 }

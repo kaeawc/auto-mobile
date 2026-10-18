@@ -224,6 +224,9 @@ describe("TakeScreenshot iOS cancellation", function () {
       requestScreenshot: fakeCtrlProxy.requestScreenshot.bind(fakeCtrlProxy),
     })) as typeof IOSCtrlProxyClient.getInstance;
     const writer = new FakeScreenshotFileWriter();
+    const streamServer = new DeviceDataStreamSocketServer("/fake/path/test.sock", new FakeTimer());
+    const pushSpy = spyOn(streamServer, "pushScreenshotUpdate");
+    installDeviceDataStreamSocketServerForTesting(streamServer);
     try {
       const screenshot = new TakeScreenshot(
         iosDevice("ios-pre-cancel"),
@@ -232,11 +235,7 @@ describe("TakeScreenshot iOS cancellation", function () {
         new CountingIdGenerator("capture"),
         writer,
       );
-      let streamPushes = 0;
-      (screenshot as any).pushScreenshotToStream = () => {
-        streamPushes++;
-      };
-      const result = await (screenshot as any).captureiOSScreenshot(
+      const result = await screenshot.testHooks.ios(
         path.join(os.tmpdir(), "ios-pre-cancel.png"),
         { format: "png" },
         controller.signal,
@@ -244,8 +243,10 @@ describe("TakeScreenshot iOS cancellation", function () {
       expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
       expect(fakeCtrlProxy.getScreenshotRequestSignals()).toEqual([controller.signal]);
       expect(writer.written).toEqual([]);
-      expect(streamPushes).toBe(0);
+      expect(pushSpy).not.toHaveBeenCalled();
     } finally {
+      pushSpy.mockRestore();
+      installDeviceDataStreamSocketServerForTesting(null);
       IOSCtrlProxyClient.getInstance = originalGetInstance;
     }
   });

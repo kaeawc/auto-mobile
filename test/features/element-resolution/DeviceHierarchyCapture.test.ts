@@ -1,13 +1,13 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
 import {
   createDeviceHierarchyCapture,
+  type AndroidHierarchyClients,
   type HierarchySyncClient,
 } from "../../../src/features/observe/DeviceHierarchyCapture";
 import {
   iosHierarchyAcquisition,
   type IosHierarchyAcquisition,
 } from "../../../src/features/observe/ios/types";
-import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -274,16 +274,23 @@ test("fresh Android capture forwards the injected ADB factory to its sync client
     hierarchy: { node: { text: "Ready", bounds: { left: 0, top: 0, right: 50, bottom: 50 } } },
   };
   const adbFactory = { create: () => new FakeAdbClient() };
-  const singleton = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
-    requestHierarchySync: async () => ({ hierarchy: raw }),
-    convertToViewHierarchyResult: () => raw,
-  } as any);
-  try {
-    await createDeviceHierarchyCapture(device, { adbFactory }).capture({ freshness: "fresh" });
-    expect(singleton).toHaveBeenCalledWith(device, adbFactory);
-  } finally {
-    singleton.mockRestore();
-  }
+  const lookups: Array<{ device: typeof device; adbFactory?: typeof adbFactory }> = [];
+  const androidClients: AndroidHierarchyClients = {
+    getInstance: (requested, factory) => {
+      lookups.push({ device: requested, adbFactory: factory });
+      return {
+        requestHierarchySync: async () => ({ hierarchy: raw }),
+        convertToViewHierarchyResult: () => raw,
+      };
+    },
+    createForObservationRead: () => {
+      throw new Error("a fresh action capture must use the shared client");
+    },
+  };
+  await createDeviceHierarchyCapture(device, { adbFactory, androidClients }).capture({
+    freshness: "fresh",
+  });
+  expect(lookups).toEqual([{ device, adbFactory }]);
 });
 
 test("fresh Android capture preserves the device timestamp across conversion", async () => {

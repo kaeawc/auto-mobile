@@ -1,21 +1,13 @@
 import { type Kysely, sql } from "kysely";
 
-// Keep raw migrations independent of app modules that are not shipped beside them.
-interface SqliteCatalogSchema {
-  sqlite_master: { type: string; name: string };
+async function tableExists<DB>(db: Kysely<DB>, tableName: string): Promise<boolean> {
+  const result = await sql<{ name: string }>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${tableName}
+  `.execute(db);
+  return result.rows.length > 0;
 }
 
-async function tableExists(db: Kysely<unknown>, tableName: string): Promise<boolean> {
-  const result = await (db as Kysely<SqliteCatalogSchema>)
-    .selectFrom("sqlite_master")
-    .select("name")
-    .where("type", "=", "table")
-    .where("name", "=", tableName)
-    .execute();
-  return result.length > 0;
-}
-
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   // Network events table
   if (!(await tableExists(db, "network_events"))) {
     await db.schema
@@ -176,7 +168,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   }
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("os_events").ifExists().execute();
   await db.schema.dropTable("custom_events").ifExists().execute();
   await db.schema.dropTable("log_events").ifExists().execute();

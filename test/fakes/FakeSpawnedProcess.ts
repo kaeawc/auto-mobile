@@ -1,19 +1,28 @@
 import { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
+import { PassThrough, type Writable } from "node:stream";
 import type { SpawnedProcess } from "../../src/features/webrtc/processSpawner";
+import type { AdbProcess } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   VIDEO_SERVER_HANDSHAKE_VERSION,
   VIDEO_SERVER_SOCKET_PREFIX,
 } from "../../src/features/webrtc/PersistentEncoderH264Source";
 
-/** Child process stand-in for both video sources. */
-export class FakeSpawnedProcess extends EventEmitter implements SpawnedProcess {
+/** Child process stand-in for both video sources, satisfying the ADB and host spawn surfaces. */
+export class FakeSpawnedProcess extends EventEmitter implements SpawnedProcess, AdbProcess {
+  readonly stdin: Writable | null = null;
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
-  killed: string[] = [];
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  /** Every signal passed to {@link kill}, in order. */
+  killSignals: string[] = [];
 
-  kill(signal?: NodeJS.Signals): boolean {
-    this.killed.push(signal ?? "SIGTERM");
+  get killed(): boolean {
+    return this.killSignals.length > 0;
+  }
+
+  kill(signal?: NodeJS.Signals | number): boolean {
+    this.killSignals.push(typeof signal === "string" ? signal : "SIGTERM");
     return true;
   }
 

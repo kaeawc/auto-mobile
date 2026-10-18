@@ -19,8 +19,7 @@ import type { PredictiveUIState as PredictiveUIStateInterface } from "./interfac
 import type { ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import type { ObserveScreenshotRecorder } from "./screenshot/ObserveScreenshotRecorder";
 import type { ScreenshotEvidenceFiles } from "./screenshot/observationScreenshotEvidence";
-import type { HierarchyCollector } from "./collectors/HierarchyCollector";
-import type { DeviceStateCollector } from "./collectors/DeviceStateCollector";
+import type { DeviceStateCollectorPort, HierarchyCollectorPort } from "./collectors/collectorPorts";
 import type { IosLockStateProbe } from "./ios/IosLockStateProbe";
 import type { PerformanceAuditor } from "./audits/PerformanceAuditor";
 import type { AccessibilityAuditor } from "./audits/AccessibilityAuditor";
@@ -63,8 +62,8 @@ export interface ResolvedObserveServices {
   pathProtection: ScreenshotPathProtection;
   screenshotRecorder: ObserveScreenshotRecorder;
   screenshotEvidenceFiles?: ScreenshotEvidenceFiles;
-  hierarchyCollector: HierarchyCollector;
-  deviceStateCollector: DeviceStateCollector;
+  hierarchyCollector: HierarchyCollectorPort;
+  deviceStateCollector: DeviceStateCollectorPort;
   iosLockStateProbe: IosLockStateProbe;
   performanceAuditor: Pick<PerformanceAuditor, "run">;
   accessibilityAuditor: Pick<AccessibilityAuditor, "run">;

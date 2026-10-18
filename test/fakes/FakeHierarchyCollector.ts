@@ -4,7 +4,7 @@ import type { ActionableError } from "../../src/models/ActionableError";
 
 export class FakeHierarchyCollector implements Pick<
   HierarchyCollector,
-  "collect" | "collectRaw" | "extractScreenSize"
+  "collect" | "collectRaw" | "extractScreenSize" | "reconcileScreenDimensions"
 > {
   constructor(
     private readonly foregroundActivity: string | null = "com.example/.MainActivity",
@@ -37,5 +37,16 @@ export class FakeHierarchyCollector implements Pick<
 
   extractScreenSize(): { width: number; height: number } | null {
     return { width: 1080, height: 1920 };
+  }
+
+  reconcileScreenDimensions(
+    viewHierarchy: ObserveResult["viewHierarchy"],
+    screenSize: { width: number; height: number } | null,
+  ): ObserveResult["viewHierarchy"] {
+    if (viewHierarchy && typeof viewHierarchy !== "string" && screenSize) {
+      viewHierarchy.screenWidth = screenSize.width;
+      viewHierarchy.screenHeight = screenSize.height;
+    }
+    return viewHierarchy;
   }
 }

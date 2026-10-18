@@ -1,6 +1,6 @@
 import { Kysely, sql } from "kysely";
 
-export async function up(db: Kysely<any>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema
     .createTable("recomposition_metrics")
     .ifNotExists()
@@ -39,6 +39,6 @@ export async function up(db: Kysely<any>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<any>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("recomposition_metrics").execute();
 }

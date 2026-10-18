@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import type { Kysely, MigrationLockOptions } from "kysely";
-import { SqliteAdapter } from "kysely";
+import { Database as BunDatabase } from "bun:sqlite";
+import type { MigrationLockOptions } from "kysely";
+import { Kysely, SqliteAdapter } from "kysely";
+import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 
 /**
  * Pins the exact Kysely `SqliteAdapter` behaviors that
@@ -46,23 +48,29 @@ describe("Kysely SqliteAdapter contract (issue #6701)", () => {
     // touch neither, which is exactly why `FileMigrationLock` in
     // `src/db/migrationLock.ts` had to be added as AutoMobile's OWN
     // cross-process lock.
-    const poison = (label: string) =>
-      new Proxy(
-        {},
-        {
-          get(_target, prop) {
-            throw new Error(
-              `SqliteAdapter accessed ${label}.${String(prop)} during a migration-lock call. ` +
-                "Kysely's SQLite adapter is assumed to be a pure no-op here (src/db/migrationLock.ts:21-30) " +
-                "— re-evaluate FileMigrationLock and the migration recovery path in src/db/migrator.ts " +
-                "before upgrading kysely.",
-            );
-          },
+    const poison = <T extends object>(label: string, target: T): T =>
+      new Proxy(target, {
+        get(_target, prop) {
+          throw new Error(
+            `SqliteAdapter accessed ${label}.${String(prop)} during a migration-lock call. ` +
+              "Kysely's SQLite adapter is assumed to be a pure no-op here (src/db/migrationLock.ts:21-30) " +
+              "— re-evaluate FileMigrationLock and the migration recovery path in src/db/migrator.ts " +
+              "before upgrading kysely.",
+          );
         },
-      );
+      });
 
-    const poisonedDb = poison("db") as unknown as Kysely<unknown>;
-    const poisonedOptions = poison("options") as unknown as MigrationLockOptions;
+    const poisonedDb = poison(
+      "db",
+      new Kysely<unknown>({
+        dialect: new BunSqliteDialect({ database: new BunDatabase(":memory:") }),
+      }),
+    );
+    const lockOptions: MigrationLockOptions = {
+      lockTable: "kysely_migration_lock",
+      lockRowId: "migration_lock",
+    };
+    const poisonedOptions = poison("options", lockOptions);
 
     await expect(
       adapter.acquireMigrationLock(poisonedDb, poisonedOptions),

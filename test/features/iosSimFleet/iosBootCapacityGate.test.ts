@@ -22,7 +22,7 @@ function sim(udid: string, state: string): SimulatorInventoryEntry {
   return { udid, name: udid, state, runtime: "iOS-18", isAvailable: true };
 }
 
-const SNAPSHOT = {
+const SNAPSHOT: HostSnapshot = {
   takenAtMs: 0,
   resources: {
     totalMemoryBytes: 64 * GIB,
@@ -31,7 +31,7 @@ const SNAPSHOT = {
     loadAverage1m: null,
   },
   processes: [],
-} as unknown as HostSnapshot;
+};
 
 class ScriptedSource implements FleetHostSource {
   readonly pending: Array<(entries: SimulatorInventoryEntry[]) => void> = [];

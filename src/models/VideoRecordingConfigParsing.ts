@@ -2,7 +2,6 @@ import type {
   VideoFormat,
   VideoQualityPreset,
   VideoRecordingConfig,
-  VideoRecordingConfigInput,
   VideoResolution,
 } from "./VideoRecording";
 
@@ -15,13 +14,19 @@ export const DEFAULT_VIDEO_RECORDING_CONFIG: VideoRecordingConfig = {
   format: "mp4",
 };
 
-const QUALITY_PRESETS = new Set<VideoQualityPreset>(["low", "medium", "high"]);
-const VIDEO_FORMATS = new Set<VideoFormat>(["mp4"]);
+const QUALITY_PRESETS: readonly VideoQualityPreset[] = ["low", "medium", "high"];
+const VIDEO_FORMATS: readonly VideoFormat[] = ["mp4"];
 
-export function parseVideoRecordingConfig(
-  input: VideoRecordingConfigInput | null | undefined,
-): VideoRecordingConfig {
-  const safeInput: VideoRecordingConfigInput = input && typeof input === "object" ? input : {};
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Parse a recording config from any caller (tool arguments, stored settings): the input is
+ * untrusted, so every field is validated and falls back to its default instead of throwing.
+ */
+export function parseVideoRecordingConfig(input: unknown): VideoRecordingConfig {
+  const safeInput: Record<string, unknown> = isRecord(input) ? input : {};
 
   const qualityPreset = parseQualityPreset(safeInput.qualityPreset);
   const maxThroughputMbps = parsePositiveNumber(
@@ -55,26 +60,19 @@ export function parseVideoRecordingConfig(
   };
 }
 
-function parseQualityPreset(value: VideoRecordingConfigInput["qualityPreset"]): VideoQualityPreset {
-  if (typeof value === "string" && QUALITY_PRESETS.has(value as VideoQualityPreset)) {
-    return value as VideoQualityPreset;
-  }
-
-  return DEFAULT_VIDEO_RECORDING_CONFIG.qualityPreset;
+function parseQualityPreset(value: unknown): VideoQualityPreset {
+  return (
+    QUALITY_PRESETS.find((preset) => preset === value) ??
+    DEFAULT_VIDEO_RECORDING_CONFIG.qualityPreset
+  );
 }
 
-function parseFormat(value: VideoRecordingConfigInput["format"]): VideoFormat {
-  if (typeof value === "string" && VIDEO_FORMATS.has(value as VideoFormat)) {
-    return value as VideoFormat;
-  }
-
-  return DEFAULT_VIDEO_RECORDING_CONFIG.format;
+function parseFormat(value: unknown): VideoFormat {
+  return VIDEO_FORMATS.find((format) => format === value) ?? DEFAULT_VIDEO_RECORDING_CONFIG.format;
 }
 
-function parseResolution(
-  value: VideoRecordingConfigInput["resolution"],
-): VideoResolution | undefined {
-  if (!value || typeof value !== "object") {
+function parseResolution(value: unknown): VideoResolution | undefined {
+  if (!isRecord(value)) {
     return undefined;
   }
 
@@ -99,11 +97,7 @@ export function capBitrateKbps(targetBitrateKbps: number, maxThroughputMbps: num
   return Math.min(targetBitrateKbps, maxBitrateKbps);
 }
 
-function parsePositiveNumber(
-  value: number | string | undefined,
-  defaultValue: number,
-  allowFloat: boolean,
-): number {
+function parsePositiveNumber(value: unknown, defaultValue: number, allowFloat: boolean): number {
   if (value === null || value === undefined) {
     return defaultValue;
   }

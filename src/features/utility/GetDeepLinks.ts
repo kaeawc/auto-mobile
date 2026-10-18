@@ -5,10 +5,13 @@ import { DeepLinkManager } from "./DeepLinkManager";
 import { BootedDevice, DeepLinkResult } from "../../models";
 
 export class GetDeepLinks {
-  private deepLinkManager: DeepLinkManager;
+  private deepLinkManager: Pick<DeepLinkManager, "getDeepLinks">;
 
-  constructor(device: BootedDevice | null = null) {
-    this.deepLinkManager = new DeepLinkManager(device);
+  constructor(
+    device: BootedDevice | null = null,
+    deepLinkManager: Pick<DeepLinkManager, "getDeepLinks"> = new DeepLinkManager(device),
+  ) {
+    this.deepLinkManager = deepLinkManager;
   }
 
   /**

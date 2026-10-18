@@ -29,7 +29,7 @@ import { ActionableError } from "../../src/models";
 import {
   permissiveDeviceAdmissionGate,
   type DeviceAdmissionGate,
-} from "../../src/daemon/deviceAdmissionGate";
+} from "../../src/utils/deviceAdmissionGate";
 import { WebRtcPublisher, WhipClient } from "../../src/features/webrtc";
 import type {
   AndroidH264Source,

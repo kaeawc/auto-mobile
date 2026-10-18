@@ -80,7 +80,7 @@ describe("navigation recording source state and routing", () => {
         session: undefined,
         traits: { recordsNavigation: boolean },
       ) => ReturnType<NavigationGraphManager["recordToolCall"]>;
-    } = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
+    } = ToolRegistry.getCollaboratorsForTesting().navigationToolCallRecorder;
     const cache = spyOn(RealObserveScreen, "getRecentCachedResult").mockReturnValue(
       capture.structuredContent,
     );

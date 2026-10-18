@@ -52,7 +52,7 @@ interface IdentifyInteractionsResult {
   error?: string;
 }
 
-interface IdentifiedInteraction {
+export interface IdentifiedInteraction {
   id: string;
   type: InteractionType;
   description: string;
@@ -75,7 +75,15 @@ interface IdentifiedInteraction {
   };
 }
 
-interface InteractionCandidate {
+/** The identifying attributes of an element that interaction matching compares against. */
+export interface ElementIdentifiers {
+  resourceId?: string;
+  text?: string;
+  contentDescription?: string;
+  className: string;
+}
+
+export interface InteractionCandidate {
   element: Element;
   typeHint?: InteractionType;
   hasText: boolean;
@@ -187,7 +195,8 @@ export class IdentifyInteractions {
     return candidates;
   }
 
-  private buildInteractions(
+  /** Turn classified candidates into identified interactions, attaching suggested tool calls and navigation-graph outcome predictions. Pure: depends only on its arguments. */
+  buildInteractions(
     candidates: InteractionCandidate[],
     includeElementDetails: boolean,
     includeSuggestedParams: boolean,
@@ -248,9 +257,7 @@ export class IdentifyInteractions {
     return interactions;
   }
 
-  private hasInteractionIdentifier(
-    identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
-  ): boolean {
+  private hasInteractionIdentifier(identifiers: ElementIdentifiers): boolean {
     return Boolean(identifiers.text || identifiers.resourceId || identifiers.contentDescription);
   }
 
@@ -313,12 +320,7 @@ export class IdentifyInteractions {
     ].join("|");
   }
 
-  private getElementIdentifiers(element: Element): {
-    resourceId?: string;
-    text?: string;
-    contentDescription?: string;
-    className: string;
-  } {
+  private getElementIdentifiers(element: Element): ElementIdentifiers {
     return {
       resourceId: element["resource-id"] ? String(element["resource-id"]) : undefined,
       text: element.text ? String(element.text) : undefined,
@@ -331,7 +333,8 @@ export class IdentifyInteractions {
     return element.text || element["content-desc"];
   }
 
-  private getTypeHint(element: Element): InteractionType | undefined {
+  /** Classify an element as `input` or `toggle` from its attributes, or `undefined` when neither applies. */
+  getTypeHint(element: Element): InteractionType | undefined {
     if (this.isInputElement(element)) {
       return "input";
     }
@@ -341,7 +344,8 @@ export class IdentifyInteractions {
     return undefined;
   }
 
-  private classifyInteraction(element: Element): InteractionType {
+  /** Classify an element into one interaction type; falls back to `action` when no more specific type matches. */
+  classifyInteraction(element: Element): InteractionType {
     if (this.isInputElement(element)) {
       return "input";
     }
@@ -439,7 +443,8 @@ export class IdentifyInteractions {
     return (element.className || element["class"] || "").toLowerCase();
   }
 
-  private computeConfidence(element: Element, type: InteractionType, hasText: boolean): number {
+  /** Score how likely the element is an interactive target of the given type, in the range 0-1. */
+  computeConfidence(element: Element, type: InteractionType, hasText: boolean): number {
     let score = 0.4;
 
     if (element.clickable === "true" || element.clickable === true) {
@@ -488,10 +493,8 @@ export class IdentifyInteractions {
     return score;
   }
 
-  private buildDescription(
-    type: InteractionType,
-    identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
-  ): string {
+  /** Human-readable description of an interaction, labelled by text, content description or resource id when one exists. */
+  buildDescription(type: InteractionType, identifiers: ElementIdentifiers): string {
     const label = identifiers.text || identifiers.contentDescription || identifiers.resourceId;
 
     if (!label) {
@@ -531,7 +534,7 @@ export class IdentifyInteractions {
 
   private buildSuggestedToolCall(
     type: InteractionType,
-    identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
+    identifiers: ElementIdentifiers,
   ): IdentifiedInteraction["suggestedToolCall"] | undefined {
     if (type === "scroll") {
       const container = identifiers.resourceId
@@ -575,7 +578,7 @@ export class IdentifyInteractions {
   }
 
   private matchNavigationOutcome(
-    identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
+    identifiers: ElementIdentifiers,
     navigationEdges: NavigationEdge[],
     currentScreen: string,
   ): IdentifiedInteraction["predictedOutcome"] | undefined {
@@ -625,10 +628,8 @@ export class IdentifyInteractions {
     };
   }
 
-  private scoreEdgeMatch(
-    identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
-    edge: NavigationEdge,
-  ): number {
+  /** Score (0-1) how well a recorded navigation edge's `tapOn` target matches the element identifiers; 0 for other tools. */
+  scoreEdgeMatch(identifiers: ElementIdentifiers, edge: NavigationEdge): number {
     if (edge.interaction?.toolName !== "tapOn") {
       return 0;
     }
@@ -659,7 +660,7 @@ export class IdentifyInteractions {
   }
 
   private scoreTapMatch(
-    identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
+    identifiers: ElementIdentifiers,
     edgeId: string | undefined,
     edgeText: string | undefined,
   ): number {

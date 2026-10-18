@@ -8,6 +8,7 @@ import { ActionableError, type BootedDevice, type ImeAction } from "../../src/mo
 import type { Timer } from "../../src/utils/SystemTimer";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { spyOnIosClientInstance } from "../helpers/iosCtrlProxyClientSpies";
 
 const reason = "No element has keyboard focus -- ensure a text field is focused";
 const guidance = `IME action 'done' failed after the text was entered: ${reason}. Do not retype the text.`;
@@ -71,7 +72,7 @@ function request(submit?: boolean, append = false, platform = "ios"): DaemonRequ
 
 function fakeIosClient() {
   // Only the two text methods can run; construction cannot start a real client.
-  const client = Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient;
+  const client = Object.create(IOSCtrlProxyClient.prototype);
   const setText = spyOn(client, "requestSetText").mockResolvedValue({
     success: true,
     totalTimeMs: 0,
@@ -81,7 +82,7 @@ function fakeIosClient() {
     action: "done",
     totalTimeMs: 0,
   });
-  spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+  spyOnIosClientInstance(client);
   return { setText, ime };
 }
 
@@ -148,10 +149,10 @@ test.each([
     const originalMessage = abortReason instanceof Error ? abortReason.message : undefined;
     const client =
       platform === "ios"
-        ? (Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient)
+        ? Object.create(IOSCtrlProxyClient.prototype)
         : (Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient);
     if (platform === "ios") {
-      spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client as IOSCtrlProxyClient);
+      spyOnIosClientInstance(client);
       spyOn(client, "requestSetText").mockResolvedValue({ success: true, totalTimeMs: 0 });
     } else {
       spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(

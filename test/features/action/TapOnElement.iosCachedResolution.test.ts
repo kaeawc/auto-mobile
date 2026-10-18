@@ -3,7 +3,6 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { freshTapHierarchy } from "../../../src/features/action/freshTapHierarchy";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { CtrlProxyHierarchy } from "../../../src/features/observe/ios/CtrlProxyHierarchy";
 import type {
   XCTestHierarchy,
@@ -22,6 +21,7 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const device = { name: "cached-ios", deviceId: "cached-ios-9821", platform: "ios" } as const;
 const raw = (left: number | null): XCTestHierarchy => ({
@@ -66,9 +66,7 @@ function harness(tool: "tapOn" | "tapAny", freshLeft: number | null = 10) {
   timer.setCurrentTime(1000);
   const client = new FakeIOSCtrlProxy(timer);
   client.setHierarchyData(raw(freshLeft));
-  const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-    client as unknown as IOSCtrlProxyClient,
-  );
+  const instance = spyOnIosClientInstance(client);
   const convert = spyOn(client, "convertToViewHierarchyResult").mockImplementation((value) =>
     converter.convertToViewHierarchyResult(value),
   );

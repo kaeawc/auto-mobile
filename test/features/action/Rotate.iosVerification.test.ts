@@ -9,6 +9,7 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("iOS observed rotation verification (#8778)", () => {
   let rotate: Rotate;
@@ -49,14 +50,11 @@ describe("iOS observed rotation verification (#8778)", () => {
       source: "local",
     };
     // Only requestRotate is reachable at this injected seam; no client I/O runs.
-    const client = Object.assign(
-      Object.create(IOSCtrlProxyClient.prototype) as IOSCtrlProxyClient,
-      {
-        requestRotate: (...args: Parameters<IOSCtrlProxyClient["requestRotate"]>) =>
-          runner.requestRotate(...args),
-      },
-    );
-    instanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+    const client = Object.assign(Object.create(IOSCtrlProxyClient.prototype), {
+      requestRotate: (...args: Parameters<IOSCtrlProxyClient["requestRotate"]>) =>
+        runner.requestRotate(...args),
+    });
+    instanceSpy = spyOnIosClientInstance(client);
     rotate = new Rotate(device, new FakeAdbExecutor(), timer);
     Object.assign(rotate, {
       observeScreen: observe,

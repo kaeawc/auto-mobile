@@ -8,12 +8,15 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { logger } from "../../../src/utils/logger";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
+import {
+  spyOnIosClientFactory,
+  spyOnIosClientInstance,
+} from "../../helpers/iosCtrlProxyClientSpies";
 
 const deleteCommand = (count: number): string =>
   `shell input keyevent ${Array<string>(count).fill("KEYCODE_DEL").join(" ")}`;
@@ -699,7 +702,7 @@ describe("ClearText Android ADB fallback", () => {
 
 test("iOS clear warns and preserves the failure result when CtrlProxy throws", async () => {
   const error = new Error("clear unavailable");
-  const client = spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(() => {
+  const client = spyOnIosClientFactory(() => {
     throw error;
   });
   const warning = spyOn(logger, "warn").mockImplementation(() => {});
@@ -732,9 +735,7 @@ test("iOS clear forwards cancellation and preserves indeterminate guidance witho
     error,
     totalTimeMs: 5000,
   });
-  const client = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-    fake as unknown as IOSCtrlProxyClient,
-  );
+  const client = spyOnIosClientInstance(fake);
   try {
     const controller = new AbortController();
     const adb = new FakeAdbExecutor();

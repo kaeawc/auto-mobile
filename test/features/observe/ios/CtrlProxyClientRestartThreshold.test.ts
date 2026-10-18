@@ -20,6 +20,7 @@ import { ActionableError } from "../../../../src/models/ActionableError";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import type { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
+import { spyOnIosClientInstance } from "../../../helpers/iosCtrlProxyClientSpies";
 
 function createFakeManager(
   timer: FakeTimer,
@@ -451,7 +452,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       reads++;
       return { hierarchy: null, unavailableReason: "runner_not_running" };
     });
-    const instanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(client);
+    const instanceSpy = spyOnIosClientInstance(client);
     try {
       const vh = new ViewHierarchy(
         testDevice,

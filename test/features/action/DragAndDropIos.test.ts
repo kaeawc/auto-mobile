@@ -26,6 +26,7 @@ import { DeviceLostError } from "../../../src/models/DeviceLostError";
 import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
 import { createSuccessWebSocketFactory } from "../../fakes/FakeWebSocket";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 // Simulator-shaped UDID so isIosSimulatorUdid would pass (not that dragAndDrop branches on it,
 // but keeps the device realistic).
@@ -110,7 +111,7 @@ describe("DragAndDrop - iOS", () => {
     androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
       fakeAndroidClient as any,
     );
-    iosSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+    iosSpy = spyOnIosClientInstance(fakeIosClient);
 
     dragAndDrop = new DragAndDrop(IOS_DEVICE, null, fakeTimer);
     (dragAndDrop as any).observeScreen = fakeObserveScreen;

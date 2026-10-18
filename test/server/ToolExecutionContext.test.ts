@@ -10,6 +10,7 @@ import {
   createToolExecutionContext,
 } from "../../src/server/ToolExecutionContext";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import type { DeviceReadinessProxyDriver } from "../../src/server/deviceReadinessProxyProvider";
 import {
   installNoOpReadinessDriver,
@@ -154,6 +155,54 @@ describe("ToolExecutionContext", () => {
     await setup();
   };
   const test = warmedTests(reset);
+
+  test("the real readiness provider forwards the session device to the proxy manager and client", async () => {
+    // `setup()` restored the real provider, so this goes through its own `getInstance(device)`
+    // forwarding. Prototype-only instances keep the real manager/client (which shell out to adb)
+    // from being constructed; only the methods the readiness path calls are given behaviour.
+    const calls: string[] = [];
+    const manager = Object.assign(Object.create(AndroidCtrlProxyManager.prototype), {
+      resetSetupState: () => calls.push("resetSetupState"),
+      rebindIfUnhealthy: async () => {
+        calls.push("rebindIfUnhealthy");
+        return false;
+      },
+      setup: async () => {
+        calls.push("setup");
+        return { success: true, message: "ok" };
+      },
+    });
+    const client = Object.assign(Object.create(AndroidCtrlProxyClient.prototype), {
+      waitForConnection: async () => {
+        calls.push("waitForConnection");
+        return true;
+      },
+      resetConnectionBudget: () => calls.push("resetConnectionBudget"),
+      verifyServiceReady: async () => {
+        calls.push("verifyServiceReady");
+        return true;
+      },
+    });
+    const managerLookup = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(manager);
+    const clientLookup = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+    try {
+      await createToolExecutionContext("real-provider", sessionManager, devicePool, sessionOptions);
+      expect(calls).toEqual(
+        expect.arrayContaining(["resetSetupState", "setup", "waitForConnection"]),
+      );
+      expect(managerLookup.mock.calls.length).toBeGreaterThan(0);
+      expect(managerLookup.mock.calls.map(([device]) => device.deviceId)).toEqual(
+        managerLookup.mock.calls.map(() => "device-1"),
+      );
+      expect(clientLookup.mock.calls.length).toBeGreaterThan(0);
+      expect(clientLookup.mock.calls.map(([device]) => device.deviceId)).toEqual(
+        clientLookup.mock.calls.map(() => "device-1"),
+      );
+    } finally {
+      managerLookup.mockRestore();
+      clientLookup.mockRestore();
+    }
+  });
 
   test("setup timing belongs to each session on a shared device", async () => {
     await sessionManager.createSession("timing-a", "device-1", "android");

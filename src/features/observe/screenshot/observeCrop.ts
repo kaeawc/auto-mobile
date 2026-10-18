@@ -1,3 +1,4 @@
+import type { ObserveCropResult } from "../../../models/ObserveCropResult";
 import { writeRetainedScreenshot } from "../ScreenshotRetention";
 import {
   screenshotPathProtection,
@@ -19,7 +20,7 @@ import { resolveImageBackend } from "../../../utils/image/backend/resolveImageBa
 import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../../utils/tempDir";
 import { type ScreenshotFileWriter } from "./ScreenshotFileWriter";
-import { cropSnapshot, type SnapshotCropResult } from "./snapshotCrop";
+import { cropSnapshot } from "./snapshotCrop";
 
 export const observeCropSchema = z.union([
   z.object({ element: tapOnSelectorSchema }).strict(),
@@ -38,11 +39,7 @@ export const observeCropSchema = z.union([
 ]);
 
 export type ObserveCrop = z.infer<typeof observeCropSchema>;
-export interface ObserveCropResult extends Omit<SnapshotCropResult, "png"> {
-  cropPath: string;
-  expiresAt?: number;
-  unit: "pixels" | "points";
-}
+export type { ObserveCropResult };
 
 export interface ObserveCropDependencies {
   readFile?: (filePath: string) => Promise<Buffer>;

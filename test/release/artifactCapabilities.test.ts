@@ -4,11 +4,13 @@ import {
   findGaps,
   formatGaps,
   parseAndroidAdvertised,
-  parseHostGated,
   parseIosRunnerAdvertised,
   parseManifest,
   parsePrototypeAgentAdvertised,
+  gatedByScans,
   recordRelease,
+  scanHostGates,
+  HOST_GATE_SOURCES,
 } from "../../scripts/release/lib/artifact-capabilities";
 import manifestJson from "../../scripts/release/artifact-capabilities.json";
 import { RELEASE_CHECKSUM_REGISTRY } from "../../src/constants/release";
@@ -55,13 +57,41 @@ describe("artifact capability parsers", () => {
     expect(parsePrototypeAgentAdvertised(swift)).toEqual(["prototype_inspect_v1"]);
   });
 
-  test("host: reads versioned literals and ignores unversioned strings", () => {
+  test("host: reads versioned literals in code and ignores unversioned strings", () => {
     const ts = `
       features.includes("path_gesture_v1");
-      export const X = "prototype_refresh_v1";
+      const list = ["prototype_refresh_v1"];
       const y = "display_cutout_info";
     `;
-    expect(parseHostGated(ts)).toEqual(["path_gesture_v1", "prototype_refresh_v1"]);
+    expect(scanHostGates(ts).literals).toEqual(["path_gesture_v1", "prototype_refresh_v1"]);
+  });
+
+  test("host: comments never count as gates", () => {
+    const ts = `
+      // features.includes("commented_out_v1")
+      /* "block_comment_v1" */
+      const a = 1;
+    `;
+    expect(scanHostGates(ts).literals).toEqual([]);
+  });
+
+  test("host: a declared constant is a gate only where it is referenced", () => {
+    const declaring = scanHostGates(
+      `export const DRAG_CAPABILITY = "prototype_bottom_sheet_drag_v1";`,
+    );
+    const consumer = scanHostGates(`supports(DRAG_CAPABILITY); const toString = 1;`);
+    const declared = declaring.declared;
+    expect(declared).toEqual({ DRAG_CAPABILITY: "prototype_bottom_sheet_drag_v1" });
+    expect(gatedByScans([declaring], declared)).toEqual([]);
+    expect(gatedByScans([declaring, consumer], declared)).toEqual([
+      "prototype_bottom_sheet_drag_v1",
+    ]);
+  });
+
+  test("dylib gate sources include the shared storage gate files", () => {
+    expect(HOST_GATE_SOURCES["prototype-agent-dylib"]).toContain(
+      "src/features/prototype/prototypeStorage.ts",
+    );
   });
 });
 

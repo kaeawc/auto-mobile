@@ -1,5 +1,5 @@
-import type { ObserveCropResult } from "../features/observe/screenshot/observeCrop";
-import type { ImageSize } from "../features/observe/screenshot/rasterGeometry";
+import type { ObserveCropResult } from "./ObserveCropResult";
+import type { ImageSize } from "./ImageGeometry";
 
 export type ImageRotation = 0 | 1 | 2 | 3;
 export interface ScreenshotPointSource {

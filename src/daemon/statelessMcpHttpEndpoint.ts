@@ -162,7 +162,8 @@ export class StatelessMcpHttpEndpoint<
 > {
   private readonly inFlight = new Map<string, InFlightRequest>();
   /** session key + JSON-RPC id → request scope, for `notifications/cancelled`. */
-  private readonly byCancelKey = new Map<string, string>();
+  // Scope ids per cancel key, oldest first: keyless requests may share a JSON-RPC id.
+  private readonly byCancelKey = new Map<string, string[]>();
   private accepting = true;
 
   constructor(private readonly deps: StatelessMcpHttpEndpointDeps<Req, Res, T>) {}
@@ -299,7 +300,7 @@ export class StatelessMcpHttpEndpoint<
     };
     this.inFlight.set(requestScopeId, request);
     for (const key of cancelKeys) {
-      this.byCancelKey.set(key, requestScopeId);
+      this.byCancelKey.set(key, [...(this.byCancelKey.get(key) ?? []), requestScopeId]);
     }
     return request;
   }
@@ -346,8 +347,13 @@ export class StatelessMcpHttpEndpoint<
       this.inFlight.delete(request.requestScopeId);
     }
     for (const key of request.cancelKeys) {
-      if (this.byCancelKey.get(key) === request.requestScopeId) {
+      const remaining = (this.byCancelKey.get(key) ?? []).filter(
+        (scopeId) => scopeId !== request.requestScopeId,
+      );
+      if (remaining.length === 0) {
         this.byCancelKey.delete(key);
+      } else {
+        this.byCancelKey.set(key, remaining);
       }
     }
   }
@@ -394,11 +400,18 @@ export class StatelessMcpHttpEndpoint<
     requestId: JsonRpcId,
   ): string | undefined {
     if (headerSessionKey !== undefined) {
-      return this.byCancelKey.get(cancelKey(headerSessionKey, requestId));
+      return this.byCancelKey.get(cancelKey(headerSessionKey, requestId))?.at(-1);
     }
     const suffix = cancelKeySuffix(requestId);
-    const matches = Array.from(this.byCancelKey.entries()).filter(([key]) => key.endsWith(suffix));
-    return matches.length === 1 ? matches[0][1] : undefined;
+    const matches = Array.from(this.byCancelKey.entries())
+      .filter(([key]) => key.endsWith(suffix))
+      .flatMap(([, scopeIds]) => scopeIds);
+    if (matches.length > 1) {
+      logger.warn(
+        `Ignoring header-less notifications/cancelled for ambiguous request id ${String(requestId)}: ${matches.length} in-flight requests share it`,
+      );
+    }
+    return matches.length === 1 ? matches[0] : undefined;
   }
 
   private async dispatch(

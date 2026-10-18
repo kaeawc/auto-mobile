@@ -1,4 +1,4 @@
-import type { DeviceDiscoveryError } from "../devices/deviceUtils";
+import type { DeviceDiscoveryError } from "./DeviceDiscoveryError";
 import { ActionableError } from "./ActionableError";
 import type { Platform } from "./Platform";
 

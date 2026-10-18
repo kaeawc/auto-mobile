@@ -265,9 +265,11 @@ export class DragAndDrop extends BaseVisualChange {
           options.display,
           this.observeScreen,
           this.adb,
-          this.lastRenderedObservation,
-          signal,
-          this.displayTransitionReader,
+          {
+            lastRenderedObservation: this.lastRenderedObservation,
+            signal,
+            transitions: this.displayTransitionReader,
+          },
         );
         if (this.device.platform === "android") {
           return await this.observedInteraction(

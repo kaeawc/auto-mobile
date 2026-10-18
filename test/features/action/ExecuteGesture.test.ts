@@ -161,8 +161,7 @@ describe("ExecuteGesture", () => {
         10,
         10,
         {},
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       ),
     ).rejects.toThrow("Operation cancelled");
     expect(adb.getExecutedCommands()).toHaveLength(1);

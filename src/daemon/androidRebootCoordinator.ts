@@ -1,5 +1,5 @@
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../models";
-import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
+import { isEmulatorLaunchCancelledError } from "../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import type { ChildProcess, PlatformDeviceManager } from "../devices/deviceUtils";
 import { waitForDeviceReadyOrCancel } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";

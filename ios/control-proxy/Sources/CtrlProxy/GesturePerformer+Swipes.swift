@@ -56,7 +56,7 @@ import os
                     factory.annotate(&sample, delivery: delivery)
                     logger.warning("\(sample.logLine(gesture: "swipe"), privacy: .public)")
                 }
-                return SwipeDispatchReport.xcuiCoordinate(distance: distance, duration: duration)
+                return SwipeDispatchReport.forDelivery(route: delivery.route, distance: distance, duration: duration)
             }
         }
 

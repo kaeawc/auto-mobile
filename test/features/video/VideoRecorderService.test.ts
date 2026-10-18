@@ -47,7 +47,7 @@ describe("parseVideoRecordingConfig", () => {
   });
 
   test("returns defaults for non-object input", () => {
-    const config = parseVideoRecordingConfig("invalid" as any);
+    const config = parseVideoRecordingConfig("invalid");
     expect(config.qualityPreset).toBe("low");
   });
 
@@ -58,7 +58,7 @@ describe("parseVideoRecordingConfig", () => {
   });
 
   test("falls back on invalid quality preset", () => {
-    expect(parseVideoRecordingConfig({ qualityPreset: "ultra" as any }).qualityPreset).toBe("low");
+    expect(parseVideoRecordingConfig({ qualityPreset: "ultra" }).qualityPreset).toBe("low");
   });
 
   test("accepts valid fps", () => {
@@ -85,7 +85,7 @@ describe("parseVideoRecordingConfig", () => {
   });
 
   test("falls back on invalid format", () => {
-    expect(parseVideoRecordingConfig({ format: "avi" as any }).format).toBe("mp4");
+    expect(parseVideoRecordingConfig({ format: "avi" }).format).toBe("mp4");
   });
 
   test("caps bitrate to max throughput", () => {
@@ -149,7 +149,7 @@ describe("parseVideoRecordingConfig", () => {
     expect(
       parseVideoRecordingConfig({ resolution: { width: 0, height: 100 } }).resolution,
     ).toBeUndefined();
-    expect(parseVideoRecordingConfig({ resolution: null as any }).resolution).toBeUndefined();
+    expect(parseVideoRecordingConfig({ resolution: null }).resolution).toBeUndefined();
   });
 });
 

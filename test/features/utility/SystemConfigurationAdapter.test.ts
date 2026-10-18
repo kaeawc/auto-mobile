@@ -9,6 +9,7 @@ import { createSystemConfigurationAdapter } from "../../../src/features/utility/
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import type { SystemConfigurationAdapter } from "../../../src/utils/interfaces/SystemConfigurationAdapter";
 
@@ -180,7 +181,7 @@ describe("SystemConfigurationAdapter", () => {
         readLocaleCapture("7-fr-FR").appLocalesUser0,
       ];
       const original = adb.executeCommand.bind(adb);
-      adb.executeCommand = (async (command: string, ...rest: any[]) => {
+      adb.executeCommand = async (command: string, options?: AdbExecuteOptions) => {
         if (command === `shell cmd locale get-app-locales '${LOCALE_CAPTURE_APP_ID}' --user 0`) {
           const stdout = appLocaleResponses.shift() ?? readLocaleCapture("7-fr-FR").appLocalesUser0;
           return {
@@ -191,8 +192,8 @@ describe("SystemConfigurationAdapter", () => {
             includes: (s: string) => stdout.includes(s),
           };
         }
-        return original(command, ...rest);
-      }) as any;
+        return original(command, options);
+      };
 
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setLocale("fr-FR", {
@@ -221,9 +222,9 @@ describe("SystemConfigurationAdapter", () => {
         "Locales for com.example.app for user 10 are [ja-JP]\n",
       ];
       const original = adb.executeCommand.bind(adb);
-      adb.executeCommand = (async (command: string, ...rest: any[]) => {
+      adb.executeCommand = async (command: string, options?: AdbExecuteOptions) => {
         if (command === "shell cmd locale get-app-locales 'com.example.app' --user 10") {
-          await original(command, ...rest);
+          await original(command, options);
           const stdout =
             appLocaleResponses.shift() ?? "Locales for com.example.app for user 10 are [ja-JP]\n";
           return {
@@ -234,8 +235,8 @@ describe("SystemConfigurationAdapter", () => {
             includes: (s: string) => stdout.includes(s),
           };
         }
-        return original(command, ...rest);
-      }) as any;
+        return original(command, options);
+      };
 
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setLocale("ja-JP", {
@@ -955,7 +956,7 @@ describe("SystemConfigurationAdapter", () => {
       const adb = new FakeAdbClient();
       const responses = ["America/New_York", "Asia/Tokyo"];
       const original = adb.executeCommand.bind(adb);
-      adb.executeCommand = (async (command: string, ...rest: any[]) => {
+      adb.executeCommand = async (command: string, options?: AdbExecuteOptions) => {
         if (command === "shell getprop persist.sys.timezone") {
           return {
             stdout: responses.shift() ?? "Asia/Tokyo",
@@ -965,8 +966,8 @@ describe("SystemConfigurationAdapter", () => {
             includes: () => false,
           };
         }
-        return original(command, ...rest);
-      }) as any;
+        return original(command, options);
+      };
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb);
       const result = await adapter.setTimeZone("Asia/Tokyo");
       expect(result.success).toBe(true);

@@ -58,6 +58,10 @@ import { FakeElementParser } from "../../fakes/FakeElementParser";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import type { LaunchAppCall } from "../../../src/features/action/LaunchApp";
 import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+import {
+  createHierarchyForTest,
+  createObserveResultForTest,
+} from "../observe/observeScreenTestBuilders";
 
 isolateToolRegistry();
 
@@ -549,10 +553,7 @@ describe("Explore", () => {
         run.setScreen("Detail");
         return { success: true, packageName: target };
       });
-      const seams = explore as unknown as {
-        enforceTargetApp: (observation: ObserveResult, packageName: string) => Promise<string>;
-        handleDeadEnd: () => Promise<void>;
-      };
+      const seams = explore;
       try {
         await seams.enforceTargetApp(
           { activeWindow: { appId: launcher } } as ObserveResult,
@@ -584,10 +585,7 @@ describe("Explore", () => {
         run.setScreen("Home");
         return { success: true, packageName: target };
       });
-      const seams = explore as unknown as {
-        enforceTargetApp: (observation: ObserveResult, packageName: string) => Promise<string>;
-        handleDeadEnd: () => Promise<void>;
-      };
+      const seams = explore;
       try {
         await seams.enforceTargetApp(
           { activeWindow: { appId: launcher } } as ObserveResult,
@@ -604,10 +602,7 @@ describe("Explore", () => {
 
     test("a null relaunch screen marks no root and unresolved dead ends still press Back", async () => {
       const run = rootRun(undefined, "Login", launcher);
-      const seams = explore as unknown as {
-        enforceTargetApp: (observation: ObserveResult, packageName: string) => Promise<string>;
-        handleDeadEnd: () => Promise<void>;
-      };
+      const seams = explore;
       const observation = (packageName: string) =>
         ({ activeWindow: { appId: packageName } }) as ObserveResult;
       try {
@@ -687,9 +682,7 @@ describe("Explore", () => {
 
     test("target returns alone do not reset the five-attempt recovery bound", async () => {
       const run = rootRun();
-      const seams = explore as unknown as {
-        enforceTargetApp: (observation: ObserveResult, packageName: string) => Promise<string>;
-      };
+      const seams = explore;
       const observation = (packageName: string) =>
         ({ activeWindow: { appId: packageName } }) as ObserveResult;
       try {
@@ -712,16 +705,7 @@ describe("Explore", () => {
 
   describe("target app recovery and reports", () => {
     function recoverySeams() {
-      return explore as unknown as {
-        selectNextElement: () => Promise<Element | undefined>;
-        performInteraction: () => Promise<boolean>;
-        consecutiveOutOfAppCount: number;
-        generateReport: (
-          initialGraph: ExportedGraph,
-          startTime: number,
-          cancelled: boolean,
-        ) => Promise<ExploreResult>;
-      };
+      return explore;
     }
 
     async function seedTargetGraph(): Promise<ExportedGraph> {
@@ -865,7 +849,7 @@ describe("Explore", () => {
       explore.observeScreen = {
         execute: async () => createMockObservation([], ""),
       } as typeof explore.observeScreen;
-      recoverySeams().selectNextElement = async () => undefined;
+      recoverySeams().selectNextElement = async () => null;
       const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
       const launch = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({ success: true });
       try {
@@ -903,7 +887,7 @@ describe("Explore", () => {
           return createMockObservation([], "");
         },
       } as typeof explore.observeScreen;
-      recoverySeams().selectNextElement = async () => undefined;
+      recoverySeams().selectNextElement = async () => null;
       const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
       try {
         const result = await explore.execute({ timeoutMs: 1000 }, undefined, controller.signal);
@@ -921,7 +905,7 @@ describe("Explore", () => {
       explore.observeScreen = {
         execute: async () => createMockObservation([], ""),
       } as typeof explore.observeScreen;
-      recoverySeams().selectNextElement = async () => undefined;
+      recoverySeams().selectNextElement = async () => null;
       const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
       try {
         await explore.execute({ timeoutMs: 1000 }, undefined, controller.signal);
@@ -937,7 +921,7 @@ describe("Explore", () => {
       explore.observeScreen = {
         execute: async () => createMockObservation([], ""),
       } as typeof explore.observeScreen;
-      recoverySeams().selectNextElement = async () => undefined;
+      recoverySeams().selectNextElement = async () => null;
       const back = spyOn(PressButton.prototype, "press").mockImplementation(async () => {
         controller.abort();
         throw new Error("Operation cancelled");
@@ -1028,13 +1012,7 @@ describe("Explore", () => {
 
   describe("execute characterization", () => {
     function executionSeams(instance: Explore) {
-      return instance as unknown as {
-        performInteraction: () => Promise<boolean>;
-        resetToHome: () => Promise<void>;
-        loopDetection: Map<string, number>;
-        previousScreen: string | null;
-        consecutiveNoChangeCount: number;
-      };
+      return instance;
     }
 
     test("tracks first, unchanged, missing and returning screens only after successful interactions", async () => {
@@ -1668,16 +1646,16 @@ describe("Explore", () => {
         $: { class: "android.widget.TextView", text, "resource-id": rowId, clickable: "true" },
         bounds: { left: 0, top, right: 100, bottom: top + 50 },
       });
-      const observation = {
-        viewHierarchy: {
+      const observation = createObserveResultForTest({
+        viewHierarchy: createHierarchyForTest({
           hierarchy: {
             node: [row("Beta", -100), row("Alpha", 0), row("Beta", 50), row("Beta", 100)],
           },
           packageName: "com.test.app",
           screenWidth: 100,
           screenHeight: 200,
-        },
-      } as unknown as ObserveResult;
+        }),
+      });
       const { calls, restore } = captureTapOptions();
       explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
 
@@ -1787,14 +1765,14 @@ describe("Explore", () => {
         $: { class: "android.widget.TextView", text, "resource-id": rowId, clickable: "true" },
         bounds: { left: 0, top, right: 100, bottom: top + 50 },
       });
-      const observation = {
-        viewHierarchy: {
+      const observation = createObserveResultForTest({
+        viewHierarchy: createHierarchyForTest({
           hierarchy: { node: [row("Beta", 0), row("Beta", 50)] },
           packageName: "com.test.app",
           screenWidth: 100,
           screenHeight: 200,
-        },
-      } as unknown as ObserveResult;
+        }),
+      });
       const tap = spyOn(TapOnElement.prototype, "execute").mockResolvedValue({ success: true });
       try {
         await perform()(
@@ -2572,7 +2550,7 @@ describe("Explore", () => {
           const launch = spyOn(LaunchApp.prototype, "execute").mockResolvedValue({ success: true });
           const back = spyOn(PressButton.prototype, "press").mockResolvedValue({ success: true });
           explore = new Explore(device, mockAdb, fakeTimer, fakeGraph);
-          const seams = explore as unknown as { performInteraction: () => Promise<boolean> };
+          const seams = explore;
           seams.performInteraction = async () => true;
           let observeCount = 0;
           explore.observeScreen = {
@@ -2627,10 +2605,7 @@ describe("Explore", () => {
           action.deviceId = device.deviceId;
           action.observationId = "before-recovery";
           explore = new Explore({ ...device, platform }, mockAdb, fakeTimer, fakeGraph);
-          const seams = explore as unknown as {
-            handleDeadEnd(): Promise<void>;
-            resetToHome(): Promise<void>;
-          };
+          const seams = explore;
           try {
             await runWithPostActionCaptureScope(undefined, async () => {
               deferTerminalScreenshot(action, async () => {

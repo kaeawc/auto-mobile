@@ -538,6 +538,87 @@ function throwAndroidRecordingStartFailure(
   throw toActionableError(error, `Failed to start Android recording`);
 }
 
+export function buildFfmpegArgs(
+  config: VideoCaptureConfig,
+  hwAccel: HardwareAccelInfo,
+  input: FfmpegInput,
+): string[] {
+  const args: string[] = [];
+
+  if (input.type === "pipe") {
+    args.push("-f", "mp4", "-i", "pipe:0");
+  } else {
+    args.push("-i", input.path);
+
+    if (isStreamCopyPostProcess(config)) {
+      args.push("-c", "copy");
+      args.push("-movflags", "+faststart");
+      // Keep the iOS simulator fast stream-copy remux while honoring explicit duration caps.
+      if (config.maxDurationSeconds && config.maxDurationSeconds > 0) {
+        args.push("-t", String(config.maxDurationSeconds));
+      }
+      args.push("-y");
+      args.push(config.outputPath);
+      return args;
+    }
+  }
+
+  args.push("-r", String(config.fps));
+
+  if (config.resolution) {
+    args.push("-vf", `scale=${config.resolution.width}:${config.resolution.height}`);
+  }
+
+  if (hwAccel.available) {
+    args.push("-c:v", hwAccel.encoder);
+    logger.info(`[FfmpegVideo] Using hardware acceleration: ${hwAccel.description}`);
+  } else {
+    args.push("-c:v", "libx264");
+    args.push("-preset", "ultrafast");
+    logger.warn(
+      `[FfmpegVideo] Hardware acceleration unavailable, falling back to software encoding`,
+    );
+  }
+
+  args.push("-b:v", `${config.targetBitrateKbps}k`);
+  args.push("-maxrate", `${config.targetBitrateKbps}k`);
+  args.push("-bufsize", `${config.targetBitrateKbps * 2}k`);
+
+  args.push("-profile:v", "baseline");
+  args.push("-level", "3.0");
+  args.push("-pix_fmt", "yuv420p");
+
+  args.push("-movflags", "+faststart");
+
+  if (config.maxDurationSeconds && config.maxDurationSeconds > 0) {
+    args.push("-t", String(config.maxDurationSeconds));
+  }
+
+  args.push("-y");
+  args.push(config.outputPath);
+
+  return args;
+}
+
+export function buildFfmpegFailureMessage(
+  binaryPath: string,
+  summary: string,
+  args: string[],
+  tracker: FfmpegDiagnosticsTracker,
+  outputPath?: string,
+): string {
+  const details = [
+    summary,
+    outputPath ? `output: ${outputPath}` : undefined,
+    `command: ${binaryPath} ${args.join(" ")}`,
+    `exitCode: ${tracker.exitState.exitCode ?? "null"}`,
+    `signal: ${tracker.exitState.signal ?? "null"}`,
+    `stderr:\n${tracker.stderr.join("").trim() || "(empty)"}`,
+  ].filter((line): line is string => Boolean(line));
+
+  return details.join("\n");
+}
+
 export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   private hwAccelCache: Map<string, HardwareAccelInfo> = new Map();
   private ffmpegProbeResult: FfmpegProbeResult | undefined;
@@ -868,7 +949,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
 
       const hwAccel = await this.detectHardwareAccel();
       throwIfRecordingStartAborted(config.abortSignal, "Android");
-      const ffmpegArgs = await this.buildFfmpegArgs(config, hwAccel, { type: "pipe" });
+      const ffmpegArgs = buildFfmpegArgs(config, hwAccel, { type: "pipe" });
       throwIfRecordingStartAborted(config.abortSignal, "Android");
 
       logger.info(
@@ -1494,7 +1575,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     // ffmpeg is attempted with whatever time the stop has (a request with none left skips it).
     const budgetMs = this.requestBoundedPostProcessBudgetMs(backendHandle.config);
     const hwAccel = await this.detectHardwareAccel();
-    const ffmpegArgs = await this.buildFfmpegArgs(backendHandle.config, hwAccel, {
+    const ffmpegArgs = buildFfmpegArgs(backendHandle.config, hwAccel, {
       type: "file",
       path: capturePath,
     });
@@ -1529,7 +1610,8 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       // Nothing else signals ffmpeg here: a SIGKILL is waitForExit escalating past its budget.
       if (signal === "SIGKILL") {
         throw new PostProcessOutOfTimeError(
-          this.buildFfmpegFailureMessage(
+          buildFfmpegFailureMessage(
+            this.ffmpegClient.binaryPath,
             `FFmpeg post-processing timed out after ${budgetMs}ms`,
             ffmpegArgs,
             ffmpegTracker,
@@ -1537,7 +1619,8 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         );
       }
       throw new ActionableError(
-        this.buildFfmpegFailureMessage(
+        buildFfmpegFailureMessage(
+          this.ffmpegClient.binaryPath,
           `FFmpeg post-processing failed (exit ${exitCode ?? `signal ${signal}`})`,
           ffmpegArgs,
           ffmpegTracker,
@@ -1578,69 +1661,12 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     return Number.isNaN(startedAtMs) ? undefined : (this.timer.now() - startedAtMs) / 1000;
   }
 
-  private async buildFfmpegArgs(
-    config: VideoCaptureConfig,
-    hwAccel: HardwareAccelInfo,
-    input: FfmpegInput,
-  ): Promise<string[]> {
-    const args: string[] = [];
-
-    if (input.type === "pipe") {
-      args.push("-f", "mp4", "-i", "pipe:0");
-    } else {
-      args.push("-i", input.path);
-
-      if (isStreamCopyPostProcess(config)) {
-        args.push("-c", "copy");
-        args.push("-movflags", "+faststart");
-        // Keep the iOS simulator fast stream-copy remux while honoring explicit duration caps.
-        if (config.maxDurationSeconds && config.maxDurationSeconds > 0) {
-          args.push("-t", String(config.maxDurationSeconds));
-        }
-        args.push("-y");
-        args.push(config.outputPath);
-        return args;
-      }
-    }
-
-    args.push("-r", String(config.fps));
-
-    if (config.resolution) {
-      args.push("-vf", `scale=${config.resolution.width}:${config.resolution.height}`);
-    }
-
-    if (hwAccel.available) {
-      args.push("-c:v", hwAccel.encoder);
-      logger.info(`[FfmpegVideo] Using hardware acceleration: ${hwAccel.description}`);
-    } else {
-      args.push("-c:v", "libx264");
-      args.push("-preset", "ultrafast");
-      logger.warn(
-        `[FfmpegVideo] Hardware acceleration unavailable, falling back to software encoding`,
-      );
-    }
-
-    args.push("-b:v", `${config.targetBitrateKbps}k`);
-    args.push("-maxrate", `${config.targetBitrateKbps}k`);
-    args.push("-bufsize", `${config.targetBitrateKbps * 2}k`);
-
-    args.push("-profile:v", "baseline");
-    args.push("-level", "3.0");
-    args.push("-pix_fmt", "yuv420p");
-
-    args.push("-movflags", "+faststart");
-
-    if (config.maxDurationSeconds && config.maxDurationSeconds > 0) {
-      args.push("-t", String(config.maxDurationSeconds));
-    }
-
-    args.push("-y");
-    args.push(config.outputPath);
-
-    return args;
-  }
-
-  private async detectHardwareAccel(): Promise<HardwareAccelInfo> {
+  /**
+   * Resolves the encoder used for new recordings: a platform hardware encoder
+   * when the FFmpeg build advertises one, otherwise libx264. The result is
+   * cached per platform, so FFmpeg is probed at most once.
+   */
+  async detectHardwareAccel(): Promise<HardwareAccelInfo> {
     const os = this.platformProvider();
     const cacheKey = os;
 
@@ -1735,10 +1761,11 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     return (await this.probeFfmpeg()).encoders;
   }
 
-  private async ensureFfmpegAvailable(
-    deadlineMs?: number,
-    abortSignal?: AbortSignal,
-  ): Promise<void> {
+  /**
+   * Verifies FFmpeg can be launched, probing it once and reusing the result.
+   * Throws an `ActionableError` with install guidance when it is unavailable.
+   */
+  async ensureFfmpegAvailable(deadlineMs?: number, abortSignal?: AbortSignal): Promise<void> {
     try {
       await this.checkFfmpegVersion(deadlineMs, abortSignal);
     } catch (error) {
@@ -1791,33 +1818,27 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     const sizeBytes = await this.recordingFileProbe.size(outputPath);
     if (sizeBytes === null) {
       throw new ActionableError(
-        this.buildFfmpegFailureMessage("FFmpeg output file missing", args, tracker, outputPath),
+        buildFfmpegFailureMessage(
+          this.ffmpegClient.binaryPath,
+          "FFmpeg output file missing",
+          args,
+          tracker,
+          outputPath,
+        ),
       );
     }
 
     if (!sizeBytes) {
       throw new ActionableError(
-        this.buildFfmpegFailureMessage("FFmpeg output file is empty", args, tracker, outputPath),
+        buildFfmpegFailureMessage(
+          this.ffmpegClient.binaryPath,
+          "FFmpeg output file is empty",
+          args,
+          tracker,
+          outputPath,
+        ),
       );
     }
-  }
-
-  private buildFfmpegFailureMessage(
-    summary: string,
-    args: string[],
-    tracker: FfmpegDiagnosticsTracker,
-    outputPath?: string,
-  ): string {
-    const details = [
-      summary,
-      outputPath ? `output: ${outputPath}` : undefined,
-      `command: ${this.ffmpegClient.binaryPath} ${args.join(" ")}`,
-      `exitCode: ${tracker.exitState.exitCode ?? "null"}`,
-      `signal: ${tracker.exitState.signal ?? "null"}`,
-      `stderr:\n${tracker.stderr.join("").trim() || "(empty)"}`,
-    ].filter((line): line is string => Boolean(line));
-
-    return details.join("\n");
   }
 
   private buildProcessFailureMessage(

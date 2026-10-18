@@ -130,7 +130,7 @@ describe("InputText", () => {
 
     expect(capturedFactory).toBeDefined();
     expect(typeof (capturedFactory as AdbClientFactory).create).toBe("function");
-    expect(capturedFactory).toBe(factory as unknown as AdbClientFactory);
+    expect(capturedFactory).toBe(factory);
   });
 
   test("does not turn device-loss cancellation into a success:false input result", async () => {

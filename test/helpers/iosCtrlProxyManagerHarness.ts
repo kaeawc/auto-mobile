@@ -21,7 +21,7 @@ import {
 import { createStartableBuilder } from "./iosCtrlProxyBuilderFake";
 
 export function tunnel(manager: IOSCtrlProxyManager): DefaultIosTunnelClient {
-  const client = manager["tunnelClient"];
+  const client = manager.diagnostics.tunnelClient;
   if (!(client instanceof DefaultIosTunnelClient)) {
     throw new Error("Expected default tunnel");
   }

@@ -12,17 +12,13 @@ import {
 import {
   ANDROID_PACKAGE_NAME_PATTERN,
   PostNotification,
-  PostNotificationOptions,
 } from "../features/utility/PostNotification";
 import {
   NotificationPolicy,
   type NotificationPolicyResult,
 } from "../features/utility/NotificationPolicy";
 
-export interface PostNotificationArgs extends PostNotificationOptions {
-  // #6154: optional — resolved from deviceId/session when omitted.
-  platform?: Platform;
-}
+export type PostNotificationArgs = z.output<typeof postNotificationSchema>;
 
 const iosAppIdRequiredMessage = "appId is required when platform is ios";
 
@@ -61,7 +57,7 @@ const androidAppIdInvalidMessage = "appId must be an Android package name";
  */
 export function checkPostNotificationPlatformConstraints(
   platform: Platform | undefined,
-  args: Pick<PostNotificationArgs, "appId">,
+  args: { appId?: string },
 ): { path: "appId"; message: string } | null {
   if (platform === "ios" && !args.appId) {
     return { path: "appId", message: iosAppIdRequiredMessage };

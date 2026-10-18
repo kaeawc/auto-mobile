@@ -293,8 +293,11 @@ export class PerformanceAudit {
    * Collect graphics performance metrics using gfxinfo. Frame-time percentiles
    * come from the closing reading; jank is the difference between an opening
    * and a closing reading `PERF_AUDIT_WINDOW_MS` apart (#10094).
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async collectGfxMetrics(
+  async collectGfxMetrics(
     packageName: string,
     perf: PerformanceTracker,
   ): Promise<Partial<PerformanceMetrics>> {
@@ -362,8 +365,11 @@ export class PerformanceAudit {
    * Collect CPU usage metrics for the package: the process's CPU time over the
    * device time elapsed between two readings `PERF_AUDIT_WINDOW_MS` apart, as a
    * percentage of one core (#10094).
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async collectCpuMetrics(
+  async collectCpuMetrics(
     packageName: string,
     perf: PerformanceTracker,
   ): Promise<Partial<PerformanceMetrics>> {
@@ -413,8 +419,11 @@ export class PerformanceAudit {
 
   /**
    * Check for pending ANRs
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async checkForAnr(
+  async checkForAnr(
     packageName: string,
     perf: PerformanceTracker,
   ): Promise<Partial<PerformanceMetrics>> {
@@ -447,8 +456,11 @@ export class PerformanceAudit {
    * Measure touch response latency
    * Injects touch on non-clickable area and measures response time
    * Only runs when UI perf mode and synthetic touch sampling are enabled.
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async measureTouchLatency(
+  async measureTouchLatency(
     packageName: string,
     screenSize: ScreenSize | undefined,
     perf: PerformanceTracker,
@@ -510,8 +522,11 @@ export class PerformanceAudit {
    * animating sample must not null out a run that also produced a real
    * measurement (issue #6167). Only report `null` when there is no valid
    * measurement at all.
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private resolveTouchLatency(result: {
+  resolveTouchLatency(result: {
     success: boolean;
     latencyMs: number;
     animating?: boolean;
@@ -548,11 +563,11 @@ export class PerformanceAudit {
   /**
    * Calculate frame rate (FPS) from gfxinfo data.
    * Uses Total frames rendered / elapsed time to compute average FPS.
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async calculateFrameRate(
-    packageName: string,
-    perf: PerformanceTracker,
-  ): Promise<number | null> {
+  async calculateFrameRate(packageName: string, perf: PerformanceTracker): Promise<number | null> {
     try {
       const { stdout } = await perf.track("adbGfxinfoFrameRate", () =>
         this.adb.executeCommand(`shell dumpsys gfxinfo ${shellQuote(packageName)}`, {
@@ -610,8 +625,11 @@ export class PerformanceAudit {
   /**
    * Measure time to first frame (TTFF) by parsing ActivityManager logcat output.
    * Looks for "ActivityManager: Displayed" log entries with timing information.
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async measureTimeToFirstFrame(
+  async measureTimeToFirstFrame(
     packageName: string,
     perf: PerformanceTracker,
   ): Promise<number | null> {
@@ -639,8 +657,11 @@ export class PerformanceAudit {
   /**
    * Measure time to interactive (TTI).
    * TTI = TTFF + time until UI is stable (no jank for 500ms).
+   *
+   * Public as a test seam: tests call this directly rather than casting past
+   * the type system (#11865).
    */
-  private async measureTimeToInteractive(
+  async measureTimeToInteractive(
     packageName: string,
     ttffMs: number,
     perf: PerformanceTracker,

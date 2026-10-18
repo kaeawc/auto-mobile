@@ -6,18 +6,15 @@ import {
 import { afterEach, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import {
+  type InteractionToolDependencies,
   dragAndDropSchema,
   dragAndDropHandler,
-  setDragAndDropFactory,
-  resetDragAndDropFactory,
   swipeOnSchema,
   pinchOnSchema,
   sendKeysSchema,
   tapAnySchema,
   tapOnSchema,
   swipeOnHandler,
-  setSwipeOnFactory,
-  resetSwipeOnFactory,
 } from "../../src/server/interactionTools";
 import type { BootedDevice } from "../../src/models";
 import {
@@ -45,6 +42,7 @@ import {
   PINCH_ROTATION_MIN_DEGREES,
 } from "../../src/features/action/PinchOn";
 
+const interactionDeps: InteractionToolDependencies = {};
 test("schema bounds follow the implementation constants", () => {
   const bounds = [
     {
@@ -191,8 +189,8 @@ const device: BootedDevice = {
 };
 
 afterEach(() => {
-  resetDragAndDropFactory();
-  resetSwipeOnFactory();
+  delete interactionDeps.dragAndDropFactory;
+  delete interactionDeps.swipeOnFactory;
 });
 
 test("pinch schema rejects the nonpositive values already rejected by the action", () => {
@@ -218,27 +216,31 @@ test("implementation-supported drag duration reaches the fake action unchanged",
     dragDurationMs: 1500,
   };
   const parsedDrag = dragAndDropSchema.parse(dragInput);
-  setDragAndDropFactory(() => ({
+  interactionDeps.dragAndDropFactory = () => ({
     execute: async (options) => {
       expect(options.dragDurationMs).toBe(dragInput.dragDurationMs);
       return { success: true, duration: 1500, distance: 10 };
     },
-  }));
-  expect((await dragAndDropHandler(device, parsedDrag)).isError).toBeUndefined();
+  });
+  expect(
+    (await dragAndDropHandler(device, parsedDrag, undefined, undefined, interactionDeps)).isError,
+  ).toBeUndefined();
 });
 
 test.each([{ apexPause: 3000 }, { returnSpeed: 0.1 }, { returnSpeed: 4 }])(
   "implementation-supported swipe timing reaches the fake action: %j",
   async (timing) => {
     const parsedSwipe = swipeOnSchema.parse({ direction: "up", boomerang: true, ...timing });
-    setSwipeOnFactory(() => ({
+    interactionDeps.swipeOnFactory = () => ({
       execute: async (options) => {
         expect(options.apexPause).toBe(timing.apexPause);
         expect(options.returnSpeed).toBe(timing.returnSpeed);
         return { success: true };
       },
-    }));
-    expect((await swipeOnHandler(device, parsedSwipe)).isError).toBeUndefined();
+    });
+    expect(
+      (await swipeOnHandler(device, parsedSwipe, undefined, undefined, interactionDeps)).isError,
+    ).toBeUndefined();
   },
 );
 

@@ -6,8 +6,16 @@ import type {
   SessionRowWriter,
 } from "../../src/daemon/sessionRowWriter";
 import { MAX_PENDING_NON_TERMINAL_RELEASE_SNAPSHOTS } from "../../src/daemon/sessionRowWriter";
+import type {
+  DeviceSessionActivityUpdate,
+  DeviceSessionPersistence,
+  DeviceSessionRecord,
+  UpsertActiveSessionOptions,
+} from "../../src/db/deviceSessionRepository";
 import type { BackoffPolicy } from "../../src/utils/Backoff";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import { SupersededRowReasserts } from "../../src/daemon/supersededRowReasserts";
+import { FakeTimer } from "./FakeTimer";
 
 /** Manually landed release desires, with no persistence or clock access. */
 export class FakeSessionRowWriter implements SessionRowWriter {
@@ -18,8 +26,40 @@ export class FakeSessionRowWriter implements SessionRowWriter {
   >();
   private draining = false;
   private seq = 0;
+  /** Real superseded-row ledger on its own fake clock; owed retries fire only when it advances. */
+  readonly supersededTimer = new FakeTimer();
+  readonly superseded = new SupersededRowReasserts({
+    timer: this.supersededTimer,
+    logger: { warn: () => undefined },
+    draining: () => this.draining,
+    trackDrainWrite: (write) => this.trackDrainWrite(write),
+  });
   private readonly liveSequences = new Map<string, number>();
   private readonly releaseSequences = new WeakMap<SessionReleaseSnapshot, number>();
+
+  /** Live-row statements in issue order; forwarded to `persistence` when one is supplied. */
+  readonly liveWrites: Array<{ kind: "upsert" | "activity" | "ownership"; uuid: string }> = [];
+
+  constructor(private readonly persistence?: Partial<DeviceSessionPersistence>) {}
+
+  upsertLive(
+    record: DeviceSessionRecord,
+    nowMs: number,
+    options?: UpsertActiveSessionOptions,
+  ): Promise<number | void> {
+    this.liveWrites.push({ kind: "upsert", uuid: record.sessionUuid });
+    return this.persistence?.upsertActiveSession?.(record, nowMs, options) ?? Promise.resolve();
+  }
+
+  recordLiveActivity(uuid: string, update: DeviceSessionActivityUpdate): Promise<void> {
+    this.liveWrites.push({ kind: "activity", uuid });
+    return this.persistence?.recordActivity?.(uuid, update) ?? Promise.resolve();
+  }
+
+  replaceLiveOwnership(uuid: string, ownerToken: string | null): Promise<void> {
+    this.liveWrites.push({ kind: "ownership", uuid });
+    return this.persistence?.replaceLivenessOwnership?.(uuid, ownerToken) ?? Promise.resolve();
+  }
 
   noteLive(uuid: string): void {
     this.liveSequences.set(uuid, ++this.seq);

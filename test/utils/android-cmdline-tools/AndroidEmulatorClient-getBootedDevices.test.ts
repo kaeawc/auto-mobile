@@ -195,12 +195,10 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       execResult(fixture("fold-open-display-device-info.txt")),
     );
     adb.setCommandResponse("cmd device_state print-states", execResult(fixture("fold-states.txt")));
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
 
     const [device] = await client.getBootedDevicesChecked();
     expect(device.displays).toEqual({
@@ -220,13 +218,11 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     }));
     const concurrency: AvdProbeConcurrency = { active: 0, maximum: 0 };
     const delays = new Map(devices.map((device) => [device.deviceId, 50]));
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
+    const client = new AndroidEmulatorClient({
       timer,
-      new DelayedAvdNameAdbFactory(devices, timer, delays, concurrency),
-      new FakeAvdConfigReader(null),
-    );
+      adbFactory: new DelayedAvdNameAdbFactory(devices, timer, delays, concurrency),
+      avdConfigReader: new FakeAvdConfigReader(null),
+    });
 
     const discovery = client.getBootedDevicesChecked();
     await waitForPendingSleeps(timer, devices.length);
@@ -252,13 +248,17 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       ["emulator-5558", 30],
       ["emulator-5560", 20],
     ]);
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
+    const client = new AndroidEmulatorClient({
       timer,
-      new DelayedAvdNameAdbFactory(devices, timer, delays, concurrency, "emulator-5558"),
-      new FakeAvdConfigReader(null),
-    );
+      adbFactory: new DelayedAvdNameAdbFactory(
+        devices,
+        timer,
+        delays,
+        concurrency,
+        "emulator-5558",
+      ),
+      avdConfigReader: new FakeAvdConfigReader(null),
+    });
 
     const discovery = client.getBootedDevicesChecked();
     await waitForPendingSleeps(timer, devices.length);
@@ -280,12 +280,10 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     ]);
     adb.setCommandResponse("emu avd name", execResult("Pixel_9_API_36\n"));
     adb.setCommandResponse("shell getprop ro.product.model", execResult("sdk_gphone64_arm64\n"));
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
 
     await expect(client.getBootedDevicesChecked()).resolves.toEqual([
       expect.objectContaining({ model: "sdk_gphone64_arm64" }),
@@ -302,13 +300,11 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     adb.setDevices([{ name: "ignored", platform: "android", deviceId: "emulator-5554" }]);
     adb.setCommandResponse("emu avd name", execResult("Pixel_9\n"));
     adb.setCommandResponse("shell getprop ro.product.model", execResult("Pixel 9\n"));
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-      new FakeAvdConfigReader(null),
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+      avdConfigReader: new FakeAvdConfigReader(null),
+    });
 
     expect((await client.getBootedDevicesChecked())[0]?.model).toBe("Pixel 9");
     adb.setCommandResponse("emu avd name", execResult("Pixel_10\n"));
@@ -341,13 +337,11 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     adb.setCommandResponse("emu avd name", execResult("Pixel_9\n"));
     adb.setCommandResponse("shell getprop ro.product.model", execResult("Pixel 9\n"));
     adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("arm64-v8a\n"));
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
+    const client = new AndroidEmulatorClient({
       timer,
-      new FakeAdbClientFactory(adb),
-      new FakeAvdConfigReader(null),
-    );
+      adbFactory: new FakeAdbClientFactory(adb),
+      avdConfigReader: new FakeAvdConfigReader(null),
+    });
 
     await client.getBootedDevicesChecked();
     expect(
@@ -380,13 +374,11 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     const adb = new BudgetSpentAdbExecutor();
     adb.setDevices([{ name: "ignored", platform: "android", deviceId: "emulator-5554" }]);
     adb.setCommandResponse("emu avd name", execResult("Pixel_9\n"));
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
+    const client = new AndroidEmulatorClient({
       timer,
-      new FakeAdbClientFactory(adb),
-      new FakeAvdConfigReader(null),
-    );
+      adbFactory: new FakeAdbClientFactory(adb),
+      avdConfigReader: new FakeAvdConfigReader(null),
+    });
 
     expect((await client.getBootedDevicesChecked())[0]?.name).toBe("Pixel_9");
     expect(adb.getExecutedCommands()).toEqual([
@@ -416,12 +408,10 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       }
       const adb = new AbortingAdbExecutor();
       adb.setDevices([{ name: "ignored", platform: "android", deviceId: "R58M12ABCDE" }]);
-      const client = new AndroidEmulatorClient(
-        null,
-        null,
-        new FakeTimer(),
-        new FakeAdbClientFactory(adb),
-      );
+      const client = new AndroidEmulatorClient({
+        timer: new FakeTimer(),
+        adbFactory: new FakeAdbClientFactory(adb),
+      });
 
       await expect(client.getBootedDevicesChecked(false, {}, controller.signal)).rejects.toBe(
         reason,
@@ -436,12 +426,10 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     ]);
     adb.setCommandResponse("shell getprop ro.product.model", execResult("Pixel 9\n"));
     adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("arm64-v8a\n"));
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
 
     await expect(client.getBootedDevicesChecked()).resolves.toEqual([
       expect.objectContaining({
@@ -465,13 +453,13 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       systemImagePackage: "system-images;android-36;google_apis;arm64-v8a",
       architecture: "arm64",
     });
-    const client = new AndroidEmulatorClient(
-      async (_file, args) => execResult(args[0] === "-list-avds" ? "Pixel_9_API_36\n" : ""),
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(new FakeAdbExecutor()),
-      config,
-    );
+    const client = new AndroidEmulatorClient({
+      execAsync: async (_file, args) =>
+        execResult(args[0] === "-list-avds" ? "Pixel_9_API_36\n" : ""),
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      avdConfigReader: config,
+    });
     // The command is faked; host SDK detection must not run on this path.
     (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
       async () => "emulator";
@@ -491,13 +479,11 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     ]);
     adb.setCommandResponse("emu avd name", execResult("Pixel_9_API_36\n"));
     adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("arm64-v8a\n"));
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-      new FakeAvdConfigReader(null),
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+      avdConfigReader: new FakeAvdConfigReader(null),
+    });
 
     await expect(client.getBootedDevicesChecked()).resolves.toEqual([
       expect.objectContaining({ architecture: "arm64-v8a" }),
@@ -511,13 +497,11 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     ]);
     adb.setCommandResponse("emu avd name", execResult("Pixel_9_API_36\n"));
     adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("x86_64\n"));
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-      new FakeAvdConfigReader(null),
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+      avdConfigReader: new FakeAvdConfigReader(null),
+    });
     await expect(client.getBootedDevicesChecked()).resolves.toEqual([
       expect.objectContaining({ name: "Pixel_9_API_36", architecture: "x86_64" }),
     ]);
@@ -540,12 +524,10 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     adb.setDevices([tcpDevice]);
     adb.setCommandResponse("shell getprop ro.product.model", execResult("Pixel 9\n"));
     adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("arm64-v8a\n"));
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
     await expect(client.getBootedDevicesChecked()).resolves.toEqual([
       expect.objectContaining({ model: "Pixel 9", architecture: "arm64-v8a" }),
     ]);
@@ -568,16 +550,14 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     ]);
     adb.setCommandResponse("emu avd name", execResult("Pixel_9_API_36\n"));
     adb.setCommandResponse("shell getprop ro.product.cpu.abi", execResult("x86_64\n"));
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-      new FakeAvdConfigReader({
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+      avdConfigReader: new FakeAvdConfigReader({
         systemImagePackage: "system-images;android-36;google_apis;arm64-v8a",
         architecture: "arm64",
       }),
-    );
+    });
 
     await expect(client.getBootedDevicesChecked()).resolves.toEqual([
       expect.objectContaining({ architecture: "arm64-v8a" }),
@@ -591,19 +571,11 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       next: () => ++stamp,
     };
     const adb = new SequencedDeferredAvdNameAdbExecutor(observationSequence);
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
       observationSequence,
-    );
+    });
 
     const discovery = client.getBootedDevicesChecked();
     await adb.avdNameProbeStarted.promise;
@@ -635,12 +607,10 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       "shell getprop ro.boot.qemu.avd_name",
       execResult("Codex_KVM_Verify\nignored trailing output"),
     );
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
 
     await expect(client.getBootedDevicesChecked()).resolves.toEqual([
       {
@@ -672,12 +642,10 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       } satisfies BootedDevice,
     ]);
     adb.setCommandError("emu avd name", new Error("emulator console unavailable"));
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
 
     await expect(client.getBootedDevicesChecked()).resolves.toEqual([
       {
@@ -702,18 +670,11 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     adb.setCommandError("emu avd name", new Error("emulator console unavailable"));
     const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
     consoleBusy.setBusy("emulator-5554", true);
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      consoleBusy,
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+      consoleBusyRegistry: consoleBusy,
+    });
 
     const [discovered] = await client.getBootedDevicesChecked();
 
@@ -734,18 +695,11 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     ]);
     const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
     consoleBusy.setBusy("emulator-5554", true);
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      consoleBusy,
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+      consoleBusyRegistry: consoleBusy,
+    });
 
     const [discovered] = await client.getBootedDevicesChecked();
 
@@ -773,18 +727,11 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     adb.setCommandResponse("shell getprop ro.boot.qemu.avd_name", execResult("\n"));
     const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
     consoleBusy.setBusy("emulator-5554", true);
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      consoleBusy,
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+      consoleBusyRegistry: consoleBusy,
+    });
 
     const [discovered] = await client.getBootedDevicesChecked();
 
@@ -804,18 +751,11 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       } satisfies BootedDevice,
     ]);
     const consoleBusy = new FakeEmulatorConsoleBusyRegistry();
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      consoleBusy,
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+      consoleBusyRegistry: consoleBusy,
+    });
 
     const discovery = client.getBootedDevicesChecked();
     await adb.avdNameProbeStarted;
@@ -841,12 +781,10 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
         deviceId: "emulator-5554",
       } satisfies BootedDevice,
     ]);
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
 
     await client.getBootedDevices();
     expect(adb.lastDiscoveryOptions).toMatchObject({ throwOnMissingAdb: true });
@@ -869,12 +807,10 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
 
   test("propagates discovery failures during shutdown", async () => {
     const adb = new FailingDiscoveryAdbExecutor();
-    const client = new AndroidEmulatorClient(
-      null,
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
+    const client = new AndroidEmulatorClient({
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
 
     await expect(
       client.killDevice({

@@ -2286,9 +2286,7 @@ class CtrlProxyActionOverloadServiceTest {
   fun `hierarchy request resolves defaults independently and forwards explicit limits and display`() =
     runTest {
       val options = mutableListOf<Pair<Boolean, Triple<Int, Int, Int?>>>()
-      ReflectionHelpers.setField(
-        fixture.service,
-        "hierarchyDebouncer",
+      fixture.service.hierarchyController.debouncer =
         HierarchyDebouncer(
           scope = backgroundScope,
           extractHierarchy = { disableAllFiltering, snapshot ->
@@ -2298,8 +2296,7 @@ class CtrlProxyActionOverloadServiceTest {
             )
             null
           },
-        ),
-      )
+        )
       fixture.actions.requestHierarchy(
         RequestHierarchy(disableAllFiltering = true, requestId = null),
       )

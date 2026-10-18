@@ -302,4 +302,52 @@ describe("ImeCommitTyper", () => {
     expect(span.safeToRestore).toBe(false);
     expect(calls).toEqual([{ acquire: true, signal: undefined }]);
   });
+
+  const restartNothing = {
+    success: false,
+    error:
+      "Editor restarted its input connection during IME commit; none of the dispatched text is in the editor",
+    insertedText: "",
+  };
+
+  test("retries an editor restart that committed nothing, with backoff, then succeeds", async () => {
+    const { typer, host, timer } = harness();
+    timer.enableAutoAdvance();
+    let attempts = 0;
+    host.textClient.commitViaIme = async (text) =>
+      ++attempts < 3 ? { ...restartNothing } : { success: true, insertedText: text };
+    expect(await typer.type({ text: "abc", operation: "insert" })).toMatchObject({
+      success: true,
+    });
+    expect(attempts).toBe(3);
+    expect(timer.getSleepHistory()).toEqual([100, 200]);
+  });
+
+  test("surfaces the restart after the bounded retries are exhausted", async () => {
+    const { typer, host, timer } = harness();
+    timer.enableAutoAdvance();
+    let attempts = 0;
+    host.textClient.commitViaIme = async () => {
+      attempts++;
+      return { ...restartNothing };
+    };
+    expect(await typer.type({ text: "abc", operation: "insert" })).toMatchObject({
+      success: false,
+    });
+    expect(attempts).toBe(3);
+  });
+
+  test("never resends when the restart left partial text in the editor", async () => {
+    const { typer, host, timer } = harness();
+    timer.enableAutoAdvance();
+    let attempts = 0;
+    host.textClient.commitViaIme = async () => {
+      attempts++;
+      return { ...restartNothing, insertedText: "a" };
+    };
+    expect(await typer.type({ text: "abc", operation: "insert" })).toMatchObject({
+      success: false,
+    });
+    expect(attempts).toBe(1);
+  });
 });

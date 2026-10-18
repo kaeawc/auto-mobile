@@ -44,8 +44,7 @@ export class TouchFrameReconstructor {
     const evValue = match[3];
 
     if (evType === "EV_ABS") {
-      this.handleAbsEvent(evCode, evValue);
-      return null;
+      return this.handleAbsEvent(evCode, evValue, arrivedAt);
     }
 
     if (evType === "EV_SYN") {
@@ -62,7 +61,7 @@ export class TouchFrameReconstructor {
     return null;
   }
 
-  private handleAbsEvent(evCode: string, evValue: string): void {
+  private handleAbsEvent(evCode: string, evValue: string, arrivedAt: number): RawTouchFrame | null {
     const value = parseInt(evValue, 16);
 
     switch (evCode) {
@@ -79,8 +78,17 @@ export class TouchFrameReconstructor {
             slot.trackingId = -1;
           }
         } else {
+          const slot = this.getOrCreateSlot();
+          if (slot.trackingId >= 0 && slot.trackingId !== value) {
+            // The kernel may write a new tracking id into an active slot without an
+            // intermediate -1 (#13129). The old contact ended: report it released now,
+            // before the slot is reused, so the new id starts a fresh contact.
+            const ended = this.endedByReplacement(slot, arrivedAt);
+            slot.trackingId = value;
+            return ended;
+          }
           // New or continuing contact
-          this.getOrCreateSlot().trackingId = value;
+          slot.trackingId = value;
         }
         break;
 
@@ -99,6 +107,19 @@ export class TouchFrameReconstructor {
       default:
         break;
     }
+    return null;
+  }
+
+  /** Synthetic frame ending `replaced` while every other active slot stays down. */
+  private endedByReplacement(replaced: TouchSlot, arrivedAt: number): RawTouchFrame {
+    const activeSlots: TouchSlot[] = [];
+    for (const [, slot] of this.slots) {
+      if (slot.slotId !== replaced.slotId && slot.trackingId >= 0) {
+        activeSlots.push({ ...slot });
+      }
+    }
+    this.releasedSlots.delete(replaced.slotId);
+    return { arrivedAt, activeSlots, releasedSlots: [replaced.slotId] };
   }
 
   private handleSynEvent(evCode: string, evValue: string, arrivedAt: number): RawTouchFrame | null {

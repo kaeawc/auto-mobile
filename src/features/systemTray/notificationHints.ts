@@ -6,7 +6,7 @@
  * Everything in this file is a pure function over a view hierarchy
  * node — no I/O, no device dependencies.
  */
-import { isViewHierarchyResult } from "../../models";
+import type { ViewHierarchyResult } from "../../models";
 import { nodeAttributes } from "../../models/ViewHierarchyResult";
 import { rawNodeString, rawResourceId } from "../utility/elementProperties";
 import { SearchableHierarchy } from "../utility/SearchableNode";
@@ -85,14 +85,8 @@ export const traverseForHint = (node: any, predicate: (node: any) => boolean): b
 
 const searchableHierarchy = new SearchableHierarchy();
 
-/**
- * Preserve original root trees while sharing the resolver's window order and capture projection.
- * The capture is untrusted wire data, so anything without an object `hierarchy` yields no roots.
- */
-export const getHierarchyRoots = (viewHierarchy: unknown): any[] => {
-  if (!isViewHierarchyResult(viewHierarchy)) {
-    return [];
-  }
+/** Preserve original root trees while sharing the resolver's window order and capture projection. */
+export const getHierarchyRoots = (viewHierarchy: ViewHierarchyResult): any[] => {
   const seen = new Set<unknown>();
   return [...searchableHierarchy.project(viewHierarchy)]
     .filter((entry) => entry.parentIndex === undefined)

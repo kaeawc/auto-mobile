@@ -1,4 +1,4 @@
-import { deleteDeviceInstanceIfCurrent, getOrCreateDeviceInstance } from "./deviceInstanceRegistry";
+import { MapDeviceClientRegistry, type DeviceClientRegistry } from "./deviceClientRegistry";
 import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
 import {
   defaultSavedPrototypeMirror,
@@ -288,7 +288,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private rebindSettled: Promise<void> = Promise.resolve();
   // The latest remove -> re-add section, which a cancelled waiter waits out.
   private rebindMutationSettled: Promise<void> = Promise.resolve();
-  private static instances: Map<string, AndroidCtrlProxyManager> = new Map();
+  public static readonly registry: DeviceClientRegistry<AndroidCtrlProxyManager> =
+    new MapDeviceClientRegistry<AndroidCtrlProxyManager>();
   private static expectedChecksumOverride: string | null = null;
   private static readonly apkOverrideChecksums = new Map<string, ApkOverrideChecksumEntry>();
   private static accessibilityDetectorOverride: AccessibilityDetector | null = null;
@@ -365,8 +366,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
   ): AndroidCtrlProxyManager {
     requireBootedDevice(device, "AndroidCtrlProxyManager.getInstance");
-    return getOrCreateDeviceInstance(
-      AndroidCtrlProxyManager.instances,
+    return AndroidCtrlProxyManager.registry.get(
       device.deviceId,
       () => new AndroidCtrlProxyManager(device, adbFactory.create(device)),
     );
@@ -398,7 +398,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * Reset all instances (for testing)
    */
   public static resetInstances(): void {
-    AndroidCtrlProxyManager.instances.clear();
+    AndroidCtrlProxyManager.registry.closeAll();
     AndroidCtrlProxyManager.apkOverrideChecksums.clear();
   }
 
@@ -457,27 +457,23 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * the map entry is the entire eviction.
    */
   public static getExistingInstance(deviceId: string): AndroidCtrlProxyManager | undefined {
-    return AndroidCtrlProxyManager.instances.get(deviceId);
+    return AndroidCtrlProxyManager.registry.peek(deviceId);
   }
 
   public static evictInstance(instance: AndroidCtrlProxyManager): void {
-    deleteDeviceInstanceIfCurrent(
-      AndroidCtrlProxyManager.instances,
-      instance.device.deviceId,
-      instance,
-    );
+    AndroidCtrlProxyManager.registry.invalidate(instance.device.deviceId, instance);
   }
 
   public static evict(deviceId: string, avdName?: string): void {
     if (!avdName) {
-      AndroidCtrlProxyManager.instances.delete(deviceId);
+      AndroidCtrlProxyManager.registry.invalidate(deviceId);
     }
     if (avdName) {
       // The stopped AVD inventory lacks an ADB serial. The manager retains
       // the booted incarnation's name and runtime ID, including direct sessions.
-      for (const [runtimeId, manager] of AndroidCtrlProxyManager.instances) {
+      for (const [runtimeId, manager] of AndroidCtrlProxyManager.registry.entries()) {
         if (runtimeId.startsWith("emulator-") && manager.device.name === avdName) {
-          AndroidCtrlProxyManager.instances.delete(runtimeId);
+          AndroidCtrlProxyManager.registry.invalidate(runtimeId);
         }
       }
     }

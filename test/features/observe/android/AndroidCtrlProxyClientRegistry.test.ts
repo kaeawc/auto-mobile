@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import type { BootedDevice } from "../../../../src/models";
@@ -66,6 +67,14 @@ describe("AndroidCtrlProxyClient.registry", () => {
     AndroidCtrlProxyClient.registerForTesting(client, device.deviceId);
     await client.close();
     expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+  });
+
+  test("getInstance after close returns a new client, not the closed one", async () => {
+    const closed = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+    await closed.close();
+    const next = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+    expect(next).not.toBe(closed);
+    expect(next.isClosed()).toBe(false);
   });
 
   test("close of a replaced client leaves the current client registered", async () => {

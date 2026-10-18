@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { createMcpServer } from "../../src/server";
+import { createIosDoctorDependencies } from "../../src/doctor/checks/ios";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -86,6 +87,41 @@ describe("stateless createMcpServer", () => {
     await createMcpServer({ stateless: true }).close();
 
     expect(ToolRegistry.getTool("observe")).toBeDefined();
+  });
+
+  test("repeated createMcpServer calls do not re-register resources or probe devices (#13068)", async () => {
+    // Registering resources used to start a booted-device discovery (adb + simctl) on every
+    // stateless request; with real devices that cost ~10-20 ms per daemon-bound call.
+    let probes = 0;
+    PlatformDeviceManagerFactory.setInstance({
+      getBootedDevices: async () => {
+        probes++;
+        return [];
+      },
+    } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
+    const iosDependencies = createIosDoctorDependencies();
+    try {
+      await createMcpServer({ stateless: true, iosDependencies }).close();
+      const afterFirst = probes;
+
+      for (let i = 0; i < 3; i++) {
+        await createMcpServer({ stateless: true, iosDependencies }).close();
+      }
+
+      expect(probes).toBe(afterFirst);
+      expect(ResourceRegistry.getResource("automobile:apps")).toBeDefined();
+    } finally {
+      PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([]));
+    }
+  });
+
+  test("cleared resources are registered again by the next createMcpServer", async () => {
+    ResourceRegistry.clearResources();
+    expect(ResourceRegistry.getResource("automobile:apps")).toBeUndefined();
+
+    await createMcpServer({ stateless: true }).close();
+
+    expect(ResourceRegistry.getResource("automobile:apps")).toBeDefined();
   });
 
   test("a server closed before it connects detaches its binding from a shared store", async () => {

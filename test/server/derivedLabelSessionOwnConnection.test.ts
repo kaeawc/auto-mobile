@@ -315,7 +315,8 @@ describe("a connection bound to the base session naming its own derived label se
             expect(tools.watcherReads).toEqual([third.deviceId]);
           }
           expect(binding).toBeDefined();
-          expect(binding!.boundDeviceSessionUuid("http-owner")).toBe(BASE);
+          // Bindings are keyed on the request's session key, not the transport id (#4678).
+          expect(binding!.boundDeviceSessionUuid(OWNER)).toBe(BASE);
           expect(manager.peekSession(BASE)).toEqual(before);
           expect(namedClocks()).toEqual(namedBefore);
           // Still ownerless: a read that crossed the routing guard did not adopt it.

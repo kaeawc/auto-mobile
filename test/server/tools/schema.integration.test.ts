@@ -1,3 +1,4 @@
+import { valueAt } from "../../helpers/valueAt";
 import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
@@ -81,9 +82,9 @@ describe("MCP Tools Schema", () => {
       // provably-dead second operand — the "should not publish top-level schema
       // combinators" test below asserts every top-level anyOf/oneOf/allOf is
       // undefined, so hasCombinator was always false. Assert `type` directly.
-      const schema = tool.inputSchema as any;
+      const schema = tool.inputSchema;
       expect(Object.prototype.hasOwnProperty.call(schema, "type")).toBe(true);
-      if (schema.type === "object") {
+      if (valueAt(schema, "type") === "object") {
         expect(schema).toHaveProperty("properties");
       }
     });
@@ -95,19 +96,28 @@ describe("MCP Tools Schema", () => {
   test.each(["tapOn", "tapAny"])("%s advertises duration minimum 0", (toolName) => {
     const tool = ToolRegistry.getToolDefinitions().find((t) => t.name === toolName);
     expect(tool, `${toolName} should be advertised`).toBeDefined();
-    const duration = (tool!.inputSchema as any).properties?.duration;
-    expect(duration?.type).toBe("number");
-    expect(duration?.minimum).toBe(0);
+    const duration = valueAt(tool!.inputSchema, "properties", "duration");
+    expect(valueAt(duration, "type")).toBe("number");
+    expect(valueAt(duration, "minimum")).toBe(0);
   });
 
   test("publishes no top-level schema combinators", () => {
     const toolDefinitions = ToolRegistry.getToolDefinitions();
 
     for (const tool of toolDefinitions) {
-      const schema = tool.inputSchema as any;
-      expect(schema.anyOf, `${tool.name} should not publish top-level anyOf`).toBeUndefined();
-      expect(schema.oneOf, `${tool.name} should not publish top-level oneOf`).toBeUndefined();
-      expect(schema.allOf, `${tool.name} should not publish top-level allOf`).toBeUndefined();
+      const schema = tool.inputSchema;
+      expect(
+        valueAt(schema, "anyOf"),
+        `${tool.name} should not publish top-level anyOf`,
+      ).toBeUndefined();
+      expect(
+        valueAt(schema, "oneOf"),
+        `${tool.name} should not publish top-level oneOf`,
+      ).toBeUndefined();
+      expect(
+        valueAt(schema, "allOf"),
+        `${tool.name} should not publish top-level allOf`,
+      ).toBeUndefined();
     }
   });
 
@@ -246,9 +256,9 @@ describe("MCP Tools Schema", () => {
   ])("%s advertises the raw/project response-shape control", async (toolName) => {
     const tool = ADVERTISED_TOOLS.find((t) => t.name === toolName);
     expect(tool).toBeDefined();
-    const props = (tool!.inputSchema as any).properties ?? {};
-    expect(props.raw).toBeDefined();
-    expect(props.project).toBeDefined();
+    const props = valueAt(tool!.inputSchema, "properties") ?? {};
+    expect(valueAt(props, "raw")).toBeDefined();
+    expect(valueAt(props, "project")).toBeDefined();
   });
 
   // Issue #5886: structural anti-divergence gate. The skeleton default and the
@@ -263,9 +273,9 @@ describe("MCP Tools Schema", () => {
     for (const toolName of SKELETON_DEFAULT_ACTION_TOOLS) {
       const tool = ADVERTISED_TOOLS.find((t) => t.name === toolName);
       expect(tool, `${toolName} should be an advertised tool`).toBeDefined();
-      const props = (tool!.inputSchema as any).properties ?? {};
-      expect(props.raw, `${toolName} must advertise raw`).toBeDefined();
-      expect(props.project, `${toolName} must advertise project`).toBeDefined();
+      const props = valueAt(tool!.inputSchema, "properties") ?? {};
+      expect(valueAt(props, "raw"), `${toolName} must advertise raw`).toBeDefined();
+      expect(valueAt(props, "project"), `${toolName} must advertise project`).toBeDefined();
     }
   });
 

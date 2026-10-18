@@ -32,6 +32,12 @@ import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager"
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
+/** The private collaborators the NavigateTo/Explore spies read off the instance they replace. */
+interface ExecuteReceiver {
+  navigationManager: unknown;
+  sessionUuid: unknown;
+}
+
 describe("navigation tool session graph selection", () => {
   const device: BootedDevice = {
     deviceId: "ios-simulator-123",
@@ -542,9 +548,9 @@ describe("navigation tool session graph selection", () => {
       isPortAvailable: () => true,
     });
     const navigateExecuteSpy = spyOn(NavigateTo.prototype, "execute").mockImplementation(
-      async function () {
-        usedManagers.push((this as unknown as { navigationManager: unknown }).navigationManager);
-        usedSessions.push((this as unknown as { sessionUuid: unknown }).sessionUuid);
+      async function (this: ExecuteReceiver) {
+        usedManagers.push(this.navigationManager);
+        usedSessions.push(this.sessionUuid);
         return {
           success: false,
           error: "No path",
@@ -555,15 +561,15 @@ describe("navigation tool session graph selection", () => {
       },
     );
     const exploreExecuteSpy = spyOn(Explore.prototype, "execute").mockImplementation(
-      async function () {
-        usedManagers.push((this as unknown as { navigationManager: unknown }).navigationManager);
-        usedSessions.push((this as unknown as { sessionUuid: unknown }).sessionUuid);
+      async function (this: ExecuteReceiver) {
+        usedManagers.push(this.navigationManager);
+        usedSessions.push(this.sessionUuid);
         return {
           success: true,
           interactionsPerformed: 0,
           screensDiscovered: 0,
           coverage: { explored: 0, total: 0, percentage: 0 },
-        } as any;
+        };
       },
     );
 

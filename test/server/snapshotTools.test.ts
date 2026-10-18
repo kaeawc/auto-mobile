@@ -1,3 +1,4 @@
+import { valueAt } from "../helpers/valueAt";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, DeviceSnapshotManifest } from "../../src/models";
@@ -51,7 +52,7 @@ describe("snapshot tool", () => {
 
     await setDeviceSnapshotManagerDependencies({
       snapshotRepository: repository as any,
-      configRepository: configRepository as any,
+      configRepository: configRepository,
       snapshotStore: store as any,
       timer: fakeTimer,
       now: () => new Date(fakeTimer.now()),
@@ -149,12 +150,12 @@ describe("snapshot tool", () => {
     );
 
     expect(toolDefinition).toBeDefined();
-    const schema = toolDefinition!.inputSchema as any;
-    expect(schema.required).toEqual(["action"]);
-    expect(schema.properties.action.enum).toEqual(["capture", "restore"]);
-    expect(schema.anyOf).toBeUndefined();
-    expect(schema.oneOf).toBeUndefined();
-    expect(schema.allOf).toBeUndefined();
+    const schema = toolDefinition!.inputSchema;
+    expect(valueAt(schema, "required")).toEqual(["action"]);
+    expect(valueAt(schema, "properties", "action", "enum")).toEqual(["capture", "restore"]);
+    expect(valueAt(schema, "anyOf")).toBeUndefined();
+    expect(valueAt(schema, "oneOf")).toBeUndefined();
+    expect(valueAt(schema, "allOf")).toBeUndefined();
   });
 
   test("captures snapshot and returns payload", async () => {
@@ -354,7 +355,7 @@ describe("snapshot tool", () => {
     await expect(
       tool!.deviceAwareHandler!(device, {
         action: "restore",
-      } as any),
+      }),
     ).rejects.toThrow("snapshotName is required");
   });
 });

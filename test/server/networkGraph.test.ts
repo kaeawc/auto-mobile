@@ -1,3 +1,4 @@
+import { valueAt } from "../helpers/valueAt";
 import { describe, it, expect } from "bun:test";
 import { buildNetworkGraph, type GraphLeaf, type GraphBranch } from "../../src/server/networkGraph";
 import type { NetworkEventWithId } from "../../src/db/networkEventRepository";
@@ -134,7 +135,7 @@ describe("buildNetworkGraph", () => {
     // Both 123 and 456 should collapse into {id}
     expect(users.paths["{id}"]).toBeDefined();
     const idNode = users.paths["{id}"] as GraphBranch;
-    expect((idNode as any).parameterized).toBe(true);
+    expect(valueAt(idNode, "parameterized")).toBe(true);
     expect(idNode.paths["posts[GET]"]).toBeDefined();
   });
 
@@ -420,7 +421,7 @@ describe("buildNetworkGraph prototype-named path segments (issue #4187)", () => 
       const branch = root[segment] as GraphBranch;
       expect(Object.keys(branch.paths)).toEqual(["items[GET]"]);
       expect((branch.paths["items[GET]"] as GraphLeaf).success).toBe(1);
-      expect((Object as unknown as { paths?: unknown }).paths).toBeUndefined();
+      expect(Reflect.get(Object, "paths")).toBeUndefined();
     },
   );
 

@@ -1,3 +1,4 @@
+import { flatHierarchyNode } from "../helpers/flatHierarchyNode";
 import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { logger } from "../../src/utils/logger";
@@ -45,11 +46,11 @@ function obs(text: string, updatedAt: number): ObserveResult {
     viewHierarchy: {
       packageName: "com.android.settings",
       hierarchy: {
-        node: {
+        node: flatHierarchyNode({
           class: "android.widget.TextView",
           "resource-id": "android:id/title",
           text,
-        } as any,
+        }),
       },
       updatedAt,
     },

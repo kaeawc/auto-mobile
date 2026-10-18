@@ -1,3 +1,4 @@
+import { valueAt } from "../helpers/valueAt";
 import { NotificationPolicy } from "../../src/features/utility/NotificationPolicy";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -104,18 +105,18 @@ describe("notification tools", () => {
     );
 
     expect(toolDefinition).toBeDefined();
-    const schema = toolDefinition!.inputSchema as any;
+    const schema = toolDefinition!.inputSchema;
     // #6154: platform is optional wherever deviceId/session resolves it.
-    expect(schema.required).toEqual(["title", "body"]);
+    expect(valueAt(schema, "required")).toEqual(["title", "body"]);
     // #6154: platform now comes from the shared `platformSchema` (android, ios)
     // instead of a per-branch literal union, so the enum order flipped.
-    expect(schema.properties.platform.enum).toEqual(["android", "ios"]);
-    expect(schema.properties.appId.description).toContain(
+    expect(valueAt(schema, "properties", "platform", "enum")).toEqual(["android", "ios"]);
+    expect(valueAt(schema, "properties", "appId", "description")).toContain(
       "Android defaults to the live foreground app",
     );
-    expect(schema.anyOf).toBeUndefined();
-    expect(schema.oneOf).toBeUndefined();
-    expect(schema.allOf).toBeUndefined();
+    expect(valueAt(schema, "anyOf")).toBeUndefined();
+    expect(valueAt(schema, "oneOf")).toBeUndefined();
+    expect(valueAt(schema, "allOf")).toBeUndefined();
   });
 
   test("generated tool definition leaves iOS appId validation to runtime", () => {
@@ -124,12 +125,12 @@ describe("notification tools", () => {
     );
 
     expect(toolDefinition).toBeDefined();
-    const schema = toolDefinition!.inputSchema as any;
+    const schema = toolDefinition!.inputSchema;
     // #6154: platform is optional wherever deviceId/session resolves it.
-    expect(schema.required).toEqual(["title", "body"]);
-    expect(schema.if).toBeUndefined();
-    expect(schema.then).toBeUndefined();
-    expect(schema.required).not.toContain("appId");
+    expect(valueAt(schema, "required")).toEqual(["title", "body"]);
+    expect(valueAt(schema, "if")).toBeUndefined();
+    expect(valueAt(schema, "then")).toBeUndefined();
+    expect(valueAt(schema, "required")).not.toContain("appId");
   });
 
   test("surfaces a postNotification warning in the message and payload (#10014)", async () => {

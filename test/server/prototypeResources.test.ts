@@ -1,3 +1,4 @@
+import { arrayAt, recordAt } from "../helpers/valueAt";
 import { beforeAll, describe, expect, test } from "bun:test";
 import contract from "../../schemas/prototype-spec-contract.json";
 import { validatePrototypeSpec } from "../../src/features/prototype/prototypeValidation";
@@ -59,18 +60,15 @@ describe("automobile:prototype resource", () => {
 
   test("mentions every node type, action type and theme role in the contract", () => {
     const guide = renderPrototypeGuide();
-    const defs = contract.definitions as unknown as Record<
-      string,
-      { variants?: Record<string, unknown>; values?: string[] }
-    >;
-    for (const type of [
-      ...Object.keys(defs.node.variants ?? {}),
-      ...Object.keys(defs.action.variants ?? {}),
-    ]) {
+    const defs = contract.definitions;
+    const variantNames = (definition: string) =>
+      Object.keys(recordAt(defs, definition, "variants"));
+    for (const type of [...variantNames("node"), ...variantNames("action")]) {
       expect(guide).toContain(`\`${type}\``);
     }
-    expect(defs.colorRole.values?.length).toBeGreaterThan(0);
-    for (const role of defs.colorRole.values ?? []) {
+    const roles = arrayAt(defs, "colorRole", "values");
+    expect(roles.length).toBeGreaterThan(0);
+    for (const role of roles) {
       expect(guide).toContain(`\`${role}\``);
     }
   });

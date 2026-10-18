@@ -23,3 +23,12 @@ export function recordAt(value: unknown, ...path: Array<string | number>): Recor
   }
   return Object.fromEntries(Object.entries(found));
 }
+
+/** Like {@link valueAt} but requires an array at the path. */
+export function arrayAt(value: unknown, ...path: Array<string | number>): unknown[] {
+  const found = valueAt(value, ...path);
+  if (!Array.isArray(found)) {
+    throw new Error(`expected an array at ${path.join(".")}, got ${JSON.stringify(found)}`);
+  }
+  return found;
+}

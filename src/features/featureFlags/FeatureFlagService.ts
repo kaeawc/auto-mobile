@@ -25,6 +25,9 @@ interface FeatureFlagState {
 /** Read-only view of the flag service; most consumers only ask `isEnabled`. */
 export type FeatureFlagReader = Pick<FeatureFlagService, "isEnabled">;
 
+/** List/set view used by the IDE flag routes; they never read single flags. */
+export type FeatureFlagAdmin = Pick<FeatureFlagService, "listFlags" | "setFlag">;
+
 export class FeatureFlagService {
   private static instance: FeatureFlagService | null = null;
   private readonly definitionByKey: Map<FeatureFlagKey, FeatureFlagDefinition>;

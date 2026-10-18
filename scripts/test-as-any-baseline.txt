@@ -116,7 +116,7 @@
 1	test/features/observe/TakeScreenshot.AndroidCtrlProxy.test.ts
 2	test/features/observe/TakeScreenshot.iOS.test.ts
 1	test/features/observe/ViewHierarchy.filter.test.ts
-13	test/features/observe/ViewHierarchy.test.ts
+11	test/features/observe/ViewHierarchy.test.ts
 1	test/features/observe/WaitForCondition.test.ts
 7	test/features/observe/android/AndroidCtrlProxyClientCapabilities.test.ts
 7	test/features/observe/android/AndroidCtrlProxyClientConnectionFailureRecovery.test.ts

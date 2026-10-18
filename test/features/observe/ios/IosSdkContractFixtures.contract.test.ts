@@ -41,10 +41,7 @@ function decodeFixture(name: string): DecodedEvent {
     createSuccessWebSocketFactory(timer),
     timer,
   );
-  const decoder = client as unknown as {
-    decodeSdkEventBatches(batches: FixtureBatch[], generation: number): DecodedEvent[];
-  };
-  const events = decoder.decodeSdkEventBatches([batch], 0);
+  const events = client["decodeSdkEventBatches"]([batch], 0);
   expect(events).toHaveLength(1);
   expect(events[0].applicationId).toBe(batch.bundleId);
   expect(events[0].eventType).toBe(batch.events[0].eventType);
@@ -67,11 +64,15 @@ async function ingest(event: DecodedEvent): Promise<{
     deviceId: null,
     sessionId: null,
   };
-  const recorder = {
+  // Only the routes these fixtures exercise record anything; the rest are inert.
+  const recorder: IosTelemetryRecorder = {
     getContext: () => context,
     setContext: (deviceId: string | null, sessionId: string | null) => {
       context = { deviceId, sessionId };
     },
+    recordNetworkEvent: async () => {},
+    recordLogEvent: async () => {},
+    recordLayoutEvent: async () => {},
     recordNavigationEvent: async (value: Record<string, unknown>) => {
       calls.navigation.push(value);
     },
@@ -81,12 +82,12 @@ async function ingest(event: DecodedEvent): Promise<{
     recordStorageEvent: async (value: Record<string, unknown>) => {
       calls.storage.push(value);
     },
-  } as unknown as IosTelemetryRecorder;
+  };
   const ingestor = new DefaultIosSdkEventIngestor({
     deviceId: "fixture-device",
     getNavigationGraphManager: () => ({
       recordNavigationEvent: async (value) => {
-        calls.graph.push(value as unknown as Record<string, unknown>);
+        calls.graph.push({ ...value });
       },
       updateNodeScreenshot: async () => {},
     }),

@@ -1,6 +1,7 @@
 import capturedWire from "../../../fixtures/ios/keyboard-modes/hardware-keyboard.runner-hierarchy.json";
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
+import { nodeAttributes } from "../../../../src/models/ViewHierarchyResult";
 import { STABLE_VIEW_ID_PREFIX } from "../../../../src/features/observe/android/StableNodeIdentity";
 import type {
   CtrlProxyNode,
@@ -154,7 +155,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
       }),
     );
 
-    expect((result.hierarchy.node as any).$["semantic-links"]).toEqual([
+    expect(nodeAttributes(result.hierarchy.node ?? {})["semantic-links"]).toEqual([
       { text: "Terms of Service", occurrence: 0 },
     ]);
   });
@@ -868,7 +869,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
       { nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 0 },
     ];
     for (const partial of partials) {
-      const result = subject.convertToViewHierarchyResult({ ...base, ...partial } as any);
+      const result = subject.convertToViewHierarchyResult({ ...base, ...partial });
       expect("nativeScale" in result).toBe(false);
       expect("pixelWidth" in result).toBe(false);
       expect("pixelHeight" in result).toBe(false);

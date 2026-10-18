@@ -373,7 +373,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     const waiting = client.awaitRecovery(20_000);
     expect(await client.ensureConnected()).toBe(true);
     await timer.advanceTimeAsync(2000);
-    expect((client as any).pendingRestartToken).toBeDefined();
+    expect(client["pendingRestartToken"]).toBeDefined();
     sockets[0]!.terminate();
     await new Promise<void>((resolve) => setImmediate(resolve));
     releaseRestart!();
@@ -483,20 +483,19 @@ describe("IOSCtrlProxyClient restart threshold", () => {
           releases.push(() => resolve([]));
         }),
     );
-    const internals = client as any;
     client.ensureRecoveryStarted();
-    const first = internals.recoveryPromise;
+    const first = client["recoveryPromise"];
     expect(releases).toHaveLength(1);
     // Model replacement before the first boot probe's completion settles.
-    internals.isRequestingServiceRestart = false;
-    internals.recoveryPromise = null;
+    client["isRequestingServiceRestart"] = false;
+    client["recoveryPromise"] = null;
     client.ensureRecoveryStarted();
-    const second = internals.recoveryPromise;
+    const second = client["recoveryPromise"];
     expect(releases).toHaveLength(2);
     releases[0]!();
     await first;
-    expect(internals.recoveryPromise).toBe(second);
-    expect(internals.isRequestingServiceRestart).toBe(true);
+    expect(client["recoveryPromise"]).toBe(second);
+    expect(client["isRequestingServiceRestart"]).toBe(true);
     releases[1]!();
     await second;
   });

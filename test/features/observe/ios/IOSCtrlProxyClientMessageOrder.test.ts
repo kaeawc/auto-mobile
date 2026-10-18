@@ -1,8 +1,9 @@
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
-import type { WebSocketMessage, XCTestHierarchy } from "../../../../src/features/observe/ios/types";
+import type { XCTestHierarchy } from "../../../../src/features/observe/ios/types";
 import { getStructuredPayload } from "../../../../src/utils/toolUtils";
+import { createConvertedHierarchyStubForTest } from "./iosStreamTestBuilders";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { createSuccessWebSocketFactory } from "../../../fakes/FakeWebSocket";
 
@@ -36,56 +37,45 @@ describe("IOSCtrlProxyClient captured hierarchy message ordering", () => {
         timer,
       );
       const calls: string[] = [];
-      const internal = client as unknown as {
-        processMessage(message: WebSocketMessage): void;
-        ignoreOlderHierarchyPush(message: WebSocketMessage): boolean;
-        retainScaleMetadataFrom(hierarchy: XCTestHierarchy): void;
-        handleHierarchyUpdateForNavigation(hierarchy: XCTestHierarchy): void;
-        convertToViewHierarchyResult(hierarchy: XCTestHierarchy): unknown;
-        sdkEventIngestor: { recordLayoutTelemetryEvent(hierarchy: unknown): void };
-        consumeHierarchyObservationStreamSuppression(requestId: string): boolean;
-        pushHierarchyToObservationStream(hierarchy: unknown): void;
-        startScreenshotBackoff(): void;
-        notifyPushUpdateListeners(hierarchy: XCTestHierarchy): void;
-        requestManager: { resolve(requestId: string, result: unknown): void };
+      // The client is created per test, so stubbing its private seams by
+      // assignment needs no restore step.
+      client["ignoreOlderHierarchyPush"] = () => {
+        calls.push("older-guard");
+        return kind === "older";
+      };
+      client["retainScaleMetadataFrom"] = () => {
+        calls.push("scale");
+      };
+      client["handleHierarchyUpdateForNavigation"] = () => {
+        calls.push("navigation");
+      };
+      client["convertToViewHierarchyResult"] = () => {
+        calls.push("convert");
+        return createConvertedHierarchyStubForTest(captured);
+      };
+      client["consumeHierarchyObservationStreamSuppression"] = () => {
+        calls.push("suppression");
+        return false;
+      };
+      client["pushHierarchyToObservationStream"] = () => {
+        calls.push("stream");
+      };
+      client["startScreenshotBackoff"] = () => {
+        calls.push("backoff");
+      };
+      client["notifyPushUpdateListeners"] = () => {
+        calls.push("listeners");
       };
       const spies = [
-        spyOn(internal, "ignoreOlderHierarchyPush").mockImplementation(() => {
-          calls.push("older-guard");
-          return kind === "older";
-        }),
-        spyOn(internal, "retainScaleMetadataFrom").mockImplementation(() => {
-          calls.push("scale");
-        }),
-        spyOn(internal, "handleHierarchyUpdateForNavigation").mockImplementation(() => {
-          calls.push("navigation");
-        }),
-        spyOn(internal, "convertToViewHierarchyResult").mockImplementation(() => {
-          calls.push("convert");
-          return { hierarchy: captured.hierarchy };
-        }),
-        spyOn(internal.sdkEventIngestor, "recordLayoutTelemetryEvent").mockImplementation(() => {
+        spyOn(client["sdkEventIngestor"], "recordLayoutTelemetryEvent").mockImplementation(() => {
           calls.push("layout");
         }),
-        spyOn(internal, "consumeHierarchyObservationStreamSuppression").mockImplementation(() => {
-          calls.push("suppression");
-          return false;
-        }),
-        spyOn(internal, "pushHierarchyToObservationStream").mockImplementation(() => {
-          calls.push("stream");
-        }),
-        spyOn(internal, "startScreenshotBackoff").mockImplementation(() => {
-          calls.push("backoff");
-        }),
-        spyOn(internal, "notifyPushUpdateListeners").mockImplementation(() => {
-          calls.push("listeners");
-        }),
-        spyOn(internal.requestManager, "resolve").mockImplementation(() => {
+        spyOn(client["requestManager"], "resolve").mockImplementation(() => {
           calls.push("resolve");
         }),
       ];
       try {
-        internal.processMessage({
+        client["processMessage"]({
           type: "hierarchy_update",
           data: captured,
           ...(kind === "response" ? { requestId: "captured-response" } : {}),

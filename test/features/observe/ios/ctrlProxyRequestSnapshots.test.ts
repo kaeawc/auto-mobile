@@ -58,6 +58,7 @@ import { buildNetworkMockRules } from "../../../../src/server/networkMockRules";
 import { NetworkState } from "../../../../src/server/NetworkState";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { serializeIosRequest } from "../../../../src/features/observe/ios/serializeIosRequest";
+import { createSendOnlyWebSocketForTest } from "./iosStreamTestBuilders";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 const FIXTURE_PATH = resolve(
@@ -92,12 +93,9 @@ function createHarness(): Harness {
   const context: HierarchyDelegateContext = {
     serializeRequest: serializeIosRequest,
     getWebSocket: () =>
-      ({
-        send: (data: string) => {
-          sent.push(data);
-        },
-        readyState: 1,
-      }) as any,
+      createSendOnlyWebSocketForTest((data) => {
+        sent.push(data);
+      }),
     requestManager,
     timer,
     ensureConnected: async () => true,

@@ -69,7 +69,7 @@ function runnerHierarchy(root: CaptureNode): XCTestHierarchy {
     updatedAt: 0,
     // Captured wire nodes use dashed ids and tuple bounds; the converter accepts
     // both spellings even though XCTestHierarchy declares camel-case/object bounds.
-    hierarchy: structuredClone(root) as unknown as XCTestHierarchy["hierarchy"],
+    hierarchy: structuredClone(root) as XCTestHierarchy["hierarchy"],
   };
 }
 

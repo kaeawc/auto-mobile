@@ -9,27 +9,22 @@ interface Node {
   node?: Node[];
 }
 const subject = new CtrlProxyHierarchy({} as HierarchyDelegateContext);
-const predicates = subject as unknown as {
-  hasContentProperties(attrs: Record<string, unknown>): boolean;
-  isRedundantStaticTextChild(text: string, child: Node): boolean;
-  noiseSiblingKey(node: Node): string | null;
-};
 
 test("content properties preserve truthiness and short circuit", () => {
   for (const key of ["text", "value", "resource-id", "content-desc", "test-tag", "role"]) {
     for (const value of ["label", " ", true, 1, {}]) {
-      expect(predicates.hasContentProperties({ [key]: value })).toBe(true);
+      expect(subject["hasContentProperties"]({ [key]: value })).toBe(true);
     }
     for (const value of ["", false, 0, null, undefined]) {
-      expect(predicates.hasContentProperties({ [key]: value })).toBe(false);
+      expect(subject["hasContentProperties"]({ [key]: value })).toBe(false);
     }
   }
-  expect(predicates.hasContentProperties({ "view-id": "stable-id" })).toBe(true);
+  expect(subject["hasContentProperties"]({ "view-id": "stable-id" })).toBe(true);
 });
 
 test("static text guards retain child structure, extras, actions and independent state", () => {
   const leaf: Node = { $: { class: "UILabel", role: "text", text: " Parent " } };
-  expect(predicates.isRedundantStaticTextChild("Parent", leaf)).toBe(true);
+  expect(subject["isRedundantStaticTextChild"]("Parent", leaf)).toBe(true);
   for (const node of [
     { ...leaf, node: [leaf] },
     { ...leaf, extras: { sdk: "value" } },
@@ -41,18 +36,18 @@ test("static text guards retain child structure, extras, actions and independent
     { $: { ...leaf.$, clickable: "true" } },
     { $: { ...leaf.$, value: "independent" } },
   ]) {
-    expect(predicates.isRedundantStaticTextChild("Parent", node)).toBe(false);
+    expect(subject["isRedundantStaticTextChild"]("Parent", node)).toBe(false);
   }
 });
 
 test("noise key preserves nullish defaults and protects content-bearing leaves", () => {
   const leaf: Node = { $: { text: "Dictate" } };
-  expect(predicates.noiseSiblingKey(leaf)).toBe('["","Dictate","",null]');
-  expect(predicates.noiseSiblingKey({ $: { text: "Horizontal scroll bar" } })).toBe(
+  expect(subject["noiseSiblingKey"](leaf)).toBe('["","Dictate","",null]');
+  expect(subject["noiseSiblingKey"]({ $: { text: "Horizontal scroll bar" } })).toBe(
     '["","Horizontal scroll bar","",null]',
   );
   expect(
-    predicates.noiseSiblingKey({
+    subject["noiseSiblingKey"]({
       $: { text: "Dictation", class: "UIButton", "resource-id": "id", bounds: [] },
     }),
   ).toBe('["UIButton","Dictation","id",[]]');
@@ -64,7 +59,7 @@ test("noise key preserves nullish defaults and protects content-bearing leaves",
     { $: { text: "independent" } },
     { $: { text: 1 } },
   ]) {
-    expect(predicates.noiseSiblingKey(node)).toBeNull();
+    expect(subject["noiseSiblingKey"](node)).toBeNull();
   }
 });
 

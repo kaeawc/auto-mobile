@@ -58,7 +58,7 @@ function onlyWindow(index: number): ViewHierarchyResult {
 
 /** The runner's unconverted tree, which keeps the UIWindow wrappers. */
 function unconverted(): ViewHierarchyResult {
-  return captured as unknown as ViewHierarchyResult;
+  return captured as ViewHierarchyResult;
 }
 
 /** Derived chromeless FULLSCREEN shape; a real capture of its root marker is still owed. */
@@ -98,7 +98,7 @@ describe("iOS prototype agent window with layer (iphone D2)", () => {
       if (form === "single window") {
         raw.hierarchy.node = (raw.hierarchy.node as CtrlProxyNode[]).slice(1);
       }
-      return form === "UIWindow wrappers" ? (raw as unknown as ViewHierarchyResult) : convert(raw);
+      return form === "UIWindow wrappers" ? (raw as ViewHierarchyResult) : convert(raw);
     };
 
     test(`fullscreen root marker alone owns the whole window (${form})`, () => {

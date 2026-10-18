@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../../../src/db/dbWriteBarrier";
 import {
   DefaultIosSdkEventIngestor,
-  type IosTelemetryRecorder,
   type NavigationEventSink,
 } from "../../../../src/features/observe/ios/IosSdkEventIngestor";
 import type { SdkEvent } from "../../../../src/features/observe/interfaces/SdkEventIngestor";
@@ -13,11 +12,10 @@ import type { ViewHierarchyResult } from "../../../../src/models";
 import type { NavigationEvent } from "../../../../src/utils/interfaces/NavigationGraph";
 import { FakeFailureRecorder } from "../../../fakes/FakeFailureRecorder";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { createLayoutHierarchyForTest } from "./iosStreamTestBuilders";
+import { FakeFileSystem } from "../../../fakes/FakeFileSystem";
 import { NavigationScreenshotManager } from "../../../../src/features/navigation/NavigationScreenshotManager";
-import {
-  DefaultAndroidSdkEventIngestor,
-  type AndroidTelemetryRecorder,
-} from "../../../../src/features/observe/android/AndroidSdkEventIngestor";
+import { DefaultAndroidSdkEventIngestor } from "../../../../src/features/observe/android/AndroidSdkEventIngestor";
 
 import { SdkFrameMetricsStore } from "../../../../src/features/performance/SdkFrameMetricsStore";
 
@@ -76,12 +74,25 @@ class CapturingTelemetryRecorder {
   }
 }
 
+/** A real manager on a fake filesystem whose storeScreenshot is replaced by `store`. */
+function createStubbedScreenshotManager(
+  store: () => Promise<string | null>,
+): NavigationScreenshotManager {
+  const manager = NavigationScreenshotManager.createForTesting({
+    screenshotDir: "/navigation-screenshots",
+    fileSystem: new FakeFileSystem(),
+    timer: new FakeTimer(),
+  });
+  spyOn(manager, "storeScreenshot").mockImplementation(store);
+  return manager;
+}
+
 class CapturingNavigationSink implements NavigationEventSink {
   recorded: Array<Record<string, unknown>> = [];
   screenshotUpdates: Array<{ appId: string; screenName: string; path: string | null }> = [];
 
   async recordNavigationEvent(event: NavigationEvent): Promise<void> {
-    this.recorded.push(event as unknown as Record<string, unknown>);
+    this.recorded.push({ ...event });
   }
 
   async updateNodeScreenshot(
@@ -113,7 +124,7 @@ describe("DefaultIosSdkEventIngestor", () => {
       timer: overrides.timer ?? new FakeTimer(),
       getNavigationGraphManager: () => navSink,
       captureScreenshot: async (): Promise<CtrlProxyScreenshotResult> => ({ success: false }),
-      telemetryRecorder: recorder as unknown as IosTelemetryRecorder,
+      telemetryRecorder: recorder,
       failureRecorder,
       navigationScreenshotsEnabled: overrides.navigationScreenshotsEnabled ?? (() => false),
     });
@@ -291,7 +302,7 @@ describe("DefaultIosSdkEventIngestor", () => {
       getNavigationScreenSource: () => ({ getCurrentScreen: () => null }),
       parseStackTrace: () => [],
       now: () => 1000,
-      telemetryRecorder: androidRecorder as unknown as AndroidTelemetryRecorder,
+      telemetryRecorder: androidRecorder,
       failureRecorder,
     });
     await android.recordSdkEvent(
@@ -672,16 +683,16 @@ describe("DefaultIosSdkEventIngestor", () => {
       const screenshotManagerSpy = spyOn(
         NavigationScreenshotManager,
         "getInstance",
-      ).mockReturnValue({
-        storeScreenshot: async () => {
+      ).mockReturnValue(
+        createStubbedScreenshotManager(async () => {
           calls.push("store");
           return "/screens/com.app/Home.webp";
-        },
-      } as unknown as NavigationScreenshotManager);
+        }),
+      );
       const subject = new DefaultIosSdkEventIngestor({
         deviceId: DEVICE_ID,
         timer: new FakeTimer(),
-        telemetryRecorder: recorder as unknown as IosTelemetryRecorder,
+        telemetryRecorder: recorder,
         failureRecorder,
         getNavigationGraphManager: () => {
           calls.push("graph");
@@ -805,9 +816,9 @@ describe("DefaultIosSdkEventIngestor", () => {
    * telemetry URI that points at it is built by the graph manager, scoped by that app (#5851).
    */
   test("a stored navigation screenshot is attached to the named app's node (#10195)", async () => {
-    const screenshotManagerSpy = spyOn(NavigationScreenshotManager, "getInstance").mockReturnValue({
-      storeScreenshot: async () => "/screens/com.app/Home.webp",
-    } as unknown as NavigationScreenshotManager);
+    const screenshotManagerSpy = spyOn(NavigationScreenshotManager, "getInstance").mockReturnValue(
+      createStubbedScreenshotManager(async () => "/screens/com.app/Home.webp"),
+    );
     try {
       const withScreenshots = new DefaultIosSdkEventIngestor({
         deviceId: DEVICE_ID,
@@ -817,7 +828,7 @@ describe("DefaultIosSdkEventIngestor", () => {
           data: "AAAA",
           format: "png",
         }),
-        telemetryRecorder: recorder as unknown as IosTelemetryRecorder,
+        telemetryRecorder: recorder,
         failureRecorder,
         navigationScreenshotsEnabled: () => true,
       });
@@ -881,12 +892,12 @@ describe("DefaultIosSdkEventIngestor", () => {
 
   describe("recordLayoutTelemetryEvent", () => {
     const hierarchy = (): ViewHierarchyResult =>
-      ({
+      createLayoutHierarchyForTest({
         hierarchy: { node: [{ $: { text: "a" } }, { $: { text: "b" } }] },
         packageName: "com.app",
         windows: [],
         updatedAt: 123,
-      }) as unknown as ViewHierarchyResult;
+      });
 
     test("timestamps layout telemetry with the advanced injected timer", () => {
       const timer = new FakeTimer();
@@ -927,12 +938,12 @@ describe("DefaultIosSdkEventIngestor", () => {
       // permanently mis-attributing later Android telemetry. A BigInt in the
       // hierarchy makes the internal JSON.stringify throw synchronously — after
       // setContext(iOS) has already run.
-      const unserializable = {
+      const unserializable = createLayoutHierarchyForTest({
         hierarchy: { node: [{ $: { bad: BigInt(1) } }] },
         packageName: "com.app",
         windows: [],
         updatedAt: 1,
-      } as unknown as ViewHierarchyResult;
+      });
       // Must not throw (telemetry is best-effort) ...
       const warning = spyOn(logger, "warn").mockImplementation(() => {});
       try {
@@ -976,7 +987,7 @@ describe("DefaultIosSdkEventIngestor", () => {
         deviceId: DEVICE_ID,
         getNavigationGraphManager: () => navSink,
         captureScreenshot: async (): Promise<CtrlProxyScreenshotResult> => ({ success: false }),
-        telemetryRecorder: new RestoreThrows() as unknown as IosTelemetryRecorder,
+        telemetryRecorder: new RestoreThrows(),
         failureRecorder,
         navigationScreenshotsEnabled: () => false,
       });

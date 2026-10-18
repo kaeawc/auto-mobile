@@ -9,6 +9,8 @@ import type { BootedDevice } from "../../../../src/models";
 import { createSuccessWebSocketFactory } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeSocket } from "../../../fakes/FakeNetServer";
+import type { XCTestHierarchy } from "../../../../src/features/observe/ios/types";
+import { createIosScreenSourceForTest, emptyViewHierarchyForTest } from "./iosStreamTestBuilders";
 import { loadCoordinateMappingVectors } from "../../../parity/coordinateMappingGoldenVectors";
 
 describe("IOSCtrlProxyClient observation-stream provenance", () => {
@@ -63,61 +65,35 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
     screenHeight: number,
     screenScale: number,
   ): { captureSequence?: number } => {
-    const source: {
-      screenWidth: number;
-      screenHeight: number;
-      screenScale: number;
-      captureSequence?: number;
-    } = { screenWidth, screenHeight, screenScale };
-    (
-      ctrlProxyClient as unknown as {
-        pushHierarchyToObservationStream(
-          hierarchy: { hierarchy: object },
-          source: { screenWidth: number; screenHeight: number; screenScale: number },
-        ): void;
-      }
-    ).pushHierarchyToObservationStream({ hierarchy: {} }, source);
+    const source = createIosScreenSourceForTest({ screenWidth, screenHeight, screenScale });
+    ctrlProxyClient["pushHierarchyToObservationStream"](emptyViewHierarchyForTest(), source);
     return source;
   };
 
   const setStaleCache = (screenWidth: number, screenHeight: number, screenScale: number): void => {
-    (
-      ctrlProxyClient as unknown as {
-        cachedHierarchy: {
-          hierarchy: { screenWidth: number; screenHeight: number; screenScale: number };
-          receivedAt: number;
-          fresh: boolean;
-        };
-      }
-    ).cachedHierarchy = {
-      hierarchy: { screenWidth, screenHeight, screenScale },
+    ctrlProxyClient["cachedHierarchy"] = {
+      hierarchy: createIosScreenSourceForTest({ screenWidth, screenHeight, screenScale }),
       receivedAt: fakeTimer.now(),
       fresh: true,
     };
   };
 
-  const receiveHierarchy = (data: Record<string, unknown>, requestId?: string): void => {
-    (
-      ctrlProxyClient as unknown as {
-        processMessage(message: Record<string, unknown>): void;
-      }
-    ).processMessage({
+  const receiveHierarchy = (data: Partial<XCTestHierarchy>, requestId?: string): void => {
+    ctrlProxyClient["processMessage"]({
       type: "hierarchy_update",
       ...(requestId ? { requestId } : {}),
       timestamp: fakeTimer.now(),
-      data: { packageName: "com.example.ios", hierarchy: {}, ...data },
+      data: createIosScreenSourceForTest({
+        packageName: "com.example.ios",
+        hierarchy: {},
+        ...data,
+      }),
     });
   };
 
   test("derives geometry from the hierarchy being forwarded, not from the cache", async () => {
     await startStreamServer();
-    const geometry = (
-      ctrlProxyClient as unknown as {
-        screenGeometry: {
-          bind(): { captureSequence: number; width: number; height: number } | null;
-        };
-      }
-    ).screenGeometry;
+    const geometry = ctrlProxyClient["screenGeometry"];
 
     const forwarded = forwardHierarchy(390, 844, 3);
     expect(geometry.bind()).toEqual({
@@ -138,26 +114,24 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
 
   test("clears tracked geometry when the forwarded hierarchy reports none", async () => {
     await startStreamServer();
-    const client = ctrlProxyClient as unknown as {
-      screenGeometry: { bind(): unknown };
-      pushHierarchyToObservationStream(hierarchy: { hierarchy: object }, source: object): void;
-    };
+    const client = ctrlProxyClient;
 
     forwardHierarchy(390, 844, 3);
-    expect(client.screenGeometry.bind()).not.toBeNull();
+    expect(client["screenGeometry"].bind()).not.toBeNull();
 
     setStaleCache(390, 844, 3);
-    client.pushHierarchyToObservationStream({ hierarchy: {} }, {});
-    expect(client.screenGeometry.bind()).toBeNull();
+    client["pushHierarchyToObservationStream"](
+      emptyViewHierarchyForTest(),
+      createIosScreenSourceForTest(),
+    );
+    expect(client["screenGeometry"].bind()).toBeNull();
   });
 
   test("retains metadata when the observation-stream push is suppressed", async () => {
     await startStreamServer();
     const requestId = "req-suppressed-1";
-    const client = ctrlProxyClient as unknown as {
-      hierarchyObservationStreamSuppressions: Map<string, unknown>;
-    };
-    client.hierarchyObservationStreamSuppressions.set(
+    const client = ctrlProxyClient;
+    client["hierarchyObservationStreamSuppressions"].set(
       requestId,
       fakeTimer.setTimeout(() => {}, 10_000),
     );
@@ -174,7 +148,7 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
       requestId,
     );
 
-    expect(client.hierarchyObservationStreamSuppressions.has(requestId)).toBe(false);
+    expect(client["hierarchyObservationStreamSuppressions"].has(requestId)).toBe(false);
     expect(ctrlProxyClient.getScreenScaleMetadata()).toEqual({
       nativeScale: 3.144,
       pixelWidth: 1179,
@@ -184,11 +158,7 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
 
   test("tracks canonical pixel geometry from native scale metadata", async () => {
     await startStreamServer();
-    const geometry = (
-      ctrlProxyClient as unknown as {
-        screenGeometry: { bind(): { width: number; height: number } };
-      }
-    ).screenGeometry;
+    const geometry = ctrlProxyClient["screenGeometry"];
 
     receiveHierarchy({
       screenWidth: 375,
@@ -204,53 +174,35 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
       pixelWidth: 1179,
       pixelHeight: 2553,
     });
-    expect(geometry.bind().width).toBe(1179);
-    expect(geometry.bind().height).toBe(2553);
+    expect(geometry.bind()?.width).toBe(1179);
+    expect(geometry.bind()?.height).toBe(2553);
   });
 
   test("stamps screenshots from the request-time coordinate-space binding", async () => {
     const socket = await startStreamServer();
-    const client = ctrlProxyClient as unknown as {
-      screenGeometry: {
-        bind(): {
-          width: number;
-          height: number;
-          captureSequence: number;
-          coordinateSpace?: "px";
-          nativeScale?: number;
-        };
-      };
-      reportedScaleMetadata: unknown;
-      pushHierarchyToObservationStream(hierarchy: { hierarchy: object }, source: object): void;
-      pushScreenshotToObservationStream(options: {
-        screenshotBase64: string;
-        screenWidth: number;
-        screenHeight: number;
-        metadata?: undefined;
-        captureSequence: number;
-        coordinateSpace?: "px";
-        nativeScale?: number;
-      }): void;
-    };
+    const client = ctrlProxyClient;
 
-    client.pushHierarchyToObservationStream(
-      { hierarchy: {} },
-      {
+    client["pushHierarchyToObservationStream"](
+      emptyViewHierarchyForTest(),
+      createIosScreenSourceForTest({
         screenWidth: 375,
         screenHeight: 812,
         screenScale: 3,
         nativeScale: 3,
         pixelWidth: 1125,
         pixelHeight: 2436,
-      },
+      }),
     );
-    const boundPx = client.screenGeometry.bind();
+    const boundPx = client["screenGeometry"].bind();
+    if (!boundPx) {
+      throw new Error("expected a bound coordinate space");
+    }
     expect(boundPx.coordinateSpace).toBe("px");
     expect(boundPx.nativeScale).toBe(3);
 
-    client.reportedScaleMetadata = null;
+    client["reportedScaleMetadata"] = null;
     socket.reset();
-    client.pushScreenshotToObservationStream({
+    client["pushScreenshotToObservationStream"]({
       screenshotBase64: "c2hvdA==",
       screenWidth: boundPx.width,
       screenHeight: boundPx.height,
@@ -265,21 +217,24 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
     expect(pxShot?.coordinateSpace).toBe("px");
     expect(pxShot?.nativeScale).toBe(3);
 
-    client.pushHierarchyToObservationStream(
-      { hierarchy: {} },
-      { screenWidth: 320, screenHeight: 693, screenScale: 3 },
+    client["pushHierarchyToObservationStream"](
+      emptyViewHierarchyForTest(),
+      createIosScreenSourceForTest({ screenWidth: 320, screenHeight: 693, screenScale: 3 }),
     );
-    const boundLegacy = client.screenGeometry.bind();
+    const boundLegacy = client["screenGeometry"].bind();
+    if (!boundLegacy) {
+      throw new Error("expected a bound coordinate space");
+    }
     expect(boundLegacy.coordinateSpace).toBeUndefined();
     expect(boundLegacy.nativeScale).toBeUndefined();
 
-    client.reportedScaleMetadata = {
+    client["reportedScaleMetadata"] = {
       nativeScale: 3,
       pixelWidth: 960,
       pixelHeight: 2079,
     };
     socket.reset();
-    client.pushScreenshotToObservationStream({
+    client["pushScreenshotToObservationStream"]({
       screenshotBase64: "c2hvdA==",
       screenWidth: boundLegacy.width,
       screenHeight: boundLegacy.height,
@@ -298,30 +253,19 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
   for (const [index, vector] of loadCoordinateMappingVectors().iosPointToPixel.entries()) {
     test(`maps live vector ${index} from points to canonical pixels`, async () => {
       await startStreamServer();
-      const geometry = (
-        ctrlProxyClient as unknown as {
-          screenGeometry: { bind(): { width: number; height: number } };
-        }
-      ).screenGeometry;
+      const geometry = ctrlProxyClient["screenGeometry"];
 
-      (
-        ctrlProxyClient as unknown as {
-          pushHierarchyToObservationStream(
-            hierarchy: { hierarchy: object },
-            source: Record<string, number>,
-          ): void;
-        }
-      ).pushHierarchyToObservationStream(
-        { hierarchy: {} },
-        {
+      ctrlProxyClient["pushHierarchyToObservationStream"](
+        emptyViewHierarchyForTest(),
+        createIosScreenSourceForTest({
           screenWidth: vector.pointWidth,
           screenHeight: vector.pointHeight,
           ...(vector.scale === 0 ? {} : { screenScale: vector.scale }),
-        },
+        }),
       );
 
-      expect(geometry.bind().width).toBe(vector.expectedPixelWidth);
-      expect(geometry.bind().height).toBe(vector.expectedPixelHeight);
+      expect(geometry.bind()?.width).toBe(vector.expectedPixelWidth);
+      expect(geometry.bind()?.height).toBe(vector.expectedPixelHeight);
     });
   }
 });

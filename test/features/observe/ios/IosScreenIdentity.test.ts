@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { deriveIosScreenIdentity } from "../../../../src/features/observe/ios/IosScreenIdentity";
+import { createRawRunnerHierarchyForTest } from "./iosStreamTestBuilders";
 import type {
   ViewHierarchyNode,
   ViewHierarchyResult,
@@ -221,25 +222,27 @@ describe("deriveIosScreenIdentity", () => {
   });
 
   test("handles raw XCTest root nodes with direct attrs and child arrays", () => {
-    const identity = deriveIosScreenIdentity({
-      packageName: "com.apple.reminders",
-      screenScale: 3,
-      hierarchy: {
-        class: "XCUIElementTypeApplication",
-        "view-id": "root",
-        node: [
-          {
-            class: "XCUIElementTypeNavigationBar",
-            node: [{ class: "XCUIElementTypeStaticText", text: "Reminders", "view-id": "title" }],
-          },
-          {
-            class: "XCUIElementTypeButton",
-            text: "New Reminder",
-            clickable: "true",
-          },
-        ],
-      } as any,
-    });
+    const identity = deriveIosScreenIdentity(
+      createRawRunnerHierarchyForTest({
+        packageName: "com.apple.reminders",
+        screenScale: 3,
+        hierarchy: {
+          class: "XCUIElementTypeApplication",
+          "view-id": "root",
+          node: [
+            {
+              class: "XCUIElementTypeNavigationBar",
+              node: [{ class: "XCUIElementTypeStaticText", text: "Reminders", "view-id": "title" }],
+            },
+            {
+              class: "XCUIElementTypeButton",
+              text: "New Reminder",
+              clickable: "true",
+            },
+          ],
+        },
+      }),
+    );
 
     expect(identity?.components.bundleId).toBe("com.apple.reminders");
     expect(identity?.components.navigationTitle).toBe("Reminders");

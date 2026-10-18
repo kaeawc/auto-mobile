@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import WebSocket from "ws";
 import { CtrlProxyGestures } from "../../../../src/features/observe/ios/CtrlProxyGestures";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { decodeCtrlProxyMessage } from "../../../../src/features/observe/ios/decodeCtrlProxyMessage";
@@ -12,6 +11,7 @@ import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { createSuccessWebSocketFactory } from "../../../fakes/FakeWebSocket";
 import { dispatchIosCoordinateTap } from "../../../../src/features/action/coordinateTapDispatch";
+import { createSendOnlyWebSocketForTest } from "./iosStreamTestBuilders";
 import { FakeSystemDetection } from "../../../fakes/FakeSystemDetection";
 
 // #8379: conflicting app/screen frames are faithfully reported; no mapping is applied.
@@ -47,14 +47,11 @@ function gestureHarness(environment = new FakeSystemDetection()) {
   const timer = new FakeTimer();
   const requestManager = new RequestManager(timer);
   const sent: string[] = [];
-  const socket = {
-    readyState: WebSocket.OPEN,
-    send(data: string) {
-      sent.push(data);
-      const request: { requestId: string } = JSON.parse(data);
-      requestManager.resolve(request.requestId, { success: true });
-    },
-  } as unknown as WebSocket;
+  const socket = createSendOnlyWebSocketForTest((data) => {
+    sent.push(data);
+    const request: { requestId: string } = JSON.parse(data);
+    requestManager.resolve(request.requestId, { success: true });
+  });
   return {
     sent,
     gestures: new CtrlProxyGestures(
@@ -239,15 +236,12 @@ describe("iOS opt-in tap diagnostics", () => {
       createSuccessWebSocketFactory(timer),
       timer,
     );
-    const boundary = client as unknown as {
-      requestManager: RequestManager;
-      processMessage(message: WebSocketMessage): void;
-    };
+    const boundary = client;
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       logger.setLogLevel(LogLevel.INFO);
-      const pending = boundary.requestManager.register("tap", "tap_coordinates", 5000);
+      const pending = boundary["requestManager"].register("tap", "tap_coordinates", 5000);
       // Model JSON from an untrusted runner, including a malformed optional value.
       const message: WebSocketMessage = JSON.parse(
         JSON.stringify({
@@ -257,7 +251,7 @@ describe("iOS opt-in tap diagnostics", () => {
           tapDiagnostics: payload,
         }),
       );
-      boundary.processMessage(message);
+      boundary["processMessage"](message);
       expect(await pending).toMatchObject({ success: true, tapDiagnostics: payload });
       const lines = debug.mock.calls
         .map(([line]) => line)
@@ -276,7 +270,7 @@ describe("iOS opt-in tap diagnostics", () => {
       // The full #8379 reading fits the logger's existing line-size bound.
       expect(lines[0].length).toBeLessThanOrEqual(1000);
       debug.mockClear();
-      boundary.processMessage({
+      boundary["processMessage"]({
         type: "tap_coordinates_result",
         requestId: "legacy",
         success: true,

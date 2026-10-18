@@ -150,12 +150,13 @@ describe("booted iOS service-status transient handling (#7053)", () => {
   });
 
   test("omits iOS version identity when installation is unconfirmed despite a running tunnel", async () => {
-    const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
-      isInstalled: async () => false,
-      isRunning: async () => true,
-      checkRunningWithReason: async () => ({ ok: true }),
-      getForcedRestartBudget: () => ({ snapshot: () => ({ state: "idle", attempts: 0 }) }),
-    } as unknown as IOSCtrlProxyManager);
+    const spies = [
+      spyOn(IOSCtrlProxyManager.prototype, "isInstalled").mockResolvedValue(false),
+      spyOn(IOSCtrlProxyManager.prototype, "isRunning").mockResolvedValue(true),
+      spyOn(IOSCtrlProxyManager.prototype, "checkRunningWithReason").mockResolvedValue({
+        ok: true,
+      }),
+    ];
     try {
       const status = await queryDeviceServiceStatus(
         { name: "iPhone", platform: "ios", deviceId: "SIM-A" },
@@ -168,7 +169,8 @@ describe("booted iOS service-status transient handling (#7053)", () => {
       expect(status).not.toHaveProperty("versionInfo");
       expect(status).not.toHaveProperty("version");
     } finally {
-      managerSpy.mockRestore();
+      spies.forEach((spy) => spy.mockRestore());
+      IOSCtrlProxyManager.resetInstances();
     }
   });
 

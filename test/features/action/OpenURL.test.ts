@@ -129,7 +129,7 @@ const openIos = (
   url: string,
 ) => {
   const openURL = new OpenURL(device, new FakeAdbExecutor(), simctl, devicectl);
-  return openURL.executeiOSOpenURL(url);
+  return openURL.testHooks.executeiOSOpenURL(url);
 };
 
 describe("OpenURL iOS routing", () => {
@@ -391,7 +391,7 @@ describe("OpenURL Android parity (regression guard)", () => {
       fakeAdb,
     );
 
-    const result = await openURL.executeAndroidOpenURL("https://example.com/x");
+    const result = await openURL.testHooks.executeAndroidOpenURL("https://example.com/x");
 
     expect(result).toEqual({ success: true, url: "https://example.com/x" });
     expect(fakeAdb.getExecutedArgv()).toEqual([

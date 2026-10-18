@@ -30,7 +30,8 @@ interface DaemonHttpInternals {
   rejectStartupCompletion(reason: unknown): void;
   sessionManager: SessionManager;
   observerSessionRegistry: ObserverSessionRegistry;
-  transports: Map<string, FakeTransport>;
+  mcpHttpTransportFactory: () => FakeTransport;
+  mcpRequestServerFactory: () => FakeMcpServer;
 }
 
 class FakeRequest extends EventEmitter {
@@ -73,6 +74,10 @@ class FakeResponse extends EventEmitter {
     return this;
   }
 
+  write(): boolean {
+    return true;
+  }
+
   end(body?: string): this {
     this.body = body ?? "";
     this.writableEnded = true;
@@ -111,17 +116,26 @@ class FakeHttpServer extends EventEmitter {
     request.method = method;
     request.url = path;
     const response = new FakeResponse();
+    if (body !== undefined) {
+      // Like a socket that buffers the upload: deliver it once the daemon reads the
+      // body, which a request held on startup admission does only later.
+      const deliver = (event: string | symbol) => {
+        if (event !== "end") {
+          return;
+        }
+        request.off("newListener", deliver);
+        queueMicrotask(() => {
+          request.emit("data", Buffer.from(body));
+          request.emit("end");
+        });
+      };
+      request.on("newListener", deliver);
+    }
     this.emit(
       "request",
       request as unknown as IncomingMessage,
       response as unknown as ServerResponse,
     );
-    if (body !== undefined) {
-      queueMicrotask(() => {
-        request.emit("data", Buffer.from(body));
-        request.emit("end");
-      });
-    }
     const finished = response.finished.then(() => response);
     this.inFlight.add(finished);
     void finished.then(() => this.inFlight.delete(finished));
@@ -129,9 +143,10 @@ class FakeHttpServer extends EventEmitter {
   }
 }
 
+/** Stands in for every request's transport: one fake shared across the stateless requests. */
 class FakeTransport {
-  readonly sessionId = "known-session";
   handled = 0;
+  closed = 0;
   parsedBodies: unknown[] = [];
 
   async handleRequest(
@@ -144,6 +159,15 @@ class FakeTransport {
     res.writeHead(200);
     res.end();
   }
+
+  async close(): Promise<void> {
+    this.closed += 1;
+  }
+}
+
+class FakeMcpServer {
+  async connect(): Promise<void> {}
+  async close(): Promise<void> {}
 }
 
 async function harness(
@@ -164,7 +188,8 @@ async function harness(
   if (observers) {
     internals.observerSessionRegistry = observers;
   }
-  internals.transports.set(transport.sessionId, transport);
+  internals.mcpHttpTransportFactory = () => transport;
+  internals.mcpRequestServerFactory = () => new FakeMcpServer();
   await internals.startHttpServer();
   if (startupComplete) {
     internals.resolveStartupCompletion();
@@ -172,6 +197,13 @@ async function harness(
     await Promise.resolve();
   }
   return { server, transport, internals };
+}
+
+const TOOLS_LIST = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+
+/** POST one MCP request, the way every stateless MCP exchange arrives. */
+function dispatchMcp(server: FakeHttpServer, headers: IncomingHttpHeaders): Promise<FakeResponse> {
+  return server.dispatch(headers, "POST", MCP_STREAMABLE_PATH, TOOLS_LIST);
 }
 
 // harness() constructs a Daemon, which initializes the process-wide DaemonState.
@@ -184,7 +216,7 @@ describe("Daemon HTTP request admission", () => {
     "rejects a non-loopback or mismatched Host header %s before MCP transport",
     async (host) => {
       const { server, transport } = await harness();
-      const response = await server.dispatch({ host, "mcp-session-id": transport.sessionId });
+      const response = await dispatchMcp(server, { host });
       expect(response.statusCode).toBe(403);
       expect(transport.handled).toBe(0);
     },
@@ -192,22 +224,26 @@ describe("Daemon HTTP request admission", () => {
 
   test("rejects a non-empty Origin header before MCP transport", async () => {
     const { server, transport } = await harness();
-    const response = await server.dispatch({
+    const response = await dispatchMcp(server, {
       host: `127.0.0.1:${port}`,
       origin: "https://evil.com",
-      "mcp-session-id": transport.sessionId,
     });
     expect(response.statusCode).toBe(403);
     expect(transport.handled).toBe(0);
   });
 
   test.each([`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`])(
-    "forwards loopback Host %s without Origin to the existing MCP transport",
+    "forwards loopback Host %s without Origin to a per-request MCP transport",
     async (host) => {
       const { server, transport } = await harness();
-      const response = await server.dispatch({ host, "mcp-session-id": transport.sessionId });
+      const response = await dispatchMcp(server, { host });
       expect(response.statusCode).toBe(200);
       expect(transport.handled).toBe(1);
+      // Stateless (#4678): the request's transport closes with its response.
+      for (let turn = 0; turn < 20 && transport.closed === 0; turn++) {
+        await Promise.resolve();
+      }
+      expect(transport.closed).toBe(1);
       expect(response.headers.has("access-control-allow-origin")).toBeFalse();
     },
   );
@@ -216,7 +252,7 @@ describe("Daemon HTTP request admission", () => {
     const { server, transport } = await harness();
     const body = { jsonrpc: "2.0", id: 1, method: "tools/list" };
     const response = await server.dispatch(
-      { host: `127.0.0.1:${port}`, "mcp-session-id": transport.sessionId },
+      { host: `127.0.0.1:${port}` },
       "POST",
       MCP_STREAMABLE_PATH,
       JSON.stringify(body),
@@ -225,6 +261,27 @@ describe("Daemon HTTP request admission", () => {
     expect(transport.handled).toBe(1);
     expect(transport.parsedBodies).toEqual([body]);
   });
+
+  test("an unknown mcp-session-id is not a 404: no session table exists to miss (#4678)", async () => {
+    const { server, transport } = await harness();
+    const response = await dispatchMcp(server, {
+      host: `127.0.0.1:${port}`,
+      "mcp-session-id": "expired-before-a-restart",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(transport.handled).toBe(1);
+  });
+
+  test.each(["GET", "DELETE"])(
+    "%s answers 405: there is no session stream (#4678)",
+    async (method) => {
+      const { server, transport } = await harness();
+      const response = await server.dispatch({ host: `127.0.0.1:${port}` }, method);
+      expect(response.statusCode).toBe(405);
+      expect(response.headers.get("allow")).toBe("POST");
+      expect(transport.handled).toBe(0);
+    },
+  );
 
   test("preflight does not expose wildcard CORS", async () => {
     const { server } = await harness();
@@ -241,14 +298,14 @@ describe("Daemon HTTP request admission", () => {
 });
 
 describe("Daemon HTTP MCP admission during startup (#11156)", () => {
-  const headers = { host: `127.0.0.1:${port}`, "mcp-session-id": "known-session" };
+  const headers = { host: `127.0.0.1:${port}` };
 
   test("holds an MCP request until startup and rehydration complete", async () => {
     const { server, transport, internals } = await harness(undefined, undefined, {
       startupComplete: false,
     });
     let answered = false;
-    const response = server.dispatch(headers).then((result) => {
+    const response = dispatchMcp(server, headers).then((result) => {
       answered = true;
       return result;
     });
@@ -269,7 +326,7 @@ describe("Daemon HTTP MCP admission during startup (#11156)", () => {
         startupComplete: false,
         timer,
       });
-      const response = server.dispatch(headers);
+      const response = dispatchMcp(server, headers);
       for (let turn = 0; turn < 20 && timer.getPendingTimeoutCount() === 0; turn++) {
         await Promise.resolve();
       }
@@ -291,7 +348,7 @@ describe("Daemon HTTP MCP admission during startup (#11156)", () => {
       const { server, transport, internals } = await harness(undefined, undefined, {
         startupComplete: false,
       });
-      const response = server.dispatch(headers);
+      const response = dispatchMcp(server, headers);
       internals.rejectStartupCompletion(new Error("rehydration exploded"));
       const result = await response;
       expect(result.statusCode).toBe(503);
@@ -304,7 +361,7 @@ describe("Daemon HTTP MCP admission during startup (#11156)", () => {
 });
 
 describe("Daemon HTTP MCP admission during shutdown (#11189)", () => {
-  const headers = { host: `127.0.0.1:${port}`, "mcp-session-id": "known-session" };
+  const headers = { host: `127.0.0.1:${port}` };
 
   test("shutdown answers a request held on startup with 503 so the HTTP server can close", async () => {
     const infos = spyOn(logger, "info").mockImplementation(() => {});
@@ -313,7 +370,7 @@ describe("Daemon HTTP MCP admission during shutdown (#11189)", () => {
         startupComplete: false,
       });
       let answered = false;
-      const response = server.dispatch(headers).then((result) => {
+      const response = dispatchMcp(server, headers).then((result) => {
         answered = true;
         return result;
       });
@@ -346,7 +403,7 @@ describe("Daemon HTTP MCP admission during shutdown (#11189)", () => {
       const { server, transport, internals } = await harness(undefined, undefined, {
         startupComplete: false,
       });
-      const response = server.dispatch(headers);
+      const response = dispatchMcp(server, headers);
       await Bun.sleep(0);
       const failure = new Error("rehydration exploded");
       let stopEntered = false;

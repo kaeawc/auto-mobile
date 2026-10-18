@@ -104,6 +104,31 @@ describe("default sources", () => {
   });
 });
 
+describe("default sources listing failures", () => {
+  const sourcesWith = (listFiles: () => string[]) =>
+    createDefaultDeviceOwnershipSources({
+      readers: { readLock: () => undefined, isProcessRunning: () => false, listFiles },
+    });
+
+  test("a missing ownership directory means no claimed devices", async () => {
+    const missing = Object.assign(new Error("no such dir"), { code: "ENOENT" });
+    expect(
+      await sourcesWith(() => {
+        throw missing;
+      }).listDevices(),
+    ).toEqual([]);
+  });
+
+  test("an unreadable ownership directory fails instead of reporting no devices", async () => {
+    const denied = Object.assign(new Error("permission denied"), { code: "EACCES" });
+    await expect(
+      sourcesWith(() => {
+        throw denied;
+      }).listDevices(),
+    ).rejects.toThrow(/permission denied/);
+  });
+});
+
 /** A tiny model of the claim protocol: acquire only when free or the holder is dead. */
 class ClaimModel {
   readonly alive = new Map<number, boolean>();

@@ -37,10 +37,11 @@ class McpHttpClient(
   },
   private val requestSender: HttpRequestSender? = null,
   /**
-   * Stable per-client session key sent on every request so a stateless daemon can bind device state
-   * to this desktop app session. Injected for deterministic tests.
+   * Session key sent on every request so a stateless daemon can bind device state to this desktop
+   * app session. Defaults to the app-session-scoped key shared by every client; injectable for
+   * tests.
    */
-  private val mcpSessionKey: String = UUID.randomUUID().toString(),
+  private val mcpSessionKey: String = McpSessionKeyProvider.appSession.key,
 ) : AutoMobileClient {
   override val transportName: String = "MCP HTTP"
   override val connectionDescription: String = endpoint

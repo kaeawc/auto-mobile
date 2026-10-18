@@ -1040,7 +1040,6 @@ test/features/action/SetUIState.test.ts TS2345 6
 test/features/action/SetUIState.test.ts TS2559 21
 test/features/action/SetUIState.test.ts TS2739 12
 test/features/action/SetUIState.test.ts TS2740 20
-test/features/action/SetUIState.test.ts TS2741 1
 test/features/action/Shake.consoleFailure.test.ts TS2739 1
 test/features/action/Shake.test.ts TS2353 1
 test/features/action/Shake.test.ts TS2739 15
@@ -1966,7 +1965,6 @@ test/features/utility/skeletonElementIdRoundtrip.test.ts TS2353 1
 test/features/utility/skeletonElementIdRoundtrip.test.ts TS2559 1
 test/features/utility/skeletonElementIdRoundtrip.test.ts TS7053 3
 test/features/video/FfmpegVideoProcessingBackend.integration.test.ts TS2352 1
-test/features/video/FfmpegVideoProcessingBackend.test.ts TS2322 1
 test/features/video/FfmpegVideoProcessingBackend.test.ts TS2345 1
 test/features/video/FfmpegVideoProcessingBackend.test.ts TS2352 3
 test/features/video/FfmpegVideoProcessingBackendPostProcessBudget.test.ts TS2352 1

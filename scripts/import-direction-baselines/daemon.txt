@@ -6,7 +6,6 @@ src/daemon/appearanceSocketServer.ts -> src/server/executionTracker
 src/daemon/childProcessCleanup.ts -> src/server/videoRecordingManager
 src/daemon/client.ts -> src/server/tasks/taskRelay
 src/daemon/daemon.ts -> src/server/NetworkState
-src/daemon/daemon.ts -> src/server/adbOfflineHeldDevices
 src/daemon/daemon.ts -> src/server/appearanceManager
 src/daemon/daemon.ts -> src/server/appearanceSessionKey
 src/daemon/daemon.ts -> src/server/bootedDeviceResources
@@ -49,6 +48,8 @@ src/daemon/deviceGestureRecordingSocketServer.ts -> src/server/deviceGestureReco
 src/daemon/deviceGestureRecordingSocketTypes.ts -> src/server/deviceGestureRecordingManager
 src/daemon/deviceGestureRecordingStartAdmission.ts -> src/server/proxyServer
 src/daemon/deviceLeaseActivitySources.ts -> src/server/executionTracker
+src/daemon/deviceLossDiscovery.ts -> src/server/adbOfflineHeldDevices
+src/daemon/deviceLossDiscovery.ts -> src/server/videoRecordingManager
 src/daemon/devicePool.ts -> src/server/adbOfflineHeldDevices
 src/daemon/deviceSnapshotSocketServer.ts -> src/server/deviceSnapshotManager
 src/daemon/failuresPushSocketServer.ts -> src/server/failuresResources

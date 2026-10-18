@@ -9,7 +9,7 @@ import { ActionableError, BootedDevice, DeviceInfo } from "../models";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
-import { DaemonState } from "../daemon/daemonState";
+import { DaemonState, type DaemonStateLike } from "../daemon/daemonState";
 import { lifecycleRequester } from "./lifecycleDeviceOwnership";
 import {
   isAnonymousAcquisitionSession,
@@ -620,7 +620,7 @@ async function reserveBootReadiness(
   args: StartDeviceArgs,
   budgets: DevicePreparationBudgets,
   deps: DeviceToolsDependencies,
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   { state, signal, requestedIdentity, releaseReadinessReservations }: BootPreparationOptions,
 ): Promise<void> {
   setAcquisitionStage(budgets, "reserving the device for readiness");
@@ -708,7 +708,7 @@ async function bindPreparedDevice(
     acquisitionReadinessKey,
     autolockEnabled,
   }: BootPreparationOptions & {
-    daemonState: DaemonState;
+    daemonState: DaemonStateLike;
     preparation: BootPreparationState;
     readinessResult: Awaited<ReturnType<typeof prepareStartDeviceRunnerReadiness>>;
     acquisitionReadinessKey: string;
@@ -1128,7 +1128,7 @@ export function restartResumeSessionForDevice(
  * record themselves.
  */
 function recordAcquiredSessionReadiness(
-  daemonState: DaemonState,
+  daemonState: DaemonStateLike,
   sessionId: string,
   achievedReadiness: DeviceReadinessLevel,
 ): void {

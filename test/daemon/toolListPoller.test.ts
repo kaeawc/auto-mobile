@@ -243,4 +243,40 @@ describe("ToolListPoller", () => {
     expect(daemon.reads).toEqual(["tools", "resources"]);
     expect(emitted).toEqual([]);
   });
+
+  test("an acknowledgement during a pending reconciliation keeps polling off", async () => {
+    const { poller, daemon, timer } = setup();
+    await poller.onSubscriptionUnavailable();
+    poller.observe("tools", daemon.lists.tools);
+    poller.markDropped();
+    daemon.holdReads = true;
+
+    const unavailable = poller.onSubscriptionUnavailable();
+    await drainMicrotasks(4);
+    await poller.onSubscriptionAcknowledged();
+    daemon.held.forEach((read) => read.resolve(undefined));
+    await unavailable;
+
+    expect(poller.isPolling()).toBe(false);
+    expect(timer.getPendingIntervalCount()).toBe(0);
+  });
+
+  test("an older read finishing after a newer one does not re-announce a stale list", async () => {
+    const { poller, daemon, emitted } = setup();
+    poller.observe("tools", [{ name: "toolA" }]);
+    daemon.holdReads = true;
+
+    const interval = poller.onPushed("tools"); // reads A (first held read)
+    await drainMicrotasks(4);
+    daemon.lists.tools = [{ name: "toolB" }];
+    const pushed = poller.onPushed("tools"); // reads B (second held read)
+    await drainMicrotasks(4);
+
+    daemon.held[1]?.resolve(undefined);
+    await drainMicrotasks(4);
+    daemon.held[0]?.resolve(undefined);
+    await Promise.all([interval, pushed]);
+
+    expect(emitted).toEqual(["tools"]);
+  });
 });

@@ -2,6 +2,8 @@ import { ActionableError, type Platform } from "../models";
 import { toActionableError } from "../models/ActionableError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { stableStringify } from "../utils/stableStringify";
+import { DeviceLifecyclePreemptedError } from "./DeviceLifecyclePreemptedError";
+export { DeviceLifecyclePreemptedError } from "./DeviceLifecyclePreemptedError";
 
 export type VirtualDeviceLifecycleOperation =
   | "start"
@@ -56,17 +58,6 @@ export interface VirtualDeviceLifecycleCoordinator {
     identity: VirtualDeviceLifecycleIdentity,
     options: VirtualDeviceLifecycleReservationOptions,
   ): Promise<VirtualDeviceLifecycleLease>;
-}
-
-export class DeviceLifecyclePreemptedError extends ActionableError {
-  constructor(identity: VirtualDeviceLifecycleIdentity) {
-    super(
-      `Device lifecycle work for ${identity.platform}:${
-        identity.kind === "stable" ? identity.stableId : identity.selector
-      } was preempted by teardown`,
-    );
-    this.name = "DeviceLifecyclePreemptedError";
-  }
 }
 
 interface LifecycleOwner {

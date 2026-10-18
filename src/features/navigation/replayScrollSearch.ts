@@ -5,6 +5,7 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import type { Timer } from "../../utils/SystemTimer";
 import type { NavigationEdge, ScrollPosition } from "../../utils/interfaces/NavigationGraph";
 import { SwipeOn } from "../action/swipeon";
+export { ReplayRunState } from "./ReplayRunState";
 export { ReplayTransientError } from "./ReplayTransientError";
 export { ReplayTargetNotFoundError } from "./ReplayTargetNotFoundError";
 export { ReplayScrollDisturbedError } from "./ReplayScrollDisturbedError";
@@ -58,17 +59,6 @@ export interface ReplayScrollSearcher {
 export interface TransientEdgeFailure {
   edge: NavigationEdge;
   searched: boolean;
-}
-
-/**
- * What the replay scroll searches of ONE navigateTo call have done so far: the time
- * they spent (capped across steps), the direction the last failed search scrolled
- * (the list is left wherever that search ended), and the edges that call must settle.
- */
-export class ReplayRunState {
-  searchMs = 0;
-  disturbedDirection: SwipeDirection | undefined;
-  readonly transientFailures: TransientEdgeFailure[] = [];
 }
 
 /**

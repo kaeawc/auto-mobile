@@ -51,6 +51,7 @@ import {
   type ForegroundObservation,
   type ForegroundObserver,
 } from "./foregroundOverlay";
+import { ReplayBlockedError } from "./ReplayBlockedError";
 
 // Back presses need time to update the screen before the next press.
 const NAVIGATION_BACK_PRESS_SETTLE_MS = 300;
@@ -88,22 +89,9 @@ interface PathStepsOutcome {
 }
 
 /** Why a fallback edge must not be dispatched: where the device actually is. */
-interface RetryBlocker {
+export interface RetryBlocker {
   reason: string;
   screen: string | null;
-}
-
-/**
- * A replay failure that was observed with a blocker already found (the pre-search
- * check), so the step outcome reuses it instead of observing the device a second time.
- */
-class ReplayBlockedError extends ActionableError {
-  constructor(
-    message: string,
-    readonly blocker: RetryBlocker,
-  ) {
-    super(message);
-  }
 }
 
 /** What a failed step needs to know about how its replay failed (#10154). */

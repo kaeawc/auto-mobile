@@ -3,12 +3,11 @@ import type { ObserveResult } from "../../models";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
-import { getFocusedTextField, getFocusedTextLength } from "../action/ClearText";
 import { withImeFailure, type ImeFailureDiagnostic } from "../action/imeFailureDiagnostics";
-import { scopeObserveResultToLayer } from "../observe/hierarchyLayer";
 import type { ObserveScreenExecuteOptions } from "../observe/interfaces/ObserveScreen";
 import type { PrototypeAgentConnections } from "./ios/iosPrototypeTransport";
 import type { PrototypeSpec } from "./prototypeSpec";
+export { AndroidPrototypeTextTargetReader } from "./AndroidPrototypeTextTargetReader";
 
 /** Three reads preserve the existing prototype text verification retry bound. */
 const PROTOTYPE_TEXT_VERIFY_ATTEMPTS = 3;
@@ -210,41 +209,6 @@ export class IosPrototypeTextTargetReader implements PrototypeTextTargetReader {
 
 export interface PrototypeTextObserver {
   execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult>;
-}
-
-export class AndroidPrototypeTextTargetReader implements PrototypeTextTargetReader {
-  constructor(private readonly observer: PrototypeTextObserver) {}
-  async read(target: PrototypeTextTarget, signal?: AbortSignal): Promise<PrototypeTextReading> {
-    try {
-      const observation = scopeObserveResultToLayer(
-        await this.observer.execute({
-          hierarchyOnly: true,
-          skipScreenshot: true,
-          freshness: "fresh",
-          display: target.display,
-          signal,
-        }),
-        "prototype",
-        "android",
-      );
-      const hierarchy = observation.viewHierarchy;
-      const field = hierarchy && getFocusedTextField(hierarchy);
-      if (!hierarchy || !field || field.secure) {
-        return { kind: "unverifiable", reason: "no focused readable prototype text field" };
-      }
-      return {
-        kind: "value",
-        source: "field",
-        value: getFocusedTextLength(hierarchy) === 0 ? "" : (field.value ?? ""),
-      };
-    } catch (error) {
-      logger.warn("Prototype text field observation failed", error);
-      return {
-        kind: "unverifiable",
-        reason: `prototype observation failed: ${errorMessage(error)}`,
-      };
-    }
-  }
 }
 
 function holdsText(

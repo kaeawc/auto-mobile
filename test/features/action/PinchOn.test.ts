@@ -17,6 +17,7 @@ import {
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
+import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -70,6 +71,15 @@ describe("PinchOn", () => {
     viewHierarchy: createHierarchy(),
   });
 
+  const pinchWith = (capture: FakeHierarchyCapture): PinchOn =>
+    new PinchOn(device, fakeAdb, {
+      capture,
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+      timer: fakeTimer,
+    });
+
   beforeEach(() => {
     fakeObserveScreen = new FakeObserveScreen();
     fakeAwaitIdle = new FakeAwaitIdle();
@@ -88,23 +98,17 @@ describe("PinchOn", () => {
       layoutSeqSum: 123,
     });
 
-    managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      isAvailable: async () => true,
-    } as any);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as any,
+    managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue(
+      FakeCtrlProxyManager.withAvailability(true),
     );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService);
     iosGetInstanceSpy = spyOnIosClientInstance(fakeIosService);
 
-    pinchOn = new PinchOn(device, fakeAdb, {
-      capture: new FakeHierarchyCapture(
+    pinchOn = pinchWith(
+      new FakeHierarchyCapture(
         async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
       ),
-      observeScreen: fakeObserveScreen,
-      awaitIdle: fakeAwaitIdle,
-      window: fakeWindow,
-      timer: fakeTimer,
-    });
+    );
   });
 
   afterEach(() => {
@@ -239,12 +243,12 @@ describe("PinchOn", () => {
 
   test("abort during target capture stops before pinch dispatch", async () => {
     const controller = new AbortController();
-    Object.defineProperty(pinchOn, "capture", {
-      value: new FakeHierarchyCapture(() => {
+    pinchOn = pinchWith(
+      new FakeHierarchyCapture(() => {
         controller.abort();
         return createHierarchy();
       }),
-    });
+    );
     await expect(
       pinchOn.execute({ direction: "in", autoTarget: false }, { signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
@@ -253,8 +257,8 @@ describe("PinchOn", () => {
   test("fresh pinch selector capture requests raw hierarchy when enabled", async () => {
     serverConfig.setRawElementSearchEnabled(true);
     const capture = new FakeHierarchyCapture(createHierarchy);
-    (pinchOn as any).capture = capture;
-    await (pinchOn as any).resolveTarget({
+    pinchOn = pinchWith(capture);
+    await pinchOn.execute({
       direction: "in",
       container: { elementId: "container-id" },
     });
@@ -280,12 +284,15 @@ describe("PinchOn", () => {
       ...createObserveResult(),
       systemInsets: { top: 80, bottom: 100, left: 0, right: 0 },
     });
-    (pinchOn as any).capture = new FakeHierarchyCapture(() => ({
-      hierarchy: { node: { bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } } },
-      systemInsets: { top: 0, bottom: 0, left: 40, right: 60 },
-    }));
-    const target = await (pinchOn as any).resolveTarget({ direction: "out", autoTarget: false });
-    expect(target.bounds).toEqual({ left: 40, top: 0, right: 1860, bottom: 1080 });
+    pinchOn = pinchWith(
+      new FakeHierarchyCapture(() => ({
+        hierarchy: { node: { bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } } },
+        systemInsets: { top: 0, bottom: 0, left: 40, right: 60 },
+      })),
+    );
+    const result = await pinchOn.execute({ direction: "out", autoTarget: false });
+    // Center of the inset-clipped bounds {left: 40, top: 0, right: 1860, bottom: 1080}.
+    expect([result.centerX, result.centerY]).toEqual([950, 540]);
   });
 
   test("rotated capture without inset metadata never reuses old portrait insets", async () => {
@@ -293,32 +300,37 @@ describe("PinchOn", () => {
       ...createObserveResult(),
       systemInsets: { top: 80, bottom: 100, left: 0, right: 0 },
     });
-    (pinchOn as any).capture = new FakeHierarchyCapture(() => ({
-      hierarchy: { node: { bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } } },
-    }));
-    const target = await (pinchOn as any).resolveTarget({ direction: "out", autoTarget: false });
-    expect(target.bounds).toEqual({ left: 0, top: 0, right: 1920, bottom: 1080 });
+    pinchOn = pinchWith(
+      new FakeHierarchyCapture(() => ({
+        hierarchy: { node: { bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } } },
+      })),
+    );
+    const result = await pinchOn.execute({ direction: "out", autoTarget: false });
+    // Center of the uninset capture bounds {left: 0, top: 0, right: 1920, bottom: 1080}.
+    expect([result.centerX, result.centerY]).toEqual([960, 540]);
   });
 
   test("auto-target favors the full-screen map over a top-window keyboard key", async () => {
     const mapBounds = { left: 0, top: 0, right: 1000, bottom: 1500 };
-    (pinchOn as any).capture = new FakeHierarchyCapture(() => ({
-      hierarchy: { node: { "resource-id": "app:id/map", bounds: mapBounds, scrollable: true } },
-      windows: [
-        {
-          windowLayer: 10,
-          hierarchy: {
-            node: {
-              "resource-id": "ime:id/key",
-              clickable: true,
-              bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+    pinchOn = pinchWith(
+      new FakeHierarchyCapture(() => ({
+        hierarchy: { node: { "resource-id": "app:id/map", bounds: mapBounds, scrollable: true } },
+        windows: [
+          {
+            windowLayer: 10,
+            hierarchy: {
+              node: {
+                "resource-id": "ime:id/key",
+                clickable: true,
+                bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+              },
             },
           },
-        },
-      ],
-    }));
-    const target = await (pinchOn as any).resolveTarget({ direction: "out" });
-    expect(target.bounds).toEqual(mapBounds);
+        ],
+      })),
+    );
+    const result = await pinchOn.execute({ direction: "out" });
+    expect([result.centerX, result.centerY]).toEqual([500, 750]);
   });
 
   test("string true scrollable flags receive the scrollable score", () => {
@@ -444,7 +456,7 @@ describe("PinchOn", () => {
         },
       },
     }));
-    (pinchOn as any).capture = capture;
+    pinchOn = pinchWith(capture);
     const result = await pinchOn.execute({
       direction: "out",
       container: { elementId: "container-id" },
@@ -456,9 +468,11 @@ describe("PinchOn", () => {
   });
 
   test("does not fall back to cached bounds when fresh capture fails", async () => {
-    (pinchOn as any).capture = new FakeHierarchyCapture(() => {
-      throw new Error("fresh capture failed");
-    });
+    pinchOn = pinchWith(
+      new FakeHierarchyCapture(() => {
+        throw new Error("fresh capture failed");
+      }),
+    );
     const result = await pinchOn.execute({
       direction: "out",
       container: { elementId: "container-id" },
@@ -473,12 +487,11 @@ describe("PinchOn", () => {
       "resource-id": "container-id",
       bounds: { left: 300, top: 300, right: 700, bottom: 700 },
     };
-    (pinchOn as any).capture = new FakeHierarchyCapture(
-      () =>
-        ({
-          ...createHierarchy(),
-          windows: [{ windowLayer: 5, hierarchy: { node: upper } }],
-        }) as any,
+    pinchOn = pinchWith(
+      new FakeHierarchyCapture(() => ({
+        ...createHierarchy(),
+        windows: [{ windowLayer: 5, hierarchy: { node: upper } }],
+      })),
     );
     const result = await pinchOn.execute({
       direction: "out",
@@ -540,9 +553,7 @@ describe("PinchOn", () => {
       platform: "ios",
       name: "iPhone 16 Pro",
     };
-    managerSpy?.mockReturnValue({
-      isAvailable: async () => false,
-    } as any);
+    managerSpy?.mockReturnValue(FakeCtrlProxyManager.withAvailability(false));
     fakeIosService.setPinchResult({ success: true, totalTimeMs: 710, gestureTimeMs: 700 });
     pinchOn = new PinchOn(iosDevice, fakeAdb, {
       capture: new FakeHierarchyCapture(

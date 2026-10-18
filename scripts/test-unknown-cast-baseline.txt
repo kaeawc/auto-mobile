@@ -167,7 +167,6 @@
 1	test/fakes/FakeAndroidInventoryLoad.ts
 2	test/fakes/FakeTimer.ts
 1	test/fakes/SafeDaemonManager.ts
-1	test/features/action/PinchOn.characterization.test.ts
 1	test/features/action/RecentApps.test.ts
 2	test/features/action/SelectAllText.test.ts
 1	test/features/action/StructuralGestureSequences.test.ts

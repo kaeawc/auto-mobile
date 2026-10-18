@@ -13,6 +13,7 @@ import {
   resolveAndroidTarget,
   type AppFileProvider,
   type AppFileWriteProvider,
+  IosSimulatorAppFileProvider,
   type PutAppFileProviderRequest,
 } from "../../src/server/appFileService";
 import { ActionableError, type BootedDevice } from "../../src/models";
@@ -1932,7 +1933,7 @@ describe("AppFileService", () => {
       dataRoot,
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem,
     });
 
@@ -2164,18 +2165,14 @@ describe("AppFileService", () => {
       const fileSystem = new BatchFileSystem();
       const simctl = new FakeSimctl();
       simctl.setCommandResult(command, dataRoot);
+      // The service rejects duplicate destinations and accepts only one target per batch.
+      // Build the iOS app-container provider directly to exercise its batch contract.
+      const provider = new IosSimulatorAppFileProvider(() => simctl, fileSystem);
       const service = createAppFileServiceForTesting({
         simctlFactory: () => simctl,
         fileSystem,
+        providers: [provider],
       });
-      // The service rejects duplicate destinations and accepts only one target per batch.
-      // Reach the private provider to exercise its batch contract without exporting it.
-      const { writeProviders } = service as unknown as {
-        writeProviders: Map<string, AppFileWriteProvider>;
-      };
-      const provider = [...writeProviders.values()].find(
-        (entry) => entry.platform === "ios" && entry.domain === "app_containers",
-      )!;
       const putFiles = (requests: PutAppFileProviderRequest[]) =>
         provider.putFiles
           ? provider.putFiles(requests)
@@ -2569,7 +2566,7 @@ describe("AppFileService", () => {
       dataRoot,
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem,
     });
 
@@ -2615,7 +2612,7 @@ describe("AppFileService", () => {
       dataRoot,
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem,
       deviceResolver: async () => iosSimulatorDevice,
     });
@@ -2664,7 +2661,7 @@ describe("AppFileService", () => {
         dataRoot,
       );
       const service = createAppFileServiceForTesting({
-        simctlFactory: () => simctl as any,
+        simctlFactory: () => simctl,
         fileSystem,
       });
       const sourceBytes = Buffer.from("from launch cwd");
@@ -2707,7 +2704,7 @@ describe("AppFileService", () => {
       dataRoot,
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem,
       deviceResolver: async () => iosSimulatorDevice,
     });
@@ -2742,7 +2739,7 @@ describe("AppFileService", () => {
   test("returns clear iOS simulator-only errors without invoking simctl for physical devices", async () => {
     const simctl = new FakeSimctl();
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem: new TestAppFileFileSystem(),
       deviceResolver: async (deviceId) => ({ deviceId, name: "iPhone", platform: "ios" }),
     });
@@ -2781,7 +2778,7 @@ describe("AppFileService", () => {
       ),
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem: new TestAppFileFileSystem(),
       deviceResolver: async () => iosSimulatorDevice,
     });
@@ -2803,7 +2800,7 @@ describe("AppFileService", () => {
       new Error("No such device or device is shutdown"),
     );
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem: new TestAppFileFileSystem(),
       deviceResolver: async () => iosSimulatorDevice,
     });
@@ -2822,7 +2819,7 @@ describe("AppFileService", () => {
   test("does not let iOS app file paths escape the resolved app container", async () => {
     const simctl = new FakeSimctl();
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem: new TestAppFileFileSystem(),
       deviceResolver: async () => iosSimulatorDevice,
     });
@@ -2844,7 +2841,7 @@ describe("AppFileService", () => {
   test("maps iOS externalFiles to explicit unsupported capability errors", async () => {
     const simctl = new FakeSimctl();
     const service = createAppFileServiceForTesting({
-      simctlFactory: () => simctl as any,
+      simctlFactory: () => simctl,
       fileSystem: new TestAppFileFileSystem(),
       deviceResolver: async (deviceId) => ({ deviceId, name: "iPhone", platform: "ios" }),
     });

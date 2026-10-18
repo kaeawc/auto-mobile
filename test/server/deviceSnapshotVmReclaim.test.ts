@@ -25,7 +25,6 @@ import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotC
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
 import { FakeAvdSnapshotService, fakeAvdSnapshotPath } from "../fakes/FakeAvdSnapshotService";
 import { VM_SNAPSHOT_SAVE_DISPATCHED } from "../../src/features/action/CaptureSnapshot";
-import type { SnapshotPathOptions } from "../../src/utils/DeviceSnapshotStore";
 import type { DeviceSnapshotRecord } from "../../src/db/deviceSnapshotRepository";
 import { sequenceBackoff } from "../../src/utils/Backoff";
 
@@ -93,9 +92,9 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
     await configRepository.setConfig(config);
 
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as any,
-      configRepository: configRepository as any,
-      snapshotStore: store as any,
+      snapshotRepository: repository,
+      configRepository: configRepository,
+      snapshotStore: store,
       avdSnapshots,
       timer: fakeTimer,
       now: () => new Date(fakeTimer.now()),
@@ -288,7 +287,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       return getConfig();
     };
     gatedRepository.setConfig = configRepository.setConfig.bind(configRepository);
-    await setDeviceSnapshotManagerDependencies({ configRepository: gatedRepository as any });
+    await setDeviceSnapshotManagerDependencies({ configRepository: gatedRepository });
 
     const first = updateDeviceSnapshotConfig({ maxVmSnapshotsPerAvd: 1 });
     await firstReadAtGate;
@@ -706,7 +705,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
 
   test("records a pending reclaim when the repository insert fails after a VM save", async () => {
     const failingRepository = new FailingSnapshotInsertRepository(1);
-    await setDeviceSnapshotManagerDependencies({ snapshotRepository: failingRepository as any });
+    await setDeviceSnapshotManagerDependencies({ snapshotRepository: failingRepository });
     store.queueGeneratedName("vm-insert-failed");
 
     await expect(captureDeviceSnapshot(EMULATOR, {})).rejects.toThrow(
@@ -720,7 +719,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
 
   test("best-effort deletes a VM payload when both repository inserts fail", async () => {
     const failingRepository = new FailingSnapshotInsertRepository(Number.POSITIVE_INFINITY);
-    await setDeviceSnapshotManagerDependencies({ snapshotRepository: failingRepository as any });
+    await setDeviceSnapshotManagerDependencies({ snapshotRepository: failingRepository });
     store.queueGeneratedName("vm-unrecordable");
 
     await expect(captureDeviceSnapshot(EMULATOR, {})).rejects.toThrow(
@@ -875,7 +874,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       return repository.getSnapshot(snapshotName);
     };
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: racingRepository as any,
+      snapshotRepository: racingRepository,
       createCaptureProvider: () => ({
         capture: async (args) => {
           const timestamp = new Date(fakeTimer.now()).toISOString();
@@ -1306,7 +1305,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       };
 
       await setDeviceSnapshotManagerDependencies({
-        snapshotRepository: failingUpdateRepository as any,
+        snapshotRepository: failingUpdateRepository,
         avdSnapshots: {
           measureVmSnapshotBytes: async (avdName: string, snapshotName: string) => {
             if (snapshotName === "vm-touched") {
@@ -1678,7 +1677,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       }
       return repository.getSnapshot(snapshotName);
     };
-    await setDeviceSnapshotManagerDependencies({ snapshotRepository: racingRepository as any });
+    await setDeviceSnapshotManagerDependencies({ snapshotRepository: racingRepository });
 
     await updateDeviceSnapshotConfig({ maxVmSnapshotsPerAvd: 2 });
 
@@ -1880,7 +1879,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       capturesStarted = resolve;
     });
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: racingRepository as any,
+      snapshotRepository: racingRepository,
       createCaptureProvider: () => ({
         capture: async (args) => {
           startedCaptures += 1;
@@ -2147,7 +2146,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       failingStore.deleteSnapshotData = async () => {
         throw new Error("archive directory is unreadable");
       };
-      await setDeviceSnapshotManagerDependencies({ snapshotStore: failingStore as any });
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: failingStore });
 
       const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 1 });
 
@@ -2157,7 +2156,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
 
       // With the store healthy again the sweep finishes what the failure
       // interrupted, instead of leaving a restorable row with no payload.
-      await setDeviceSnapshotManagerDependencies({ snapshotStore: store as any });
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: store });
       await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 0 });
       store.queueGeneratedName("vm-after");
       await captureDeviceSnapshot(EMULATOR, {});
@@ -2309,9 +2308,9 @@ describe("orphan accounting is keyed by AVD and record type (#6891 review)", () 
       maxArchiveSizeMb: 4096,
     });
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as any,
-      configRepository: configRepository as any,
-      snapshotStore: store as any,
+      snapshotRepository: repository,
+      configRepository: configRepository,
+      snapshotStore: store,
       avdSnapshots,
       timer: fakeTimer,
       now: () => new Date(fakeTimer.now()),
@@ -2408,9 +2407,9 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
       maxArchiveSizeMb: 4096,
     });
     await setDeviceSnapshotManagerDependencies({
-      snapshotRepository: repository as any,
-      configRepository: configRepository as any,
-      snapshotStore: store as any,
+      snapshotRepository: repository,
+      configRepository: configRepository,
+      snapshotStore: store,
       avdSnapshots,
       timer: fakeTimer,
       now: () => new Date(fakeTimer.now()),
@@ -2473,16 +2472,12 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
     const atGate = new Promise<void>((resolve) => {
       captureReachedGate = resolve;
     });
-    (store as any).replaceSnapshotData = async (
-      name: string,
-      options: SnapshotPathOptions | undefined,
-      capture: () => Promise<unknown>,
-    ) => {
+    spyOn(store, "replaceSnapshotData").mockImplementation(async (name, options, capture) => {
       const result = await replaceSnapshotData(name, options, capture);
       captureReachedGate();
       await captureGate;
       return result;
-    };
+    });
 
     const capturing = captureDeviceSnapshot(EMULATOR, { snapshotName: "vm-inflight" });
     await atGate;
@@ -2555,8 +2550,8 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
     // it would delete the fresh payload plus the row that describes it.
     const listSnapshots = repository.listSnapshots.bind(repository);
     let superseded = false;
-    (repository as any).listSnapshots = async (query: Record<string, unknown> = {}) => {
-      const rows = await listSnapshots(query as never);
+    spyOn(repository, "listSnapshots").mockImplementation(async (query = {}) => {
+      const rows = await listSnapshots(query);
       if (!superseded && query.orderByLastAccessed === "asc") {
         superseded = true;
         const timestamp = new Date(9000).toISOString();
@@ -2576,7 +2571,7 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
         });
       }
       return rows;
-    };
+    });
 
     const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 1 });
 
@@ -2598,8 +2593,8 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
     const originalTimestamp = new Date(1000).toISOString();
     const replacementTimestamp = new Date(9000).toISOString();
     let superseded = false;
-    (repository as any).listSnapshots = async (query: Record<string, unknown> = {}) => {
-      const rows = await listSnapshots(query as never);
+    spyOn(repository, "listSnapshots").mockImplementation(async (query = {}) => {
+      const rows = await listSnapshots(query);
       if (!superseded && query.orderByLastAccessed === "asc") {
         superseded = true;
         await repository.insertSnapshot({
@@ -2617,7 +2612,7 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
         });
       }
       return rows;
-    };
+    });
 
     const { evictedSnapshotNames } = await updateDeviceSnapshotConfig({ maxVmArchiveSizeMb: 1 });
 

@@ -3,7 +3,7 @@ import { isProductBrokerDevice } from "./sessionBroker/persistedIdentity";
 import type { Mutex } from "async-mutex";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
-import { isEmulatorLaunchCancelledError } from "../models/EmulatorLaunchCancelledError";
+import { isEmulatorLaunchCancelledError } from "../utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { BootedDeviceDiscoveryIncompleteError } from "../devices/deviceBootService";
 import type { DeviceStartResult, PlatformDeviceManager } from "../devices/deviceUtils";
 import type { VirtualDeviceLifecycleCoordinator } from "../devices/virtualDeviceLifecycleCoordinator";

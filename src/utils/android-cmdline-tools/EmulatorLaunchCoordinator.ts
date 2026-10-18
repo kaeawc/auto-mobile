@@ -9,7 +9,7 @@ import type { Timer } from "../SystemTimer";
 import type { HostChildProcess as ChildProcess } from "../HostCommandExecutor";
 import { ActionableError, type BootedDevice } from "../../models";
 import type { BootAdmission } from "../../models/BootAdmission";
-import { EmulatorLaunchCancelledError } from "../../models/EmulatorLaunchCancelledError";
+import { EmulatorLaunchCancelledError } from "./EmulatorLaunchCancelledError";
 import type {
   AndroidEmulatorLaunchHandle,
   AndroidEmulatorLaunchRequest,

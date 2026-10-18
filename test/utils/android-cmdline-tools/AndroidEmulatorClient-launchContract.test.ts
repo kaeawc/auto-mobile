@@ -7,7 +7,7 @@ import {
   parseExtraEmulatorArguments,
 } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { DeviceInfo, ExecResult } from "../../../src/models";
-import { EmulatorLaunchCancelledError } from "../../../src/models/EmulatorLaunchCancelledError";
+import { EmulatorLaunchCancelledError } from "../../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { resolve } from "node:path";

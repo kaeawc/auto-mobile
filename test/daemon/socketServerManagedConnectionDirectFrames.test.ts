@@ -8,6 +8,7 @@ import {
   computeBindingScopeKey,
   type ManagedDeviceEntry,
 } from "../../src/daemon/sessionBroker/registry/bindingRegistry";
+import type { FeatureFlagKey } from "../../src/features/featureFlags/FeatureFlagDefinitions";
 import type { FeatureFlagAdmin } from "../../src/features/featureFlags/FeatureFlagService";
 import { BrokerConnectionScopes } from "../../src/daemon/sessionBroker/connectionScope";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -72,7 +73,9 @@ describe("direct frames from a managed connection outside its slots", () => {
   let bindingHeld: boolean;
   let poolRefreshes: string[];
   let flagWrites: Array<{ key: string; enabled: boolean }>;
-  const flags = [{ key: "debug", label: "Debug", description: "Debug", enabled: false }];
+  const flags: Awaited<ReturnType<FeatureFlagAdmin["listFlags"]>> = [
+    { key: "debug", label: "Debug", description: "Debug", enabled: false },
+  ];
   const slotEntry: ManagedDeviceEntry = {
     platform: "android",
     stableDeviceId: slotDevice.deviceId,
@@ -218,9 +221,9 @@ describe("direct frames from a managed connection outside its slots", () => {
       } as unknown as DaemonStateAccess,
       new FakeTimer(),
       {
-        setFlag: async (key: string, enabled: boolean) => {
+        setFlag: async (key: FeatureFlagKey, enabled: boolean) => {
           flagWrites.push({ key, enabled });
-          return { key, enabled };
+          return { key, label: key, description: key, enabled };
         },
         listFlags: async () => flags,
       } satisfies FeatureFlagAdmin,

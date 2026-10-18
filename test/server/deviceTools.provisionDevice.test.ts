@@ -145,7 +145,23 @@ interface ToolResponse {
 
 /** Narrows the handler's `unknown` result to the MCP tool-response shape these tests read. */
 function asToolResponse(response: unknown): ToolResponse {
-  if (typeof response !== "object" || response === null || !("content" in response)) {
+  if (
+    typeof response !== "object" ||
+    response === null ||
+    !("content" in response) ||
+    !Array.isArray(response.content) ||
+    response.content.length === 0 ||
+    !response.content.every(
+      (item: unknown) =>
+        typeof item === "object" &&
+        item !== null &&
+        "text" in item &&
+        typeof item.text === "string",
+    ) ||
+    ("isError" in response &&
+      response.isError !== undefined &&
+      typeof response.isError !== "boolean")
+  ) {
     throw new Error("tool returned an invalid response");
   }
   return response as ToolResponse;

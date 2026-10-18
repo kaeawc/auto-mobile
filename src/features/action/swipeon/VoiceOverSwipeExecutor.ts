@@ -85,7 +85,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
           signal,
         );
       }
-      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf, signal);
+      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, { perf, signal });
     }
 
     // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
@@ -112,7 +112,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
             perf,
             signal,
           )
-        : await this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf, signal);
+        : await this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, { perf, signal });
       return withEpilogueWarning(result, warning);
     }
 
@@ -173,15 +173,10 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     const forwardOptions = this.buildGestureOptions(gestureOptions, forwardDuration);
     const returnOptions = this.buildGestureOptions(gestureOptions, returnDuration);
 
-    const forwardResult = await this.executeGesture.swipe(
-      x1,
-      y1,
-      x2,
-      y2,
-      forwardOptions,
+    const forwardResult = await this.executeGesture.swipe(x1, y1, x2, y2, forwardOptions, {
       perf,
       signal,
-    );
+    });
     if (!forwardResult.success) {
       throwIfAborted(signal);
       return forwardResult;
@@ -192,7 +187,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
       timer: this.timer,
       apexPauseMs: boomerang.apexPauseMs,
       signal,
-      returnSwipe: () => this.executeGesture.swipe(x2, y2, x1, y1, returnOptions, perf, signal),
+      returnSwipe: () => this.executeGesture.swipe(x2, y2, x1, y1, returnOptions, { perf, signal }),
     });
     if (!returnResult.success) {
       return {

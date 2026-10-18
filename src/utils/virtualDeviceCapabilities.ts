@@ -1,0 +1,139 @@
+import {
+  VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION,
+  type VirtualDeviceCapability,
+  type VirtualDeviceCapabilityInventory,
+  type VirtualDeviceCapabilityState,
+} from "../models/virtualDeviceCapabilities";
+
+/**
+ * Capabilities exposed by iOS Simulator independently of a running session.
+ * `ios.simulator.biometric` corresponds to simctl biometric controls; NFC has
+ * no simulator implementation and is explicit so clients do not infer support
+ * from the device type.
+ */
+export function iosSimulatorCapabilityInventory(
+  options: {
+    isAvailable?: boolean;
+    availabilityError?: string;
+    runtime?: string;
+  } = {},
+): VirtualDeviceCapabilityInventory {
+  const supportsBiometricControls =
+    options.runtime === undefined ||
+    options.runtime.startsWith("com.apple.CoreSimulator.SimRuntime.iOS-");
+  const biometricCapability: VirtualDeviceCapability = !supportsBiometricControls
+    ? {
+        id: "ios.simulator.biometric",
+        state: "unsupported",
+        source: "platform",
+        reason: "Biometric controls are only supported for iOS Simulator runtimes.",
+      }
+    : options.isAvailable === false
+      ? {
+          id: "ios.simulator.biometric",
+          state: "unavailable",
+          source: "platform",
+          reason: options.availabilityError ?? "The iOS Simulator runtime is unavailable.",
+        }
+      : { id: "ios.simulator.biometric", state: "available", source: "platform" };
+
+  return {
+    schemaVersion: VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION,
+    capabilities: [
+      biometricCapability,
+      {
+        id: "ios.simulator.cameraPoster",
+        state: "unsupported",
+        source: "platform",
+        reason: "Camera posters are only supported at Android emulator boot.",
+      },
+      {
+        id: "ios.simulator.nfc",
+        state: "unsupported",
+        source: "platform",
+        reason: "iOS Simulator cannot emulate NFC hardware.",
+      },
+      {
+        id: "ios.simulator.doNotDisturb",
+        state: "unsupported",
+        source: "platform",
+        reason: "Do Not Disturb cannot be read or set on an iOS simulator.",
+      },
+      {
+        id: "ios.simulator.networkCondition",
+        state: "available",
+        source: "platform",
+        reason:
+          "Per-app only: setDeviceState networkCondition offline or none with appId, within a session, through the opt-in network-extension backend (install and approval required; getDeviceState networkCondition reports its state). Device-wide conditions and latency or bandwidth profiles are unsupported.",
+      },
+      {
+        id: "ios.simulator.connectivity",
+        state: "unsupported",
+        source: "platform",
+        reason: "iOS Simulator shares the host network stack and has no connectivity read verb.",
+      },
+    ],
+  };
+}
+
+const ANDROID_AVD_CAPABILITIES = [
+  { configKey: "hw.camera.back", id: "android.hardware.camera", kind: "camera" },
+  { configKey: "hw.camera.front", id: "android.hardware.camera.front", kind: "camera" },
+  { configKey: "hw.fingerprint", id: "android.hardware.fingerprint", kind: "boolean" },
+  { configKey: "hw.gps", id: "android.hardware.location.gps", kind: "boolean" },
+  { configKey: "hw.nfc", id: "android.hardware.nfc", kind: "boolean" },
+] as const;
+
+const DISABLED_AVD_VALUES = new Set(["0", "false", "no", "none", "off"]);
+const ENABLED_BOOLEAN_AVD_VALUES = new Set(["1", "true", "yes"]);
+const ENABLED_CAMERA_AVD_VALUES = new Set(["emulated", "virtualscene"]);
+
+function avdCapabilityState(
+  value: string,
+  kind: (typeof ANDROID_AVD_CAPABILITIES)[number]["kind"],
+): Exclude<VirtualDeviceCapabilityState, "unsupported"> | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (DISABLED_AVD_VALUES.has(normalized)) {
+    return "unavailable";
+  }
+  if (kind === "boolean" && ENABLED_BOOLEAN_AVD_VALUES.has(normalized)) {
+    return "available";
+  }
+  if (kind === "camera" && ENABLED_CAMERA_AVD_VALUES.has(normalized)) {
+    return "available";
+  }
+  return undefined;
+}
+
+/**
+ * Derive normalized Android feature identifiers from the AVD config values
+ * selected by its image and hardware profile. Unknown config keys stay out of
+ * the hardware report so the inventory never over-claims an unverified feature.
+ * Camera posters are a boot-time emulator control, independent of the saved camera setting.
+ */
+export function buildAndroidAvdCapabilityInventory(
+  config: Readonly<Record<string, string | undefined>>,
+): VirtualDeviceCapabilityInventory {
+  const capabilities = new Map<string, VirtualDeviceCapability>([
+    [
+      "android.emulator.cameraPoster",
+      {
+        id: "android.emulator.cameraPoster",
+        state: "available",
+        source: "platform",
+      },
+    ],
+  ]);
+  for (const definition of ANDROID_AVD_CAPABILITIES) {
+    const value = config[definition.configKey];
+    const state = value && avdCapabilityState(value, definition.kind);
+    if (state) {
+      capabilities.set(definition.id, { id: definition.id, state, source: "avd_config" });
+    }
+  }
+
+  return {
+    schemaVersion: VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION,
+    capabilities: [...capabilities.values()].sort((left, right) => left.id.localeCompare(right.id)),
+  };
+}

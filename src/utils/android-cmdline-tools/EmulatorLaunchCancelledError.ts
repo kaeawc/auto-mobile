@@ -1,5 +1,5 @@
-import type { HostChildProcess } from "../utils/HostCommandExecutor";
-import { ActionableError } from "./ActionableError";
+import type { HostChildProcess } from "../HostCommandExecutor";
+import { ActionableError } from "../../models/ActionableError";
 
 /**
  * An Android emulator launch was cancelled (request abort, deadline, teardown

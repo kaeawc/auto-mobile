@@ -5,7 +5,7 @@ import {
 } from "../devices/deviceBootService";
 import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
 import { ActionableError } from "../models/ActionableError";
-import { TextIndeterminateError } from "../features/action/textTransportTimeout";
+import { TextIndeterminateError } from "../features/action/TextIndeterminateError";
 import { McpError } from "./mcpError";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";

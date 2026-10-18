@@ -8,7 +8,7 @@ import {
   type VirtualDeviceLifecycleLease,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
-import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
+import { EmulatorLaunchCancelledError } from "../../src/utils/android-cmdline-tools/EmulatorLaunchCancelledError";
 import { getAbortSignal } from "../../src/utils/AbortContext";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";

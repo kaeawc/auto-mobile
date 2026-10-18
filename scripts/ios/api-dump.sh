@@ -494,6 +494,47 @@ generate_api() {
   done <<< "$swift_files"
 }
 
+# Prints `live` when a Swift file under $1 holds a live `@_exported import AutoMobileSdkWire`.
+# Commented-out lines, block comments and `#if false`/`#if 0` regions do not count
+# (a raw grep would accept them, #13318); other #if conditions are treated as live.
+wire_reexport_state() {
+  local root="$1" file
+  while IFS= read -r file; do
+    awk '
+      function dead(  i) { for (i = 1; i <= depth; i++) if (state[i] == "dead") return 1; return 0 }
+      BEGIN { depth = 0; block = 0 }
+      {
+        line = $0
+        out = ""
+        while (length(line) > 0) {
+          if (block > 0) {
+            e = index(line, "*/")
+            if (e == 0) { line = ""; break }
+            block--; line = substr(line, e + 2); continue
+          }
+          o = index(line, "/*"); c = index(line, "//")
+          if (c > 0 && (o == 0 || c < o)) { out = out substr(line, 1, c - 1); line = ""; break }
+          if (o > 0) { out = out substr(line, 1, o - 1); block++; line = substr(line, o + 2); continue }
+          out = out line; line = ""
+        }
+        if (match(out, /^[[:space:]]*#if[[:space:]]+(false|0)[[:space:]]*$/)) { state[++depth] = "dead"; next }
+        if (match(out, /^[[:space:]]*#if[[:space:]]+(true|1)[[:space:]]*$/)) { state[++depth] = "live"; next }
+        if (match(out, /^[[:space:]]*#if([[:space:]]|\()/)) { state[++depth] = "unknown"; next }
+        if (match(out, /^[[:space:]]*#else[[:space:]]*$/) && depth > 0) {
+          if (state[depth] == "dead") state[depth] = "live"
+          else if (state[depth] == "live") state[depth] = "dead"
+          next
+        }
+        if (match(out, /^[[:space:]]*#elseif/) && depth > 0) { state[depth] = "unknown"; next }
+        if (match(out, /^[[:space:]]*#endif/) && depth > 0) { depth--; next }
+        if (!dead() && out ~ /^[[:space:]]*@_exported[[:space:]]+import[[:space:]]+AutoMobileSdkWire[[:space:]]*$/) { found = 1 }
+      }
+      END { exit found ? 0 : 1 }
+    ' "$file" && { echo live; return 0; }
+  done < <(find "$root" -type f -name '*.swift')
+  echo missing
+}
+
 output="$(generate_api "$SDK_SOURCES")"
 # An explicit source override is a complete, isolated source tree (used by BATS).
 # The SDK re-exports the public wire product, so its declarations are SDK API.
@@ -505,8 +546,9 @@ if [[ -z "${AUTOMOBILE_IOS_API_SOURCES:-}" ]]; then
   # The wire declarations only count as SDK API while the SDK re-exports them.
   # With a plain import, SDK-only clients lose these types but the dump stays
   # identical, so assert the re-export instead of appending unconditionally.
-  if ! grep -rqE '^[[:space:]]*@_exported[[:space:]]+import[[:space:]]+AutoMobileSdkWire[[:space:]]*(//.*)?$' \
-    --include='*.swift' "$SDK_SOURCES"; then
+  wire_reexport=""
+  wire_reexport="$(wire_reexport_state "$SDK_SOURCES")"
+  if [[ "$wire_reexport" != live ]]; then
     echo "error: $SDK_SOURCES no longer contains '@_exported import AutoMobileSdkWire'." >&2
     echo "The SDK's public API includes the wire product only through that re-export." >&2
     exit 1

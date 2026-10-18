@@ -5,8 +5,8 @@
 1752	src/ctrlProxy/RunnerReadinessService.ts
 1183	src/daemon/cli/runDaemonCommand.ts
 1588	src/daemon/client.ts
-5222	src/daemon/daemon.ts
-6196	src/daemon/daemonMcpProxy.ts
+5223	src/daemon/daemon.ts
+6203	src/daemon/daemonMcpProxy.ts
 1730	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8441	src/daemon/devicePool.ts
@@ -54,7 +54,7 @@
 1875	src/features/observe/android/ctrlProxyProtocol.ts
 1121	src/features/observe/android/ctrlProxyWireManifest.ts
 1342	src/features/observe/ios/CtrlProxyHierarchy.ts
-4586	src/features/observe/ios/IOSCtrlProxyClient.ts
+4565	src/features/observe/ios/IOSCtrlProxyClient.ts
 2136	src/features/observe/output/ObserveResultOutput.ts
 1693	src/features/observe/output/SkeletonProjection.ts
 1429	src/features/performance/PerformanceMonitor.ts

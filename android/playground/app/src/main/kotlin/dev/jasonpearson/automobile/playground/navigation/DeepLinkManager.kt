@@ -41,6 +41,7 @@ object DeepLinkManager {
   private const val PATH_DEMO_A11Y_CONTRAST = "/demos/a11y/contrast"
   private const val PATH_DEMO_A11Y_TAP_TARGETS = "/demos/a11y/tap_targets"
   private const val PATH_DEMO_BUG_REPRO = "/demos/bugs/repro"
+  private const val PATH_DEMO_POINTER_PROBE = "/demos/input/pointer_probe"
 
   /** Generate deep link URL for onboarding screen */
   fun generateOnboardingUrl(): String {
@@ -200,6 +201,13 @@ object DeepLinkManager {
   fun generateDemoBugReproUrl(): String {
     val url = buildUri(PATH_DEMO_BUG_REPRO)
     Log.d(TAG, "Generated demo bug repro URL: $url")
+    return url
+  }
+
+  /** Generate deep link URL for demo pointer probe screen */
+  fun generateDemoPointerProbeUrl(): String {
+    val url = buildUri(PATH_DEMO_POINTER_PROBE)
+    Log.d(TAG, "Generated demo pointer probe URL: $url")
     return url
   }
 
@@ -364,6 +372,10 @@ object DeepLinkManager {
           Log.d(TAG, "Parsed as DemoBugReproDestination")
           DemoBugReproDestination
         }
+        path == PATH_DEMO_POINTER_PROBE -> {
+          Log.d(TAG, "Parsed as DemoPointerProbeDestination")
+          DemoPointerProbeDestination
+        }
         else -> {
           Log.d(TAG, "No matching destination for path: $path")
           null
@@ -449,6 +461,7 @@ object DeepLinkManager {
         path == PATH_DEMO_A11Y_CONTRAST -> "Demo Contrast"
         path == PATH_DEMO_A11Y_TAP_TARGETS -> "Demo Tap Targets"
         path == PATH_DEMO_BUG_REPRO -> "Demo Bug Repro"
+        path == PATH_DEMO_POINTER_PROBE -> "Demo Pointer Probe"
         else -> null
       }
 
@@ -647,6 +660,7 @@ object DeepLinkManager {
         "Demo Contrast" to generateDemoContrastUrl(),
         "Demo Tap Targets" to generateDemoTapTargetsUrl(),
         "Demo Bug Repro" to generateDemoBugReproUrl(),
+        "Demo Pointer Probe" to generateDemoPointerProbeUrl(),
       )
     Log.d(TAG, "Generated ${deepLinks.size} deep links")
     return deepLinks

@@ -179,6 +179,18 @@ impossible. [doc]
 
 ## Experiments that settle the unknowns
 
+The Playground **Pointer Probe** screen (#13096) is the probe view for experiments 2, 3, 4 and 6.
+Open it from Home > Demos > Pointer Probe, or with
+`adb shell am start -a android.intent.action.VIEW -d automobile:playground/demos/input/pointer_probe`
+(the app must be onboarded and logged in). A custom View receives every `MotionEvent` through
+`onTouchEvent`, `onHoverEvent` and `onGenericMotionEvent` and logs one line per event: the callback
+(`touch`/`hover`/`generic`), action (DOWN/MOVE/UP, HOVER_ENTER/MOVE/EXIT, ...), `deviceId`,
+`source` names, `buttonState` names, and per pointer `toolType`, `getPressure()`, `AXIS_TILT`,
+`AXIS_ORIENTATION` and x/y. The newest 20 lines are Text nodes tagged `pointer_probe_event_0`
+(newest) to `pointer_probe_event_19`; `pointer_probe_count` holds the running total and
+`pointer_probe_clear` empties the log, so `observe` can read results after an injection. Device
+results are still to be collected.
+
 1. `adb shell dumpsys input` on an API 34+ AVD and a physical pen device: list
    devices, sources and motion ranges (emulator stylus capability).
 2. Run `input stylus swipe` / `input stylus motionevent` against a probe view

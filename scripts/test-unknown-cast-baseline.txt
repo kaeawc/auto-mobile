@@ -218,9 +218,7 @@
 1	test/features/observe/ios/iosWindowLayer.test.ts
 1	test/features/observe/ios/sdkInjectedStableIdentity.test.ts
 1	test/features/observe/ios/tapDiagnostics.test.ts
-2	test/features/prototype/prototypeNodeContractParity.test.ts
 1	test/features/utility/DeepLinkManagerHostExec.test.ts
-1	test/features/video/FfmpegVideoProcessingBackend.test.ts
 1	test/fixtures/observe/observeFixture.ts
 1	test/helpers/daemonHeartbeatHandler.ts
 3	test/helpers/daemonRestartScenario.ts
@@ -288,7 +286,6 @@
 1	test/server/observeAppResource.integration.test.ts
 1	test/server/observeWaitForConditionDsl.test.ts
 6	test/server/openLinkWaitFor.test.ts
-1	test/server/releaseCallerOrderingPreservedSession.test.ts
 2	test/server/resourceNotifySlowSibling.test.ts
 1	test/server/resourceRegistryListChanged.test.ts
 4	test/server/resourceRegistryMalformedUri.test.ts
@@ -302,7 +299,6 @@
 1	test/server/setActiveDevice.refusedBeforeResume.test.ts
 10	test/server/storageResources.test.ts
 1	test/server/telephonyTools.test.ts
-1	test/server/terminalPersistedRecoveryTransport.integration.test.ts
 2	test/server/toolRegistry.collaborators.integration.test.ts
 1	test/server/toolRegistry.reachability.test.ts
 1	test/server/toolRegistry.readOnlyDeviceAccess.test.ts

@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import path from "node:path";
 import type {
   BootedDevice,
@@ -142,8 +141,9 @@ describe("PlanExecutionOrchestrator video teardown of a cancelled plan (#9885)",
     return cancelled;
   }
 
+  const scratch = useScratchRoot("cancelled-plan-video-");
   beforeEach(async () => {
-    dir = await mkdtemp(path.join(os.tmpdir(), "cancelled-plan-video-"));
+    dir = scratch.next();
     timer = new FakeTimer();
     caller = new AbortController();
     video = new FakeRecorder(dir);
@@ -153,7 +153,6 @@ describe("PlanExecutionOrchestrator video teardown of a cancelled plan (#9885)",
   afterEach(async () => {
     warn.mockRestore();
     execute.mockRestore();
-    await rm(dir, { recursive: true, force: true });
   });
 
   function orchestrator(

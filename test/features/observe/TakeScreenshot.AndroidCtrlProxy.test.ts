@@ -1,7 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
+import { readFileSync } from "node:fs";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAndroidPhysicalDisplayIdResolver } from "../../fakes/FakeAndroidPhysicalDisplayIdResolver";
@@ -11,11 +10,9 @@ import { mockDevice } from "./takeScreenshotTestHelpers";
 
 describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
   let cacheDir: string;
+  const scratch = useScratchRoot("am-shot-test-");
   beforeEach(() => {
-    cacheDir = mkdtempSync(path.join(os.tmpdir(), "am-shot-test-"));
-  });
-  afterEach(() => {
-    rmSync(cacheDir, { recursive: true, force: true });
+    cacheDir = scratch.next();
   });
 
   test("tracks WebP metadata when requested", async function () {

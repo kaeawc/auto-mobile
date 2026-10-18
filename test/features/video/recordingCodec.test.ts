@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import { promises as fsPromises } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import {
   defaultRecordingCodecProbe,
@@ -130,12 +130,9 @@ describe("parseMp4DurationMs", () => {
 describe("defaultRecordingCodecProbe", () => {
   let tempDir: string;
 
+  const scratch = useScratchRoot("recording-codec-");
   beforeEach(async () => {
-    tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "recording-codec-"));
-  });
-
-  afterEach(async () => {
-    await fsPromises.rm(tempDir, { recursive: true, force: true });
+    tempDir = scratch.next();
   });
 
   test("reads the codec from a finalized file (moov before mdat)", async () => {

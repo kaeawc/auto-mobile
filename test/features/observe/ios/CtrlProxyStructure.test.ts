@@ -1,19 +1,13 @@
 import { expect, test } from "bun:test";
-import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
+import {
+  IosHierarchyConverter,
+  type ConvertedNode,
+} from "../../../../src/features/observe/ios/IosHierarchyConverter";
 import { springBoardPhotosIcon } from "../../../fixtures/observe/iosSpringBoardIcon";
-import type { HierarchyDelegateContext } from "../../../../src/features/observe/ios/types";
 
-interface Node {
-  $: Record<string, unknown>;
-  extras?: Record<string, string>;
-  node?: Node[];
-}
-const subject = new CtrlProxyHierarchy({} as HierarchyDelegateContext);
-const predicates = subject as unknown as {
-  hasContentProperties(attrs: Record<string, unknown>): boolean;
-  isRedundantStaticTextChild(text: string, child: Node): boolean;
-  noiseSiblingKey(node: Node): string | null;
-};
+type Node = ConvertedNode;
+const subject = new IosHierarchyConverter();
+const predicates = subject.testHooks;
 
 test("content properties preserve truthiness and short circuit", () => {
   for (const key of ["text", "value", "resource-id", "content-desc", "test-tag", "role"]) {

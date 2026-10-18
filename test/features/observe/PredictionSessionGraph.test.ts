@@ -6,7 +6,7 @@ import { NavigationRepository } from "../../../src/db/navigationRepository";
 import { PredictionHistoryRepository } from "../../../src/db/predictionHistoryRepository";
 import type { PredictionOutcomeRecord } from "../../../src/db/predictionHistoryRepository";
 import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
-import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
+import { buildPredictionActionContext } from "../../../src/features/action/postActionAnnotations";
 import {
   createNavigationGraphResolver,
   type NavigationDeviceRef,
@@ -16,9 +16,7 @@ import { PredictionAnalyzer } from "../../../src/features/observe/PredictionAnal
 import { PredictiveUIState } from "../../../src/features/observe/PredictiveUIState";
 import type { Element, ObserveResult } from "../../../src/models";
 import { PortManager } from "../../../src/utils/PortManager";
-import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeElementParser } from "../../fakes/FakeElementParser";
-import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   installInMemoryNavManager,
   type InMemoryNavManagerHarness,
@@ -200,24 +198,12 @@ describe("prediction outcomes are recorded on the graph that produced the predic
     });
   }
 
-  function visualChange(device: NavigationDeviceRef): BaseVisualChange {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const change = new BaseVisualChange(
-      { name: "test-device", ...device },
-      new FakeAdbExecutor(),
-      timer,
-    );
-    change.navigationGraphResolver = resolver;
-    return change;
-  }
-
   const tapOpen = { toolName: "tapOn", toolArgs: { text: "Open" } };
 
   test("buildPredictionContext reads the bound session's app and screen", async () => {
     await moveSessionTo("Home", 1_000);
 
-    const context = visualChange(SESSION_A_DEVICE)["buildPredictionContext"](tapOpen);
+    const context = buildPredictionActionContext(tapOpen, () => resolver(SESSION_A_DEVICE));
 
     expect(context).toMatchObject({ appId: APP, fromScreen: "Home", toolName: "tapOn" });
     expect(context?.navigationGraph).toBe(sessionGraph);
@@ -235,19 +221,19 @@ describe("prediction outcomes are recorded on the graph that produced the predic
       applicationId: APP,
     });
 
-    const context = visualChange(UNBOUND_DEVICE)["buildPredictionContext"](tapOpen);
+    const context = buildPredictionActionContext(tapOpen, () => resolver(UNBOUND_DEVICE));
 
     expect(context).toMatchObject({ appId: APP, fromScreen: "GlobalHome" });
     expect(context?.navigationGraph).toBe(harness.manager);
   });
 
   test("a device with no session graph screen yields no context", () => {
-    expect(visualChange(SESSION_A_DEVICE)["buildPredictionContext"](tapOpen)).toBeUndefined();
+    expect(buildPredictionActionContext(tapOpen, () => resolver(SESSION_A_DEVICE))).toBeUndefined();
   });
 
   test("the outcome compares the landing screen on the session graph that built the context", async () => {
     await moveSessionTo("Home", 1_000);
-    const context = visualChange(SESSION_A_DEVICE)["buildPredictionContext"](tapOpen);
+    const context = buildPredictionActionContext(tapOpen, () => resolver(SESSION_A_DEVICE));
     await moveSessionTo("Detail", 2_000);
     const history = new RecordingHistory();
     // The global manager never learned any screen, as in a session-bound client.

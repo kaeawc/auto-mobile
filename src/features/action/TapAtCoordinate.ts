@@ -14,8 +14,6 @@ import {
   type TalkBackNavigationDriverFactory,
 } from "../talkback/TalkBackNavigationDriver";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
-import { normalizedAxis } from "./coordinateAxis";
-import { resolveImageRelativePoint } from "./imageRelativePoint";
 import {
   resolveCoordinateTapCtrlProxyTimeoutMs,
   resolveGestureCtrlProxyTimeoutMs,
@@ -42,7 +40,6 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { withStaleDisplay } from "../observe/StaleDisplayError";
 import { snapshotReferences, type SnapshotReferenceStore } from "../observe/SnapshotReferenceStore";
-import { layerGestureRefusal } from "../observe/hierarchyLayer";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
 import {
@@ -66,11 +63,19 @@ import {
   tryAtomicAndroidDoubleTap,
 } from "./androidDoubleTap";
 
-import { LONG_PRESS_DEFAULT_MS, LONG_PRESS_MIN_MS, LONG_PRESS_MAX_MS } from "./tapAtGesture";
+import { LONG_PRESS_DEFAULT_MS, LONG_PRESS_MIN_MS } from "./tapAtGesture";
 import { resolveTapAtCall, type TapAtCall } from "./ActionCall";
 import { collectWarnings, partialDoubleTapNote, tapDeliveryReporter } from "./tapSharedHelpers";
 import { dispatchStylusTap, refusedTap, stylusTapRefusal } from "./stylusPointer";
 import { TapAtGeometryError } from "./TapAtGeometryError";
+import {
+  failurePoint,
+  inputPoint,
+  resolveCoordinates,
+  resolveTapAtCoordinates,
+} from "./tapAtCoordinateResolution";
+
+export { resolveTapAtCoordinates };
 
 const ANDROID_TAP_DURATION_MS = 10;
 const IOS_TAP_DURATION_MS = 50;
@@ -95,153 +100,6 @@ function tapDurationMs(options: TapAtOptions, platform: BootedDevice["platform"]
     return options.durationMs ?? LONG_PRESS_DEFAULT_MS;
   }
   return platform === "android" ? ANDROID_TAP_DURATION_MS : IOS_TAP_DURATION_MS;
-}
-
-function gestureOptionError(options: TapAtOptions): string | undefined {
-  const { durationMs } = options;
-  const action = options.action ?? "tap";
-  if (action !== "tap" && action !== "longPress" && action !== "doubleTap") {
-    return "tapAt action is unsupported";
-  }
-  if (
-    durationMs !== undefined &&
-    (action !== "longPress" ||
-      !Number.isInteger(durationMs) ||
-      durationMs < LONG_PRESS_MIN_MS ||
-      durationMs > LONG_PRESS_MAX_MS)
-  ) {
-    return `tapAt durationMs requires longPress and must be ${LONG_PRESS_MIN_MS}–${LONG_PRESS_MAX_MS} ms`;
-  }
-  return undefined;
-}
-
-function inputPoint(options: TapAtOptions): { x: number; y: number } {
-  return options.image ?? { x: options.x, y: options.y };
-}
-
-function failurePoint(
-  options: TapAtOptions,
-  platform: BootedDevice["platform"],
-): { x: number; y: number } {
-  const point = inputPoint(options);
-  return platform === "android" && !options.image
-    ? { x: Math.round(point.x), y: Math.round(point.y) }
-    : point;
-}
-
-function imageOptionError(options: TapAtOptions, toolName: string): string | undefined {
-  return options.x !== undefined || options.y !== undefined || options.coordinateSpace !== undefined
-    ? `${toolName} image is mutually exclusive with x, y, and coordinateSpace`
-    : undefined;
-}
-
-function coordinateOptionError(options: TapAtOptions, toolName: string): string | undefined {
-  if (options.image !== undefined) {
-    return imageOptionError(options, toolName);
-  }
-  const { x, y } = options;
-  const space = options.coordinateSpace ?? "absolute";
-  if (space !== "absolute" && space !== "normalized" && space !== "percent") {
-    return `${toolName} coordinateSpace is unsupported`;
-  }
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    return `${toolName} requires finite x and y coordinates`;
-  }
-  const max = space === "normalized" ? 1 : space === "percent" ? 100 : undefined;
-  if (max !== undefined && !axesWithinRange(x, y, max)) {
-    return `${toolName} ${space} coordinates must be between 0 and ${max}`;
-  }
-  return undefined;
-}
-
-function axesWithinRange(x: number, y: number, max: number): boolean {
-  return x >= 0 && x <= max && y >= 0 && y <= max;
-}
-
-function resolveAxis(value: number, size: number, space: TapAtOptions["coordinateSpace"]): number {
-  const max = space === "normalized" ? 1 : space === "percent" ? 100 : undefined;
-  if (max === undefined) {
-    return value;
-  }
-  return normalizedAxis(value / max, size);
-}
-
-function hasPositiveScreenSize(screenSize: ObserveResult["screenSize"] | undefined): boolean {
-  if (!screenSize) {
-    return false;
-  }
-  return (
-    Number.isFinite(screenSize.width) &&
-    Number.isFinite(screenSize.height) &&
-    screenSize.width > 0 &&
-    screenSize.height > 0
-  );
-}
-
-function isOutsideScreenBounds(
-  point: { x: number; y: number },
-  screenSize: ObserveResult["screenSize"],
-): boolean {
-  return point.x < 0 || point.x >= screenSize.width || point.y < 0 || point.y >= screenSize.height;
-}
-
-/** Android rounds to integer raster pixels; keep crop endpoints on the final included pixel. */
-function androidIntegerLimits(
-  options: TapAtOptions,
-  screenSize: ObserveResult["screenSize"],
-): { width: number; height: number } {
-  const source = options.image?.source;
-  return source && "crop" in source
-    ? { width: source.crop.rasterBounds.right, height: source.crop.rasterBounds.bottom }
-    : screenSize;
-}
-
-/** Shared native point resolution for coordinate dispatch and hierarchy preview. */
-export function resolveTapAtCoordinates(
-  options: TapAtOptions,
-  observeResult: ObserveResult,
-  platform: BootedDevice["platform"],
-  toolName: string = "tapAt",
-): { x: number; y: number } | { x: number; y: number; error: string } {
-  const { x: rawX, y: rawY } = inputPoint(options);
-  const optionError = coordinateOptionError(options, toolName);
-  if (optionError) {
-    return { x: rawX, y: rawY, error: optionError };
-  }
-  const space = options.coordinateSpace ?? "absolute";
-
-  const screenSize = observeResult.screenSize;
-  if (!hasPositiveScreenSize(screenSize)) {
-    return {
-      x: rawX,
-      y: rawY,
-      error: `${toolName} requires a positive screenSize from a fresh observation`,
-    };
-  }
-  const point = options.image
-    ? resolveImageRelativePoint(options.image, platform === "ios" ? "ios" : "android", screenSize)
-    : {
-        x: resolveAxis(rawX, screenSize.width, space),
-        y: resolveAxis(rawY, screenSize.height, space),
-      };
-  const { x: resolvedX, y: resolvedY } = point;
-  if (isOutsideScreenBounds({ x: resolvedX, y: resolvedY }, screenSize)) {
-    return {
-      x: rawX,
-      y: rawY,
-      error: `${toolName} coordinates (${rawX}, ${rawY}) are outside screen bounds [0, ${screenSize.width}) x [0, ${screenSize.height})`,
-    };
-  }
-  const limits = androidIntegerLimits(options, screenSize);
-  const x =
-    platform === "android"
-      ? Math.min(Math.round(resolvedX), Math.ceil(limits.width) - 1)
-      : resolvedX;
-  const y =
-    platform === "android"
-      ? Math.min(Math.round(resolvedY), Math.ceil(limits.height) - 1)
-      : resolvedY;
-  return { x, y };
 }
 
 function withoutVolatileTapLayoutFields(value: unknown): unknown {
@@ -354,21 +212,6 @@ function resolveTalkBackDependencies(
   };
 }
 
-/**
- * `layer` refusal for the resolved native point, checked against the pre-dispatch observation
- * before any input is sent (issue #9305).
- */
-function tapAtLayerRefusal(
-  options: TapAtOptions,
-  observation: ObserveResult,
-  point: { x: number; y: number },
-): string | undefined {
-  const action = options.action ?? "tap";
-  const verb =
-    action === "longPress" ? "long press" : action === "doubleTap" ? "double tap" : "tap";
-  return layerGestureRefusal(observation.viewHierarchy, options.layer, [point], verb);
-}
-
 /** Tap one absolute point in the native coordinate space reported by observe. */
 export class TapAtCoordinate extends BaseVisualChange {
   private readonly androidClient: CoordinateTapClient<() => void> & {
@@ -448,7 +291,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         error: stale,
       };
     }
-    const resolved = this.resolveCoordinates(options, observation);
+    const resolved = resolveCoordinates(options, observation, this.device.platform);
     if ("error" in resolved) {
       return {
         success: false,
@@ -592,7 +435,7 @@ export class TapAtCoordinate extends BaseVisualChange {
               error: stale,
             };
           }
-          const resolved = this.resolveCoordinates(options, observeResult);
+          const resolved = resolveCoordinates(options, observeResult, this.device.platform);
           if ("error" in resolved) {
             return {
               success: false,
@@ -991,7 +834,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     initial: ObserveResult,
     refreshed: ObserveResult,
   ): { point: { x: number; y: number }; frameContext: string } | undefined {
-    const resolved = this.resolveCoordinates(options, refreshed);
+    const resolved = resolveCoordinates(options, refreshed, this.device.platform);
     const frameContext = refreshed.viewHierarchy?.frameContext;
     if (
       "error" in resolved ||
@@ -1261,93 +1104,6 @@ export class TapAtCoordinate extends BaseVisualChange {
         throw indeterminateTapError(errorMessage(error));
       }
       throw toActionableError(error, "TalkBack focus tap failed before dispatch");
-    }
-  }
-
-  private resolveCoordinates(
-    options: TapAtOptions,
-    observeResult: ObserveResult,
-  ): { x: number; y: number } | { x: number; y: number; error: string } {
-    this.validatePlanGeometry(options, observeResult);
-    const gestureError = gestureOptionError(options);
-    if (gestureError) {
-      return { x: inputPoint(options).x, y: inputPoint(options).y, error: gestureError };
-    }
-    const resolved = resolveTapAtCoordinates(options, observeResult, this.device.platform);
-    if ("error" in resolved) {
-      return resolved;
-    }
-    const layerRefusal = tapAtLayerRefusal(options, observeResult, resolved);
-    if (layerRefusal) {
-      return { ...resolved, error: layerRefusal };
-    }
-    if (options.planContext) {
-      this.recordNativeGeometry(options.planContext, observeResult, resolved);
-    }
-    return resolved;
-  }
-
-  private validatePlanGeometry(options: TapAtOptions, observation: ObserveResult): void {
-    const geometry = options.planContext?.geometry;
-    if (!geometry) {
-      return;
-    }
-    const orientation = observation.rotation ?? observation.viewHierarchy?.rotation;
-    const checks: Array<[string, boolean]> = [
-      ["platform", geometry.platform === this.device.platform],
-      [
-        "dimensions",
-        geometry.deviceWidth === observation.screenSize.width &&
-          geometry.deviceHeight === observation.screenSize.height,
-      ],
-      ["orientation", Number.isInteger(orientation) && geometry.orientation === orientation],
-      ["point", this.matchesRecordedPoint(options, geometry)],
-    ];
-    const mismatch = checks.find(([, matches]) => !matches)?.[0];
-    if (mismatch) {
-      throw new TapAtGeometryError(
-        `tapAt replay ${mismatch} mismatch: recorded ${JSON.stringify(geometry)}, current ${this.device.platform} ${observation.screenSize?.width}x${observation.screenSize?.height} orientation ${orientation}. Replay on compatible geometry or record this step again.`,
-      );
-    }
-  }
-
-  private matchesRecordedPoint(
-    options: TapAtOptions,
-    geometry: NonNullable<TapAtPlanContext["geometry"]>,
-  ): boolean {
-    if (options.image || (options.coordinateSpace ?? "absolute") !== "absolute") {
-      return false;
-    }
-    if (options.x !== geometry.x || options.y !== geometry.y) {
-      return false;
-    }
-    return (
-      this.device.platform !== "android" ||
-      (Number.isInteger(geometry.x) && Number.isInteger(geometry.y))
-    );
-  }
-
-  private recordNativeGeometry(
-    context: TapAtPlanContext,
-    observeResult: ObserveResult,
-    point: { x: number; y: number },
-  ): void {
-    const orientation = observeResult.rotation ?? observeResult.viewHierarchy?.rotation;
-    if (
-      (this.device.platform === "android" || this.device.platform === "ios") &&
-      Number.isInteger(orientation) &&
-      orientation !== undefined &&
-      orientation >= 0 &&
-      orientation <= 3
-    ) {
-      context.recordedGeometry = {
-        platform: this.device.platform,
-        deviceWidth: observeResult.screenSize.width,
-        deviceHeight: observeResult.screenSize.height,
-        orientation,
-        x: point.x,
-        y: point.y,
-      };
     }
   }
 

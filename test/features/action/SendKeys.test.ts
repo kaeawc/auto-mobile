@@ -2277,11 +2277,14 @@ describe("DefaultSendKeysCommandExecutor", () => {
     test(`eventAll types a 42-char run as ${expected.length} input text command(s) on API ${apiLevel}`, async () => {
       const adb = new FakeAdbExecutor();
       adb.setAndroidApiLevel(apiLevel);
+      // The per-chunk consume wait (~28 ms per char) must run on a FakeTimer, not the real clock.
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
       const executor = new DefaultSendKeysCommandExecutor(
         androidDevice,
         createAdbFactory(adb),
         createObserver(focusedAndroidObservation()),
-        { textClient: createTextClient().client },
+        { textClient: createTextClient().client, timer },
       );
 
       const result = await executor.type({ action: "type", text: longRun, mode: "eventAll" });

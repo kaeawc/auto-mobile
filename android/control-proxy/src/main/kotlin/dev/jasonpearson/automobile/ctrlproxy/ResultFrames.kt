@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.CurrentFocusResult
+import dev.jasonpearson.automobile.protocol.DragResult
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleReportContract
+import dev.jasonpearson.automobile.protocol.PinchResult
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
@@ -12,12 +15,19 @@ import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode
 import dev.jasonpearson.automobile.protocol.SavedPrototypeInfo
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
+import dev.jasonpearson.automobile.protocol.SwipeResult
+import dev.jasonpearson.automobile.protocol.TapCoordinatesResult
+import dev.jasonpearson.automobile.protocol.TraversalOrderResult
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 
 private val resultFrameJson = Json {
@@ -41,6 +51,44 @@ private fun resultFrame(
     },
   )
 
+/**
+ * The hand-built frames omitted absent optionals, so these typed classes are encoded with
+ * `explicitNulls = false` rather than per-field `@EncodeDefault(NEVER)`: the latter would alter the
+ * response fixture, which encodes the same classes with explicit nulls.
+ */
+private val omitNullsFrameJson = Json {
+  prettyPrint = false
+  encodeDefaults = true
+  explicitNulls = false
+}
+
+private fun typedResultFrame(response: WebSocketResponse): String =
+  omitNullsFrameJson.encodeToString<WebSocketResponse>(response)
+
+/**
+ * Content of an `insert_text_result` frame. The envelope (type, timestamp, requestId, perfTiming)
+ * is added by the response sender, so this encodes only the body, in the order the hand-built frame
+ * wrote it. It is deliberately not a [WebSocketResponse] subclass: that would add a response to the
+ * published wire-contract fixture, which this refactor must leave byte-identical.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+internal data class InsertTextResultBody(
+  val success: Boolean,
+  val totalTimeMs: Long,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val error: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val warning: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val caretPlaced: Boolean? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val resultingTextLength: Int? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val partialApplication: Boolean = false,
+) {
+  fun putInto(builder: JsonObjectBuilder) {
+    resultFrameJson.encodeToJsonElement(serializer(), this).jsonObject.forEach { (key, value) ->
+      builder.put(key, value)
+    }
+  }
+}
+
 internal fun swipeResultFrame(
   requestId: String?,
   success: Boolean,
@@ -49,12 +97,17 @@ internal fun swipeResultFrame(
   gestureTimeMs: Long?,
   perfTiming: JsonElement?,
 ): String =
-  resultFrame("swipe_result", requestId, perfTiming) {
-    put("success", success)
-    put("totalTimeMs", totalTimeMs)
-    if (gestureTimeMs != null) put("gestureTimeMs", gestureTimeMs)
-    if (error != null) put("error", error)
-  }
+  typedResultFrame(
+    SwipeResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = success,
+      totalTimeMs = totalTimeMs,
+      gestureTimeMs = gestureTimeMs,
+      error = error,
+      perfTiming = perfTiming?.toString(),
+    ),
+  )
 
 internal fun dragResultFrame(
   requestId: String?,
@@ -64,12 +117,17 @@ internal fun dragResultFrame(
   gestureTimeMs: Long?,
   perfTiming: JsonElement?,
 ): String =
-  resultFrame("drag_result", requestId, perfTiming) {
-    put("success", success)
-    put("totalTimeMs", totalTimeMs)
-    if (gestureTimeMs != null) put("gestureTimeMs", gestureTimeMs)
-    if (error != null) put("error", error)
-  }
+  typedResultFrame(
+    DragResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = success,
+      totalTimeMs = totalTimeMs,
+      gestureTimeMs = gestureTimeMs,
+      error = error,
+      perfTiming = perfTiming?.toString(),
+    ),
+  )
 
 internal fun tapCoordinatesResultFrame(
   requestId: String?,
@@ -78,11 +136,16 @@ internal fun tapCoordinatesResultFrame(
   totalTimeMs: Long,
   perfTiming: JsonElement?,
 ): String =
-  resultFrame("tap_coordinates_result", requestId, perfTiming) {
-    put("success", success)
-    put("totalTimeMs", totalTimeMs)
-    if (error != null) put("error", error)
-  }
+  typedResultFrame(
+    TapCoordinatesResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = success,
+      totalTimeMs = totalTimeMs,
+      error = error,
+      perfTiming = perfTiming?.toString(),
+    ),
+  )
 
 internal fun pinchResultFrame(
   requestId: String?,
@@ -92,12 +155,17 @@ internal fun pinchResultFrame(
   gestureTimeMs: Long?,
   perfTiming: JsonElement?,
 ): String =
-  resultFrame("pinch_result", requestId, perfTiming) {
-    put("success", success)
-    put("totalTimeMs", totalTimeMs)
-    if (gestureTimeMs != null) put("gestureTimeMs", gestureTimeMs)
-    if (error != null) put("error", error)
-  }
+  typedResultFrame(
+    PinchResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = success,
+      totalTimeMs = totalTimeMs,
+      gestureTimeMs = gestureTimeMs,
+      error = error,
+      perfTiming = perfTiming?.toString(),
+    ),
+  )
 
 internal fun screenshotErrorFrame(
   requestId: String?,
@@ -137,20 +205,28 @@ internal fun currentFocusErrorFrame(
   error: String?,
   totalTimeMs: Long,
 ): String =
-  resultFrame("current_focus_result", requestId) {
-    put("totalTimeMs", totalTimeMs)
-    put("error", error ?: "Unknown error")
-  }
+  typedResultFrame(
+    CurrentFocusResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      totalTimeMs = totalTimeMs,
+      error = error ?: "Unknown error",
+    ),
+  )
 
 internal fun traversalOrderErrorFrame(
   requestId: String?,
   error: String?,
   totalTimeMs: Long,
 ): String =
-  resultFrame("traversal_order_result", requestId) {
-    put("totalTimeMs", totalTimeMs)
-    put("error", error ?: "Unknown error")
-  }
+  typedResultFrame(
+    TraversalOrderResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      totalTimeMs = totalTimeMs,
+      error = error ?: "Unknown error",
+    ),
+  )
 
 internal fun prototypeResultFrame(
   requestId: String?,

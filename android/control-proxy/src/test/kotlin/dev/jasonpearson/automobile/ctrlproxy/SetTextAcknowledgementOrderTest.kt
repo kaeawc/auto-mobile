@@ -123,17 +123,24 @@ class SetTextAcknowledgementOrderTest {
       listOf(
         "private suspend fun performNodeAction(",
         "private fun performGlobalActionRequest(",
-        "override suspend fun requestGestureStart(",
-        "override suspend fun requestGestureMove(",
-        "override suspend fun requestGestureEnd(",
         "override suspend fun requestCommitText(",
         "override suspend fun requestClickFocusedInput(",
       )) {
       assertTrue("$signature clears caret", functionBody(serviceSource, signature).contains(forget))
     }
-    val gestureStart = serviceSource.indexOf("private fun dispatchGestureWithResult(")
-    val gestureLifecycle = serviceSource.indexOf("val lifecycle", gestureStart)
-    assertTrue(serviceSource.substring(gestureStart, gestureLifecycle).contains(forget))
+    // Gestures reach the caret through GestureController.Host, which the service wires to it.
+    assertTrue(serviceSource.contains("override fun forgetRememberedInsert() = $forget"))
+    val gestureSource = KotlinSourceScan.maskLiteralsAndComments(readGestureSource())
+    val hostForget = "host.forgetRememberedInsert()"
+    for (signature in listOf("fun startStream(", "fun moveStream(", "fun endStream(")) {
+      assertTrue(
+        "$signature clears caret",
+        functionBody(gestureSource, signature).contains(hostForget),
+      )
+    }
+    val gestureStart = gestureSource.indexOf("private fun dispatchGestureWithResult(")
+    val gestureLifecycle = gestureSource.indexOf("val lifecycle", gestureStart)
+    assertTrue(gestureSource.substring(gestureStart, gestureLifecycle).contains(hostForget))
     val events = functionBody(serviceSource, "override fun onAccessibilityEvent(")
     assertTrue(events.indexOf(forget) in 0 until events.indexOf("val connectionCount"))
     assertTrue(events.contains("AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED"))
@@ -190,31 +197,24 @@ class SetTextAcknowledgementOrderTest {
         outcome > selectionDecision,
     )
     assertTrue("acknowledgement must include the computed outcome", broadcast > outcome)
+    // The wire encoding (omitted optionals, partialApplication only when true) is pinned
+    // byte-for-byte against the old hand-built frame in ResultFramesGoldenTest.
     val broadcaster = functionBody(source, "private suspend fun broadcastInsertTextResult(")
-    val rawBroadcaster =
-      functionBody(readTextInputSource(), "private suspend fun broadcastInsertTextResult(")
-    assertTrue(
-      "legacy partialApplication must be serialized",
-      "put(\"partialApplication\", true)" in rawBroadcaster,
-    )
-    assertTrue("success must be serialized", "put(\"success\", success)" in rawBroadcaster)
-    assertTrue("partialApplication must be guarded", "if (partialApplication)" in broadcaster)
     assertTrue(
       "insert acknowledgements must be synchronous",
       "responseSender.broadcastWithPerfSync" in broadcaster,
     )
-    assertTrue("error must be serialized", "put(\"error\", error)" in rawBroadcaster)
-    for (field in listOf("warning", "caretPlaced", "resultingTextLength")) {
-      val guard = broadcaster.indexOf("if ($field != null)")
-      assertTrue("optional $field must be guarded", guard >= 0)
-      assertTrue(
-        "optional $field must serialize its value",
-        "put(\"$field\", $field)" in rawBroadcaster,
-      )
-      assertTrue(
-        "optional $field must be serialized after its guard",
-        broadcaster.indexOf("put(", startIndex = guard) > guard,
-      )
+    for (field in
+      listOf(
+        "success",
+        "totalTimeMs",
+        "error",
+        "warning",
+        "caretPlaced",
+        "resultingTextLength",
+        "partialApplication",
+      )) {
+      assertTrue("$field must reach the typed body", "$field = $field" in broadcaster)
     }
   }
 
@@ -250,6 +250,8 @@ class SetTextAcknowledgementOrderTest {
   private fun readCtrlProxySource(): String = locateSource("CtrlProxy.kt").readText()
 
   private fun readTextInputSource(): String = locateSource("TextInputController.kt").readText()
+
+  private fun readGestureSource(): String = locateSource("GestureController.kt").readText()
 
   private fun locateSource(fileName: String): File {
     val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/$fileName"

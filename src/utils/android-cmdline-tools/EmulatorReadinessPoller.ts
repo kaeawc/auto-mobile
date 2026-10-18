@@ -16,7 +16,7 @@ import {
   type ReadinessDiagnostic,
 } from "./AndroidDeviceInventoryScanner";
 import { EmulatorExitedDuringReadinessError } from "./EmulatorLauncher";
-import type { AdbDeviceState } from "./interfaces/AdbExecutor";
+import type { AdbDeviceState, AdbExecutor } from "./interfaces/AdbExecutor";
 import type { AndroidEmulatorReadinessOptions } from "./AndroidEmulatorClient";
 import {
   matchesRequestedAvdOrUnknown,
@@ -516,10 +516,10 @@ export class DefaultEmulatorReadinessPoller implements EmulatorReadinessPoller {
     emulator: BootedDevice,
     scanDiagnostic: ReadinessDiagnostic | undefined,
     results: [
-      PromiseSettledResult<Awaited<ReturnType<AdbClient["executeCommand"]>>>,
-      PromiseSettledResult<Awaited<ReturnType<AdbClient["executeCommand"]>>>,
-      PromiseSettledResult<Awaited<ReturnType<AdbClient["executeCommand"]>>>,
-      PromiseSettledResult<Awaited<ReturnType<AdbClient["executeCommand"]>>>,
+      PromiseSettledResult<Awaited<ReturnType<AdbExecutor["executeCommand"]>>>,
+      PromiseSettledResult<Awaited<ReturnType<AdbExecutor["executeCommand"]>>>,
+      PromiseSettledResult<Awaited<ReturnType<AdbExecutor["executeCommand"]>>>,
+      PromiseSettledResult<Awaited<ReturnType<AdbExecutor["executeCommand"]>>>,
     ],
   ): boolean {
     const { state, signal } = context;

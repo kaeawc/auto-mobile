@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { createMcpServer } from "../../src/server";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { createFakeDeviceManager } from "../daemon/helpers/inputSocketHarness";
@@ -85,5 +86,15 @@ describe("stateless createMcpServer", () => {
     await createMcpServer({ stateless: true }).close();
 
     expect(ToolRegistry.getTool("observe")).toBeDefined();
+  });
+
+  test("a server closed before it connects detaches its binding from a shared store", async () => {
+    const store = new SessionToolBindingStore();
+    const server = createMcpServer({ stateless: true, sessionToolBindingStore: store });
+    expect(store.attachedCountForTesting).toBe(1);
+
+    await server.close();
+
+    expect(store.attachedCountForTesting).toBe(0);
   });
 });

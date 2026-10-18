@@ -2,12 +2,28 @@
  * Manages accessibility violation baselines for suppressing known violations
  */
 
+import { z } from "zod";
 import { sql, type Kysely } from "kysely";
 import { getDatabase } from "../../db/database";
 import type { Database } from "../../db/types";
 import type { WcagViolation } from "../../models/AccessibilityAudit";
 import { getCutoffDate, DEFAULT_TTL } from "../shared/MetricsUtils";
 import { logger } from "../../utils/logger";
+
+/**
+ * Baseline rows decide which violations are suppressed, by `fingerprint`. A row whose
+ * entries lack one would throw (or silently suppress nothing) inside the audit, so
+ * require it and keep the rest of the violation shape untouched.
+ */
+const baselineViolationsSchema = z.array(
+  z.custom<WcagViolation>(
+    (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      "fingerprint" in value &&
+      typeof value.fingerprint === "string",
+  ),
+);
 
 interface BaselineData {
   screenId: string;
@@ -69,7 +85,7 @@ export class BaselineManager {
    */
   private parseViolations(violationsJson: string, screenId: string): WcagViolation[] | null {
     try {
-      return JSON.parse(violationsJson) as WcagViolation[];
+      return baselineViolationsSchema.parse(JSON.parse(violationsJson));
     } catch (error) {
       logger.warn(
         `[BaselineManager] Corrupt violations_json for screen "${screenId}"; ignoring baseline row`,

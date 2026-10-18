@@ -13,7 +13,7 @@ takes one, otherwise the `x-auto-mobile-mcp-session-id` header (or the in-band
 `__mcpSessionId` argument). The socket server sends the header for proxy and CLI
 connections, and the desktop app sends one generated id per app session. A client that calls
 the daemon's HTTP endpoint directly and sends neither gets no implicit binding and must name
-`sessionUuid`. In progress (#4678); see
+`sessionUuid`. Landed in #4678 (#13047, #13049, #13046); see
 [the design record](../design-docs/mcp/sdk-v2-stateless-migration.md).
 
 ## What is refused

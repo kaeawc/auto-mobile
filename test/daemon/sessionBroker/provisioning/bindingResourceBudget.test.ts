@@ -230,6 +230,49 @@ describe("binding total-resource budget", () => {
     },
   );
 
+  test.each([
+    ["Booted", true, "running"],
+    ["Booting", false, "power_unknown"],
+    ["Shutting Down", false, "power_unknown"],
+  ])(
+    "unbound iOS simulator in state %s still consumes the cap (#13060)",
+    async (state, running) => {
+      inventory.devices = [
+        {
+          platform: "ios",
+          name: "ambroker-sim",
+          deviceId: "SIM-1",
+          isRunning: running,
+          isRunningStateKnown: true,
+          state,
+        },
+      ];
+      const entry = await creation("ambroker-new");
+      expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+        kind: "exhausted",
+        usage: { orphaned: 1 },
+      });
+    },
+  );
+
+  test("unbound iOS simulator in state Shutdown does not consume the cap (#13060)", async () => {
+    inventory.devices = [
+      {
+        platform: "ios",
+        name: "ambroker-sim",
+        deviceId: "SIM-1",
+        isRunning: false,
+        isRunningStateKnown: true,
+        state: "Shutdown",
+      },
+    ];
+    const entry = await creation("ambroker-new");
+    expect(await budget(1).admitCreation({ journalEntryId: entry.id })).toMatchObject({
+      kind: "admitted",
+      usage: { orphaned: 0 },
+    });
+  });
+
   test("a leftover with unknown power state still counts as an orphan", async () => {
     inventory.devices = [
       {

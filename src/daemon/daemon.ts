@@ -687,10 +687,9 @@ export class Daemon {
   private readonly shutdownIngressAbort = new AbortController();
   /** Host headers the HTTP listener admits; set when it starts. */
   private httpAllowedHosts: string[] = [];
-  /** Builds one MCP request's transport (stateless, #4678); tests replace it with a double. */
+  /** Builds one MCP request's transport (stateless: no transport session id, #4678); tests replace it with a double. */
   private mcpHttpTransportFactory = (allowedHosts: string[]): StreamableHTTPServerTransport =>
     new StreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
       enableDnsRebindingProtection: true,
       allowedHosts,
     });
@@ -2250,7 +2249,7 @@ export class Daemon {
 
   /**
    * Build one request's MCP server (#4678 stateless). The request scope id is its
-   * `sessionContext.sessionId`, so the executions it starts cancel with its response;
+   * session-context id, so the executions it starts cancel with its response;
    * the caller's session key travels as `requestMcpSessionId`.
    */
   private createRequestMcpServer(

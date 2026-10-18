@@ -4,6 +4,7 @@ import {
   containsBounded,
   isDeviceTool,
   diffToolSequence,
+  missingFromAnswer,
   type RunOutcome,
 } from "../../../scripts/agent-benchmark/compare";
 import { auditTranscript } from "../../../scripts/agent-benchmark/transcript";
@@ -254,6 +255,23 @@ describe("compareRun verdict", () => {
 });
 
 describe("verification text matching", () => {
+  test("a KEY: value needle must be on the last line that reports KEY", () => {
+    const needles = ["EXPECTED_COUNT: 3", "DISPLAYED_COUNT: 2"];
+    const final = "Done.\n```\nEXPECTED_COUNT: 3\nDISPLAYED_COUNT: 2\n```";
+    expect(missingFromAnswer(final, needles)).toEqual([]);
+    // Echoing the expected value, then reporting a different one, fails.
+    const contradicted =
+      "I expected DISPLAYED_COUNT: 2 here.\nEXPECTED_COUNT: 3\nDISPLAYED_COUNT: 2\nDISPLAYED_COUNT: 3";
+    expect(missingFromAnswer(contradicted, needles)).toEqual(["DISPLAYED_COUNT: 2"]);
+    // Mentioned only mid-sentence, never as its own report line.
+    expect(missingFromAnswer("The DISPLAYED_COUNT: 2 and EXPECTED_COUNT: 3", needles)).toEqual(
+      needles,
+    );
+    // Inline backticks and case do not matter; non-keyed needles search the whole answer.
+    expect(missingFromAnswer("`expected_count: 3`\nDISPLAYED_COUNT: 2", needles)).toEqual([]);
+    expect(missingFromAnswer("The status was Bug triggered.", ["Bug triggered"])).toEqual([]);
+  });
+
   test("values must end at a boundary, so a prefix of a larger number never matches", () => {
     expect(containsBounded("EXPECTED_COUNT: 3\nDISPLAYED_COUNT: 2", "expected_count: 3")).toBe(
       true,

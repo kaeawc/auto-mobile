@@ -150,7 +150,7 @@ A run's verdict comes only from hard signals; baselines never change it.
 Every suite must have at least one `verify.screenIncludes` entry: the device screen is the oracle,
 since an answer alone can be produced without touching the app. `verify.answerIncludes` checks Claude's final reply, case-insensitively. Each expected string
 must stand alone: it can't run on into a letter or digit in any script, so `EXPECTED_COUNT: 3`
-doesn't match `EXPECTED_COUNT: 30` (or `3.5`, or `3,000`) and `完了` doesn't match inside `未完了`. A run must also make at
+doesn't match `EXPECTED_COUNT: 30` (or `3.5`, or `3,000`) and `完了` doesn't match inside `未完了`. An expected `KEY: value` string must be on the last line of the reply that starts with `KEY:`, so a reply that echoes the expected value and then reports a different one fails. A run must also make at
 least one non-error call to a device-aware auto-mobile tool (one whose generated schema takes a
 `device` label); inventory and control tools such as `listDevices` and `setToolEnabled` don't count,
 so an answer produced without touching the device fails. Suite prompts ask for a fixed final-line format so this is deterministic. `verify.screenIncludes` checks an independent
@@ -248,7 +248,7 @@ built `dist/` with the schemas and vendor tools it loads at runtime, `bun.lock` 
 libraries the build leaves external, `package.json`, the harness sources under
 `scripts/agent-benchmark/` with every repository module they import (they run unbundled), the
 Bun version, and the host platform, architecture, and libc (which pick the native image build), the `--claude` command (by content, so an edited wrapper or binary counts), and a non-secret provider identity
-(provider selection, the scheme and host of every provider base URL and proxy with a digest of each path, digests of the account and project selectors (Vertex and Google Cloud project, the identity fields of the `GOOGLE_APPLICATION_CREDENTIALS` file, AWS profile and assumed role ARN), proxy bypass list, regions, provider-specific region routing and service tiers, adb server endpoint, and model-routing variables), the `adb version` of every adb client the server might run (SDK platform-tools, the adb on PATH, and the SDK the server's command-line tools detection finds), so a change to whichever one the server picks changes the build; the PATH adb is also the one the harness itself runs for preflight and the screen oracle. A stale build or changed scoring code is
+(provider selection, the scheme and host of every provider base URL and proxy with a digest of each path, digests of the account and project selectors (Vertex and Google Cloud project, the identity fields of the `GOOGLE_APPLICATION_CREDENTIALS` file, AWS profile and assumed role ARN), proxy bypass list, regions, provider-specific region routing and service tiers, adb server endpoint, and model-routing variables), the `adb version` of every adb client the server might run (SDK platform-tools, the adb on PATH, and the SDK the server's command-line tools detection finds), so a change to whichever one the server picks changes the build; the harness runs the client the server would pick (a working SDK platform-tools adb, else PATH, else the detected SDK) for preflight and the screen oracle, and fingerprints its version too. A stale build or changed scoring code is
 flagged rather than silently measured. The git commit is deliberately left out, since every
 unrelated commit would change it), and
 `baseline.observedModel`, the model Claude reported running. Suites without

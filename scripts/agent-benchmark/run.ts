@@ -727,17 +727,43 @@ export async function adbClientIdentity(
 }
 
 /**
- * The `adb version` of the client the harness itself runs (bare `adb` from PATH) for
- * preflight, the device fingerprint, and the screen oracle. It can differ from the server's
- * SDK client, so both are part of the fingerprint.
+ * The adb the harness itself runs for preflight, the device fingerprint, and the screen
+ * oracle, picked in AdbClient.getAdbPath's order so it is the client the server would use:
+ * the SDK's platform-tools/adb when it answers `adb version`, else the adb on PATH, else the
+ * detected SDK's, else bare `adb`. A PATH adb from another SDK would otherwise prepare and
+ * verify through a different client and server than the agent's tools.
  */
-export function harnessAdbIdentity(
+export async function resolveHarnessAdb(
   env: Record<string, string | undefined>,
   version: (adb: string) => string | undefined = defaultAdbVersion,
   onPath: (command: string) => string | null = (command) => Bun.which(command, { PATH: env.PATH }),
+  detected: () => Promise<string | null> = detectedAdbPath,
+): Promise<string> {
+  const sdk = resolveAndroidSdkRoot(env);
+  const sdkAdb = sdk ? `${sdk}/platform-tools/adb` : null;
+  if (sdkAdb && version(sdkAdb)) {
+    return sdkAdb;
+  }
+  return onPath("adb") ?? (await detected()) ?? "adb";
+}
+
+/** Route the harness's bare `adb` commands to the resolved client. */
+export function adbRoutedRunner(runner: CommandRunner, adbPath: string): CommandRunner {
+  return {
+    run: (command, args, timeoutMs, env) =>
+      runner.run(command === "adb" ? adbPath : command, args, timeoutMs, env),
+  };
+}
+
+/**
+ * The `adb version` of the client the harness runs (see resolveHarnessAdb). It can still
+ * differ from the server's pick on hosts where detection disagrees, so both are fingerprinted.
+ */
+export function harnessAdbIdentity(
+  adbPath: string,
+  version: (adb: string) => string | undefined = defaultAdbVersion,
 ): string {
-  const adb = onPath("adb");
-  return (adb ? version(adb)?.trim() : undefined) || `unavailable:${adb ?? "adb"}`;
+  return version(adbPath)?.trim() || `unavailable:${adbPath}`;
 }
 
 function defaultAdbVersion(adb: string): string | undefined {
@@ -758,7 +784,7 @@ async function detectedAdbPath(): Promise<string | null> {
   }
 }
 
-async function serverDigest(claudeCommand: string): Promise<string> {
+async function serverDigest(claudeCommand: string, harnessAdb: string): Promise<string> {
   const adb = await adbClientIdentity(process.env);
   const tree = (dir: string) =>
     readdirSync(join(REPO_ROOT, dir), { recursive: true, encoding: "utf8" })
@@ -787,12 +813,16 @@ async function serverDigest(claudeCommand: string): Promise<string> {
     { path: "adb", read: () => new TextEncoder().encode(adb) },
     {
       path: "harness-adb",
-      read: () => new TextEncoder().encode(harnessAdbIdentity(process.env)),
+      read: () => new TextEncoder().encode(harnessAdbIdentity(harnessAdb)),
     },
   ]);
 }
 
-async function runSuites(options: CliOptions, deps: HarnessDeps): Promise<BenchmarkResult[]> {
+async function runSuites(
+  options: CliOptions,
+  deps: HarnessDeps,
+  harnessAdb: string,
+): Promise<BenchmarkResult[]> {
   const serverEntry = join(REPO_ROOT, "dist", "src", "index.js");
   if (!existsSync(serverEntry)) {
     throw new Error(`${serverEntry} is missing; run \`bun run build\` first.`);
@@ -801,7 +831,7 @@ async function runSuites(options: CliOptions, deps: HarnessDeps): Promise<Benchm
   // Claude runs from an empty temp directory, so a relative command must be resolved here.
   const claudeCommand = resolveCommand(options.claude);
   assertDirectlyLaunchable(claudeCommand);
-  const serverBuild = await serverDigest(claudeCommand);
+  const serverBuild = await serverDigest(claudeCommand, harnessAdb);
   const suites = suitePaths(options).map((path) => loadSuite(path, REPO_ROOT));
   const results: BenchmarkResult[] = [];
   for (const suite of suites) {
@@ -848,25 +878,30 @@ async function main(argv: string[]): Promise<number> {
     console.log(suites.map((suite) => dryRunReport(suite, options)).join("\n\n"));
     return 0;
   }
-  const results = await runSuites(options, {
-    runner: realRunner,
-    launcher: createLauncher(defaultTimer),
-    timer: defaultTimer,
-    idGenerator: defaultIdGenerator,
-    deviceClaims: realDeviceClaims,
-    fs: realFs,
-    log: (line) => console.error(line),
-    env: process.env,
-    platform: process.platform,
-    physicalIosDevices: async () => {
-      // Never throws: non-macOS hosts list nothing, and a failed sweep is complete: false.
-      const discovery = await getSharedDevicectlDeviceLister().listConnectedDevices();
-      return {
-        names: discovery.devices.map((device) => device.name),
-        complete: discovery.complete,
-      };
+  const harnessAdb = await resolveHarnessAdb(process.env);
+  const results = await runSuites(
+    options,
+    {
+      runner: adbRoutedRunner(realRunner, harnessAdb),
+      launcher: createLauncher(defaultTimer),
+      timer: defaultTimer,
+      idGenerator: defaultIdGenerator,
+      deviceClaims: realDeviceClaims,
+      fs: realFs,
+      log: (line) => console.error(line),
+      env: process.env,
+      platform: process.platform,
+      physicalIosDevices: async () => {
+        // Never throws: non-macOS hosts list nothing, and a failed sweep is complete: false.
+        const discovery = await getSharedDevicectlDeviceLister().listConnectedDevices();
+        return {
+          names: discovery.devices.map((device) => device.name),
+          complete: discovery.complete,
+        };
+      },
     },
-  });
+    harnessAdb,
+  );
   emit(results, options.json);
   return results.every((result) => result.comparison.verdict === "passed") ? 0 : 1;
 }

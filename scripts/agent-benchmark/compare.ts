@@ -255,6 +255,31 @@ function missingFrom(haystack: string, needles: string[]): string[] {
   return needles.filter((needle) => !containsBounded(haystack, needle));
 }
 
+/** A `KEY: value` report line, as the prompts ask the agent to end with. */
+const KEYED_NEEDLE = /^([A-Z][A-Z0-9_]*):/;
+
+/**
+ * Expected answer text the final answer lacks. A `KEY: value` needle must be on the last
+ * line that reports KEY, so an answer that echoes the expected value (quoting the task, or a
+ * first reading) and then reports a different one fails. Other needles search the whole answer.
+ */
+export function missingFromAnswer(answer: string, needles: string[]): string[] {
+  const lines = answer.split(/\r?\n/).map((line) =>
+    line
+      .trim()
+      .replace(/^`+|`+$/g, "")
+      .trim(),
+  );
+  return needles.filter((needle) => {
+    const key = KEYED_NEEDLE.exec(needle)?.[1];
+    if (key === undefined) {
+      return !containsBounded(answer, needle);
+    }
+    const reported = lines.findLast((line) => line.toUpperCase().startsWith(`${key}:`));
+    return reported === undefined || !containsBounded(reported, needle);
+  });
+}
+
 function verifyChecks(audit: TranscriptAudit, outcome: RunOutcome, verify: VerifySpec) {
   // A UI benchmark that never touched the device proved nothing, whatever it answered; a
   // call that errored (bad arguments, refused) did not touch it either, and neither does a
@@ -273,7 +298,7 @@ function verifyChecks(audit: TranscriptAudit, outcome: RunOutcome, verify: Verif
     },
   ];
   if (verify.answerIncludes.length > 0) {
-    const missing = missingFrom(audit.result?.finalText ?? "", verify.answerIncludes);
+    const missing = missingFromAnswer(audit.result?.finalText ?? "", verify.answerIncludes);
     checks.push({
       name: "final answer",
       passed: missing.length === 0,

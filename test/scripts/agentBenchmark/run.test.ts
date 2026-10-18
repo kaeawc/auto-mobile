@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { loadSuite } from "../../../scripts/agent-benchmark/config";
 import {
   adbClientIdentity,
+  adbRoutedRunner,
   assertDirectlyLaunchable,
   bundleDigest,
   dryRunReport,
@@ -16,6 +17,7 @@ import {
   killProcessTree,
   parseCliArgs,
   resolveCommand,
+  resolveHarnessAdb,
   resolveSuitePath,
   staleBuildSource,
 } from "../../../scripts/agent-benchmark/run";
@@ -117,21 +119,67 @@ describe("agent benchmark --claude identity", () => {
 });
 
 describe("agent benchmark harness adb identity", () => {
-  test("fingerprints the PATH adb the harness runs, separately from the server's", () => {
+  test("fingerprints the adb the harness runs, separately from the server's", () => {
     expect(
-      harnessAdbIdentity(
-        {},
-        (adb) => (adb === "/usr/bin/adb" ? "Version 36.0.0\n" : undefined),
-        () => "/usr/bin/adb",
+      harnessAdbIdentity("/sdk/platform-tools/adb", (adb) =>
+        adb === "/sdk/platform-tools/adb" ? "Version 36.0.0\n" : undefined,
       ),
     ).toBe("Version 36.0.0");
+    expect(harnessAdbIdentity("adb", () => undefined)).toBe("unavailable:adb");
+  });
+
+  test("resolves adb in the server's order: working SDK adb, PATH, detected, bare", async () => {
+    const sdkAdb = (sdk: string) => `${sdk}/platform-tools/adb`;
+    const answers = (adb: string) =>
+      adb.replaceAll("\\", "/").startsWith("/sdk/") ? "Version" : undefined;
+    const resolved = await resolveHarnessAdb(
+      { ANDROID_HOME: "/sdk" },
+      answers,
+      () => "/usr/bin/adb",
+      async () => "/detected/platform-tools/adb",
+    );
+    expect(resolved.replaceAll("\\", "/")).toEndWith(sdkAdb("/sdk"));
+    // A stale SDK adb that does not answer falls through to PATH, then detection, then bare.
     expect(
-      harnessAdbIdentity(
-        {},
-        () => undefined,
-        () => null,
+      await resolveHarnessAdb(
+        { ANDROID_HOME: "/stale" },
+        answers,
+        () => "/usr/bin/adb",
+        async () => "/detected/platform-tools/adb",
       ),
-    ).toBe("unavailable:adb");
+    ).toBe("/usr/bin/adb");
+    expect(
+      await resolveHarnessAdb(
+        {},
+        answers,
+        () => null,
+        async () => "/detected/platform-tools/adb",
+      ),
+    ).toBe("/detected/platform-tools/adb");
+    expect(
+      await resolveHarnessAdb(
+        {},
+        answers,
+        () => null,
+        async () => null,
+      ),
+    ).toBe("adb");
+  });
+
+  test("routes only bare adb commands to the resolved client", async () => {
+    const calls: string[] = [];
+    const runner = adbRoutedRunner(
+      {
+        async run(command) {
+          calls.push(command);
+          return { exitCode: 0, stdout: "", stderr: "" };
+        },
+      },
+      "/sdk/platform-tools/adb",
+    );
+    await runner.run("adb", ["devices"], 1_000);
+    await runner.run("xcrun", ["simctl"], 1_000);
+    expect(calls).toEqual(["/sdk/platform-tools/adb", "xcrun"]);
   });
 });
 

@@ -1,7 +1,7 @@
 import type { DeviceInfo } from "../models";
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
-import { DEFAULT_ADMISSION_RETRY_AFTER_MS } from "../features/bootAdmission/BootAdmissionGate";
+import { DEFAULT_ADMISSION_RETRY_AFTER_MS } from "./bootAdmission/BootAdmissionGate";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { Timer } from "../utils/SystemTimer";
 import { sequenceBackoff } from "../utils/Backoff";

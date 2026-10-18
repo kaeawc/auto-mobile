@@ -269,7 +269,7 @@ async function executeAt(
   }) as AdbExecutor;
   const selector = new FakeElementSelector(missing ? null : element);
   if (selectionError) {
-    selector.selectByText = () => {
+    selector.select = () => {
       throw selectionError;
     };
   }

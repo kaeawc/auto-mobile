@@ -6,6 +6,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 /**
  * Extended FakeAdbExecutor that supports dynamic responses based on call count.
@@ -28,10 +29,7 @@ class DynamicFakeAdbExecutor extends FakeAdbExecutor {
 
   override async executeCommand(
     command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
+    options?: AdbExecuteOptions,
   ): Promise<{
     stdout: string;
     stderr: string;
@@ -55,7 +53,7 @@ class DynamicFakeAdbExecutor extends FakeAdbExecutor {
       }
     }
     // Fall back to parent behavior
-    return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    return super.executeCommand(command, options);
   }
 
   resetCallCounts(): void {

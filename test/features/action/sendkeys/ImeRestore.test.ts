@@ -97,4 +97,34 @@ describe("ImeRestore", () => {
     await restoration.restoreIme(AUTO_MOBILE_IME_ID, true, { id: 7 });
     expect(adb.getExecutedCommands()).toEqual([]);
   });
+
+  test("recovery re-disables a commit IME left enabled by a failed restoration (#13158)", async () => {
+    const { restoration, adb } = harness();
+    const original = "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME";
+    adb.setCommandResponse("shell ime list -a -s", {
+      stdout: `${original}\n${AUTO_MOBILE_IME_ID}\n`,
+      stderr: "",
+    });
+    adb.setCommandResponseSequence("shell ime list -s", [
+      { stdout: `${original}\n${AUTO_MOBILE_IME_ID}\n`, stderr: "" },
+      { stdout: `${original}\n`, stderr: "" },
+    ]);
+    adb.setCommandResponse("shell settings get secure default_input_method", {
+      stdout: `${original}\n`,
+      stderr: "",
+    });
+    adb.setCommandResponse("shell settings get secure default_input_method_subtype", {
+      stdout: "null\n",
+      stderr: "",
+    });
+    adb.setCommandResponse(`shell ime disable ${AUTO_MOBILE_IME_ID}`, { stdout: "", stderr: "" });
+    const recovered = await restoration.verifySafeImeRecovery({
+      imeId: original,
+      subtypeId: null,
+      wasEnabled: false,
+      userId: 0,
+    });
+    expect(recovered).toBe(true);
+    expect(adb.getExecutedCommands()).toContain(`shell ime disable ${AUTO_MOBILE_IME_ID}`);
+  });
 });

@@ -34,6 +34,11 @@ export interface TaskSessionBindingsDeps<C> {
   readonly retain: (context: C) => void;
   /** The task no longer waits to bind (bound, failed, cancelled, gone or evicted). */
   readonly release: (context: C) => void;
+  /**
+   * `drain` gave up on a binding still running at its deadline. The owner must fence that binding
+   * so it cannot publish state after the close has released what it knew about (#13155).
+   */
+  readonly abandon?: () => void;
 }
 
 /**
@@ -105,6 +110,7 @@ export class TaskSessionBindings<C> {
         const done = this.bindOnce(entry.context, answer.result);
         // Every poll awaits `done` itself; this handler only keeps an unawaited copy quiet.
         done.catch(() => undefined);
+        this.deps.timer.clearTimeout(entry.expiry);
         this.entries.set(taskId, { kind: "bound", done });
         this.evictOverCapacity("bound");
         return done;
@@ -114,9 +120,7 @@ export class TaskSessionBindings<C> {
         this.drop(taskId);
         return;
       default:
-        entry.touchedAt = this.deps.timer.now();
-        this.deps.timer.clearTimeout(entry.expiry);
-        entry.expiry = this.scheduleExpiry();
+        this.touch(entry);
     }
   }
 
@@ -132,6 +136,12 @@ export class TaskSessionBindings<C> {
     const taskId = params.taskId;
     if (method !== "tasks/get" || typeof taskId !== "string") {
       return answer;
+    }
+    // A poll in flight keeps its task alive: a transient failure of it must not leave the task on
+    // the clock of an earlier poll, or its retry could find the task already abandoned (#13155).
+    const polled = this.entries.get(taskId);
+    if (polled?.kind === "pending") {
+      this.touch(polled);
     }
     let result: Record<string, unknown>;
     try {
@@ -192,8 +202,15 @@ export class TaskSessionBindings<C> {
     } catch (error) {
       // A binding stuck past the deadline is abandoned so the close can proceed.
       logger.warn(`[TaskSessionBindings] ${errorMessage(error)}`);
+      this.deps.abandon?.();
     }
     this.clear();
+  }
+
+  private touch(entry: Extract<Entry<C>, { kind: "pending" }>): void {
+    entry.touchedAt = this.deps.timer.now();
+    this.deps.timer.clearTimeout(entry.expiry);
+    entry.expiry = this.scheduleExpiry();
   }
 
   private scheduleExpiry(): ReturnType<Timer["setTimeout"]> {

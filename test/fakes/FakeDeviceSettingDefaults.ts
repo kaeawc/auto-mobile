@@ -4,8 +4,8 @@ import type {
   DeviceSettingDefaultsRecord,
   DeviceSettingKey,
   DeviceSettingValues,
-  DeviceSettingsAccess,
-} from "../../src/features/utility/DeviceSettingDefaults";
+} from "../../src/models/DeviceSettingDefaults";
+import type { DeviceSettingsAccess } from "../../src/features/utility/DeviceSettingDefaults";
 
 /** In-memory device-setting defaults store (#11145). */
 export class FakeDeviceSettingDefaultsPersistence implements DeviceSettingDefaultsPersistence {

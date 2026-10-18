@@ -41,7 +41,8 @@ import {
   defaultRotationRestorerFactory,
   defaultScreenReaderRestorer,
 } from "./sessionDefaultRestorers";
-import { ignoresManagedExecutionIdleDeadline } from "./sessionBroker/provisioning/executionLiveness";
+import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../models/managedExecutionLiveness";
+import { ignoresManagedExecutionIdleDeadline } from "../models/managedExecutionLiveness";
 import type { DeferredRebindCleanup } from "./acquisitionReceipt";
 import type { TimingData } from "../utils/PerformanceTracker";
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
@@ -106,7 +107,6 @@ import { RELEASE_PERSIST_TIMEOUT_REASON, SessionReleasePersistTimeoutError } fro
 import { UNATTACHED, assertCollaboratorsAttached } from "./daemonAttachedCollaborators";
 export * from "./releaseErrors";
 import {
-  MANAGED_EXECUTION_LIVENESS_POLICY,
   clampManagedExecutionIdleTimeoutMs,
   holdsOwnerHeartbeatLease,
 } from "./sessionBroker/provisioning/executionLiveness";
@@ -5910,7 +5910,7 @@ export class SessionManager {
    * Get device assigned to a session
    */
   getDeviceForSession(sessionId: string): string | null {
-    const session = this.getSession(sessionId);
+    const session = this.findSession(sessionId);
     if (!session) {
       return null;
     }
@@ -8878,7 +8878,7 @@ export class SessionManager {
    * admitted (`getOrCreateSession`) and where it ends (`recordToolCallEnded`).
    */
   updateSessionCache(sessionId: string, updates: Partial<SessionCacheData>): void {
-    const session = this.getSession(sessionId);
+    const session = this.findSession(sessionId);
     if (!session) {
       logger.warn(`Cannot update cache for session ${sessionId}: not found`);
       return;
@@ -8984,7 +8984,7 @@ export class SessionManager {
   setDisplayPin(sessionId: string, pin: string | null): void {
     this.updateSessionCache(sessionId, { displayPin: pin ?? undefined });
     if (pin === null) {
-      const session = this.getSession(sessionId);
+      const session = this.findSession(sessionId);
       if (session) {
         delete session.cacheData.displayPin;
       }
@@ -9065,7 +9065,7 @@ export class SessionManager {
 
   /** Drop stale automation readiness after its service becomes unavailable. */
   invalidateAutomationReadiness(sessionId: string, reason: string): void {
-    if (!this.getSession(sessionId)) {
+    if (!this.findSession(sessionId)) {
       logger.debug(`[SessionManager] Cannot invalidate readiness for unknown session ${sessionId}`);
       return;
     }
@@ -9199,7 +9199,7 @@ export class SessionManager {
    * and read on the `device:`-label routing hot path (`resolveDeviceLabelSession`).
    */
   setDeviceLabels(sessionId: string, labels: DeviceLabelMap): void {
-    if (this.getSession(sessionId)) {
+    if (this.findSession(sessionId)) {
       this.planLabels.indexDerivedLabels(sessionId, labels);
     }
     this.updateSessionCache(sessionId, { deviceLabels: labels });
@@ -10093,7 +10093,7 @@ export class SessionManager {
    * Clear session cache (for specific key or all)
    */
   clearSessionCache(sessionId: string, key?: string): void {
-    const session = this.getSession(sessionId);
+    const session = this.findSession(sessionId);
     if (!session) {
       return;
     }

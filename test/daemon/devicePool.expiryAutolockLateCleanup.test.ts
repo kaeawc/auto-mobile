@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 /**
  * H13 reproduction: an EXPIRY-origin release whose device quarantine is extended
  * after the pool's release listener ran returns the device to idle, but leaves
@@ -33,7 +34,6 @@
  */
 import { afterEach, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type {
   RotateOptions,
@@ -52,7 +52,6 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 
 // SessionManager.CLEANUP_INTERVAL_MS (sessionManager.ts:1150): the real sweep timer fires the expiry.
@@ -101,13 +100,11 @@ async function setupDaemonPool() {
   });
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [DEVICE]);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "daemon-h13", {
-      timer,
-      deviceManager: utils,
-      idGenerator: new CountingIdGenerator("autolock"),
-    }),
-  );
+  const pool = makePool(manager, "daemon-h13", {
+    timer,
+    deviceManager: utils,
+    idGenerator: new CountingIdGenerator("autolock"),
+  });
   await pool.initializeWithDevices([DEVICE]);
   // rotateHandler resolves the SessionManager through DaemonState, as in the daemon.
   DaemonState.getInstance().initialize(manager, pool);

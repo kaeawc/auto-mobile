@@ -1,7 +1,6 @@
+import { makePool } from "../helpers/makePool";
 import { drainMicrotasks, drainUntil, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect, test } from "bun:test";
-import { DevicePool } from "../../src/daemon/devicePool";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DeviceCleanupInProgressError,
@@ -44,12 +43,10 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
         const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
         utils.setBootedDevices("android", [device]);
         PlatformDeviceManagerFactory.setInstance(utils);
-        const pool = new DevicePool(
-          createDevicePoolDependencies(manager, "daemon-test", {
-            timer: timer,
-            deviceManager: utils,
-          }),
-        );
+        const pool = makePool(manager, "daemon-test", {
+          timer: timer,
+          deviceManager: utils,
+        });
         await pool.initializeWithDevices([device]);
         if (route === "setActiveDevice") {
           DaemonState.getInstance().initialize(manager, pool);
@@ -163,9 +160,7 @@ test("a bind during a capped pending cleanup is refused with the cleanup's remai
   const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
   utils.setBootedDevices("android", [device]);
   PlatformDeviceManagerFactory.setInstance(utils);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "daemon-test", { timer, deviceManager: utils }),
-  );
+  const pool = makePool(manager, "daemon-test", { timer, deviceManager: utils });
   const cleanup = Promise.withResolvers<void>();
   try {
     await pool.initializeWithDevices([device]);
@@ -213,9 +208,7 @@ test("a deferred release never frees a same-id replacement entry after late tear
   const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
   utils.setBootedDevices("android", [device]);
   PlatformDeviceManagerFactory.setInstance(utils);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "daemon-test", { timer, deviceManager: utils }),
-  );
+  const pool = makePool(manager, "daemon-test", { timer, deviceManager: utils });
   const cleanup = Promise.withResolvers<void>();
   try {
     await pool.initializeWithDevices([device]);

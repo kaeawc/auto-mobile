@@ -10,8 +10,11 @@ import {
   resetPooledClientIfCurrent,
   runWithActivePooledClient,
   schedulePooledIdleClose,
+  runWithLoopbackSessionKey,
+  withLoopbackSessionKey,
   type LoopbackClientPool,
 } from "../../src/daemon/socketServer/loopbackMcpClientPool";
+import { MCP_SESSION_KEY_HEADER } from "../../src/server/mcpSessionKey";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
@@ -53,7 +56,7 @@ function fixture() {
     },
     generation: () => generation,
     isSuperseded: (since) => closing || since !== generation,
-    closeClient: (key, client) => closePooledClient(timer, key, client),
+    closeClient: (_key, client) => closePooledClient(client),
     clearIdleTimer: (key) => clearPooledIdleTimer(pool, key),
     scheduleIdleClose: (key) => schedulePooledIdleClose(pool, key),
     resetClient: (key, mode) => resetPooledClient(pool, key, mode),
@@ -155,5 +158,37 @@ describe("loopback MCP client pool", () => {
     await expect(connection).rejects.toThrow("superseded");
     await drainMicrotasks(20);
     expect(created[0].closed).toBe(1);
+  });
+});
+
+describe("loopback session key header", () => {
+  function recordingFetch() {
+    const seen: Array<string | null> = [];
+    const inner = async (_url: string | URL, init?: RequestInit): Promise<Response> => {
+      seen.push(new Headers(init?.headers).get(MCP_SESSION_KEY_HEADER));
+      return new Response("{}");
+    };
+    return { seen, fetch: withLoopbackSessionKey(inner) };
+  }
+
+  test("each forward sends its own socket session id on a shared client", async () => {
+    const { seen, fetch } = recordingFetch();
+    await runWithLoopbackSessionKey("socket-a", () => fetch("http://x/mcp", { method: "POST" }));
+    await runWithLoopbackSessionKey("socket-b", () =>
+      fetch("http://x/mcp", { headers: { "x-keep": "1" } }),
+    );
+    expect(seen).toEqual(["socket-a", "socket-b"]);
+  });
+
+  test("a request outside a forward carries no session key", async () => {
+    const { seen, fetch } = recordingFetch();
+    await fetch("http://x/mcp");
+    expect(seen).toEqual([null]);
+  });
+
+  test("closing a pooled client only closes it", async () => {
+    const fake = fakeClient();
+    await closePooledClient(fake.client);
+    expect(fake.closed).toBe(1);
   });
 });

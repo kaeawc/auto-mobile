@@ -2,8 +2,5 @@
   "src/daemon/daemon.ts": {
     "sessionContext.sessionId": 1,
     "sessionIdGenerator": 1
-  },
-  "src/daemon/socketServer.ts": {
-    "mcp-session-id": 1
   }
 }

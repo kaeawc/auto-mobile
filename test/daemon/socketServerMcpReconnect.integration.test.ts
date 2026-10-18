@@ -1,6 +1,5 @@
 import { ErrorCode, McpError } from "../../src/server/mcpError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
@@ -8,8 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SdkErrorCode, SdkHttpError } from "@modelcontextprotocol/client";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
-import { SOCKET_REQUEST_DEADLINE_MS, sendSocketRequest } from "./helpers/socketRequest";
-import { defaultTimer } from "../../src/utils/SystemTimer";
+import { sendSocketRequest } from "./helpers/socketRequest";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
@@ -168,69 +166,6 @@ function sendRequest(
   return sendSocketRequest(socketPath, method, params, timeoutMs);
 }
 
-class PersistentSocketClient {
-  private readonly socket = new Socket();
-  private buffer = "";
-  private readonly responses = new Map<string, DaemonResponse>();
-  private readonly waiters = new Map<string, (response: DaemonResponse) => void>();
-
-  async connect(socketPath: string): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      this.socket.connect(socketPath, resolve);
-      this.socket.on("error", reject);
-      this.socket.on("data", (data) => {
-        this.buffer += data.toString();
-        const lines = this.buffer.split("\n");
-        this.buffer = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.trim()) {
-            continue;
-          }
-          const response = JSON.parse(line) as DaemonResponse;
-          const waiter = this.waiters.get(response.id);
-          if (waiter) {
-            this.waiters.delete(response.id);
-            waiter(response);
-          } else {
-            this.responses.set(response.id, response);
-          }
-        }
-      });
-    });
-  }
-
-  request(method: string, params: Record<string, unknown>): Promise<DaemonResponse> {
-    const id = randomUUID();
-    this.socket.write(JSON.stringify({ id, type: "mcp_request", method, params }) + "\n");
-    const buffered = this.responses.get(id);
-    if (buffered) {
-      this.responses.delete(id);
-      return Promise.resolve(buffered);
-    }
-    return new Promise((resolve, reject) => {
-      // Bounded: an unanswered request must fail fast with a diagnostic, not
-      // pend until the suite's wall-clock watchdog (macos hang class, #5391).
-      const deadline = defaultTimer.setTimeout(() => {
-        this.waiters.delete(id);
-        this.socket.destroy();
-        reject(
-          new Error(
-            `No response to ${method} within ${SOCKET_REQUEST_DEADLINE_MS}ms — bounded socket-test deadline hit`,
-          ),
-        );
-      }, SOCKET_REQUEST_DEADLINE_MS);
-      this.waiters.set(id, (response) => {
-        defaultTimer.clearTimeout(deadline);
-        resolve(response);
-      });
-    });
-  }
-
-  close(): void {
-    this.socket.destroy();
-  }
-}
-
 describe("UnixSocketServer MCP session reconnect", () => {
   let socketPath: string;
   let server: UnixSocketServer;
@@ -299,30 +234,6 @@ describe("UnixSocketServer MCP session reconnect", () => {
     }
   });
 
-  test("retries with a fresh client when MCP throws 'Session not found'", async () => {
-    let clientsCreated = 0;
-
-    server.mcpClientFactory = async () => {
-      const clientIndex = ++clientsCreated;
-      return createFakeMcpClient({
-        listTools: async () => {
-          if (clientIndex === 1) {
-            throw expiredLoopbackSession();
-          }
-          return { tools: [{ name: "observe" }] };
-        },
-      });
-    };
-
-    const response = await sendRequest(socketPath, "tools/list");
-
-    expect(response.success).toBe(true);
-    expect(clientsCreated).toBe(2);
-    const result = response.result as { tools: Array<{ name: string }> };
-    expect(result.tools).toHaveLength(1);
-    expect(result.tools[0].name).toBe("observe");
-  });
-
   test("does not replay a tools/call on a message-only 'Session not found' (#6383)", async () => {
     let clientsCreated = 0;
     let callsDispatched = 0;
@@ -349,19 +260,16 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(callsDispatched).toBe(1);
   });
 
-  test("replays a tools/call once when the loopback server 404s its MCP session", async () => {
+  test("does not replay a tools/call or recreate the client when the loopback answers 404", async () => {
     let clientsCreated = 0;
-    const dispatchedTo: number[] = [];
+    let callsDispatched = 0;
 
     server.mcpClientFactory = async () => {
-      const clientIndex = ++clientsCreated;
+      ++clientsCreated;
       return createFakeMcpClient({
         callTool: async () => {
-          dispatchedTo.push(clientIndex);
-          if (clientIndex === 1) {
-            throw expiredLoopbackSession();
-          }
-          return { content: [{ type: "text", text: "tapped" }] };
+          callsDispatched++;
+          throw expiredLoopbackSession();
         },
       });
     };
@@ -371,31 +279,9 @@ describe("UnixSocketServer MCP session reconnect", () => {
       arguments: { text: "Submit" },
     });
 
-    expect(response.success).toBe(true);
-    expect(clientsCreated).toBe(2);
-    expect(dispatchedTo).toEqual([1, 2]);
-  });
-
-  test("resets cached client before reconnecting so getMcpClient creates a fresh one", async () => {
-    let clientsCreated = 0;
-
-    server.mcpClientFactory = async () => {
-      ++clientsCreated;
-      return createFakeMcpClient({
-        listTools: async () => {
-          if (clientsCreated === 1) {
-            throw expiredLoopbackSession();
-          }
-          return { tools: [] };
-        },
-      });
-    };
-
-    await sendRequest(socketPath, "tools/list");
-
-    // After reconnect, the per-key client cache should hold the fresh client.
-    expect((server as any).mcpClients.size).toBe(1);
-    expect(clientsCreated).toBe(2);
+    expect(response.success).toBe(false);
+    expect(clientsCreated).toBe(1);
+    expect(callsDispatched).toBe(1);
   });
 
   test("does not start device-control recovery after owner cancellation", async () => {
@@ -682,81 +568,6 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(clientsCreated).toBe(2);
     expect(response.error).toContain("MCP configuration rejected");
     expect(response.transportFailure).toBeUndefined();
-  });
-
-  test("classifies a closure during the existing session-expiry replay", async () => {
-    let clientsCreated = 0;
-    let callsDispatched = 0;
-
-    server.mcpClientFactory = async () => {
-      const clientIndex = ++clientsCreated;
-      return createFakeMcpClient({
-        callTool: async () => {
-          callsDispatched++;
-          if (clientIndex === 1) {
-            throw expiredLoopbackSession();
-          }
-          throw socketClosedError(" endpoint=https://secret.invalid?token=hidden");
-        },
-      });
-    };
-
-    const response = await sendRequest(socketPath, "tools/call", {
-      name: "observe",
-      arguments: { sessionUuid: "session-a" },
-    });
-
-    expect(response.success).toBe(false);
-    expect(clientsCreated).toBe(2);
-    expect(callsDispatched).toBe(2);
-    expect(response.error).toBe(
-      "Device-control transport recovery exhausted while handling observe",
-    );
-    expect(JSON.stringify(response)).not.toContain("secret.invalid");
-    expect(response.transportFailure).toMatchObject({
-      sessionValid: true,
-      phase: "response",
-      retryable: true,
-      reconnectAttempted: true,
-      replayAttempted: true,
-    });
-    expect((server as any).mcpClients.size).toBe(0);
-  });
-
-  test("refreshes autolock identity when session-expiry replay closes", async () => {
-    let clientsCreated = 0;
-
-    server.mcpClientFactory = async () => {
-      const clientIndex = ++clientsCreated;
-      return createFakeMcpClient({
-        callTool: async () => {
-          if (clientIndex === 1) {
-            autolockSessionUuid = "session-a";
-            throw expiredLoopbackSession();
-          }
-          throw socketClosedError();
-        },
-      });
-    };
-
-    const response = await sendRequest(socketPath, "tools/call", {
-      name: "observe",
-      arguments: { platform: "android" },
-    });
-
-    expect(response.success).toBe(false);
-    expect(clientsCreated).toBe(2);
-    expect(response.transportFailure).toMatchObject({
-      deviceId: "emulator-5554",
-      deviceSessionUuid: "device-epoch-a",
-      sessionUuid: "session-a",
-      sessionValid: true,
-      deviceSessionValid: true,
-      phase: "response",
-      retryable: true,
-      reconnectAttempted: true,
-      replayAttempted: true,
-    });
   });
 
   test("reconnects and replays observe after a socket closure while handling the response", async () => {
@@ -1608,65 +1419,6 @@ describe("UnixSocketServer MCP session reconnect", () => {
     });
     expect(response.transportFailure).toBeUndefined();
     expect(clientsCreated).toBe(1);
-  });
-
-  test("subsequent requests reuse the reconnected client without creating another", async () => {
-    let clientsCreated = 0;
-
-    server.mcpClientFactory = async () => {
-      ++clientsCreated;
-      const isFailing = clientsCreated === 1;
-      return createFakeMcpClient({
-        listTools: async () => {
-          if (isFailing) {
-            throw expiredLoopbackSession();
-          }
-          return { tools: [] };
-        },
-      });
-    };
-
-    // First request triggers reconnect (2 clients)
-    const first = await sendRequest(socketPath, "tools/list");
-    expect(first.success).toBe(true);
-    expect(clientsCreated).toBe(2);
-
-    // Second request reuses the cached client (still 2 clients)
-    const second = await sendRequest(socketPath, "tools/list");
-    expect(second.success).toBe(true);
-    expect(clientsCreated).toBe(2);
-  });
-
-  test("replays a bound session when tools/list reconnects its MCP client", async () => {
-    const clientBindings: Array<string | undefined> = [];
-    server.mcpClientFactory = async (boundSessionUuid) => {
-      clientBindings.push(boundSessionUuid);
-      const isFirstClient = clientBindings.length === 1;
-      return createFakeMcpClient({
-        listTools: async () => {
-          if (isFirstClient) {
-            throw expiredLoopbackSession();
-          }
-          return { tools: [{ name: boundSessionUuid ?? "unbound" }] };
-        },
-      });
-    };
-
-    const client = new PersistentSocketClient();
-    await client.connect(socketPath);
-    try {
-      const boundCall = await client.request("tools/call", {
-        name: "observe",
-        arguments: { sessionUuid: "session-a" },
-      });
-      const list = await client.request("tools/list", {});
-
-      expect(boundCall.success).toBe(true);
-      expect(clientBindings).toEqual(["session-a", "session-a"]);
-      expect(list.result).toEqual({ tools: [{ name: "session-a" }] });
-    } finally {
-      client.close();
-    }
   });
 
   test("seeds a session-scoped client for a reconnected tools/list carrying {sessionUuid}", async () => {

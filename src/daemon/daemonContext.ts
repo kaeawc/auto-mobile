@@ -1,6 +1,8 @@
 import { DaemonState } from "./daemonState";
 import type { DevicePool } from "./devicePool";
 import type { SessionManager } from "./sessionManager";
+import type { DeviceSessionRegistry } from "./deviceSessionRegistry";
+import type { BrokerConnectionScopes } from "./sessionBroker/connectionScope";
 
 /** The per-session rendered-display reads action code takes from the daemon's SessionManager. */
 export type RenderedDisplaySessionReads = Pick<
@@ -24,10 +26,49 @@ export type DevicePoolReads = Pick<
   | "assertDeviceCleanupComplete"
   | "assertAutolockAccess"
   | "isSafeForObservationServiceStart"
+  | "restartReservationForStart"
+  | "bindingOwnershipGate"
+  | "getAllDevices"
+  | "mapAndroidDiscovery"
+  | "resolveAndroidCanonicalId"
+  | "normalizeAndroidDiscovery"
+  | "isAndroidTransportAssignable"
+  | "androidTransportMayAliasDevice"
+  | "androidBindingHold"
+  | "assertNotAssignedToBinding"
+  | "bindingRefusalFor"
+  | "bindingStableIds"
+  | "bindingSnapshotRetainedAfterFailedRead"
+  | "assertNotClaimedByForeignDaemon"
+  | "hasStartedDeviceProcess"
+  | "getRecoveringAndroidTargets"
+  | "matchesRuntimeIdentity"
+  | "hasReusableSerial"
+  | "isPooledIdentityUnresolved"
+  | "getAndroidTransportAliases"
+  | "getAndroidTransportAvdName"
+  | "describesPooledRuntime"
+  | "getDeviceHealthMarker"
+  | "genericAvailability"
+  | "poolBucket"
+>;
+
+/** The only device-pool mutations server callers take from the daemon's DevicePool (#11806). */
+export type DevicePoolWrites = Pick<
+  DevicePool,
+  | "releaseDevice"
+  | "releaseUndeliveredAcquisition"
+  | "clearAndroidRebootBudgetForDeletedAvd"
+  | "clearIntentionalShutdown"
+  | "notifyDeviceReady"
+  | "markIntentionalShutdown"
+  | "reserveDeviceForShutdown"
+  | "retireDeviceForShutdown"
+  | "settlePooledRuntimeIdentity"
 >;
 
 /**
- * Narrow, read-only view of daemon state for callers that only consume it (#11806).
+ * Narrow view of daemon state for callers that only consume it (#11806).
  * Grow it when a second consumer needs more; do not mirror DaemonState wholesale.
  * Callers take a `DaemonContext` by injection and default to {@link defaultDaemonContext},
  * the bridge onto the `DaemonState` singleton until the daemon composes one itself.
@@ -39,20 +80,26 @@ export interface DaemonContext {
   sessionManager(): SessionManager | undefined;
   /** Read-only device-pool view, or undefined when the daemon is not initialized (stdio, tests). */
   devicePool(): DevicePoolReads | undefined;
+  /** The device-pool mutations callers need, or undefined when the daemon is not initialized. */
+  devicePoolWrites(): DevicePoolWrites | undefined;
+  /** Socket sessions bound to broker bindings, or undefined when the daemon is not initialized. */
+  brokerConnectionScopes(): Pick<BrokerConnectionScopes, "forGrantedSession"> | undefined;
+  /** Device-session identity lookups, or undefined when the daemon is not initialized. */
+  deviceSessionRegistry(): Pick<DeviceSessionRegistry, "getByDeviceId"> | undefined;
+}
+
+/** The singleton once the daemon is initialized, else undefined (stdio, tests); resolved on every read. */
+function initializedDaemon(): DaemonState | undefined {
+  const daemon = DaemonState.getInstance();
+  return daemon.isInitialized() ? daemon : undefined;
 }
 
 /** Bridge onto the `DaemonState` singleton; resolves it lazily on every read. */
 export const defaultDaemonContext: DaemonContext = {
-  renderedDisplaySessions() {
-    const daemon = DaemonState.getInstance();
-    return daemon.isInitialized() ? daemon.getSessionManager() : undefined;
-  },
-  sessionManager() {
-    const daemon = DaemonState.getInstance();
-    return daemon.isInitialized() ? daemon.getSessionManager() : undefined;
-  },
-  devicePool() {
-    const daemon = DaemonState.getInstance();
-    return daemon.isInitialized() ? daemon.getDevicePool() : undefined;
-  },
+  renderedDisplaySessions: () => initializedDaemon()?.getSessionManager(),
+  sessionManager: () => initializedDaemon()?.getSessionManager(),
+  devicePool: () => initializedDaemon()?.getDevicePool(),
+  devicePoolWrites: () => initializedDaemon()?.getDevicePool(),
+  brokerConnectionScopes: () => initializedDaemon()?.getBrokerConnectionScopes(),
+  deviceSessionRegistry: () => initializedDaemon()?.getDeviceSessionRegistry(),
 };

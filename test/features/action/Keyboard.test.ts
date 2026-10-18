@@ -995,7 +995,7 @@ describe("Keyboard", () => {
         open: action === "detect",
         totalTimeMs: 5,
       }),
-    } as any);
+    });
 
     try {
       const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
@@ -1282,7 +1282,7 @@ describe("Keyboard", () => {
         totalTimeMs: 5,
         error: "No keyboard focus",
       }),
-    } as any);
+    });
 
     try {
       const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
@@ -1452,7 +1452,7 @@ describe("Keyboard", () => {
         open: false,
         totalTimeMs: 5,
       }),
-    } as any);
+    });
 
     try {
       const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);

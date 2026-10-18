@@ -3,8 +3,6 @@ import { recordWrongWindowEvidence } from "../../../src/features/observe/observa
 import { DEFAULT_HIERARCHY_READ_TIMEOUT_MS } from "../../../src/features/observe/DeviceHierarchyCapture";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { ActionableError, type ObserveResult } from "../../../src/models";
-import type { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
-import type { Window } from "../../../src/features/observe/Window";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -37,8 +35,8 @@ describe("BaseVisualChange cached freshness", () => {
       { renderedDisplayGeneration: () => undefined },
     );
     instance.observeScreen = observe;
-    instance.awaitIdle = new FakeAwaitIdle() as unknown as AwaitIdle;
-    instance.window = new FakeWindow() as unknown as Window;
+    instance.awaitIdle = new FakeAwaitIdle();
+    instance.window = new FakeWindow();
   });
 
   afterEach(() => timer.reset());

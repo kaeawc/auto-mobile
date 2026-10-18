@@ -41,7 +41,10 @@ type RequestSetText = (
 ) => Promise<{ success: boolean; error?: string; totalTimeMs: number }>;
 
 function testInputText(inputText: InputText): TestInputText {
-  return inputText as unknown as TestInputText;
+  return {
+    executeAndroidTextInput: (text, imeAction, dismissKeyboard, mode, signal) =>
+      inputText.executeAndroidTextInput(text, imeAction, dismissKeyboard, mode, signal),
+  };
 }
 
 function stubAndroidSetText(requestSetText: RequestSetText): void {
@@ -122,11 +125,7 @@ describe("InputText", () => {
       };
     }) as typeof AndroidCtrlProxyClient.getInstance;
 
-    await (
-      inputText as unknown as {
-        executeAndroidTextInput: (text: string) => Promise<unknown>;
-      }
-    ).executeAndroidTextInput("hello");
+    await inputText.executeAndroidTextInput("hello");
 
     expect(capturedFactory).toBeDefined();
     expect(typeof (capturedFactory as AdbClientFactory).create).toBe("function");
@@ -619,20 +618,7 @@ describe("InputText", () => {
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
-    const result = await (
-      inputText as unknown as {
-        executeAndroidTextInput: (
-          text: string,
-          imeAction?: string,
-          dismissKeyboard?: boolean,
-        ) => Promise<{
-          success: boolean;
-          error?: string;
-          keyboardDismissed?: boolean;
-          warnings?: string[];
-        }>;
-      }
-    ).executeAndroidTextInput("hello", "done", true);
+    const result = await inputText.executeAndroidTextInput("hello", "done", true);
 
     // The dismissal failure surfaces as a warning on a SUCCESSFUL result (#6868),
     // and the IME action (Enter) already ran — pre-#5887 the dismiss-first

@@ -14,6 +14,7 @@ import {
   FINAL_OBSERVATION_RETRY_BACKOFF_MS,
 } from "../../../src/features/action/BaseVisualChange";
 import { BootedDevice, ObserveResult } from "../../../src/models";
+import type { DisplayRef } from "../../../src/models/DisplayPanel";
 import { PortManager } from "../../../src/utils/PortManager";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -43,14 +44,20 @@ describe("BaseVisualChange post-action observation", () => {
   let fakeWindow: FakeWindow;
   let originalActionScreenshotPolicy: string | undefined;
 
-  const makeObserve = (overrides: Record<string, unknown> = {}): ObserveResult =>
-    ({
+  const makeObserve = (
+    overrides: Omit<Partial<ObserveResult>, "display"> & { display?: Partial<DisplayRef> } = {},
+  ): ObserveResult => {
+    const { display, ...rest } = overrides;
+    return {
+      observationId: "test-observation",
       updatedAt: Date.now(),
+      display: { key: "default", role: "unknown", posture: "unknown", generation: 0, ...display },
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       viewHierarchy: { hierarchy: {} },
-      ...overrides,
-    }) as unknown as ObserveResult;
+      ...rest,
+    };
+  };
 
   class TerminalVisualChange extends BaseVisualChange {
     recordDeferred(result: unknown, observation: ObserveResult) {

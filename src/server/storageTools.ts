@@ -8,7 +8,14 @@ import {
   withAppIdAliases,
   withPostFlattenJsonSchemaOverride,
 } from "./toolSchemaHelpers";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
+import {
+  clearKeyValueFileResultSchema,
+  getDataStoreResultSchema,
+  listDataStoresResultSchema,
+  removeKeyValueResultSchema,
+  setKeyValueResultSchema,
+} from "./storageToolOutputSchemas";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import {
@@ -447,7 +454,7 @@ async function setKeyValueHandler(
         : sdkRouteIgnoredUserIdWarning(device, args.userId),
       effectiveValueDiffers,
     );
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       success: true,
       appId: args.appId,
       name: storageName,
@@ -506,7 +513,7 @@ async function removeKeyValueHandler(
       buildEntriesUri(device.deviceId, args.appId, storageName),
     );
 
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       success: true,
       appId: args.appId,
       name: storageName,
@@ -565,7 +572,7 @@ async function clearKeyValueFileHandler(
       buildEntriesUri(device.deviceId, args.appId, storageName),
     );
 
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       success: true,
       appId: args.appId,
       name: storageName,
@@ -598,7 +605,7 @@ async function listDataStoresHandler(
   try {
     const client = deps.androidClientFactory(device);
     const stores = await client.listDataStores(args.appId, args.adapterName);
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       success: true,
       appId: args.appId,
       adapterName: args.adapterName,
@@ -629,7 +636,7 @@ async function getDataStoreHandler(
   try {
     const client = deps.androidClientFactory(device);
     const entries = await client.getDataStore(args.appId, args.adapterName, args.name);
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       success: true,
       appId: args.appId,
       adapterName: args.adapterName,
@@ -660,7 +667,7 @@ export function registerStorageTools(overrides: Partial<StorageToolsDependencies
     "Set app key-value storage entry.",
     setKeyValueSchema,
     (device, args) => setKeyValueHandler(device, args, deps),
-    { defaultEnabled: false, embeddedSdkOnly: true },
+    { defaultEnabled: false, outputSchema: setKeyValueResultSchema, embeddedSdkOnly: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -670,6 +677,7 @@ export function registerStorageTools(overrides: Partial<StorageToolsDependencies
     (device, args) => listDataStoresHandler(device, args, deps),
     {
       defaultEnabled: false,
+      outputSchema: listDataStoresResultSchema,
       embeddedSdkOnly: true,
       // Reads only; a non-holder watches a held device through the read-only path (#10830).
       deviceReadOnly: true,
@@ -683,6 +691,7 @@ export function registerStorageTools(overrides: Partial<StorageToolsDependencies
     (device, args) => getDataStoreHandler(device, args, deps),
     {
       defaultEnabled: false,
+      outputSchema: getDataStoreResultSchema,
       embeddedSdkOnly: true,
       // Reads only; a non-holder watches a held device through the read-only path (#10830).
       deviceReadOnly: true,
@@ -694,7 +703,7 @@ export function registerStorageTools(overrides: Partial<StorageToolsDependencies
     "Remove app key-value storage entry.",
     removeKeyValueSchema,
     (device, args) => removeKeyValueHandler(device, args, deps),
-    { defaultEnabled: false, embeddedSdkOnly: true },
+    { defaultEnabled: false, outputSchema: removeKeyValueResultSchema, embeddedSdkOnly: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -702,6 +711,6 @@ export function registerStorageTools(overrides: Partial<StorageToolsDependencies
     "Clear app key-value storage file.",
     clearKeyValueFileSchema,
     (device, args) => clearKeyValueFileHandler(device, args, deps),
-    { defaultEnabled: false, embeddedSdkOnly: true },
+    { defaultEnabled: false, outputSchema: clearKeyValueFileResultSchema, embeddedSdkOnly: true },
   );
 }

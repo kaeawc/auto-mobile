@@ -1,3 +1,4 @@
+import { MapDeviceClientRegistry } from "../../../ctrlProxy/deviceClientRegistry";
 import { iosWireDeadlineParams, type IOSDispatchResult } from "./CtrlProxyDispatch";
 import { withCtrlProxyRecordingFromEnv } from "./CtrlProxyExchangeRecorder";
 import type { CtrlProxyMagicTapResult, CtrlProxySdkTriggerResult } from "./types";
@@ -779,7 +780,8 @@ export function getRequiredIosRunnerFeatureFlags(
  */
 export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlProxy {
   private readonly streamedCaptureSequences = new WeakMap<XCTestHierarchy, number>();
-  private static instances: Map<string, IOSCtrlProxyClient> = new Map();
+  /** Per-device client instances (#11847); retired-device state stays on IOSCtrlProxyManager. */
+  public static readonly registry = new MapDeviceClientRegistry<IOSCtrlProxyClient>();
 
   // Default port matches CtrlProxy on iOS
   public static readonly DEFAULT_PORT = 8765;
@@ -1006,27 +1008,28 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     requireBootedDevice(device, "IOSCtrlProxyClient.getInstance");
     const key = device.deviceId;
     const retired = IOSCtrlProxyManager.isDeviceRetired(key);
-    const existing = IOSCtrlProxyClient.instances.get(key);
+    const existing = IOSCtrlProxyClient.registry.peek(key);
     if (existing) {
       if (port !== undefined && !existing.closed && !retired) {
         existing.updatePort(port);
       }
       return existing;
     }
-    const allocatePort = !retired && port === undefined && device.platform === "ios";
-    const resolvedPort = allocatePort
-      ? PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS })
-      : ((retired ? IOSCtrlProxyClient.DEFAULT_PORT : port) ?? IOSCtrlProxyClient.DEFAULT_PORT);
-    const client = new IOSCtrlProxyClient(device, resolvedPort);
-    if (allocatePort) {
-      client.allocatedPort = resolvedPort;
-    }
-    if (retired) {
-      client.closed = true;
-      client.autoReconnectEnabled = false;
-    }
-    IOSCtrlProxyClient.instances.set(key, client);
-    return client;
+    return IOSCtrlProxyClient.registry.get(key, () => {
+      const allocatePort = !retired && port === undefined && device.platform === "ios";
+      const resolvedPort = allocatePort
+        ? PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS })
+        : ((retired ? IOSCtrlProxyClient.DEFAULT_PORT : port) ?? IOSCtrlProxyClient.DEFAULT_PORT);
+      const client = new IOSCtrlProxyClient(device, resolvedPort);
+      if (allocatePort) {
+        client.allocatedPort = resolvedPort;
+      }
+      if (retired) {
+        client.closed = true;
+        client.autoReconnectEnabled = false;
+      }
+      return client;
+    });
   }
 
   /**
@@ -1039,12 +1042,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (IOSCtrlProxyManager.isDeviceRetired(deviceId)) {
       return null;
     }
-    return IOSCtrlProxyClient.instances.get(deviceId) ?? null;
+    return IOSCtrlProxyClient.registry.peek(deviceId) ?? null;
   }
 
   /** @internal Test seam matching AndroidCtrlProxyClient.registerForTesting. */
   public static registerForTesting(client: IOSCtrlProxyClient, deviceId: string): void {
-    IOSCtrlProxyClient.instances.set(deviceId, client);
+    IOSCtrlProxyClient.registry.invalidate(deviceId);
+    IOSCtrlProxyClient.registry.get(deviceId, () => client);
   }
 
   /**
@@ -1055,13 +1059,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * untouched.
    */
   public static clearInstanceRegistryForTesting(): void {
-    IOSCtrlProxyClient.instances.clear();
+    IOSCtrlProxyClient.registry.closeAll();
   }
 
   /** Permanently retire the registered client for one device incarnation. */
   public static async retireInstance(deviceId: string): Promise<void> {
     IOSCtrlProxyManager.retireDevice(deviceId);
-    const instance = IOSCtrlProxyClient.instances.get(deviceId);
+    const instance = IOSCtrlProxyClient.registry.peek(deviceId);
     if (!instance) {
       return;
     }
@@ -1074,7 +1078,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (!IOSCtrlProxyManager.isDeviceRetired(deviceId)) {
       return;
     }
-    IOSCtrlProxyClient.instances.delete(deviceId);
+    IOSCtrlProxyClient.registry.invalidate(deviceId);
     IOSCtrlProxyManager.resumeDevice(deviceId);
   }
 
@@ -1618,10 +1622,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * Reset all instances (for testing)
    */
   public static resetInstances(): void {
-    for (const instance of IOSCtrlProxyClient.instances.values()) {
+    for (const instance of IOSCtrlProxyClient.registry.closeAll()) {
       void instance.close();
     }
-    IOSCtrlProxyClient.instances.clear();
     IOSCtrlProxyManager.resetRetiredDevicesForTesting();
   }
 
@@ -1822,9 +1825,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     try {
       await super.close();
     } finally {
-      const registered = IOSCtrlProxyClient.instances.get(this.device.deviceId);
+      const registered = IOSCtrlProxyClient.registry.peek(this.device.deviceId);
       if (registered === this) {
-        IOSCtrlProxyClient.instances.delete(this.device.deviceId);
+        IOSCtrlProxyClient.registry.invalidate(this.device.deviceId, this);
       }
       if (this.allocatedPort !== null && (!registered || registered === this)) {
         PortManager.releaseIfAllocated(this.device.deviceId, this.allocatedPort);

@@ -9,24 +9,18 @@ import { parseGuardSource, relativePosix, typeScriptFiles } from "./astGuard";
  * schema, and a schema-shaped alias is `z.output<typeof schema>` (#11824). Migrating a type removes
  * its interface and its entry here; a count may only shrink, so a new tool defines its args through
  * the schema rather than adding another interface.
+ *
+ * Shapes that are not a tool's wire input are deliberately outside the ratchet and are named
+ * `*Input` / `*QueryParams` rather than `*Args`: resource URI query parameters (no tool schema),
+ * the narrowed per-action slices the prototype handlers read from the already-validated
+ * `prototypeSchema` output, and internal service request shapes. What remains below is owned by
+ * other in-flight lanes (navigation, interaction, device tools).
  */
 const BASELINE: Readonly<Record<string, number>> = {
-  "appFileContract.ts": 2,
-  "biometricTools.ts": 1,
   "deviceSnapshotManager.ts": 2,
-  "downloadsFixtureContract.ts": 1,
-  "fileSourcePreparation.ts": 1,
-  "interactionToolTypes.ts": 8,
+  "interactionToolTypes.ts": 1,
   "navigationTools.ts": 3,
-  "notificationTools.ts": 1,
-  "performanceData.ts": 1,
-  "prototypePatchAction.ts": 1,
-  "prototypeReverse.ts": 1,
-  "prototypeSavedActions.ts": 1,
   "setActiveDevice.ts": 2,
-  "sharedStorageContract.ts": 1,
-  "testRunResources.ts": 1,
-  "testTimingData.ts": 1,
 };
 
 const SERVER_DIR = join(import.meta.dir, "..", "..", "src", "server");

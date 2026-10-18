@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
 import { registerInteractionTools } from "../../src/server/interactionTools";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
@@ -31,7 +31,7 @@ describe("ToolRegistry Android session context", () => {
   };
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let restorePipelineOverrides: (() => void) | undefined;
 
   const schema = z.object({
@@ -54,14 +54,14 @@ describe("ToolRegistry Android session context", () => {
       displayInventory: new FakeDisplayInventoryProvider(),
     });
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
-    Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
   });
 
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     ToolRegistry.clearTools();
   });
 

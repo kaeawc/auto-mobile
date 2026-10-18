@@ -4,6 +4,7 @@ import { SwipeAtCoordinate } from "../features/action/SwipeAtCoordinate";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import type { BootedDevice } from "../models";
 import type { SwipeAtOptions, SwipeAtRecordingContext } from "../models/SwipeAtOptions";
+import { swipeAtResultSchema } from "./gestureToolOutputSchemas";
 import { createStructuredToolResponse, type StructuredToolResponse } from "../utils/toolUtils";
 import {
   SWIPE_DURATION_MAX_MS,
@@ -222,6 +223,6 @@ export function registerSwipeAtTools() {
     "Swipe from one screen point to another, including diagonals, in native, normalized, or percent units.",
     swipeAtSchema,
     swipeAtHandler,
-    { defaultEnabled: false, supportsProgress: true },
+    { defaultEnabled: false, supportsProgress: true, outputSchema: swipeAtResultSchema },
   );
 }

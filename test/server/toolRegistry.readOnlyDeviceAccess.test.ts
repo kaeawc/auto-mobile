@@ -12,7 +12,11 @@ import {
   test,
 } from "bun:test";
 import { z } from "zod/v4";
-import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
+import {
+  ToolRegistry,
+  type AuditRunnerInput,
+  type ToolRegistryCollaborators,
+} from "../../src/server/toolRegistry";
 import { registerAppTools } from "../../src/server/appTools";
 import { registerDatabaseTools } from "../../src/server/databaseTools";
 import { registerNetworkTools } from "../../src/server/networkTools";
@@ -48,11 +52,7 @@ import {
   isSessionlessDeviceRead,
   runWithToolSelectionContext,
 } from "../../src/features/toolSelection/toolSelectionContext";
-import {
-  executionTracker,
-  type ActiveExecution,
-  type SessionClockOffsetProvider,
-} from "../../src/server/executionTracker";
+import { executionTracker, type ActiveExecution } from "../../src/server/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import {
   getDeviceToolsDependencies,
@@ -95,9 +95,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   let authorized: boolean;
   /** Whether the fake audit runner also runs the audited tool's handler. */
   let runAuditedHandlers: boolean;
-  let originalDeviceSessionManager: unknown;
-  let originalToolCallRepository: unknown;
-  let originalNavigationRecorder: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
   let devices: FakeDeviceSessionManager;
@@ -156,15 +154,17 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     });
     devices = new FakeDeviceSessionManager();
     devices.setConnectedDevices([held, free]);
-    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
-    Reflect.set(ToolRegistry, "deviceSessionManager", devices);
-    originalToolCallRepository = Reflect.get(ToolRegistry, "toolCallRepository");
-    Reflect.set(ToolRegistry, "toolCallRepository", { async recordToolCall(): Promise<void> {} });
-    originalNavigationRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", {
-      record: (name: string) => {
-        recorded.push(name);
-        return undefined;
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    });
+    ToolRegistry.setCollaboratorsForTesting({
+      navigationToolCallRecorder: {
+        record: (name: string) => {
+          recorded.push(name);
+          return undefined;
+        },
       },
     });
 
@@ -211,9 +211,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     expect(executionTracker.getActiveExecutionCount()).toBe(0);
     serverConfig.setEmbeddedSdkEnabled(false);
     restorePipeline();
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
-    Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", originalNavigationRecorder);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
@@ -539,30 +537,29 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     let ingressHandler: Parameters<Server["setRequestHandler"]>[1];
     let finishControl: (() => void) | undefined;
     let pendingControl: Promise<unknown> | undefined;
-    let previousClockOffset: SessionClockOffsetProvider;
     let previousFeatureFlags: FeatureFlagService | null;
     let previousFlagNotifier: Parameters<FeatureFlagService["setToolListChangedNotifier"]>[0];
     let previousResources: ReturnType<typeof ResourceRegistry.getAllResources>;
-    let previousTemplates: Map<string, ReturnType<typeof ResourceRegistry.getAllTemplates>[number]>;
-    let previousToolServers: unknown;
-    let previousResourceServers: unknown;
-    let previousBindingHandlers: unknown;
-    let previousReleaseListeners: Set<Parameters<typeof SessionReleaseBroadcaster.subscribe>[0]>;
-    let previousDeviceRemovalListeners: Set<(deviceId: string) => void>;
+    let previousRegistry: ReturnType<typeof ResourceRegistry.snapshotForTesting>;
+    let previousToolServers: ReturnType<typeof ToolRegistry.trackedServerCountsForTesting>;
+    let previousResourceServers: ReturnType<typeof ResourceRegistry.trackedServerCountsForTesting>;
+    let previousBindingHandlers: number;
+    let previousReleaseListeners: ReturnType<typeof SessionReleaseBroadcaster.listenersForTesting>;
+    let previousDeviceRemovalListeners: Array<(deviceId: string) => void>;
 
     beforeAll(async () => {
-      previousClockOffset = Reflect.get(executionTracker, "sessionClockOffsetProvider");
-      previousFeatureFlags = Reflect.get(FeatureFlagService, "instance");
+      previousFeatureFlags = FeatureFlagService.peekInstanceForTesting();
       if (previousFeatureFlags) {
-        previousFlagNotifier = Reflect.get(previousFeatureFlags, "notifier");
+        previousFlagNotifier = previousFeatureFlags.toolListChangedNotifierForTesting();
       }
       previousResources = ResourceRegistry.getAllResources();
-      previousTemplates = new Map(ResourceRegistry["templates"]);
-      previousToolServers = new Set(ToolRegistry["servers"]);
-      previousResourceServers = new Set(ResourceRegistry["servers"]);
-      previousBindingHandlers = new Set(ToolRegistry["sessionBindingReleaseHandlers"]);
-      previousReleaseListeners = new Set(SessionReleaseBroadcaster["listeners"]);
-      previousDeviceRemovalListeners = new Set(getDaemonStreamDeviceLifecycleEmitter()["removed"]);
+      previousRegistry = ResourceRegistry.snapshotForTesting();
+      previousToolServers = ToolRegistry.trackedServerCountsForTesting();
+      previousResourceServers = ResourceRegistry.trackedServerCountsForTesting();
+      previousBindingHandlers = ToolRegistry.sessionBindingReleaseHandlerCountForTesting();
+      previousReleaseListeners = SessionReleaseBroadcaster.listenersForTesting();
+      previousDeviceRemovalListeners =
+        getDaemonStreamDeviceLifecycleEmitter().removedListenersForTesting();
       // Warm the real server/SDK setup outside the individual test budgets.
       restoreServer = installHermeticServerFixture();
       const warm = new McpTestFixture({ daemonMode: true });
@@ -591,7 +588,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       resetDeviceToolsDependencies();
       resetDbWriteBarrier();
       // Match the neighbouring suite's identity restore; this tracker has no reset API.
-      Reflect.set(executionTracker, "sessionClockOffsetProvider", previousClockOffset);
+      // No getter on the tracker: restore its constructor default (an identity clock).
+      executionTracker.setSessionClockOffsetProvider(() => 0);
       DaemonState.getInstance().reset();
       // Obtain the current shared prototype host's public disposer, then retire its lifecycle.
       registerPrototypeTools()();
@@ -600,44 +598,43 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
         SessionReleaseBroadcaster.subscribe(listener);
       }
       // The stream emitter has no reset API; restore its existing listener set in place.
-      const removed = getDaemonStreamDeviceLifecycleEmitter()["removed"];
-      removed.clear();
+      getDaemonStreamDeviceLifecycleEmitter().clearRemovedListenersForTesting();
       for (const listener of previousDeviceRemovalListeners) {
         getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved(listener);
       }
       ToolRegistry.clearTools();
       ResourceRegistry.clearResources();
-      for (const resource of previousResources) {
-        ResourceRegistry["resources"].set(resource.uri, resource);
-      }
-      for (const [uri, template] of previousTemplates) {
-        ResourceRegistry["templates"].set(uri, template);
-      }
+      ResourceRegistry.restoreForTesting(previousRegistry);
       if (previousFeatureFlags) {
         previousFeatureFlags.setToolListChangedNotifier(previousFlagNotifier);
-        expect(Reflect.get(previousFeatureFlags, "notifier")).toBe(previousFlagNotifier);
+        expect(previousFeatureFlags.toolListChangedNotifierForTesting()).toBe(previousFlagNotifier);
       }
       // FeatureFlagService has no singleton reset API; restore its pre-ingress identity.
-      Reflect.set(FeatureFlagService, "instance", previousFeatureFlags);
-      expect(Reflect.get(FeatureFlagService, "instance")).toBe(previousFeatureFlags);
-      expect(Reflect.get(PlatformDeviceManagerFactory, "instance")).toBeNull();
-      expect(Reflect.get(PlatformDeviceManagerFactory, "injectedManager")).toBeNull();
-      expect(Reflect.get(PlatformDeviceManagerFactory, "injectedAdbFactory")).toBeNull();
+      FeatureFlagService.setInstanceForTesting(previousFeatureFlags);
+      expect(FeatureFlagService.peekInstanceForTesting()).toBe(previousFeatureFlags);
+      expect(PlatformDeviceManagerFactory.slotsForTesting()).toEqual({
+        instance: null,
+        injectedManager: null,
+        injectedAdbFactory: null,
+      });
       expect(executionTracker.getActiveExecutionCount()).toBe(0);
-      expect(Reflect.get(executionTracker, "sessionClockOffsetProvider")).toBe(previousClockOffset);
       expect(DaemonState.getInstance().isInitialized()).toBe(false);
       expect(ToolRegistry.getAllTools()).toHaveLength(0);
       expect(getDbWriteBarrier().inFlightCount()).toBe(0);
       expect(getDbWriteBarrier().isDraining()).toBe(false);
       expect(getDeviceToolsDependencies()).not.toBe(deviceToolsDependencies);
       expect(ResourceRegistry.getAllResources()).toEqual(previousResources);
-      expect(ResourceRegistry["templates"]).toEqual(previousTemplates);
+      expect(ResourceRegistry.snapshotForTesting()).toEqual(previousRegistry);
       // Closing the fixtures must unsubscribe their servers and binding closures, not mask leaks.
-      expect(ToolRegistry["servers"]).toEqual(previousToolServers);
-      expect(ResourceRegistry["servers"]).toEqual(previousResourceServers);
-      expect(ToolRegistry["sessionBindingReleaseHandlers"]).toEqual(previousBindingHandlers);
-      expect(SessionReleaseBroadcaster["listeners"]).toEqual(previousReleaseListeners);
-      expect(removed).toEqual(previousDeviceRemovalListeners);
+      expect(ToolRegistry.trackedServerCountsForTesting()).toEqual(previousToolServers);
+      expect(ResourceRegistry.trackedServerCountsForTesting()).toEqual(previousResourceServers);
+      expect(ToolRegistry.sessionBindingReleaseHandlerCountForTesting()).toBe(
+        previousBindingHandlers,
+      );
+      expect(SessionReleaseBroadcaster.listenersForTesting()).toEqual(previousReleaseListeners);
+      expect(getDaemonStreamDeviceLifecycleEmitter().removedListenersForTesting()).toEqual(
+        previousDeviceRemovalListeners,
+      );
     });
 
     beforeEach(async () => {
@@ -705,8 +702,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       expect(binding?.boundDeviceSessionUuid(connection)).toBeUndefined();
       bindingLookup.mockRestore();
       release.mockRestore();
-      Reflect.set(executionTracker, "sessionClockOffsetProvider", previousClockOffset);
-      expect(Reflect.get(executionTracker, "sessionClockOffsetProvider")).toBe(previousClockOffset);
+      // No getter on the tracker: restore its constructor default (an identity clock).
+      executionTracker.setSessionClockOffsetProvider(() => 0);
       expect(executionTracker.getActiveExecutionCount()).toBe(0);
       timer.reset();
     });

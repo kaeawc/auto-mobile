@@ -204,12 +204,13 @@ follow-up issue (see below) so it can be done where the hardware exists:
 
 ## Follow-up issues
 
-The feasible parts, filed from this note (numbers added when filed):
+The feasible parts, filed from this note:
 
-- Android: `pointer.toolType` (stylus, constant pressure) on `swipeAt`/`dragPath`
-  through `adb shell input`, with capability-gated errors.
-- Android and iOS: the device and simulator experiments above, as one probe-app
-  issue per platform with a result table to fill in.
-- Recorder: capture tool type, pressure series and hover from `getevent`, and export
+- #13081: `pointer.toolType` (stylus, constant pressure) on `swipeAt`/`dragPath`
+  through `adb shell input`, with capability-gated errors. Per-device capability
+  reporting (recommendation 4) starts here, as the data those errors are derived from.
+- #13082: Android emulator and device experiments (pressure curve, tilt, hover,
+  `uinput`, minimum API level).
+- #13083: iOS simulator and device experiments (pressure, hover, `XCUIElement.hover()`).
+- #13084: recorder capture of tool type, pressure series and hover, and export of
   `pointer`.
-- Capability reporting for pointer input in the device description.

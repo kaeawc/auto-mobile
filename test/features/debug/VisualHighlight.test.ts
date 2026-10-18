@@ -41,11 +41,11 @@ describe("VisualHighlight", () => {
       success: true,
     };
 
-    const fakeClient = {
+    const fakeClient: HighlightDeviceClient = {
       requestAddHighlight: async () => response,
     };
 
-    const highlight = new VisualHighlight(androidDevice, null, fakeClient as any);
+    const highlight = new VisualHighlight(androidDevice, null, fakeClient);
     const result = await highlight.addHighlight("highlight-1", highlightShape);
 
     expect(result.success).toBe(true);
@@ -56,11 +56,11 @@ describe("VisualHighlight", () => {
       success: true,
     };
 
-    const fakeClient = {
+    const fakeClient: HighlightDeviceClient = {
       requestAddHighlight: async () => response,
     };
 
-    const highlight = new VisualHighlight(androidDevice, null, fakeClient as any);
+    const highlight = new VisualHighlight(androidDevice, null, fakeClient);
     const result = await highlight.addHighlight("path-1", pathShape);
 
     expect(result.success).toBe(true);
@@ -103,12 +103,12 @@ describe("VisualHighlight", () => {
     "addHighlight names the invalid bounds $dimension before contacting the client",
     async ({ dimension, invalidShape }) => {
       let requests = 0;
-      const fakeClient = {
+      const fakeClient: HighlightDeviceClient = {
         requestAddHighlight: async () => {
           requests += 1;
           return { success: true };
         },
-      } as unknown as HighlightDeviceClient;
+      };
 
       const highlight = new VisualHighlight(androidDevice, null, fakeClient);
       const error = await highlight
@@ -122,13 +122,12 @@ describe("VisualHighlight", () => {
   );
 
   test("addHighlight rejects invalid highlight responses", async () => {
-    const fakeClient = {
-      requestAddHighlight: async () => ({
-        invalid: true,
-      }),
+    const fakeClient: HighlightDeviceClient = {
+      // JSON.parse yields an untyped value: the malformed payload a misbehaving client could return.
+      requestAddHighlight: async () => JSON.parse('{"invalid":true}'),
     };
 
-    const highlight = new VisualHighlight(androidDevice, null, fakeClient as any);
+    const highlight = new VisualHighlight(androidDevice, null, fakeClient);
     await expect(highlight.addHighlight("highlight-1", highlightShape)).rejects.toThrow(
       "Invalid highlight response",
     );
@@ -170,7 +169,7 @@ describe("VisualHighlightClient", () => {
       }),
     };
 
-    const client = new VisualHighlightClient(fakeSessionManager as any, () => fakeHighlight as any);
+    const client = new VisualHighlightClient(fakeSessionManager, () => fakeHighlight);
 
     await expect(
       client.addHighlight("highlight-1", highlightShape, {
@@ -189,10 +188,13 @@ describe("VisualHighlightClient", () => {
       },
     };
 
-    const client = new VisualHighlightClient({} as any, (device) => {
-      calls.push({ device, shape: highlightShape });
-      return fakeHighlight as any;
-    });
+    const client = new VisualHighlightClient(
+      { ensureDeviceReady: async () => iosDevice },
+      (device) => {
+        calls.push({ device, shape: highlightShape });
+        return fakeHighlight;
+      },
+    );
 
     const result = await client.addHighlight("highlight-1", highlightShape, {
       device: iosDevice,

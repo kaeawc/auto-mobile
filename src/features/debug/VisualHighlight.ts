@@ -171,13 +171,16 @@ export class VisualHighlight {
   }
 }
 
+type HighlightAdder = Pick<VisualHighlight, "addHighlight">;
+type HighlightDeviceReadiness = Pick<DeviceReadiness, "ensureDeviceReady">;
+
 export class VisualHighlightClient {
-  private readonly deviceSessionManager: DeviceReadiness;
-  private readonly visualHighlightFactory: (device: BootedDevice) => VisualHighlight;
+  private readonly deviceSessionManager: HighlightDeviceReadiness;
+  private readonly visualHighlightFactory: (device: BootedDevice) => HighlightAdder;
 
   constructor(
-    deviceSessionManager: DeviceReadiness = DeviceReadiness.getInstance(),
-    visualHighlightFactory: (device: BootedDevice) => VisualHighlight = (device) =>
+    deviceSessionManager: HighlightDeviceReadiness = DeviceReadiness.getInstance(),
+    visualHighlightFactory: (device: BootedDevice) => HighlightAdder = (device) =>
       new VisualHighlight(device),
   ) {
     this.deviceSessionManager = deviceSessionManager;
@@ -197,7 +200,7 @@ export class VisualHighlightClient {
     return result;
   }
 
-  private async resolveHighlight(options: HighlightOptions): Promise<VisualHighlight> {
+  private async resolveHighlight(options: HighlightOptions): Promise<HighlightAdder> {
     if (options.device) {
       if (options.device.platform !== options.platform) {
         throw new ActionableError(

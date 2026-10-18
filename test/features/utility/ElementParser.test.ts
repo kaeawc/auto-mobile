@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
 import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../src/models";
 
+// Runtime-null input that the static types forbid; JSON.parse yields an untyped value.
+const untypedNull = JSON.parse("null");
+
 describe("DefaultElementParser", () => {
   const parser = new DefaultElementParser();
   const bounds = (left: number, top: number, right: number, bottom: number) => ({
@@ -89,7 +92,7 @@ describe("DefaultElementParser", () => {
 
   describe("parseNodeBounds", () => {
     test("returns null for null node", () => {
-      expect(parser.parseNodeBounds(null as any)).toBeNull();
+      expect(parser.parseNodeBounds(untypedNull)).toBeNull();
     });
 
     test("parses Android node with object bounds", () => {
@@ -108,7 +111,7 @@ describe("DefaultElementParser", () => {
       const node = {
         $: { text: "Login" },
         bounds: { left: 10, top: 20, right: 300, bottom: 400 },
-      } as any;
+      } as ViewHierarchyNode;
       const element = parser.parseNodeBounds(node);
       expect(element).not.toBeNull();
       expect(element!.bounds).toEqual({ left: 10, top: 20, right: 300, bottom: 400 });
@@ -212,7 +215,7 @@ describe("DefaultElementParser", () => {
 
   describe("extractRootNodes", () => {
     test("returns empty array for null hierarchy", () => {
-      expect(parser.extractRootNodes(null as any)).toEqual([]);
+      expect(parser.extractRootNodes(untypedNull)).toEqual([]);
     });
 
     test("returns empty array for hierarchy with error", () => {
@@ -234,7 +237,7 @@ describe("DefaultElementParser", () => {
     test("extracts array of root nodes", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
-          node: [{ $: { text: "root1" } }, { $: { text: "root2" } }] as any,
+          node: [{ $: { text: "root1" } }, { $: { text: "root2" } }],
         },
       };
       const roots = parser.extractRootNodes(viewHierarchy);
@@ -282,7 +285,7 @@ describe("DefaultElementParser", () => {
 
   describe("flattenViewHierarchy", () => {
     test("returns empty for null hierarchy", () => {
-      expect(parser.flattenViewHierarchy(null as any)).toEqual([]);
+      expect(parser.flattenViewHierarchy(untypedNull)).toEqual([]);
     });
 
     test("flattens single element", () => {

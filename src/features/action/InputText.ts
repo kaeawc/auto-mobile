@@ -37,6 +37,7 @@ import {
 import { Keyboard } from "./Keyboard";
 import { TapOnElement } from "./TapOnElement";
 import { getRequestContext } from "../../utils/AbortContext";
+import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
 // The UI needs a brief settle after a key event.
 export const KEY_EVENT_SETTLE_MS = 100;
@@ -271,7 +272,7 @@ export class InputText extends BaseVisualChange {
         usesObservationForResolution: false,
         changeExpected: true,
         tolerancePercent: 0.0,
-        timeoutMs: 5000,
+        timeoutMs: SETTLE_BUDGET_MS.lifecycle,
         perf,
         signal,
         skipUiStability: true, // Skip UI stability wait - a11y service already waits 100ms for tree update

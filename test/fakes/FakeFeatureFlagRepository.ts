@@ -3,10 +3,7 @@ import type {
   FeatureFlagDefinition,
   FeatureFlagKey,
 } from "../../src/features/featureFlags/FeatureFlagDefinitions";
-import type {
-  FeatureFlagRecord,
-  FeatureFlagRepository,
-} from "../../src/features/featureFlags/FeatureFlagRepository";
+import type { FeatureFlagRecord, FeatureFlagRepository } from "../../src/db/featureFlagRepository";
 
 /** SQLite stores config as JSON, so the fake keeps its own copy of every config it is given. */
 function cloneConfig(config: FeatureFlagConfig | null | undefined): FeatureFlagConfig | null {

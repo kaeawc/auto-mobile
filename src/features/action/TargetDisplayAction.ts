@@ -2,7 +2,7 @@ import type { BootedDevice, ObserveResult } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import type { AdbCommandRunner } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer } from "../../utils/SystemTimer";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../../daemon/daemonContext";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted } from "../../utils/toolUtils";
@@ -111,12 +111,12 @@ export type RenderedObservationReader = (deviceId: string) =>
 
 export function sessionRenderedObservation(
   deviceId: string,
+  daemon: DaemonContext = defaultDaemonContext,
 ): ReturnType<RenderedObservationReader> {
-  const daemon = DaemonState.getInstance();
-  if (!daemon.isInitialized()) {
+  const sessions = daemon.renderedDisplaySessions();
+  if (!sessions) {
     return undefined;
   }
-  const sessions = daemon.getSessionManager();
   const sessionId = sessions.getSessionForDevice(deviceId);
   if (!sessionId) {
     return undefined;
@@ -133,12 +133,12 @@ export function sessionRenderedObservation(
 function renderedRevision(
   deviceId: string,
   previous: NonNullable<ReturnType<RenderedObservationReader>>,
+  daemon: DaemonContext = defaultDaemonContext,
 ): number | undefined {
-  const daemon = DaemonState.getInstance();
-  if (!daemon.isInitialized()) {
+  const sessions = daemon.renderedDisplaySessions();
+  if (!sessions) {
     return previous.displayRevision;
   }
-  const sessions = daemon.getSessionManager();
   const sessionId = sessions.getSessionForDevice(deviceId);
   return sessionId ? sessions.getLastRenderedDisplayRevision(sessionId) : previous.displayRevision;
 }

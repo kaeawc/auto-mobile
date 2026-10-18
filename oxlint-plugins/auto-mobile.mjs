@@ -400,7 +400,7 @@ const noAccumulatorForEachRule = {
 };
 
 // The ElementSelector service has one entry point, `select(capture, query, options)`. The older
-// per-field adapters survive only for the tap actions that have not moved yet (issue #11838).
+// per-field adapters survive only for ResolverElementSelector's own tests until they move (issue #11838).
 const SELECTOR_FACADE_METHODS = new Set([
   "selectByText",
   "selectByResourceId",
@@ -410,13 +410,13 @@ const SELECTOR_FACADE_METHODS = new Set([
   "selectClickableSiblingOfResourceId",
 ]);
 const SELECTOR_FACADE_ALLOWED_FILES =
-  /(?:^|\/)src\/features\/(?:action\/(?:TapOnElement|TapAnyElement|tapElementFinder)|utility\/ResolverElementSelector)\.ts$/;
+  /(?:^|\/)src\/features\/utility\/ResolverElementSelector\.ts$/;
 const noDeprecatedSelectorFacadeRule = {
   meta: {
     type: "problem",
     messages: {
       facade:
-        "selectByText/selectByResourceId/selectByTestTag/selectClickable* are deprecated adapters; call ElementSelector.select(capture, query, options) with a named policy from SelectionPolicy. Only TapOnElement, TapAnyElement and tapElementFinder may still use them (oxlint-plugins/auto-mobile.mjs, issue #11838).",
+        "selectByText/selectByResourceId/selectByTestTag/selectClickable* are deprecated adapters; call ElementSelector.select(capture, query, options) with a named policy from SelectionPolicy. Only ResolverElementSelector, which defines them, may use them (oxlint-plugins/auto-mobile.mjs, issue #11838).",
     },
   },
   create(context) {

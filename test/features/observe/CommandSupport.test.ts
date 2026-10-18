@@ -1,3 +1,4 @@
+import { FakeOpenSocket } from "../../fakes/FakeOpenSocket";
 import { describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import {
@@ -56,11 +57,7 @@ async function sendWithClientContext(client: AndroidCtrlProxyClient, messageType
   const context: DelegateContext = {
     ...actualContext,
     ensureConnected: async () => true,
-    getWebSocket: () =>
-      ({
-        readyState: WebSocket.OPEN,
-        send: (data: string) => sent.push(data),
-      }) as unknown as WebSocket,
+    getWebSocket: () => new FakeOpenSocket((frame) => sent.push(frame)),
   };
   const result = await sendCommand<{ success: boolean; totalTimeMs: number; error?: string }>(
     context,
@@ -83,7 +80,7 @@ function androidClient(): AndroidCtrlProxyClient {
   const timer = new FakeTimer();
   AndroidCtrlProxyClient.resetInstances();
   return AndroidCtrlProxyClient.createForTesting(androidDevice, adb, {
-    webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer) as unknown as WebSocket,
+    webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer),
     timer,
   });
 }
@@ -94,7 +91,7 @@ function iosClient(): IOSCtrlProxyClient {
   return IOSCtrlProxyClient.createForTesting(
     iosDevice,
     8765,
-    (url) => new FakeWebSocket(url, "none", 0, timer) as unknown as WebSocket,
+    (url) => new FakeWebSocket(url, "none", 0, timer),
     timer,
   );
 }

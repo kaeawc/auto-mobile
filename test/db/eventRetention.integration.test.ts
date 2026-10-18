@@ -26,6 +26,7 @@ import {
 } from "../../src/db/navigationEventRepository";
 import { recordLayoutEvent, recordLayoutEvents } from "../../src/db/layoutEventRepository";
 import { recordStorageEvent } from "../../src/db/storageEventRepository";
+import { looseKyselyTables } from "../helpers/looseKyselyTables";
 
 /**
  * Retention behavior for the six telemetry event repositories (#2799).
@@ -300,8 +301,8 @@ describe("event repository retention (#2799)", () => {
           );
           expect(inserts).toHaveLength(1);
 
-          const rows = await db
-            .selectFrom(repo.table as any)
+          const rows = await looseKyselyTables(db)
+            .selectFrom(repo.table)
             .select("timestamp")
             .orderBy("timestamp", "asc")
             .execute();
@@ -359,8 +360,8 @@ describe("event repository retention (#2799)", () => {
           // checkInterval: 1 forces the scan to run now, regardless of the counter.
           await cleanupRepo(repo, db, createRetentionState(), cap, 1);
 
-          const rows = await db
-            .selectFrom(repo.table as any)
+          const rows = await looseKyselyTables(db)
+            .selectFrom(repo.table)
             .select("timestamp")
             .orderBy("timestamp", "asc")
             .execute();
@@ -386,8 +387,8 @@ describe("event repository retention (#2799)", () => {
             await repo.record(repo.make(100), db);
           }
           // Not every repo's record() returns the id, so read them from the DB.
-          const beforeRows = await db
-            .selectFrom(repo.table as any)
+          const beforeRows = await looseKyselyTables(db)
+            .selectFrom(repo.table)
             .select("id")
             .orderBy("id", "asc")
             .execute();
@@ -395,8 +396,8 @@ describe("event repository retention (#2799)", () => {
 
           await cleanupRepo(repo, db, createRetentionState(), cap, 1);
 
-          const rows = await db
-            .selectFrom(repo.table as any)
+          const rows = await looseKyselyTables(db)
+            .selectFrom(repo.table)
             .select("id")
             .orderBy("id", "asc")
             .execute();
@@ -417,8 +418,8 @@ describe("event repository retention (#2799)", () => {
           }
           await cleanupRepo(repo, db, createRetentionState(), 10, 1);
 
-          const rows = await db
-            .selectFrom(repo.table as any)
+          const rows = await looseKyselyTables(db)
+            .selectFrom(repo.table)
             .select("timestamp")
             .execute();
           expect(rows).toHaveLength(3);

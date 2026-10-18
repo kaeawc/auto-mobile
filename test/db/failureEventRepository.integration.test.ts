@@ -53,8 +53,8 @@ describe("FailureEventRepository", () => {
   test("primes independent crash and ANR sweeps for each repository lifetime", async () => {
     for (let lifetime = 0; lifetime < 2; lifetime++) {
       const fresh = new FailureEventRepository(db, timer);
-      const crashes = spyOn(fresh as any, "pruneCrashesToRowCap");
-      const anrs = spyOn(fresh as any, "pruneAnrsToRowCap");
+      const crashes = spyOn(fresh, "pruneCrashesToRowCap");
+      const anrs = spyOn(fresh, "pruneAnrsToRowCap");
       try {
         await fresh.saveCrash(makeCrashEvent());
         await fresh.saveAnr(makeAnrEvent());
@@ -717,7 +717,7 @@ describe("FailureEventRepository", () => {
         await repo.saveCrash(makeCrashEvent({ timestamp: 1000 + i }));
       }
 
-      await (repo as any).pruneCrashesToRowCap(5);
+      await repo.pruneCrashesToRowCap(5);
 
       const crashes = await repo.getCrashes();
       expect(crashes).toHaveLength(5);
@@ -729,7 +729,7 @@ describe("FailureEventRepository", () => {
         await repo.saveCrash(makeCrashEvent({ timestamp: 1000 + i }));
       }
 
-      await (repo as any).pruneCrashesToRowCap(10);
+      await repo.pruneCrashesToRowCap(10);
 
       const crashes = await repo.getCrashes();
       expect(crashes).toHaveLength(3);
@@ -740,7 +740,7 @@ describe("FailureEventRepository", () => {
         await repo.saveAnr(makeAnrEvent({ timestamp: 2000 + i }));
       }
 
-      await (repo as any).pruneAnrsToRowCap(5);
+      await repo.pruneAnrsToRowCap(5);
 
       const anrs = await repo.getAnrs();
       expect(anrs).toHaveLength(5);
@@ -752,7 +752,7 @@ describe("FailureEventRepository", () => {
         await repo.saveAnr(makeAnrEvent({ timestamp: 2000 + i }));
       }
 
-      await (repo as any).pruneAnrsToRowCap(10);
+      await repo.pruneAnrsToRowCap(10);
 
       const anrs = await repo.getAnrs();
       expect(anrs).toHaveLength(3);
@@ -768,7 +768,7 @@ describe("FailureEventRepository", () => {
         await repo.saveAnr(makeAnrEvent({ timestamp: 2000 + i }));
       }
 
-      await (repo as any).pruneCrashesToRowCap(2);
+      await repo.pruneCrashesToRowCap(2);
 
       const crashes = await repo.getCrashes();
       const anrs = await repo.getAnrs();

@@ -259,8 +259,10 @@ steps:
       const plan = importPlanFromYaml(yamlContent);
 
       expect(plan.devices).toHaveLength(2);
-      expect((plan.devices![0] as any).label).toBe("A");
-      expect((plan.devices![1] as any).platform).toBe("ios");
+      expect(plan.devices).toMatchObject([
+        { label: "A", platform: "ios" },
+        { label: "B", platform: "ios" },
+      ]);
     });
 
     test("should throw error for invalid YAML", () => {

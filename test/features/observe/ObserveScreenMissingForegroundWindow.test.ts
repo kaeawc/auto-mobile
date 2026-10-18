@@ -18,6 +18,7 @@ import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import type { BootedDevice } from "../../../src/models";
+import { createFlatHierarchyForTest } from "./flatHierarchyBuilders";
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -51,26 +52,28 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
     const viewHierarchy = new FakeViewHierarchy();
     // The exact #6220 repro shape: only com.android.systemui status-bar nodes,
     // no packageName/foregroundActivity the accessibility path can attribute.
-    viewHierarchy.configureHierarchy({
-      updatedAt: now,
-      receivedAt: now,
-      fresh: true,
-      screenWidth: 1080,
-      screenHeight: 2400,
-      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
-      hierarchy: {
-        node: {
-          bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
-          node: [
-            {
-              "resource-id": "com.android.systemui:id/clock",
-              text: "8:33",
-              bounds: { left: 21, top: 0, right: 107, bottom: 63 },
-            },
-          ],
+    viewHierarchy.configureHierarchy(
+      createFlatHierarchyForTest({
+        updatedAt: now,
+        receivedAt: now,
+        fresh: true,
+        screenWidth: 1080,
+        screenHeight: 2400,
+        systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+            node: [
+              {
+                "resource-id": "com.android.systemui:id/clock",
+                text: "8:33",
+                bounds: { left: 21, top: 0, right: 107, bottom: 63 },
+              },
+            ],
+          },
         },
-      },
-    } as any);
+      }),
+    );
 
     const fakeAdb = new FakeAdbExecutor();
     // getForegroundApp returns null (default): the async, device-confirmed
@@ -84,9 +87,9 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         viewHierarchy,
         window: noOpWindow(""),
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        performanceAuditor: { run: async () => undefined },
+        accessibilityAuditor: { run: async () => undefined },
+        accessibilityStateDetector: { run: async () => undefined },
       },
       timer,
     );
@@ -105,21 +108,23 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
-      updatedAt: now,
-      receivedAt: now,
-      fresh: true,
-      screenWidth: 1080,
-      screenHeight: 2400,
-      packageName: "com.google.android.deskclock",
-      foregroundActivity: "com.google.android.deskclock/.DeskClock",
-      hierarchy: {
-        node: {
-          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
-          node: [{ text: "Add alarm", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+    viewHierarchy.configureHierarchy(
+      createFlatHierarchyForTest({
+        updatedAt: now,
+        receivedAt: now,
+        fresh: true,
+        screenWidth: 1080,
+        screenHeight: 2400,
+        packageName: "com.google.android.deskclock",
+        foregroundActivity: "com.google.android.deskclock/.DeskClock",
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+            node: [{ text: "Add alarm", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+          },
         },
-      },
-    } as any);
+      }),
+    );
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.google.android.deskclock", userId: 0 });
@@ -130,9 +135,9 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
       {
         viewHierarchy,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        performanceAuditor: { run: async () => undefined },
+        accessibilityAuditor: { run: async () => undefined },
+        accessibilityStateDetector: { run: async () => undefined },
       },
       timer,
     );
@@ -158,23 +163,25 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
-      updatedAt: now,
-      receivedAt: now,
-      fresh: true,
-      screenWidth: 1080,
-      screenHeight: 2400,
-      // Real package attribution, but no usable foregroundActivity: the
-      // accessibility path leaves `activeWindow` unset, so the legacy Window
-      // query (mocked below to fail) and then the package-name fallback run.
-      packageName: "com.google.android.deskclock",
-      hierarchy: {
-        node: {
-          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
-          node: [{ text: "Add alarm", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+    viewHierarchy.configureHierarchy(
+      createFlatHierarchyForTest({
+        updatedAt: now,
+        receivedAt: now,
+        fresh: true,
+        screenWidth: 1080,
+        screenHeight: 2400,
+        // Real package attribution, but no usable foregroundActivity: the
+        // accessibility path leaves `activeWindow` unset, so the legacy Window
+        // query (mocked below to fail) and then the package-name fallback run.
+        packageName: "com.google.android.deskclock",
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+            node: [{ text: "Add alarm", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+          },
         },
-      },
-    } as any);
+      }),
+    );
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.google.android.deskclock", userId: 0 });
@@ -188,9 +195,9 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         // with an empty appId, not `undefined`/`null`.
         window: noOpWindow(""),
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        performanceAuditor: { run: async () => undefined },
+        accessibilityAuditor: { run: async () => undefined },
+        accessibilityStateDetector: { run: async () => undefined },
       },
       timer,
     );
@@ -217,21 +224,23 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
-      updatedAt: now,
-      receivedAt: now,
-      fresh: true,
-      // No screenWidth/screenHeight: the dimensions-present branch that would
-      // derive `activeWindow` from `foregroundActivity` is skipped entirely.
-      // No packageName either, so the package-attribution fallback cannot fire.
-      foregroundActivity: "com.google.android.deskclock/.DeskClock",
-      hierarchy: {
-        node: {
-          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
-          node: [{ text: "Add alarm", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+    viewHierarchy.configureHierarchy(
+      createFlatHierarchyForTest({
+        updatedAt: now,
+        receivedAt: now,
+        fresh: true,
+        // No screenWidth/screenHeight: the dimensions-present branch that would
+        // derive `activeWindow` from `foregroundActivity` is skipped entirely.
+        // No packageName either, so the package-attribution fallback cannot fire.
+        foregroundActivity: "com.google.android.deskclock/.DeskClock",
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+            node: [{ text: "Add alarm", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+          },
         },
-      },
-    } as any);
+      }),
+    );
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.google.android.deskclock", userId: 0 });
@@ -245,9 +254,9 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         // with an empty appId, not `undefined`/`null`.
         window: noOpWindow(""),
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        performanceAuditor: { run: async () => undefined },
+        accessibilityAuditor: { run: async () => undefined },
+        accessibilityStateDetector: { run: async () => undefined },
       },
       timer,
     );
@@ -268,26 +277,28 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
-      updatedAt: now,
-      receivedAt: now,
-      fresh: true,
-      screenWidth: 1080,
-      screenHeight: 2400,
-      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
-      hierarchy: {
-        node: {
-          bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
-          node: [
-            {
-              "resource-id": "com.android.systemui:id/clock",
-              text: "8:33",
-              bounds: { left: 21, top: 0, right: 107, bottom: 63 },
-            },
-          ],
+    viewHierarchy.configureHierarchy(
+      createFlatHierarchyForTest({
+        updatedAt: now,
+        receivedAt: now,
+        fresh: true,
+        screenWidth: 1080,
+        screenHeight: 2400,
+        systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+            node: [
+              {
+                "resource-id": "com.android.systemui:id/clock",
+                text: "8:33",
+                bounds: { left: 21, top: 0, right: 107, bottom: 63 },
+              },
+            ],
+          },
         },
-      },
-    } as any);
+      }),
+    );
 
     const fakeAdb = new FakeAdbExecutor();
 
@@ -298,9 +309,9 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         viewHierarchy,
         window: noOpWindow(""),
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        performanceAuditor: { run: async () => undefined },
+        accessibilityAuditor: { run: async () => undefined },
+        accessibilityStateDetector: { run: async () => undefined },
       },
       timer,
     );
@@ -325,30 +336,32 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
-      updatedAt: now,
-      receivedAt: now,
-      fresh: true,
-      screenWidth: 1080,
-      screenHeight: 2400,
-      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
-      // Stale identity metadata from a previously-resumed app, left over even
-      // though the tree itself is now confined to the status-bar strip.
-      packageName: "com.android.settings",
-      foregroundActivity: "com.android.settings/.SubSettings",
-      hierarchy: {
-        node: {
-          bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
-          node: [
-            {
-              "resource-id": "com.android.systemui:id/clock",
-              text: "8:33",
-              bounds: { left: 21, top: 0, right: 107, bottom: 63 },
-            },
-          ],
+    viewHierarchy.configureHierarchy(
+      createFlatHierarchyForTest({
+        updatedAt: now,
+        receivedAt: now,
+        fresh: true,
+        screenWidth: 1080,
+        screenHeight: 2400,
+        systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+        // Stale identity metadata from a previously-resumed app, left over even
+        // though the tree itself is now confined to the status-bar strip.
+        packageName: "com.android.settings",
+        foregroundActivity: "com.android.settings/.SubSettings",
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+            node: [
+              {
+                "resource-id": "com.android.systemui:id/clock",
+                text: "8:33",
+                bounds: { left: 21, top: 0, right: 107, bottom: 63 },
+              },
+            ],
+          },
         },
-      },
-    } as any);
+      }),
+    );
 
     const fakeAdb = new FakeAdbExecutor();
     // Both ADB foreground reads come back empty: no ground truth to confirm
@@ -361,9 +374,9 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
       {
         viewHierarchy,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        performanceAuditor: { run: async () => undefined },
+        accessibilityAuditor: { run: async () => undefined },
+        accessibilityStateDetector: { run: async () => undefined },
       },
       timer,
     );
@@ -393,20 +406,22 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
     const viewHierarchy = new FakeViewHierarchy();
     // Real package attribution, no usable foregroundActivity: the accessibility
     // path leaves `activeWindow` unset, so the legacy Window query runs.
-    viewHierarchy.configureHierarchy({
-      updatedAt: now,
-      receivedAt: now,
-      fresh: true,
-      screenWidth: 1080,
-      screenHeight: 2400,
-      packageName: "com.foo.app",
-      hierarchy: {
-        node: {
-          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
-          node: [{ text: "Hello", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+    viewHierarchy.configureHierarchy(
+      createFlatHierarchyForTest({
+        updatedAt: now,
+        receivedAt: now,
+        fresh: true,
+        screenWidth: 1080,
+        screenHeight: 2400,
+        packageName: "com.foo.app",
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+            node: [{ text: "Hello", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+          },
         },
-      },
-    } as any);
+      }),
+    );
 
     const fakeAdb = new FakeAdbExecutor();
 
@@ -432,9 +447,9 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
         viewHierarchy,
         window: sentinelWindow,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        performanceAuditor: { run: async () => undefined },
+        accessibilityAuditor: { run: async () => undefined },
+        accessibilityStateDetector: { run: async () => undefined },
       },
       timer,
     );
@@ -450,7 +465,7 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
   });
 
   // The genuinely-absent case must still construct a fresh object with empty
-  // defaults: when the legacy query returns null (no sentinel to preserve), the
+  // defaults: when the active-window read fails (no sentinel to preserve), the
   // package-name backfill supplies the appId and the empty-string/zero defaults.
   test("backfill constructs a fresh object when activeWindow is truly undefined (#6320)", async () => {
     const now = 1_700_000_000_000;
@@ -458,27 +473,31 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
-      updatedAt: now,
-      receivedAt: now,
-      fresh: true,
-      screenWidth: 1080,
-      screenHeight: 2400,
-      packageName: "com.foo.app",
-      hierarchy: {
-        node: {
-          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
-          node: [{ text: "Hello", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+    viewHierarchy.configureHierarchy(
+      createFlatHierarchyForTest({
+        updatedAt: now,
+        receivedAt: now,
+        fresh: true,
+        screenWidth: 1080,
+        screenHeight: 2400,
+        packageName: "com.foo.app",
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+            node: [{ text: "Hello", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+          },
         },
-      },
-    } as any);
+      }),
+    );
 
     const fakeAdb = new FakeAdbExecutor();
 
-    // Legacy query returns null: `collectActiveWindow` leaves `activeWindow`
-    // undefined, so the backfill takes the object-construction path.
-    const nullWindow = {
-      getActive: async () => null,
+    // The active-window read fails: `collectActiveWindow` records the error and leaves
+    // `activeWindow` undefined, so the backfill takes the object-construction path.
+    const failingWindow = {
+      getActive: async () => {
+        throw new Error("dumpsys window unavailable");
+      },
       getActiveHash: async () => "hash",
       getCachedActiveWindow: async () => null,
       setCachedActiveWindow: async () => undefined,
@@ -490,11 +509,11 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
       new FakeAdbClientFactory(fakeAdb),
       {
         viewHierarchy,
-        window: nullWindow as any,
+        window: failingWindow,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        performanceAuditor: { run: async () => undefined },
+        accessibilityAuditor: { run: async () => undefined },
+        accessibilityStateDetector: { run: async () => undefined },
       },
       timer,
     );
@@ -516,23 +535,25 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
-      updatedAt: now,
-      receivedAt: now,
-      fresh: true,
-      screenWidth: 1080,
-      screenHeight: 2400,
-      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
-      packageName: "com.android.systemui",
-      foregroundActivity: "com.android.systemui/.shade.NotificationPanelView",
-      hierarchy: {
-        node: {
-          // The expanded shade extends well past the status-bar strip.
-          bounds: { left: 0, top: 0, right: 1080, bottom: 1400 },
-          node: [{ text: "Silent", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+    viewHierarchy.configureHierarchy(
+      createFlatHierarchyForTest({
+        updatedAt: now,
+        receivedAt: now,
+        fresh: true,
+        screenWidth: 1080,
+        screenHeight: 2400,
+        systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+        packageName: "com.android.systemui",
+        foregroundActivity: "com.android.systemui/.shade.NotificationPanelView",
+        hierarchy: {
+          node: {
+            // The expanded shade extends well past the status-bar strip.
+            bounds: { left: 0, top: 0, right: 1080, bottom: 1400 },
+            node: [{ text: "Silent", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+          },
         },
-      },
-    } as any);
+      }),
+    );
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp(null);
@@ -543,9 +564,9 @@ describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () =
       {
         viewHierarchy,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        performanceAuditor: { run: async () => undefined },
+        accessibilityAuditor: { run: async () => undefined },
+        accessibilityStateDetector: { run: async () => undefined },
       },
       timer,
     );

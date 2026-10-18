@@ -10,14 +10,14 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function () {
     const fakeAdb = new FakeAdbExecutor();
     collector = new DisplayedTimeMetricsCollector(
       { deviceId: "test", name: "test", platform: "android" },
-      fakeAdb as any,
+      fakeAdb,
     );
   });
 
   test("parses ActivityManager displayed metrics with millisecond duration", function () {
     const output =
       "1694099696.789  1234  5678 I ActivityManager: Displayed com.example/.MainActivity: +824ms";
-    const result = (collector as any).parseDisplayedMetrics(output, {
+    const result = collector.parseDisplayedMetrics(output, {
       packageName: "com.example",
       startTimestampMs: 1694099696000,
       endTimestampMs: 1694099697000,
@@ -33,7 +33,7 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function () {
   test("parses ActivityTaskManager displayed metrics with seconds duration", function () {
     const output =
       "1694099697.123  1111  2222 I ActivityTaskManager: Displayed com.example/com.example.MainActivity: +1s234ms";
-    const result = (collector as any).parseDisplayedMetrics(output, {
+    const result = collector.parseDisplayedMetrics(output, {
       packageName: "com.example",
       startTimestampMs: 1694099697000,
       endTimestampMs: 1694099698000,
@@ -48,7 +48,7 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function () {
   test("parses Android 14 displayed lines with a user suffix", function () {
     const output =
       "1694099697.123  1111  2222 I ActivityTaskManager: Displayed com.ex/.Main for user 0: +512ms";
-    const result = (collector as any).parseDisplayedMetrics(output, {
+    const result = collector.parseDisplayedMetrics(output, {
       packageName: "com.ex",
       startTimestampMs: 1694099697000,
       endTimestampMs: 1694099698000,
@@ -67,7 +67,7 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function () {
       "1694099696.200  1234  5678 I ActivityManager: Displayed com.other/.MainActivity: +300ms",
     ].join("\n");
 
-    const result = (collector as any).parseDisplayedMetrics(output, {
+    const result = collector.parseDisplayedMetrics(output, {
       packageName: "com.example",
       startTimestampMs: 1694099696000,
       endTimestampMs: 1694099697000,
@@ -79,17 +79,12 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function () {
   });
 
   describe("getPreferredLogcatTag API-level boundary", function () {
-    type ConstructorAdb = ConstructorParameters<typeof DisplayedTimeMetricsCollector>[1];
-    type LogcatTagProbe = { getPreferredLogcatTag(): Promise<string> };
-
     function collectorForApiLevel(apiLevel: number | null): DisplayedTimeMetricsCollector {
-      const fakeAdb = {
-        executeCommand: async () => ({ stdout: "", stderr: "" }),
-        getAndroidApiLevel: async () => apiLevel,
-      };
+      const fakeAdb = new FakeAdbExecutor();
+      fakeAdb.setAndroidApiLevel(apiLevel);
       return new DisplayedTimeMetricsCollector(
         { deviceId: "test", name: "test", platform: "android" },
-        fakeAdb as unknown as ConstructorAdb,
+        fakeAdb,
       );
     }
 
@@ -102,17 +97,19 @@ describe("DisplayedTimeMetricsCollector - Unit Tests", function () {
 
     test.each(cases)("%s", async function (_name, apiLevel, expected) {
       const collector = collectorForApiLevel(apiLevel);
-      const tag = await (collector as unknown as LogcatTagProbe).getPreferredLogcatTag();
+      const tag = await collector.getPreferredLogcatTag();
       expect(tag).toBe(expected);
     });
 
     test("falls back to ActivityManager when the executor cannot report an API level", async function () {
-      const fakeAdb = { executeCommand: async () => ({ stdout: "", stderr: "" }) };
+      const fakeAdb = new FakeAdbExecutor();
+      // Shadow the prototype method: an executor that cannot report an API level.
+      Object.defineProperty(fakeAdb, "getAndroidApiLevel", { value: undefined });
       const collector = new DisplayedTimeMetricsCollector(
         { deviceId: "test", name: "test", platform: "android" },
-        fakeAdb as unknown as ConstructorAdb,
+        fakeAdb,
       );
-      const tag = await (collector as unknown as LogcatTagProbe).getPreferredLogcatTag();
+      const tag = await collector.getPreferredLogcatTag();
       expect(tag).toBe("ActivityManager");
     });
   });

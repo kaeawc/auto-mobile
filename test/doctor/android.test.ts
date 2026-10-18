@@ -822,21 +822,16 @@ describe("doctor probe cancellation seam (#7008)", () => {
 
   test("checkAdbInstallation forwards the signal and deadline to adb path discovery", async () => {
     const controller = new AbortController();
-    const calls: Array<DoctorProbeOptions | undefined> = [];
-    const fakeFactory: AdbClientFactory = {
-      create: () =>
-        ({
-          getAdbPathOnly: async (probe?: DoctorProbeOptions) => {
-            calls.push(probe);
-            return "/usr/local/bin/adb";
-          },
-        }) as any,
-    };
+    const fakeExecutor = new FakeAdbExecutor();
+    const fakeFactory = new FakeAdbClientFactory(fakeExecutor);
 
     await checkAdbInstallation(fakeFactory, { signal: controller.signal, timeoutMs: 1234 });
     await checkAdbInstallation(fakeFactory);
 
-    expect(calls).toEqual([{ signal: controller.signal, timeoutMs: 1234 }, {}]);
+    expect(fakeExecutor.adbPathProbeOptions).toEqual([
+      { signal: controller.signal, timeoutMs: 1234 },
+      {},
+    ]);
   });
 
   test("checkAndroidCommandLineTools forwards the signal and deadline to the version probe", async () => {

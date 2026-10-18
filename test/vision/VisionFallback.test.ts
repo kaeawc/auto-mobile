@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { VisionFallback, MAX_VISION_CACHE_ENTRIES } from "../../src/vision/VisionFallback";
+import type { ViewHierarchyNode } from "../../src/models/ViewHierarchyResult";
 import type {
+  VisionClient,
   VisionFallbackConfig,
   VisionFallbackResult,
   ElementSearchCriteria,
@@ -10,8 +12,7 @@ import { FakeChecksumCalculator } from "../fakes/FakeChecksumCalculator";
 
 // VisionFallback constructs a ClaudeVisionClient internally (provider "claude"),
 // whose Anthropic client needs *some* key at construction. A dummy is fine — we
-// override the client with a counting stub before any call, so no request is
-// ever made.
+// inject a counting stub client for the cache tests, so no request is ever made.
 
 const config = (overrides: Partial<VisionFallbackConfig> = {}): VisionFallbackConfig => ({
   enabled: true,
@@ -34,28 +35,32 @@ const result = (overrides: Partial<VisionFallbackResult> = {}): VisionFallbackRe
 });
 
 const criteria = (text: string): ElementSearchCriteria => ({ text });
-const HIERARCHY = {} as any;
-
-/**
- * Replace the internal Claude client with a stub that counts calls and returns
- * a fixed result, so we exercise the orchestrator's cache/cost logic without a
- * network call. Returns a getter for the call count.
- */
-function stubAnalyzer(fallback: VisionFallback, canned: VisionFallbackResult): () => number {
-  let calls = 0;
-  (fallback as any).claudeClient = {
-    analyzeUIElement: async () => {
-      calls += 1;
-      return canned;
-    },
-  };
-  return () => calls;
-}
+const HIERARCHY: ViewHierarchyNode = {};
 
 describe("VisionFallback orchestrator", () => {
   let originalApiKey: string | undefined;
   let timer: FakeTimer;
   let checksums: FakeChecksumCalculator;
+
+  /**
+   * Build a fallback whose Claude client is a stub that counts calls and returns
+   * a fixed result, so we exercise the orchestrator's cache/cost logic without a
+   * network call. `calls` reads the call count.
+   */
+  function stubbedFallback(
+    fallbackConfig: VisionFallbackConfig,
+    canned: VisionFallbackResult,
+  ): { fallback: VisionFallback; calls: () => number } {
+    let calls = 0;
+    const client: VisionClient = {
+      analyzeUIElement: async () => {
+        calls += 1;
+        return canned;
+      },
+    };
+    const fallback = new VisionFallback(fallbackConfig, timer, client, checksums);
+    return { fallback, calls: () => calls };
+  }
 
   beforeEach(() => {
     originalApiKey = process.env.ANTHROPIC_API_KEY;
@@ -83,22 +88,16 @@ describe("VisionFallback orchestrator", () => {
     );
   });
 
-  test("rejects an unsupported provider before attempting a paid analysis", async () => {
-    const fallback = new VisionFallback(
-      config({ provider: "unsupported" as any }),
-      timer,
-      undefined,
-      checksums,
-    );
+  test("rejects a provider with no implementation before attempting a paid analysis", async () => {
+    const fallback = new VisionFallback(config({ provider: "local" }), timer, undefined, checksums);
 
     await expect(
       fallback.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login")),
-    ).rejects.toThrow("Unsupported vision provider: unsupported");
+    ).rejects.toThrow("Unsupported vision provider: local");
   });
 
   test("caches a result: an identical query hits the analyzer only once", async () => {
-    const fb = new VisionFallback(config(), timer, undefined, checksums);
-    const count = stubAnalyzer(fb, result());
+    const { fallback: fb, calls: count } = stubbedFallback(config(), result());
 
     const first = await fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"));
     const second = await fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"));
@@ -109,8 +108,10 @@ describe("VisionFallback orchestrator", () => {
   });
 
   test("re-analyzes after the cache entry passes cacheTtlMinutes", async () => {
-    const fb = new VisionFallback(config({ cacheTtlMinutes: 60 }), timer, undefined, checksums);
-    const count = stubAnalyzer(fb, result());
+    const { fallback: fb, calls: count } = stubbedFallback(
+      config({ cacheTtlMinutes: 60 }),
+      result(),
+    );
 
     await fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"));
     // Just under the TTL: still cached.
@@ -129,8 +130,7 @@ describe("VisionFallback orchestrator", () => {
   });
 
   test("caches distinct search criteria separately", async () => {
-    const fb = new VisionFallback(config(), timer, undefined, checksums);
-    const count = stubAnalyzer(fb, result());
+    const { fallback: fb, calls: count } = stubbedFallback(config(), result());
 
     await fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"));
     await fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Signup"));
@@ -143,8 +143,7 @@ describe("VisionFallback orchestrator", () => {
   });
 
   test("criteria written with keys in a different order hit the cache: the paid analyzer runs once", async () => {
-    const fb = new VisionFallback(config(), timer, undefined, checksums);
-    const count = stubAnalyzer(fb, result());
+    const { fallback: fb, calls: count } = stubbedFallback(config(), result());
 
     // Semantically identical searches, keys typed in a different order.
     await fb.analyzeAndSuggest("/s.png", HIERARCHY, { text: "Login", resourceId: "btn" });
@@ -155,8 +154,7 @@ describe("VisionFallback orchestrator", () => {
   });
 
   test("control: criteria with the same keys but different values are still analyzed separately", async () => {
-    const fb = new VisionFallback(config(), timer, undefined, checksums);
-    const count = stubAnalyzer(fb, result());
+    const { fallback: fb, calls: count } = stubbedFallback(config(), result());
 
     await fb.analyzeAndSuggest("/s.png", HIERARCHY, { text: "Login", resourceId: "btn" });
     await fb.analyzeAndSuggest("/s.png", HIERARCHY, { resourceId: "btn2", text: "Login" });
@@ -166,8 +164,7 @@ describe("VisionFallback orchestrator", () => {
   });
 
   test("control: the same criteria against a different screenshot is not a cache hit", async () => {
-    const fb = new VisionFallback(config(), timer, undefined, checksums);
-    const count = stubAnalyzer(fb, result());
+    const { fallback: fb, calls: count } = stubbedFallback(config(), result());
 
     await fb.analyzeAndSuggest("/a.png", HIERARCHY, criteria("Login"));
     await fb.analyzeAndSuggest("/b.png", HIERARCHY, criteria("Login"));
@@ -176,8 +173,7 @@ describe("VisionFallback orchestrator", () => {
   });
 
   test("clearCache forces re-analysis", async () => {
-    const fb = new VisionFallback(config(), timer, undefined, checksums);
-    const count = stubAnalyzer(fb, result());
+    const { fallback: fb, calls: count } = stubbedFallback(config(), result());
 
     await fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"));
     fb.clearCache();
@@ -187,8 +183,10 @@ describe("VisionFallback orchestrator", () => {
   });
 
   test("does not cache when cacheResults is false", async () => {
-    const fb = new VisionFallback(config({ cacheResults: false }), timer, undefined, checksums);
-    const count = stubAnalyzer(fb, result());
+    const { fallback: fb, calls: count } = stubbedFallback(
+      config({ cacheResults: false }),
+      result(),
+    );
 
     await fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"));
     await fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"));
@@ -197,8 +195,10 @@ describe("VisionFallback orchestrator", () => {
   });
 
   test("a cost above maxCostUsd is a warning, not a failure — the result is still returned", async () => {
-    const fb = new VisionFallback(config({ maxCostUsd: 0.01 }), timer, undefined, checksums);
-    stubAnalyzer(fb, result({ costUsd: 5.0 }));
+    const { fallback: fb } = stubbedFallback(
+      config({ maxCostUsd: 0.01 }),
+      result({ costUsd: 5.0 }),
+    );
 
     const res = await fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"));
     expect(res.found).toBe(true);
@@ -208,8 +208,7 @@ describe("VisionFallback orchestrator", () => {
   // The cache now outlives a single tool call (issue #4207), so it has to be
   // bounded or a long-running daemon retains every query it ever made.
   test("caps retained entries at MAX_VISION_CACHE_ENTRIES", async () => {
-    const fb = new VisionFallback(config(), timer, undefined, checksums);
-    stubAnalyzer(fb, result());
+    const { fallback: fb } = stubbedFallback(config(), result());
 
     for (let i = 0; i < MAX_VISION_CACHE_ENTRIES + 10; i++) {
       await fb.analyzeAndSuggest(`/s-${i}.png`, HIERARCHY, criteria("Login"));
@@ -222,8 +221,7 @@ describe("VisionFallback orchestrator", () => {
   });
 
   test("sweeps entries past their TTL on write, not only on read", async () => {
-    const fb = new VisionFallback(config({ cacheTtlMinutes: 10 }), timer, undefined, checksums);
-    stubAnalyzer(fb, result());
+    const { fallback: fb } = stubbedFallback(config({ cacheTtlMinutes: 10 }), result());
 
     await fb.analyzeAndSuggest("/stale.png", HIERARCHY, criteria("Login"));
     expect(fb.getCacheStats().size).toBe(1);

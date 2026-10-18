@@ -1,3 +1,4 @@
+import type { CtrlSocket } from "../../../src/features/observe/shared/types";
 import {
   afterAll,
   afterEach,
@@ -374,10 +375,10 @@ describe("AndroidCtrlProxyClient", function () {
     // until we trigger `open` ourselves, and the connection timeout never fires.
     const manualTimer = new FakeTimer();
     let socket: FakeWebSocket | null = null;
-    const factory = (url: string): WebSocket => {
+    const factory = (url: string): CtrlSocket => {
       // "timeout" mode keeps the socket CONNECTING (the timer is never advanced).
       socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
-      return socket as unknown as WebSocket;
+      return socket;
     };
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       webSocketFactory: factory,
@@ -425,9 +426,9 @@ describe("AndroidCtrlProxyClient", function () {
     gatedAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
     gatedAdb.setScreenState(true);
     let socket: FakeWebSocket | null = null;
-    const factory = (url: string): WebSocket => {
+    const factory = (url: string): CtrlSocket => {
       socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
-      return socket as unknown as WebSocket;
+      return socket;
     };
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, gatedAdb, {
       webSocketFactory: factory,
@@ -1130,11 +1131,7 @@ describe("AndroidCtrlProxyClient", function () {
       });
 
       expect(checkedPorts).toEqual([8765, 8767]);
-      expect(
-        (
-          accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }
-        ).getWebSocketUrl(),
-      ).toBe("ws://127.0.0.1:8767/ws");
+      expect(accessibilityServiceClient.testHooks.getWebSocketUrl()).toBe("ws://127.0.0.1:8767/ws");
     } finally {
       PortManager.setPortAvailabilityCheckerForTesting(null);
     }
@@ -1160,21 +1157,12 @@ describe("AndroidCtrlProxyClient", function () {
       });
       unavailablePorts.add(8765);
 
-      await (
-        accessibilityServiceClient as unknown as {
-          setupPortForwarding: () => Promise<void>;
-          getWebSocketUrl: () => string;
-        }
-      ).setupPortForwarding();
+      await accessibilityServiceClient.setupPortForwarding();
 
       expect(checkedPorts).toEqual([8765, 8765, 8765, 8765, 8765, 8767]);
       expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:8767");
       expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8767 tcp:8765");
-      expect(
-        (
-          accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }
-        ).getWebSocketUrl(),
-      ).toBe("ws://127.0.0.1:8767/ws");
+      expect(accessibilityServiceClient.testHooks.getWebSocketUrl()).toBe("ws://127.0.0.1:8767/ws");
     } finally {
       PortManager.setPortAvailabilityCheckerForTesting(null);
     }
@@ -1489,9 +1477,7 @@ describe("AndroidCtrlProxyClient", function () {
     stubForwardLifecycleCommands(() => "");
     const debug = spyOn(logger, "debug");
     try {
-      const client = accessibilityServiceClient as unknown as {
-        removeCtrlProxyPortForward: (port: number) => Promise<boolean>;
-      };
+      const client = accessibilityServiceClient.testHooks;
       expect(await client.removeCtrlProxyPortForward(8765)).toBe(true);
       expect(PortManager.isPortAvailable(8765)).toBe(true);
       expect(
@@ -1511,9 +1497,7 @@ describe("AndroidCtrlProxyClient", function () {
       );
       const warning = spyOn(logger, "warn");
       try {
-        const client = accessibilityServiceClient as unknown as {
-          removeCtrlProxyPortForward: (port: number) => Promise<boolean>;
-        };
+        const client = accessibilityServiceClient.testHooks;
         expect(await client.removeCtrlProxyPortForward(8765)).toBe(false);
         expect(PortManager.isPortAvailable(8765)).toBe(true);
         expect(
@@ -4165,7 +4149,7 @@ describe("AndroidCtrlProxyClient", function () {
         expect(pkgSpy).toHaveBeenCalledTimes(1); // cached — no re-resolution
 
         // Connection drops (app may be replaced unobserved), then a later event arrives.
-        (testClient as unknown as { onConnectionClosed: () => void }).onConnectionClosed();
+        testClient.onConnectionClosed();
 
         navEvent("Home2");
         await settle();

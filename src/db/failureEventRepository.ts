@@ -517,7 +517,7 @@ export class FailureEventRepository {
 
   // `maxRows` is injectable so tests can exercise trimming at a small cap
   // without inserting 10k rows.
-  private async pruneCrashesToRowCap(maxRows: number = CRASH_RETENTION_MAX_ROWS): Promise<void> {
+  async pruneCrashesToRowCap(maxRows: number = CRASH_RETENTION_MAX_ROWS): Promise<void> {
     try {
       await pruneTableByRowCap(this.getDb(), "crashes", maxRows);
     } catch (error) {
@@ -525,7 +525,7 @@ export class FailureEventRepository {
     }
   }
 
-  private async pruneAnrsToRowCap(maxRows: number = ANR_RETENTION_MAX_ROWS): Promise<void> {
+  async pruneAnrsToRowCap(maxRows: number = ANR_RETENTION_MAX_ROWS): Promise<void> {
     try {
       await pruneTableByRowCap(this.getDb(), "anrs", maxRows);
     } catch (error) {

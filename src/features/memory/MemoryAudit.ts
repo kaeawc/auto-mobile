@@ -176,7 +176,7 @@ export class MemoryAudit {
   /**
    * Validate metrics against thresholds
    */
-  private validateMetrics(
+  validateMetrics(
     metrics: MemoryMetrics,
     thresholds: {
       heapGrowthThresholdMb: number;
@@ -257,7 +257,7 @@ export class MemoryAudit {
   /**
    * Generate weighted diagnostic output based on violations
    */
-  private generateDiagnostics(metrics: MemoryMetrics, violations: MemoryViolation[]): string {
+  generateDiagnostics(metrics: MemoryMetrics, violations: MemoryViolation[]): string {
     if (violations.length === 0) {
       return "No memory issues detected";
     }

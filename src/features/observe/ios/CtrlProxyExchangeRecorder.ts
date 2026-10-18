@@ -23,6 +23,7 @@ import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { WebSocketFactory } from "../DeviceServiceClient";
 import { DirectoryExchangeSink } from "./DirectoryExchangeSink";
+import type { CtrlSocket } from "../shared/types";
 
 export const IOS_CTRL_PROXY_RECORD_DIR_ENV = "AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR";
 
@@ -182,7 +183,7 @@ export function recordingWebSocketFactory(
     socket.send = ((data: WebSocket.Data, ...args: unknown[]) => {
       recorder.onSent(data);
       return send(data, ...args);
-    }) as WebSocket["send"];
+    }) as CtrlSocket["send"];
     socket.on("message", (data: WebSocket.Data) => recorder.onReceived(data));
     return socket;
   };

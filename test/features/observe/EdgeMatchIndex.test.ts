@@ -1,5 +1,5 @@
 import { expect, describe, test } from "bun:test";
-import { EdgeMatchIndex } from "../../../src/features/observe/PredictiveUIState";
+import { EdgeMatchIndex } from "../../../src/features/observe/EdgeMatchIndex";
 import type { NavigationEdge } from "../../../src/features/navigation/NavigationGraphManager";
 import type { Element } from "../../../src/models";
 

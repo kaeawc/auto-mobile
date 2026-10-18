@@ -72,9 +72,9 @@ import {
 } from "./collectors/PlatformObservationTraits";
 import {
   AndroidDisplayBindingCollector,
-  IosDisplayBindingCollector,
   type DisplayBindingCollector,
 } from "./collectors/DisplayBindingCollector";
+import { IosDisplayBindingCollector } from "./collectors/IosDisplayBindingCollector";
 import {
   DefaultAndroidObservationCollector,
   scopeActiveWindowToBackStack,

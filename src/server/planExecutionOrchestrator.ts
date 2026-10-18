@@ -31,9 +31,10 @@ import {
   buildDeviceLabelMap,
   planLifecycleSessionUuid,
   registerDeviceLabelMap,
+  requireMultiDeviceDaemon,
 } from "./deviceLabelMapping";
 import { importPlanFromYaml, executePlan } from "../utils/planUtils";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { DAEMON_SHUTTING_DOWN_ERROR_CODE, INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import {
   brokerConnectionPlanLabelRefusal,
@@ -271,13 +272,9 @@ export function planShutdownInterruptionFields(
   signal: AbortSignal | undefined,
   planSucceeded = false,
 ): Pick<ExecutePlanResult, "code" | "retryable"> {
-  const daemonState = DaemonState.getInstance();
-  if (
-    planSucceeded ||
-    !signal?.aborted ||
-    !daemonState.isInitialized() ||
-    daemonState.getSessionManager().isAcceptingSessionCreations()
-  ) {
+  const sessionManager =
+    planSucceeded || !signal?.aborted ? undefined : defaultDaemonContext.sessionManager();
+  if (!sessionManager || sessionManager.isAcceptingSessionCreations()) {
     return {};
   }
   return { code: DAEMON_SHUTTING_DOWN_ERROR_CODE, retryable: true };
@@ -295,11 +292,13 @@ export function planBaseEndFields(
   planSucceeded: boolean,
   failedStep?: PlanExecutionResult["failedStep"],
 ): Pick<ExecutePlanResult, "code" | "retryable" | "nextAction" | "details"> {
-  const daemonState = DaemonState.getInstance();
-  if (planSucceeded || !baseSessionUuid || !failedStep || !daemonState.isInitialized()) {
+  if (planSucceeded || !baseSessionUuid || !failedStep) {
     return {};
   }
-  const manager = daemonState.getSessionManager();
+  const manager = defaultDaemonContext.sessionManager();
+  if (!manager) {
+    return {};
+  }
   const ended = manager.peekTerminalAnswerForEndedSession(baseSessionUuid);
   if (!ended) {
     return {};
@@ -738,12 +737,7 @@ export class PlanExecutionOrchestrator {
 
     this.perfLog("Allocating devices upfront");
 
-    if (!DaemonState.getInstance().isInitialized()) {
-      throw new ActionableError("Multi-device plans require an active daemon session.");
-    }
-
-    const devicePool = DaemonState.getInstance().getDevicePool();
-    const sessionManager = DaemonState.getInstance().getSessionManager();
+    const { devicePool, sessionManager } = requireMultiDeviceDaemon();
     const labelToSessionMap = buildDeviceLabelMap(
       effectiveLabels,
       sessionUuid,
@@ -881,7 +875,11 @@ export class PlanExecutionOrchestrator {
     normalized: NormalizedPlanDevices,
     sessionManager: SessionManager,
   ): Map<string, string> | undefined {
-    const scopes = DaemonState.getInstance().getBrokerConnectionScopes();
+    const scopes = defaultDaemonContext.brokerConnectionScopes();
+    const devicePool = defaultDaemonContext.devicePool();
+    if (!scopes || !devicePool) {
+      return undefined;
+    }
     const connectionId: unknown = Reflect.get(this.request, INTERNAL_MCP_SESSION_PARAM);
     const binding =
       scopes.get(typeof connectionId === "string" ? connectionId : undefined) ??
@@ -897,7 +895,6 @@ export class PlanExecutionOrchestrator {
     if (refusal) {
       throw refusal;
     }
-    const devicePool = DaemonState.getInstance().getDevicePool();
     const grantedDevices = new Map<string, string>();
     for (const [label, grantedSessionUuid] of Object.entries(labelToSessionMap)) {
       const grantedSession = sessionManager.getSession(grantedSessionUuid);

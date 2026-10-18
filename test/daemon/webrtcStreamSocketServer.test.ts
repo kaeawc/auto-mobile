@@ -6,7 +6,6 @@ import {
   type StreamAuthSessionManager,
   type StreamSocketAuthenticator,
 } from "../../src/daemon/streamSocketAuth";
-import { Socket } from "node:net";
 import {
   resolveWebRtcStreamDevice,
   WebRtcStreamSocketServer,
@@ -31,13 +30,8 @@ import {
   type DeviceAdmissionGate,
 } from "../../src/utils/deviceAdmissionGate";
 import { WebRtcPublisher, WhipClient } from "../../src/features/webrtc";
-import type {
-  AndroidH264Source,
-  WebRtcStreamDescriptor,
-  WebRtcStreamingOverrides,
-} from "../../src/features/webrtc";
+import type { WebRtcStreamDescriptor, WebRtcStreamingOverrides } from "../../src/features/webrtc";
 import type { WhipClientOptions } from "../../src/features/webrtc/WhipClient";
-import type { RTCPeerConnection } from "werift";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
@@ -51,12 +45,12 @@ const ANDROID: BootedDevice = {
   deviceId: "emulator-5554",
   platform: "android",
   name: "a",
-} as BootedDevice;
+};
 const IOS: BootedDevice = {
   deviceId: "simulator-1",
   platform: "ios",
   name: "iPhone 16",
-} as BootedDevice;
+};
 
 function descriptor(
   streamId: string,
@@ -101,9 +95,12 @@ class TestableServer extends WebRtcStreamSocketServer {
   ) {
     super("/fake/webrtc-stream.sock", new FakeTimer(), deps, authenticator, admissionGate);
   }
+  async simulateRaw(socket: FakeSocket, line: string): Promise<void> {
+    await this.processLine(socket, line);
+  }
   async simulate(socket: FakeSocket, request: WebRtcStreamSocketRequest): Promise<void> {
-    await (this as any).processLine(socket as unknown as Socket, JSON.stringify(request));
-    const pending = (this as any).pendingBySocket.get(socket);
+    await this.processLine(socket, JSON.stringify(request));
+    const pending = this.pendingBySocket.get(socket);
     if (pending) {
       await pending;
     }
@@ -656,8 +653,7 @@ describe("WebRtcStreamSocketServer", () => {
       createPublisher: (config, deps) =>
         new WebRtcPublisher(config, {
           ...deps,
-          createPeerConnection: () =>
-            new FakeConnectedPeerConnection() as unknown as RTCPeerConnection,
+          createPeerConnection: () => new FakeConnectedPeerConnection(),
           createWhipClient: (options: WhipClientOptions) =>
             new WhipClient({
               ...options,
@@ -670,7 +666,7 @@ describe("WebRtcStreamSocketServer", () => {
       createSource: () => {
         const source = new FakeH264Source();
         sources.push(source);
-        return source as unknown as AndroidH264Source;
+        return source;
       },
       resolveVideoJar: async () => null,
       now: () => new Date("2026-07-14T00:00:00.000Z"),
@@ -742,7 +738,7 @@ describe("WebRtcStreamSocketServer", () => {
   test("invalid JSON yields an error response", async () => {
     const server = new TestableServer(makeDeps());
     const socket = new FakeSocket();
-    await (server as any).processLine(socket as unknown as Socket, "{not json");
+    await server.simulateRaw(socket, "{not json");
     const response = lastResponse(socket);
     expect(response.success).toBe(false);
     expect(response.error).toContain("Invalid JSON");
@@ -808,7 +804,7 @@ describe("WebRtcStreamSocketServer", () => {
     function enforcingServer(sm: StreamAuthSessionManager): TestableServer {
       return new TestableServer(
         makeDeps(),
-        new SessionScopedStreamAuthenticator(() => sm, "webrtcStream", {} as NodeJS.ProcessEnv),
+        new SessionScopedStreamAuthenticator(() => sm, "webrtcStream", {}),
       );
     }
 
@@ -879,7 +875,7 @@ describe("WebRtcStreamSocketServer", () => {
             return descriptor("stream-1", "stopped");
           },
         }),
-        new SessionScopedStreamAuthenticator(() => sm, "webrtcStream", {} as NodeJS.ProcessEnv),
+        new SessionScopedStreamAuthenticator(() => sm, "webrtcStream", {}),
       );
       const socket = new FakeSocket();
       for (const action of ["start", "status", "await", "stop"] as const) {
@@ -914,7 +910,7 @@ describe("WebRtcStreamSocketServer", () => {
       const disabled = new SessionScopedStreamAuthenticator(
         () => fakeSessionManager(),
         "webrtcStream",
-        { AUTOMOBILE_DAEMON_STREAM_AUTH: "0" } as NodeJS.ProcessEnv,
+        { AUTOMOBILE_DAEMON_STREAM_AUTH: "0" },
       );
       await new TestableServer(deps, disabled).simulate(socket, request);
       expect(identities).toEqual(["session-1:phone", "session-1:phone"]);

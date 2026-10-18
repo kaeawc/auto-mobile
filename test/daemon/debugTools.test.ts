@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { mkdirSync, writeFileSync } from "node:fs";
+
 import { dirname, join } from "node:path";
 import { DaemonClient } from "../../src/daemon/client";
 import { getDaemonHealthReport, runSocketDiagnostics } from "../../src/daemon/debugTools";
@@ -8,7 +9,7 @@ import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("getDaemonHealthReport", () => {
-  const tempDirs: string[] = [];
+  const scratch = useScratchRoot("debugTools-");
   let warn: ReturnType<typeof spyOn<typeof logger, "warn">> | undefined;
   let isAvailable: ReturnType<typeof spyOn<typeof DaemonClient, "isAvailable">> | undefined;
 
@@ -17,17 +18,12 @@ describe("getDaemonHealthReport", () => {
     warn = undefined;
     isAvailable?.mockRestore();
     isAvailable = undefined;
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
   });
 
   test.each(["running", "stale", "no-start-time"])(
     "preserves PID liveness and recommendation order for %s",
     async (state) => {
-      const tempDir = mkdtempSync(join(tmpdir(), "automobile-health-characterization-"));
-      tempDirs.push(tempDir);
+      const tempDir = scratch.next();
       const socketPath = join(tempDir, "daemon.sock");
       const pidFilePath = join(tempDir, "daemon.pid");
       writeFileSync(socketPath, "");
@@ -75,8 +71,7 @@ describe("getDaemonHealthReport", () => {
   );
 
   test.each([false, "throws"])("preserves unresponsive socket result %j", async (result) => {
-    const tempDir = mkdtempSync(join(tmpdir(), "automobile-health-unresponsive-"));
-    tempDirs.push(tempDir);
+    const tempDir = scratch.next();
     const socketPath = join(tempDir, "daemon.sock");
     const pidFilePath = join(tempDir, "daemon.pid");
     writeFileSync(socketPath, "");
@@ -102,8 +97,7 @@ describe("getDaemonHealthReport", () => {
   });
 
   test("warns once with static context for invalid PID JSON and preserves the recommendation", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "automobile-daemon-health-invalid-json-"));
-    tempDirs.push(tempDir);
+    const tempDir = scratch.next();
     const socketPath = join(tempDir, "daemon.sock");
     const pidFilePath = join(tempDir, "daemon.pid");
     const content = "not-json-SECRET-MARKER";
@@ -139,8 +133,7 @@ describe("getDaemonHealthReport", () => {
   });
 
   test("warns once with EISDIR context when the PID file path is a directory", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "automobile-daemon-health-read-failure-"));
-    tempDirs.push(tempDir);
+    const tempDir = scratch.next();
     const socketPath = join(tempDir, "daemon.sock");
     const pidFilePath = join(tempDir, "daemon.pid");
     mkdirSync(pidFilePath);
@@ -169,8 +162,7 @@ describe("getDaemonHealthReport", () => {
   });
 
   test("treats a responsive socket as running when PID bookkeeping is missing", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "automobile-daemon-health-"));
-    tempDirs.push(tempDir);
+    const tempDir = scratch.next();
     const socketPath = join(tempDir, "daemon.sock");
     const pidPath = join(tempDir, "daemon.pid");
     mkdirSync(dirname(socketPath), { recursive: true });
@@ -209,8 +201,7 @@ describe("getDaemonHealthReport", () => {
   // existsSync gate always reports "not found" for a live daemon there — the
   // health report must skip that gate and consult connectivity directly.
   test("simulating win32: reports connectivity via the pipe probe despite no filesystem entry existing", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "automobile-daemon-health-win32-"));
-    tempDirs.push(tempDir);
+    const tempDir = scratch.next();
     // A path that does not exist on disk — modeling a Windows named pipe, which
     // never has a filesystem entry to begin with.
     const socketPath = join(tempDir, "daemon.sock");
@@ -247,8 +238,7 @@ describe("getDaemonHealthReport", () => {
   // reaches its normal "start the daemon" recommendation instead of a
   // misleading "investigate stale socket state" one.
   test("simulating win32: reports the pipe as absent when the probe finds nothing (no daemon running)", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "automobile-daemon-health-win32-absent-"));
-    tempDirs.push(tempDir);
+    const tempDir = scratch.next();
     const socketPath = join(tempDir, "daemon.sock");
     const pidPath = join(tempDir, "daemon.pid");
 
@@ -285,8 +275,7 @@ describe("getDaemonHealthReport", () => {
   // behavior (the existsSync gate firing), so it must run — and pass — on every
   // CI leg, including the windows-latest one, rather than being skipped there.
   test("off win32 (posix): a nonexistent socket path is reported as not found without probing", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "automobile-daemon-health-posix-"));
-    tempDirs.push(tempDir);
+    const tempDir = scratch.next();
     const socketPath = join(tempDir, "daemon.sock");
     const pidPath = join(tempDir, "daemon.pid");
 
@@ -309,22 +298,14 @@ describe("getDaemonHealthReport", () => {
 });
 
 describe("runSocketDiagnostics", () => {
-  const tempDirs: string[] = [];
-
-  afterEach(() => {
-    for (const dir of tempDirs) {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    tempDirs.length = 0;
-  });
+  const scratch = useScratchRoot("debugTools-");
 
   // #6140 P2: the same Windows named-pipe gap applies to runSocketDiagnostics'
   // existsSync gate AND its subsequent fs.stat read/write-permission check —
   // neither has a filesystem entry to inspect on Windows, so both must be
   // skipped there and connectivity consulted directly.
   test("simulating win32: reports connectivity via the pipe probe despite no filesystem entry existing", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "automobile-socket-diag-win32-"));
-    tempDirs.push(tempDir);
+    const tempDir = scratch.next();
     const socketPath = join(tempDir, "daemon.sock");
 
     const isAvailable = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
@@ -349,8 +330,7 @@ describe("runSocketDiagnostics", () => {
   // socketExists/socketReadable/socketWritable from the probe result, never
   // assume them true when nothing actually answers.
   test("simulating win32: reports the pipe as absent when the probe finds nothing (no daemon running)", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "automobile-socket-diag-win32-absent-"));
-    tempDirs.push(tempDir);
+    const tempDir = scratch.next();
     const socketPath = join(tempDir, "daemon.sock");
 
     const isAvailable = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
@@ -375,8 +355,7 @@ describe("runSocketDiagnostics", () => {
   // Pinned to a POSIX platform (not skipIf(win32)): see the matching note above
   // in the getDaemonHealthReport describe block.
   test("off win32 (posix): a nonexistent socket path is reported as missing without probing", async () => {
-    const tempDir = mkdtempSync(join(tmpdir(), "automobile-socket-diag-posix-"));
-    tempDirs.push(tempDir);
+    const tempDir = scratch.next();
     const socketPath = join(tempDir, "daemon.sock");
 
     const isAvailable = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);

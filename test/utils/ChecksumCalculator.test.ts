@@ -1,22 +1,18 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { DefaultChecksumCalculator } from "../../src/utils/ChecksumCalculator";
 import { FakeChecksumCalculator } from "../fakes/FakeChecksumCalculator";
 import * as fs from "fs/promises";
 import * as path from "path";
 import crypto from "crypto";
-import os from "os";
 
 describe("DefaultChecksumCalculator", function () {
   let tempDir: string;
 
-  afterEach(async function () {
-    if (tempDir) {
-      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
-    }
-  });
+  const scratch = useScratchRoot("checksum-test-");
 
   test("should compute SHA256 of a file using node fallback", async function () {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "checksum-test-"));
+    tempDir = scratch.next();
     const filePath = path.join(tempDir, "test-file.bin");
     const content = Buffer.from("hello world checksum test");
     await fs.writeFile(filePath, content);
@@ -30,7 +26,7 @@ describe("DefaultChecksumCalculator", function () {
   });
 
   test("should produce consistent checksums across calls", async function () {
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "checksum-test-"));
+    tempDir = scratch.next();
     const filePath = path.join(tempDir, "test-file.bin");
     const content = crypto.randomBytes(1024);
     await fs.writeFile(filePath, content);

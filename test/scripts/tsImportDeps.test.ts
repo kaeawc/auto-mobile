@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import ts from "typescript";
@@ -32,10 +32,20 @@ test("module extraction preserves type edges by default and can omit them", () =
 
 describe("resolveRelativeImportPaths", () => {
   let repoRoot: string;
+  let scratchRoot = "";
+  let scratchCount = 0;
+
+  beforeAll(() => {
+    mkdirSync(path.join(process.cwd(), "scratch"), { recursive: true });
+    scratchRoot = mkdtempSync(path.join(process.cwd(), "scratch/ts-import-deps-"));
+  });
+
+  afterAll(() => {
+    rmSync(scratchRoot, { recursive: true, force: true });
+  });
 
   beforeEach(() => {
-    mkdirSync(path.join(process.cwd(), "scratch"), { recursive: true });
-    repoRoot = mkdtempSync(path.join(process.cwd(), "scratch/ts-import-deps-"));
+    repoRoot = path.join(scratchRoot, `t${scratchCount++}`);
     mkdirSync(path.join(repoRoot, "scripts/release/lib"), { recursive: true });
     writeFileSync(
       path.join(repoRoot, "scripts/release/pin-runtime-deps.ts"),
@@ -59,10 +69,6 @@ describe("resolveRelativeImportPaths", () => {
     writeFileSync(path.join(repoRoot, "scripts/release/lib/nested.ts"), 'import "./cycle-a";\n');
     writeFileSync(path.join(repoRoot, "scripts/release/lib/cycle-a.ts"), 'import "./cycle-b";\n');
     writeFileSync(path.join(repoRoot, "scripts/release/lib/cycle-b.ts"), 'import "./cycle-a";\n');
-  });
-
-  afterEach(() => {
-    rmSync(repoRoot, { recursive: true, force: true });
   });
 
   test("resolves relative imports through two levels without following packages or cycles", () => {

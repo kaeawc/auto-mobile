@@ -1,19 +1,18 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { Socket } from "node:net";
 import {
   TelemetryPushSocketServer,
   boundBackfillEventText,
+  type TelemetryFilter,
 } from "../../src/daemon/telemetryPushSocketServer";
 import { boundStructuredField } from "../../src/utils/truncateBodyText";
 import type { TelemetryEvent } from "../../src/features/telemetry/TelemetryRecorder";
+import type { Subscriber } from "../../src/daemon/socketServer/SocketServerTypes";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
 import { withInMemorySingletonDatabase } from "../db/inMemorySingletonDatabase";
 import { getDatabase } from "../../src/db/database";
 import { runMigrations } from "../../src/db/migrator";
-import type { Database } from "../../src/db/types";
-import type { Kysely } from "kysely";
 
 /**
  * Test helper that wraps TelemetryPushSocketServer to allow injecting fake sockets
@@ -25,13 +24,11 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
   }
 
   async startFake(): Promise<void> {
-    (this as any).server = { listening: true };
-    (this as any).onServerStarted();
+    this.onServerStarted();
   }
 
   async closeFake(): Promise<void> {
-    (this as any).onServerClosing();
-    (this as any).server = null;
+    this.onServerClosing();
   }
 
   simulateSubscription(options: {
@@ -44,12 +41,11 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
     subscriptionId: string;
   } {
     const socket = new FakeSocket();
-    const subscriptionId = `telemetrypush-${++(this as any).subscriptionCounter}`;
-    const timer = (this as any).timer as FakeTimer;
+    const subscriptionId = `telemetrypush-${++this.subscriptionCounter}`;
     this.subscribers.set(subscriptionId, {
-      socket: socket as unknown as Socket,
+      socket: socket,
       subscriptionId,
-      lastActivity: timer.now(),
+      lastActivity: this.timer.now(),
       filter: {
         category: options.category ?? null,
         deviceSessionUuid: options.deviceSessionUuid ?? null,
@@ -67,14 +63,46 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
   simulatePong(subscriptionId: string): void {
     const subscriber = this.subscribers.get(subscriptionId);
     if (subscriber) {
-      const timer = (this as any).timer as FakeTimer;
-      subscriber.lastActivity = timer.now();
+      subscriber.lastActivity = this.timer.now();
     }
   }
 
   triggerKeepalive(): void {
-    (this as any).checkKeepalive();
+    this.checkKeepalive();
   }
+
+  /** Register a subscriber directly, as `subscribe` would after authorizing it. */
+  seedSubscriber(subscriptionId: string, subscriber: Subscriber<TelemetryFilter>): void {
+    this.subscribers.set(subscriptionId, subscriber);
+  }
+
+  getSubscriber(subscriptionId: string): Subscriber<TelemetryFilter> | undefined {
+    return this.subscribers.get(subscriptionId);
+  }
+
+  removeSubscriber(subscriptionId: string): void {
+    this.subscribers.delete(subscriptionId);
+  }
+
+  runBackfill(subscriptionId: string, filter: TelemetryFilter, socket: FakeSocket): Promise<void> {
+    return this.backfillRecentEvents(subscriptionId, filter, socket);
+  }
+}
+
+/** The own enumerable fields of a bounded telemetry payload; fails the test for a non-object. */
+function fieldsOf(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`expected an object payload, got ${JSON.stringify(value)}`);
+  }
+  return Object.fromEntries(Object.entries(value));
+}
+
+function stringField(value: unknown, key: string): string {
+  const field = fieldsOf(value)[key];
+  if (typeof field !== "string") {
+    throw new Error(`expected "${key}" to be a string, got ${typeof field}`);
+  }
+  return field;
 }
 
 describe("boundBackfillEventText", () => {
@@ -86,7 +114,7 @@ describe("boundBackfillEventText", () => {
       data: { level: 4, tag: "t", message: "m".repeat(50_000) },
     };
     const bounded = boundBackfillEventText(event);
-    expect((bounded.data as { message: string }).message.length).toBe(10_240);
+    expect(stringField(bounded.data, "message").length).toBe(10_240);
   });
 
   it("caps large storage value and previousValue at 10KB", () => {
@@ -102,9 +130,8 @@ describe("boundBackfillEventText", () => {
       },
     };
     const bounded = boundBackfillEventText(event);
-    const data = bounded.data as { value: string; previousValue: string };
-    expect(data.value.length).toBe(10_240);
-    expect(data.previousValue.length).toBe(10_240);
+    expect(stringField(bounded.data, "value").length).toBe(10_240);
+    expect(stringField(bounded.data, "previousValue").length).toBe(10_240);
   });
 
   it("leaves small fields and unrelated categories untouched", () => {
@@ -115,7 +142,7 @@ describe("boundBackfillEventText", () => {
       data: { level: 4, tag: "t", message: "small" },
     };
     const bounded = boundBackfillEventText(event);
-    expect((bounded.data as { message: string }).message).toBe("small");
+    expect(stringField(bounded.data, "message")).toBe("small");
 
     const os: TelemetryEvent = {
       category: "os",
@@ -134,7 +161,7 @@ describe("boundBackfillEventText", () => {
       data: { level: 4, tag: "t", message: "m".repeat(10_239) + "😀" + "n".repeat(50) },
     };
     const bounded = boundBackfillEventText(event);
-    const msg = (bounded.data as { message: string }).message;
+    const msg = stringField(bounded.data, "message");
     expect(msg.length).toBe(10_239);
     expect(msg.isWellFormed()).toBe(true);
   });
@@ -148,12 +175,10 @@ describe("boundBackfillEventText", () => {
       data: { category: "lifecycle", kind: "foreground", details: bigDetails },
     };
     const bounded = boundBackfillEventText(event);
-    const details = (bounded.data as { details: unknown }).details as {
-      _truncated: boolean;
-      bytes: number;
-    };
-    expect(details._truncated).toBe(true);
-    expect(details.bytes).toBe(JSON.stringify(bigDetails).length);
+    expect(fieldsOf(bounded.data).details).toMatchObject({
+      _truncated: true,
+      bytes: JSON.stringify(bigDetails).length,
+    });
     // Result must round-trip through JSON.parse (dashboard contract).
     expect(() => JSON.parse(JSON.stringify(bounded.data))).not.toThrow();
   });
@@ -167,7 +192,7 @@ describe("boundBackfillEventText", () => {
       data: { category: "lifecycle", kind: "foreground", details },
     };
     const bounded = boundBackfillEventText(event);
-    expect((bounded.data as { details: unknown }).details).toBe(details);
+    expect(fieldsOf(bounded.data).details).toBe(details);
   });
 
   it("replaces an oversized layout detailsJson raw string with a marker", () => {
@@ -179,12 +204,10 @@ describe("boundBackfillEventText", () => {
       data: { composableId: "c", detailsJson: raw },
     };
     const bounded = boundBackfillEventText(event);
-    const dj = (bounded.data as { detailsJson: unknown }).detailsJson as {
-      _truncated: boolean;
-      bytes: number;
-    };
-    expect(dj._truncated).toBe(true);
-    expect(dj.bytes).toBe(raw.length);
+    expect(fieldsOf(bounded.data).detailsJson).toMatchObject({
+      _truncated: true,
+      bytes: raw.length,
+    });
   });
 
   it("leaves a small layout detailsJson string untouched", () => {
@@ -196,7 +219,7 @@ describe("boundBackfillEventText", () => {
       data: { composableId: "c", detailsJson: raw },
     };
     const bounded = boundBackfillEventText(event);
-    expect((bounded.data as { detailsJson: unknown }).detailsJson).toBe(raw);
+    expect(fieldsOf(bounded.data).detailsJson).toBe(raw);
   });
 });
 
@@ -220,19 +243,14 @@ describe("boundStructuredField", () => {
       method: "doSomethingExpensive",
       line: i,
     }));
-    const bounded = boundStructuredField(frames, false) as {
-      _truncated: boolean;
-      bytes: number;
-    };
-    expect(bounded._truncated).toBe(true);
-    expect(bounded.bytes).toBe(JSON.stringify(frames).length);
+    const bounded = boundStructuredField(frames, false);
+    expect(bounded).toMatchObject({ _truncated: true, bytes: JSON.stringify(frames).length });
     expect(() => JSON.parse(JSON.stringify(bounded))).not.toThrow();
   });
 
   it("measures raw JSON strings by their own length when isJsonString", () => {
     const raw = "z".repeat(20_000);
-    const bounded = boundStructuredField(raw, true) as { bytes: number };
-    expect(bounded.bytes).toBe(20_000);
+    expect(boundStructuredField(raw, true)).toMatchObject({ bytes: 20_000 });
   });
 });
 
@@ -535,7 +553,7 @@ describe("TelemetryPushSocketServer", () => {
     const { socket, subscriptionId } = server.simulateSubscription({});
 
     // Simulate backfill in progress
-    const subscriber = server.subscribers.get(subscriptionId)!;
+    const subscriber = server.getSubscriber(subscriptionId)!;
     subscriber.backfilling = true;
 
     const event: TelemetryEvent = {
@@ -574,8 +592,8 @@ describe("TelemetryPushSocketServer", () => {
 describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
   it("applies the session filter before limiting backfilled crash events", async () => {
     await withInMemorySingletonDatabase(async () => {
-      const db = getDatabase() as unknown as Kysely<Database>;
-      await runMigrations(db as unknown as Kysely<unknown>);
+      const db = getDatabase();
+      await runMigrations(db);
 
       await db
         .insertInto("failure_groups")
@@ -638,8 +656,8 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
 
       const server = new TestableTelemetryPushSocketServer(new FakeTimer());
       const socket = new FakeSocket();
-      (server as any).subscribers.set("backfill-test", {
-        socket: socket as unknown as Socket,
+      server.seedSubscriber("backfill-test", {
+        socket: socket,
         subscriptionId: "backfill-test",
         lastActivity: 0,
         filter: { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
@@ -657,10 +675,10 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         didWrite?.();
         return false;
       };
-      const drainingBackfill = (server as any).backfillRecentEvents(
+      const drainingBackfill = server.runBackfill(
         "backfill-test",
         { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
-        socket as unknown as Socket,
+        socket,
       );
       await wrote;
       expect(socket.listenerCount("drain")).toBe(1);
@@ -678,20 +696,20 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
       expect(crash!.subscriptionId).toBe("backfill-test");
 
       socket.reset();
-      (server as any).subscribers.set("backfill-test", {
-        socket: socket as unknown as Socket,
+      server.seedSubscriber("backfill-test", {
+        socket: socket,
         subscriptionId: "backfill-test",
         lastActivity: 0,
         filter: { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
         backfilling: true,
         drainPending: false,
       });
-      const backfill = (server as any).backfillRecentEvents(
+      const backfill = server.runBackfill(
         "backfill-test",
         { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
-        socket as unknown as Socket,
+        socket,
       );
-      (server as any).subscribers.delete("backfill-test");
+      server.removeSubscriber("backfill-test");
 
       await backfill;
 
@@ -706,8 +724,8 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
   // the guard in backfillRecentEvents and the stale case below leaks the crash.
   it("backfills zero events for a specific deviceSessionUuid that no longer resolves (AC4)", async () => {
     await withInMemorySingletonDatabase(async () => {
-      const db = getDatabase() as unknown as Kysely<Database>;
-      await runMigrations(db as unknown as Kysely<unknown>);
+      const db = getDatabase();
+      await runMigrations(db);
 
       await db
         .insertInto("failure_groups")
@@ -756,19 +774,15 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         deviceId: null,
         sessionId: null,
       };
-      (server as any).subscribers.set("stale", {
-        socket: staleSocket as unknown as Socket,
+      server.seedSubscriber("stale", {
+        socket: staleSocket,
         subscriptionId: "stale",
         lastActivity: 0,
         filter: staleFilter,
         backfilling: true,
         drainPending: false,
       });
-      await (server as any).backfillRecentEvents(
-        "stale",
-        staleFilter,
-        staleSocket as unknown as Socket,
-      );
+      await server.runBackfill("stale", staleFilter, staleSocket);
       expect(staleSocket.getWrittenMessages()).toHaveLength(0);
 
       // Contrast: an all-devices subscription (deviceSessionUuid === null) still backfills.
@@ -779,15 +793,15 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         deviceId: null,
         sessionId: null,
       };
-      (server as any).subscribers.set("all", {
-        socket: allSocket as unknown as Socket,
+      server.seedSubscriber("all", {
+        socket: allSocket,
         subscriptionId: "all",
         lastActivity: 0,
         filter: allFilter,
         backfilling: true,
         drainPending: false,
       });
-      await (server as any).backfillRecentEvents("all", allFilter, allSocket as unknown as Socket);
+      await server.runBackfill("all", allFilter, allSocket);
       expect(allSocket.getWrittenMessages().length).toBeGreaterThan(0);
     });
   });
@@ -805,8 +819,8 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
 describe("TelemetryPushSocketServer navigation screenshot URI scoping (#5851)", () => {
   it("backfills a navigation event with an app-scoped screenshot URI", async () => {
     await withInMemorySingletonDatabase(async () => {
-      const db = getDatabase() as unknown as Kysely<Database>;
-      await runMigrations(db as unknown as Kysely<unknown>);
+      const db = getDatabase();
+      await runMigrations(db);
 
       const APP_B = "com.example.b";
       await db
@@ -866,8 +880,8 @@ describe("TelemetryPushSocketServer navigation screenshot URI scoping (#5851)", 
         deviceId: "emulator-5554",
         sessionId: null,
       };
-      (server as any).subscribers.set("nav-scope", {
-        socket: socket as unknown as Socket,
+      server.seedSubscriber("nav-scope", {
+        socket: socket,
         subscriptionId: "nav-scope",
         lastActivity: 0,
         filter,
@@ -875,7 +889,7 @@ describe("TelemetryPushSocketServer navigation screenshot URI scoping (#5851)", 
         drainPending: false,
       });
 
-      await (server as any).backfillRecentEvents("nav-scope", filter, socket as unknown as Socket);
+      await server.runBackfill("nav-scope", filter, socket);
 
       const messages = socket.getWrittenMessages<{
         data: TelemetryEvent & { data: { screenshotUri: string | null } };

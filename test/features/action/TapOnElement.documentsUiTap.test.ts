@@ -65,7 +65,7 @@ const row: Element = {
 };
 
 async function execute(tap: TapOnElement, element = row, action = "tap") {
-  await (tap as any).executeAndroidTapWithCoordinates(action, 540, 380, 0, element);
+  await tap.executeAndroidTapWithCoordinates(action, 540, 380, 0, element);
 }
 
 describe("DocumentsUI row activation (#6335)", () => {
@@ -175,7 +175,7 @@ for (const action of ["tap", "doubleTap"]) {
     strategy.setDirectActivationResult({ success: false, method: "accessibility-action" });
     (tap as any).talkBackStrategy = strategy;
     (tap as any).talkBackDriverFactory = { createDriver: () => new FakeTalkBackNavigationDriver() };
-    await (tap as any).executeAndroidTap(action, 540, 380, 0, row, undefined, undefined, true);
+    await tap.executeAndroidTap(action, 540, 380, 0, row, undefined, undefined, true);
     expect(strategy.fallbackCalls).toHaveLength(0);
     expect(adb.getAllCommands()).toHaveLength(action === "tap" ? 1 : 2);
   });
@@ -189,7 +189,7 @@ test("does not activate or fall back after cancellation during runner capability
     return true;
   };
   await expect(
-    (tap as any).executeAndroidTapWithCoordinates("tap", 540, 380, 0, row, controller.signal),
+    tap.executeAndroidTapWithCoordinates("tap", 540, 380, 0, row, controller.signal),
   ).rejects.toThrow();
   expect(service.getNodeActionHistory()).toHaveLength(0);
   expect(adb.getAllCommands()).toHaveLength(0);
@@ -229,14 +229,7 @@ test.each(["capability", "action"])(
         return { success: true };
       };
     }
-    const result = (tap as any).executeAndroidTapWithCoordinates(
-      "tap",
-      540,
-      380,
-      0,
-      row,
-      controller.signal,
-    );
+    const result = tap.executeAndroidTapWithCoordinates("tap", 540, 380, 0, row, controller.signal);
     for (let i = 0; i < 12; i++) {
       await Promise.resolve();
     }

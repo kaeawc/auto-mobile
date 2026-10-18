@@ -4,15 +4,15 @@ import {
   afterEach as afterOutputSchema,
   spyOn as spyOnOutputSchema,
 } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import { launchAppResultSchema } from "../../../src/server/toolOutputSchemas";
 import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { executeCommandOptionsOf } from "../../fakes/executeCommandOptionsOf";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
-import { promises as fsp, readFileSync } from "fs";
-import * as os from "os";
-import * as nodePath from "path";
+import { readFileSync } from "fs";
+
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { buildLaunchAppResponse } from "../../../src/server/appTools";
 import {
@@ -4397,13 +4397,7 @@ describe("LaunchApp", () => {
   describe("iOS clearAppData", () => {
     const userBundleId = "com.example.myapp";
     const systemBundleId = "com.apple.Preferences";
-    const tempDirs: string[] = [];
-
-    afterEach(async () => {
-      for (const dir of tempDirs.splice(0)) {
-        await fsp.rm(dir, { recursive: true, force: true });
-      }
-    });
+    const scratch = useScratchRoot("automobile-launch-clear-");
 
     function createClearDataHarness(bundleId: string, opts: { containerPath?: string } = {}) {
       const iosDevice: BootedDevice = {
@@ -4476,10 +4470,7 @@ describe("LaunchApp", () => {
 
     test("wipes the data container and re-wires CtrlProxy when clearAppData is true", async () => {
       fakeTimer.enableAutoAdvance();
-      const containerPath = await fsp.mkdtemp(
-        nodePath.join(os.tmpdir(), "automobile-launch-clear-"),
-      );
-      tempDirs.push(containerPath);
+      const containerPath = scratch.next();
       const { iosLaunchApp, fakeCtrlProxy, installedApps, calls, cleanup } = createClearDataHarness(
         userBundleId,
         {

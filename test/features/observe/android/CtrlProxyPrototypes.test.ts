@@ -36,6 +36,7 @@ import type { SavedPrototypeMirror } from "../../../../src/features/prototype/sa
 import { FilePrototypeAssetCache } from "../../../../src/features/prototype/prototypeAssetCache";
 import { FakeMirrorFileSystem } from "../../../fakes/FakeMirrorFileSystem";
 import { FakePrototypeAssetCache } from "../../../fakes/FakePrototypeAssetCache";
+import { asWebSocket } from "../../../helpers/observeCtrlProxySocketBuilders";
 
 const spec = {
   id: "panel",
@@ -84,7 +85,7 @@ async function harness(
     prototypeAssetCache: cache ? { serial: "prototype-test", cache } : undefined,
   });
   await Promise.resolve();
-  client["ws"] = socket as unknown as WebSocket;
+  client["ws"] = asWebSocket(socket);
   spyOn(client, "ensureConnected").mockResolvedValue(true);
   const receive = (frame: object) => client["handleWebSocketMessage"](JSON.stringify(frame));
   if (commands !== null) {

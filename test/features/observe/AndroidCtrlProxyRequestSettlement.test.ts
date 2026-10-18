@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { CtrlProxyCertificates } from "../../../src/features/observe/android/CtrlProxyCertificates";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import {
@@ -12,6 +11,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../fakes/FakeWebSocket";
+import { asWebSocket } from "../../helpers/observeCtrlProxySocketBuilders";
 
 class RecordingSocket extends FakeWebSocket {
   readonly frames: string[] = [];
@@ -34,14 +34,14 @@ async function harness() {
     { deviceId: "client-send-command", platform: "android", name: "Android", isEmulator: true },
     new FakeAdbExecutor(),
     {
-      webSocketFactory: () => socket as unknown as WebSocket,
+      webSocketFactory: () => asWebSocket(socket),
       timer,
       installedAppsRepository: new FakeInstalledAppsRepository(),
       idGenerator: new CountingIdGenerator("delegate"),
     },
   );
   await Promise.resolve();
-  client["ws"] = socket as unknown as WebSocket;
+  client["ws"] = asWebSocket(socket);
   client["supportedCommands"] = new Set([
     ...ANDROID_CAPABILITY_GATED_COMMANDS,
     "request_activate_accessibility_link",

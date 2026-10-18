@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { CtrlProxyStorage } from "../../../src/features/observe/ios/CtrlProxyStorage";
 import { CtrlProxyDatabase } from "../../../src/features/observe/ios/CtrlProxyDatabase";
 import { iosWireDeadlineParams } from "../../../src/features/observe/ios/CtrlProxyDispatch";
@@ -11,6 +10,7 @@ import { RequestManager } from "../../../src/utils/RequestManager";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWebSocket, WebSocketState } from "../../fakes/FakeWebSocket";
+import { asWebSocket } from "../../helpers/observeCtrlProxySocketBuilders";
 
 class RecordingSocket extends FakeWebSocket {
   readonly frames: string[] = [];
@@ -34,7 +34,7 @@ async function harness() {
   const context: DelegateContext = {
     timer,
     requestManager: manager,
-    getWebSocket: () => socket as unknown as WebSocket,
+    getWebSocket: () => asWebSocket(socket),
     ensureConnected: async () => {
       connects++;
       return true;

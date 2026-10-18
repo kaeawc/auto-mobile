@@ -14,6 +14,7 @@ import type { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../fakes/FakeWebSocket";
+import { asWebSocket } from "../../helpers/observeCtrlProxySocketBuilders";
 
 const androidDevice: BootedDevice = {
   deviceId: "command-support-android",
@@ -57,10 +58,10 @@ async function sendWithClientContext(client: AndroidCtrlProxyClient, messageType
     ...actualContext,
     ensureConnected: async () => true,
     getWebSocket: () =>
-      ({
+      asWebSocket({
         readyState: WebSocket.OPEN,
         send: (data: string) => sent.push(data),
-      }) as unknown as WebSocket,
+      }),
   };
   const result = await sendCommand<{ success: boolean; totalTimeMs: number; error?: string }>(
     context,
@@ -83,7 +84,7 @@ function androidClient(): AndroidCtrlProxyClient {
   const timer = new FakeTimer();
   AndroidCtrlProxyClient.resetInstances();
   return AndroidCtrlProxyClient.createForTesting(androidDevice, adb, {
-    webSocketFactory: (url) => new FakeWebSocket(url, "none", 0, timer) as unknown as WebSocket,
+    webSocketFactory: (url) => asWebSocket(new FakeWebSocket(url, "none", 0, timer)),
     timer,
   });
 }
@@ -94,7 +95,7 @@ function iosClient(): IOSCtrlProxyClient {
   return IOSCtrlProxyClient.createForTesting(
     iosDevice,
     8765,
-    (url) => new FakeWebSocket(url, "none", 0, timer) as unknown as WebSocket,
+    (url) => asWebSocket(new FakeWebSocket(url, "none", 0, timer)),
     timer,
   );
 }

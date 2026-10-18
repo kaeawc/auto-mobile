@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { BootedDevice } from "../../../../src/models";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
 import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
+import { asWebSocket } from "../../../helpers/observeCtrlProxySocketBuilders";
 
 // Isolate request dispatch from connection provisioning: the fake socket is already open.
 describe("AndroidCtrlProxyClient input delivery", () => {
@@ -21,18 +21,18 @@ describe("AndroidCtrlProxyClient input delivery", () => {
     socket = new FakeWebSocket("ws://fake", "none", 0, timer);
     await Promise.resolve();
     client = AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
-      webSocketFactory: () => socket as unknown as WebSocket,
+      webSocketFactory: () => asWebSocket(socket),
       timer,
       idGenerator: new FakeIdGenerator(),
       transientObserver: false,
     });
     closedSpy = spyOn(client, "onConnectionClosed").mockImplementation(() => {});
-    client["ws"] = socket as unknown as WebSocket;
+    client["ws"] = asWebSocket(socket);
     client["autoReconnectEnabled"] = false;
     socket.on("message", (data: string) => {
       void client["handleMessage"](data);
     });
-    socket.on("close", () => client["finishEstablishedConnection"](socket as unknown as WebSocket));
+    socket.on("close", () => client["finishEstablishedConnection"](asWebSocket(socket)));
     connectionSpy = spyOn(client, "connectWebSocket").mockResolvedValue(true);
   });
 

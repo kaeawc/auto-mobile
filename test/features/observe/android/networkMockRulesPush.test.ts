@@ -6,6 +6,7 @@ import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeInstalledAppsRepository } from "../../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
+import { asWebSocket } from "../../../helpers/observeCtrlProxySocketBuilders";
 
 // Issue #10101: the host waits (bounded) for the app's report of rejected rules, and treats a
 // CtrlProxy, SDK or reply that says nothing as "sent, not confirmed" rather than as a failure.
@@ -50,7 +51,7 @@ async function harness(commands: string[]) {
   );
   clients.push(client);
   await Promise.resolve();
-  client["ws"] = socket as unknown as WebSocket;
+  client["ws"] = asWebSocket(socket);
   spyOn(client, "ensureConnected").mockResolvedValue(true);
   const receive = (frame: object) => client["handleWebSocketMessage"](JSON.stringify(frame));
   await receive({ type: "connected", supportedCommands: commands });

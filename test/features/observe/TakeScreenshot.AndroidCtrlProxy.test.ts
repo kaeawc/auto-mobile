@@ -7,7 +7,15 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAndroidPhysicalDisplayIdResolver } from "../../fakes/FakeAndroidPhysicalDisplayIdResolver";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { Window } from "../../../src/features/observe/Window";
 import { mockDevice } from "./takeScreenshotTestHelpers";
+
+/** A Window whose activity hash is fixed, so no ADB dumpsys is needed to key the cache. */
+class FixedHashWindow extends Window {
+  override async getActiveHash(): Promise<string> {
+    return "mock-hash";
+  }
+}
 
 describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
   let cacheDir: string;
@@ -162,7 +170,7 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
       undefined,
       () => cacheDir,
     );
-    (screenshot as any).window = { getActiveHash: async () => "mock-hash" };
+    screenshot["window"] = new FixedHashWindow(mockDevice, new FakeAdbClientFactory(testFakeAdb));
     const result = await screenshot.execute();
     const executedCommands = testFakeAdb.getExecutedCommands();
     const captureCommand = executedCommands.find((command) => command.includes("screencap"));

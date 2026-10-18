@@ -16,6 +16,14 @@ import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "../../../../src/daemon/daemonF
 import { testOverrides } from "../../../../src/utils/testOverrides";
 import { statSync } from "node:fs";
 import path from "node:path";
+import { Socket } from "node:net";
+
+/** A real, never-connected socket whose keepalive writes are swallowed instead of erroring. */
+class SilentSocket extends Socket {
+  override write(): boolean {
+    return true;
+  }
+}
 
 describe("CtrlProxyPackages (Android)", function () {
   let fakeAdb: FakeAdbExecutor;
@@ -181,10 +189,10 @@ describe("CtrlProxyPackages (Android)", function () {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
-        (client as any).screenshotBackoffScheduler = scheduler;
+        client["screenshotBackoffScheduler"] = scheduler;
 
         // A genuine WebSocket "close" must run the client's close handler, which cancels pending
-        // screenshot captures. The old test poked (client as any).onConnectionClosed() directly, so
+        // screenshot captures. The old test poked client.onConnectionClosed() directly, so
         // it stayed green even if the ws.on("close") -> onConnectionClosed() wiring was severed.
         socket!.close();
         await waitForCondition(() => scheduler.cancelPendingCapturesCalls >= 1);
@@ -203,7 +211,7 @@ describe("CtrlProxyPackages (Android)", function () {
       });
       const scheduler = new FakeScreenshotBackoffScheduler();
 
-      (client as any).screenshotBackoffScheduler = scheduler;
+      client["screenshotBackoffScheduler"] = scheduler;
       client.refreshObservationStreamScreenshotCadence();
 
       expect(scheduler.rescheduleKeepAliveCalls).toBe(1);
@@ -254,9 +262,13 @@ describe("CtrlProxyPackages (Android)", function () {
       if (process.platform !== "win32") {
         expect(statSync(socketPath).isSocket()).toBe(true);
       }
-      (streamServer as any).subscribers.set("hierarchy-cadence-test", {
-        socket: { destroyed: false },
+      streamServer["subscribers"].set("hierarchy-cadence-test", {
+        socket: new SilentSocket(),
+        subscriptionId: "hierarchy-cadence-test",
+        // Never idle: the auto-advancing fake clock must not time this subscriber out.
+        lastActivity: Number.MAX_SAFE_INTEGER,
         backfilling: false,
+        drainPending: false,
         filter: {
           deviceId: testDevice.deviceId,
           // Device-scoped subscriptions created at the socket boundary always

@@ -1,5 +1,4 @@
 import { describe, expect, test, spyOn } from "bun:test";
-import type WebSocket from "ws";
 import {
   sendCommand,
   type SendCommandOptions,
@@ -9,6 +8,7 @@ import { RequestManager } from "../../../src/utils/RequestManager";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWebSocket, WebSocketState } from "../../fakes/FakeWebSocket";
+import { asWebSocket } from "../../helpers/observeCtrlProxySocketBuilders";
 
 function harness(overrides: Partial<DelegateContext> = {}) {
   const timer = new FakeTimer();
@@ -24,7 +24,7 @@ function harness(overrides: Partial<DelegateContext> = {}) {
   const context: DelegateContext = {
     timer,
     requestManager,
-    getWebSocket: () => socket as unknown as WebSocket,
+    getWebSocket: () => asWebSocket(socket),
     ensureConnected: async () => {
       order.push("connect");
       return true;

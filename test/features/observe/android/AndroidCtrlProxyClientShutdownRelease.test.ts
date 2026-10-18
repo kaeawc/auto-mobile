@@ -87,9 +87,8 @@ describe("AndroidCtrlProxyClient.releaseForwardLeasesForShutdown", () => {
       timer,
       ctrlProxyForwardLease: lease,
     });
-    const internals = client as unknown as { portForwardingSetup: boolean; localPort: number };
-    internals.portForwardingSetup = true;
-    internals.localPort = PORT;
+    client["portForwardingSetup"] = true;
+    client["localPort"] = PORT;
     AndroidCtrlProxyClient.registerForTesting(client, DEVICE.deviceId);
     return client;
   }

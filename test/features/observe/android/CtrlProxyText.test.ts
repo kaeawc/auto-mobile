@@ -4,7 +4,6 @@ import {
   TextRequestState,
 } from "../../../../src/features/action/textTransportTimeout";
 import { describe, expect, spyOn, test } from "bun:test";
-import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import {
   CtrlProxyText,
@@ -20,6 +19,7 @@ import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
+import { asWebSocket } from "../../../helpers/observeCtrlProxySocketBuilders";
 
 class CapturingWebSocket extends FakeWebSocket {
   sentMessages: string[] = [];
@@ -253,7 +253,7 @@ describe("Android CtrlProxyText", () => {
     await waitForSocketOpen(socket);
     const requestManager = new RequestManager(timer);
     const context: DelegateContext = {
-      getWebSocket: () => socket as unknown as WebSocket,
+      getWebSocket: () => asWebSocket(socket),
       requestManager,
       timer,
       ensureConnected: async () => true,
@@ -327,7 +327,7 @@ describe("Android CtrlProxyText", () => {
     const sent: Record<string, unknown>[] = [];
     const context: DelegateContext = {
       getWebSocket: () =>
-        ({ readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) }) as any,
+        asWebSocket({ readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) }),
       requestManager,
       timer,
       ensureConnected: async () => true,
@@ -355,7 +355,7 @@ describe("Android CtrlProxyText", () => {
     const manager = new RequestManager(timer);
     const context: DelegateContext = {
       getWebSocket: () =>
-        ({ readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) }) as any,
+        asWebSocket({ readyState: 1, send: (data: string) => sent.push(JSON.parse(data)) }),
       requestManager: manager,
       timer,
       ensureConnected: async () => true,
@@ -392,7 +392,7 @@ describe("Android CtrlProxyText", () => {
       await waitForSocketOpen(socket);
       const manager = new RequestManager(timer);
       const context: DelegateContext = {
-        getWebSocket: () => socket as unknown as WebSocket,
+        getWebSocket: () => asWebSocket(socket),
         requestManager: manager,
         timer,
         ensureConnected: async () => true,
@@ -444,10 +444,10 @@ describe("Android CtrlProxyText", () => {
     const requestManager = new RequestManager(timer);
     const context: DelegateContext = {
       getWebSocket: () =>
-        ({
+        asWebSocket({
           readyState: 1,
           send: (data: string) => sent.push(data),
-        }) as any,
+        }),
       requestManager,
       timer,
       ensureConnected: async () => true,
@@ -474,7 +474,7 @@ describe("Android CtrlProxyText", () => {
     const sent: string[] = [];
     const requestManager = new RequestManager(timer);
     const context: DelegateContext = {
-      getWebSocket: () => ({ readyState: 1, send: (data: string) => sent.push(data) }) as any,
+      getWebSocket: () => asWebSocket({ readyState: 1, send: (data: string) => sent.push(data) }),
       requestManager,
       timer,
       ensureConnected: async () => true,
@@ -532,7 +532,7 @@ describe("Android CtrlProxyText", () => {
       }
       await waitForSocketOpen(socket);
 
-      const textDelegate = (client as unknown as { text: CtrlProxyText }).text;
+      const textDelegate = client["text"];
       const resultPromise = textDelegate.commitViaIme("value", "prior-ime");
       const request = await waitForRequest(socket, "request_commit_text");
       expect(request).toMatchObject({
@@ -805,7 +805,7 @@ test("sends expectedSuffix only when provided and resolves insert metadata", asy
   await waitForSocketOpen(socket);
   const requestManager = new RequestManager(timer);
   const context: DelegateContext = {
-    getWebSocket: () => socket as unknown as WebSocket,
+    getWebSocket: () => asWebSocket(socket),
     requestManager,
     timer,
     ensureConnected: async () => true,
@@ -904,7 +904,7 @@ test("insert caret-warning acceptance defaults on and can explicitly opt out for
   await waitForSocketOpen(socket);
   const requestManager = new RequestManager(timer);
   const delegate = new CtrlProxyText({
-    getWebSocket: () => socket as unknown as WebSocket,
+    getWebSocket: () => asWebSocket(socket),
     requestManager,
     timer,
     ensureConnected: async () => true,
@@ -1134,7 +1134,7 @@ test("Android client forwards appended transport controls for insert and IME", a
       timer,
     },
   );
-  const text = (client as unknown as { text: CtrlProxyText }).text;
+  const text = client["text"];
   const insert = spyOn(text, "requestInsertText").mockResolvedValue({
     success: true,
     totalTimeMs: 1,

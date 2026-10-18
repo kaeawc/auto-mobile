@@ -68,6 +68,7 @@ import { STABLE_VIEW_ID_PREFIX } from "../../../src/features/observe/android/Sta
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { asWebSocket } from "../../helpers/observeCtrlProxySocketBuilders";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -374,10 +375,10 @@ describe("AndroidCtrlProxyClient", function () {
     // until we trigger `open` ourselves, and the connection timeout never fires.
     const manualTimer = new FakeTimer();
     let socket: FakeWebSocket | null = null;
-    const factory = (url: string): WebSocket => {
+    const factory = (url: string) => {
       // "timeout" mode keeps the socket CONNECTING (the timer is never advanced).
       socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
-      return socket as unknown as WebSocket;
+      return asWebSocket(socket);
     };
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       webSocketFactory: factory,
@@ -425,9 +426,9 @@ describe("AndroidCtrlProxyClient", function () {
     gatedAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
     gatedAdb.setScreenState(true);
     let socket: FakeWebSocket | null = null;
-    const factory = (url: string): WebSocket => {
+    const factory = (url: string) => {
       socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
-      return socket as unknown as WebSocket;
+      return asWebSocket(socket);
     };
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, gatedAdb, {
       webSocketFactory: factory,
@@ -1130,11 +1131,7 @@ describe("AndroidCtrlProxyClient", function () {
       });
 
       expect(checkedPorts).toEqual([8765, 8767]);
-      expect(
-        (
-          accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }
-        ).getWebSocketUrl(),
-      ).toBe("ws://127.0.0.1:8767/ws");
+      expect(accessibilityServiceClient["getWebSocketUrl"]()).toBe("ws://127.0.0.1:8767/ws");
     } finally {
       PortManager.setPortAvailabilityCheckerForTesting(null);
     }
@@ -1160,21 +1157,12 @@ describe("AndroidCtrlProxyClient", function () {
       });
       unavailablePorts.add(8765);
 
-      await (
-        accessibilityServiceClient as unknown as {
-          setupPortForwarding: () => Promise<void>;
-          getWebSocketUrl: () => string;
-        }
-      ).setupPortForwarding();
+      await accessibilityServiceClient["setupPortForwarding"]();
 
       expect(checkedPorts).toEqual([8765, 8765, 8765, 8765, 8765, 8767]);
       expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:8767");
       expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8767 tcp:8765");
-      expect(
-        (
-          accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }
-        ).getWebSocketUrl(),
-      ).toBe("ws://127.0.0.1:8767/ws");
+      expect(accessibilityServiceClient["getWebSocketUrl"]()).toBe("ws://127.0.0.1:8767/ws");
     } finally {
       PortManager.setPortAvailabilityCheckerForTesting(null);
     }
@@ -1489,10 +1477,8 @@ describe("AndroidCtrlProxyClient", function () {
     stubForwardLifecycleCommands(() => "");
     const debug = spyOn(logger, "debug");
     try {
-      const client = accessibilityServiceClient as unknown as {
-        removeCtrlProxyPortForward: (port: number) => Promise<boolean>;
-      };
-      expect(await client.removeCtrlProxyPortForward(8765)).toBe(true);
+      const client = accessibilityServiceClient;
+      expect(await client["removeCtrlProxyPortForward"](8765)).toBe(true);
       expect(PortManager.isPortAvailable(8765)).toBe(true);
       expect(
         debug.mock.calls.some(([message]) => String(message).includes("Cleared quarantine")),
@@ -1511,10 +1497,8 @@ describe("AndroidCtrlProxyClient", function () {
       );
       const warning = spyOn(logger, "warn");
       try {
-        const client = accessibilityServiceClient as unknown as {
-          removeCtrlProxyPortForward: (port: number) => Promise<boolean>;
-        };
-        expect(await client.removeCtrlProxyPortForward(8765)).toBe(false);
+        const client = accessibilityServiceClient;
+        expect(await client["removeCtrlProxyPortForward"](8765)).toBe(false);
         expect(PortManager.isPortAvailable(8765)).toBe(true);
         expect(
           warning.mock.calls.some(([message]) => String(message).includes("Failed to remove")),
@@ -4165,7 +4149,7 @@ describe("AndroidCtrlProxyClient", function () {
         expect(pkgSpy).toHaveBeenCalledTimes(1); // cached — no re-resolution
 
         // Connection drops (app may be replaced unobserved), then a later event arrives.
-        (testClient as unknown as { onConnectionClosed: () => void }).onConnectionClosed();
+        testClient.onConnectionClosed();
 
         navEvent("Home2");
         await settle();

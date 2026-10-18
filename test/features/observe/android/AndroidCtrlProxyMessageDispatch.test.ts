@@ -21,10 +21,35 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 
 interface DispatchTestClient {
   onDisplayTransition?: (event: AndroidDisplayTransition) => void;
-  cachedHierarchy?: { hierarchy: { displayId?: number; panelUniqueId?: string } };
+  readonly cachedHierarchy: AndroidCtrlProxyClient["cachedHierarchy"];
   handleWebSocketMessage(data: string): Promise<void>;
-  webSocketMessageHandlers: Record<string, unknown>;
-  requestManager: RequestManager;
+  readonly webSocketMessageHandlers: Record<string, unknown>;
+  readonly requestManager: RequestManager;
+}
+
+/**
+ * Expose the private dispatch members of a real client through a typed view, so the
+ * tests reach them without casting the client.
+ */
+function dispatchView(real: AndroidCtrlProxyClient): DispatchTestClient {
+  return {
+    get onDisplayTransition() {
+      return real.onDisplayTransition;
+    },
+    set onDisplayTransition(handler) {
+      real.onDisplayTransition = handler;
+    },
+    get cachedHierarchy() {
+      return real["cachedHierarchy"];
+    },
+    get webSocketMessageHandlers() {
+      return real["webSocketMessageHandlers"];
+    },
+    get requestManager() {
+      return real["requestManager"];
+    },
+    handleWebSocketMessage: (data) => real["handleWebSocketMessage"](data),
+  };
 }
 
 describe("Android CtrlProxy WebSocket dispatch", () => {
@@ -48,13 +73,15 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
         recorded.push({ event, applicationId });
       },
     };
-    client = AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
-      webSocketFactory: () => {
-        throw new Error("WebSocket connection is not needed for dispatch tests");
-      },
-      timer,
-      sdkEventIngestor: ingestor as AndroidSdkEventIngestor,
-    }) as unknown as DispatchTestClient;
+    client = dispatchView(
+      AndroidCtrlProxyClient.createForTesting(device, new FakeAdbExecutor(), {
+        webSocketFactory: () => {
+          throw new Error("WebSocket connection is not needed for dispatch tests");
+        },
+        timer,
+        sdkEventIngestor: ingestor as AndroidSdkEventIngestor,
+      }),
+    );
   });
 
   afterEach(() => {

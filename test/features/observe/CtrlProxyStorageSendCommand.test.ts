@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { CtrlProxyStorage } from "../../../src/features/observe/android/CtrlProxyStorage";
 import { isCtrlProxyStorageUnavailableError } from "../../../src/features/observe/android/CtrlProxyStorage";
@@ -15,6 +14,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWebSocket, WebSocketState } from "../../fakes/FakeWebSocket";
+import { asWebSocket } from "../../helpers/observeCtrlProxySocketBuilders";
 
 class RecordingSocket extends FakeWebSocket {
   readonly frames: string[] = [];
@@ -35,7 +35,7 @@ async function harness() {
     { deviceId: "storage-send-command", platform: "android", name: "Android", isEmulator: true },
     new FakeAdbExecutor(),
     {
-      webSocketFactory: () => socket as unknown as WebSocket,
+      webSocketFactory: () => asWebSocket(socket),
       timer,
       installedAppsRepository: new FakeInstalledAppsRepository(),
       idGenerator: new CountingIdGenerator("delegate"),
@@ -43,7 +43,7 @@ async function harness() {
   );
   await Promise.resolve();
   timer.advanceTime(123);
-  client["ws"] = socket as unknown as WebSocket;
+  client["ws"] = asWebSocket(socket);
   client["supportedCommands"] = new Set([
     "discover_keystore",
     "get_sdk_capabilities",

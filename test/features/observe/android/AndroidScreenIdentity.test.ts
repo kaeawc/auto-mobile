@@ -95,7 +95,7 @@ describe("deriveAndroidScreenIdentity", () => {
     firstChild(windowRoot(prototype, 174))["pane-title"] = "Prototype";
     expect(deriveAndroidScreenIdentity(prototype.viewHierarchy)).toBeUndefined();
 
-    const ime = { viewHierarchy: structuredClone(imeCapture) } as unknown as ObserveResult;
+    const ime = capture({ viewHierarchy: imeCapture });
     firstChild(windowRoot(ime, 550))["pane-title"] = "Keyboard";
     expect(deriveAndroidScreenIdentity(ime.viewHierarchy)).toBeUndefined();
   });

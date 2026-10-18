@@ -17,6 +17,7 @@ import {
   SWIPE_RETURN_DURATION_MAX_MS,
 } from "../../../../src/features/action/swipeon/swipeTiming";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../../src/features/observe/shared/SharedGestureDelegate";
+import { asWebSocket } from "../../../helpers/observeCtrlProxySocketBuilders";
 
 /**
  * Tests for the Android two-finger swipe result correlation (#2988).
@@ -36,12 +37,12 @@ function createFakeContext(overrides?: Partial<DelegateContext>): {
   const sent: string[] = [];
   const context: DelegateContext = {
     getWebSocket: () =>
-      ({
+      asWebSocket({
         send: (data: string) => {
           sent.push(data);
         },
         readyState: 1,
-      }) as any,
+      }),
     requestManager,
     timer,
     ensureConnected: async () => true,

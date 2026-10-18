@@ -655,18 +655,13 @@ describe("DevicePool", () => {
       manager.bootedDevices = [];
       const incidentResolutionStarted = Promise.withResolvers<void>();
       const releaseIncidentResolution = Promise.withResolvers<void>();
-      const livenessInternals = (
-        devicePool as unknown as {
-          missingDeviceLiveness: {
-            resolveMissingDeviceIncident(...args: unknown[]): Promise<string | undefined>;
-          };
-        }
-      ).missingDeviceLiveness;
-      livenessInternals.resolveMissingDeviceIncident = async (...args) => {
-        incidentResolutionStarted.resolve();
-        await releaseIncidentResolution.promise;
-        return args[2] as string | undefined;
-      };
+      devicePool.testHooks.missingDeviceLiveness.testHooks.interposeResolveMissingDeviceIncident(
+        () => async (_device, _recoverAndroidEmulator, incidentId) => {
+          incidentResolutionStarted.resolve();
+          await releaseIncidentResolution.promise;
+          return incidentId;
+        },
+      );
 
       const eviction = processLifecycle!.evictStartedDeviceAfterProcessExit(
         "emulator-5554",

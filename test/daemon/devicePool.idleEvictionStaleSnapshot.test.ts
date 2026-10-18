@@ -4,7 +4,6 @@ import { settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
-import type { IosLivenessSnapshot } from "../../src/daemon/idleDeviceReaper";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
@@ -79,18 +78,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
       deviceManager.bootedDevices = [sim];
       await pool.initializeWithDevices([sim]);
       const original = pool.getDevice(udid)!;
-      const internals = pool as unknown as {
-        idleDeviceReaper: { getIosLivenessSnapshot(): Promise<IosLivenessSnapshot> };
-        assignmentMutex: { runExclusive<T>(operation: () => Promise<T>): Promise<T> };
-        selectAssignableIdleDevice(
-          candidates: PooledDevice[],
-          snapshots: {
-            capturedEntries: ReadonlySet<PooledDevice>;
-            iosLiveness: IosLivenessSnapshot;
-          },
-        ): Promise<unknown>;
-        pruneStaleIdleIosDevices(candidates: PooledDevice[]): Promise<number>;
-      };
+      const internals = pool.testHooks;
 
       deviceManager.bootedDevices = [];
       deviceManager.parkNext = "ios";
@@ -159,9 +147,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
     deviceManager.bootedDevices = [sim];
     await pool.initializeWithDevices([sim]);
     const original = pool.getDevice(sim.deviceId)!;
-    const internals = pool as unknown as {
-      pruneStaleIdleIosDevices(candidates: PooledDevice[]): Promise<number>;
-    };
+    const internals = pool.testHooks;
     deviceManager.bootedDevices = [];
     deviceManager.parkNext = "ios";
     const prune = internals.pruneStaleIdleIosDevices([original]);
@@ -221,12 +207,7 @@ describe("idle eviction with a stale discovery snapshot", () => {
           : { name: "SM-S911B", platform, deviceId: "R58M1234ABC" };
       deviceManager.bootedDevices = [device];
       await pool.initializeWithDevices([device]);
-      const internals = pool as unknown as {
-        assignmentMutex: {
-          runExclusive<T>(callback: () => T | Promise<T>): Promise<T>;
-        };
-      };
-      const mutex = internals.assignmentMutex;
+      const mutex = pool.testHooks.assignmentMutex;
       const runExclusive = mutex.runExclusive.bind(mutex);
       const remove = pool.removeDevice.bind(pool);
       let lockDepth = 0;
@@ -272,30 +253,10 @@ describe("idle eviction with a stale discovery snapshot", () => {
         source: "local",
       };
       deviceManager.deviceImages = [image];
-      const internals = pool as unknown as {
-        assignmentMutex: {
-          runExclusive<T>(callback: () => T | Promise<T>): Promise<T>;
-        };
-        startAdditionalDevices(
-          count: number,
-          deadline: number,
-          platform: Platform,
-        ): Promise<number>;
-        startAdditionalDeviceMatchingCriteria(
-          criteria: { platform: Platform },
-          excluded: Set<string>,
-          deadline: number,
-          rediscover: () => Promise<PooledDevice | undefined>,
-        ): Promise<{ device: PooledDevice; started: boolean } | null>;
-        trackStartedDeviceProcess(
-          device: BootedDevice,
-          childProcess: ChildProcess | null | undefined,
-        ): Promise<void>;
-      };
+      const internals = pool.testHooks;
       const mutex = internals.assignmentMutex;
       const runExclusive = mutex.runExclusive.bind(mutex);
       const add = pool.addDevice.bind(pool);
-      const track = internals.trackStartedDeviceProcess.bind(pool);
       let lockDepth = 0;
       let guardedAdds = 0;
       let guardedTracks = 0;
@@ -313,11 +274,11 @@ describe("idle eviction with a stale discovery snapshot", () => {
         guardedAdds++;
         await add(...args);
       };
-      internals.trackStartedDeviceProcess = async (...args) => {
+      internals.interpose.trackStartedDeviceProcess((track) => async (...args) => {
         expect(lockDepth).toBe(1);
         guardedTracks++;
         await track(...args);
-      };
+      });
       try {
         if (path === "count") {
           expect(await internals.startAdditionalDevices(1, timer.now() + 1_000, "ios")).toBe(1);
@@ -337,7 +298,6 @@ describe("idle eviction with a stale discovery snapshot", () => {
       } finally {
         mutex.runExclusive = runExclusive;
         pool.addDevice = add;
-        internals.trackStartedDeviceProcess = track;
       }
     },
   );

@@ -7,6 +7,7 @@ import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResou
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
 import type { PooledDevice, RemoveDeviceOptions, SessionRecoveryPreparation } from "./devicePool";
+import type { Wrapper } from "./devicePoolTypes";
 import type { IdentityComparison } from "../devices/deviceIdentityEvidence";
 
 /** Consecutive successful discovery sweeps required to confirm absence. */
@@ -625,5 +626,19 @@ export class MissingDeviceLiveness {
       undefined,
       "absent",
     );
+  }
+
+  /** Typed view of the internals unit tests drive; production code never reads it. */
+  get testHooks() {
+    return {
+      reconcileDiscoveredPooledDevice: (
+        ...args: Parameters<MissingDeviceLiveness["reconcileDiscoveredPooledDevice"]>
+      ) => this.reconcileDiscoveredPooledDevice(...args),
+      interposeResolveMissingDeviceIncident: (
+        wrap: Wrapper<MissingDeviceLiveness["resolveMissingDeviceIncident"]>,
+      ) => {
+        this.resolveMissingDeviceIncident = wrap(this.resolveMissingDeviceIncident.bind(this));
+      },
+    };
   }
 }

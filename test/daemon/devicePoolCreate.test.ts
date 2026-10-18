@@ -133,22 +133,15 @@ describe("DevicePool.create", () => {
     };
     const factoryPool = DevicePool.create(deps);
     const directPool = new DevicePool(deps);
-    const factoryInternals = factoryPool as unknown as {
-      timer: FakeTimer;
-      installedAppsRepository: FakeInstalledAppsRepository;
-      deviceManager: FakeDeviceManager;
-      retryExecutor: DefaultRetryExecutor;
-      criteriaMatcher: DeviceCriteriaMatcher;
-      onDeviceReady: typeof onDeviceReady;
-    };
-    const directInternals = directPool as unknown as typeof factoryInternals;
+    const factoryInternals = factoryPool.testHooks.collaborators;
+    const directInternals = directPool.testHooks.collaborators;
 
-    expect(factoryInternals.timer).toBe(deps.timer);
-    expect(factoryInternals.installedAppsRepository).toBe(deps.installedAppsRepository);
-    expect(factoryInternals.deviceManager).toBe(deps.deviceManager);
-    expect(factoryInternals.retryExecutor).toBe(deps.retryExecutor);
-    expect(factoryInternals.criteriaMatcher).toBe(deps.criteriaMatcher);
-    expect(factoryInternals.onDeviceReady).toBe(deps.onDeviceReady);
+    expect(factoryInternals.timer).toBe(timer);
+    expect(factoryInternals.installedAppsRepository).toBe(installedAppsRepository);
+    expect(factoryInternals.deviceManager).toBe(deviceManager);
+    expect(factoryInternals.retryExecutor).toBe(retryExecutor);
+    expect(factoryInternals.criteriaMatcher).toBe(criteriaMatcher);
+    expect(factoryInternals.onDeviceReady).toBe(onDeviceReady);
     expect(directInternals.timer).toBe(factoryInternals.timer);
     expect(directInternals.installedAppsRepository).toBe(factoryInternals.installedAppsRepository);
     expect(directInternals.deviceManager).toBe(factoryInternals.deviceManager);

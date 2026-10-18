@@ -116,15 +116,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       stubPoolDiscovery(pool, [device]);
       await pool.initializeWithDevices([device]);
       await pool.assignDeviceToSession("release-session", "android");
-      retry = (
-        pool as unknown as {
-          releaseDisconnectedRecoverySessionWithRetry(
-            id: string,
-            device: string,
-            reason: string,
-          ): Promise<void>;
-        }
-      ).releaseDisconnectedRecoverySessionWithRetry(
+      retry = pool.testHooks.releaseDisconnectedRecoverySessionWithRetry(
         "release-session",
         device.deviceId,
         "device-restart:Physical Android",
@@ -190,15 +182,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       stubPoolDiscovery(pool, [device]);
       await pool.initializeWithDevices([device]);
       await pool.assignDeviceToSession("release-session", "android");
-      const retry = (
-        pool as unknown as {
-          releaseDisconnectedRecoverySessionWithRetry(
-            id: string,
-            device: string,
-            reason: string,
-          ): Promise<void>;
-        }
-      ).releaseDisconnectedRecoverySessionWithRetry(
+      const retry = pool.testHooks.releaseDisconnectedRecoverySessionWithRetry(
         "release-session",
         device.deviceId,
         "device-restart:Physical Android",
@@ -266,15 +250,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
         stubPoolDiscovery(pool, [device]);
         await pool.initializeWithDevices([device]);
         await pool.assignDeviceToSession("release-session", "android");
-        const retry = (
-          pool as unknown as {
-            releaseDisconnectedRecoverySessionWithRetry(
-              id: string,
-              device: string,
-              reason: string,
-            ): Promise<void>;
-          }
-        ).releaseDisconnectedRecoverySessionWithRetry(
+        const retry = pool.testHooks.releaseDisconnectedRecoverySessionWithRetry(
           "release-session",
           device.deviceId,
           "device-restart:Physical Android",

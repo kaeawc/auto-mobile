@@ -3,8 +3,6 @@ import * as bindingRegistryModule from "../../src/daemon/sessionBroker/registry/
 import type { SqliteBindingRegistry } from "../../src/daemon/sessionBroker/registry/sqliteBindingRegistry";
 import { PlatformVideoCaptureBackend } from "../../src/features/video/PlatformVideoCaptureBackend";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
-import type { BootedDevice } from "../../src/models";
-import type { ChildProcess } from "node:child_process";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { NoopTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
@@ -221,13 +219,12 @@ describe("Daemon.start() tool-call-end wiring", () => {
         deviceId: "emulator-5554",
         ownerSessionUuid: undefined,
       });
-      const pool = daemon.getDevicePool() as unknown as {
-        trackStartedDeviceProcess(device: BootedDevice, child: ChildProcess): Promise<void>;
-      };
-      await pool.trackStartedDeviceProcess(
-        { deviceId: "emulator-5554", platform: "android", name: "Pixel" },
-        new FakeChildProcess() as unknown as ChildProcess,
-      );
+      await daemon
+        .getDevicePool()
+        .testHooks.trackStartedDeviceProcess(
+          { deviceId: "emulator-5554", platform: "android", name: "Pixel" },
+          new FakeChildProcess(),
+        );
       expect(confirm).toHaveBeenCalledTimes(1);
       expect(confirm).toHaveBeenCalledWith(
         { deviceId: "emulator-5554", platform: "android", name: "Pixel" },

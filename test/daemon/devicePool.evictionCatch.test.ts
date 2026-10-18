@@ -1,7 +1,7 @@
 import { makePool } from "../helpers/makePool";
 import { poolInternals } from "../helpers/devicePoolRecoveryInternals";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
-import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
+import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { StreamlessChildProcess } from "../helpers/streamlessChildProcess";
@@ -223,11 +223,10 @@ describe("device identity replacement IME quarantine", () => {
         }
       }
     } else if (route === "liveness eviction") {
-      await (
-        pool as unknown as {
-          evictMissingPooledDevice(device: PooledDevice, reason: string): Promise<void>;
-        }
-      ).evictMissingPooledDevice(captured, "missing device during liveness check");
+      await pool.testHooks.evictMissingPooledDevice(
+        captured,
+        "missing device during liveness check",
+      );
     } else if (route === "shutdown") {
       expect(await pool.retireDeviceForShutdown(captured)).toBe(true);
     } else if (route === "same-AVD replacement") {

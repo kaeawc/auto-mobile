@@ -3,11 +3,9 @@ import { DeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuaranti
 import { ActionableError, type BootedDevice } from "../models";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { getAbortSignal } from "../utils/AbortContext";
-import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../utils/logger";
-import { DEFAULT_RETRY_OPTIONS, type RetryExecutor } from "../utils/retry/RetryExecutor";
-import type { Timer } from "../utils/SystemTimer";
+import { DEFAULT_RETRY_OPTIONS } from "../utils/retry/RetryExecutor";
 import { deviceLossCancellationReason } from "./emulatorLossIncident";
 import {
   compareIdentityEvidence,
@@ -17,40 +15,21 @@ import {
   type IdentityEvidence,
 } from "../devices/deviceIdentityEvidence";
 import { DevicePoolError, type DiscoveryReconcileOptions, type PooledDevice } from "./devicePool";
+import type { Wrapper } from "./devicePoolTypes";
+import type {
+  DeviceRetirementOptions,
+  DeviceRuntimeIdentityPoolPort,
+} from "./deviceRuntimeIdentityTypes";
+export type {
+  DeviceRetirementOptions,
+  DeviceRuntimeIdentityPoolPort,
+} from "./deviceRuntimeIdentityTypes";
 
 const POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS = DEFAULT_RETRY_OPTIONS.maxAttempts;
 type MutableMetadataSource = "refresh" | "snapshot";
 
-export type DeviceRetirementOptions = Pick<DiscoveryReconcileOptions, "excludeExecutionId"> & {
-  /** ANR failure releases session work separately and retains sessionless work. */
-  cancelDeviceBoundExecutions?: boolean;
-};
-
 function unknownAndroidRuntimeName(deviceId: string): string {
   return `Unknown (${deviceId})`;
-}
-
-/** Mutable pool state is read at use time, including after every await. */
-export interface DeviceRuntimeIdentityPoolPort {
-  getAmbientExecutionId?(): string | undefined;
-  getDevices(): ReadonlyMap<string, PooledDevice>;
-  notifyDeviceFramesInvalidated?(deviceId: string): void;
-  getDeviceManager(): PlatformDeviceManager;
-  getRetryExecutor(): RetryExecutor;
-  getTimer(): Timer;
-  getRefreshGeneration(): number;
-  hasReusableSerial(device: PooledDevice): boolean;
-  isReservedForShutdown(device: PooledDevice): boolean;
-  cancelDeviceExecutions?(
-    deviceId: string,
-    reason: ReturnType<typeof deviceLossCancellationReason>,
-    options: { excludeExecutionId?: string },
-  ): Promise<number>;
-  cancelDeviceSessionExecutions(
-    sessionId: string,
-    reason: ReturnType<typeof deviceLossCancellationReason>,
-    options: { excludeExecutionId?: string },
-  ): Promise<number>;
 }
 
 /** Resolves and caches pooled runtime identity without deciding pool membership. */
@@ -1054,5 +1033,18 @@ export class DeviceRuntimeIdentity {
       delete pooled.nameObservedAt;
       pooled.nameRefreshGeneration = this.pool.getRefreshGeneration();
     }
+  }
+
+  /** Typed view of the internals unit tests drive; production code never reads it. */
+  get testHooks() {
+    return {
+      interposeReconcileObservedPooledIdentity: (
+        wrap: Wrapper<DeviceRuntimeIdentity["reconcileObservedPooledIdentity"]>,
+      ) => {
+        this.reconcileObservedPooledIdentity = wrap(
+          this.reconcileObservedPooledIdentity.bind(this),
+        );
+      },
+    };
   }
 }

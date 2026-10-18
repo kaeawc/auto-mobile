@@ -4,7 +4,6 @@ import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { StreamlessChildProcess } from "../helpers/streamlessChildProcess";
-import { type PooledDevice } from "../../src/daemon/devicePool";
 import { ActionableError } from "../../src/models/ActionableError";
 import {
   InMemoryEmulatorLossIncidentStore,
@@ -29,7 +28,6 @@ import {
   KillTrackingShutdownManager,
   setup,
   setupPassiveRestart,
-  DevicePoolProcessExitInternals,
   assertNoRecoveryReservationsRemain,
   flush,
 } from "../helpers/devicePoolRecoveryShutdownHarness";
@@ -378,14 +376,7 @@ test("continuity-disabled emulator loss keeps a terminal released settlement", a
     throw new Error("Expected emulator-loss incident to be recorded");
   }
   try {
-    const eviction = pool as unknown as {
-      evictMissingPooledDevice(
-        device: PooledDevice,
-        reason: string,
-        options: { attemptDeviceLossRecovery: boolean; incidentId: string },
-      ): Promise<void>;
-    };
-    await eviction.evictMissingPooledDevice(captured, "not present in adb devices", {
+    await pool.testHooks.evictMissingPooledDevice(captured, "not present in adb devices", {
       attemptDeviceLossRecovery: true,
       incidentId,
     });
@@ -979,7 +970,7 @@ async function setupProcessExitPool(
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
   const child = exitedChild();
-  const internals = pool as unknown as DevicePoolProcessExitInternals;
+  const internals = pool.testHooks;
   await internals.trackStartedDeviceProcess(original, child);
   await pool.bindOrReuseDeviceSession(
     "session",

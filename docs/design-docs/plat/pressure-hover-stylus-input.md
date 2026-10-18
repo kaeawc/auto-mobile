@@ -3,8 +3,8 @@
 AutoMobile injects finger touches. It cannot yet drive stylus-only drawing modes,
 pressure-sensitive brushes, palm rejection, hover previews, Apple Pencil
 interactions or force-press menus. This note records what each platform's
-injection path can carry, recommends an API shape, and lists the follow-up work
-(#12539).
+injection path can carry, states the direction that follows, and lists the follow-up
+work (#12539).
 
 It is a research note, not a design for a shipped tool. Nothing here was run on an
 emulator, simulator or device: the capability claims are read from source or
@@ -177,70 +177,28 @@ platforms), so there is no iOS recorder representation to extend.
 "Supported" means a documented path exists in source. Nothing in the table other
 than the `adb shell input stylus` cells has been demonstrated.
 
-## Recommended API shape
+## Direction
 
-1. **Pointer options on the coordinate tools, not on element tools.** Add an
-   optional `pointer` object (`toolType`: `finger` | `stylus`; later `eraser`,
-   `mouse`; `pressure`: a constant, 0–1) to `tapAt`, `swipeAt` and `dragPath`, the
-   tools that already take raw coordinates. Element tools (`tapOn`, `swipeOn`) stay
-   finger-only: a stylus has no accessibility-element meaning, and widening them
-   multiplies the surface for no recorded use case. A recorded stationary stylus
-   contact therefore exports through `tapAt`, never `tapOn`, so its tool type is not
-   lost. A pressure _curve_ is carried by an optional per-point `pressure` on
-   `dragPath` points, which already carry per-segment timing; `tapAt` and `swipeAt`
-   carry the constant only. The first slice accepts the constant only, because no
-   curve is proven injectable yet, and on the `adb shell input` backend that constant
-   can only be `1.0` (the shell hard-codes it): that backend's capability is
-   `pressure: 1.0`, and any other value is rejected under point 2, not rounded.
-2. **Fail loudly instead of downgrading.** If the active device or path cannot honor
-   a requested `pointer`, return an actionable error naming the missing capability.
-   Never fall back to a finger touch: a silent downgrade is exactly the failure
-   reported with Appium pressure above, and it makes a stylus-only UI test pass for
-   the wrong reason.
-3. **Hover is its own tool.** A `hoverAt` tool (move the pointer without contact,
-   optionally dwell) has different semantics from a gesture: no contact, no
-   scroll or fling, and the result is a UI change, not a navigation. It also has the
-   weakest platform support, so it should not be bundled into the first slice.
-4. **Report capability once, per operation.** Expose pointer capability in the device
-   or session description, keyed by tool and action (or by backend path) rather than as
-   one flat device tuple: for each of `tapAt` tap, long press and double tap, `swipeAt`
-   and `dragPath`, the supported tool types, the fixed or allowed constant pressure
-   values, whether a pressure curve is accepted, and whether hover applies. A flat
-   tuple could not say that stylus works for a tap and a straight swipe but not for a
-   double tap or a drawn path, and the same record can then drive replay validation, so
-   a client can choose without trial and error, and so the error in point 2 is derived
-   from the same data. The reported pressure values matter because a backend that accepts only
-   `1.0` is otherwise indistinguishable from one that accepts any constant.
-5. **Stage by what is proven.** First slice: `pointer.toolType: "stylus"` at the
-   backend's fixed pressure (`1.0`) on `tapAt` and a straight two-point `swipeAt`, on
-   Android through the `adb shell input` source prefix (the only path demonstrated in
-   source, no root), which changes the source of a path AutoMobile already uses for
-   swipes and long presses. `tapAt` covers `tap` and `longPress` (a zero-distance
-   swipe with a duration); `doubleTap` is excluded until the experiment shows two
-   shell invocations hold the double-tap interval despite host latency. The `display`
-   option takes a panel key or role, not a raw display id, so mapping it onto the
-   shell's `-d DISPLAY_ID` is part of the slice and is checked in the experiment. `dragPath` is deferred: the shell offers a two-point `swipe` that
-   interpolates a single segment, and `motionevent` calls that each get a fresh
-   timestamp and down-time, and nothing in the source shows a 2–100-point,
-   per-segment-timed path staying one continuous contact instead of lifting between
-   invocations. Pressure curves, tilt, eraser and hover wait for the experiments
-   below.
+Only the direction is fixed here; the design lives in the follow-up issues, where it is
+specified and reviewed when the work is picked up.
 
-## Recording
-
-The full recorder requirements belong to #13084 and get specified when that work is
-picked up. This note fixes only the constraints the API shape puts on it, on top of
-the gaps listed under [What the recorder sees](#what-the-recorder-sees):
-
-- Export preserves `pointer` on `tapAt`, `swipeAt` and `dragPath` steps and never turns
-  a stylus step into a finger step. The device is only chosen when `executePlan` runs,
-  so the capability check and its error happen at replay.
-- A stationary contact exports as `tapAt` and a drawn stroke as `dragPath`, which needs
-  a drag classification that does not exist today.
-- Pressure is exported on the contract's 0–1 scale, normalized against the node's own
-  axis range; an unknown or degenerate range omits `pressure` and warns.
-- Anything the recorder cannot represent yet, hover today, is reported in an export
-  warning instead of being dropped silently.
+- **Pointer options on the coordinate tools.** Stylus input is an optional option on
+  `tapAt`, `swipeAt` and `dragPath`, not on the element tools (`tapOn`, `swipeOn`): a
+  stylus has no accessibility-element meaning.
+- **Fail loudly instead of downgrading.** A device or path that cannot honor a
+  requested pointer returns an actionable error. It never falls back to a finger
+  touch: a silent downgrade is the failure reported with Appium pressure above, and it
+  makes a stylus-only UI test pass for the wrong reason.
+- **Hover is its own tool.** A `hoverAt` tool has different semantics from a gesture
+  (no contact, no scroll or fling) and the weakest platform support, so it is not part
+  of the first slice.
+- **Stage by what is proven.** The only path demonstrated in source is the stylus
+  source of `adb shell input`, at a fixed pressure of `1.0`. The first slice is that,
+  for `tapAt` and a straight `swipeAt`; pressure curves, tilt, eraser, hover and
+  `dragPath` wait for the experiments below.
+- **Recording follows the tools.** The recorder gaps under
+  [What the recorder sees](#what-the-recorder-sees) are #13084's work. A stylus step is
+  never silently exported or replayed as a finger step.
 
 ## Verification plan
 
@@ -265,22 +223,14 @@ follow-up issue (see below) so it can be done where the hardware exists:
 
 ## Follow-up issues
 
-The feasible parts, filed from this note:
+The feasible parts, filed from this note, each carrying its own design and acceptance
+criteria:
 
-- #13081: `pointer.toolType` (stylus, pressure fixed at `1.0`) on `tapAt` and a
-  straight `swipeAt` through `adb shell input`, with capability-gated errors;
-  `dragPath` waits for #13082. Per-device capability reporting (recommendation 4),
-  including the accepted pressure values, starts here, as the data those errors are
-  derived from. AutoMobile supports API 24, and only AOSP `main` was read, so the
-  stylus capability is fail-closed: it is advertised only after a receiving probe
-  observes `TOOL_TYPE_STYLUS` on an injected event, or after the minimum-API part of
-  #13082 shows that on every supported release. A successful `input stylus` command is
-  not enough: older releases build the event with a legacy `MotionEvent` overload that
-  changes the source but can leave the tool type unknown, and applications are told to
-  read `getToolType()` regardless of the reported source.
+- #13081: stylus tool type at fixed pressure on `tapAt` and a straight `swipeAt`
+  through `adb shell input`, with capability-gated errors.
 - #13082: Android emulator and device experiments (pressure curve, tilt, hover, eraser
   and barrel buttons, `UiAutomation.injectInputEvent`, `uinput`, minimum API level).
 - #13083: iOS simulator and device experiments (pressure, hover through the public
   `hover()` calls first, private selectors as the fallback).
-- #13084: recorder capture of tool type, pressure series and hover, and export of
-  `pointer`.
+- #13084: recorder capture of tool type, pressure, hover and the pen's event node, and
+  export of the pointer.

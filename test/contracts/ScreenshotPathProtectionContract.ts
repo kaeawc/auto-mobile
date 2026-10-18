@@ -45,8 +45,16 @@ export function runScreenshotPathProtectionContract(
   // Lets every already-queued promise continuation run without involving a timer.
   const tick = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
   // The real implementation reads its inventory through async stores before the write starts.
+  // Polls by turning the event loop, bounded by wall-clock time rather than a turn count: the real
+  // store awaits process-wide caches before a write starts, which a loaded shard can slow past
+  // any fixed number of turns. Throws instead of returning so a stall cannot pass as ordering.
+  const UNTIL_DEADLINE_MS = 5_000;
   const until = async (condition: () => boolean): Promise<void> => {
-    for (let i = 0; i < 1000 && !condition(); i += 1) {
+    const deadline = performance.now() + UNTIL_DEADLINE_MS;
+    while (!condition()) {
+      if (performance.now() > deadline) {
+        throw new Error(`condition not met within ${UNTIL_DEADLINE_MS} ms`);
+      }
       await tick();
     }
   };

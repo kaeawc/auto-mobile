@@ -53,10 +53,11 @@ describe("RecentApps", () => {
     });
 
     // Inject the fakes into the feature
-    recentApps = new RecentApps(testDevice, fakeAdb, fakeTimer);
-    (recentApps as any).observeScreen = fakeObserveScreen;
-    (recentApps as any).window = fakeWindow;
-    (recentApps as any).awaitIdle = fakeAwaitIdle;
+    recentApps = new RecentApps(testDevice, fakeAdb, fakeTimer, {
+      observeScreen: fakeObserveScreen,
+      awaitIdle: fakeAwaitIdle,
+      window: fakeWindow,
+    });
   });
 
   // Helper function to create mock ObserveResult
@@ -204,10 +205,11 @@ describe("RecentApps", () => {
         platform: "ios",
         deviceId: "ios-device",
       };
-      iosRecentApps = new RecentApps(iosDevice, fakeAdb, fakeTimer);
-      (iosRecentApps as any).observeScreen = fakeObserveScreen;
-      (iosRecentApps as any).window = fakeWindow;
-      (iosRecentApps as any).awaitIdle = fakeAwaitIdle;
+      iosRecentApps = new RecentApps(iosDevice, fakeAdb, fakeTimer, {
+        observeScreen: fakeObserveScreen,
+        awaitIdle: fakeAwaitIdle,
+        window: fakeWindow,
+      });
 
       fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
       getInstanceSpy = spyOnIosClientInstance(fakeIOSCtrlProxy);

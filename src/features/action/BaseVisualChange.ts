@@ -131,6 +131,10 @@ export function resolveDisplayFence(options?: DisplayFenceOption): DisplayFence 
 }
 
 export interface DisplayFenceDependencies {
+  /** Collaborator overrides; default to the real device-backed implementations. */
+  observeScreen?: ObserveScreen;
+  awaitIdle?: AwaitIdle;
+  window?: Window;
   displayTransitions?: DisplayTransitionReader;
   renderedDisplayRevision?: RenderedDisplayRevisionReader;
   renderedDisplayGeneration?: RenderedDisplayRevisionReader;
@@ -219,28 +223,15 @@ export class BaseVisualChange {
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
     renderedDisplayRevision: RenderedDisplayRevisionReader = sessionRenderedDisplayRevision,
-    displayFence: DisplayFenceDependencies & { observeScreen?: ObserveScreen } = {},
+    displayFence: DisplayFenceDependencies = {},
   ) {
     this.device = device;
-    // Detect if the argument is a factory (has create method) or an executor
-    if (
-      adbFactoryOrExecutor &&
-      typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
-    ) {
-      this.adbFactory = adbFactoryOrExecutor as AdbClientFactory;
-      this.adb = this.adbFactory.create(device);
-    } else if (adbFactoryOrExecutor) {
-      // Legacy path: wrap the executor in a factory for downstream dependencies
-      const executor = adbFactoryOrExecutor as AdbExecutor;
-      this.adb = executor;
-      this.adbFactory = { create: () => executor };
-    } else {
-      this.adbFactory = defaultAdbClientFactory;
-      this.adb = this.adbFactory.create(device);
-    }
+    const { adbFactory, adb } = BaseVisualChange.resolveAdb(device, adbFactoryOrExecutor);
+    this.adbFactory = adbFactory;
+    this.adb = adb;
     // Same clock as this instance: its gfxinfo stability polls must not spend real
     // wall-clock under an injected FakeTimer.
-    this.awaitIdle = new RealAwaitIdle(device, this.adbFactory, timer);
+    this.awaitIdle = displayFence.awaitIdle ?? new RealAwaitIdle(device, this.adbFactory, timer);
     // Honor the observer seam before constructing defaults: RealObserveScreen's
     // screenshot service starts host filesystem work and retention timers.
     this.observeScreen =
@@ -250,13 +241,33 @@ export class BaseVisualChange {
     // Window derives the per-subread budgets from ITS timer — they must be the
     // same clock or a FakeTimer's elapsed time won't shrink the ADB sub-read
     // budgets in the integrated path (issue #6289).
-    this.window = new RealWindow(device, this.adbFactory, timer);
+    this.window = displayFence.window ?? new RealWindow(device, this.adbFactory, timer);
     this.predictionAnalyzer = new PredictionAnalyzer();
     this.timer = timer;
     this.renderedDisplayRevision = displayFence.renderedDisplayRevision ?? renderedDisplayRevision;
     this.displayTransitionReader = displayFence.displayTransitions ?? displayTransitions;
     this.renderedDisplayGeneration =
       displayFence.renderedDisplayGeneration ?? sessionRenderedDisplayGeneration;
+  }
+
+  private static resolveAdb(
+    device: BootedDevice,
+    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null,
+  ): { adbFactory: AdbClientFactory; adb: AdbExecutor } {
+    // Detect if the argument is a factory (has create method) or an executor
+    if (
+      adbFactoryOrExecutor &&
+      typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
+    ) {
+      const adbFactory = adbFactoryOrExecutor as AdbClientFactory;
+      return { adbFactory, adb: adbFactory.create(device) };
+    }
+    if (adbFactoryOrExecutor) {
+      // Legacy path: wrap the executor in a factory for downstream dependencies
+      const executor = adbFactoryOrExecutor as AdbExecutor;
+      return { adbFactory: { create: () => executor }, adb: executor };
+    }
+    return { adbFactory: defaultAdbClientFactory, adb: defaultAdbClientFactory.create(device) };
   }
 
   protected staleDisplay(observedGeneration: number) {

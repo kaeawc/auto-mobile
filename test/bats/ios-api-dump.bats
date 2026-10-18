@@ -20,6 +20,28 @@ setup() {
   [[ "$output" == *'+  case renamedSuccess'* ]]
 }
 
+@test "default sources include public wire declarations and gate their changes" {
+  local fixture="$BATS_TEST_TMPDIR/repo"
+  local wire_sources="$fixture/ios/sdk-wire/Sources"
+  mkdir -p "$fixture/scripts/ios" "$fixture/ios/auto-mobile-sdk/Sources/AutoMobileSDK" \
+    "$wire_sources/AutoMobileSdkWire"
+  cp "$SCRIPT" "$fixture/scripts/ios/api-dump.sh"
+  cp "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift" "$fixture/ios/auto-mobile-sdk/Sources/AutoMobileSDK/Surface.swift"
+  printf '%s\n' 'public struct SdkViewNode {}' > "$wire_sources/AutoMobileSdkWire/SdkViewNode.swift"
+  unset AUTOMOBILE_IOS_API_SOURCES
+  bash "$fixture/scripts/ios/api-dump.sh" > "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '// Surface.swift' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '// sdk-wire/SdkViewNode.swift' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx 'public struct SdkViewNode' "$AUTOMOBILE_IOS_API_FILE"
+  run bash "$fixture/scripts/ios/api-dump.sh" --check
+  [ "$status" -eq 0 ]
+  printf '%s\n' 'public struct RenamedNode {}' > "$wire_sources/AutoMobileSdkWire/SdkViewNode.swift"
+  run bash "$fixture/scripts/ios/api-dump.sh" --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'-public struct SdkViewNode'* ]]
+  [[ "$output" == *'+public struct RenamedNode'* ]]
+}
+
 @test "renaming a public protocol requirement fails the API check" {
   bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
   sed 's/captureObservation/renamedObservation/' "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift" > "$BATS_TEST_TMPDIR/changed.swift"

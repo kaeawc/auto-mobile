@@ -13,7 +13,7 @@ import type {
   H264CaptureSource,
   H264CaptureSourceOptions,
 } from "../../src/features/webrtc/H264CaptureSource";
-import type { WebRtcPublisher } from "../../src/features/webrtc/WebRtcPublisher";
+import type { WebRtcStreamPublisher } from "../../src/features/webrtc/WebRtcPublisher";
 import { logger } from "../../src/utils/logger";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -106,8 +106,10 @@ function harness(platform: "android" | "ios" = "android") {
         notifySourceFailed: () => {},
         writeH264Chunk: () => {},
         primeH264ParameterSets: () => {},
+        endOfH264Packet: () => {},
+        writePcmAudioChunk: () => {},
         getDescriptor: () => ({ streamId: config.streamId, state: "idle", iceServers: [] }),
-      }) as unknown as WebRtcPublisher,
+      }) satisfies WebRtcStreamPublisher,
   });
   const relay = new Relay(
     {

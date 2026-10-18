@@ -55,6 +55,46 @@ describe("DevicePool", () => {
       mcpSessionId,
     );
 
+  const pixel8Source: DeviceInfo = {
+    name: "Pixel 8",
+    platform: "android",
+    isRunning: false,
+    source: "local",
+  };
+
+  /** A freshly started device whose first session is already bound by `ownerMcpSessionId`. */
+  const startOwnedDevice = async (ownerSessionId: string) => {
+    const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+    await initializeLiveDevices([device]);
+    await bindAsMcpOwner(ownerSessionId, device.deviceId, "owner-mcp-session");
+    return device;
+  };
+
+  const reacquire = (device: BootedDevice, mcpSessionId?: string) =>
+    devicePool.bindOrReuseDeviceSession(
+      "newly-generated-session",
+      device.deviceId,
+      "android",
+      pixel8Source,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      mcpSessionId,
+    );
+
+  /** Runs `body` with reboot-on-death recovery enabled and restores the environment after. */
+  const withRebootOnDeath = async (body: () => Promise<void>) => {
+    const restoreRebootOnDeath = enableRebootOnDeath();
+    try {
+      await body();
+    } finally {
+      restoreRebootOnDeath();
+    }
+  };
+
   beforeEach(() => {
     ({ devicePool, sessionManager, fakeTimer, fakeAppsRepo, fakeDeviceManager } =
       createDevicePoolSuite());
@@ -155,88 +195,25 @@ describe("DevicePool", () => {
   });
 
   test("reuses a freshly started device already owned by the same MCP session", async () => {
-    const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
-    const sourceImage: DeviceInfo = {
-      name: "Pixel 8",
-      platform: "android",
-      isRunning: false,
-      source: "local",
-    };
-    await initializeLiveDevices([device]);
-    await bindAsMcpOwner("owner-session", device.deviceId, "owner-mcp-session");
+    const device = await startOwnedDevice("owner-session");
 
-    await expect(
-      devicePool.bindOrReuseDeviceSession(
-        "newly-generated-session",
-        device.deviceId,
-        "android",
-        sourceImage,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        "owner-mcp-session",
-      ),
-    ).resolves.toBe("owner-session");
+    await expect(reacquire(device, "owner-mcp-session")).resolves.toBe("owner-session");
     expect(devicePool.getDevice(device.deviceId)?.assignmentCount).toBe(1);
   });
 
   test("rejects a freshly started device owned by a different MCP session", async () => {
-    const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
-    const sourceImage: DeviceInfo = {
-      name: "Pixel 8",
-      platform: "android",
-      isRunning: false,
-      source: "local",
-    };
-    await initializeLiveDevices([device]);
-    await bindAsMcpOwner("owner-session", device.deviceId, "owner-mcp-session");
+    const device = await startOwnedDevice("owner-session");
 
-    await expect(
-      devicePool.bindOrReuseDeviceSession(
-        "newly-generated-session",
-        device.deviceId,
-        "android",
-        sourceImage,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-        "other-mcp-session",
-      ),
-    ).rejects.toThrow("already assigned to another session");
+    await expect(reacquire(device, "other-mcp-session")).rejects.toThrow(
+      "already assigned to another session",
+    );
     expect(devicePool.getDevice(device.deviceId)?.sessionId).toBe("owner-session");
   });
 
   test("rejects an anonymous re-acquisition of a freshly started device", async () => {
-    const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
-    const sourceImage: DeviceInfo = {
-      name: "Pixel 8",
-      platform: "android",
-      isRunning: false,
-      source: "local",
-    };
-    await initializeLiveDevices([device]);
-    await bindAsMcpOwner("owner-session", device.deviceId, "owner-mcp-session");
+    const device = await startOwnedDevice("owner-session");
 
-    await expect(
-      devicePool.bindOrReuseDeviceSession(
-        "newly-generated-session",
-        device.deviceId,
-        "android",
-        sourceImage,
-        undefined,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        undefined,
-      ),
-    ).rejects.toThrow(
+    await expect(reacquire(device)).rejects.toThrow(
       "Freshly started device 'emulator-5554' was assigned to session " +
         "owner-session before its owning session could reserve it.",
     );
@@ -244,30 +221,11 @@ describe("DevicePool", () => {
   });
 
   test("names a restored session awaiting its owner instead of a fresh-start race (#11189)", async () => {
-    const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
-    const sourceImage: DeviceInfo = {
-      name: "Pixel 8",
-      platform: "android",
-      isRunning: false,
-      source: "local",
-    };
-    await initializeLiveDevices([device]);
-    await bindAsMcpOwner("restored-session", device.deviceId, "owner-mcp-session");
+    const device = await startOwnedDevice("restored-session");
     // What startup rehydration leaves behind after a daemon restart.
     sessionManager.getSession("restored-session")!.ownership = "awaiting-owner";
 
-    const refusal = devicePool.bindOrReuseDeviceSession(
-      "newly-generated-session",
-      device.deviceId,
-      "android",
-      sourceImage,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-    );
+    const refusal = reacquire(device);
     await expect(refusal).rejects.toThrow(
       "Device 'emulator-5554' is reserved for session restored-session, which the daemon " +
         "restored after a restart and is holding for its previous owner to reconnect.",
@@ -277,18 +235,11 @@ describe("DevicePool", () => {
   });
 
   describe("assertSessionReadyForAutomation shutdown admission (#5494)", () => {
-    const sourceImage: DeviceInfo = {
-      name: "Pixel 8",
-      platform: "android",
-      isRunning: false,
-      source: "local",
-    };
-
     const bindOwnerSession = async (sessionId: string, deviceId: string): Promise<void> => {
       const device = createBootedDevice(deviceId, "android", "Pixel 8");
       fakeDeviceManager.bootedDevices = [device];
       await devicePool.initializeWithDevices([device]);
-      await devicePool.bindOrReuseDeviceSession(sessionId, deviceId, "android", sourceImage);
+      await devicePool.bindOrReuseDeviceSession(sessionId, deviceId, "android", pixel8Source);
       expect(sessionManager.getSession(sessionId)?.assignedDevice).toBe(deviceId);
     };
 
@@ -367,7 +318,7 @@ describe("DevicePool", () => {
         "owner-session",
         device.deviceId,
         "android",
-        sourceImage,
+        pixel8Source,
       );
       await persistence.waitForUpsert();
       const controller = new AbortController();
@@ -376,7 +327,7 @@ describe("DevicePool", () => {
           "expired-session",
           device.deviceId,
           "android",
-          sourceImage,
+          pixel8Source,
         ),
       ).catch((error: unknown) => error);
       const lateReservation = runWithAbortSignal(controller.signal, () =>
@@ -404,7 +355,7 @@ describe("DevicePool", () => {
         "owner-session",
         device.deviceId,
         "android",
-        sourceImage,
+        pixel8Source,
       );
       await persistence.waitForUpsert();
       const reservationPromise = devicePool.reserveDeviceForShutdown(device.deviceId);
@@ -432,7 +383,7 @@ describe("DevicePool", () => {
         "owner-session",
         owner.deviceId,
         "android",
-        sourceImage,
+        pixel8Source,
       );
       await persistence.waitForUpsert();
       persistence.finishUpsert();
@@ -443,7 +394,7 @@ describe("DevicePool", () => {
         "blocking-session",
         blocker.deviceId,
         "android",
-        sourceImage,
+        pixel8Source,
       );
       await persistence.waitForUpsert();
 
@@ -493,13 +444,13 @@ describe("DevicePool", () => {
         "owner-session",
         owner.deviceId,
         "android",
-        sourceImage,
+        pixel8Source,
       );
       await devicePool.bindOrReuseDeviceSession(
         "other-session",
         other.deviceId,
         "android",
-        sourceImage,
+        pixel8Source,
       );
 
       const reservation = await devicePool.reserveDeviceForShutdown(owner.deviceId);
@@ -628,64 +579,35 @@ describe("DevicePool", () => {
 
     test("records the source AVD when a recovery boot races with pool refresh", async () => {
       const ready = createBootedDevice("emulator-5554", "android", "Unknown (emulator-5554)");
-      const source: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
       await devicePool.initializeWithDevices([ready]);
 
-      await devicePool.addDevice(ready, source);
+      await devicePool.addDevice(ready, pixel8Source);
 
       expect(devicePool.getDevice("emulator-5554")?.avdName).toBe("Pixel 8");
     });
 
     test("replaces stale AVD identity at a same-serial authoritative boot boundary", async () => {
       const ready = createBootedDevice("emulator-5554", "android", "Pixel");
-      await devicePool.addDevice(ready, {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      });
+      await devicePool.addDevice(ready, pixel8Source);
 
-      await devicePool.addDevice(ready, {
-        name: "Pixel 9",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      });
+      await devicePool.addDevice(ready, { ...pixel8Source, name: "Pixel 9" });
 
       expect(devicePool.getDevice(ready.deviceId)?.avdName).toBe("Pixel 9");
     });
 
     test("an authoritative same-serial replacement clears an old intentional-stop marker", async () => {
-      const restoreRebootOnDeath = enableRebootOnDeath();
-      const ready = createBootedDevice("emulator-5554", "android", "Pixel");
-      try {
+      await withRebootOnDeath(async () => {
+        const ready = createBootedDevice("emulator-5554", "android", "Pixel");
         devicePool = makePool({ recoveryPolicy: { onLoss: true, maxAttempts: 2 } });
-        await devicePool.addDevice(ready, {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          source: "local",
-        });
+        await devicePool.addDevice(ready, pixel8Source);
         devicePool.markIntentionalShutdown(ready.deviceId);
-        await devicePool.addDevice(ready, {
-          name: "Pixel 9",
-          platform: "android",
-          isRunning: false,
-          source: "local",
-        });
+        await devicePool.addDevice(ready, { ...pixel8Source, name: "Pixel 9" });
         fakeDeviceManager.bootedDevices = [];
 
         await devicePool.removeDisconnectedDevice(ready.deviceId, false);
 
         expect(fakeDeviceManager.startedDevices.map((device) => device.name)).toEqual(["Pixel 9"]);
-      } finally {
-        restoreRebootOnDeath();
-      }
+      });
     });
 
     test("intentional shutdown remains a current disconnect for monitor cleanup", async () => {
@@ -697,15 +619,9 @@ describe("DevicePool", () => {
     });
 
     test("does not accept a different AVD that reuses the disconnected emulator serial", async () => {
-      const restoreRebootOnDeath = enableRebootOnDeath();
-      const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      try {
-        await devicePool.addDevice(ready, {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          source: "local",
-        });
+      await withRebootOnDeath(async () => {
+        const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
+        await devicePool.addDevice(ready, pixel8Source);
         const disconnected = devicePool.getDevice(ready.deviceId);
         if (!disconnected) {
           throw new Error("expected disconnected pooled device");
@@ -715,22 +631,14 @@ describe("DevicePool", () => {
         ];
 
         expect(await devicePool.isCurrentDisconnectedDevice(disconnected)).toBe("current");
-      } finally {
-        restoreRebootOnDeath();
-      }
+      });
     });
 
     test("retains a same-serial Android emulator when its AVD name is unresolved", async () => {
-      const restoreRebootOnDeath = enableRebootOnDeath();
-      const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      try {
+      await withRebootOnDeath(async () => {
+        const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
         devicePool = makePool({ recoveryPolicy: { onLoss: true, maxAttempts: 2 } });
-        await devicePool.addDevice(ready, {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          source: "local",
-        });
+        await devicePool.addDevice(ready, pixel8Source);
         const disconnected = devicePool.getDevice(ready.deviceId);
         if (!disconnected) {
           throw new Error("expected disconnected pooled device");
@@ -740,22 +648,14 @@ describe("DevicePool", () => {
         ];
 
         expect(await devicePool.isCurrentDisconnectedDevice(disconnected)).toBe("recovered");
-      } finally {
-        restoreRebootOnDeath();
-      }
+      });
     });
 
     test("reports an unknown disconnect state when Android rediscovery discovery fails", async () => {
-      const restoreRebootOnDeath = enableRebootOnDeath();
-      const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      try {
+      await withRebootOnDeath(async () => {
+        const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
         devicePool = makePool({ recoveryPolicy: { onLoss: true, maxAttempts: 2 } });
-        await devicePool.addDevice(ready, {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          source: "local",
-        });
+        await devicePool.addDevice(ready, pixel8Source);
         const disconnected = devicePool.getDevice(ready.deviceId);
         if (!disconnected) {
           throw new Error("expected disconnected pooled device");
@@ -763,9 +663,7 @@ describe("DevicePool", () => {
         fakeDeviceManager.failedPlatforms = new Set(["android"]);
 
         expect(await devicePool.isCurrentDisconnectedDevice(disconnected)).toBe("unknown");
-      } finally {
-        restoreRebootOnDeath();
-      }
+      });
     });
 
     test("stale disconnect validation rejects a same-serial replacement added during discovery", async () => {
@@ -773,14 +671,8 @@ describe("DevicePool", () => {
       const manager = new DeferredDiscoveryFakeDeviceManager();
       devicePool = makePool({ deviceManager: manager });
       const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      const source: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
       try {
-        await devicePool.addDevice(ready, source);
+        await devicePool.addDevice(ready, pixel8Source);
         const original = devicePool.getDevice(ready.deviceId);
         if (!original) {
           throw new Error("expected original pooled device");
@@ -788,7 +680,7 @@ describe("DevicePool", () => {
         const validation = devicePool.isCurrentDisconnectedDevice(original);
         await manager.waitForDiscoveryStart();
         await devicePool.removeDevice(ready.deviceId);
-        await devicePool.addDevice(ready, source);
+        await devicePool.addDevice(ready, pixel8Source);
         const replacement = devicePool.getDevice(ready.deviceId);
 
         manager.releaseDiscovery();
@@ -806,18 +698,12 @@ describe("DevicePool", () => {
       const manager = new DeferredDiscoveryFakeDeviceManager();
       devicePool = makePool({ deviceManager: manager });
       const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      const source: DeviceInfo = {
-        name: "Pixel 8",
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      };
       try {
-        await devicePool.addDevice(ready, source);
+        await devicePool.addDevice(ready, pixel8Source);
         const cleanup = devicePool.removeDisconnectedDevice(ready.deviceId);
         await manager.waitForDiscoveryStart();
         await devicePool.removeDevice(ready.deviceId);
-        await devicePool.addDevice(ready, source);
+        await devicePool.addDevice(ready, pixel8Source);
         const replacement = devicePool.getDevice(ready.deviceId);
 
         manager.releaseDiscovery();
@@ -831,25 +717,17 @@ describe("DevicePool", () => {
     });
 
     test("retains a recovery-owned emulator when detailed discovery throws", async () => {
-      const restoreRebootOnDeath = enableRebootOnDeath();
-      const manager = new ThrowingDiscoveryFakeDeviceManager();
-      devicePool = makePool({ deviceManager: manager });
-      const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
-      try {
-        await devicePool.addDevice(ready, {
-          name: "Pixel 8",
-          platform: "android",
-          isRunning: false,
-          source: "local",
-        });
+      await withRebootOnDeath(async () => {
+        const manager = new ThrowingDiscoveryFakeDeviceManager();
+        devicePool = makePool({ deviceManager: manager });
+        const ready = createBootedDevice("emulator-5554", "android", "Pixel 8");
+        await devicePool.addDevice(ready, pixel8Source);
 
         await devicePool.removeDisconnectedDevice(ready.deviceId);
 
         expect(devicePool.getDevice(ready.deviceId)).not.toBeNull();
         expect(manager.startedDevices).toHaveLength(0);
-      } finally {
-        restoreRebootOnDeath();
-      }
+      });
     });
   });
 });

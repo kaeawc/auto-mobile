@@ -6,7 +6,7 @@
 1183	src/daemon/cli/runDaemonCommand.ts
 1540	src/daemon/client.ts
 5392	src/daemon/daemon.ts
-5939	src/daemon/daemonMcpProxy.ts
+6008	src/daemon/daemonMcpProxy.ts
 1730	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
 8441	src/daemon/devicePool.ts
@@ -83,7 +83,7 @@
 1331	src/server/planExecutionOrchestrator.ts
 2852	src/server/prototypeTools.ts
 1894	src/server/toolOutputSchemas.ts
-1099	src/server/toolRegistry.ts
+1108	src/server/toolRegistry.ts
 1045	src/server/utilityTools.ts
 2185	src/server/videoRecordingManager.ts
 1459	src/server/videoRecordingTools.ts

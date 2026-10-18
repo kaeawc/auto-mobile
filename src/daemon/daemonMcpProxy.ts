@@ -94,6 +94,7 @@ export {
 import { anyDeviceReadOnlyArgShapeMatches } from "../server/deviceReadOnlyArgShapes";
 import { SessionOutsideBoundSessionError } from "../server/deviceOutsideBoundSessionRefusal";
 import { errorMessage } from "../utils/describeUnknownError";
+import { ToolListPoller } from "./proxy/ToolListPoller";
 import { getRemovedToolHint } from "../models/removedTools";
 import {
   DaemonBoundSessionLostError,
@@ -429,6 +430,8 @@ export interface DaemonMcpProxyConfig {
   daemonOptions?: DaemonOptions;
   /** Timer for restart cooldown checks and bound-session heartbeats. */
   timer?: Timer;
+  /** Interval of the list_changed polling fallback (#4678); defaults to 30 s. */
+  listPollIntervalMs?: number;
   /** Total wait for a bind refused as `device_cleanup_in_progress` (#10960); 0 disables it. */
   cleanupWaitBudgetMs?: number;
   /** Poll cadence while a refused bind waits for cleanup; defaults to 250ms x2, capped at 5s. */
@@ -917,6 +920,8 @@ export class DaemonMcpProxy {
   // Listeners for daemon-forwarded list-changed notifications (issue #3223),
   // fired after the matching cache is invalidated so a re-fetch is never stale.
   private readonly listChangedListeners = new Set<(kind: ListChangedKind) => void>();
+  // Polls the daemon lists while its list_changed push is unavailable (#4678).
+  private readonly listPoller: ToolListPoller;
   // A token can be reused by concurrent callers, and a new connection can
   // reuse a request id. Scope listeners to the client connection, then match
   // both the daemon request id and echoed caller token.
@@ -963,6 +968,12 @@ export class DaemonMcpProxy {
     this.daemonStatusProbe = this.createStatusProbe(config);
     this.daemonAvailabilityProbe = daemonAvailabilityProbe(config);
     this.timer = config.timer ?? defaultTimer;
+    this.listPoller = new ToolListPoller({
+      timer: this.timer,
+      intervalMs: config.listPollIntervalMs,
+      fetchList: (kind) => this.pollDaemonList(kind),
+      emitListChanged: (kind) => this.announceDaemonListChanged(kind),
+    });
     this.heartbeatLeashMs = heartbeatLeashMs(config);
     this.heartbeatIntervalMs = heartbeatIntervalMs(config);
     this.ownershipConflictLeashMs = ownershipConflictLeashMs(
@@ -1733,10 +1744,14 @@ export class DaemonMcpProxy {
       // timeout, while the time-critical first heartbeat must still be dispatched
       // immediately to beat the pre-first-heartbeat reclaim grace (#5637).
       const notificationSubscription = supportsNotifications
-        ? client.subscribeToNotifications!({ signal: this.closeAbort.signal }).catch((error) => {
-            logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
-          })
-        : Promise.resolve();
+        ? client.subscribeToNotifications!({ signal: this.closeAbort.signal }).then(
+            () => true,
+            (error) => {
+              logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
+              return false;
+            },
+          )
+        : Promise.resolve(undefined);
       const [firstConnectionStep, secondConnectionStep] =
         this.connectionOwnershipAndPresentationSteps(client);
       await firstConnectionStep();
@@ -1761,13 +1776,14 @@ export class DaemonMcpProxy {
       // Connection establishment still waits for the already-running subscription
       // so callers do not race later requests ahead of notification opt-in. Failure
       // was converted to a warning above and preserves the prior best-effort policy.
-      await notificationSubscription;
+      const subscribed = await notificationSubscription;
       this.throwIfClosing();
       if (this.resourceSubscriptions.size > 0) {
         await this.replayResourceSubscriptions(client);
       }
 
       this.notifyStaticListsServedBeforeConnect();
+      this.applyListChangedSubscription(subscribed);
     } catch (error) {
       // A failed partial connect (e.g. presentation profile rejected) must not
       // leave a live socket or subscriptions behind: the next attempt would
@@ -1961,15 +1977,75 @@ export class DaemonMcpProxy {
   // so a re-fetch is never stale.
   private notifyListChanged(kind: ListChangedKind): void {
     this.invalidateListCache(kind);
+    this.listPoller.noteEmitted(kind);
+    this.fireListChangedListeners(kind);
+  }
+
+  private fireListChangedListeners(kind: ListChangedKind): void {
     for (const listener of this.listChangedListeners) {
       try {
         listener(kind);
       } catch (error) {
         // Best-effort re-emit: a dead/mid-teardown client transport must not
-        // break sibling listeners.
+        // break cache invalidation or sibling listeners.
         logger.warn(`[DaemonMcpProxy] list_changed listener failed for ${kind}: ${error}`);
       }
     }
+  }
+
+  private invalidateDaemonList(kind: ListChangedKind): void {
+    this.invalidateListCache(kind);
+    if (kind === "tools") {
+      this.reconciliationSnapshot = undefined;
+    }
+  }
+
+  // A daemon list change, pushed or found by the polling fallback.
+  private announceDaemonListChanged(kind: ListChangedKind): void {
+    this.invalidateDaemonList(kind);
+    this.fireListChangedListeners(kind);
+  }
+
+  // Poll the daemon lists when it did not acknowledge the push subscription
+  // (#4678). A custom transport without notification support (undefined) keeps
+  // its previous behaviour. Not awaited: a comparison must not delay connect.
+  private applyListChangedSubscription(subscribed: boolean | undefined): void {
+    if (subscribed === undefined) {
+      return;
+    }
+    void (subscribed
+      ? this.listPoller.onSubscriptionAcknowledged()
+      : this.listPoller.onSubscriptionUnavailable());
+  }
+
+  // Discovery's session scope for a poll, or undefined when the poll must skip.
+  // Discovery decides how a released or idle binding lists; the poll must not
+  // retire, refresh or replay a binding, so it skips rather than decide that.
+  private listPollParams(): Record<string, unknown> | undefined {
+    if (this.terminalBoundSession || this.isBoundSessionReplayExpired()) {
+      return undefined;
+    }
+    const bound = this.boundSessionUuid;
+    return bound ? { sessionUuid: bound, [DAEMON_BOUND_SESSION_PARAM]: bound } : {};
+  }
+
+  // Read a daemon list for the polling fallback with discovery's session scope.
+  // It only uses the live connection: it never reconnects or starts the daemon.
+  private async pollDaemonList(kind: ListChangedKind): Promise<unknown> {
+    const client = this.client;
+    const params = this.listPollParams();
+    if (!this.connected || !client || this.closing || this.hasLivenessLifecycleFence() || !params) {
+      return undefined;
+    }
+    if (kind === "tools") {
+      const result = await client.callDaemonMethod(
+        "tools/list",
+        this.withToolSelectionProfile(params),
+      );
+      return result?.tools ?? [];
+    }
+    const result = await client.callDaemonMethod("resources/list", params);
+    return result?.resources ?? [];
   }
 
   /**
@@ -2058,20 +2134,14 @@ export class DaemonMcpProxy {
       return;
     }
 
-    this.invalidateListCache(kind);
-    if (kind === "tools") {
-      this.reconciliationSnapshot = undefined;
+    if (this.listPoller.isPolling()) {
+      // Push and poll can see the same change; the poller announces it once.
+      this.invalidateDaemonList(kind);
+      void this.listPoller.onPushed(kind);
+      return;
     }
-
-    for (const listener of this.listChangedListeners) {
-      try {
-        listener(kind);
-      } catch (error) {
-        // Best-effort re-emit: a dead/mid-teardown client transport must not
-        // break cache invalidation or sibling listeners.
-        logger.warn(`[DaemonMcpProxy] list_changed listener failed for ${kind}: ${error}`);
-      }
-    }
+    this.listPoller.noteEmitted(kind);
+    this.announceDaemonListChanged(kind);
   }
 
   // A late or unmatched progress frame is expected around call completion.
@@ -2897,6 +2967,7 @@ export class DaemonMcpProxy {
     this.notificationUnsubscribe = null;
     this.connectionClosedUnsubscribe?.();
     this.connectionClosedUnsubscribe = null;
+    this.listPoller.markDropped();
     this.invalidateCache();
 
     if (!staleClient) {
@@ -3206,6 +3277,7 @@ export class DaemonMcpProxy {
       // keep serving this unbound list under the new binding.
       if (this.discoveryEpoch === discoveryEpoch && !releasedResultMint) {
         this.cachedTools = tools;
+        this.listPoller.observe("tools", tools);
       }
       return tools;
     } catch (error) {
@@ -5938,6 +6010,7 @@ export class DaemonMcpProxy {
       // does not invalidate the resource cache, so it would outlive the rebind.
       if (this.discoveryEpoch === discoveryEpoch && !releasedResultMint) {
         this.cachedResources = resources;
+        this.listPoller.observe("resources", resources);
       }
       return resources;
     } catch (error) {
@@ -6211,6 +6284,7 @@ export class DaemonMcpProxy {
     this.notificationUnsubscribe = null;
     this.connectionClosedUnsubscribe?.();
     this.connectionClosedUnsubscribe = null;
+    this.listPoller.stop();
     this.connected = false;
     this.clearBoundSessionUuid();
     this.otherHeldSessions.clear();

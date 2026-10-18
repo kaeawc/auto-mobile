@@ -1,11 +1,10 @@
+import { makePool } from "../helpers/makePool";
 import { expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 // Pins the post-await replacement guard in DevicePool.rollbackAssignments (#11802). If a replacement
 // session under the same id ever binds the same device while the rollback awaits
@@ -29,13 +28,10 @@ async function createContext(): Promise<Context> {
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const deviceManager = new FakeDeviceManager();
   deviceManager.bootedDevices = [DEVICE];
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "rollback-guard-test", {
-      timer,
-      deviceManager,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-    }),
-  );
+  const pool = makePool(manager, "rollback-guard-test", {
+    timer,
+    deviceManager,
+  });
   await pool.initializeWithDevices([DEVICE]);
   await pool.bindOrReuseDeviceSession(SESSION_ID, DEVICE.deviceId, "android");
   return { timer, manager, pool, allocated: manager.getSession(SESSION_ID)! };

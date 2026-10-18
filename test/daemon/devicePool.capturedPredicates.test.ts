@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { markDeviceError } from "../../src/daemon/deviceBinding";
 import { expect, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
@@ -6,7 +7,6 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 interface PredicateContext {
   pool: DevicePool;
@@ -119,9 +119,7 @@ async function createContext(autolock: boolean): Promise<PredicateContext> {
   const booted = { deviceId: "emulator-5554", name: "Pixel", platform: "android" as const };
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [booted]);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "predicate-daemon", { timer, deviceManager: utils }),
-  );
+  const pool = makePool(manager, "predicate-daemon", { timer, deviceManager: utils });
   await pool.initializeWithDevices([booted]);
   const session = await manager.createSession("owner", booted.deviceId, "android", {
     timeoutMs: 1_000,

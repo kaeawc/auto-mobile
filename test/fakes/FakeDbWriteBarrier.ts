@@ -1,14 +1,18 @@
 import type { DbWriteBarrier } from "../../src/db/dbWriteBarrier";
+import type { Timer } from "../../src/utils/SystemTimer";
+import { FakeTimer } from "./FakeTimer";
 
 /**
  * Deterministic in-memory fake of {@link DbWriteBarrier} for unit tests.
  *
- * Records enough to assert both halves of the shutdown-drain contract without a
- * real timer or DB: `trackCalls`/`ranCount` count attempts vs. writes that
- * actually ran, and `ran` marks each executed write. `trackExistingCalls`/
- * `trackedExisting` mirror that for {@link trackExisting} (issue #2885). While
- * `draining`, tracked work short-circuits (resolves `undefined`) exactly like
- * {@link InMemoryDbWriteBarrier}, but with no in-flight/idle bookkeeping.
+ * Mirrors {@link InMemoryDbWriteBarrier}'s observable behaviour (pinned by
+ * `test/contracts/DbWriteBarrierContract.ts`): it counts in-flight writes, makes
+ * `drain` wait for them bounded by an injected {@link Timer}, and short-circuits
+ * tracked work while draining. On top of that it records enough to assert both
+ * halves of the shutdown-drain contract: `trackCalls`/`ranCount` count attempts
+ * vs. writes that actually ran, and `ran` marks each executed write.
+ * `trackExistingCalls`/`trackedExisting` mirror that for {@link trackExisting}
+ * (issue #2885).
  */
 export class FakeDbWriteBarrier implements DbWriteBarrier {
   draining = false;
@@ -18,21 +22,39 @@ export class FakeDbWriteBarrier implements DbWriteBarrier {
   trackExistingCalls = 0;
   trackedExisting: string[] = [];
 
+  #inFlight = 0;
+  #idleWaiters: Array<() => void> = [];
+
+  constructor(private readonly timer: Timer = new FakeTimer()) {}
+
   isDraining(): boolean {
     return this.draining;
   }
 
   inFlightCount(): number {
-    return 0;
+    return this.#inFlight;
   }
 
   beginDrain(): void {
     this.draining = true;
   }
 
-  async drain(): Promise<boolean> {
+  async drain(timeoutMs: number = 0): Promise<boolean> {
     this.draining = true;
-    return true;
+    if (this.#inFlight === 0) {
+      return true;
+    }
+    return new Promise<boolean>((resolve) => {
+      const handle = this.timer.setTimeout(() => {
+        this.#idleWaiters = this.#idleWaiters.filter((waiter) => waiter !== onIdle);
+        resolve(false);
+      }, timeoutMs);
+      const onIdle = (): void => {
+        this.timer.clearTimeout(handle);
+        resolve(true);
+      };
+      this.#idleWaiters.push(onIdle);
+    });
   }
 
   async track<T>(work: () => Promise<T>): Promise<T | undefined> {
@@ -42,22 +64,46 @@ export class FakeDbWriteBarrier implements DbWriteBarrier {
     }
     this.ranCount += 1;
     this.ran.push("ran");
-    return work();
+    this.#inFlight += 1;
+    try {
+      return await work();
+    } finally {
+      this.#leave();
+    }
   }
 
   trackExisting<T>(work: Promise<T>): Promise<T | undefined> {
     this.trackExistingCalls += 1;
+    const normalized = Promise.resolve(work);
     if (this.draining) {
       // Not counted while draining (issue #2885); never rejects, safe to `void`.
-      return work.then(
+      return normalized.then(
         () => undefined,
         () => undefined,
       );
     }
     this.trackedExisting.push("tracked");
-    return work.then(
-      (value) => value as T | undefined,
-      () => undefined,
+    this.#inFlight += 1;
+    return normalized.then(
+      (value) => {
+        this.#leave();
+        return value as T | undefined;
+      },
+      () => {
+        this.#leave();
+        return undefined;
+      },
     );
+  }
+
+  #leave(): void {
+    this.#inFlight -= 1;
+    if (this.#inFlight === 0) {
+      const waiters = this.#idleWaiters;
+      this.#idleWaiters = [];
+      for (const waiter of waiters) {
+        waiter();
+      }
+    }
   }
 }

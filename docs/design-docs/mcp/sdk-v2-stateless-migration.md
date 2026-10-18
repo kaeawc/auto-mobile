@@ -28,8 +28,9 @@ Facts worth knowing here: request handlers are registered by method string; four
 v2 behaviour differences are bridged so the wire is unchanged
 (`src/server/mcpError.ts`, `src/server/sdkMcpServer.ts`,
 `src/server/stdioServerTransport.ts`, `src/daemon/socketServer/loopbackMcpClient.ts`);
-test helpers are `test/helpers/fakeServerContext.ts` and
-`test/helpers/v1ViewMcpClient.ts`.
+the test helper is `test/helpers/fakeServerContext.ts`. Tests drive our servers with the
+plain v2 `Client` (the v1-error-shape test client was retired; the boundary checker
+rejects its reintroduction), so client error assertions see the SDK's unprefixed errors.
 
 ## Stateless daemon MCP layer (landed, #4678)
 

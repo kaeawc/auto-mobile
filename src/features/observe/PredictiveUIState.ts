@@ -7,7 +7,7 @@ import {
   PredictionTarget,
   Predictions,
 } from "../../models";
-import type { NavigationEdge, NavigationGraphManager } from "../navigation/NavigationGraphManager";
+import type { NavigationEdge, NavigationGraphService } from "../navigation/NavigationGraphManager";
 import {
   resolveNavigationGraphForDevice,
   type NavigationDeviceRef,
@@ -44,6 +44,12 @@ interface IndexedEdge {
  * paths, which is identical to the previous "first edge in edge order that
  * matches by any path" behavior.
  */
+/** The navigation graph reads prediction building uses. */
+type PredictionNavGraph = Pick<
+  NavigationGraphService,
+  "getCurrentScreen" | "getCurrentAppId" | "getEdgesFrom"
+>;
+
 export class EdgeMatchIndex {
   // tapOn: keyed by normalized args.text / element id.
   private readonly tapByText = new Map<string, IndexedEdge>();
@@ -194,7 +200,7 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
   private async buildPredictions(
     interactables: InteractableElement[],
     actionableEdges: NavigationEdge[],
-    navGraph: NavigationGraphManager,
+    navGraph: PredictionNavGraph,
     currentScreen: string,
     appId: string | null,
   ): Promise<Predictions | undefined> {
@@ -421,7 +427,7 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
   }
 
   private async getPredictedElements(
-    navGraph: NavigationGraphManager,
+    navGraph: PredictionNavGraph,
     screenName: string,
     cache: Map<string, string[]>,
   ): Promise<string[]> {

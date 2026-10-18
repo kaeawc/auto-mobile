@@ -52,3 +52,10 @@ test("rejects a raw migrations folder packed beside the static bundle", () => {
     findPackedAssetViolations([...completeManifest, "dist/src/db/migrations/2026_01_01_000.ts"]),
   ).toEqual(["Forbidden packed asset: dist/src/db/migrations/2026_01_01_000.ts"]);
 });
+
+test("packed dist source maps are forbidden but dependency maps are not inspected", () => {
+  expect(findPackedAssetViolations([...completeManifest, "dist/src/index.js.map"])).toEqual([
+    "Forbidden packed source map: dist/src/index.js.map",
+  ]);
+  expect(findPackedAssetViolations([...completeManifest, "node_modules/x/y.js.map"])).toEqual([]);
+});

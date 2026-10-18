@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { CREATE_SESSION_RELEASE_WAIT_MS, DevicePool } from "../../src/daemon/devicePool";
@@ -15,7 +16,6 @@ import { FakeDeviceHealthMarkers } from "../fakes/FakeDeviceHealthMarkers";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 const first = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
 const second = { deviceId: "emulator-5556", name: "Pixel B", platform: "android" as const };
@@ -81,13 +81,11 @@ async function poolFor(manager: SessionManager, timer: FakeTimer): Promise<Devic
   const utils = new FakeDeviceUtils();
   utils.setBootedDevices("android", [first, second]);
   PlatformDeviceManagerFactory.setInstance(utils);
-  const pool = new DevicePool(
-    createDevicePoolDependencies(manager, "create-release-wait-deadline", {
-      timer,
-      deviceManager: utils,
-      deviceHealthMarkers: new FakeDeviceHealthMarkers(timer),
-    }),
-  );
+  const pool = makePool(manager, "create-release-wait-deadline", {
+    timer,
+    deviceManager: utils,
+    deviceHealthMarkers: new FakeDeviceHealthMarkers(timer),
+  });
   await pool.initializeWithDevices([first, second]);
   return pool;
 }

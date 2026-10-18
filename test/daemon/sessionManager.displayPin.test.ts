@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
-import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
+import { TerminalSessionError } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { installSessionManagerCleanup, makeSessionManager } from "../helpers/sessionManagerSuite";
+
+installSessionManagerCleanup();
 
 function manager() {
-  return new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence(), {
-    barrier: () => new FakeDbWriteBarrier(),
-  });
+  return makeSessionManager({ fakeBarrier: true });
 }
 
 test("pin belongs to one session and clears on release and reacquisition with a new uuid", async () => {
@@ -44,16 +44,12 @@ test("rebind drops pin and observation cache clearing preserves it", async () =>
 test("persistence and restart rehydration never resurrect a session pin", async () => {
   const timer = new FakeTimer();
   const persistence = new FakeDeviceSessionPersistence();
-  const original = new SessionManager(timer, persistence, {
-    barrier: () => new FakeDbWriteBarrier(),
-  });
+  const original = makeSessionManager({ timer, persistence, fakeBarrier: true });
   await original.createSession("recover", "device-1", "android");
   original.setDisplayPin("recover", "inner");
   expect(await persistence.getSession!("recover")).not.toHaveProperty("displayPin");
   await original.releaseSession("recover", "daemon-restart");
-  const restarted = new SessionManager(timer, persistence, {
-    barrier: () => new FakeDbWriteBarrier(),
-  });
+  const restarted = makeSessionManager({ timer, persistence, fakeBarrier: true });
   const summary = await restarted.rehydratePersistedSessions({
     assignDeviceToSession: async (sessionId) => {
       await restarted.createSession(sessionId, "device-1", "android");

@@ -47,9 +47,11 @@ class FakeTransport {
 }
 
 interface CallbackInternals {
-  mcpHttpEndpoint: StatelessMcpHttpEndpoint<FakeMcpRequest, FakeResponse, FakeTransport>;
-  mcpHttpTransportFactory: () => FakeTransport;
-  mcpRequestServerFactory: () => { connect(): Promise<void>; close(): Promise<void> };
+  httpIngress: {
+    mcpHttpEndpoint: StatelessMcpHttpEndpoint<FakeMcpRequest, FakeResponse, FakeTransport>;
+    mcpHttpTransportFactory: () => FakeTransport;
+    mcpRequestServerFactory: () => { connect(): Promise<void>; close(): Promise<void> };
+  };
 }
 
 describe("daemon stateless MCP request close rejection ownership", () => {
@@ -67,8 +69,8 @@ describe("daemon stateless MCP request close rejection ownership", () => {
     // Construct only: no daemon startup, sockets, devices, or real timers.
     internals = new Daemon({}, { timer }) as unknown as CallbackInternals;
     transport = new FakeTransport();
-    internals.mcpHttpTransportFactory = () => transport;
-    internals.mcpRequestServerFactory = () => ({
+    internals.httpIngress.mcpHttpTransportFactory = () => transport;
+    internals.httpIngress.mcpRequestServerFactory = () => ({
       connect: async () => {},
       close: async () => {},
     });
@@ -90,7 +92,12 @@ describe("daemon stateless MCP request close rejection ownership", () => {
 
   async function openRequest(): Promise<FakeResponse> {
     const res = new FakeResponse();
-    await internals.mcpHttpEndpoint.handle(new FakeMcpRequest(), res, undefined, () => {});
+    await internals.httpIngress.mcpHttpEndpoint.handle(
+      new FakeMcpRequest(),
+      res,
+      undefined,
+      () => {},
+    );
     await transport.started;
     return res;
   }
@@ -109,7 +116,7 @@ describe("daemon stateless MCP request close rejection ownership", () => {
         error,
       );
       // The request is untracked and its transport closed even though cancellation failed.
-      expect(internals.mcpHttpEndpoint.inFlightCount).toBe(0);
+      expect(internals.httpIngress.mcpHttpEndpoint.inFlightCount).toBe(0);
       expect(transport.closed).toBe(1);
     } finally {
       cancel.mockRestore();
@@ -134,7 +141,7 @@ describe("daemon stateless MCP request close rejection ownership", () => {
         await timer.advanceTimersByTimeAsync(0);
       }
       expect(transport.closed).toBe(1);
-      expect(internals.mcpHttpEndpoint.inFlightCount).toBe(0);
+      expect(internals.httpIngress.mcpHttpEndpoint.inFlightCount).toBe(0);
     } finally {
       cancel.mockRestore();
     }

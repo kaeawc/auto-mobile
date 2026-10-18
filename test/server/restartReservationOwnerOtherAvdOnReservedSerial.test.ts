@@ -111,19 +111,19 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
       env,
       displayInventory: new FakeDisplayInventoryProvider(),
     });
-    const previousSessionManager: unknown = Reflect.get(ToolRegistry, "deviceSessionManager");
-    const previousToolCalls: unknown = Reflect.get(ToolRegistry, "toolCallRepository");
+    const previousCollaborators = ToolRegistry.getCollaboratorsForTesting();
     const deviceSessions = new FakeDeviceSessionManager();
     deviceSessions.setConnectedDevices([device]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", deviceSessions);
-    Reflect.set(ToolRegistry, "toolCallRepository", { recordToolCall: async () => {} });
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessions });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
     cleanups.push(() => {
       pool.releaseDeviceClaimsForShutdown();
       sessions.stopCleanupTimer();
       timer.reset();
       restorePipeline();
-      Reflect.set(ToolRegistry, "deviceSessionManager", previousSessionManager);
-      Reflect.set(ToolRegistry, "toolCallRepository", previousToolCalls);
+      ToolRegistry.setCollaboratorsForTesting(previousCollaborators);
     });
     setDeviceToolsDependencies({
       env,

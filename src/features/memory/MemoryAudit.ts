@@ -10,7 +10,7 @@ import { MemoryMetricsCollector, MemoryMetrics } from "./MemoryMetricsCollector"
 import { MemoryThresholdManager } from "./MemoryThresholdManager";
 import { MemoryBaselineManager } from "./MemoryBaselineManager";
 import type { Kysely } from "kysely";
-import { getDatabase } from "../../db/database";
+import { MemoryAuditResultRepository } from "../../db/memoryAuditResultRepository";
 import { Database, NewMemoryAuditResult } from "../../db/types";
 import { selectTopContributors } from "../../utils/topContributors";
 import { redactTypedTextArguments } from "../../utils/redactTypedTextArguments";
@@ -46,7 +46,7 @@ export class MemoryAudit {
   private metricsCollector: MemoryMetricsCollector;
   private thresholdManager: MemoryThresholdManager;
   private baselineManager: MemoryBaselineManager;
-  private readonly injectedDb: Kysely<Database> | null;
+  private readonly auditResults: MemoryAuditResultRepository;
 
   /**
    * @param db Optional Kysely handle, resolved LAZILY (per use, via {@link db})
@@ -66,12 +66,7 @@ export class MemoryAudit {
     this.metricsCollector = new MemoryMetricsCollector(device, adbFactory);
     this.thresholdManager = new MemoryThresholdManager(db);
     this.baselineManager = new MemoryBaselineManager(db);
-    this.injectedDb = db ?? null;
-  }
-
-  /** The injected DB, or the shared singleton resolved on first use. */
-  private get db(): Kysely<Database> {
-    return this.injectedDb ?? getDatabase();
+    this.auditResults = new MemoryAuditResultRepository(db);
   }
 
   /**
@@ -394,7 +389,7 @@ export class MemoryAudit {
         diagnostics_json: diagnostics,
       };
 
-      await this.db.insertInto("memory_audit_results").values(auditResult).execute();
+      await this.auditResults.insert(auditResult);
 
       logger.info(
         `[MemoryAudit] Stored audit result for ${packageName}/${toolName}: ${passed ? "PASSED" : "FAILED"}`,

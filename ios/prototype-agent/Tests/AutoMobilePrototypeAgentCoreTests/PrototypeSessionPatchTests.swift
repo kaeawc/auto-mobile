@@ -256,4 +256,38 @@ final class PrototypeSessionPatchTests: XCTestCase {
         )
         XCTAssertEqual(second, .applied(revision: 3))
     }
+
+    // MARK: Size baseline after a data write
+
+    private func dataWrite(_ json: String) throws -> [PrototypeAction] {
+        try JSONDecoder().decode([PrototypeAction].self, from: Data(json.utf8))
+    }
+
+    /// A `setData` action grows the spec like a patch does, so a later patch is measured against it.
+    func testGrowingDataByAnActionRaisesTheSizeBaselineForLaterPatches() throws {
+        var session = try nearCapSession()
+        let grown = String(repeating: "d", count: 120)
+        let events = try session
+            .run(dataWrite(#"[{"type":"setData","path":"/data/title","value":{"value":"\#(grown)"}}]"#))
+        XCTAssertEqual(events.count, 1)
+        let text = String(repeating: "s", count: 60)
+        let (second, _) = try session.patch(
+            id: "p", baseRevision: 2,
+            ops: ops(#"[{"op":"replace","path":"/state/count","value":"\#(text)"}]"#)
+        )
+        guard case let .rejected(message, _) = second else { return XCTFail("expected a refusal, got \(second)") }
+        XCTAssertEqual(message, "Spec byte limit exceeded")
+    }
+
+    func testShrinkingDataByAnActionLowersTheSizeBaselineForLaterPatches() throws {
+        var session = try nearCapSession()
+        let events = try session.run(dataWrite(#"[{"type":"removeData","path":"/data/items"}]"#))
+        XCTAssertEqual(events.count, 1)
+        let text = String(repeating: "s", count: 155)
+        let (second, _) = try session.patch(
+            id: "p", baseRevision: 2,
+            ops: ops(#"[{"op":"replace","path":"/state/count","value":"\#(text)"}]"#)
+        )
+        XCTAssertEqual(second, .applied(revision: 3))
+    }
 }

@@ -143,22 +143,21 @@ describe("start admission and owner resume for restart reservations", () => {
       env,
       displayInventory: new FakeDisplayInventoryProvider(),
     });
-    const previousSessionManager: unknown = Reflect.get(ToolRegistry, "deviceSessionManager");
-    const previousToolCalls: unknown = Reflect.get(ToolRegistry, "toolCallRepository");
+    const previousCollaborators = ToolRegistry.getCollaboratorsForTesting();
     const deviceSessions = new FakeDeviceSessionManager();
     deviceSessions.setConnectedDevices([device]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", deviceSessions);
-    Reflect.set(ToolRegistry, "toolCallRepository", { recordToolCall: async () => {} });
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessions });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { recordToolCall: async () => {} },
+    });
     cleanups.push(() => {
       pool.releaseDeviceClaimsForShutdown();
       sessions.stopCleanupTimer();
       timer.reset();
       expect(timer.getPendingTimeoutCount()).toBe(0);
       restorePipeline();
-      Reflect.set(ToolRegistry, "deviceSessionManager", previousSessionManager);
-      Reflect.set(ToolRegistry, "toolCallRepository", previousToolCalls);
-      expect(Reflect.get(ToolRegistry, "deviceSessionManager")).toBe(previousSessionManager);
-      expect(Reflect.get(ToolRegistry, "toolCallRepository")).toBe(previousToolCalls);
+      ToolRegistry.setCollaboratorsForTesting(previousCollaborators);
+      expect(ToolRegistry.getCollaboratorsForTesting()).toEqual(previousCollaborators);
     });
     lastManagerFactory = () => manager;
     setDeviceToolsDependencies({

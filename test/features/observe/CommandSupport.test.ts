@@ -144,7 +144,7 @@ describe("CtrlProxy command support", () => {
         "show_prototype",
         "dismiss_prototype",
         // Newer than the old-APK fixture: no older APK advertises it.
-        "prototype_display_id_v1",
+        "prototype_display_id_v2",
         "prototype_window_options_v1",
         "prototype_persistence_replay_v1",
         "prototype_show_in_place_v1",

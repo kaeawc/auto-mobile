@@ -1,5 +1,5 @@
 complexity:
-  active: false
+  active: true
 coroutines:
   active: true
 empty-blocks:

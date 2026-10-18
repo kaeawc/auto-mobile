@@ -1,6 +1,8 @@
 import type { Kysely } from "kysely";
 import { getDatabase } from "./database";
+import { nowIso } from "./nowIso";
 import type { Database } from "./types";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 /** One tool's enable/disable decision inside a batch write. */
 export interface SessionToolSelectionEntry {
@@ -26,7 +28,10 @@ export interface SessionToolSelectionRepository {
 }
 
 export class SqliteSessionToolSelectionRepository implements SessionToolSelectionRepository {
-  constructor(private readonly resolveDatabase: () => Kysely<Database> = getDatabase) {}
+  constructor(
+    private readonly resolveDatabase: () => Kysely<Database> = getDatabase,
+    private readonly timer: Timer = defaultTimer,
+  ) {}
 
   async list(sessionUuid: string): Promise<Map<string, boolean>> {
     const rows = await this.resolveDatabase()
@@ -44,7 +49,7 @@ export class SqliteSessionToolSelectionRepository implements SessionToolSelectio
       .onConflict((conflict) =>
         conflict.columns(["session_uuid", "tool_name"]).doUpdateSet({
           enabled: enabled ? 1 : 0,
-          updated_at: new Date().toISOString(),
+          updated_at: nowIso(this.timer),
         }),
       )
       .execute();
@@ -60,7 +65,7 @@ export class SqliteSessionToolSelectionRepository implements SessionToolSelectio
     if (entries.length === 0) {
       return;
     }
-    const updatedAt = new Date().toISOString();
+    const updatedAt = nowIso(this.timer);
     await this.resolveDatabase()
       .transaction()
       .execute(async (trx) => {

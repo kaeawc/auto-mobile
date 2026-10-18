@@ -255,7 +255,7 @@ export class SwipeOn extends BaseVisualChange {
   private executeGesture!: GestureExecutor;
   private scrollables!: ScrollableElementsQuery;
   private geometry!: ElementGeometry;
-  private accessibilityService!: AndroidCtrlProxyClient;
+  private accessibilityService!: import("./types").SwipeOnCtrlProxy;
   private accessibilityDetector!: AccessibilityDetector;
   private featureFlags!: FeatureFlagReader;
   private overlayDetector: OverlayDetector;
@@ -1123,9 +1123,11 @@ export class SwipeOn extends BaseVisualChange {
           options.display,
           this.observeScreen,
           this.adb,
-          this.lastRenderedObservation,
-          signal,
-          this.displayTransitionReader,
+          {
+            lastRenderedObservation: this.lastRenderedObservation,
+            signal,
+            transitions: this.displayTransitionReader,
+          },
         );
         throwIfAborted(signal);
         if (this.device.platform === "android") {

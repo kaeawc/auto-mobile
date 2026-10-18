@@ -13,6 +13,12 @@ import {
   type InputTapParams,
   type InputTypeTextParams,
 } from "./inputRouteParams";
+import {
+  dispatchInputRoute,
+  isOwnerFencedMethod,
+  runPassthroughForward,
+  type InputRouteHandlers,
+} from "./socketServer/controlRoutes";
 import { IDE_DEVICE_MUTATION_METHODS, IDE_ROUTE_PARSERS, STARTUP_PROBE_METHODS } from "./ideRoutes";
 import { ideFeatureRoutes } from "./socketServer/ideRouteModule";
 import { daemonLifecycleRoutes } from "./socketServer/lifecycleRouteModule";
@@ -3957,7 +3963,7 @@ export class UnixSocketServer {
       onInputDispatch?: () => void;
     },
   ): Promise<unknown> {
-    if (!request.method.startsWith("input/") && !IDE_DEVICE_MUTATION_METHODS.has(request.method)) {
+    if (!isOwnerFencedMethod(request.method, IDE_DEVICE_MUTATION_METHODS)) {
       return await this.handleLocalSocketRequest(request, sessionId);
     }
     const owner = this.mcpRequestSignal(sessionId, ownerSocket, cancelSignal);
@@ -4002,28 +4008,30 @@ export class UnixSocketServer {
     return await this.dispatchIdeSocketRequest(request, socketSessionId, signal);
   }
 
-  /** Runs the handler an `input/*` route table entry names. */
   private async dispatchInputRoute(
     route: InputRouteEntry,
     request: DaemonRequest,
     socketSessionId: string | undefined,
     input: InputRequestContext,
   ): Promise<any | undefined> {
-    switch (route.handler) {
-      case "tap":
-        return await this.handleInputTap(request, socketSessionId, input);
-      case "swipe":
-        return await this.handleInputSwipe(request, socketSessionId, input);
-      case "typeText":
-        return await this.handleInputTypeText(request, socketSessionId, input);
-      case "pressButton":
-        return await this.handleInputPressButton(request, socketSessionId, input);
-      case "key":
-        return await this.handleInputKey(request, socketSessionId, input);
-      case "gesture":
-        return await this.handleInputGesture(request, route.gestureKind, socketSessionId, input);
-    }
+    return await dispatchInputRoute(
+      this.inputRouteHandlers,
+      route,
+      request,
+      socketSessionId,
+      input,
+    );
   }
+
+  /** The handler each `input/*` route table entry names (#11815). */
+  private readonly inputRouteHandlers: InputRouteHandlers<InputRequestContext> = {
+    tap: (request, sid, input) => this.handleInputTap(request, sid, input),
+    swipe: (request, sid, input) => this.handleInputSwipe(request, sid, input),
+    typeText: (request, sid, input) => this.handleInputTypeText(request, sid, input),
+    pressButton: (request, sid, input) => this.handleInputPressButton(request, sid, input),
+    key: (request, sid, input) => this.handleInputKey(request, sid, input),
+    gesture: (request, kind, sid, input) => this.handleInputGesture(request, kind, sid, input),
+  };
 
   /** A route that mutates a device runs as one tracked control call (#11486); the rest run bare. */
   private async dispatchIdeSocketRequest(
@@ -6810,12 +6818,19 @@ export class UnixSocketServer {
     signal?.throwIfAborted();
     const requestOptions = this.mcpRequestOptions(timeoutMs, signal);
 
+    const passthrough = runPassthroughForward({
+      mcpClient,
+      request,
+      timeoutMs,
+      options: requestOptions,
+      admitted: (args, forward) => this.withAdmittedBoundSession(args, forward),
+      readAdmissionArgs: (r) => this.boundSessionAdmissionArgs(r),
+    });
+    if (passthrough) {
+      return await passthrough;
+    }
+
     switch (request.method) {
-      case "tools/list": {
-        return await this.withAdmittedBoundSession(request.params, () =>
-          mcpClient.listTools(undefined, requestOptions),
-        );
-      }
       case "tools/call": {
         const progressToken = request.progressToken;
         // Cleanup includes the live dispatch evidence on every tools/call and
@@ -6949,34 +6964,6 @@ export class UnixSocketServer {
         } finally {
           cleanup();
         }
-      }
-      case "resources/list": {
-        return await this.withAdmittedBoundSession(request.params, () =>
-          mcpClient.listResources(undefined, requestOptions),
-        );
-      }
-      case "resources/read": {
-        if (!request.params?.uri) {
-          throw new Error("resources/read requires params.uri");
-        }
-        return await this.withAdmittedBoundSession(this.boundSessionAdmissionArgs(request), () =>
-          mcpClient.readResource({ uri: request.params.uri }, requestOptions),
-        );
-      }
-      case "resources/list-templates": {
-        return await this.withAdmittedBoundSession(request.params, () =>
-          mcpClient.listResourceTemplates(undefined, requestOptions),
-        );
-      }
-      case "ide/getNavigationGraph": {
-        const args = {
-          ...(request.params ?? {}),
-          [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: timeoutMs,
-        };
-        return await mcpClient.callTool(
-          { name: "getNavigationGraph", arguments: args },
-          requestOptions,
-        );
       }
       default:
         // `tasks/get`, `tasks/update` and `tasks/cancel` (#4668); anything else is refused.

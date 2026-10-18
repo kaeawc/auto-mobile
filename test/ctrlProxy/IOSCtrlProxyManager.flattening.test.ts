@@ -592,42 +592,4 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
     expect(shared.teardownCommitted).toBe(true);
     expect(manager["isStopping"]).toBe(false);
   });
-
-  test.each(["present", "absent", "failed", "missing data", "throws"])(
-    "remote simulator detection: %s",
-    async (branch) => {
-      const remote = remoteRunner();
-      const manager = makeManager(simulator, remote);
-      const failure = new Error("enumeration unavailable");
-      const list = spyOn(remote, "runSimctl").mockImplementation(async () => {
-        if (branch === "throws") {
-          throw failure;
-        }
-        if (branch === "failed") {
-          return { success: false };
-        }
-        if (branch === "missing data") {
-          return { success: true };
-        }
-        return { success: true, data: { stdout: branch === "present" ? simulator.deviceId : "" } };
-      });
-      const debug = spyOn(logger, "debug").mockImplementation(() => {});
-      restores.push(
-        () => list.mockRestore(),
-        () => debug.mockRestore(),
-      );
-      expect(await manager["isDeviceDetected"]()).toBe(branch === "present");
-      expect(list).toHaveBeenCalledWith(["list", "devices"]);
-      expect(debug.mock.calls).toEqual(
-        branch === "throws"
-          ? [
-              [
-                "src/ctrlProxy/IOSCtrlProxyManager.ts fallback failed: Error: enumeration unavailable",
-                failure,
-              ],
-            ]
-          : [],
-      );
-    },
-  );
 });

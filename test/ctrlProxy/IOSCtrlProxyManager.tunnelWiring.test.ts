@@ -594,7 +594,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
   );
   test("simulator supervised probe returns before detection and disconnect uses manager identity before start", async () => {
     const { manager, supervisor, events } = realFixture();
-    const detection = spyOn(manager, "isDeviceDetected").mockResolvedValue(false);
+    const detection = spyOn(manager["deviceDetector"], "isDeviceDetected").mockResolvedValue(false);
     keep(detection);
     const simulator = spyOn(manager, "isSimulator").mockReturnValue(true);
     keep(simulator);

@@ -4,13 +4,37 @@ import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { PortManager } from "../../src/utils/PortManager";
+import { logger } from "../../src/utils/logger";
 import {
   FakeListeningProcess,
   createFakeBuilder,
   deferred,
+  flushUntil,
   installIosManagerSuiteHooks,
   installListeningProcessFakes,
 } from "../helpers/iosCtrlProxyManagerHarness";
+
+type RemoteRunner = NonNullable<Parameters<typeof IOSCtrlProxyManager.createForTestingWithDeps>[6]>;
+
+/** A host-control runner that reports itself enabled, with `overrides` replacing individual calls. */
+function physicalRemoteRunner(overrides: Partial<RemoteRunner> = {}): RemoteRunner {
+  return {
+    isEnabled: () => true,
+    isRunningInDocker: () => true,
+    isAvailable: async () => true,
+    getHost: () => "remote-host",
+    runIdeviceId: async () => ({ success: true, data: { stdout: "" } }),
+    runIdeviceInstaller: async () => ({ success: true, data: { stdout: "" } }),
+    runSimctl: async () => ({ success: true, data: { stdout: "" } }),
+    startIproxy: async () => ({ success: true, data: { pid: 99 } }),
+    stopIproxy: async () => ({ success: true }),
+    getIproxyStatus: async () => ({ success: true, data: { running: true } }),
+    start: async () => ({ success: true, data: { pid: 42, message: "started" } }),
+    stop: async () => ({ success: true }),
+    status: async () => ({ success: true, data: { running: false } }),
+    ...overrides,
+  };
+}
 
 describe("IOSCtrlProxyManager shutdown and eviction", function () {
   let testDevice: BootedDevice;
@@ -22,7 +46,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
   });
 
   describe("shutdownAll", function () {
-    test("returns the original timeout error after forced stop and clears its deadline", async () => {
+    test("reports the original timeout after forced stop and clears its deadline", async () => {
       const manager = IOSCtrlProxyManager.getInstance(testDevice);
       const stop = deferred();
       const force = deferred();
@@ -32,23 +56,23 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
         forceCalled.resolve();
         return force.promise;
       });
-      const boundary = IOSCtrlProxyManager as unknown as {
-        stopWithinShutdownDeadline(
-          instance: IOSCtrlProxyManager,
-          timer: FakeTimer,
-        ): Promise<unknown>;
-      };
-      const stopped = boundary.stopWithinShutdownDeadline(manager, fakeTimer);
-      expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
-      fakeTimer.advanceTime(1_200);
-      await forceCalled.promise;
-      force.resolve();
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const shutdown = IOSCtrlProxyManager.shutdownAll(fakeTimer);
+        expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+        fakeTimer.advanceTime(1_200);
+        await forceCalled.promise;
+        force.resolve();
+        await shutdown;
 
-      const result = await stopped;
-      expect(result).toBeInstanceOf(Error);
-      expect((result as Error).message).toBe("timed out after 1200ms");
-      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
-      stop.resolve();
+        expect(warn).toHaveBeenCalledWith(
+          "[IOSCtrlProxy] Failed to stop instance during shutdown: Error: timed out after 1200ms",
+        );
+        expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+        stop.resolve();
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     test("awaits in-flight force termination when the original stop settles", async () => {
@@ -56,7 +80,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
       const stop = deferred();
       const force = deferred();
       spyOn(manager, "stop").mockReturnValue(stop.promise);
-      spyOn(manager as any, "forceStopForShutdown").mockReturnValue(force.promise);
+      spyOn(manager, "forceStopForShutdown").mockReturnValue(force.promise);
       let settled = false;
       const shutdown = IOSCtrlProxyManager.shutdownAll(fakeTimer).then(() => {
         settled = true;
@@ -95,7 +119,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
           executor,
         );
         manager.setXcTestProcessIdForTesting(42);
-        (IOSCtrlProxyManager as any).instances.set(testDevice.deviceId, manager);
+        manager.registerForTesting();
         let settled = false;
         const shutdown = IOSCtrlProxyManager.shutdownAll(fakeTimer).then(() => {
           settled = true;
@@ -135,7 +159,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
       } as const;
       const second = IOSCtrlProxyManager.getInstance(otherDevice);
       const firstStop = spyOn(first, "stop").mockRejectedValue(new Error("iproxy stop failed"));
-      const forceStop = spyOn(first as any, "forceStopForShutdown").mockResolvedValue();
+      const forceStop = spyOn(first, "forceStopForShutdown").mockResolvedValue();
       const secondStop = spyOn(second, "stop").mockResolvedValue();
 
       await expect(IOSCtrlProxyManager.shutdownAll()).resolves.toBeUndefined();
@@ -158,7 +182,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
       const firstStop = spyOn(first, "stop").mockImplementation(async () => {
         await new Promise<void>(() => {});
       });
-      const forceStop = spyOn(first as any, "forceStopForShutdown").mockImplementation(() => {});
+      const forceStop = spyOn(first, "forceStopForShutdown").mockImplementation(() => {});
       const secondStop = spyOn(second, "stop").mockResolvedValue();
       const shutdown = IOSCtrlProxyManager.shutdownAll(timer);
 
@@ -226,15 +250,8 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
             undefined,
             remoteRunner,
             { isAvailable: async () => true },
-          );
+          ).registerForTesting();
           spyOn(manager, "isRunning").mockResolvedValue(false);
-          spyOn(
-            manager as unknown as { isCtrlProxyProcessAlive: () => Promise<boolean> },
-            "isCtrlProxyProcessAlive",
-          ).mockResolvedValue(false);
-          (
-            IOSCtrlProxyManager as unknown as { instances: Map<string, IOSCtrlProxyManager> }
-          ).instances.set(device.deviceId, manager);
 
           const startup = manager.start();
           await startCalled.promise;
@@ -259,64 +276,23 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
     }
 
     test("force-stops a late remote runner when admission cleanup never settles (#7108)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        { ...testDevice, deviceId: "00008030-001E28C11E" },
-        fakeTimer,
-        undefined,
-        new FakeProcessExecutor(),
-      );
-      const controller = new AbortController();
+      const remoteStart = Promise.withResolvers<{
+        success: boolean;
+        data?: { pid: number; message: string };
+      }>();
+      const startCalled = Promise.withResolvers<void>();
       const stoppedPids: number[] = [];
-      const internal = manager as unknown as {
-        sharedStart: { controller: AbortController } | null;
-        xcTestProcessId: number | null;
-        remoteRunner: {
-          stop: (options: { deviceId: string; pid: number }) => Promise<{ success: boolean }>;
-        };
-        useRemoteRunner: () => boolean;
-        fenceLateRemoteStartAfterShutdown: (runnerPid: number) => Promise<void>;
-        forceStopForShutdown: (deadline: number) => Promise<void>;
-      };
-      const firstStop = new Promise<{ success: boolean }>(() => {});
-      internal.remoteRunner.stop = async ({ pid }) => {
-        stoppedPids.push(pid);
-        return stoppedPids.length === 1 ? firstStop : { success: true };
-      };
-      spyOn(internal, "useRemoteRunner").mockReturnValue(true);
-      internal.sharedStart = {
-        controller,
-      };
-      controller.abort(new Error("iOS CtrlProxy startup was cancelled by stop()"));
-
-      const fence = internal.fenceLateRemoteStartAfterShutdown(42);
-      void fence.catch(() => {});
-      await Promise.resolve();
-
-      expect(internal.xcTestProcessId).toBe(42);
-      await internal.forceStopForShutdown(fakeTimer.now() + 250);
-
-      expect(stoppedPids).toEqual([42, 42]);
-      expect(internal.xcTestProcessId).toBeNull();
-    });
-
-    test("publishes a physical remote runner before yielding to its late-start fence (#7108)", async function () {
-      const fenceEntered = Promise.withResolvers<void>();
-      const releaseFence = Promise.withResolvers<void>();
-      const remoteRunner = {
-        isEnabled: () => true,
-        isRunningInDocker: () => true,
-        isAvailable: async () => true,
-        getHost: () => "remote-host",
-        runIdeviceId: async () => ({ success: true, data: { stdout: "" } }),
-        runIdeviceInstaller: async () => ({ success: true, data: { stdout: "" } }),
-        runSimctl: async () => ({ success: true, data: { stdout: "" } }),
-        startIproxy: async () => ({ success: true, data: { pid: 99 } }),
-        stopIproxy: async () => ({ success: true }),
-        getIproxyStatus: async () => ({ success: true, data: { running: true } }),
-        start: async () => ({ success: true, data: { pid: 42, message: "started" } }),
-        stop: async () => ({ success: true }),
-        status: async () => ({ success: true, data: { running: false } }),
-      };
+      const remoteRunner = physicalRemoteRunner({
+        start: () => {
+          startCalled.resolve();
+          return remoteStart.promise;
+        },
+        stop: async ({ pid }) => {
+          stoppedPids.push(pid);
+          // Admission cleanup (the first stop) never settles; the shutdown force-stop does.
+          return stoppedPids.length === 1 ? new Promise<never>(() => {}) : { success: true };
+        },
+      });
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
         { ...testDevice, deviceId: "00008030-001E28C11E" },
         fakeTimer,
@@ -327,19 +303,47 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
         remoteRunner,
         { isAvailable: async () => true },
       );
-      const internal = manager as unknown as {
-        xcTestProcessId: number | null;
-        startOnDevice: () => Promise<void>;
-        fenceLateRemoteStartAfterShutdown: () => Promise<void>;
-      };
-      spyOn(internal, "fenceLateRemoteStartAfterShutdown").mockImplementation(async () => {
-        fenceEntered.resolve();
-        await releaseFence.promise;
-      });
+      // The startup is cancelled by stop() below and its settlement is not asserted here.
+      void manager.start().catch(() => {});
+      await startCalled.promise;
+      void manager.stop(fakeTimer.now() + 1_200).catch(() => {});
+      remoteStart.resolve({ success: true, data: { pid: 42, message: "started" } });
+      await flushUntil(
+        () => stoppedPids.length === 1,
+        "the late remote runner's admission cleanup",
+      );
 
-      const startup = internal.startOnDevice();
+      expect(manager.getXcTestProcessId()).toBe(42);
+      await manager.forceStopForShutdown(fakeTimer.now() + 250);
+
+      expect(stoppedPids).toEqual([42, 42]);
+      expect(manager.getXcTestProcessId()).toBeNull();
+    });
+
+    test("publishes a physical remote runner before yielding to its late-start fence (#7108)", async function () {
+      const fenceEntered = Promise.withResolvers<void>();
+      const releaseFence = Promise.withResolvers<void>();
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: { ...testDevice, deviceId: "00008030-001E28C11E" },
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: new FakeProcessExecutor(),
+        remoteRunner: physicalRemoteRunner(),
+        hostPortAvailabilityChecker: { isAvailable: async () => true },
+        steps: {
+          fenceLateRemoteStartAfterShutdown: async () => {
+            fenceEntered.resolve();
+            await releaseFence.promise;
+          },
+          waitForHealthEndpoint: async () => true,
+          completeHealthStartup: async () => {},
+        },
+      });
+      spyOn(manager, "isRunning").mockResolvedValue(false);
+
+      const startup = manager.start();
       await fenceEntered.promise;
-      expect(internal.xcTestProcessId).toBe(42);
+      expect(manager.getXcTestProcessId()).toBe(42);
 
       releaseFence.resolve();
       await startup;
@@ -529,7 +533,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
     test("stops the instance, deletes the map entry, and releases the port", async function () {
       const first = IOSCtrlProxyManager.getInstance(testDevice);
       expect(PortManager.getPort(testDevice.deviceId)).toBeDefined();
-      const forceStop = spyOn(first as any, "forceStopForShutdown").mockResolvedValue();
+      const forceStop = spyOn(first, "forceStopForShutdown").mockResolvedValue();
 
       await IOSCtrlProxyManager.evict(testDevice.deviceId);
 
@@ -542,10 +546,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
     test("preserves a replacement port while retiring old cleanup", async function () {
       const first = IOSCtrlProxyManager.getInstance(testDevice);
       let finish!: () => void;
-      spyOn(
-        first as unknown as { forceStopForShutdown: () => Promise<void> },
-        "forceStopForShutdown",
-      ).mockImplementation(() => {
+      spyOn(first, "forceStopForShutdown").mockImplementation(() => {
         PortManager.release(testDevice.deviceId);
         return new Promise<void>((resolve) => {
           finish = resolve;
@@ -567,7 +568,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
       };
       const evicted = IOSCtrlProxyManager.getInstance(testDevice);
       const other = IOSCtrlProxyManager.getInstance(otherDevice);
-      spyOn(evicted as any, "forceStopForShutdown").mockResolvedValue();
+      spyOn(evicted, "forceStopForShutdown").mockResolvedValue();
 
       await IOSCtrlProxyManager.evict(testDevice.deviceId);
 
@@ -585,7 +586,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
     test("does not wait when the eviction deadline has already expired", async function () {
       const first = IOSCtrlProxyManager.getInstance(testDevice);
       const timer = new FakeTimer();
-      const forceStop = spyOn(first as any, "forceStopForShutdown").mockImplementation(
+      const forceStop = spyOn(first, "forceStopForShutdown").mockImplementation(
         () => new Promise<void>(() => {}),
       );
       let settled = false;
@@ -606,7 +607,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
     test("caps force-stop waiting at the remaining eviction deadline", async function () {
       const first = IOSCtrlProxyManager.getInstance(testDevice);
       const timer = new FakeTimer();
-      const forceStop = spyOn(first as any, "forceStopForShutdown").mockImplementation(
+      const forceStop = spyOn(first, "forceStopForShutdown").mockImplementation(
         () => new Promise<void>(() => {}),
       );
       let settled = false;
@@ -631,7 +632,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
 
     test("still releases the port and clears the map entry when stopping fails", async function () {
       const first = IOSCtrlProxyManager.getInstance(testDevice);
-      spyOn(first as any, "forceStopForShutdown").mockRejectedValue(new Error("stop failed"));
+      spyOn(first, "forceStopForShutdown").mockRejectedValue(new Error("stop failed"));
 
       await IOSCtrlProxyManager.evict(testDevice.deviceId);
 
@@ -642,7 +643,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
     test("releases the port and clears the map entry within the deadline when forceStopForShutdown never resolves", async function () {
       const first = IOSCtrlProxyManager.getInstance(testDevice);
       const timer = new FakeTimer();
-      const forceStop = spyOn(first as any, "forceStopForShutdown").mockImplementation(() => {
+      const forceStop = spyOn(first, "forceStopForShutdown").mockImplementation(() => {
         return new Promise<void>(() => {});
       });
 

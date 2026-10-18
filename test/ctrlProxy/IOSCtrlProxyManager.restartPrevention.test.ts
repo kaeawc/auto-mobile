@@ -3,14 +3,19 @@ import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
+import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { FakeIosTunnelClient } from "../fakes/FakeIosTunnelClient";
 import { createExecResult } from "../../src/utils/execResult";
 import { IosCtrlProxyProcessClient } from "../../src/ctrlProxy/ios/IosCtrlProxyProcessClient";
 import { logger } from "../../src/utils/logger";
 import {
   FakeListeningProcess,
+  captureLifecycleSteps,
   createFakeBuilder,
+  createSupervisorProbe,
   deferred,
+  flushUntil,
   installIosManagerSuiteHooks,
   installListeningProcessFakes,
   tunnel,
@@ -97,20 +102,17 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     }
 
     test("stop() tears down only the tracked owned runner tree without global pkill (#2847)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const tunnelClient = new FakeIosTunnelClient();
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        tunnelClient,
+      });
       // Startup may publish its PID while tunnel shutdown yields.
-      const internal = manager as unknown as {
-        xcTestProcessId: number | null;
-        stopIproxyTunnel: () => Promise<void>;
-      };
-      internal.stopIproxyTunnel = async () => {
+      tunnelClient.stop = async () => {
         await Promise.resolve();
-        internal.xcTestProcessId = 912345;
+        manager.setXcTestProcessIdForTesting(912345);
       };
 
       const ownedRunner = ownRunnerProcess(912345);
@@ -188,12 +190,6 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("stop() cancels and awaits a local startup before retiring its published runner", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        physicalDevice,
-        fakeTimer,
-        createFakeBuilder(),
-        fakeExecutor,
-      );
       const startupEntered = deferred();
       const releaseStartup = deferred();
       const tunnelStopEntered = deferred();
@@ -203,45 +199,45 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       const runnerController = new AbortController();
       const terminatedPids: number[] = [];
       let sharedStartupSignal: AbortSignal | undefined;
-      const internal = manager as unknown as {
-        sharedStart: { controller: AbortController } | null;
-        runnerAbortController: AbortController | null;
-        xcTestProcessId: number | null;
-        xcTestProcess: FakeChildProcess | null;
-        processClient: IosCtrlProxyProcessClient;
-        awaitStartupOrphanRunnerReap: () => Promise<void>;
-        isCtrlProxyProcessAlive: () => Promise<boolean>;
-        isRunning: () => Promise<boolean>;
-        startOnDevice: () => Promise<void>;
-        waitForHealthEndpoint: (start: { controller: AbortController }) => Promise<boolean>;
-        completeHealthStartup: () => Promise<void>;
-        stopIproxyTunnel: () => Promise<void>;
-        isOwnRunnerProcessAlive: () => Promise<boolean>;
+      const processClient = new IosCtrlProxyProcessClient(fakeExecutor, fakeTimer);
+      processClient.terminateProcessTree = async (pid) => {
+        terminatedPids.push(pid);
       };
-      internal.awaitStartupOrphanRunnerReap = async () => {};
-      internal.isCtrlProxyProcessAlive = async () => false;
-      internal.isRunning = async () => false;
-      internal.startOnDevice = async () => {
-        sharedStartupSignal = internal.sharedStart?.controller.signal;
-        startupEntered.resolve();
-        await releaseStartup.promise;
-        internal.runnerAbortController = runnerController;
-        internal.xcTestProcessId = runner.pid!;
-        internal.xcTestProcess = runner;
-      };
-      internal.waitForHealthEndpoint = async (start) => {
-        start.controller.signal.throwIfAborted();
-        return true;
-      };
-      internal.completeHealthStartup = async () => {};
-      internal.stopIproxyTunnel = async () => {
+      const tunnelClient = new FakeIosTunnelClient();
+      tunnelClient.stop = async () => {
         tunnelStopEntered.resolve();
         await releaseTunnelStop.promise;
       };
-      internal.isOwnRunnerProcessAlive = async () => true;
-      internal.processClient.terminateProcessTree = async (pid) => {
-        terminatedPids.push(pid);
-      };
+      const manager: IOSCtrlProxyManager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: physicalDevice,
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: fakeExecutor,
+        processClient,
+        tunnelClient,
+        steps: (defaults) => ({
+          startInternal: (start) => {
+            sharedStartupSignal = start.controller.signal;
+            return defaults.startInternal(start);
+          },
+          startOnDevice: async () => {
+            startupEntered.resolve();
+            await releaseStartup.promise;
+            manager.trackRunnerForTesting({
+              pid: runner.pid!,
+              process: runner as unknown as ChildProcess,
+              abortController: runnerController,
+            });
+          },
+          waitForHealthEndpoint: async (start) => {
+            start.controller.signal.throwIfAborted();
+            return true;
+          },
+          completeHealthStartup: async () => {},
+          isOwnRunnerProcessAlive: async () => true,
+        }),
+      });
+      spyOn(manager, "isRunning").mockResolvedValue(false);
 
       const startOutcome = manager.start().then(
         () => "resolved" as const,
@@ -264,8 +260,10 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       expect(stopResult).toBe("resolved");
       expect(terminatedPids).toEqual([runner.pid]);
       expect(runnerController.signal.aborted).toBe(true);
-      expect(internal.xcTestProcessId).toBeNull();
-      expect(internal.xcTestProcess).toBeNull();
+      expect(manager.runnerSnapshot()).toMatchObject({
+        xcTestProcessId: null,
+        xcTestProcess: null,
+      });
     });
 
     test("forceStopForShutdown does not signal a recycled tracked PID that is no longer our runner (#6579)", async function () {
@@ -332,24 +330,27 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     test.each(["error", "timeout"])(
       "keeps an inconclusive ownership %s separate from mismatch",
       async function (mode) {
-        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-          testDevice,
-          fakeTimer,
-          undefined,
-          fakeExecutor,
-        );
+        const processClient = new IosCtrlProxyProcessClient(fakeExecutor, fakeTimer);
+        const terminatedPids: number[] = [];
+        processClient.terminateProcessTree = async (pid) => {
+          terminatedPids.push(pid);
+        };
+        const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+          device: testDevice,
+          timer: fakeTimer,
+          processExecutor: fakeExecutor,
+          processClient,
+        });
+        manager.setXcTestProcessIdForTesting(912350);
         fakeExecutor.setCommandHandler("ps -p", async () => {
           if (mode === "error") {
             throw new Error("temporary ps failure");
           }
           return new Promise<ReturnType<typeof createExecResult>>(() => {});
         });
-        const result = (
-          manager as unknown as {
-            isRunnerStillOwnedWithinShutdownDeadline: (pid: number) => Promise<boolean>;
-          }
-        ).isRunnerStillOwnedWithinShutdownDeadline(912350);
-        expect(await fakeTimer.resolvePromise(result)).toBe(true);
+        await fakeTimer.resolvePromise(manager.forceStopForShutdown(fakeTimer.now() + 5_000));
+        // An inconclusive ownership probe fails open: the runner is still torn down.
+        expect(terminatedPids).toEqual([912350]);
         expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
       },
     );
@@ -373,19 +374,18 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("forceStopForShutdown does not SIGKILL an unconfirmed-ownership PID after the probe budget is exhausted (#6898)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const processClient = new IosCtrlProxyProcessClient(fakeExecutor, fakeTimer);
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        processClient,
+      });
       const runnerPid = 912353;
       manager.setXcTestProcessIdForTesting(runnerPid);
       const ownedRunner = { ...ownRunnerProcess(runnerPid), ppid: process.pid };
       installListeningProcessFakes(fakeExecutor, [ownedRunner]);
 
-      const processClient = (manager as unknown as { processClient: IosCtrlProxyProcessClient })
-        .processClient;
       let ownershipChecks = 0;
       processClient.checkRunnerOwnership = async (_pid, _deviceId, deadline) => {
         ownershipChecks++;
@@ -416,18 +416,17 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("forceStopForShutdown reserves SIGKILL time after both ownership probes confirm the runner (#6898)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const processClient = new IosCtrlProxyProcessClient(fakeExecutor, fakeTimer);
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        processClient,
+      });
       const runnerPid = 912354;
       manager.setXcTestProcessIdForTesting(runnerPid);
       const ownedRunner = { ...ownRunnerProcess(runnerPid), ppid: process.pid };
       installListeningProcessFakes(fakeExecutor, [ownedRunner]);
-      const processClient = (manager as unknown as { processClient: IosCtrlProxyProcessClient })
-        .processClient;
       let ownershipChecks = 0;
       processClient.checkRunnerOwnership = async (_pid, _deviceId, deadline) => {
         ownershipChecks++;
@@ -446,12 +445,13 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("forceStopForShutdown skips a foreign PID when an eviction leaves no ownership-check time (#6898)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const processClient = new IosCtrlProxyProcessClient(fakeExecutor, fakeTimer);
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        processClient,
+      });
       const runnerPid = 912356;
       manager.setXcTestProcessIdForTesting(runnerPid);
       const foreignRunner: FakeListeningProcess = {
@@ -462,8 +462,6 @@ describe("IOSCtrlProxyManager restart prevention", function () {
         ignoreKill: true,
       };
       installListeningProcessFakes(fakeExecutor, [foreignRunner]);
-      const processClient = (manager as unknown as { processClient: IosCtrlProxyProcessClient })
-        .processClient;
       let ownershipChecks = 0;
       processClient.checkRunnerOwnership = async () => {
         ownershipChecks++;
@@ -544,16 +542,18 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       expect(runnerProcs[0].alive).toBe(false);
       expect(manager.getXcTestProcessId()).toBeNull();
       // The auto-restart suppression latch is not left set across the throw (MINOR-2).
-      expect((manager as unknown as { isStopping: boolean }).isStopping).toBe(false);
+      expect(manager.runnerSnapshot().isStopping).toBe(false);
     });
 
     test("start() re-arms supervision after hung-runner cleanup so the next pre-health exit restarts", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        createFakeBuilder(),
-        fakeExecutor,
-      );
+      const supervisor = createSupervisorProbe();
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: fakeExecutor,
+        processSupervisorFactory: supervisor.factory,
+      });
 
       manager.setXcTestProcessIdForTesting(12345);
       fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
@@ -570,9 +570,10 @@ describe("IOSCtrlProxyManager restart prevention", function () {
 
       const failedPreHealthProcess = new FakeChildProcess();
       failedPreHealthProcess.pid = 22222;
-      manager.setXcTestProcessIdForTesting(failedPreHealthProcess.pid);
-      (manager as unknown as { xcTestProcess: FakeChildProcess }).xcTestProcess =
-        failedPreHealthProcess;
+      manager.trackRunnerForTesting({
+        pid: failedPreHealthProcess.pid,
+        process: failedPreHealthProcess as unknown as ChildProcess,
+      });
       fakeExecutor.setCommandHandler("curl -s", () =>
         createExecResult(
           fakeExecutor.getSpawnedProcesses().length > 0
@@ -582,7 +583,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
         ),
       );
 
-      (manager as unknown as { handleProcessExit: () => void }).handleProcessExit();
+      supervisor.supervisor.processExited();
       fakeTimer.advanceTime(1000);
       for (let i = 0; i < 5; i++) {
         await new Promise((resolve) => setImmediate(resolve));
@@ -628,7 +629,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       // un-track it (MINOR-1). isStopping is not left latched (MINOR-2).
       expect(fakeExecutor.wasCommandExecuted("kill -TERM 12345")).toBe(false);
       expect(manager.getXcTestProcessId()).toBeNull();
-      expect((manager as unknown as { isStopping: boolean }).isStopping).toBe(false);
+      expect(manager.runnerSnapshot().isStopping).toBe(false);
       expect(psArgsCalls).toBeGreaterThanOrEqual(2); // wait-decision + pre-kill re-verify
     });
 
@@ -823,12 +824,14 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("a caller arriving during hung-runner teardown starts fresh after it settles", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        createFakeBuilder(),
-        fakeExecutor,
-      );
+      const processClient = new IosCtrlProxyProcessClient(fakeExecutor, fakeTimer);
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: fakeExecutor,
+        processClient,
+      });
       manager.setXcTestProcessIdForTesting(12345);
       installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
 
@@ -846,11 +849,6 @@ describe("IOSCtrlProxyManager restart prevention", function () {
 
       const teardownEntered = deferred();
       const releaseTeardown = deferred();
-      const processClient = (
-        manager as unknown as {
-          processClient: IosCtrlProxyProcessClient;
-        }
-      ).processClient;
       const terminateProcessTree = processClient.terminateProcessTree.bind(processClient);
       processClient.terminateProcessTree = async (pid) => {
         teardownEntered.resolve();
@@ -876,12 +874,6 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("retires the tracked runner and iproxy when the final health-poll waiter cancels (#6905)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        physicalDevice,
-        fakeTimer,
-        createFakeBuilder(),
-        fakeExecutor,
-      );
       const runnerPid = 912354;
       const runner = {
         pid: runnerPid,
@@ -896,35 +888,34 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       const iproxy = new FakeChildProcess(fakeTimer);
       iproxy.pid = 912355;
       const healthPollingEntered = deferred();
-      const internal = manager as unknown as {
-        xcTestProcessId: number | null;
-        xcTestProcess: FakeChildProcess | null;
-        awaitStartupOrphanRunnerReap: () => Promise<void>;
-        isCtrlProxyProcessAlive: () => Promise<boolean>;
-        isRunning: () => Promise<boolean>;
-        startOnDevice: () => Promise<void>;
-        waitForHealthEndpoint: (start: { controller: AbortController }) => Promise<boolean>;
-      };
-      internal.awaitStartupOrphanRunnerReap = async () => {};
-      internal.isCtrlProxyProcessAlive = async () => false;
-      internal.isRunning = async () => false;
-      internal.startOnDevice = async () => {
-        internal.xcTestProcessId = runnerPid;
-        internal.xcTestProcess = new FakeChildProcess(fakeTimer);
-        fakeExecutor.setNextSpawnProcess(iproxy);
-        tunnel(manager)["iproxyProcessId"] = iproxy.pid!;
-        tunnel(manager)["iproxyProcess"] = fakeExecutor.spawn("iproxy", []);
-      };
-      internal.waitForHealthEndpoint = async (start) => {
-        healthPollingEntered.resolve();
-        return await new Promise<boolean>((_resolve, reject) => {
-          start.controller.signal.addEventListener(
-            "abort",
-            () => reject(start.controller.signal.reason),
-            { once: true },
-          );
-        });
-      };
+      const manager: IOSCtrlProxyManager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: physicalDevice,
+        timer: fakeTimer,
+        builder: createFakeBuilder(),
+        processExecutor: fakeExecutor,
+        steps: {
+          startOnDevice: async () => {
+            manager.trackRunnerForTesting({
+              pid: runnerPid,
+              process: new FakeChildProcess(fakeTimer) as unknown as ChildProcess,
+            });
+            fakeExecutor.setNextSpawnProcess(iproxy);
+            tunnel(manager)["iproxyProcessId"] = iproxy.pid!;
+            tunnel(manager)["iproxyProcess"] = fakeExecutor.spawn("iproxy", []);
+          },
+          waitForHealthEndpoint: async (start) => {
+            healthPollingEntered.resolve();
+            return await new Promise<boolean>((_resolve, reject) => {
+              start.controller.signal.addEventListener(
+                "abort",
+                () => reject(start.controller.signal.reason),
+                { once: true },
+              );
+            });
+          },
+        },
+      });
+      spyOn(manager, "isRunning").mockResolvedValue(false);
 
       const caller = new AbortController();
       const starting = manager.start({ signal: caller.signal });
@@ -988,26 +979,27 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("retires a cancelled startup while an immediate retry is barrier-waiting", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
       const firstStartEntered = deferred();
       let rejectFirstStart!: (error: Error) => void;
       let startInternalCalls = 0;
-      spyOn(manager as any, "startInternal").mockImplementation(() => {
-        startInternalCalls++;
-        if (startInternalCalls === 1) {
-          firstStartEntered.resolve();
-          return new Promise<void>((_resolve, reject) => {
-            rejectFirstStart = reject;
-          });
-        }
-        return Promise.resolve();
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        steps: {
+          startInternal: () => {
+            startInternalCalls++;
+            if (startInternalCalls === 1) {
+              firstStartEntered.resolve();
+              return new Promise<void>((_resolve, reject) => {
+                rejectFirstStart = reject;
+              });
+            }
+            return Promise.resolve();
+          },
+        },
       });
-      const forceStop = spyOn(manager as any, "forceStopForShutdown").mockResolvedValue();
+      const forceStop = spyOn(manager, "forceStopForShutdown").mockResolvedValue();
 
       const caller = new AbortController();
       const cancelledStart = manager.start({ signal: caller.signal });
@@ -1028,74 +1020,81 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("bounds retirement when a remote runner stop never settles", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
-      const internal = manager as unknown as {
-        xcTestProcessId: number | null;
-        remoteRunner: { stop: () => Promise<{ success: boolean }> };
-        useRemoteRunner: () => boolean;
-        retireRunnerAfterFinalSharedStartCancellation: (sharedStart: {
-          controller: AbortController;
-          completion: Promise<void>;
-          healthPollDeadlineMs: number | null;
-          defaultHealthPollDeadlineMs: number | null;
-          callerHealthPollDeadlinesMs: Map<symbol, number>;
-          teardownCommitted: boolean;
-          waitingCallers: number;
-          externalWaitingCallers: number;
-          completed: boolean;
-        }) => Promise<void>;
+      let remoteStops = 0;
+      const remoteRunner = {
+        isEnabled: () => true,
+        isRunningInDocker: () => true,
+        isAvailable: async () => true,
+        getHost: () => "remote-host",
+        runIdeviceId: async () => ({ success: true, data: { stdout: "" } }),
+        runIdeviceInstaller: async () => ({ success: true, data: { stdout: "" } }),
+        runSimctl: async () => ({ success: true, data: { stdout: "" } }),
+        startIproxy: async () => ({ success: true, data: { pid: 99 } }),
+        stopIproxy: async () => ({ success: true }),
+        getIproxyStatus: async () => ({ success: true, data: { running: true } }),
+        start: async () => ({ success: true, data: { pid: 42, message: "started" } }),
+        stop: () => {
+          remoteStops++;
+          return new Promise<{ success: boolean }>(() => {});
+        },
+        status: async () => ({ success: true, data: { running: false } }),
       };
-      internal.xcTestProcessId = 912357;
-      spyOn(internal, "useRemoteRunner").mockReturnValue(true);
-      internal.remoteRunner.stop = () => new Promise(() => {});
-      const sharedStart = {
-        controller: new AbortController(),
-        completion: Promise.resolve(),
-        healthPollDeadlineMs: null,
-        defaultHealthPollDeadlineMs: null,
-        callerHealthPollDeadlinesMs: new Map<symbol, number>(),
-        teardownCommitted: false,
-        waitingCallers: 0,
-        externalWaitingCallers: 0,
-        completed: false,
-      };
-      sharedStart.controller.abort(new Error("caller cancelled"));
-
-      let retired = false;
-      const retirement = internal.retireRunnerAfterFinalSharedStartCancellation(sharedStart);
-      void retirement.then(() => {
-        retired = true;
+      const startupEntered = deferred();
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        remoteRunner,
+        steps: {
+          startInternal: async (start) => {
+            startupEntered.resolve();
+            await new Promise<void>((_resolve, reject) => {
+              start.controller.signal.addEventListener(
+                "abort",
+                () => reject(start.controller.signal.reason),
+                { once: true },
+              );
+            });
+          },
+        },
       });
-      await Promise.resolve();
+      manager.setXcTestProcessIdForTesting(912357);
+
+      const caller = new AbortController();
+      const starting = manager.start({ signal: caller.signal });
+      await startupEntered.promise;
+      caller.abort(new Error("caller cancelled"));
+      await expect(starting).rejects.toThrow("caller cancelled");
+      await flushUntil(() => remoteStops === 1, "the final-waiter retirement to reach the runner");
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
 
       fakeTimer.advanceTime(250);
-      for (let attempt = 0; attempt < 5 && !retired; attempt++) {
-        await Promise.resolve();
-      }
-
-      expect(retired).toBe(true);
-      await retirement;
-      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      await flushUntil(
+        () => fakeTimer.getPendingTimeoutCount() === 0,
+        "the bounded retirement to settle",
+      );
+      expect(manager.getXcTestProcessId()).toBeNull();
     });
 
     // Directly exercise the PID-reuse guard added in review (thread 2). Testing the
     // predicate rather than a full start() keeps it precise and avoids spawning a
     // runner (whose background monitor would leak into later tests under autoAdvance).
-    const callIsOwnRunnerProcessAlive = (m: IOSCtrlProxyManager): Promise<boolean> =>
-      (m as unknown as { isOwnRunnerProcessAlive(): Promise<boolean> }).isOwnRunnerProcessAlive();
+    function createManagerWithOwnRunnerCheck(): {
+      manager: IOSCtrlProxyManager;
+      isOwnRunnerProcessAlive: () => Promise<boolean>;
+    } {
+      const probe = captureLifecycleSteps();
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        steps: probe.overrides,
+      });
+      return { manager, isOwnRunnerProcessAlive: () => probe.steps.isOwnRunnerProcessAlive() };
+    }
 
     test("isOwnRunnerProcessAlive rejects a reused PID that is not our runner (#2834)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const { manager, isOwnRunnerProcessAlive } = createManagerWithOwnRunnerCheck();
       // The tracked PID is alive but has been reused by an UNRELATED process
       // (not xcodebuild, no device identity).
       manager.setXcTestProcessIdForTesting(12345);
@@ -1108,16 +1107,11 @@ describe("IOSCtrlProxyManager restart prevention", function () {
         },
       ]);
 
-      expect(await callIsOwnRunnerProcessAlive(manager)).toBe(false);
+      expect(await isOwnRunnerProcessAlive()).toBe(false);
     });
 
     test("isOwnRunnerProcessAlive rejects a CtrlProxy runner for a DIFFERENT device (#2834)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const { manager, isOwnRunnerProcessAlive } = createManagerWithOwnRunnerCheck();
       manager.setXcTestProcessIdForTesting(12345);
       // A genuine CtrlProxy runner, but for a sibling simulator (different device id).
       installListeningProcessFakes(fakeExecutor, [
@@ -1134,16 +1128,11 @@ describe("IOSCtrlProxyManager restart prevention", function () {
         },
       ]);
 
-      expect(await callIsOwnRunnerProcessAlive(manager)).toBe(false);
+      expect(await isOwnRunnerProcessAlive()).toBe(false);
     });
 
     test("isOwnRunnerProcessAlive rejects a user's own xcodebuild on the same simulator (#2834)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const { manager, isOwnRunnerProcessAlive } = createManagerWithOwnRunnerCheck();
       manager.setXcTestProcessIdForTesting(12345);
       // The tracked PID was reused by the user's OWN app test run, which targets the
       // same simulator (xcodebuild + our device id) but is NOT a CtrlProxy runner. It
@@ -1160,29 +1149,19 @@ describe("IOSCtrlProxyManager restart prevention", function () {
         },
       ]);
 
-      expect(await callIsOwnRunnerProcessAlive(manager)).toBe(false);
+      expect(await isOwnRunnerProcessAlive()).toBe(false);
     });
 
     test("isOwnRunnerProcessAlive accepts our live xcodebuild runner for this device (#2834)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const { manager, isOwnRunnerProcessAlive } = createManagerWithOwnRunnerCheck();
       manager.setXcTestProcessIdForTesting(12345);
       installListeningProcessFakes(fakeExecutor, [ownRunnerProcess(12345)]);
 
-      expect(await callIsOwnRunnerProcessAlive(manager)).toBe(true);
+      expect(await isOwnRunnerProcessAlive()).toBe(true);
     });
 
     test("isOwnRunnerProcessAlive returns false when the tracked PID is dead (#2834)", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const { manager, isOwnRunnerProcessAlive } = createManagerWithOwnRunnerCheck();
       manager.setXcTestProcessIdForTesting(12345);
       // No living process with this PID (installListeningProcessFakes' kill -0 throws).
       installListeningProcessFakes(fakeExecutor, [
@@ -1192,14 +1171,11 @@ describe("IOSCtrlProxyManager restart prevention", function () {
         },
       ]);
 
-      expect(await callIsOwnRunnerProcessAlive(manager)).toBe(false);
+      expect(await isOwnRunnerProcessAlive()).toBe(false);
     });
 
     test("health-poll budget is env-configurable with a generous default (#2834)", function () {
-      const resolve = (): number =>
-        (
-          IOSCtrlProxyManager as unknown as { resolveHealthPollMaxAttempts(): number }
-        ).resolveHealthPollMaxAttempts();
+      const resolve = (): number => IOSCtrlProxyManager.resolveHealthPollMaxAttempts();
       const prev = process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
       try {
         process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS = "240";
@@ -1273,72 +1249,66 @@ describe("IOSCtrlProxyManager restart prevention", function () {
     });
 
     test("xctest process supervisor uses the injected timer so tests can control it", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const supervisor = createSupervisorProbe();
+      IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        processSupervisorFactory: supervisor.factory,
+      });
 
       expect(fakeTimer.getPendingIntervals().length).toBe(0);
 
-      await (
-        manager as unknown as { processSupervisor: { start: () => Promise<void> } }
-      ).processSupervisor.start();
+      await supervisor.supervisor.start();
 
       expect(fakeTimer.getPendingIntervals().length).toBe(1);
       expect(fakeTimer.getPendingIntervals()[0]).toBe(30000);
     });
 
     test("xctest process supervisor treats a live launcher with a dead health endpoint as unhealthy", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
+      const supervisor = createSupervisorProbe();
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        processSupervisorFactory: supervisor.factory,
+      });
       manager.setXcTestProcessIdForTesting(12345);
       fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
       fakeExecutor.setCommandResponse("kill -0 12345", createExecResult("", ""));
 
-      const alive = await (
-        manager as unknown as { isSupervisedCtrlProxyProcessAlive: () => Promise<boolean> }
-      ).isSupervisedCtrlProxyProcessAlive();
+      const alive = await supervisor.supervisor.isAlive();
 
       expect(alive).toBe(false);
     });
 
     test("xctest process supervisor restarts once when health is down and the tracked PID is missing", async function () {
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
-      const internal = manager as unknown as {
-        xcTestProcessId: number | null;
-        isSupervisedCtrlProxyProcessAlive: () => Promise<boolean>;
-        processSupervisor: { start: () => Promise<void> };
-      };
+      const supervisor = createSupervisorProbe();
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        processSupervisorFactory: supervisor.factory,
+      });
       fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
 
       // Prime the public status cache with the dead runner state. The supervisor's
       // onExit callback must clear it so readiness can observe the replacement.
       expect(await manager.isRunning()).toBe(false);
-      expect(await internal.isSupervisedCtrlProxyProcessAlive()).toBe(false);
+      expect(await supervisor.supervisor.isAlive()).toBe(false);
       expect(fakeExecutor.wasCommandExecuted("kill -0")).toBe(false);
 
       let restartAttempts = 0;
       spyOn(manager, "start").mockImplementation(async () => {
         restartAttempts++;
-        internal.xcTestProcessId = 67890;
+        manager.setXcTestProcessIdForTesting(67890);
         fakeExecutor.setCommandResponse(
           "curl -s",
           createExecResult(JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }), ""),
         );
       });
 
-      await internal.processSupervisor.start();
+      await supervisor.supervisor.start();
       fakeTimer.advanceTime(30000);
       for (let i = 0; i < 5; i++) {
         await new Promise((resolve) => setImmediate(resolve));
@@ -1353,7 +1323,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       }
 
       expect(restartAttempts).toBe(1);
-      expect(internal.xcTestProcessId).toBe(67890);
+      expect(manager.getXcTestProcessId()).toBe(67890);
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
       expect(fakeTimer.getPendingIntervals()).toEqual([30000]);
       expect(await manager.isRunning()).toBe(true);
@@ -1377,32 +1347,28 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       // `restartAttempts` or touching the pending timeout, so this is a single,
       // deterministic assertion on that structural guard rather than a new
       // production behavior.
-      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        fakeTimer,
-        undefined,
-        fakeExecutor,
-      );
-      const internal = manager as unknown as {
-        xcTestProcessId: number | null;
-        isSupervisedCtrlProxyProcessAlive: () => Promise<boolean>;
-        processSupervisor: { start: () => Promise<void>; processExited: () => void };
-      };
+      const supervisor = createSupervisorProbe();
+      const manager = IOSCtrlProxyManager.createForTestingWithOptions({
+        device: testDevice,
+        timer: fakeTimer,
+        processExecutor: fakeExecutor,
+        processSupervisorFactory: supervisor.factory,
+      });
       fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
 
-      expect(await internal.isSupervisedCtrlProxyProcessAlive()).toBe(false);
+      expect(await supervisor.supervisor.isAlive()).toBe(false);
 
       let restartAttempts = 0;
       spyOn(manager, "start").mockImplementation(async () => {
         restartAttempts++;
-        internal.xcTestProcessId = 67890;
+        manager.setXcTestProcessIdForTesting(67890);
         fakeExecutor.setCommandResponse(
           "curl -s",
           createExecResult(JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }), ""),
         );
       });
 
-      await internal.processSupervisor.start();
+      await supervisor.supervisor.start();
 
       // First "dead" signal: the 30s monitor tick observes health down + no
       // tracked PID, and schedules a bounded restart.
@@ -1418,7 +1384,7 @@ describe("IOSCtrlProxyManager restart prevention", function () {
       // This simulates a racing/duplicate liveness detection rather than the
       // 30s interval, since `handleProcessExit` already stopped the monitor
       // interval for this generation.
-      internal.processSupervisor.processExited();
+      supervisor.supervisor.processExited();
       for (let i = 0; i < 5; i++) {
         await new Promise((resolve) => setImmediate(resolve));
       }

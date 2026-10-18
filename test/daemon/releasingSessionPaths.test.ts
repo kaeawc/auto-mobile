@@ -3,12 +3,7 @@ import {
   SessionScopedStreamAuthenticator,
   STREAM_SOCKET_AUTH_ENV,
 } from "../../src/daemon/streamSocketAuth";
-import {
-  isDeviceControlTargetOwnerValid,
-  isDeviceControlRoutingSessionValid,
-} from "../../src/daemon/deviceControlSessionValidity";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { PLAN_AUTO_RELEASE_REASON, TerminalSessionError } from "../../src/daemon/sessionManager";
 import {
   MissingDeviceLiveness,
   type MissingDeviceLivenessPoolPort,
@@ -93,28 +88,6 @@ describe("remaining paths during session release", () => {
     } finally {
       heartbeat.mockRestore();
     }
-  });
-
-  test("device-control target owner accepts an unregistered non-releasing object", async () => {
-    const session = await h.createUnregisteredSession();
-    expect(
-      isDeviceControlTargetOwnerValid(h.manager, {
-        sessionUuid: sessionId,
-        sessionIncarnation: session,
-        deviceId,
-      }),
-    ).toBe(true);
-  });
-
-  test("device-control routing accepts an unregistered non-releasing object", async () => {
-    const session = await h.createUnregisteredSession();
-    expect(
-      isDeviceControlRoutingSessionValid(h.manager, {
-        sessionUuid: "other",
-        routingSessionUuid: sessionId,
-        routingSessionIncarnation: session,
-      }),
-    ).toBe(true);
   });
 
   test("CLI heartbeat accepts an unregistered non-releasing object", async () => {
@@ -242,87 +215,6 @@ describe("remaining paths during session release", () => {
       success: true,
       result: { activeSessions: 0, activeExecutions: 0 },
     });
-  });
-
-  for (const [name, valid, identityFor] of [
-    [
-      "target owner",
-      isDeviceControlTargetOwnerValid,
-      (session: object) => ({ sessionUuid: sessionId, sessionIncarnation: session, deviceId }),
-    ],
-    [
-      "routing session",
-      isDeviceControlRoutingSessionValid,
-      (session: object) => ({
-        sessionUuid: "another-owner",
-        routingSessionUuid: sessionId,
-        routingSessionIncarnation: session,
-      }),
-    ],
-  ] as const) {
-    test(`device-control ${name} refuses recovery and same-UUID replacement after explicit release`, async () => {
-      const session = await h.create();
-      const identity = identityFor(session);
-      expect(valid(h.manager, identity)).toBe(true);
-      const finish = await h.beginRelease();
-      expect(valid(h.manager, identity)).toBe(false);
-      await finish();
-      expect(valid(h.manager, identity)).toBe(false);
-      await expect(h.create()).rejects.toThrow(TerminalSessionError);
-      await expect(h.create()).rejects.toThrow(
-        `Session ${sessionId} was released and cannot be reused. Acquire a new device with getAndroid or getApple.`,
-      );
-      expect(valid(h.manager, identity)).toBe(false);
-      expect(h.manager.getSession(sessionId)).toBeNull();
-      expect(h.manager.getSessionForDevice(deviceId)).toBeNull();
-    });
-
-    test(`device-control ${name} accepts only the replacement incarnation after internal plan release`, async () => {
-      const session = await h.create();
-      const identity = identityFor(session);
-      expect(valid(h.manager, identity)).toBe(true);
-      const finishSetup = Promise.withResolvers<void>();
-      const setup = h.manager.trackSessionSetup(session, () => finishSetup.promise);
-      // Do not join daemon/releaseSession: that explicit client request upgrades
-      // an in-flight internal release to terminal.
-      const release = h.manager.releaseSession(sessionId, PLAN_AUTO_RELEASE_REASON);
-      try {
-        expect(h.manager.getReleasingSession(sessionId)).toBe(session);
-        expect(valid(h.manager, identity)).toBe(false);
-      } finally {
-        finishSetup.resolve();
-        h.persistence.finishRelease.resolve();
-        await setup;
-        expect(await release).toBe(deviceId);
-      }
-      expect(valid(h.manager, identity)).toBe(false);
-      expect(h.manager.getSession(sessionId)).toBeNull();
-      expect(h.manager.getSessionForDevice(deviceId)).toBeNull();
-      expect(h.manager.getTerminalReleaseSnapshot(sessionId)).toBeUndefined();
-      expect(await h.persistence.getSession(sessionId)).toMatchObject({
-        status: "released",
-        release_reason: PLAN_AUTO_RELEASE_REASON,
-      });
-      const replacement = await h.create();
-      expect(replacement).not.toBe(session);
-      expect(valid(h.manager, identity)).toBe(false);
-      expect(valid(h.manager, identityFor(replacement))).toBe(true);
-    });
-  }
-
-  test("device-control scopes without a separate session keep their existing semantics", () => {
-    expect(isDeviceControlTargetOwnerValid(h.manager, {})).toBe(true);
-    expect(isDeviceControlRoutingSessionValid(h.manager, {})).toBe(true);
-    expect(
-      isDeviceControlRoutingSessionValid(h.manager, {
-        sessionUuid: sessionId,
-        routingSessionUuid: sessionId,
-      }),
-    ).toBe(true);
-    h.observers.register(sessionId, "desktop");
-    expect(isDeviceControlRoutingSessionValid(h.manager, { routingSessionUuid: sessionId })).toBe(
-      false,
-    );
   });
 
   async function poolHarness() {
@@ -478,17 +370,11 @@ describe("remaining paths during session release", () => {
     });
   }
 
-  test("rebind remains admitted by stream, transport, and informational paths", async () => {
-    const session = await h.create();
+  test("rebind remains admitted by stream and informational paths", async () => {
+    await h.create();
     h.persistence.deferUpsert = true;
     const rebind = h.manager.rebindSession(sessionId, "emulator-5556", "android");
     await h.persistence.upsertStarted.promise;
-    expect(
-      isDeviceControlRoutingSessionValid(h.manager, {
-        routingSessionUuid: sessionId,
-        routingSessionIncarnation: session,
-      }),
-    ).toBe(true);
     expect(() =>
       new SessionScopedStreamAuthenticator(() => h.manager, "test op", {}).authorize({
         sessionUuid: sessionId,

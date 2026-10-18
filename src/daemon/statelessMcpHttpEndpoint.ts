@@ -108,6 +108,8 @@ const METHOD_NOT_ALLOWED_BODY = JSON.stringify({
   id: null,
 });
 
+const SHUTTING_DOWN_BODY = JSON.stringify({ error: "Daemon is shutting down" });
+
 type JsonRpcId = string | number;
 
 function jsonRpcMessages(parsedBody: unknown): readonly Record<string, unknown>[] {
@@ -156,6 +158,7 @@ export class StatelessMcpHttpEndpoint<
   private readonly inFlight = new Map<string, InFlightRequest>();
   /** session key + JSON-RPC id → request scope, for `notifications/cancelled`. */
   private readonly byCancelKey = new Map<string, string>();
+  private accepting = true;
 
   constructor(private readonly deps: StatelessMcpHttpEndpointDeps<Req, Res, T>) {}
 
@@ -185,8 +188,18 @@ export class StatelessMcpHttpEndpoint<
     });
   }
 
+  /**
+   * Serve nothing more (#13049): shutdown calls this when it stops admitting HTTP requests. A
+   * request admitted earlier that is still awaiting a cancellation it carried is answered 503
+   * instead of building a server after the shutdown snapshot.
+   */
+  stopAccepting(): void {
+    this.accepting = false;
+  }
+
   /** Drop all tracking after shutdown closed the requests (or gave up on them). */
   clear(): void {
+    this.accepting = false;
     this.inFlight.clear();
     this.byCancelKey.clear();
   }
@@ -208,6 +221,12 @@ export class StatelessMcpHttpEndpoint<
     }
     const headerSessionKey = readMcpSessionKey(req.headers);
     await this.cancelNotifiedRequests(headerSessionKey, parsedBody);
+    if (!this.accepting) {
+      // Shutdown began while this request's cancellation was closing its target (#13049).
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(SHUTTING_DOWN_BODY);
+      return;
+    }
     const scope: StatelessMcpRequestScope = {
       requestScopeId: this.deps.idGenerator.next(),
       requestMcpSessionId: headerSessionKey ?? readInBandMcpSessionId(parsedBody),

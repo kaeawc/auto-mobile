@@ -120,7 +120,6 @@
 4	test/daemon/socketServerAcquisitionToolSelectionProfile.integration.test.ts
 1	test/daemon/socketServerClose.integration.test.ts
 2	test/daemon/socketServerCloseTerminalResponses.test.ts
-1	test/daemon/socketServerDeviceSessionRestore.test.ts
 4	test/daemon/socketServerDirectFrameTransportAlias.test.ts
 4	test/daemon/socketServerForeignDaemonControl.test.ts
 1	test/daemon/socketServerForwardBudgetTimeoutVsOverload.test.ts
@@ -157,7 +156,7 @@
 4	test/daemon/socketServerRefusedOwnedRestore.test.ts
 1	test/daemon/socketServerScopeKey.integration.test.ts
 3	test/daemon/socketServerStartupAndParse.test.ts
-28	test/daemon/socketServerTransportLifecycle.test.ts
+26	test/daemon/socketServerTransportLifecycle.test.ts
 21	test/daemon/socketServerWriteBackpressure.test.ts
 9	test/daemon/sseKeepaliveAndDisconnect.test.ts
 1	test/daemon/startupLockHolderGeneration.test.ts
@@ -462,7 +461,7 @@
 1	test/server/releaseCallerOrderingPreservedSession.test.ts
 10	test/server/resourceDeviceResolver.test.ts
 2	test/server/resourceNotifySlowSibling.test.ts
-28	test/server/resourceRegistryListChanged.test.ts
+1	test/server/resourceRegistryListChanged.test.ts
 4	test/server/resourceRegistryMalformedUri.test.ts
 1	test/server/resourceUriLoneSurrogate.test.ts
 1	test/server/resources/bootedDeviceServiceStatusTransient.test.ts
@@ -479,7 +478,7 @@
 2	test/server/toolRegistry.collaborators.integration.test.ts
 1	test/server/toolRegistry.reachability.test.ts
 1	test/server/toolRegistry.readOnlyDeviceAccess.test.ts
-11	test/server/toolRegistryNotifyToolListChanged.test.ts
+1	test/server/toolRegistryNotifyToolListChanged.test.ts
 1	test/server/tools/structuredContentGating.test.ts
 1	test/server/transportAliasRuleParity.test.ts
 1	test/server/videoStopByIdInterruptedRetainedCapture.test.ts

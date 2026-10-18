@@ -5,7 +5,7 @@
 1752	src/ctrlProxy/RunnerReadinessService.ts
 1183	src/daemon/cli/runDaemonCommand.ts
 1540	src/daemon/client.ts
-5223	src/daemon/daemon.ts
+5220	src/daemon/daemon.ts
 6008	src/daemon/daemonMcpProxy.ts
 1730	src/daemon/daemonRequestHandlers.ts
 2064	src/daemon/deviceDataStreamSocketServer.ts
@@ -19,7 +19,7 @@
 1002	src/daemon/sessionBroker/sqliteStore.ts
 2339	src/daemon/sessionDeviceStateRestore.ts
 10394	src/daemon/sessionManager.ts
-8097	src/daemon/socketServer.ts
+7224	src/daemon/socketServer.ts
 1808	src/daemon/videoStreamSocketServer.ts
 1147	src/db/deviceSessionRepository.ts
 1089	src/db/failureAnalyticsRepository.ts
@@ -77,7 +77,7 @@
 2530	src/server/deviceToolsProvisioning.ts
 1269	src/server/deviceToolsShutdown.ts
 1266	src/server/deviceToolsStartDevice.ts
-1170	src/server/executionTracker.ts
+1186	src/server/executionTracker.ts
 1661	src/server/finalizeToolResponse.ts
 3137	src/server/interactionTools.ts
 1331	src/server/planExecutionOrchestrator.ts

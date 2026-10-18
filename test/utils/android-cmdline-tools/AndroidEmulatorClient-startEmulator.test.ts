@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import type { BootedDevice, DeviceInfo, ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -42,12 +42,11 @@ function clientWithAvd(
     adbFactory,
     hostPortAvailabilityChecker: { isPortAvailable: () => true },
     runningAvdAdvertisementReader: advertisements,
+    locateEmulatorPath: async () => "emulator",
   });
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-    async () => "emulator";
-  (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
+  spyOn(client, "listAvds").mockImplementation(async () => [
     { name: avdName, platform: "android", isRunning: false } as DeviceInfo,
-  ];
+  ]);
   return { client, advertisements };
 }
 

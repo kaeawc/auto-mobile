@@ -1,5 +1,5 @@
+import { FakeDeviceAppManager } from "../fakes/FakeDeviceAppManager";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { ChildProcess } from "node:child_process";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -557,16 +557,14 @@ describe("IOSCtrlProxyManager", function () {
         throw new Error("runner is no longer running");
       });
 
-      const fakeDeviceAppManager = {
-        getInstalledAppBundleHash: async () => null,
-      } as unknown as DeviceAppManager;
+      const fakeDeviceAppManager = new FakeDeviceAppManager();
       const xcodebuild: Xcodebuild = {
         executeCommand: async () => createExecResult("", ""),
         isAvailable: async () => true,
         startStreaming: async () => {
           launchCount++;
           runnerHealthy = true;
-          return new FakeChildProcess() as unknown as ChildProcess;
+          return new FakeChildProcess();
         },
       };
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -618,7 +616,7 @@ describe("IOSCtrlProxyManager", function () {
         isAvailable: async () => true,
         startStreaming: async () => {
           healthy = true;
-          return new FakeChildProcess() as unknown as ChildProcess;
+          return new FakeChildProcess();
         },
       };
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -668,7 +666,7 @@ describe("IOSCtrlProxyManager", function () {
         isAvailable: async () => true,
         startStreaming: async () => {
           healthy = true;
-          return new FakeChildProcess() as unknown as ChildProcess;
+          return new FakeChildProcess();
         },
       };
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -725,7 +723,7 @@ describe("IOSCtrlProxyManager", function () {
         isAvailable: async () => true,
         startStreaming: async () => {
           healthy = true;
-          return new FakeChildProcess() as unknown as ChildProcess;
+          return new FakeChildProcess();
         },
       };
       const manager = IOSCtrlProxyManager.createForTestingWithDeps(
@@ -812,7 +810,7 @@ describe("IOSCtrlProxyManager", function () {
         }),
         fakeExecutor,
         undefined,
-        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
+        new FakeDeviceAppManager(),
       );
 
       // First pass through the gate: attemptedSetup becomes true and the
@@ -856,7 +854,7 @@ describe("IOSCtrlProxyManager", function () {
         }),
         fakeExecutor,
         undefined,
-        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
+        new FakeDeviceAppManager(),
       );
 
       expect((await manager.setup()).success).toBe(true);
@@ -889,7 +887,7 @@ describe("IOSCtrlProxyManager", function () {
         }),
         fakeExecutor,
         undefined,
-        { getInstalledAppBundleHash: async () => null } as unknown as DeviceAppManager,
+        new FakeDeviceAppManager(),
       );
 
       expect((await manager.setup()).success).toBe(true);
@@ -961,7 +959,7 @@ describe("IOSCtrlProxyManager", function () {
         fakeExecutor,
       );
       tunnel(manager).setStateForTesting({ processId: fakeProcess.pid });
-      tunnel(manager).setStateForTesting({ process: fakeProcess as unknown as ChildProcess });
+      tunnel(manager).setStateForTesting({ process: fakeProcess });
 
       fakeTimer.enableAutoAdvance();
       await tunnel(manager).stop();

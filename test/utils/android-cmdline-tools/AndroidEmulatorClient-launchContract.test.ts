@@ -61,18 +61,17 @@ function createClient(
     avdConfigReader: { readConfig: async () => ({ ramSizeMb: 2048 }) },
     hostPortAvailabilityChecker,
     posterFileSystem,
+    locateEmulatorPath: async () => "emulator",
   });
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-    async () => "emulator";
-  (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
+  spyOn(client, "listAvds").mockImplementation(async () => [
     { name: avdName, platform: "android", isRunning: false },
-  ];
-  (client as unknown as { isAvdRunning: () => Promise<boolean> }).isAvdRunning = async () => false;
-  (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () =>
-    false;
-  (
-    client as unknown as { checkArchitectureCompatibility: () => Promise<{ compatible: boolean }> }
-  ).checkArchitectureCompatibility = async () => ({ compatible: true });
+  ]);
+  spyOn(client, "isAvdRunning").mockImplementation(async () => false);
+  spyOn(client, "isAvdStarting").mockImplementation(async () => false);
+  spyOn(client, "checkArchitectureCompatibility").mockImplementation(async () => ({
+    compatible: true,
+    hostArch: "arm64",
+  }));
   return client;
 }
 
@@ -767,10 +766,10 @@ describe("AndroidEmulatorClient launch contract", () => {
       spawns += 1;
       return createChild();
     });
-    (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => {
+    spyOn(client, "listAvds").mockImplementation(async () => {
       validating = true;
       return availableAvds;
-    };
+    });
 
     const launch = client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal });
     while (!validating) {

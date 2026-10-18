@@ -109,9 +109,8 @@ function createClient(
     adbFactory: factory,
     avdConfigReader,
     platform: "linux",
+    locateEmulatorPath: async () => "emulator",
   });
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-    async () => "emulator";
 
   return {
     client,

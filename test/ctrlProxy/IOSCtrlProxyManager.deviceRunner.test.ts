@@ -1,7 +1,9 @@
+import { FakeXcodeSigningManager } from "../fakes/FakeXcodeSigningManager";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
-import type { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import type { IosCtrlProxyBuilderPort } from "../../src/ctrlProxy/IosCtrlProxyBuilderPort";
+import { asIosCtrlProxyBuilder } from "../helpers/iosCtrlProxyBuilderFake";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
@@ -98,7 +100,7 @@ class DeviceWorld {
         this.runnerPorts.push(runnerPort);
         const child = this.register("xcodebuild", `xcodebuild ${args.join(" ")}`, runnerPort);
         this.events.push(`spawn:${child.pid}`);
-        return child as unknown as ChildProcess;
+        return child;
       },
     };
   }
@@ -177,8 +179,8 @@ class DeviceWorld {
   }
 }
 
-function createBuilder(runnerEnvPorts: number[]): IosCtrlProxyBuilder {
-  return {
+function createBuilder(runnerEnvPorts: number[]): IosCtrlProxyBuilderPort {
+  return asIosCtrlProxyBuilder({
     getXctestrunPath: async () => "/tmp/CtrlProxy.xctestrun",
     getRunnerBinaryPath: async () => null,
     verifyRunnerBinaryBeforeLaunch: async () => {},
@@ -193,16 +195,10 @@ function createBuilder(runnerEnvPorts: number[]): IosCtrlProxyBuilder {
     needsRebuild: async () => false,
     build: async () => ({ success: true, message: "built" }),
     getExpectedAppHash: () => null,
-  } as unknown as IosCtrlProxyBuilder;
+  });
 }
 
-const defaultSigning = {
-  resolveSigningForDevice: async () => ({
-    buildSettings: [],
-    allowProvisioningUpdates: false,
-    warnings: [],
-  }),
-} as unknown as XcodeSigningManager;
+const defaultSigning = new FakeXcodeSigningManager();
 
 /** Drain promise continuations only, so the auto-advancing fake timer does not move. */
 async function flushMicrotasks(): Promise<void> {

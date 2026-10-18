@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
-import type { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import type { IosCtrlProxyBuilderPort } from "../../src/ctrlProxy/IosCtrlProxyBuilderPort";
+import { asIosCtrlProxyBuilder } from "../helpers/iosCtrlProxyBuilderFake";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { BootedDevice } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
@@ -26,8 +27,8 @@ const HEALTH_MAX_ATTEMPTS = "3";
 const WINDOW_MS = 1_500;
 const FIRST_LAUNCH_WINDOW_MS = 3_000;
 
-function fakeBuilder(): IosCtrlProxyBuilder {
-  return {
+function fakeBuilder(): IosCtrlProxyBuilderPort {
+  return asIosCtrlProxyBuilder({
     getXctestrunPath: async () => "/tmp/CtrlProxy.xctestrun",
     getRunnerBinaryPath: async () => null,
     verifyRunnerBinaryBeforeLaunch: async () => {},
@@ -35,7 +36,7 @@ function fakeBuilder(): IosCtrlProxyBuilder {
     needsRebuild: async () => false,
     build: async () => ({ success: true, message: "built" }),
     getExpectedAppHash: () => null,
-  } as unknown as IosCtrlProxyBuilder;
+  });
 }
 
 interface Harness {

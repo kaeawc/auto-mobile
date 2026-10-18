@@ -5,17 +5,6 @@ import type { ExecResult } from "../../../src/models";
 import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-interface ArchitectureCompatibilityResult {
-  compatible: boolean;
-  hostArch: string;
-  avdArch?: string;
-  reason?: string;
-}
-
-interface ArchitectureCompatibilityClient {
-  checkArchitectureCompatibility(avdName: string): Promise<ArchitectureCompatibilityResult>;
-}
-
 const result = (): ExecResult => ({
   stdout: "",
   stderr: "",
@@ -36,12 +25,11 @@ function createClient(config: AvdConfig | null, hostArchitecture: string) {
     avdConfigReader: reader,
     platform: "linux",
     hostArchitecture,
+    locateEmulatorPath: async () => "emulator",
   });
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-    async () => "emulator";
 
   return {
-    client: client as unknown as ArchitectureCompatibilityClient,
+    client,
     commandCalls,
     reader,
   };

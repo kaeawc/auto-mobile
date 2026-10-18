@@ -275,7 +275,7 @@ const NO_PHYSICAL_DEVICES: IosPhysicalDeviceLister = {
 interface IosCtrlProxyManagerOptions {
   device: BootedDevice;
   timer?: Timer;
-  builder?: IosCtrlProxyBuilder;
+  builder?: IosCtrlProxyManagerDiagnostics["builder"];
   processExecutor?: HostProcessExecutor;
   signingManager?: XcodeSigningManager;
   deviceAppManager?: DeviceAppManager;
@@ -312,7 +312,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private readonly timer: Timer;
   private readonly forcedRestartBudget: ForcedRestartBudget;
   private servicePort: number;
-  private readonly builder: IosCtrlProxyBuilder;
+  private readonly builder: IosCtrlProxyManagerDiagnostics["builder"];
   private readonly processExecutor: HostProcessExecutor;
   private readonly xcodebuild: Xcodebuild;
   private readonly processClient: IosCtrlProxyProcessClient;
@@ -768,7 +768,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public static createForTesting(
     device: BootedDevice,
     timer: Timer,
-    builder?: IosCtrlProxyBuilder,
+    builder?: IosCtrlProxyManagerDiagnostics["builder"],
     tunnelClient?: IosTunnelClient,
     processExecutor?: HostProcessExecutor,
   ): IOSCtrlProxyManager {
@@ -788,7 +788,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   public static createForTestingWithDeps(
     device: BootedDevice,
     timer: Timer,
-    builder: IosCtrlProxyBuilder | undefined,
+    builder: IosCtrlProxyManagerDiagnostics["builder"] | undefined,
     processExecutor: HostProcessExecutor,
     signingManager?: XcodeSigningManager,
     deviceAppManager?: DeviceAppManager,

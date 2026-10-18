@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import type { ChildProcess } from "node:child_process";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import type { BootedDevice, DeviceInfo, ExecResult } from "../../../src/models";
+import type { BootedDevice, ExecResult } from "../../../src/models";
 import type { AdmitColdBoot } from "../../../src/models/BootAdmission";
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import {
@@ -53,17 +53,16 @@ function createClient(
     adbFactory,
     avdConfigReader: { readConfig: async () => ({ ramSizeMb: 2048 }) },
     hostPortAvailabilityChecker: { isPortAvailable: () => true },
+    locateEmulatorPath: async () => "emulator",
   });
-  (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
-    async () => "emulator";
-  (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [
+  spyOn(client, "listAvds").mockImplementation(async () => [
     { name: AVD, platform: "android", isRunning: false },
-  ];
-  (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () =>
-    false;
-  (
-    client as unknown as { checkArchitectureCompatibility: () => Promise<{ compatible: boolean }> }
-  ).checkArchitectureCompatibility = async () => ({ compatible: true });
+  ]);
+  spyOn(client, "isAvdStarting").mockImplementation(async () => false);
+  spyOn(client, "checkArchitectureCompatibility").mockImplementation(async () => ({
+    compatible: true,
+    hostArch: "arm64",
+  }));
   return client;
 }
 

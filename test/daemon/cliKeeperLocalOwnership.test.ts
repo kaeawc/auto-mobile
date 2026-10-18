@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/cli/runDaemonCommand";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
@@ -25,7 +26,8 @@ test.each([false, true])("local CLI keeper refuses proxy ownership (claim=%s)", 
   }
   const session = await manager.createSession("proxy-session", "emulator-5554", "android");
   await manager.claimLivenessOwnership(session.sessionId, "proxy-token");
-  manager.recordHeartbeat(session.sessionId);
+  // The owner token makes this the proxy owner's own heartbeat; a tokenless frame would be a no-op.
+  await deliverDaemonHeartbeat(manager, session.sessionId, { livenessOwnerToken: "proxy-token" });
   const before = { ...session };
   timer.advanceTime(1_000);
   const output: string[] = [];

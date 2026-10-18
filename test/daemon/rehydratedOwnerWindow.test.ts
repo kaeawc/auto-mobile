@@ -1,3 +1,4 @@
+import { deliverDaemonHeartbeat } from "../helpers/daemonHeartbeatHandler";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -82,7 +83,7 @@ describe("rehydrated owner reconnect window", () => {
     try {
       await timer.advanceTimeAsync(OWNER_WINDOW_MS - DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
       expect(released).toEqual([]);
-      sessionManager.recordHeartbeat("rehydrated");
+      await deliverDaemonHeartbeat(sessionManager, "rehydrated");
       expect(sessionManager.getSession("rehydrated")?.ownership).toBe("owned");
     } finally {
       stop();

@@ -543,7 +543,12 @@ export class FakeAdbExecutor implements AdbExecutor {
     };
   }
 
-  async getAdbPathOnly(): Promise<string> {
+  /** Options passed to each getAdbPathOnly call, in order. */
+  readonly adbPathProbeOptions: Array<{ timeoutMs?: number; signal?: AbortSignal } | undefined> =
+    [];
+
+  async getAdbPathOnly(options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<string> {
+    this.adbPathProbeOptions.push(options);
     return "adb";
   }
 }

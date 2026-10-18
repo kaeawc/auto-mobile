@@ -34,7 +34,7 @@ describe("ExploreElementScoring", () => {
   describe("calculateNavigationScore", () => {
     test("should give clickable elements a base score", () => {
       const element = createMockElement({ clickable: true });
-      (element as any).hierarchyDepth = 99; // Deep in hierarchy, no depth bonus
+      element.hierarchyDepth = 99; // Deep in hierarchy, no depth bonus
 
       const score = calculateNavigationScore(element);
 
@@ -46,7 +46,7 @@ describe("ExploreElementScoring", () => {
         clickable: false,
         scrollable: true,
       });
-      (element as any).hierarchyDepth = 99;
+      element.hierarchyDepth = 99;
 
       const score = calculateNavigationScore(element);
 
@@ -55,10 +55,10 @@ describe("ExploreElementScoring", () => {
 
     test("should give higher scores to elements closer to root", () => {
       const deepElement = createMockElement();
-      (deepElement as any).hierarchyDepth = 10;
+      deepElement.hierarchyDepth = 10;
 
       const shallowElement = createMockElement();
-      (shallowElement as any).hierarchyDepth = 2;
+      shallowElement.hierarchyDepth = 2;
 
       const deepScore = calculateNavigationScore(deepElement);
       const shallowScore = calculateNavigationScore(shallowElement);
@@ -68,7 +68,7 @@ describe("ExploreElementScoring", () => {
 
     test("should calculate correct depth bonus", () => {
       const element = createMockElement({ clickable: true });
-      (element as any).hierarchyDepth = 0; // Root level
+      element.hierarchyDepth = 0; // Root level
 
       const score = calculateNavigationScore(element);
 
@@ -81,7 +81,7 @@ describe("ExploreElementScoring", () => {
         clickable: true,
         scrollable: true,
       });
-      (element as any).hierarchyDepth = 99;
+      element.hierarchyDepth = 99;
 
       const score = calculateNavigationScore(element);
 
@@ -129,7 +129,7 @@ describe("ExploreElementScoring", () => {
   describe("estimateCoverageGain", () => {
     test("should return at least 1", () => {
       const element = createMockElement();
-      (element as any).hierarchyDepth = 99;
+      element.hierarchyDepth = 99;
 
       const gain = estimateCoverageGain(element);
 
@@ -138,10 +138,10 @@ describe("ExploreElementScoring", () => {
 
     test("should increase with navigation score", () => {
       const lowScoreElement = createMockElement({ clickable: false });
-      (lowScoreElement as any).hierarchyDepth = 99;
+      lowScoreElement.hierarchyDepth = 99;
 
       const highScoreElement = createMockElement({ clickable: true });
-      (highScoreElement as any).hierarchyDepth = 0;
+      highScoreElement.hierarchyDepth = 0;
 
       const lowGain = estimateCoverageGain(lowScoreElement);
       const highGain = estimateCoverageGain(highScoreElement);
@@ -157,10 +157,10 @@ describe("ExploreElementScoring", () => {
 
     test("should select element with highest navigation score", () => {
       const lowScore = createMockElement({ text: "Low" });
-      (lowScore as any).hierarchyDepth = 10;
+      lowScore.hierarchyDepth = 10;
 
       const highScore = createMockElement({ text: "High" });
-      (highScore as any).hierarchyDepth = 1;
+      highScore.hierarchyDepth = 1;
 
       const selected = selectBreadthFirst([lowScore, highScore]);
 
@@ -176,9 +176,9 @@ describe("ExploreElementScoring", () => {
 
     test("does not mutate the input array order", () => {
       const lowScore = createMockElement({ text: "Low" });
-      (lowScore as any).hierarchyDepth = 10;
+      lowScore.hierarchyDepth = 10;
       const highScore = createMockElement({ text: "High" });
-      (highScore as any).hierarchyDepth = 1;
+      highScore.hierarchyDepth = 1;
 
       const input = [lowScore, highScore];
       selectBreadthFirst(input);
@@ -194,10 +194,10 @@ describe("ExploreElementScoring", () => {
 
     test("should prefer unexplored elements", () => {
       const explored = createMockElement({ text: "Explored" });
-      (explored as any).hierarchyDepth = 0; // High score
+      explored.hierarchyDepth = 0; // High score
 
       const unexplored = createMockElement({ text: "Unexplored" });
-      (unexplored as any).hierarchyDepth = 10; // Lower score
+      unexplored.hierarchyDepth = 10; // Lower score
 
       const trackedElements = new Map<string, TrackedElement>();
       trackedElements.set(getElementKey(explored), {
@@ -212,10 +212,10 @@ describe("ExploreElementScoring", () => {
 
     test("should fall back to score when all elements are explored", () => {
       const lowScore = createMockElement({ text: "Low" });
-      (lowScore as any).hierarchyDepth = 10;
+      lowScore.hierarchyDepth = 10;
 
       const highScore = createMockElement({ text: "High" });
-      (highScore as any).hierarchyDepth = 1;
+      highScore.hierarchyDepth = 1;
 
       const trackedElements = new Map<string, TrackedElement>();
       trackedElements.set(getElementKey(lowScore), {
@@ -242,9 +242,9 @@ describe("ExploreElementScoring", () => {
 
     test("does not mutate the input array order", () => {
       const explored = createMockElement({ text: "Explored" });
-      (explored as any).hierarchyDepth = 0;
+      explored.hierarchyDepth = 0;
       const unexplored = createMockElement({ text: "Unexplored" });
-      (unexplored as any).hierarchyDepth = 10;
+      unexplored.hierarchyDepth = 10;
 
       const trackedElements = new Map<string, TrackedElement>();
       trackedElements.set(getElementKey(explored), {
@@ -266,7 +266,7 @@ describe("ExploreElementScoring", () => {
 
     test("should return element and stats", () => {
       const element = createMockElement({ text: "Test" });
-      (element as any).hierarchyDepth = 5;
+      element.hierarchyDepth = 5;
 
       const result = selectWeighted([element], "discover", new Map());
 
@@ -279,10 +279,10 @@ describe("ExploreElementScoring", () => {
     test("should favor novelty in discover mode", () => {
       // Use same depth so navigation score is similar, novelty becomes deciding factor
       const explored = createMockElement({ text: "Explored" });
-      (explored as any).hierarchyDepth = 5;
+      explored.hierarchyDepth = 5;
 
       const unexplored = createMockElement({ text: "Unexplored" });
-      (unexplored as any).hierarchyDepth = 5;
+      unexplored.hierarchyDepth = 5;
 
       const trackedElements = new Map<string, TrackedElement>();
       trackedElements.set(getElementKey(explored), {
@@ -300,10 +300,10 @@ describe("ExploreElementScoring", () => {
   describe("rankElementsForDryRun", () => {
     test("should rank elements by score", () => {
       const low = createMockElement({ text: "Low" });
-      (low as any).hierarchyDepth = 10;
+      low.hierarchyDepth = 10;
 
       const high = createMockElement({ text: "High" });
-      (high as any).hierarchyDepth = 1;
+      high.hierarchyDepth = 1;
 
       const ranked = rankElementsForDryRun([low, high], "weighted", "discover", new Map());
 

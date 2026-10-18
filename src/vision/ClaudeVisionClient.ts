@@ -16,7 +16,9 @@ import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 
-export function parseClaudeResponse(response: Anthropic.Message): ClaudeVisionAnalysis {
+export function parseClaudeResponse(
+  response: Pick<Anthropic.Message, "content">,
+): ClaudeVisionAnalysis {
   let responseText = "";
   for (const block of response.content) {
     if (block.type === "text") {

@@ -5,6 +5,7 @@ import type { Migration, MigrationProvider } from "kysely/migration";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { runMigrations, isAnyTableNonEmpty, isBenignForwardSkew } from "../../src/db/migrator";
 import { ActionableError } from "../../src/models/ActionableError";
+import { looseKyselyTables } from "../helpers/looseKyselyTables";
 
 // --- Fake migration set (all in-memory, deterministic, <100ms) -------------
 
@@ -46,8 +47,8 @@ async function insertSentinel(db: Kysely<unknown>): Promise<void> {
 }
 
 async function sentinelSurvives(db: Kysely<unknown>): Promise<boolean> {
-  const rows = await db
-    .selectFrom("widgets" as any)
+  const rows = await looseKyselyTables(db)
+    .selectFrom("widgets")
     .select("id")
     .where("id", "=", 42)
     .execute();
@@ -55,10 +56,7 @@ async function sentinelSurvives(db: Kysely<unknown>): Promise<boolean> {
 }
 
 async function migrationNames(db: Kysely<unknown>): Promise<string[]> {
-  const rows = await db
-    .selectFrom("kysely_migration" as any)
-    .select("name")
-    .execute();
+  const rows = await looseKyselyTables(db).selectFrom("kysely_migration").select("name").execute();
   return rows.map((row) => String(row.name)).sort();
 }
 
@@ -244,8 +242,8 @@ describe("runMigrations recovery", () => {
 
     const events: string[] = [];
     const backup = async (): Promise<void> => {
-      const widgetsStillPresent = await db
-        .selectFrom("sqlite_master" as any)
+      const widgetsStillPresent = await looseKyselyTables(db)
+        .selectFrom("sqlite_master")
         .select("name")
         .where("name", "=", "widgets")
         .executeTakeFirst();

@@ -107,7 +107,7 @@ export class DisplayedTimeMetricsCollector {
     }
   }
 
-  private async getPreferredLogcatTag(): Promise<DisplayedLogcatTag> {
+  async getPreferredLogcatTag(): Promise<DisplayedLogcatTag> {
     if (this.logcatTagCache) {
       return this.logcatTagCache;
     }
@@ -120,7 +120,7 @@ export class DisplayedTimeMetricsCollector {
     return `shell logcat -d -v epoch -s ${tag}:I`;
   }
 
-  private parseDisplayedMetrics(
+  parseDisplayedMetrics(
     output: string,
     options: DisplayedTimeCaptureOptions,
   ): DisplayedTimeMetric[] {

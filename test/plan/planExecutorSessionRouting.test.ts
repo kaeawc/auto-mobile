@@ -4,6 +4,12 @@ import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { z } from "zod/v4";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
 describe("PlanExecutor - Session-based Device Routing", () => {
   let planExecutor: DefaultPlanExecutor;
@@ -69,7 +75,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
 
     // Mark it as requiring a device so params get injected
     const tool = ToolRegistry.getTool("testDaemonNotInitializedTool")!;
-    (tool as any).requiresDevice = true;
+    tool.requiresDevice = true;
 
     const plan: Plan = {
       name: "Test Daemon Not Initialized",
@@ -106,10 +112,16 @@ describe("PlanExecutor - Session-based Device Routing", () => {
   test("should NOT inject deviceId when sessionUuid is provided AND daemon is initialized", async () => {
     // Initialize daemon with minimal setup
     const daemonState = DaemonState.getInstance();
-    daemonState.initialize(
-      {} as any, // sessionManager - not used in this test
-      {} as any, // devicePool - not used in this test
+    const timer = new FakeTimer();
+    const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    sessionManager.stopCleanupTimer();
+    const devicePool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "plan-session-routing", {
+        timer,
+        deviceManager: new FakeDeviceUtils(),
+      }),
     );
+    daemonState.initialize(sessionManager, devicePool);
 
     expect(daemonState.isInitialized()).toBe(true);
 
@@ -135,7 +147,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
     );
 
     const tool = ToolRegistry.getTool("testDaemonInitializedTool")!;
-    (tool as any).requiresDevice = true;
+    tool.requiresDevice = true;
 
     const plan: Plan = {
       name: "Test Daemon Initialized",
@@ -207,7 +219,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
 
     // Mark it as requiring a device so params get injected
     const tool = ToolRegistry.getTool("testDeviceIdInjectionTool")!;
-    (tool as any).requiresDevice = true;
+    tool.requiresDevice = true;
 
     const plan: Plan = {
       name: "Test DeviceId Injection",
@@ -268,7 +280,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       mockHandler,
       { acceptsPlanLockNamespace: true },
     );
-    (ToolRegistry.getTool("testLockNamespaceTool")! as any).requiresDevice = true;
+    ToolRegistry.getTool("testLockNamespaceTool")!.requiresDevice = true;
 
     const plan: Plan = {
       name: "Test Lock Namespace Injection",
@@ -306,7 +318,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       testToolSchema,
       mockHandler,
     );
-    (ToolRegistry.getTool("testNoLockNamespaceTool")! as any).requiresDevice = true;
+    ToolRegistry.getTool("testNoLockNamespaceTool")!.requiresDevice = true;
 
     const plan: Plan = {
       name: "Test Lock Namespace Not Leaked",
@@ -343,7 +355,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
 
     // Mark it as requiring a device
     const tool = ToolRegistry.getTool("testNoOverrideTool")!;
-    (tool as any).requiresDevice = true;
+    tool.requiresDevice = true;
 
     const plan: Plan = {
       name: "Test No Override",

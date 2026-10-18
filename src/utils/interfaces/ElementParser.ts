@@ -6,8 +6,8 @@ type WindowSearchOrder = "topmost-first" | "bottommost-first";
 export interface ElementParser {
   extractNodeProperties(node: ViewHierarchyNode): any;
   parseBounds(bounds: unknown): ElementBounds | null;
-  parseNodeBounds(node: ViewHierarchyNode): Element | null;
-  extractRootNodes(viewHierarchy: ViewHierarchyResult): ViewHierarchyNode[];
+  parseNodeBounds(node: ViewHierarchyNode | null): Element | null;
+  extractRootNodes(viewHierarchy: ViewHierarchyResult | null): ViewHierarchyNode[];
   extractWindowRootGroups(
     viewHierarchy: ViewHierarchyResult,
     order?: WindowSearchOrder,
@@ -18,7 +18,7 @@ export interface ElementParser {
   ): ViewHierarchyNode[];
   traverseNode(node: any, callback: (node: any, depth: number) => void, depth?: number): void;
   flattenViewHierarchy(
-    viewHierarchy: ViewHierarchyResult,
+    viewHierarchy: ViewHierarchyResult | null,
     options?: { includeWindows?: boolean; windowOrder?: WindowSearchOrder },
   ): Array<{ element: Element; index: number; depth: number; text?: string }>;
 }

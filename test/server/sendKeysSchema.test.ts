@@ -2,16 +2,16 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import {
+  type InteractionToolDependencies,
   assertSendKeysRunnerCompatible,
   registerInteractionTools,
   sendKeysSchema,
-  setSendKeysFactory,
-  resetSendKeysFactory,
 } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { SendKeys } from "../../src/features/action/SendKeys";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 
+const interactionDeps: InteractionToolDependencies = {};
 isolateToolRegistry();
 
 describe("sendKeysSchema", () => {
@@ -30,7 +30,7 @@ describe("sendKeysSchema", () => {
     }
   });
   test("advertises nested scope, strategies, and selector dependencies", () => {
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     const schema = ToolRegistry.getToolDefinitions().find(
       (tool) => tool.name === "sendKeys",
     )?.inputSchema;
@@ -58,14 +58,14 @@ describe("sendKeysSchema", () => {
     const calls: Parameters<SendKeys["execute"]>[] = [];
     const error =
       "Container level 2 ambiguous: item_42; Candidates: resourceId=item_42 text=item_42 bounds=[0,0,100,20]";
-    setSendKeysFactory(() => ({
+    interactionDeps.sendKeysFactory = () => ({
       execute: async (...args) => {
         calls.push(args);
         return { success: false, completedCommands: 0, failedIndex: 0, commands: [], error };
       },
-    }));
+    });
     try {
-      registerInteractionTools();
+      registerInteractionTools(interactionDeps);
       expect(handler).toBeDefined();
       const args = sendKeysSchema.parse({ ...scoped, display: "external" });
       const response = await handler!(
@@ -81,7 +81,7 @@ describe("sendKeysSchema", () => {
         content: [expect.objectContaining({ text: expect.stringContaining(error) })],
       });
     } finally {
-      resetSendKeysFactory();
+      delete interactionDeps.sendKeysFactory;
       capability.mockRestore();
       registration.mockRestore();
     }
@@ -158,7 +158,7 @@ describe("sendKeysSchema", () => {
   });
 
   test("accepts keyboard profiles only with automatic or IME delivery", () => {
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     for (const mode of [undefined, "auto", "ime"]) {
       expect(
         sendKeysSchema.safeParse({

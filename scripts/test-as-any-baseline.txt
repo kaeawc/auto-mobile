@@ -1,12 +1,10 @@
 # AutoMobile test as-any ratchet baseline -- see scripts/test-as-any-baseline.sh
-32	test/ctrlProxy/CtrlProxyManager.test.ts
 3	test/daemon/appearanceSocketServer.test.ts
 1	test/daemon/canonicalPixels.test.ts
 5	test/daemon/clientRequestIdGenerator.test.ts
 1	test/daemon/daemonMcpProxyListChanged.test.ts
-19	test/daemon/deviceDataStreamSocketServer.test.ts
 6	test/daemon/failuresPushSocketServer.test.ts
-42	test/daemon/identityRecovery.test.ts
+1	test/daemon/identityRecovery.test.ts
 2	test/daemon/manager.test.ts
 6	test/daemon/observationInitialFrame.test.ts
 8	test/daemon/performancePushSocketServer.test.ts
@@ -77,7 +75,6 @@
 4	test/features/action/TapOnElement.searchPolling.test.ts
 15	test/features/action/TapOnElement.selectedElement.test.ts
 25	test/features/action/TapOnElement.selectionStrategy.test.ts
-64	test/features/action/TapOnElement.talkback.test.ts
 9	test/features/action/TapOnElement.visionFallback.test.ts
 30	test/features/action/TapOnElement.voiceover.test.ts
 8	test/features/action/TapStrategy.test.ts
@@ -103,7 +100,6 @@
 1	test/features/element-resolution/HierarchyNormalization.test.ts
 4	test/features/failures/FailureRecorder.test.ts
 9	test/features/memory/MemoryAudit.test.ts
-47	test/features/navigation/Explore.test.ts
 24	test/features/navigation/ExploreElementScoring.test.ts
 2	test/features/navigation/navigateToInternalNoDiffE2E.test.ts
 1	test/features/observe/EdgeMatchIndex.test.ts
@@ -111,14 +107,13 @@
 2	test/features/observe/IdentifyMediaViews.test.ts
 1	test/features/observe/Idle.test.ts
 8	test/features/observe/ObservePoll.test.ts
-43	test/features/observe/ObserveScreen.test.ts
 37	test/features/observe/ObserveScreenMissingForegroundWindow.test.ts
 4	test/features/observe/SettleObserve.test.ts
 8	test/features/observe/TakeScreenshot.AndroidAdbFilePull.test.ts
 1	test/features/observe/TakeScreenshot.AndroidCtrlProxy.test.ts
 2	test/features/observe/TakeScreenshot.iOS.test.ts
 1	test/features/observe/ViewHierarchy.filter.test.ts
-13	test/features/observe/ViewHierarchy.test.ts
+11	test/features/observe/ViewHierarchy.test.ts
 1	test/features/observe/WaitForCondition.test.ts
 7	test/features/observe/android/AndroidCtrlProxyClientCapabilities.test.ts
 7	test/features/observe/android/AndroidCtrlProxyClientConnectionFailureRecovery.test.ts
@@ -136,7 +131,6 @@
 2	test/features/observe/ios/CtrlProxyHierarchy.test.ts
 1	test/features/observe/ios/IosScreenIdentity.test.ts
 1	test/features/observe/ios/ctrlProxyRequestSnapshots.test.ts
-37	test/features/observe/output/ObserveResultOutput.test.ts
 1	test/features/observe/shared/SharedGestureDelegate.test.ts
 1	test/features/observe/shared/SharedTextDelegate.test.ts
 5	test/features/performance/DisplayedTimeMetricsCollector.test.ts
@@ -150,10 +144,8 @@
 5	test/features/utility/ElementParser.test.ts
 2	test/features/utility/GetDeepLinks.test.ts
 19	test/features/utility/PostNotification.test.ts
-1	test/features/utility/PostNotificationIos.test.ts
 3	test/features/utility/SystemConfigurationAdapter.test.ts
 1	test/features/utility/SystemConfigurationManager.test.ts
-50	test/features/video/FfmpegVideoProcessingBackend.test.ts
 5	test/features/video/PlatformVideoCaptureBackend.test.ts
 4	test/features/video/VideoRecorderService.test.ts
 2	test/plan/planExecutorAbortAfterStep.test.ts

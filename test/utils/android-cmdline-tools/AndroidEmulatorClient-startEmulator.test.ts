@@ -35,17 +35,14 @@ function clientWithAvd(
   adb.setCommandResponse("emu avd name", createExecResult(`${avdName}\n`));
   const adbFactory: AdbClientFactory = { create: (): AdbExecutor => adb };
   const advertisements = new FakeRunningAvdAdvertisementReader();
-  const client = new AndroidEmulatorClient(
-    noopExec,
-    forbiddenSpawn,
-    new FakeTimer(),
+  const client = new AndroidEmulatorClient({
+    execAsync: noopExec,
+    spawnFn: forbiddenSpawn,
+    timer: new FakeTimer(),
     adbFactory,
-    undefined,
-    undefined,
-    undefined,
-    { isPortAvailable: () => true },
-    advertisements,
-  );
+    hostPortAvailabilityChecker: { isPortAvailable: () => true },
+    runningAvdAdvertisementReader: advertisements,
+  });
   (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
     async () => "emulator";
   (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [

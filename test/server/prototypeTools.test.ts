@@ -1167,6 +1167,8 @@ describe("prototype discovery over MCP", () => {
         (definition) => definition.outputSchema,
       ),
     );
+    // First listing builds every tool's schema and the client's validators; keep it out of the test.
+    await fixture.client.listTools();
   });
   afterAll(async () => {
     unsubscribe();
@@ -1182,8 +1184,9 @@ describe("prototype discovery over MCP", () => {
       arguments: { toolName: "prototype", enabled: true },
     });
     expect(enabled.isError).not.toBe(true);
-    expect(await names()).toContain("prototype");
-    expect(await names()).not.toContain("highlight");
+    const whileEnabled = await names();
+    expect(whileEnabled).toContain("prototype");
+    expect(whileEnabled).not.toContain("highlight");
     const disabled = await fixture.client.callTool({
       name: "setToolEnabled",
       arguments: { toolName: "prototype", enabled: false },

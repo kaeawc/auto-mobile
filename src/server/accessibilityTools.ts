@@ -15,7 +15,7 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../utils/logger";
 import { accessibilityStateSchema } from "./toolOutputSchemas";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import type { ScreenReaderToggleOptions } from "../models/AccessibilityResult";
 import type { ScreenReaderRestoreSlot } from "../features/accessibility/ScreenReaderRestore";
 import { runSessionScreenReaderMutation } from "./sessionScreenReader";
@@ -67,11 +67,9 @@ async function toggleRecordingPreviousState<
   device: BootedDevice,
   args: AccessibilityArgs,
   run: (options: ScreenReaderToggleOptions) => Promise<R>,
+  daemon: DaemonContext = defaultDaemonContext,
 ): Promise<R> {
-  const manager =
-    args.sessionUuid && DaemonState.getInstance().isInitialized()
-      ? DaemonState.getInstance().getSessionManager()
-      : undefined;
+  const manager = args.sessionUuid ? daemon.sessionManager() : undefined;
   const platform = device.platform === "ios" ? "ios" : "android";
   return runSessionScreenReaderMutation(
     manager,

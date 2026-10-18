@@ -71,6 +71,10 @@ import type { ActionCall } from "./ActionCall";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
+/** Budget for the Android a11y service to answer a launch-intent request. */
+const A11Y_LAUNCH_INTENT_TIMEOUT_MS = 3_000;
+/** Cold iOS app starts can take a long time before CtrlProxy publishes a hierarchy. */
+const IOS_HIERARCHY_READY_TIMEOUT_MS = 60_000;
 const ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS = 15_000;
 const SHADE_COLLAPSE_RETRY_INTERVAL_MS = 1_000;
 // One bounded lock re-read before a launch timeout names a SystemUI blocker (#10182).
@@ -351,8 +355,10 @@ export class LaunchApp extends BaseVisualChange {
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
       const result = perf
-        ? await perf.track("a11yLaunchIntent", () => a11y.requestLaunchIntent(packageName, 3000))
-        : await a11y.requestLaunchIntent(packageName, 3000);
+        ? await perf.track("a11yLaunchIntent", () =>
+            a11y.requestLaunchIntent(packageName, A11Y_LAUNCH_INTENT_TIMEOUT_MS),
+          )
+        : await a11y.requestLaunchIntent(packageName, A11Y_LAUNCH_INTENT_TIMEOUT_MS);
       this.assertLaunchNotAborted(signal);
       if (result.success && result.componentName) {
         const activity = resolveComponentActivity(result.componentName, packageName);
@@ -764,7 +770,7 @@ export class LaunchApp extends BaseVisualChange {
 
           signal?.throwIfAborted();
           await perf.track("waitForHierarchy", () =>
-            this.waitForIosHierarchyReady(60000, bundleId, signal),
+            this.waitForIosHierarchyReady(IOS_HIERARCHY_READY_TIMEOUT_MS, bundleId, signal),
           );
           perf.end();
           return {
@@ -1296,8 +1302,8 @@ export class LaunchApp extends BaseVisualChange {
       : null;
     let displayedMetricsStartMs: number | null = null;
 
-    const foregroundWaitTimeoutMs = 5000;
-    const foregroundPollIntervalMs = 200;
+    const foregroundWaitTimeoutMs = LAUNCH_OBSERVATION_TIMEOUT_MS;
+    const foregroundPollIntervalMs = LAUNCH_OBSERVATION_POLL_INTERVAL_MS;
     let observationTimestampMs: number | undefined;
 
     const launchResult = await this.observedInteraction<LaunchAppResult>(

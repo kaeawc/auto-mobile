@@ -6,13 +6,8 @@ import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import {
+  type InteractionToolDependencies,
   registerInteractionTools,
-  setTapAnyElementFactory,
-  resetTapAnyElementFactory,
-  setTapOnElementFactory,
-  resetTapOnElementFactory,
-  setSwipeOnFactory,
-  resetSwipeOnFactory,
 } from "../../src/server/interactionTools";
 import { withStaleDisplay } from "../../src/features/observe/StaleDisplayError";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
@@ -55,6 +50,7 @@ import { FakeDisplayInventorySource } from "../fakes/FakeDisplayInventoryProvide
 import type { BootedDevice } from "../../src/models";
 import { settleEmbeddedObservationInResponse } from "../../src/server/embeddedObservationSettle";
 
+const interactionDeps: InteractionToolDependencies = {};
 const device: BootedDevice = {
   deviceId: "pin-device",
   name: "Pin device",
@@ -92,9 +88,9 @@ beforeEach(async () => {
   registerUtilityTools({ displayInventory: provider });
 });
 afterEach(() => {
-  resetTapAnyElementFactory();
-  resetTapOnElementFactory();
-  resetSwipeOnFactory();
+  delete interactionDeps.tapAnyElementFactory;
+  delete interactionDeps.tapOnElementFactory;
+  delete interactionDeps.swipeOnFactory;
   sessions.stopCleanupTimer();
   DaemonState.getInstance().reset();
   ToolRegistry.clearTools();
@@ -343,15 +339,15 @@ test("registered sole-panel iOS swipeOn pin preserves lookFor and ordinary defau
   };
   sessions.setDisplayPin("one", "inner");
   const lookFor = { text: "Terms" };
-  setSwipeOnFactory(() => ({
+  interactionDeps.swipeOnFactory = () => ({
     execute: async (options) => {
       expect(options).toMatchObject({ lookFor, autoTarget: true, includeSystemInsets: false });
       expect(options.display).toBeUndefined();
       expect(selectedDisplayPin()).toBe("inner");
       return { success: true, targetType: "screen", x1: 0, y1: 0, x2: 0, y2: 0, duration: 0 };
     },
-  }));
-  registerInteractionTools();
+  });
+  registerInteractionTools(interactionDeps);
   const response = await ToolRegistry.callInternal(
     "swipeOn",
     { direction: "up", lookFor },
@@ -755,21 +751,21 @@ for (const name of ["observe", "tapOn", "tapAny", "swipeOn"] as const) {
         getMostRecentCachedObserveResult: observe.getMostRecentCachedObserveResult.bind(observe),
       }),
     });
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async (options) => {
         const observation = capture(options.display);
         await executor.executeCommand(`tap panel ${observation.display.key}`);
         return { success: true, action: "tap", element: {}, observation };
       },
-    }));
-    setTapAnyElementFactory(() => ({
+    });
+    interactionDeps.tapAnyElementFactory = () => ({
       execute: async (options) => {
         const observation = capture(options.display);
         await executor.executeCommand(`tap panel ${observation.display.key}`);
         return { success: true, action: "tap", element: {}, observation };
       },
-    }));
-    setSwipeOnFactory(() => ({
+    });
+    interactionDeps.swipeOnFactory = () => ({
       execute: async (options) => {
         const observation = capture(options.display);
         await executor.executeCommand(`swipe panel ${observation.display.key}`);
@@ -784,8 +780,8 @@ for (const name of ["observe", "tapOn", "tapAny", "swipeOn"] as const) {
           observation,
         };
       },
-    }));
-    registerInteractionTools();
+    });
+    registerInteractionTools(interactionDeps);
     const args =
       name === "tapOn"
         ? { selector: { text: "Settings" } }
@@ -1318,6 +1314,13 @@ for (const name of ["observe", "tapOn", "tapAny", "swipeOn"]) {
   }
 }
 
+/** What the real provider reports when nothing could be read: no panels and an unreadable outcome. */
+function unreadableInventoryProvider(): FakeDisplayInventoryProvider {
+  const provider = new FakeDisplayInventoryProvider();
+  provider.outcome = { kind: "unreadable", reason: "no inventory" };
+  return provider;
+}
+
 for (const outcome of ["throws", "no inventory", "degraded", "degraded panels"] as const) {
   test(`setting a pin with ${outcome} fails retryably and preserves the old pin`, async () => {
     sessions.setDisplayPin("one", "cover");
@@ -1335,7 +1338,7 @@ for (const outcome of ["throws", "no inventory", "degraded", "degraded panels"] 
     }
     const inventory =
       outcome === "no inventory"
-        ? new FakeDisplayInventoryProvider()
+        ? unreadableInventoryProvider()
         : new CachingDisplayInventoryProvider(source, source, timer);
     const handler = createSetActiveDeviceHandler({
       displayInventory: inventory,
@@ -1391,13 +1394,13 @@ for (const name of ["observe", "tapOn", "tapAny", "swipeOn"]) {
 test("registered tapAny missing pin reports typed details without dispatch", async () => {
   sessions.setDisplayPin("one", "unplugged");
   let dispatches = 0;
-  setTapAnyElementFactory(() => ({
+  interactionDeps.tapAnyElementFactory = () => ({
     execute: async () => {
       dispatches++;
       return { success: true, element: {} };
     },
-  }));
-  registerInteractionTools();
+  });
+  registerInteractionTools(interactionDeps);
   const response = await ToolRegistry.callInternal("tapAny", {}, undefined, undefined, {
     targetDevice: device,
     sessionUuid: "one",

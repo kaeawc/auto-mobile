@@ -32,9 +32,14 @@ import {
   verifyImeCommitResult,
   confirmImeCommitAfterSyncLoss,
   imeCommitExceptionResult,
+  isRetryableImeRestartWithNothingCommitted,
 } from "../imeFailureDiagnostics";
+import { exponentialBackoff } from "../../../utils/Backoff";
 import type { ImeSpanSnapshot } from "./ImeSpan";
 import { KEY_EVENT_FORMAT_MARKERS } from "./AndroidTypingConstants";
+/** Bounded resends after a restart that provably committed nothing (first focus of a field). */
+const IME_RESTART_RETRIES = 2;
+const IME_RESTART_BACKOFF = exponentialBackoff({ initialDelayMs: 100, maxDelayMs: 400 });
 interface ImeCommitProgress {
   result: TextActionResult;
   safeToRestore: boolean;
@@ -438,13 +443,29 @@ export class ImeCommitTyper implements AndroidModeTyper {
         logger.debug("[SendKeys] IME trace capability unavailable", error);
       }
     }
-    const result = await this.host.textClient.commitViaIme(
+    let result = await this.host.textClient.commitViaIme(
       text,
       priorImeId,
       signal,
       delivery,
       trace ? true : undefined,
     );
+    for (
+      let attempt = 1;
+      attempt <= IME_RESTART_RETRIES && isRetryableImeRestartWithNothingCommitted(result);
+      attempt++
+    ) {
+      logger.warn(`[SendKeys] IME editor restarted before any text landed; retry ${attempt}`);
+      await this.host.timer.sleep(IME_RESTART_BACKOFF.delayForAttempt(attempt));
+      this.host.checkAbort(signal);
+      result = await this.host.textClient.commitViaIme(
+        text,
+        priorImeId,
+        signal,
+        delivery,
+        trace ? true : undefined,
+      );
+    }
     const traceState = this.host.imeTraceContext.getStore();
     if (trace && traceState && result.imeTrace !== undefined) {
       traceState.lines = [...new Set([...(traceState.lines ?? []), ...result.imeTrace])].slice(

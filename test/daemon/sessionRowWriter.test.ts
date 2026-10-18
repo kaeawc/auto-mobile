@@ -552,7 +552,7 @@ describe("SessionRowWriter release statements", () => {
     h.park(gate.promise);
     const terminal = desire();
     terminal.initialPrecondition = {
-      expectedRowGeneration: 1,
+      expectedRowGeneration: 0,
       unlessTerminalOrOwnedByLivePeer: {
         livePeerDaemonSessionIds: [],
         reportRefusal: true,

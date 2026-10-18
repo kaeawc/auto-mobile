@@ -36,12 +36,11 @@ describe("AndroidEmulatorClient.getOfflineDeviceIdsAmong", () => {
       { deviceId: "emulator-5554", state: "offline" },
       { deviceId: "emulator-5556", state: "device" },
     ]);
-    const client = new AndroidEmulatorClient(
-      async () => execResult(""),
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => execResult(""),
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
 
     const offline = await client.getOfflineDeviceIdsAmong(["emulator-5554", "emulator-5556"]);
 
@@ -51,12 +50,11 @@ describe("AndroidEmulatorClient.getOfflineDeviceIdsAmong", () => {
   test("excludes an offline serial that is not among the given candidates", async () => {
     const adb = new FakeAdbExecutor();
     adb.setDeviceStates([{ deviceId: "emulator-9999", state: "offline" }]);
-    const client = new AndroidEmulatorClient(
-      async () => execResult(""),
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => execResult(""),
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
 
     const offline = await client.getOfflineDeviceIdsAmong(["emulator-5554"]);
 
@@ -72,12 +70,11 @@ describe("AndroidEmulatorClient.getOfflineDeviceIdsAmong", () => {
       probed = true;
       return originalGetDeviceStates(...args);
     };
-    const client = new AndroidEmulatorClient(
-      async () => execResult(""),
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => execResult(""),
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
 
     const offline = await client.getOfflineDeviceIdsAmong([]);
 
@@ -87,12 +84,11 @@ describe("AndroidEmulatorClient.getOfflineDeviceIdsAmong", () => {
 
   test("distinguishes a failed offline probe from an authoritative empty result", async () => {
     const adb = new RejectingDeviceStatesAdbExecutor();
-    const client = new AndroidEmulatorClient(
-      async () => execResult(""),
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
+    const client = new AndroidEmulatorClient({
+      execAsync: async () => execResult(""),
+      timer: new FakeTimer(),
+      adbFactory: new FakeAdbClientFactory(adb),
+    });
 
     await expect(client.getOfflineDeviceIdsAmong(["emulator-5554"])).rejects.toBeInstanceOf(
       AndroidOfflineProbeError,
@@ -102,7 +98,11 @@ describe("AndroidEmulatorClient.getOfflineDeviceIdsAmong", () => {
 
 describe("AndroidEmulatorClient.recoverOfflineDevices", () => {
   function recoveryClient(adb: FakeAdbExecutor, factory = new FakeAdbClientFactory(adb)) {
-    return new AndroidEmulatorClient(async () => execResult(""), null, new FakeTimer(), factory);
+    return new AndroidEmulatorClient({
+      execAsync: async () => execResult(""),
+      timer: new FakeTimer(),
+      adbFactory: factory,
+    });
   }
 
   test("reconnects each distinct serial once with explicit argv and noRetry", async () => {

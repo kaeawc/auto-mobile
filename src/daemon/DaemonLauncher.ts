@@ -1,3 +1,4 @@
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 import type {
   HostChildProcess as ChildProcess,
   HostSpawnOptions as SpawnOptions,
@@ -241,7 +242,10 @@ function resolvePackageSpecifier(version: string): string {
 }
 
 function pathEntries(environment: NodeJS.ProcessEnv, platform: NodeJS.Platform): string[] {
-  const path = platform === "win32" ? (environment.Path ?? environment.PATH) : environment.PATH;
+  const path =
+    platform === "win32"
+      ? (environment.Path ?? readEnvRaw(AMBIENT_ENV.PATH, environment))
+      : readEnvRaw(AMBIENT_ENV.PATH, environment);
   return path?.split(platform === "win32" ? ";" : posix.delimiter).filter(Boolean) ?? [];
 }
 

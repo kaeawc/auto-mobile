@@ -378,9 +378,7 @@ describe("TapOnElement extended selectors", () => {
       const proxy = new FakeCtrlProxy();
       proxy.setHierarchyData({ updatedAt: 1, packageName: "com.android.systemui", hierarchy: {} });
       proxy.setViewHierarchyResult(notificationHierarchy);
-      const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        proxy as unknown as AndroidCtrlProxyClient,
-      );
+      const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(proxy);
       let tapOn: TapOnElement;
       try {
         tapOn = createDefaultTapOnElement();

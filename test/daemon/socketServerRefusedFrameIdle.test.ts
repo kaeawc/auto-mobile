@@ -245,7 +245,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
         setPreference: record("setPreference", 5),
         removePreference: record("removePreference", 3),
         clearPreferenceStore: record("clearPreferenceStore", 2),
-      } as unknown as AndroidCtrlProxyClient;
+      };
     });
     spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
       () =>

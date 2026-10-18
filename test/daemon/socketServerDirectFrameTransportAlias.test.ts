@@ -111,25 +111,22 @@ describe("a direct frame naming a held handset by its other transport id", () =>
 
     // The direct frames discover through the process device manager: the raw `adb devices` rows.
     PlatformDeviceManagerFactory.setInstance(manager);
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-      (device) =>
-        ({
-          getScreenScaleMetadata: () => null,
-          requestTapCoordinates: async (
-            ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-          ) => {
-            args[6]?.();
-            driven.push(`tap:${device.deviceId}`);
-            return { success: true };
-          },
-          setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-            if (typeof args[5] === "object") {
-              args[5].onDispatch?.();
-            }
-            driven.push(`setPreference:${device.deviceId}`);
-          },
-        }) as unknown as AndroidCtrlProxyClient,
-    );
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation((device) => ({
+      getScreenScaleMetadata: () => null,
+      requestTapCoordinates: async (
+        ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+      ) => {
+        args[6]?.();
+        driven.push(`tap:${device.deviceId}`);
+        return { success: true };
+      },
+      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+        if (typeof args[5] === "object") {
+          args[5].onDispatch?.();
+        }
+        driven.push(`setPreference:${device.deviceId}`);
+      },
+    }));
     spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
       (device) =>
         ({

@@ -188,7 +188,7 @@ describe("ExecuteGesture", () => {
         totalTimeMs: 1,
         gestureTimeMs: 1,
       }),
-    } as unknown as AndroidCtrlProxyClient;
+    };
 
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
 
@@ -225,7 +225,7 @@ describe("ExecuteGesture", () => {
     adb.setCommandError("shell input swipe", new Error("ADB device offline"));
     const fakeClient = {
       requestSwipe: async () => ({ success: false, error: "a11y dispatch rejected" }),
-    } as unknown as AndroidCtrlProxyClient;
+    };
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
     const result = await new ExecuteGesture(androidDevice, adb).swipe(0, 0, 100, 100, {
       scrollMode: "a11y",

@@ -22,7 +22,7 @@ describe("tapOn semantic link outcomes", () => {
           const android = new FakeCtrlProxy(timer);
           const ios = new FakeIOSCtrlProxy();
           const androidInstance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-            android as unknown as AndroidCtrlProxyClient,
+            android,
           );
           const iosInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
             ios as unknown as IOSCtrlProxyClient,
@@ -30,7 +30,7 @@ describe("tapOn semantic link outcomes", () => {
           const androidExisting = spyOn(
             AndroidCtrlProxyClient,
             "getExistingInstance",
-          ).mockReturnValue(android as unknown as AndroidCtrlProxyClient);
+          ).mockReturnValue(android);
           const iosExisting = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
             ios as unknown as IOSCtrlProxyClient,
           );

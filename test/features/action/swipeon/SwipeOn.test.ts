@@ -76,9 +76,7 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
       hierarchy: { node: { $: container } },
     });
     // The real TalkBackSwipeExecutor inside SwipeOn talks to this fake service.
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeCtrlProxy as unknown as AndroidCtrlProxyClient,
-    );
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy);
     fakeObserveScreen = new FakeObserveScreen();
     fakeGesture = new FakeGestureExecutor();
     fakeAwaitIdle = new FakeAwaitIdle();

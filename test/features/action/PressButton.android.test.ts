@@ -93,7 +93,7 @@ describe("PressButton Android keycode dispatch", () => {
           }
           return { success: outcome !== "refused", error: "stale frame" };
         },
-      } as unknown as AndroidCtrlProxyClient);
+      });
       const action = new PressButton(androidDevice, fakeAdb, fakeTimer);
       const pending = action.press(
         "volume_up",
@@ -125,7 +125,7 @@ describe("PressButton Android keycode dispatch", () => {
         expect(marks).toBe(1);
         return { success: false, acknowledged: true, error: "global action refused" };
       },
-    } as unknown as AndroidCtrlProxyClient);
+    });
     const result = await new PressButton(androidDevice, fakeAdb, fakeTimer).press(
       "back",
       500,
@@ -215,7 +215,7 @@ describe("PressButton Android keycode dispatch", () => {
       requestGlobalAction: async () => {
         throw new Error("global action unavailable");
       },
-    } as unknown as AndroidCtrlProxyClient);
+    });
 
     const result = await press(button);
 
@@ -247,7 +247,7 @@ describe("PressButton Android keycode dispatch", () => {
                 acknowledged: false,
               };
             },
-          } as unknown as AndroidCtrlProxyClient);
+          });
           const result = await press(button);
           expect(result.success).toBe(false);
           expect(result.error).toContain("may have been applied");
@@ -274,7 +274,7 @@ describe("PressButton Android keycode dispatch", () => {
                 acknowledged,
               };
             },
-          } as unknown as AndroidCtrlProxyClient);
+          });
           expect(await press(button)).toEqual({ success: true, button, keyCode });
           expect(fakeAdb.getExecutedCommands()).toEqual([`shell input keyevent ${keyCode}`]);
         },
@@ -287,7 +287,7 @@ describe("PressButton Android keycode dispatch", () => {
             args[5]?.();
             return { success: true, action: button, totalTimeMs: 1, acknowledged: true };
           },
-        } as unknown as AndroidCtrlProxyClient);
+        });
         expect(await press(button)).toEqual({ success: true, button, keyCode });
         expect(fakeAdb.getExecutedCommands()).toEqual([]);
       });
@@ -306,7 +306,7 @@ describe("PressButton Android keycode dispatch", () => {
             acknowledged: false,
           };
         },
-      } as unknown as AndroidCtrlProxyClient);
+      });
       expect((await press("home", launcherWindow())).success).toBe(true);
       expect(
         fakeAdb.getExecutedCommands().filter((command) => command.includes("input keyevent")),
@@ -323,7 +323,7 @@ describe("PressButton Android keycode dispatch", () => {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      } as unknown as AndroidCtrlProxyClient);
+      });
 
       const result = await press("home", launcherWindow());
 
@@ -341,7 +341,7 @@ describe("PressButton Android keycode dispatch", () => {
     test("does not trust an inert global action on API 28 and falls back to the ADB keyevent", async () => {
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: true }),
-      } as unknown as AndroidCtrlProxyClient);
+      });
       // The post-global-action verification retries internally (initial
       // attempt + 2 backoff retries) before giving up, so it must see the
       // original app on all 3 of those checks; only the post-ADB-keyevent
@@ -369,7 +369,7 @@ describe("PressButton Android keycode dispatch", () => {
     test("surfaces failure instead of false success when neither path reaches the launcher", async () => {
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
         requestGlobalAction: async () => ({ success: true }),
-      } as unknown as AndroidCtrlProxyClient);
+      });
       const stuckWindow = new FakeWindow();
       stuckWindow.configureActiveWindow({
         appId: "com.android.settings",
@@ -462,7 +462,7 @@ describe("PressButton Android keycode dispatch", () => {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      } as unknown as AndroidCtrlProxyClient);
+      });
       const window = launcherWindow();
       const controller = new AbortController();
 
@@ -487,7 +487,7 @@ describe("PressButton Android keycode dispatch", () => {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      } as unknown as AndroidCtrlProxyClient);
+      });
       fakeAdb.setThrowOnAbortedSignal();
       const controller = new AbortController();
       controller.abort();
@@ -513,7 +513,7 @@ describe("PressButton Android keycode dispatch", () => {
         requestGlobalAction: async () => {
           throw new Error("global action unavailable");
         },
-      } as unknown as AndroidCtrlProxyClient);
+      });
       const window = launcherWindow();
       const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
       (pressButton as any).window = window;
@@ -586,7 +586,7 @@ describe("PressButton Android keycode dispatch", () => {
           // Report failure so the flow falls back to the ADB keyevent path.
           return { success: false, action: "home", totalTimeMs: 0, error: "not now" };
         },
-      } as unknown as AndroidCtrlProxyClient);
+      });
       const controller = new AbortController();
       const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
       (pressButton as any).window = launcherWindow();
@@ -613,7 +613,7 @@ describe("PressButton Android keycode dispatch", () => {
           capturedSignal = signal;
           return { success: true, totalTimeMs: 0 };
         },
-      } as unknown as AndroidCtrlProxyClient);
+      });
       const controller = new AbortController();
       const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
 
@@ -662,7 +662,7 @@ describe("PressButton Android keycode dispatch", () => {
         success: false,
         error: "Stale frame context; observe a fresh frame before retrying",
       }),
-    } as unknown as AndroidCtrlProxyClient);
+    });
 
     const pressButton = new PressButton(androidDevice, fakeAdb);
     const result = await (pressButton as any).executeAndroidButtonPress("back", 500, "epoch:2");
@@ -678,7 +678,7 @@ describe("PressButton Android keycode dispatch", () => {
         success: false,
         error: "Stale frame context; observe a fresh frame before retrying",
       }),
-    } as unknown as AndroidCtrlProxyClient);
+    });
 
     const pressButton = new PressButton(androidDevice, fakeAdb);
     const result = await (pressButton as any).executeAndroidButtonPress(

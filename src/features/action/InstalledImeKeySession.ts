@@ -4,7 +4,7 @@ import { ActionableError } from "../../models/ActionableError";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
-import { AndroidCtrlProxyClient } from "../observe/android";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { DefaultFocusedInputQuery } from "../utility/FocusedInput";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -47,7 +47,7 @@ export type EditorVerification =
   | { status: "unavailable"; reason: string };
 
 export async function tapFrameBoundImeKey(
-  client: Pick<AndroidCtrlProxyClient, "requestTapCoordinates">,
+  client: Pick<AndroidCtrlProxy, "requestTapCoordinates">,
   point: FrameBoundKeyPoint,
 ): Promise<{ success: boolean; error?: string }> {
   if (typeof point.frameContext !== "string" || !point.frameContext.trim()) {

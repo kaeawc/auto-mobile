@@ -47,9 +47,7 @@ function harness(platform: "android" | "ios", bounds: ElementBounds) {
     activityName: "MainActivity",
     layoutSeqSum: 123,
   });
-  const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-    android as unknown as AndroidCtrlProxyClient,
-  );
+  const androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(android);
   const iosSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
     ios as unknown as IOSCtrlProxyClient,
   );

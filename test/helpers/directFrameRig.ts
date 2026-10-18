@@ -167,7 +167,7 @@ export function createDirectFrameRig(
         called("clearPreferenceStore");
         await client.clearPreferenceStore?.(...args);
       },
-    } as unknown as AndroidCtrlProxyClient;
+    };
   });
 
   const updateServiceSpy = client.updateService

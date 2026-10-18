@@ -93,15 +93,12 @@ function installClient(): void {
         calls.push({ label, args, release: resolve });
       });
   };
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-    () =>
-      ({
-        getScreenScaleMetadata: () => null,
-        requestTapCoordinates: record("tap"),
-        requestGestureStart: record("gestureStart"),
-        requestGestureEnd: record("gestureEnd"),
-      }) as unknown as AndroidCtrlProxyClient,
-  );
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+    getScreenScaleMetadata: () => null,
+    requestTapCoordinates: record("tap"),
+    requestGestureStart: record("gestureStart"),
+    requestGestureEnd: record("gestureEnd"),
+  }));
 }
 
 beforeEach(() => {

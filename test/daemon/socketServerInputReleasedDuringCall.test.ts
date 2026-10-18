@@ -70,19 +70,16 @@ describe("input/* cut by a session release (#11381)", () => {
     tapEntered = Promise.withResolvers<void>();
     tapOutcome = Promise.withResolvers<{ success: boolean }>();
     PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-      () =>
-        ({
-          getScreenScaleMetadata: () => null,
-          requestTapCoordinates: (
-            ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-          ) => {
-            args[6]?.();
-            tapEntered.resolve();
-            return tapOutcome.promise;
-          },
-        }) as unknown as AndroidCtrlProxyClient,
-    );
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+      getScreenScaleMetadata: () => null,
+      requestTapCoordinates: (
+        ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+      ) => {
+        args[6]?.();
+        tapEntered.resolve();
+        return tapOutcome.promise;
+      },
+    }));
     const server = createTestUnixSocketServer(
       "unused",
       "http://localhost:0/mcp",

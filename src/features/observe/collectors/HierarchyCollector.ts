@@ -2,7 +2,7 @@ import { WEBSOCKET_NOT_CONNECTED_MESSAGE } from "../DeviceServiceUtils";
 import { logger } from "../../../utils/logger";
 import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
-import { AndroidCtrlProxyClient } from "../android";
+import { type AndroidCtrlProxy, AndroidCtrlProxyClient } from "../android";
 import { IOSCtrlProxyClient } from "../ios";
 import { appendObserveError } from "../ObserveError";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
@@ -24,7 +24,7 @@ export interface HierarchyCollectorOptions {
   androidRawClient?: (
     device: BootedDevice,
     adbFactory: AdbClientFactory,
-  ) => Pick<AndroidCtrlProxyClient, "requestHierarchySync" | "invalidateCache">;
+  ) => Pick<AndroidCtrlProxy, "requestHierarchySync" | "invalidateCache">;
 }
 
 /**

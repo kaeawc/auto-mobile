@@ -970,9 +970,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       const proxy = new FakeCtrlProxy();
       proxy.setHierarchyData({ updatedAt: 1, packageName: "test", hierarchy: {} });
       proxy.setViewHierarchyResult({ hierarchy: { node: { $: makeElement() } } });
-      const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-        proxy as unknown as AndroidCtrlProxyClient,
-      );
+      const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(proxy);
       let command: TapOnElement;
       try {
         command = new TapOnElement(
@@ -1131,9 +1129,7 @@ describe("TapOnElement screen-reader navigation result", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     if (coordinate) {
-      androidGetInstanceSpy.mockReturnValue(
-        coordinate.service as unknown as AndroidCtrlProxyClient,
-      );
+      androidGetInstanceSpy.mockReturnValue(coordinate.service);
     }
     const targetElement = coordinate?.element ?? element;
     const observation = {

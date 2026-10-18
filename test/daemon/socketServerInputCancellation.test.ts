@@ -64,25 +64,22 @@ beforeEach(() => {
   taps = [];
   allSockets = [];
   PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-    () =>
-      ({
-        getScreenScaleMetadata: () => null,
-        requestTapCoordinates: (
-          x: number,
-          _y: number,
-          _duration?: number,
-          timeoutMs?: number,
-          _perf?: unknown,
-          _frameContext?: string,
-          _onDispatch?: () => void,
-          signal?: AbortSignal,
-        ) =>
-          new Promise<{ success: boolean; error?: string }>((resolve) => {
-            taps.push({ x, timeoutMs, signal, release: resolve });
-          }),
-      }) as unknown as AndroidCtrlProxyClient,
-  );
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+    getScreenScaleMetadata: () => null,
+    requestTapCoordinates: (
+      x: number,
+      _y: number,
+      _duration?: number,
+      timeoutMs?: number,
+      _perf?: unknown,
+      _frameContext?: string,
+      _onDispatch?: () => void,
+      signal?: AbortSignal,
+    ) =>
+      new Promise<{ success: boolean; error?: string }>((resolve) => {
+        taps.push({ x, timeoutMs, signal, release: resolve });
+      }),
+  }));
   const server = createTestUnixSocketServer(
     "unused",
     "http://localhost:0/mcp",
@@ -283,20 +280,17 @@ test("auto-advancing time does not expire a tap whose key holder finishes in tim
   let inFlight = 0;
   let maxInFlight = 0;
   let calls = 0;
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-    () =>
-      ({
-        getScreenScaleMetadata: () => null,
-        requestTapCoordinates: async () => {
-          calls += 1;
-          inFlight += 1;
-          maxInFlight = Math.max(maxInFlight, inFlight);
-          await new Promise<void>((resolve) => timer.setTimeout(resolve, 40));
-          inFlight -= 1;
-          return { success: true };
-        },
-      }) as unknown as AndroidCtrlProxyClient,
-  );
+  spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => ({
+    getScreenScaleMetadata: () => null,
+    requestTapCoordinates: async () => {
+      calls += 1;
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise<void>((resolve) => timer.setTimeout(resolve, 40));
+      inFlight -= 1;
+      return { success: true };
+    },
+  }));
   const first = connect();
   const second = connect();
   first.send(tapFrame("first", 1));

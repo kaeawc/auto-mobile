@@ -1,5 +1,5 @@
 import { makePool } from "../helpers/makePool";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { DeviceAllocationRequest } from "../../src/daemon/DeviceCriteriaMatcher";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -24,7 +24,7 @@ describe("criteria allocation rollback on thrown errors", () => {
     criteria: { platform: "android", simulatorType: `device-${label}` },
   }));
 
-  beforeEach(async () => {
+  async function arrangeHarness(): Promise<void> {
     timer = new FakeTimer();
     persistence = new FakeDeviceSessionPersistence();
     manager = new SessionManager(timer, persistence);
@@ -42,7 +42,19 @@ describe("criteria allocation rollback on thrown errors", () => {
       deviceHealthMarkers: markers,
     });
     await pool.initializeWithDevices(devices);
-  });
+  }
+
+  // Builds the DevicePool harness inside each test, so its cost is paid honestly in the test body.
+  function arranged(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+    test(
+      name,
+      async () => {
+        await arrangeHarness();
+        await fn();
+      },
+      timeout,
+    );
+  }
 
   afterEach(() => {
     manager.stopCleanupTimer();
@@ -65,7 +77,7 @@ describe("criteria allocation rollback on thrown errors", () => {
     ]);
   };
 
-  test("third label abort releases partial allocations before rejection", async () => {
+  arranged("third label abort releases partial allocations before rejection", async () => {
     await pool.bindOrReuseDeviceSession("other-owner", "device-c", "android");
     const controller = new AbortController();
     const originalError = new Error("client cancelled criteria allocation");
@@ -93,7 +105,7 @@ describe("criteria allocation rollback on thrown errors", () => {
     await expectImmediateRetry();
   });
 
-  test("third label unhealthy-device error releases the first two allocations", async () => {
+  arranged("third label unhealthy-device error releases the first two allocations", async () => {
     const incarnation = pool.getDeviceIncarnation("device-c");
     if (incarnation === undefined) {
       throw new Error("expected pooled device incarnation");
@@ -112,7 +124,7 @@ describe("criteria allocation rollback on thrown errors", () => {
     await expectImmediateRetry();
   });
 
-  test("third label session-create failure releases the first two allocations", async () => {
+  arranged("third label session-create failure releases the first two allocations", async () => {
     const originalError = new Error("third session persistence rejected");
     const upsert = persistence.upsertActiveSession.bind(persistence);
     const create = spyOn(persistence, "upsertActiveSession").mockImplementation(async (record) => {
@@ -136,12 +148,23 @@ describe("criteria allocation rollback on thrown errors", () => {
   describe("device-acquisition cancellation settles with the whole allocation (#10929)", () => {
     let cancelled: Array<[string, string]>;
 
-    beforeEach(() => {
-      cancelled = [];
-      manager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
-        cancelled.push([deviceId, sessionId]);
-      });
-    });
+    function arrangedCancelling(
+      name: string,
+      fn: () => void | Promise<void>,
+      timeout?: number,
+    ): void {
+      arranged(
+        name,
+        async () => {
+          cancelled = [];
+          manager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
+            cancelled.push([deviceId, sessionId]);
+          });
+          await fn();
+        },
+        timeout,
+      );
+    }
 
     const failThirdCreate = (): ReturnType<typeof spyOn> => {
       const upsert = persistence.upsertActiveSession.bind(persistence);
@@ -153,83 +176,101 @@ describe("criteria allocation rollback on thrown errors", () => {
       });
     };
 
-    test("a rolled-back criteria allocation cancels nothing on earlier devices", async () => {
-      const create = failThirdCreate();
-      try {
-        await expect(pool.assignMultipleDevicesByCriteria(requests, 10_000)).rejects.toThrow(
-          "third session persistence rejected",
+    arrangedCancelling(
+      "a rolled-back criteria allocation cancels nothing on earlier devices",
+      async () => {
+        const create = failThirdCreate();
+        try {
+          await expect(pool.assignMultipleDevicesByCriteria(requests, 10_000)).rejects.toThrow(
+            "third session persistence rejected",
+          );
+        } finally {
+          create.mockRestore();
+        }
+        expectReleased(["a", "b", "c"]);
+        expect(cancelled).toEqual([]);
+      },
+    );
+
+    arrangedCancelling(
+      "a rolled-back plain allocation cancels nothing on earlier devices",
+      async () => {
+        const create = failThirdCreate();
+        try {
+          await expect(
+            pool.assignMultipleDevices(["plan:a", "plan:b", "plan:c"], 10_000, "android"),
+          ).rejects.toThrow("third session persistence rejected");
+        } finally {
+          create.mockRestore();
+        }
+        expectReleased(["a", "b", "c"]);
+        expect(cancelled).toEqual([]);
+      },
+    );
+
+    arrangedCancelling(
+      "a committed criteria allocation cancels each device's sessionless work once",
+      async () => {
+        await pool.assignMultipleDevicesByCriteria(requests, 10_000);
+        expect(cancelled.slice().sort()).toEqual([
+          ["device-a", "plan:a"],
+          ["device-b", "plan:b"],
+          ["device-c", "plan:c"],
+        ]);
+      },
+    );
+
+    arrangedCancelling(
+      "a committed plain allocation cancels each device's sessionless work once",
+      async () => {
+        await pool.assignMultipleDevices(["plan:a", "plan:b"], 10_000, "android");
+        expect(cancelled.length).toBe(2);
+        expect(new Set(cancelled.map(([, sessionId]) => sessionId))).toEqual(
+          new Set(["plan:a", "plan:b"]),
         );
-      } finally {
-        create.mockRestore();
-      }
-      expectReleased(["a", "b", "c"]);
-      expect(cancelled).toEqual([]);
-    });
+      },
+    );
 
-    test("a rolled-back plain allocation cancels nothing on earlier devices", async () => {
-      const create = failThirdCreate();
+    arrangedCancelling(
+      "a single-device bind still cancels as soon as its create commits",
+      async () => {
+        await pool.bindOrReuseDeviceSession("solo", "device-a", "android");
+        expect(cancelled).toEqual([["device-a", "solo"]]);
+      },
+    );
+  });
+
+  arranged(
+    "a live session whose held device misses its criteria fails fast and is preserved",
+    async () => {
+      await pool.bindOrReuseDeviceSession("plan:a", "device-a", "android");
+      const heldSession = manager.getSession("plan:a");
+      // plan:a holds device-a but asks for device-b. It must not be moved to (or
+      // reused through) idle b (#10153); the allocation fails before any claim.
+      const reuseRequests: DeviceAllocationRequest[] = [
+        { sessionId: "plan:a", criteria: { platform: "android", simulatorType: "device-b" } },
+        requests[1],
+        requests[2],
+      ];
+      const create = spyOn(manager, "createSession");
+      const release = spyOn(manager, "releaseSession");
       try {
-        await expect(
-          pool.assignMultipleDevices(["plan:a", "plan:b", "plan:c"], 10_000, "android"),
-        ).rejects.toThrow("third session persistence rejected");
+        await expect(pool.assignMultipleDevicesByCriteria(reuseRequests, 10_000)).rejects.toThrow(
+          "Session 'plan:a' already holds device 'device-a', but it does not match the requested criteria",
+        );
+        expect(manager.getSession("plan:a")).toBe(heldSession);
+        expect(pool.getDevice("device-a")).toMatchObject({ status: "busy", sessionId: "plan:a" });
+        expectReleased(["b", "c"]);
+        expect(create.mock.calls).toEqual([]);
+        expect(release.mock.calls).toEqual([]);
       } finally {
         create.mockRestore();
+        release.mockRestore();
       }
-      expectReleased(["a", "b", "c"]);
-      expect(cancelled).toEqual([]);
-    });
+    },
+  );
 
-    test("a committed criteria allocation cancels each device's sessionless work once", async () => {
-      await pool.assignMultipleDevicesByCriteria(requests, 10_000);
-      expect(cancelled.slice().sort()).toEqual([
-        ["device-a", "plan:a"],
-        ["device-b", "plan:b"],
-        ["device-c", "plan:c"],
-      ]);
-    });
-
-    test("a committed plain allocation cancels each device's sessionless work once", async () => {
-      await pool.assignMultipleDevices(["plan:a", "plan:b"], 10_000, "android");
-      expect(cancelled.length).toBe(2);
-      expect(new Set(cancelled.map(([, sessionId]) => sessionId))).toEqual(
-        new Set(["plan:a", "plan:b"]),
-      );
-    });
-
-    test("a single-device bind still cancels as soon as its create commits", async () => {
-      await pool.bindOrReuseDeviceSession("solo", "device-a", "android");
-      expect(cancelled).toEqual([["device-a", "solo"]]);
-    });
-  });
-
-  test("a live session whose held device misses its criteria fails fast and is preserved", async () => {
-    await pool.bindOrReuseDeviceSession("plan:a", "device-a", "android");
-    const heldSession = manager.getSession("plan:a");
-    // plan:a holds device-a but asks for device-b. It must not be moved to (or
-    // reused through) idle b (#10153); the allocation fails before any claim.
-    const reuseRequests: DeviceAllocationRequest[] = [
-      { sessionId: "plan:a", criteria: { platform: "android", simulatorType: "device-b" } },
-      requests[1],
-      requests[2],
-    ];
-    const create = spyOn(manager, "createSession");
-    const release = spyOn(manager, "releaseSession");
-    try {
-      await expect(pool.assignMultipleDevicesByCriteria(reuseRequests, 10_000)).rejects.toThrow(
-        "Session 'plan:a' already holds device 'device-a', but it does not match the requested criteria",
-      );
-      expect(manager.getSession("plan:a")).toBe(heldSession);
-      expect(pool.getDevice("device-a")).toMatchObject({ status: "busy", sessionId: "plan:a" });
-      expectReleased(["b", "c"]);
-      expect(create.mock.calls).toEqual([]);
-      expect(release.mock.calls).toEqual([]);
-    } finally {
-      create.mockRestore();
-      release.mockRestore();
-    }
-  });
-
-  test("a throwing rollback logs warn and still releases the next allocation", async () => {
+  arranged("a throwing rollback logs warn and still releases the next allocation", async () => {
     const originalError = new Error("third session rejected");
     const rollbackError = new Error("first device release rejected");
     const createSession = manager.createSession.bind(manager);
@@ -270,44 +311,49 @@ describe("criteria allocation rollback on thrown errors", () => {
     }
   });
 
-  test("a throwing rollback on the platform path still releases the next allocation (#11091)", async () => {
-    const originalError = new Error("third session rejected");
-    const rollbackError = new Error("first device release rejected");
-    const createSession = manager.createSession.bind(manager);
-    const create = spyOn(manager, "createSession").mockImplementation(async (...args) => {
-      if (args[0] === "plan:c") {
-        throw originalError;
-      }
-      return createSession(...args);
-    });
-    const releaseDevice = pool.releaseDevice.bind(pool);
-    const release = spyOn(pool, "releaseDevice").mockImplementation(async (deviceId, sessionId) => {
-      if (deviceId === "device-a") {
-        throw rollbackError;
-      }
-      await releaseDevice(deviceId, sessionId);
-    });
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      await expect(
-        pool.assignMultipleDevices(["plan:a", "plan:b", "plan:c"], 10_000, "android"),
-      ).rejects.toBe(originalError);
-      expectReleased(["b", "c"]);
-      expect(manager.getSession("plan:a")).toBeNull();
-      expect(release.mock.calls).toEqual([
-        ["device-a", "plan:a"],
-        ["device-b", "plan:b"],
-      ]);
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining(
-          "Failed to roll back multi-device allocation for plan:a on device-a",
-        ),
-        rollbackError,
+  arranged(
+    "a throwing rollback on the platform path still releases the next allocation (#11091)",
+    async () => {
+      const originalError = new Error("third session rejected");
+      const rollbackError = new Error("first device release rejected");
+      const createSession = manager.createSession.bind(manager);
+      const create = spyOn(manager, "createSession").mockImplementation(async (...args) => {
+        if (args[0] === "plan:c") {
+          throw originalError;
+        }
+        return createSession(...args);
+      });
+      const releaseDevice = pool.releaseDevice.bind(pool);
+      const release = spyOn(pool, "releaseDevice").mockImplementation(
+        async (deviceId, sessionId) => {
+          if (deviceId === "device-a") {
+            throw rollbackError;
+          }
+          await releaseDevice(deviceId, sessionId);
+        },
       );
-    } finally {
-      create.mockRestore();
-      release.mockRestore();
-      warn.mockRestore();
-    }
-  });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await expect(
+          pool.assignMultipleDevices(["plan:a", "plan:b", "plan:c"], 10_000, "android"),
+        ).rejects.toBe(originalError);
+        expectReleased(["b", "c"]);
+        expect(manager.getSession("plan:a")).toBeNull();
+        expect(release.mock.calls).toEqual([
+          ["device-a", "plan:a"],
+          ["device-b", "plan:b"],
+        ]);
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Failed to roll back multi-device allocation for plan:a on device-a",
+          ),
+          rollbackError,
+        );
+      } finally {
+        create.mockRestore();
+        release.mockRestore();
+        warn.mockRestore();
+      }
+    },
+  );
 });

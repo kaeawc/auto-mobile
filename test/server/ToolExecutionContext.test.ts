@@ -33,6 +33,7 @@ import type { BootedDevice, DeviceInfo } from "../../src/models";
 import type { DeviceSession } from "../../src/db/types";
 import type { ProxySetupResult } from "../../src/utils/interfaces/ProxyManager";
 import { logger } from "../../src/utils/logger";
+import { DeviceLostError } from "../../src/models/DeviceLostError";
 
 /** Drain pending microtasks without yielding to timers or I/O. */
 const drainMicrotasks = async (): Promise<void> => {
@@ -573,6 +574,38 @@ describe("ToolExecutionContext", () => {
       expect(setupCalls).toBe(1);
     },
   );
+
+  // Issue #13392: a confirmed device loss keeps its typed cause and is terminal
+  // even though its message classifies as deviceConnection.
+  test("does not retry a deviceConnection failure carrying a DeviceLostError cause (#13392)", async () => {
+    let setupCalls = 0;
+    const lost = new DeviceLostError("device-1", "error: device 'device-1' not found");
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls++;
+        return {
+          success: false,
+          message: "Failed to setup Accessibility Service due to device connection issue",
+          error: lost.message,
+          cause: lost,
+          category: "deviceConnection" as const,
+        };
+      },
+      waitForConnection: async () => true,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    const failure = await createToolExecutionContext(
+      "setup-device-lost-terminal",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+    ).catch((error: unknown) => error);
+    expect((failure as Error).message).toContain("Failed to setup accessibility service");
+    expect((failure as Error).cause).toBe(lost);
+    expect(setupCalls).toBe(1);
+  });
 
   // Issue #7541: an abort during the retry delay must reject promptly with
   // the caller's own reason instead of waiting out the 3s sleep. That caller

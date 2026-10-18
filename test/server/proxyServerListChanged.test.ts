@@ -144,6 +144,33 @@ describe("proxy resource subscriptions", () => {
     }
   });
 
+  test("a cold subscribe is answered while the daemon connect is still pending", async () => {
+    const harness = await wireHarness();
+    const connectGate = Promise.withResolvers<void>();
+    const connect = harness.fakeClient.connect.bind(harness.fakeClient);
+    const connectSpy = spyOn(harness.fakeClient, "connect").mockImplementation(async () => {
+      await connectGate.promise;
+      await connect();
+    });
+    try {
+      expect(await harness.client.subscribeResource({ uri: "automobile:one" })).toEqual({});
+      // The reply arrived while the background connect it started is still gated.
+      expect(connectSpy).toHaveBeenCalledTimes(1);
+      expect(harness.proxy.isConnected()).toBe(false);
+      expect(harness.fakeClient.callDaemonMethodCalls).toEqual([]);
+
+      connectGate.resolve();
+      await harness.proxy.ensureConnected();
+      expect(harness.fakeClient.callDaemonMethodCalls).toEqual([
+        { method: "resources/subscribe", params: { uri: "automobile:one" } },
+      ]);
+    } finally {
+      connectGate.resolve();
+      connectSpy.mockRestore();
+      await close(harness);
+    }
+  });
+
   test("subscribe/unsubscribe return empty results and filter updates per connection", async () => {
     const first = await wireHarness();
     const second = await wireHarness();

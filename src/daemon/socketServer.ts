@@ -6212,7 +6212,7 @@ export class UnixSocketServer {
    * device still reports that exact context. Missing context fails closed: a caller can re-observe
    * and retry, whereas executing against an unproven screen could actuate the wrong UI.
    */
-  private requireCurrentFrameContext(
+  requireCurrentFrameContext(
     deviceId: string,
     frameContext: string | undefined,
     action: string,

@@ -1,6 +1,10 @@
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { Daemon } from "../../src/daemon/daemon";
+import {
+  Daemon,
+  type DaemonTestHooks,
+  type DeviceSessionRoutingTargets,
+} from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
 import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
@@ -19,7 +23,6 @@ import {
 import type {
   DeviceSessionRecord,
   DeviceSessionEndOptions,
-  DeviceSessionRegistry,
 } from "../../src/daemon/deviceSessionRegistry";
 import type { DeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
@@ -28,6 +31,8 @@ import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { createTestDatabase } from "../db/testDbHelper";
+import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import type { DeviceLabelMap } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -49,10 +54,6 @@ import {
   spyOnIosExistingFactory,
   spyOnIosExistingInstance,
 } from "../helpers/iosCtrlProxyClientSpies";
-
-interface RoutingTarget {
-  setDeviceSessionResolver(resolver: DeviceSessionResolver): void;
-}
 
 class StaticScreenStreamServer extends DeviceDataStreamSocketServer {
   requestObservation(socket: FakeSocket): Promise<void> {
@@ -77,11 +78,41 @@ class StaticScreenStreamServer extends DeviceDataStreamSocketServer {
   }
 }
 
-interface RoutingTargets {
-  deviceDataStream: RoutingTarget | null;
-  performancePush: RoutingTarget | null;
-  failuresPush: RoutingTarget | null;
-  telemetryPush: RoutingTarget | null;
+/** A session manager answering session lookups from real sessions seeded up front. */
+class LookupSessionManager extends SessionManager {
+  holderOf: (deviceId: string) => string | null = () => null;
+
+  constructor(
+    timer: FakeTimer,
+    private readonly known: ReadonlyMap<string, Session>,
+  ) {
+    super(timer, new FakeDeviceSessionRepository());
+  }
+
+  override getSession(sessionUuid: string): Session | null {
+    return this.known.get(sessionUuid) ?? null;
+  }
+
+  override getSessionForDevice(deviceId: string): string | null {
+    return this.holderOf(deviceId);
+  }
+
+  override getDeviceLabels(_sessionUuid: string): DeviceLabelMap | undefined {
+    return undefined;
+  }
+}
+
+async function lookupSessionManager(
+  timer: FakeTimer,
+  sessionUuids: readonly string[],
+): Promise<LookupSessionManager> {
+  const seed = new SessionManager(timer, new FakeDeviceSessionRepository());
+  const known = new Map<string, Session>();
+  for (const sessionUuid of sessionUuids) {
+    known.set(sessionUuid, await seed.createSession(sessionUuid, `seed-${sessionUuid}`, "android"));
+  }
+  seed.stopCleanupTimer();
+  return new LookupSessionManager(timer, known);
 }
 
 interface PooledEntry {
@@ -89,38 +120,7 @@ interface PooledEntry {
   platform: string;
 }
 
-interface DaemonStreamInternals {
-  sessionManager: {
-    getSession(sessionUuid: string): unknown | null;
-    getSessionForDevice(deviceId: string): string | null;
-    getDeviceLabels(sessionUuid: string): Record<string, string> | undefined;
-  };
-  devicePool: {
-    isPooledIdentityUnresolved(deviceId: string): boolean;
-    getAllDevices(): PooledEntry[];
-    assertDeviceActionable(deviceId: string, purpose: string): void;
-  };
-  observationStreamHealth: {
-    isHealthy(): boolean;
-    recover(): Promise<void>;
-  };
-  deviceSessionRegistry: DeviceSessionRegistry;
-  getDeviceSessionRoutingTargets(): RoutingTargets;
-  setupDeviceSessionRouting(): void;
-  setupDeviceDataStreamCallback(): void;
-  setupNavigationGraphStreamListener(server: unknown): void;
-  navigationGraphBridge: { attach(manager: NavigationGraphManager): void };
-  attemptRecovery(failureKind?: string): Promise<void>;
-  applyStorageSubscriptionRequest(request: {
-    deviceId: string | null;
-    sessionUuid: string;
-    packageName: string;
-    fileName: string;
-    subscribe: boolean;
-  }): Promise<void>;
-}
-
-class FakePushServer implements RoutingTarget {
+class FakePushServer {
   resolver: DeviceSessionResolver | null = null;
 
   setDeviceSessionResolver(resolver: DeviceSessionResolver): void {
@@ -128,7 +128,8 @@ class FakePushServer implements RoutingTarget {
   }
 }
 
-class FakeDeviceDataStreamServer extends FakePushServer {
+class FakeDeviceDataStreamServer extends DeviceDataStreamSocketServer {
+  resolver: DeviceSessionResolver | null = null;
   started: DeviceSessionRecord[] = [];
   ended: Array<{ record: DeviceSessionRecord; successorSessionUuid?: string }> = [];
   navigationUpdates: Array<{ appId: string | null; deviceId: string | null | undefined }> = [];
@@ -137,13 +138,21 @@ class FakeDeviceDataStreamServer extends FakePushServer {
   hierarchyCadenceCallbackInstalled = false;
   observationCallbackInstalled = false;
   observationHandler: OnObservationRequestedCallback | null = null;
-  observationRequestTimeoutMs: number | undefined;
+  requestedObservationTimeoutMs: number | undefined;
   navigationRequestCallbackInstalled = false;
   navigationRequestHandler: OnNavigationGraphRequestedCallback | null = null;
   storageSubscriptionCallbackInstalled = false;
   subscriberConnected: ((deviceId: string | null) => void) | null = null;
   screenshotCadenceChanged: ((deviceId: string | null) => void) | null = null;
   hierarchyCadenceChanged: ((deviceId: string | null) => void) | null = null;
+
+  constructor() {
+    super("/fake/unused.sock", new FakeTimer(), { authorize: () => {} });
+  }
+
+  override setDeviceSessionResolver(resolver: DeviceSessionResolver): void {
+    this.resolver = resolver;
+  }
 
   invalidateDeviceFrames(_deviceId: string): void {}
 
@@ -177,6 +186,9 @@ class FakeDeviceDataStreamServer extends FakePushServer {
     this.navigationUpdates.push({ appId: streamData.appId, deviceId });
   }
 
+  /** Build-context pushes are not observed by these suites. */
+  pushBuildContextUpdate(_deviceId: string, _packageId: string, _buildKey: unknown): void {}
+
   setOnSubscriberConnected(handler: OnSubscriberConnectedCallback): void {
     this.subscriberCallbackInstalled = true;
     let subscriptions = 0;
@@ -204,7 +216,7 @@ class FakeDeviceDataStreamServer extends FakePushServer {
   setOnObservationRequested(handler: OnObservationRequestedCallback, timeoutMs?: number): void {
     this.observationCallbackInstalled = true;
     this.observationHandler = handler;
-    this.observationRequestTimeoutMs = timeoutMs;
+    this.requestedObservationTimeoutMs = timeoutMs;
   }
 
   setOnNavigationGraphRequested(handler: OnNavigationGraphRequestedCallback): void {
@@ -217,7 +229,7 @@ class FakeDeviceDataStreamServer extends FakePushServer {
   }
 }
 
-function targets(deviceDataStream: FakeDeviceDataStreamServer): RoutingTargets {
+function targets(deviceDataStream: FakeDeviceDataStreamServer): DeviceSessionRoutingTargets {
   return {
     deviceDataStream,
     performancePush: new FakePushServer(),
@@ -336,14 +348,11 @@ describe("Daemon stream wiring", () => {
       name: "pool removal followed by serial re-add",
       apply: async (daemon, pool) => {
         await pool.removeDevice("emulator-5554");
-        const stream = (
-          daemon as unknown as { deviceDataStreamServer: DeviceDataStreamSocketServer }
-        ).deviceDataStreamServer;
-        expect(
-          (
-            stream as unknown as { liveFrameGenerations: ReadonlyMap<string, number> }
-          ).liveFrameGenerations.has("emulator-5554"),
-        ).toBe(false);
+        const stream = daemon.testHooks.deviceDataStreamServer;
+        // Removal drops the tracked generation, so the serial reads like one never seen.
+        expect(stream?.getLiveFrameGeneration("emulator-5554")).toBe(
+          stream?.getLiveFrameGeneration("never-seen-device"),
+        );
         await pool.addDevice({ deviceId: "emulator-5554", name: "Pixel", platform: "android" });
       },
     },
@@ -404,18 +413,18 @@ describe("Daemon stream wiring", () => {
             startupFailureTracker: new FakeStartupFailureTracker(),
           },
         );
-        const internals = daemon as unknown as DaemonStreamInternals;
+        const internals = daemon.testHooks;
         const stream = new StaticScreenStreamServer("/fake/unused.sock", timer, {
           authorize: () => {},
         });
-        internals.getDeviceSessionRoutingTargets = () => ({
+        internals.setDeviceSessionRoutingTargets(() => ({
           deviceDataStream: stream,
           performancePush: null,
           failuresPush: null,
           telemetryPush: null,
-        });
-        internals.navigationGraphBridge.attach = () => {};
-        const pool = internals.devicePool as unknown as DevicePool;
+        }));
+        internals.setNavigationGraphBridgeAttach(() => {});
+        const pool = daemon.getDevicePool();
         try {
           internals.setupDeviceSessionRouting();
           await pool.initializeWithDevices([
@@ -446,13 +455,7 @@ describe("Daemon stream wiring", () => {
             createFakeDaemonState(),
             timer,
           );
-          const input = inputServer as unknown as {
-            requireCurrentFrameContext(
-              deviceId: string,
-              frameContext: string,
-              action: string,
-            ): void;
-          };
+          const input = inputServer;
           installDeviceDataStreamSocketServerForTesting(stream);
           const coordinator = new DefaultObservationInitialFrameCoordinator(
             timer,
@@ -583,9 +586,9 @@ describe("Daemon stream wiring", () => {
         startupFailureTracker: new FakeStartupFailureTracker(),
       },
     );
-    const internals = daemon as unknown as DaemonStreamInternals;
+    const internals = daemon.testHooks;
     const stream = new FakeDeviceDataStreamServer();
-    internals.getDeviceSessionRoutingTargets = () => targets(stream);
+    internals.setDeviceSessionRoutingTargets(() => targets(stream));
 
     try {
       internals.setupDeviceSessionRouting();
@@ -636,12 +639,12 @@ describe("Daemon stream wiring", () => {
         startupFailureTracker: new FakeStartupFailureTracker(),
       },
     );
-    const internals = daemon as unknown as DaemonStreamInternals;
+    const internals = daemon.testHooks;
     const stream = new FakeDeviceDataStreamServer();
-    internals.getDeviceSessionRoutingTargets = () => targets(stream);
-    internals.setupNavigationGraphStreamListener = () => {};
+    internals.setDeviceSessionRoutingTargets(() => targets(stream));
+    internals.setNavigationGraphStreamListener(() => {});
     try {
-      await (internals.devicePool as unknown as DevicePool).initializeWithDevices([
+      await daemon.getDevicePool().initializeWithDevices([
         { deviceId: "android-owned", name: "Owned Pixel", platform: "android" },
         { deviceId: "android-unowned", name: "Other Pixel", platform: "android" },
       ]);
@@ -724,19 +727,17 @@ describe("Daemon stream wiring", () => {
             startupFailureTracker: new FakeStartupFailureTracker(),
           },
         );
-        const internals = daemon as unknown as DaemonStreamInternals;
+        const internals = daemon.testHooks;
         const stream = new FakeDeviceDataStreamServer();
         const managerA = new FakeIOSCtrlProxyManager();
         const managerB = new FakeIOSCtrlProxyManager();
         managers.set("sim-a", managerA);
         managers.set("sim-b", managerB);
-        internals.getDeviceSessionRoutingTargets = () => targets(stream);
-        internals.setupNavigationGraphStreamListener = () => {};
+        internals.setDeviceSessionRoutingTargets(() => targets(stream));
+        internals.setNavigationGraphStreamListener(() => {});
 
         try {
-          await (internals.devicePool as unknown as DevicePool).initializeWithDevices(
-            bootedDevices,
-          );
+          await daemon.getDevicePool().initializeWithDevices(bootedDevices);
           await daemon.getSessionManager().createSession("session-a", "sim-a", "ios");
           internals.setupDeviceSessionRouting();
           internals.setupDeviceDataStreamCallback();
@@ -816,12 +817,12 @@ describe("Daemon stream wiring", () => {
             startupFailureTracker: new FakeStartupFailureTracker(),
           },
         );
-        const internals = daemon as unknown as DaemonStreamInternals;
+        const internals = daemon.testHooks;
         const stream = new FakeDeviceDataStreamServer();
-        internals.getDeviceSessionRoutingTargets = () => targets(stream);
-        internals.setupNavigationGraphStreamListener = () => {};
+        internals.setDeviceSessionRoutingTargets(() => targets(stream));
+        internals.setNavigationGraphStreamListener(() => {});
         try {
-          await (internals.devicePool as unknown as DevicePool).initializeWithDevices([
+          await daemon.getDevicePool().initializeWithDevices([
             { deviceId: "sim-foreign", name: "Foreign iPhone", platform: "ios" },
             { deviceId: "android-foreign", name: "Foreign Pixel", platform: "android" },
           ]);
@@ -879,11 +880,11 @@ describe("Daemon stream wiring", () => {
         idGenerator: new CountingIdGenerator("device-session"),
       },
     );
-    const internals = daemon as unknown as DaemonStreamInternals;
+    const internals = daemon.testHooks;
     const originalStream = new FakeDeviceDataStreamServer();
     const replacementStream = new FakeDeviceDataStreamServer();
     let activeTargets = targets(originalStream);
-    internals.getDeviceSessionRoutingTargets = () => activeTargets;
+    internals.setDeviceSessionRoutingTargets(() => activeTargets);
 
     try {
       internals.setupDeviceSessionRouting();
@@ -893,12 +894,12 @@ describe("Daemon stream wiring", () => {
         incarnation: 1,
       });
 
-      internals.observationStreamHealth = {
+      internals.setObservationStreamHealth({
         isHealthy: () => false,
         recover: async () => {
           activeTargets = targets(replacementStream);
         },
-      };
+      });
       await internals.attemptRecovery("socket");
 
       const recoveredRecord = internals.deviceSessionRegistry.onDeviceConnected({
@@ -919,7 +920,7 @@ describe("Daemon stream wiring", () => {
       expect(replacementStream.screenshotCadenceCallbackInstalled).toBe(true);
       expect(replacementStream.hierarchyCadenceCallbackInstalled).toBe(true);
       expect(replacementStream.observationCallbackInstalled).toBe(true);
-      expect(replacementStream.observationRequestTimeoutMs).toBe(
+      expect(replacementStream.requestedObservationTimeoutMs).toBe(
         PER_DEVICE_OBSERVATION_TIMEOUT_MS + OBSERVATION_BATCH_HEADROOM_MS,
       );
       expect(replacementStream.navigationRequestCallbackInstalled).toBe(true);
@@ -943,12 +944,12 @@ describe("Daemon stream wiring", () => {
         idGenerator: new CountingIdGenerator("device-session"),
       },
     );
-    const internals = daemon as unknown as DaemonStreamInternals;
+    const internals = daemon.testHooks;
     const stream = new FakeDeviceDataStreamServer();
-    internals.getDeviceSessionRoutingTargets = () => targets(stream);
-    let quarantined = false;
-    internals.devicePool.isPooledIdentityUnresolved = (deviceId: string) =>
-      quarantined && deviceId === "emulator-5554";
+    internals.setDeviceSessionRoutingTargets(() => targets(stream));
+    await daemon
+      .getDevicePool()
+      .initializeWithDevices([{ deviceId: "emulator-5554", name: "Pixel", platform: "android" }]);
 
     try {
       internals.setupDeviceSessionRouting();
@@ -959,13 +960,28 @@ describe("Daemon stream wiring", () => {
       });
       expect(stream.resolver?.resolveUuid("emulator-5554")).toBe(record.deviceSessionUuid);
 
-      quarantined = true;
+      await daemon.getDevicePool().reconcileDiscoveryObservation(
+        [
+          {
+            deviceId: "emulator-5554",
+            name: "Different AVD",
+            platform: "android",
+            observedAt: 1,
+          },
+        ],
+        "test",
+      );
 
       expect(stream.resolver?.resolveUuid("emulator-5554")).toBeNull();
       expect(stream.resolver?.resolveDeviceId(record.deviceSessionUuid)).toBeNull();
       expect(stream.resolver?.isRoutingSuspended("emulator-5554")).toBe(true);
 
-      quarantined = false;
+      await daemon
+        .getDevicePool()
+        .reconcileDiscoveryObservation(
+          [{ deviceId: "emulator-5554", name: "Pixel", platform: "android", observedAt: 2 }],
+          "test",
+        );
 
       // The epoch was preserved underneath, so routing resumes on the SAME uuid.
       expect(stream.resolver?.resolveUuid("emulator-5554")).toBe(record.deviceSessionUuid);
@@ -999,9 +1015,9 @@ describe("Daemon stream wiring", () => {
         idGenerator: new CountingIdGenerator("daemon"),
       },
     );
-    const internals = daemon as unknown as DaemonStreamInternals;
+    const internals = daemon.testHooks;
     const stream = new FakeDeviceDataStreamServer();
-    internals.getDeviceSessionRoutingTargets = () => targets(stream);
+    internals.setDeviceSessionRoutingTargets(() => targets(stream));
 
     try {
       await daemon.getSessionManager().createSession(sessionId, "emulator-5554", "android");
@@ -1042,9 +1058,9 @@ describe("Daemon stream wiring", () => {
         idGenerator: new CountingIdGenerator("daemon"),
       },
     );
-    const internals = daemon as unknown as DaemonStreamInternals;
+    const internals = daemon.testHooks;
     const stream = new FakeDeviceDataStreamServer();
-    internals.getDeviceSessionRoutingTargets = () => targets(stream);
+    internals.setDeviceSessionRoutingTargets(() => targets(stream));
 
     try {
       await daemon.getSessionManager().createSession(sessionId, "emulator-5554", "android");
@@ -1094,9 +1110,9 @@ describe("Daemon stream wiring", () => {
         idGenerator: new CountingIdGenerator("daemon"),
       },
     );
-    const internals = daemon as unknown as DaemonStreamInternals;
+    const internals = daemon.testHooks;
     const stream = new FakeDeviceDataStreamServer();
-    internals.getDeviceSessionRoutingTargets = () => targets(stream);
+    internals.setDeviceSessionRoutingTargets(() => targets(stream));
 
     try {
       internals.setupDeviceSessionRouting();
@@ -1139,13 +1155,13 @@ describe("Daemon stream wiring", () => {
         idGenerator: new CountingIdGenerator("daemon"),
       },
     );
-    const internals = daemon as unknown as DaemonStreamInternals;
+    const internals = daemon.testHooks;
     const stream = new FakeDeviceDataStreamServer();
-    internals.getDeviceSessionRoutingTargets = () => targets(stream);
+    internals.setDeviceSessionRoutingTargets(() => targets(stream));
     const attachedManagers: NavigationGraphManager[] = [];
-    internals.navigationGraphBridge.attach = (manager) => {
+    internals.setNavigationGraphBridgeAttach((manager) => {
       attachedManagers.push(manager);
-    };
+    });
 
     try {
       internals.setupDeviceSessionRouting();
@@ -1187,9 +1203,9 @@ describe("Daemon stream wiring", () => {
         idGenerator: new CountingIdGenerator("daemon"),
       },
     );
-    const internals = daemon as unknown as DaemonStreamInternals;
+    const internals = daemon.testHooks;
     const stream = new FakeDeviceDataStreamServer();
-    internals.getDeviceSessionRoutingTargets = () => targets(stream);
+    internals.setDeviceSessionRoutingTargets(() => targets(stream));
 
     try {
       internals.setupDeviceSessionRouting();
@@ -1234,11 +1250,11 @@ describe("Daemon stream wiring", () => {
         idGenerator: new CountingIdGenerator("daemon"),
       },
     );
-    const internals = daemon as unknown as DaemonStreamInternals;
+    const internals = daemon.testHooks;
     const attachedManagers: NavigationGraphManager[] = [];
-    internals.navigationGraphBridge.attach = (manager) => {
+    internals.setNavigationGraphBridgeAttach((manager) => {
       attachedManagers.push(manager);
-    };
+    });
 
     try {
       await daemon.getSessionManager().createSession(sessionId, "emulator-5554", "android");
@@ -1262,28 +1278,38 @@ describe("Daemon stream wiring", () => {
     async function daemonWithPool(
       pooled: PooledEntry[],
       quarantined: ReadonlySet<string>,
-    ): Promise<{ daemon: Daemon; internals: DaemonStreamInternals }> {
+      sessionUuids: readonly string[] = ["caller-session"],
+    ): Promise<{ daemon: Daemon; internals: DaemonTestHooks; sessions: LookupSessionManager }> {
       const db = await createTestDatabase();
+      const timer = new FakeTimer();
       const daemon = new Daemon(
         {},
         {
-          timer: new FakeTimer(),
+          timer,
           deviceSessionRepository: new DeviceSessionRepository(db),
           idGenerator: new CountingIdGenerator("device-session"),
         },
       );
-      const internals = daemon as unknown as DaemonStreamInternals;
-      internals.devicePool.getAllDevices = () => pooled;
-      internals.sessionManager.getSession = (sessionUuid) =>
-        sessionUuid === "caller-session" ? {} : null;
-      internals.sessionManager.getSessionForDevice = () => null;
-      internals.sessionManager.getDeviceLabels = () => undefined;
-      internals.devicePool.assertDeviceActionable = (deviceId: string, purpose: string) => {
-        if (quarantined.has(deviceId)) {
-          throw new Error(`Refusing ${purpose} on device '${deviceId}'`);
-        }
-      };
-      return { daemon, internals };
+      const internals = daemon.testHooks;
+      const sessions = await lookupSessionManager(timer, sessionUuids);
+      internals.setSessionManager(sessions);
+      DaemonState.getInstance().setSessionManagerForTesting(sessions);
+      const pool = daemon.getDevicePool();
+      await pool.initializeWithDevices(
+        pooled.map((entry) => ({ deviceId: entry.id, name: "Pixel", platform: "android" })),
+      );
+      if (quarantined.size > 0) {
+        await pool.reconcileDiscoveryObservation(
+          Array.from(quarantined, (deviceId) => ({
+            deviceId,
+            name: "Different AVD",
+            platform: "android" as const,
+            observedAt: 1,
+          })),
+          "test",
+        );
+      }
+      return { daemon, internals, sessions };
     }
 
     test("refuses an all-device subscribe that expands to a quarantined serial", async () => {
@@ -1352,14 +1378,14 @@ describe("Daemon stream wiring", () => {
 
     // Watching stored values is a read (#10830): another session's device is watched too.
     test("an all-device subscribe also watches a device owned by another session", async () => {
-      const { daemon, internals } = await daemonWithPool(
+      const { daemon, internals, sessions } = await daemonWithPool(
         [
           { id: "emulator-5554", platform: "android" },
           { id: "emulator-5556", platform: "android" },
         ],
         new Set(),
       );
-      internals.sessionManager.getSessionForDevice = (deviceId) =>
+      sessions.holderOf = (deviceId) =>
         deviceId === "emulator-5556" ? "other-session" : "caller-session";
       const originalGetExistingInstance = AndroidCtrlProxyClient.getExistingInstance;
       const touched: string[] = [];
@@ -1385,13 +1411,13 @@ describe("Daemon stream wiring", () => {
     });
 
     test("reports a per-device observation failure for an unknown session", async () => {
-      const { daemon, internals } = await daemonWithPool(
+      const { daemon, internals, sessions } = await daemonWithPool(
         [{ id: "emulator-5556", platform: "android" }],
         new Set(),
       );
-      internals.sessionManager.getSessionForDevice = () => "other-session";
+      sessions.holderOf = () => "other-session";
       const stream = new FakeDeviceDataStreamServer();
-      internals.getDeviceSessionRoutingTargets = () => targets(stream);
+      internals.setDeviceSessionRoutingTargets(() => targets(stream));
 
       try {
         internals.setupDeviceSessionRouting();
@@ -1416,15 +1442,14 @@ describe("Daemon stream wiring", () => {
       holder: string | null;
       platform: "android" | "ios";
     }): Promise<{ paths: string[]; error: string | undefined }> {
-      const { daemon, internals } = await daemonWithPool(
+      const { daemon, internals, sessions } = await daemonWithPool(
         [{ id: "device-1", platform: options.platform }],
         new Set(),
+        options.holder === null ? [options.requester] : [options.requester, options.holder],
       );
-      internals.sessionManager.getSession = (sessionUuid) =>
-        sessionUuid === options.requester || sessionUuid === options.holder ? {} : null;
-      internals.sessionManager.getSessionForDevice = () => options.holder;
+      sessions.holderOf = () => options.holder;
       const stream = new FakeDeviceDataStreamServer();
-      internals.getDeviceSessionRoutingTargets = () => targets(stream);
+      internals.setDeviceSessionRoutingTargets(() => targets(stream));
       const paths: string[] = [];
       const observation: ObserveResult = {
         observationId: "observed",

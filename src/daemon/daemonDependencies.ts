@@ -1,4 +1,7 @@
-import { createServer as createHttpServer, type Server as HttpServer } from "http";
+import { createServer as createHttpServer } from "http";
+import type { HttpListener } from "./daemonHttpIngress";
+import type { PlatformDeviceManager } from "../devices/deviceUtils";
+import { DeviceReadiness } from "../devices/DeviceReadiness";
 import {
   createDefaultBindingExclusion,
   type BindingExclusion,
@@ -46,7 +49,7 @@ export interface DaemonDependencies {
   recoveryPolicyEnvironment?: NodeJS.ProcessEnv;
   managedAdbServerShutdown?: ManagedAdbServerShutdown;
   toolSelectionProfileProvenanceLoader?: ToolSelectionProfileProvenanceLoader;
-  httpServerFactory?: () => HttpServer;
+  httpServerFactory?: () => HttpListener;
   processBirthTime?: DaemonProcessBirthTimeProvider;
   processGenerationToken?: DaemonProcessGenerationTokenProvider;
   liveDaemonSessionIdProvider?: LiveDaemonSessionIdProvider;
@@ -56,6 +59,10 @@ export interface DaemonDependencies {
   bindingExclusionFactory?: (timer: Timer) => BindingExclusion;
   /** Host forward evidence is supplied by the production entry point only (#12220). */
   foreignCtrlProxyForwardEvidence?: ForeignCtrlProxyForwardEvidence;
+  /** The iOS device verification startup warm-up runs; resolved per call, defaults to the singleton. */
+  iosDeviceVerifier?: () => Pick<DeviceReadiness, "verifyIosDevice">;
+  /** Device discovery and boot for the pool; defaults to the multi-platform manager. */
+  deviceManager?: PlatformDeviceManager;
 }
 
 /** {@link DaemonDependencies} with every default applied; the three optional ones stay optional. */
@@ -65,6 +72,7 @@ export type ResolvedDaemonDependencies = Required<
     | "installedAppsRepository"
     | "recoverFromDatabaseHealthFailure"
     | "foreignCtrlProxyForwardEvidence"
+    | "deviceManager"
   >
 > &
   Pick<
@@ -72,6 +80,7 @@ export type ResolvedDaemonDependencies = Required<
     | "installedAppsRepository"
     | "recoverFromDatabaseHealthFailure"
     | "foreignCtrlProxyForwardEvidence"
+    | "deviceManager"
   >;
 
 /**
@@ -116,6 +125,7 @@ function resolveFactories(dependencies: DaemonDependencies) {
     httpServerFactory: dependencies.httpServerFactory ?? (() => createHttpServer()),
     avdManagerFactory: dependencies.avdManagerFactory ?? (() => new AvdManagerService()),
     bindingExclusionFactory: dependencies.bindingExclusionFactory ?? createDefaultBindingExclusion,
+    iosDeviceVerifier: dependencies.iosDeviceVerifier ?? (() => DeviceReadiness.getInstance()),
   };
 }
 

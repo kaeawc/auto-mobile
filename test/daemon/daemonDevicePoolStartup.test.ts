@@ -1,5 +1,6 @@
+import { FakePersistenceBackedSessionRepository } from "../fakes/FakePersistenceBackedSessionRepository";
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
-import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -15,9 +16,21 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import * as appearanceSyncScheduler from "../../src/daemon/AppearanceSyncScheduler";
 import { logger } from "../../src/utils/logger";
+
+/** Records each iOS device the daemon verifies during startup warm-up. */
+class VerifyRecordingIosVerifier {
+  constructor(
+    private readonly verified: string[],
+    private readonly onVerify: () => void = () => {},
+  ) {}
+
+  async verifyIosDevice(deviceId: string): Promise<void> {
+    this.verified.push(deviceId);
+    this.onVerify();
+  }
+}
 
 class DeferredDiscoveryDeviceManager extends FakeDeviceManager {
   private discoveryStarted = false;
@@ -52,10 +65,18 @@ class DeferredDiscoveryDeviceManager extends FakeDeviceManager {
   }
 }
 
-function buildDaemon(timer: FakeTimer): Daemon {
+function buildDaemon(
+  timer: FakeTimer,
+  {
+    deviceManager,
+    verifier,
+  }: { deviceManager?: PlatformDeviceManager; verifier?: VerifyRecordingIosVerifier } = {},
+): Daemon {
   return new Daemon(
     {},
     {
+      ...(deviceManager ? { deviceManager } : {}),
+      ...(verifier ? { iosDeviceVerifier: () => verifier } : {}),
       installedAppsRepository: new FakeInstalledAppsRepository(),
       timer,
       deviceSessionRepository: new FakeDeviceSessionRepository(),
@@ -74,10 +95,9 @@ describe("Daemon startup device discovery", () => {
   });
 
   test("failed startup refresh reports its reason once without claiming no devices were detected", async () => {
-    const daemon = buildDaemon(new FakeTimer());
-    const internals = daemon;
     const manager = new FakeDeviceManager();
-    Object.assign(internals.getDevicePoolForTesting(), { deviceManager: manager });
+    const daemon = buildDaemon(new FakeTimer(), { deviceManager: manager });
+    const internals = daemon;
     const discovery = spyOn(manager, "getBootedDevicesDetailed").mockRejectedValue(
       new Error("startup discovery failed"),
     );
@@ -106,13 +126,12 @@ describe("Daemon startup device discovery", () => {
   test.each([false, true])(
     "successful startup refresh preserves empty/non-empty reporting: populated=%s",
     async (populated) => {
-      const daemon = buildDaemon(new FakeTimer());
-      const internals = daemon;
       const manager = new FakeDeviceManager();
       manager.bootedDevices = populated
         ? [{ deviceId: "startup-device", name: "Physical Android", platform: "android" }]
         : [];
-      Object.assign(internals.getDevicePoolForTesting(), { deviceManager: manager });
+      const daemon = buildDaemon(new FakeTimer(), { deviceManager: manager });
+      const internals = daemon;
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       const info = spyOn(logger, "info").mockImplementation(() => {});
       try {
@@ -226,7 +245,7 @@ describe("Daemon startup device discovery", () => {
     const pool = daemon.getDevicePoolForTesting();
     const manager = new FakeIOSCtrlProxyManager(timer);
     const managerLookup = spyOn(IOSCtrlProxyManager, "getExistingInstance").mockReturnValue(
-      manager as unknown as IOSCtrlProxyManager,
+      manager,
     );
     const device: BootedDevice = {
       deviceId: "00000000-0000-0000-0000-000000007676",
@@ -253,9 +272,9 @@ describe("Daemon startup device discovery", () => {
 
   test("does not overwrite a live assignment when timed-out discovery finishes later", async () => {
     const timer = new FakeTimer();
-    const daemon = buildDaemon(timer);
-    const internals = daemon;
     const manager = new DeferredDiscoveryDeviceManager();
+    const daemon = buildDaemon(timer, { deviceManager: manager });
+    const internals = daemon;
     const device: BootedDevice = {
       deviceId: "android-device-1",
       name: "Pixel 8",
@@ -267,11 +286,6 @@ describe("Daemon startup device discovery", () => {
       platform: "android",
     };
     manager.bootedDevices = [device, lateDevice];
-    (
-      internals.getDevicePoolForTesting() as unknown as {
-        deviceManager: DeferredDiscoveryDeviceManager;
-      }
-    ).deviceManager = manager;
     const refreshCompleted = Promise.withResolvers<void>();
     const originalInitialize = internals.initializeDevicePool.bind(internals);
     internals.initializeDevicePool = async () => {
@@ -348,16 +362,12 @@ describe("Daemon startup device discovery", () => {
     const previousAllowlist = process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
     delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
     const verifiedDeviceIds: string[] = [];
-    const getInstanceSpy = spyOn(DeviceSessionManager, "getInstance").mockReturnValue({
-      verifyIosDevice: async (deviceId: string) => {
-        verifiedDeviceIds.push(deviceId);
-      },
-    } as unknown as DeviceSessionManager);
+    const verifier = new VerifyRecordingIosVerifier(verifiedDeviceIds);
     const pendingPrefetchSpy = spyOn(IosCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
     try {
       for (const allowlist of [" sim-a, missing, sim-a ", ""]) {
         process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = allowlist;
-        const daemon = buildDaemon(new FakeTimer());
+        const daemon = buildDaemon(new FakeTimer(), { verifier });
         const internals = daemon;
         await internals.getDevicePoolForTesting().initializeWithDevices([
           { deviceId: "sim-a", name: "First iPhone", platform: "ios" },
@@ -369,7 +379,6 @@ describe("Daemon startup device discovery", () => {
       expect(verifiedDeviceIds).toEqual(["sim-a"]);
     } finally {
       pendingPrefetchSpy.mockRestore();
-      getInstanceSpy.mockRestore();
       if (previousSecret === undefined) {
         delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
       } else {
@@ -389,14 +398,10 @@ describe("Daemon startup device discovery", () => {
     delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
     delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
     const verifiedDeviceIds: string[] = [];
-    const getInstanceSpy = spyOn(DeviceSessionManager, "getInstance").mockReturnValue({
-      verifyIosDevice: async (deviceId: string) => {
-        verifiedDeviceIds.push(deviceId);
-      },
-    } as unknown as DeviceSessionManager);
+    const verifier = new VerifyRecordingIosVerifier(verifiedDeviceIds);
     const pendingPrefetchSpy = spyOn(IosCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
     try {
-      const daemon = buildDaemon(new FakeTimer());
+      const daemon = buildDaemon(new FakeTimer(), { verifier });
       const internals = daemon;
       await internals.getDevicePoolForTesting().initializeWithDevices([
         {
@@ -411,7 +416,6 @@ describe("Daemon startup device discovery", () => {
       expect(verifiedDeviceIds).toEqual([]);
     } finally {
       pendingPrefetchSpy.mockRestore();
-      getInstanceSpy.mockRestore();
       if (previousSecret === undefined) {
         delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
       } else {
@@ -431,7 +435,7 @@ describe("Daemon startup device discovery", () => {
     delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
     delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
     const timer = new FakeTimer();
-    const persistence = new FakeDeviceSessionPersistence();
+    const persistence = new FakePersistenceBackedSessionRepository();
     await persistence.upsertActiveSession({
       sessionUuid: "restored-ios-session",
       deviceId: "owned-simulator",
@@ -446,18 +450,15 @@ describe("Daemon startup device discovery", () => {
     });
     await persistence.markReleased("restored-ios-session", "released", 0, "daemon-restart");
     const verifiedDeviceIds: string[] = [];
-    const getInstanceSpy = spyOn(DeviceSessionManager, "getInstance").mockReturnValue({
-      verifyIosDevice: async (deviceId: string) => {
-        verifiedDeviceIds.push(deviceId);
-      },
-    } as unknown as DeviceSessionManager);
+    const verifier = new VerifyRecordingIosVerifier(verifiedDeviceIds);
     const pendingPrefetchSpy = spyOn(IosCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
     const daemon = new Daemon(
       {},
       {
         installedAppsRepository: new FakeInstalledAppsRepository(),
         timer,
-        deviceSessionRepository: persistence as unknown as DeviceSessionRepository,
+        iosDeviceVerifier: () => verifier,
+        deviceSessionRepository: persistence,
         idGenerator: new CountingIdGenerator("daemon-session"),
         databaseInitializer: new FakeDatabaseInitializer(),
         startupFailureTracker: new FakeStartupFailureTracker(),
@@ -492,7 +493,6 @@ describe("Daemon startup device discovery", () => {
     } finally {
       daemon.getSessionManager().stopCleanupTimer();
       pendingPrefetchSpy.mockRestore();
-      getInstanceSpy.mockRestore();
       if (previousSecret === undefined) {
         delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
       } else {
@@ -513,15 +513,12 @@ describe("Daemon startup device discovery", () => {
     process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = "first-simulator,second-simulator";
     const verifiedDeviceIds: string[] = [];
     let daemon: Daemon;
-    const getInstanceSpy = spyOn(DeviceSessionManager, "getInstance").mockReturnValue({
-      verifyIosDevice: async (deviceId: string) => {
-        verifiedDeviceIds.push(deviceId);
-        daemon.markShutdownInProgressForTesting();
-      },
-    } as unknown as DeviceSessionManager);
+    const verifier = new VerifyRecordingIosVerifier(verifiedDeviceIds, () => {
+      daemon.markShutdownInProgressForTesting();
+    });
     const pendingPrefetchSpy = spyOn(IosCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
     try {
-      daemon = buildDaemon(new FakeTimer());
+      daemon = buildDaemon(new FakeTimer(), { verifier });
       const internals = daemon;
       await internals.getDevicePoolForTesting().initializeWithDevices([
         { deviceId: "first-simulator", name: "First iPhone", platform: "ios" },
@@ -533,7 +530,6 @@ describe("Daemon startup device discovery", () => {
       expect(verifiedDeviceIds).toEqual(["first-simulator"]);
     } finally {
       pendingPrefetchSpy.mockRestore();
-      getInstanceSpy.mockRestore();
       if (previousSecret === undefined) {
         delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
       } else {

@@ -1,5 +1,4 @@
 import { EventEmitter } from "node:events";
-import type { Server as HttpServer } from "node:http";
 import { afterEach, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -23,12 +22,8 @@ import { ActionableError } from "../../src/models/ActionableError";
  * EADDRINUSE, with no real socket involved.
  */
 
-interface DaemonHttpBindInternals {
-  httpIngress: { start(): Promise<void>; closeListener(): Promise<void> };
-}
-
-function bindInternals(daemon: Daemon): DaemonHttpBindInternals {
-  return daemon as unknown as DaemonHttpBindInternals;
+function bindInternals(daemon: Daemon) {
+  return daemon.testHooks;
 }
 
 /**
@@ -74,7 +69,7 @@ function daemonWithFakeHttpServer(
   outcome: "bind-ok" | "bind-refused",
 ): Daemon {
   return new Daemon(options, {
-    httpServerFactory: () => new FakeBindServer(outcome) as unknown as HttpServer,
+    httpServerFactory: () => new FakeBindServer(outcome),
   });
 }
 
@@ -128,7 +123,7 @@ describe("Daemon strict-port bind (issue #6260)", () => {
 
     // No port+1..3 fallback: the daemon must still be configured for the
     // exact requested port, not a substitute one.
-    expect((daemon as unknown as { port: number }).port).toBe(port);
+    expect(bindInternals(daemon).port).toBe(port);
 
     await bindInternals(daemon).httpIngress.closeListener();
   });

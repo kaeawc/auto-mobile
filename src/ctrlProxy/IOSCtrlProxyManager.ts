@@ -1,4 +1,4 @@
-import { MapDeviceClientRegistry } from "./deviceClientRegistry";
+import { MapDeviceClientRegistry, type ExistingIosCtrlProxyManager } from "./deviceClientRegistry";
 import { DefaultIosTunnelClient, type IosTunnelClient } from "./ios/IosTunnelClient";
 import type { IosPhysicalDeviceLister } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { DefaultIosAppBundleGuard, type IosAppBundleGuard } from "./ios/IosAppBundleGuard";
@@ -477,7 +477,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // stop phase, even when the readiness caller times out before it settles.
   private forceRestartInFlight: Promise<void> | null = null;
   private removalCleanup: Promise<void> | null = null;
-  private removalGeneration = 0;
+  removalGeneration = 0;
   private rearmedRemovalGeneration = 0;
   // Lets ordinary starts detect that a newer forced restart began while they
   // yielded before claiming the shared-start slot.
@@ -690,7 +690,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     );
   }
 
-  public static getExistingInstance(deviceId: string): IOSCtrlProxyManager | undefined {
+  public static getExistingInstance(deviceId: string): ExistingIosCtrlProxyManager | undefined {
     return IOSCtrlProxyManager.registry.peek(deviceId);
   }
 
@@ -731,7 +731,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
   }
 
-  private supersededSinceRemoval(removalGeneration: number): boolean {
+  supersededSinceRemoval(removalGeneration: number): boolean {
     return (
       this.removalGeneration !== removalGeneration ||
       this.rearmedRemovalGeneration >= removalGeneration ||

@@ -2,41 +2,17 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { releasingSessionHarness, releasingSessionId } from "../helpers/releasingSessionHarness";
 import { EventEmitter } from "node:events";
-import type {
-  IncomingHttpHeaders,
-  IncomingMessage,
-  Server as HttpServer,
-  ServerResponse,
-} from "node:http";
+import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
+import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http";
 import { logger } from "../../src/utils/logger";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { Daemon } from "../../src/daemon/daemon";
+import { Daemon, type DaemonTestHooks } from "../../src/daemon/daemon";
 import { MCP_STREAMABLE_PATH } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 
 const port = 41321;
-
-interface DaemonHttpIngressInternals {
-  start(): Promise<void>;
-  closeListener(): Promise<void>;
-  mcpHttpTransportFactory: () => FakeTransport;
-  mcpRequestServerFactory: () => FakeMcpServer;
-}
-
-interface DaemonHttpInternals {
-  httpIngress: DaemonHttpIngressInternals;
-  startUntilReady(): Promise<void>;
-  startThroughSocketBind(): Promise<void>;
-  startAfterSocketBind(): Promise<void>;
-  stopAfterFailedStartup(): Promise<void>;
-  quiesceProvisioningIngress(): Promise<void>;
-  resolveStartupCompletion(): void;
-  rejectStartupCompletion(reason: unknown): void;
-  sessionManager: SessionManager;
-  observerSessionRegistry: ObserverSessionRegistry;
-}
 
 class FakeRequest extends EventEmitter {
   method = "GET";
@@ -92,6 +68,7 @@ class FakeResponse extends EventEmitter {
 }
 
 class FakeHttpServer extends EventEmitter {
+  listening = false;
   requestTimeout = 0;
   headersTimeout = 0;
   timeout = 0;
@@ -135,11 +112,7 @@ class FakeHttpServer extends EventEmitter {
       };
       request.on("newListener", deliver);
     }
-    this.emit(
-      "request",
-      request as unknown as IncomingMessage,
-      response as unknown as ServerResponse,
-    );
+    this.emit("request", request, response);
     const finished = response.finished.then(() => response);
     this.inFlight.add(finished);
     void finished.then(() => this.inFlight.delete(finished));
@@ -148,12 +121,12 @@ class FakeHttpServer extends EventEmitter {
 }
 
 /** Stands in for every request's transport: one fake shared across the stateless requests. */
-class FakeTransport {
+class FakeTransport extends StreamableHTTPServerTransport {
   handled = 0;
   closed = 0;
   parsedBodies: unknown[] = [];
 
-  async handleRequest(
+  override async handleRequest(
     _req: IncomingMessage,
     res: ServerResponse,
     parsedBody?: unknown,
@@ -164,7 +137,7 @@ class FakeTransport {
     res.end();
   }
 
-  async close(): Promise<void> {
+  override async close(): Promise<void> {
     this.closed += 1;
   }
 }
@@ -178,22 +151,22 @@ async function harness(
   sessionManager?: SessionManager,
   observers?: ObserverSessionRegistry,
   { startupComplete = true, timer = new FakeTimer() } = {},
-): Promise<{ server: FakeHttpServer; transport: FakeTransport; internals: DaemonHttpInternals }> {
+): Promise<{ server: FakeHttpServer; transport: FakeTransport; internals: DaemonTestHooks }> {
   const server = new FakeHttpServer();
   const daemon = new Daemon(
     { port, host: "127.0.0.1" },
-    { timer, httpServerFactory: () => server as unknown as HttpServer },
+    { timer, httpServerFactory: () => server },
   );
   const transport = new FakeTransport();
-  const internals = daemon as unknown as DaemonHttpInternals;
+  const internals = daemon.testHooks;
   if (sessionManager) {
-    internals.sessionManager = sessionManager;
+    internals.setSessionManager(sessionManager);
   }
   if (observers) {
-    internals.observerSessionRegistry = observers;
+    internals.setObserverSessionRegistry(observers);
   }
-  internals.httpIngress.mcpHttpTransportFactory = () => transport;
-  internals.httpIngress.mcpRequestServerFactory = () => new FakeMcpServer();
+  internals.httpIngress.setMcpHttpTransportFactory(() => transport);
+  internals.httpIngress.setMcpRequestServerFactory(() => new FakeMcpServer());
   await internals.httpIngress.start();
   if (startupComplete) {
     internals.resolveStartupCompletion();
@@ -411,15 +384,17 @@ describe("Daemon HTTP MCP admission during shutdown (#11189)", () => {
       await Bun.sleep(0);
       const failure = new Error("rehydration exploded");
       let stopEntered = false;
-      internals.startThroughSocketBind = async () => {};
-      internals.startAfterSocketBind = async () => {
-        throw failure;
-      };
-      // The real stop awaits the HTTP server close, which waits for the held request.
-      internals.stopAfterFailedStartup = async () => {
-        stopEntered = true;
-        await internals.httpIngress.closeListener();
-      };
+      internals.setStartSteps({
+        startThroughSocketBind: async () => {},
+        startAfterSocketBind: async () => {
+          throw failure;
+        },
+        // The real stop awaits the HTTP server close, which waits for the held request.
+        stopAfterFailedStartup: async () => {
+          stopEntered = true;
+          await internals.httpIngress.closeListener();
+        },
+      });
       let startError: unknown;
       await internals.startUntilReady().catch((error: unknown) => {
         startError = error;

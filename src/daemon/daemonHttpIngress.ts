@@ -1,4 +1,4 @@
-import { Server as HttpServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { ActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
@@ -21,6 +21,8 @@ import {
 } from "./httpHeartbeat";
 import {
   StatelessMcpHttpEndpoint,
+  type McpHttpRequestLike,
+  type McpHttpResponseLike,
   type StatelessMcpRequestScope,
   type StatelessMcpServer,
 } from "./statelessMcpHttpEndpoint";
@@ -35,11 +37,67 @@ const HTTP_STARTUP_ADMISSION_TIMEOUT_MS = 30_000;
 const HTTP_STARTUP_RETRY_AFTER_SECONDS = 1;
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 
-type HttpBodyResult = { ok: true; body: string } | { ok: false; status: number; error: string };
+export type HttpBodyResult =
+  | { ok: true; body: string }
+  | { ok: false; status: number; error: string };
+
+/** The request surface the body reader drives. `IncomingMessage` satisfies it. */
+export interface HttpBodyRequestLike {
+  on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
+  on(event: "end" | "aborted" | "close", listener: () => void): unknown;
+  on(event: "error", listener: (error: Error) => void): unknown;
+  off(event: "data", listener: (chunk: Buffer | string) => void): unknown;
+  off(event: "end" | "aborted" | "close", listener: () => void): unknown;
+  off(event: "error", listener: (error: Error) => void): unknown;
+  destroy(): unknown;
+}
+
+/** One MCP HTTP request: what the endpoint reads plus what the body reader drives. */
+export type HttpMcpRequestLike = McpHttpRequestLike & HttpBodyRequestLike;
+
+/** The listener surface ingress uses. `node:http`'s `Server` satisfies it. */
+export interface HttpListener {
+  readonly listening: boolean;
+  requestTimeout: number;
+  headersTimeout: number;
+  timeout: number;
+  listen(port: number, host: string, callback: () => void): unknown;
+  close(callback: (error?: Error) => void): unknown;
+  on(event: "request", listener: (req: IncomingMessage, res: ServerResponse) => void): unknown;
+  on(event: "error", listener: (error: NodeJS.ErrnoException) => void): unknown;
+}
+
+/** Typed view of the ingress internals tests drive; production code never uses it. */
+export interface DaemonHttpIngressTestHooks {
+  acceptingHttpSessions(): boolean;
+  setAcceptingHttpSessions(accepting: boolean): void;
+  setStartupCompleted(completed: boolean): void;
+  /** Install a listener double as if `start()` had bound it. */
+  setHttpServer(server: HttpListener | null): void;
+  setMcpHttpTransportFactory(factory: () => StreamableHTTPServerTransport): void;
+  setMcpRequestServerFactory(
+    factory: (
+      req: HttpMcpRequestLike,
+      scope: StatelessMcpRequestScope,
+    ) => StatelessMcpServer<StreamableHTTPServerTransport>,
+  ): void;
+  /** Serve one request straight through the stateless endpoint, past HTTP admission. */
+  handleEndpointRequest(
+    req: HttpMcpRequestLike,
+    res: McpHttpResponseLike,
+    parsedBody: unknown,
+  ): Promise<void>;
+  endpointInFlightCount(): number;
+  start(): Promise<void>;
+  closeListener(): Promise<void>;
+  inFlightRequests(): Array<{ requestScopeId: string; close: () => Promise<void> }>;
+  handleMcpHttpRequest(req: HttpMcpRequestLike, res: McpHttpResponseLike): Promise<void>;
+  readHttpBody(req: HttpBodyRequestLike): Promise<HttpBodyResult>;
+}
 
 /** What the daemon's HTTP listener needs from the daemon; everything is read lazily. */
 export interface DaemonHttpIngressDeps {
-  httpServerFactory: () => HttpServer;
+  httpServerFactory: () => HttpListener;
   timer: () => Timer;
   idGenerator: () => IdGenerator;
   /** Current bind address; the port is only final after port selection. */
@@ -51,7 +109,7 @@ export interface DaemonHttpIngressDeps {
   observerSessionRegistry: () => ObserverSessionRegistry;
   /** Builds one request's MCP server from its headers (#4678 stateless, #11820). */
   createRequestMcpServer: (
-    req: IncomingMessage,
+    req: HttpMcpRequestLike,
     scope: StatelessMcpRequestScope,
   ) => StatelessMcpServer<StreamableHTTPServerTransport>;
   isShutdownInProgress: () => boolean;
@@ -62,7 +120,7 @@ export interface DaemonHttpIngressDeps {
  * admission, body reading and the stateless per-request MCP endpoint.
  */
 export class DaemonHttpIngress {
-  private httpServer: HttpServer | null = null;
+  private httpServer: HttpListener | null = null;
   private httpServerClosePromise: Promise<void> | null = null;
   /**
    * Aborted when shutdown closes ingress, so an HTTP MCP request still waiting
@@ -80,14 +138,14 @@ export class DaemonHttpIngress {
     });
   /** Builds one MCP request's server; tests replace it with a double. */
   private mcpRequestServerFactory = (
-    req: IncomingMessage,
+    req: HttpMcpRequestLike,
     scope: StatelessMcpRequestScope,
   ): StatelessMcpServer<StreamableHTTPServerTransport> =>
     this.deps.createRequestMcpServer(req, scope);
   /** One server and transport per MCP POST, closed with its response (#4678). */
   private readonly mcpHttpEndpoint = new StatelessMcpHttpEndpoint<
-    IncomingMessage,
-    ServerResponse,
+    HttpMcpRequestLike,
+    McpHttpResponseLike,
     StreamableHTTPServerTransport
   >({
     timer: {
@@ -117,7 +175,7 @@ export class DaemonHttpIngress {
   constructor(private readonly deps: DaemonHttpIngressDeps) {}
 
   /** The listener, once started; the health check reads `listening` off it. */
-  get server(): HttpServer | null {
+  get server(): HttpListener | null {
     return this.httpServer;
   }
 
@@ -138,6 +196,36 @@ export class DaemonHttpIngress {
   /** Test seam: register an in-flight HTTP request double that shutdown must close. */
   trackTransportForTesting(requestScopeId: string, close: () => Promise<void>): void {
     this.mcpHttpEndpoint.trackForTesting(requestScopeId, close);
+  }
+
+  /** One typed view of the internals ingress tests drive; production code never reads it. */
+  get testHooks(): DaemonHttpIngressTestHooks {
+    return {
+      acceptingHttpSessions: () => this.acceptingHttpSessions,
+      setAcceptingHttpSessions: (accepting) => {
+        this.acceptingHttpSessions = accepting;
+      },
+      setStartupCompleted: (completed) => {
+        this.startupCompleted = completed;
+      },
+      setHttpServer: (server) => {
+        this.httpServer = server;
+      },
+      setMcpHttpTransportFactory: (factory) => {
+        this.mcpHttpTransportFactory = factory;
+      },
+      setMcpRequestServerFactory: (factory) => {
+        this.mcpRequestServerFactory = factory;
+      },
+      handleEndpointRequest: (req, res, parsedBody) =>
+        this.mcpHttpEndpoint.handle(req, res, parsedBody, () => {}),
+      endpointInFlightCount: () => this.mcpHttpEndpoint.inFlightCount,
+      inFlightRequests: () => this.inFlightRequests(),
+      start: () => this.start(),
+      closeListener: () => this.closeListener(),
+      handleMcpHttpRequest: (req, res) => this.handleMcpHttpRequest(req, res),
+      readHttpBody: (req) => this.readHttpBody(req),
+    };
   }
 
   /** In-flight MCP requests that shutdown must close. */
@@ -320,7 +408,7 @@ export class DaemonHttpIngress {
    * path already does (#11156). Returns false after answering 503 when shutting
    * down, or when startup is still running past the admission bound or failed.
    */
-  private async admitHttpMcpRequest(res: ServerResponse): Promise<boolean> {
+  private async admitHttpMcpRequest(res: McpHttpResponseLike): Promise<boolean> {
     if (!this.acceptingHttpSessions) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Daemon is shutting down" }));
@@ -367,7 +455,10 @@ export class DaemonHttpIngress {
     }
   }
 
-  private async handleMcpHttpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  private async handleMcpHttpRequest(
+    req: HttpMcpRequestLike,
+    res: McpHttpResponseLike,
+  ): Promise<void> {
     if (!(await this.admitHttpMcpRequest(res))) {
       return;
     }
@@ -409,7 +500,7 @@ export class DaemonHttpIngress {
   }
 
   private sendHttpJsonRpcError(
-    res: ServerResponse,
+    res: McpHttpResponseLike,
     parsedBody: unknown,
     message: string,
     error?: unknown,
@@ -433,7 +524,7 @@ export class DaemonHttpIngress {
     );
   }
 
-  private readHttpBody(req: IncomingMessage): Promise<HttpBodyResult> {
+  private readHttpBody(req: HttpBodyRequestLike): Promise<HttpBodyResult> {
     const timer = this.deps.timer();
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];
@@ -482,7 +573,7 @@ export class DaemonHttpIngress {
   }
 
   private respondToBodyReadFailure(
-    res: ServerResponse,
+    res: McpHttpResponseLike,
     result: Extract<HttpBodyResult, { ok: false }>,
   ): void {
     if (!res.destroyed) {

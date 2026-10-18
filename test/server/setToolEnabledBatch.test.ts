@@ -15,6 +15,9 @@ import {
   SET_TOOL_ENABLED_TOOL_NAME,
   setToolEnabledSchema,
 } from "../../src/server/toolSelectionTools";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * #6869 — `setToolEnabled` accepted a single `toolName`, so declaring the

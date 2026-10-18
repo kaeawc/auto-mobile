@@ -47,6 +47,9 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import type { BootedDevice } from "../../src/models";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const devices: BootedDevice[] = [
   { name: "Pixel", deviceId: "emulator-5554", platform: "android" },

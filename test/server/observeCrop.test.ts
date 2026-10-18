@@ -35,6 +35,9 @@ import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants"
 import { screenshotPathProtection } from "../../src/features/observe/ScreenshotPathProtection";
 import { selectScreenshotsToEvict } from "../../src/features/observe/screenshotCacheEviction";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device: BootedDevice = { deviceId: "crop-device", name: "Fake", platform: "android" };
 const rect = { x: 10, y: 20, width: 30, height: 40 };

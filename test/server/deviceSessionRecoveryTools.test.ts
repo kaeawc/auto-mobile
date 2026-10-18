@@ -7,6 +7,9 @@ import {
 } from "../../src/server/deviceSessionResult";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerDeviceTools } from "../../src/server/deviceTools";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * Every `session_ownership_lost` / `no_active_device_session` payload tells the

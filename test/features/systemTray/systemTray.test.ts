@@ -37,6 +37,9 @@ import type {
   ViewHierarchyResult,
 } from "../../../src/models";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const POLL_INTERVAL_MS = 250;
 // Mirrors the private SYSTEM_TRAY_REEXPAND_INTERVAL_MS in systemTrayHelpers.ts.

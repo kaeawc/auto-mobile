@@ -159,7 +159,6 @@
 2	test/daemon/untargetedCallProvisionalAutolockKey.test.ts
 4	test/daemon/webrtcStreamSocketServer.test.ts
 1	test/daemon/webrtcStreamSocketServer.viewerSubscription.test.ts
-1	test/db/dbWriteBarrierTrackExistingNonPromise.test.ts
 1	test/db/sessionToolSelectionRepository.integration.test.ts
 1	test/devices/deviceUtils.test.ts
 1	test/devices/iosCreatedSimRollbackBooted.test.ts
@@ -356,9 +355,7 @@
 1	test/utils/iosRunnerRestartIsolation.test.ts
 1	test/utils/logger-close.test.ts
 2	test/utils/logger-loglevel-env.test.ts
-7	test/utils/logger-sink-degradation.test.ts
 1	test/utils/logger-structured.test.ts
-6	test/utils/plan/PlanValidator.test.ts
 1	test/utils/promiseRejectionOwnership.test.ts
 1	test/utils/toolUtils.property.test.ts
 2	test/utils/toolUtilsStructuredField.test.ts

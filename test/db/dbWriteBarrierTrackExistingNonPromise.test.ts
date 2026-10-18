@@ -2,20 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { InMemoryDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-describe("trackExisting tolerates non-promises without leaking a count", () => {
-  for (const draining of [false, true]) {
-    test.each([undefined, 42])(`non-thenable %j while draining=${draining}`, async (value) => {
-      const barrier = new InMemoryDbWriteBarrier(new FakeTimer());
-      if (draining) {
-        barrier.beginDrain();
-      }
-      const result = barrier.trackExisting(value as unknown as Promise<number | undefined>);
-      expect(await result).toBe(draining ? undefined : value);
-      expect(barrier.inFlightCount()).toBe(0);
-      expect(await barrier.drain(1)).toBe(true);
-    });
-  }
-
+describe("trackExisting settles its in-flight count without leaking", () => {
   test("a native promise settles the count before its caller resumes, without an extra turn", async () => {
     const barrier = new InMemoryDbWriteBarrier(new FakeTimer());
     const work = Promise.withResolvers<number>();

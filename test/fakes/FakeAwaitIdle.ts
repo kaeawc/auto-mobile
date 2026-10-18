@@ -1,5 +1,6 @@
 import type { AwaitIdle, UiStabilityState } from "../../src/features/observe/interfaces/AwaitIdle";
 import type { GfxMetrics } from "../../src/models";
+import { throwIfAborted } from "../../src/utils/toolUtils";
 
 /**
  * Fake implementation of AwaitIdle for testing
@@ -13,6 +14,7 @@ export class FakeAwaitIdle implements AwaitIdle {
   private configuredGfxMetrics: GfxMetrics | null = null;
   private configuredUiStabilityState: UiStabilityState | null = null;
   private initializeSignal: AbortSignal | undefined;
+  private configuredRotation: number | null = null;
 
   /**
    * Configure the GfxMetrics to be returned by waitForUiStability methods
@@ -26,6 +28,14 @@ export class FakeAwaitIdle implements AwaitIdle {
    */
   configureUiStabilityState(state: UiStabilityState): void {
     this.configuredUiStabilityState = state;
+  }
+
+  /**
+   * Configure the rotation the device reports. waitForRotation then rejects with the
+   * real timeout error for any other target. Unset (default) rotates immediately.
+   */
+  configureRotation(rotation: number | null): void {
+    this.configuredRotation = rotation;
   }
 
   /**
@@ -92,6 +102,7 @@ export class FakeAwaitIdle implements AwaitIdle {
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<UiStabilityState> {
+    throwIfAborted(signal);
     this.executedOperations.push(`initializeUiStabilityTracking(${packageName}, ${timeoutMs})`);
     this.initializeCallCount++;
     this.initializeSignal = signal;
@@ -116,8 +127,9 @@ export class FakeAwaitIdle implements AwaitIdle {
     packageName: string,
     timeoutMs: number,
     _perf?: any,
-    _signal?: AbortSignal,
+    signal?: AbortSignal,
   ): Promise<GfxMetrics | null> {
+    throwIfAborted(signal);
     this.executedOperations.push(`waitForUiStability(${packageName}, ${timeoutMs})`);
     this.waitForUiStabilityCallCount++;
     return this.configuredGfxMetrics;
@@ -128,15 +140,27 @@ export class FakeAwaitIdle implements AwaitIdle {
     timeoutMs: number,
     _initState: UiStabilityState,
     _perf?: any,
-    _signal?: AbortSignal,
+    signal?: AbortSignal,
   ): Promise<GfxMetrics | null> {
+    throwIfAborted(signal);
     this.executedOperations.push(`waitForUiStabilityWithState(${packageName}, ${timeoutMs})`);
     this.waitForUiStabilityWithStateCallCount++;
     return this.configuredGfxMetrics;
   }
 
-  async waitForRotation(targetRotation: number, timeoutMs?: number): Promise<void> {
+  async waitForRotation(
+    targetRotation: number,
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
     this.executedOperations.push(`waitForRotation(${targetRotation}, ${timeoutMs ?? 500})`);
-    // No delay - immediately resolve
+    // No delay: a device that never reaches the target fails immediately like the
+    // real wait does once its budget is spent.
+    if (this.configuredRotation !== null && this.configuredRotation !== targetRotation) {
+      throw new Error(
+        `Timeout waiting for rotation to ${targetRotation} after ${timeoutMs ?? 500}ms`,
+      );
+    }
   }
 }

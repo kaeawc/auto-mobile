@@ -567,16 +567,9 @@
         let simulatorUdid: String?
     }
 
-    private struct SetMockRulesBody: Decodable {
-        let rules: [NetworkMockRuleDTO]
-    }
-
     private struct SetMockRulesResponse: Encodable {
         let status: String
         let rejected: [RejectedMockRule]
     }
 
-    private struct SetNetworkFaultRulesBody: Decodable {
-        let rules: [NetworkFaultRuleDTO]
-    }
 #endif

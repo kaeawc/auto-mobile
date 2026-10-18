@@ -32,7 +32,9 @@ export const noopTaskLeaseKeepalive: TaskLeaseKeepalive = {
 /**
  * The part of the session manager a held lease renews through: the same `recordHeartbeat` the
  * socket and HTTP heartbeat routes call, so a held task is one more owner heartbeat, not a
- * second liveness path. `peekSession` judges without releasing an expired session.
+ * second liveness path. `peekSession` judges without releasing an expired session, and returns
+ * the same object for as long as one session incarnation lives, so a hold fences its renewals
+ * to the incarnation it captured.
  */
 export interface TaskLeaseSessions {
   peekSession(sessionId: string): { readonly heartbeatTimeoutMs: number } | null;
@@ -65,11 +67,16 @@ export class HeartbeatTaskLeaseKeepalive implements TaskLeaseKeepalive {
   private readonly timer: Timer;
   private readonly renewIntervalMs: number;
   private readonly active = new Set<ActiveHold>();
-  private closed = false;
+  private isClosed = false;
 
   constructor(private readonly deps: HeartbeatTaskLeaseKeepaliveDeps) {
     this.timer = deps.timer ?? defaultTimer;
     this.renewIntervalMs = deps.renewIntervalMs ?? DEFAULT_TASK_LEASE_RENEW_INTERVAL_MS;
+  }
+
+  /** True once {@link releaseAll} ran: this keeper holds nothing more. */
+  get closed(): boolean {
+    return this.isClosed;
   }
 
   /** The holds not yet released. */
@@ -79,10 +86,10 @@ export class HeartbeatTaskLeaseKeepalive implements TaskLeaseKeepalive {
 
   hold(request: TaskLeaseHoldRequest): () => void {
     const { taskId, sessionUuid } = request;
-    const session = this.closed ? null : this.deps.sessions()?.peekSession(sessionUuid);
+    const session = this.isClosed ? null : this.deps.sessions()?.peekSession(sessionUuid);
     if (!session) {
       logger.debug(
-        `[TASKS] Task ${taskId} holds no lease: session ${sessionUuid} is not live${this.closed ? " (daemon stopping)" : ""}`,
+        `[TASKS] Task ${taskId} holds no lease: session ${sessionUuid} is not live${this.isClosed ? " (daemon stopping)" : ""}`,
       );
       return () => {};
     }
@@ -100,8 +107,9 @@ export class HeartbeatTaskLeaseKeepalive implements TaskLeaseKeepalive {
     this.active.add(hold);
     const renew = () => {
       const sessions = this.deps.sessions();
-      if (!sessions?.peekSession(sessionUuid)) {
-        // The session ended (released, replaced or expired) under the task: nothing to keep.
+      if (sessions?.peekSession(sessionUuid) !== session) {
+        // The session ended (released, replaced or expired) under the task: nothing to keep. A
+        // session recreated under the same uuid is a different incarnation the task never held.
         logger.debug(`[TASKS] Task ${taskId} stops holding ended session ${sessionUuid}`);
         hold.release();
         return;
@@ -119,7 +127,7 @@ export class HeartbeatTaskLeaseKeepalive implements TaskLeaseKeepalive {
 
   /** Daemon shutdown: stop renewing every held lease and refuse new holds. */
   releaseAll(): number {
-    this.closed = true;
+    this.isClosed = true;
     const holds = [...this.active];
     for (const hold of holds) {
       hold.release();

@@ -41,6 +41,7 @@ import {
   createStatelessMcpServer,
   type StatelessMcpServerBase,
 } from "./statelessMcpServerFactory";
+import { releaseDaemonTaskLeases } from "../server/tasks/daemonTaskManager";
 import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { createIosDoctorDependencies } from "../doctor/checks/ios";
 import { logger } from "../utils/logger";
@@ -5285,6 +5286,7 @@ export class Daemon {
     // The navigation retention monitor's in-flight pass drains via the DB
     // write-barrier stage below; here we only cancel its next scheduled tick.
     navigationRetentionMonitor?.stop();
+    releaseDaemonTaskLeases(); // running MCP tasks stop renewing their leases (#4668)
     const [heartbeatSettled, disconnectSettled] = await Promise.all([
       heartbeatMonitor ? heartbeatMonitor.stop().then(() => true) : true,
       deviceDisconnectMonitor ? deviceDisconnectMonitor.stop() : true,

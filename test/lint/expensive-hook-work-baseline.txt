@@ -140,6 +140,7 @@ test/server/setActiveDevice.refusedBeforeResume.test.ts	heavy-harness
 test/server/setActiveDevice.sessionlessOwnership.test.ts	heavy-harness
 test/server/setActiveDeviceDiscoveryIncompleteWire.test.ts	heavy-harness
 test/server/snapshotOfTools.test.ts	recursive-rm
+test/server/tasks/startDeviceTask.test.ts	heavy-harness
 test/server/toolRegistry.bindingEnforcement.test.ts	heavy-harness
 test/server/toolRegistry.deviceOwnership.test.ts	heavy-harness
 test/server/toolRegistry.foreignDaemonControl.test.ts	heavy-harness

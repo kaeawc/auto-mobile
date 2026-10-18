@@ -1,4 +1,5 @@
 import { holderOf } from "../daemon/deviceBinding";
+import { currentTaskContext } from "./tasks/runAsTask";
 import { bindingPoolGate } from "../daemon/sessionBroker/provisioning/poolGate";
 import { captureAutolockPolicy } from "../daemon/deviceAutolockPolicy";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
@@ -273,7 +274,13 @@ async function rollbackCreatedDeviceAfterBoot(
  * passed to the bound session, so the failure rollbacks above no longer apply; a request that
  * turns out undelivered after this point is undone through the receipt instead (#11593).
  */
-function recordStartedDevice(boot: DeviceBootResult, options: BootPreparationOptions): void {
+function recordStartedDevice(
+  boot: DeviceBootResult,
+  options: BootPreparationOptions,
+  sessionId: string,
+): void {
+  // As an MCP task the caller sees the session only once the task settles: hold it until then.
+  currentTaskContext()?.holdDeviceLease(sessionId);
   const receipt = requestAcquisitionReceipt();
   if (!receipt) {
     return;
@@ -462,7 +469,7 @@ const bootAndPrepareDevice = async (
     });
   });
   state.ownershipTransferred = true;
-  recordStartedDevice(state.boot, options);
+  recordStartedDevice(state.boot, options, sessionId);
 
   refreshResourcesAfterCommittedBoot(state.boot, deps);
   return buildBootedResponse(state.boot.device, state.boot.source, perf, sessionId, {

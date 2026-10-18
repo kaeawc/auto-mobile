@@ -233,8 +233,18 @@ result, and only to a client whose `initialize` declared it; every other client 
   `CreateTaskResult`; otherwise it runs the work synchronously. `currentTaskContext()` gives
   code inside the work the task id, `holdDeviceLease(sessionUuid)` and `requestInput(...)`.
 - `TaskLeaseKeepalive`: the hook a task uses to keep a device session's lease alive until it is
-  terminal. The default holds nothing; the session broker implements it with `startDevice`.
-- `TASK_ELIGIBLE_TOOLS`: the tools whose call may become a task. Empty in this slice.
+  terminal. `HeartbeatTaskLeaseKeepalive` renews the session through the session manager's own
+  `recordHeartbeat` (the path the socket and HTTP heartbeat routes use, owner lease only, never
+  the idle clocks) at once and then at half the session's heartbeat timeout (at most every
+  second). A hold ends when the task settles (completed, failed or cancelled; expiry follows a
+  terminal state), when the session ends under it, or at daemon shutdown
+  (`releaseDaemonTaskLeases`). The daemon's per-request servers get the daemon-scoped instance
+  from `createStatelessMcpServer`; direct stdio holds nothing.
+- `TASK_ELIGIBLE_TOOLS`: the tools whose call may become a task: `startDevice`. Its work holds
+  the session it binds (`currentTaskContext()?.holdDeviceLease`) right after the bind, so the
+  session cannot lapse before the client learns its id from `tasks/get`. The boot itself binds
+  no session until it is ready, so `tasks/cancel` during the boot runs the existing
+  undelivered-acquisition rollback: the boot is stopped and nothing stays bound.
 - `createSdkMcpServer` passes a `CreateTaskResult` through the SDK's `tools/call` result
   validation, which would otherwise stamp `content: []` on it.
 

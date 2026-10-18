@@ -256,28 +256,47 @@ function missingFrom(haystack: string, needles: string[]): string[] {
 }
 
 /** A `KEY: value` report line, as the prompts ask the agent to end with. */
-const KEYED_NEEDLE = /^([A-Z][A-Z0-9_]*):/;
+const KEYED_NEEDLE = /^[A-Z][A-Z0-9_]*:/;
+
+/** A Markdown code fence line (```, ```text), which frames the report lines. */
+const FENCE_LINE = /^(`{3,}|~{3,})[\w-]*$/;
 
 /**
- * Expected answer text the final answer lacks. A `KEY: value` needle must be on the last
- * line that reports KEY, so an answer that echoes the expected value (quoting the task, or a
- * first reading) and then reports a different one fails. Other needles search the whole answer.
+ * One report line compared loosely: NFC, case, runs of whitespace, inline backticks, and one
+ * trailing period (the UX flow's screen text ends with one) do not matter.
+ */
+function normalizeReportLine(line: string): string {
+  return line
+    .normalize("NFC")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^`+|`+$/g, "")
+    .trim()
+    .replace(/\.$/, "")
+    .toLowerCase();
+}
+
+/**
+ * Expected answer text the final answer lacks. The prompts ask the agent to finish with exactly
+ * the `KEY: value` lines, so those needles must be the reply's last nonblank lines (fences
+ * aside), in the suite's order, each equal to its needle: an echoed value followed by a
+ * different one, extra text on the line (`EXPECTED_COUNT: 3 or 99`), or a disclaimer after the
+ * lines all fail. Other needles search the whole answer.
  */
 export function missingFromAnswer(answer: string, needles: string[]): string[] {
-  const lines = answer.split(/\r?\n/).map((line) =>
-    line
-      .trim()
-      .replace(/^`+|`+$/g, "")
-      .trim(),
+  const keyed = needles.filter((needle) => KEYED_NEEDLE.test(needle));
+  const lines = answer
+    .split(/\r?\n/)
+    .map(normalizeReportLine)
+    .filter((line) => line !== "" && !FENCE_LINE.test(line));
+  const tail = keyed.length === 0 ? [] : lines.slice(-keyed.length);
+  // Matched in order, so a repeated key (DISPLAYED_COUNT: 2 then DISPLAYED_COUNT: 3) fails.
+  const offset = tail.length - keyed.length;
+  return needles.filter((needle) =>
+    KEYED_NEEDLE.test(needle)
+      ? tail[keyed.indexOf(needle) + offset] !== normalizeReportLine(needle)
+      : !containsBounded(answer, needle),
   );
-  return needles.filter((needle) => {
-    const key = KEYED_NEEDLE.exec(needle)?.[1];
-    if (key === undefined) {
-      return !containsBounded(answer, needle);
-    }
-    const reported = lines.findLast((line) => line.toUpperCase().startsWith(`${key}:`));
-    return reported === undefined || !containsBounded(reported, needle);
-  });
 }
 
 function verifyChecks(audit: TranscriptAudit, outcome: RunOutcome, verify: VerifySpec) {

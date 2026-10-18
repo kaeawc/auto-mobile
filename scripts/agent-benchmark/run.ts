@@ -45,6 +45,7 @@ import {
 } from "../../src/daemon/foreignDeviceOwnership";
 import { createForeignCtrlProxyForwardEvidence } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { resolveAndroidSdkRoot } from "../../src/utils/android-cmdline-tools/androidSdkRoot";
 import {
   detectAndroidCommandLineTools,
@@ -726,27 +727,6 @@ export async function adbClientIdentity(
     .join("\n");
 }
 
-/**
- * The adb the harness itself runs for preflight, the device fingerprint, and the screen
- * oracle, picked in AdbClient.getAdbPath's order so it is the client the server would use:
- * the SDK's platform-tools/adb when it answers `adb version`, else the adb on PATH, else the
- * detected SDK's, else bare `adb`. A PATH adb from another SDK would otherwise prepare and
- * verify through a different client and server than the agent's tools.
- */
-export async function resolveHarnessAdb(
-  env: Record<string, string | undefined>,
-  version: (adb: string) => string | undefined = defaultAdbVersion,
-  onPath: (command: string) => string | null = (command) => Bun.which(command, { PATH: env.PATH }),
-  detected: () => Promise<string | null> = detectedAdbPath,
-): Promise<string> {
-  const sdk = resolveAndroidSdkRoot(env);
-  const sdkAdb = sdk ? `${sdk}/platform-tools/adb` : null;
-  if (sdkAdb && version(sdkAdb)) {
-    return sdkAdb;
-  }
-  return onPath("adb") ?? (await detected()) ?? "adb";
-}
-
 /** Route the harness's bare `adb` commands to the resolved client. */
 export function adbRoutedRunner(runner: CommandRunner, adbPath: string): CommandRunner {
   return {
@@ -756,8 +736,9 @@ export function adbRoutedRunner(runner: CommandRunner, adbPath: string): Command
 }
 
 /**
- * The `adb version` of the client the harness runs (see resolveHarnessAdb). It can still
- * differ from the server's pick on hosts where detection disagrees, so both are fingerprinted.
+ * The `adb version` of the client the harness runs, which AdbClient.getAdbPathOnly resolves
+ * the same way the server does (including its platform-specific `which`). Every candidate the
+ * server might pick is fingerprinted separately by adbClientIdentity.
  */
 export function harnessAdbIdentity(
   adbPath: string,
@@ -878,7 +859,8 @@ async function main(argv: string[]): Promise<number> {
     console.log(suites.map((suite) => dryRunReport(suite, options)).join("\n\n"));
     return 0;
   }
-  const harnessAdb = await resolveHarnessAdb(process.env);
+  // The server's own resolver, so preflight and the screen oracle use the server's adb client.
+  const harnessAdb = await new AdbClient().getAdbPathOnly();
   const results = await runSuites(
     options,
     {

@@ -255,20 +255,28 @@ describe("compareRun verdict", () => {
 });
 
 describe("verification text matching", () => {
-  test("a KEY: value needle must be on the last line that reports KEY", () => {
+  test("KEY: value needles must be the reply's exact final lines", () => {
     const needles = ["EXPECTED_COUNT: 3", "DISPLAYED_COUNT: 2"];
-    const final = "Done.\n```\nEXPECTED_COUNT: 3\nDISPLAYED_COUNT: 2\n```";
+    const final = "Done.\n```text\nEXPECTED_COUNT: 3\nDISPLAYED_COUNT: 2\n```\n";
     expect(missingFromAnswer(final, needles)).toEqual([]);
     // Echoing the expected value, then reporting a different one, fails.
-    const contradicted =
-      "I expected DISPLAYED_COUNT: 2 here.\nEXPECTED_COUNT: 3\nDISPLAYED_COUNT: 2\nDISPLAYED_COUNT: 3";
-    expect(missingFromAnswer(contradicted, needles)).toEqual(["DISPLAYED_COUNT: 2"]);
+    expect(
+      missingFromAnswer("EXPECTED_COUNT: 3\nDISPLAYED_COUNT: 2\nDISPLAYED_COUNT: 3", needles),
+    ).toEqual(["EXPECTED_COUNT: 3", "DISPLAYED_COUNT: 2"]);
+    // Extra text on the line, or a disclaimer after the lines, fails.
+    expect(missingFromAnswer("EXPECTED_COUNT: 3 or 99\nDISPLAYED_COUNT: 2", needles)).toEqual([
+      "EXPECTED_COUNT: 3",
+    ]);
+    expect(
+      missingFromAnswer("EXPECTED_COUNT: 3\nDISPLAYED_COUNT: 2\nActually, I am not sure.", needles),
+    ).toEqual(needles);
     // Mentioned only mid-sentence, never as its own report line.
     expect(missingFromAnswer("The DISPLAYED_COUNT: 2 and EXPECTED_COUNT: 3", needles)).toEqual(
       needles,
     );
-    // Inline backticks and case do not matter; non-keyed needles search the whole answer.
-    expect(missingFromAnswer("`expected_count: 3`\nDISPLAYED_COUNT: 2", needles)).toEqual([]);
+    // Inline backticks, case, spacing, and a trailing period do not matter.
+    expect(missingFromAnswer("`expected_count:  3`\nDISPLAYED_COUNT: 2.", needles)).toEqual([]);
+    // Non-keyed needles search the whole answer.
     expect(missingFromAnswer("The status was Bug triggered.", ["Bug triggered"])).toEqual([]);
   });
 

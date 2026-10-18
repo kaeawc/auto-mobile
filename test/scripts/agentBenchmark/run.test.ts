@@ -17,7 +17,6 @@ import {
   killProcessTree,
   parseCliArgs,
   resolveCommand,
-  resolveHarnessAdb,
   resolveSuitePath,
   staleBuildSource,
 } from "../../../scripts/agent-benchmark/run";
@@ -126,44 +125,6 @@ describe("agent benchmark harness adb identity", () => {
       ),
     ).toBe("Version 36.0.0");
     expect(harnessAdbIdentity("adb", () => undefined)).toBe("unavailable:adb");
-  });
-
-  test("resolves adb in the server's order: working SDK adb, PATH, detected, bare", async () => {
-    const sdkAdb = (sdk: string) => `${sdk}/platform-tools/adb`;
-    const answers = (adb: string) =>
-      adb.replaceAll("\\", "/").startsWith("/sdk/") ? "Version" : undefined;
-    const resolved = await resolveHarnessAdb(
-      { ANDROID_HOME: "/sdk" },
-      answers,
-      () => "/usr/bin/adb",
-      async () => "/detected/platform-tools/adb",
-    );
-    expect(resolved.replaceAll("\\", "/")).toEndWith(sdkAdb("/sdk"));
-    // A stale SDK adb that does not answer falls through to PATH, then detection, then bare.
-    expect(
-      await resolveHarnessAdb(
-        { ANDROID_HOME: "/stale" },
-        answers,
-        () => "/usr/bin/adb",
-        async () => "/detected/platform-tools/adb",
-      ),
-    ).toBe("/usr/bin/adb");
-    expect(
-      await resolveHarnessAdb(
-        {},
-        answers,
-        () => null,
-        async () => "/detected/platform-tools/adb",
-      ),
-    ).toBe("/detected/platform-tools/adb");
-    expect(
-      await resolveHarnessAdb(
-        {},
-        answers,
-        () => null,
-        async () => null,
-      ),
-    ).toBe("adb");
   });
 
   test("routes only bare adb commands to the resolved client", async () => {

@@ -213,37 +213,19 @@ than the `adb shell input stylus` cells has been demonstrated.
 
 ## Recording
 
-Extending `recordDeviceGestures` needs the gesture event to carry a tool type and a
-pressure series, and the exported `tapAt`, `swipeAt` or `dragPath` step to carry
-`pointer`:
+The full recorder requirements belong to #13084 and get specified when that work is
+picked up. This note fixes only the constraints the API shape puts on it, on top of
+the gaps listed under [What the recorder sees](#what-the-recorder-sees):
 
-- `GetEventReader`/`TouchFrameReconstructor` must read `ABS_MT_TOOL_TYPE`,
-  `BTN_TOOL_PEN`, the single-touch `ABS_PRESSURE` that a separate pen node reports
-  (the reconstructor handles only `ABS_MT_PRESSURE` today), `ABS_TILT_X`/`ABS_TILT_Y` and `ABS_DISTANCE`/`ABS_MT_DISTANCE`, and
-  keep per-contact pressure over time, not just the last value.
-- Event-node discovery must find and read the pen's node as well as the multitouch
-  one, and handle non-multitouch contact coordinates (`ABS_X`/`ABS_Y`).
-- Recorded pressure is a raw integer in the device's own range, but the contract is
-  0–1. `TouchNodeDiscovery` must therefore parse the minimum and maximum of whichever
-  pressure axis the node reports (`ABS_MT_PRESSURE` or `ABS_PRESSURE`) from
-  `getevent -p`, and export normalizes against it. A missing or degenerate range
-  (no axis, or `max <= min`) exports no `pressure` and warns, rather than writing a
-  contract-invalid sample.
-- `GestureClassifier` must keep the tool type through classification. Hover-only
-  sequences (pen in range, no `BTN_TOUCH`) have no event type and no plan step today,
-  and `hoverAt` is deferred, so hover is not exported yet: the recorder reports it in
-  an export warning instead of silently dropping it as noise, and exporting it waits
-  for `hoverAt`.
-- A drawn stroke needs path sampling and a drag classification (a new
-  `GestureEventType`) exported as `dragPath`, with the sampled pressure written to the
-  per-point `pressure`; attaching `pointer` to a `swipeAt` keeps only the endpoints. A
-  stationary stylus contact exports as `tapAt` with `pointer`.
-- Export preserves `pointer` and does not guess the replay target: the device is only
-  chosen when `executePlan` runs, so the capability check and its error from point 2
-  of the API shape happen at replay, when the active device is resolved. Export-time
-  warnings are limited to source-side uncertainty (an unknown tool type, a missing
-  pressure range, a path that was sampled coarsely), as the existing geometry
-  warnings are. A stylus step never silently becomes a finger step at either point.
+- Export preserves `pointer` on `tapAt`, `swipeAt` and `dragPath` steps and never turns
+  a stylus step into a finger step. The device is only chosen when `executePlan` runs,
+  so the capability check and its error happen at replay.
+- A stationary contact exports as `tapAt` and a drawn stroke as `dragPath`, which needs
+  a drag classification that does not exist today.
+- Pressure is exported on the contract's 0–1 scale, normalized against the node's own
+  axis range; an unknown or degenerate range omits `pressure` and warns.
+- Anything the recorder cannot represent yet, hover today, is reported in an export
+  warning instead of being dropped silently.
 
 ## Verification plan
 

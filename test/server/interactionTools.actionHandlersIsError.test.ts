@@ -6,32 +6,13 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { cancellationHandlers, warmedTests } from "../helpers/interactionCancellation";
 import { afterEach, describe, expect, spyOn } from "bun:test";
 import {
+  type InteractionToolDependencies,
   dragAndDropHandler,
   pressButtonHandler,
-  resetDragAndDropFactory,
-  resetPressButtonFactory,
-  resetRotateFactory,
-  resetSelectAllTextFactory,
-  resetTapAnyElementFactory,
   rotateHandler,
   setPostureHandler,
-  setSetPostureFactory,
-  resetSetPostureFactory,
   selectAllTextHandler,
-  setDragAndDropFactory,
-  setPressButtonFactory,
-  setRotateFactory,
-  setSelectAllTextFactory,
-  setTapAnyElementFactory,
   tapAnyHandler,
-  setClipboardFactory,
-  resetClipboardFactory,
-  setRecentAppsFactory,
-  resetRecentAppsFactory,
-  setKeyboardFactory,
-  resetKeyboardFactory,
-  setShakeFactory,
-  resetShakeFactory,
 } from "../../src/server/interactionTools";
 import type {
   DragAndDropArgs,
@@ -50,26 +31,24 @@ import type {
 } from "../../src/models";
 import type { ActionCall, RotateCall } from "../../src/features/action/ActionCall";
 
+const interactionDeps: InteractionToolDependencies = {};
 const test = warmedTests(() => {
-  resetTapAnyElementFactory();
-  resetDragAndDropFactory();
-  resetSelectAllTextFactory();
-  resetPressButtonFactory();
-  resetRotateFactory();
-  resetSetPostureFactory();
-  resetClipboardFactory();
-  resetRecentAppsFactory();
-  resetKeyboardFactory();
-  resetShakeFactory();
+  delete interactionDeps.tapAnyElementFactory;
+  delete interactionDeps.dragAndDropFactory;
+  delete interactionDeps.selectAllTextFactory;
+  delete interactionDeps.pressButtonFactory;
+  delete interactionDeps.rotateFactory;
+  delete interactionDeps.setPostureFactory;
+  delete interactionDeps.clipboardFactory;
+  delete interactionDeps.recentAppsFactory;
+  delete interactionDeps.keyboardFactory;
+  delete interactionDeps.shakeFactory;
 });
 
-const handler = cancellationHandlers([
-  "clipboard",
-  "recentApps",
-  "keyboard",
-  "shake",
-  "homeScreen",
-]);
+const handler = cancellationHandlers(
+  ["clipboard", "recentApps", "keyboard", "shake", "homeScreen"],
+  interactionDeps,
+);
 
 describe("clipboard and recentApps failure envelopes", () => {
   const device: BootedDevice = { name: "Test Android", deviceId: "fake", platform: "android" };
@@ -83,7 +62,7 @@ describe("clipboard and recentApps failure envelopes", () => {
         method: "adb" as const,
         ...(success ? {} : { error: "cmd clipboard unsupported" }),
       };
-      setClipboardFactory(() => ({ execute: async () => result }));
+      interactionDeps.clipboardFactory = () => ({ execute: async () => result });
       const response = await handler("clipboard")(device, { action: "paste" });
       const message = success
         ? "Pasted clipboard content into focused field (via adb)"
@@ -106,7 +85,7 @@ describe("clipboard and recentApps failure envelopes", () => {
         method: "hardware" as const,
         ...(success ? {} : { error: "App Switcher did not appear" }),
       };
-      setRecentAppsFactory(() => ({ execute: async () => result }));
+      interactionDeps.recentAppsFactory = () => ({ execute: async () => result });
       const response = await handler("recentApps")(device, {});
       const message = success
         ? "Opened recent apps"
@@ -145,7 +124,7 @@ describe("tapAnyHandler (registered handler wiring)", () => {
   const args: TapAnyArgs = { action: "tap", platform: "android" };
 
   afterEach(() => {
-    resetTapAnyElementFactory();
+    delete interactionDeps.tapAnyElementFactory;
   });
 
   const fakeResult = (overrides: Partial<TapOnElementResult>): TapOnElementResult =>
@@ -160,14 +139,14 @@ describe("tapAnyHandler (registered handler wiring)", () => {
     "forwards transport deadline %s through internal context",
     async (deadline) => {
       let received: number | undefined;
-      setTapAnyElementFactory(() => ({
+      interactionDeps.tapAnyElementFactory = () => ({
         execute: async (_options, call) => {
           received = (call as ActionCall | undefined)?.deadlineMs;
           return fakeResult({ success: true });
         },
-      }));
+      });
       const internalArgs = { ...args, __mcpRequestDeadlineMs: deadline };
-      await tapAnyHandler(fakeDevice, internalArgs);
+      await tapAnyHandler(fakeDevice, internalArgs, undefined, undefined, interactionDeps);
       expect(received).toBe(deadline);
     },
   );
@@ -178,13 +157,19 @@ describe("tapAnyHandler (registered handler wiring)", () => {
     timer.advanceTime(1000);
     const adb = new FakeAdbExecutor();
     const action = new TapAnyElement(device, adb, { timer });
-    setTapAnyElementFactory(() => action);
+    interactionDeps.tapAnyElementFactory = () => action;
 
-    const response = await tapAnyHandler(device, {
-      action: "longPress",
-      duration: 20000,
-      __mcpRequestDeadlineMs: timer.now() + 5000,
-    });
+    const response = await tapAnyHandler(
+      device,
+      {
+        action: "longPress",
+        duration: 20000,
+        __mcpRequestDeadlineMs: timer.now() + 5000,
+      },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
     const error =
       "Failed to tap clickable element: longPress duration 20000 ms does not fit the remaining request budget (5000 ms; needs 22000 ms including dispatch headroom); the press was not started. Increase the request timeout or use a shorter duration.";
     expect(response.isError).toBe(true);
@@ -195,11 +180,17 @@ describe("tapAnyHandler (registered handler wiring)", () => {
   });
 
   test("a failure sets isError and reports the failure, not a completed tap", async () => {
-    setTapAnyElementFactory(() => ({
+    interactionDeps.tapAnyElementFactory = () => ({
       execute: async () => fakeResult({ error: "No clickable element found" }),
-    }));
+    });
 
-    const response = (await tapAnyHandler(fakeDevice, args)) as ToolResponse;
+    const response = (await tapAnyHandler(
+      fakeDevice,
+      args,
+      undefined,
+      undefined,
+      interactionDeps,
+    )) as ToolResponse;
     expect(response.isError).toBe(true);
     expect(parsePayload(response).message).toBe(
       "Failed to tap clickable element: No clickable element found",
@@ -208,11 +199,17 @@ describe("tapAnyHandler (registered handler wiring)", () => {
   });
 
   test("a success has no isError and the unchanged success message", async () => {
-    setTapAnyElementFactory(() => ({
+    interactionDeps.tapAnyElementFactory = () => ({
       execute: async () => fakeResult({ success: true }),
-    }));
+    });
 
-    const response = (await tapAnyHandler(fakeDevice, args)) as ToolResponse;
+    const response = (await tapAnyHandler(
+      fakeDevice,
+      args,
+      undefined,
+      undefined,
+      interactionDeps,
+    )) as ToolResponse;
     expect(response.isError).toBeUndefined();
     expect(parsePayload(response).message).toBe("Tapped clickable element");
   });
@@ -226,19 +223,25 @@ describe("dragAndDropHandler (registered handler wiring)", () => {
   };
 
   afterEach(() => {
-    resetDragAndDropFactory();
+    delete interactionDeps.dragAndDropFactory;
   });
 
   const fakeResult = (overrides: Partial<DragAndDropResult>): DragAndDropResult =>
     ({ success: false, duration: 0, distance: 0, ...overrides }) as DragAndDropResult;
 
   test("a failure sets isError and reports the failure, not a completed drag", async () => {
-    setDragAndDropFactory(() => ({
+    interactionDeps.dragAndDropFactory = () => ({
       execute: async () =>
         fakeResult({ error: "Unable to get view hierarchy, cannot drag and drop" }),
-    }));
+    });
 
-    const response = (await dragAndDropHandler(fakeDevice, args)) as ToolResponse;
+    const response = (await dragAndDropHandler(
+      fakeDevice,
+      args,
+      undefined,
+      undefined,
+      interactionDeps,
+    )) as ToolResponse;
     expect(response.isError).toBe(true);
     expect(parsePayload(response).message).toBe(
       "Failed to drag element to target: Unable to get view hierarchy, cannot drag and drop",
@@ -254,19 +257,33 @@ describe("dragAndDropHandler (registered handler wiring)", () => {
     };
     const error =
       "Failed to perform drag and drop: dragAndDrop source: Container level 1 not found: missing";
-    setDragAndDropFactory(() => ({ execute: async () => fakeResult({ error, containerFailure }) }));
-    const response = await dragAndDropHandler(fakeDevice, args);
+    interactionDeps.dragAndDropFactory = () => ({
+      execute: async () => fakeResult({ error, containerFailure }),
+    });
+    const response = await dragAndDropHandler(
+      fakeDevice,
+      args,
+      undefined,
+      undefined,
+      interactionDeps,
+    );
     expect(response.isError).toBe(true);
     expect(parsePayload(response)).toMatchObject({ error, containerFailure });
     expect(parsePayload(response).message).toBe(`Failed to drag element to target: ${error}`);
   });
 
   test("a success has no isError and the unchanged success message", async () => {
-    setDragAndDropFactory(() => ({
+    interactionDeps.dragAndDropFactory = () => ({
       execute: async () => fakeResult({ success: true }),
-    }));
+    });
 
-    const response = (await dragAndDropHandler(fakeDevice, args)) as ToolResponse;
+    const response = (await dragAndDropHandler(
+      fakeDevice,
+      args,
+      undefined,
+      undefined,
+      interactionDeps,
+    )) as ToolResponse;
     expect(response.isError).toBeUndefined();
     expect(parsePayload(response).message).toBe("Dragged element to target");
   });
@@ -276,7 +293,7 @@ describe("selectAllTextHandler (registered handler wiring)", () => {
   const args: SelectAllTextArgs = { platform: "android" };
 
   afterEach(() => {
-    resetSelectAllTextFactory();
+    delete interactionDeps.selectAllTextFactory;
   });
 
   const fakeResult = (overrides: Partial<SelectAllTextResult>): SelectAllTextResult => ({
@@ -285,11 +302,17 @@ describe("selectAllTextHandler (registered handler wiring)", () => {
   });
 
   test("a failure sets isError and reports the failure, not a completed selection", async () => {
-    setSelectAllTextFactory(() => ({
+    interactionDeps.selectAllTextFactory = () => ({
       execute: async () => fakeResult({ error: "No focused input field" }),
-    }));
+    });
 
-    const response = (await selectAllTextHandler(fakeDevice, args)) as ToolResponse;
+    const response = (await selectAllTextHandler(
+      fakeDevice,
+      args,
+      undefined,
+      undefined,
+      interactionDeps,
+    )) as ToolResponse;
     expect(response.isError).toBe(true);
     expect(parsePayload(response).message).toBe(
       "Failed to select all text: No focused input field",
@@ -298,11 +321,17 @@ describe("selectAllTextHandler (registered handler wiring)", () => {
   });
 
   test("a success has no isError and the unchanged success message", async () => {
-    setSelectAllTextFactory(() => ({
+    interactionDeps.selectAllTextFactory = () => ({
       execute: async () => fakeResult({ success: true }),
-    }));
+    });
 
-    const response = (await selectAllTextHandler(fakeDevice, args)) as ToolResponse;
+    const response = (await selectAllTextHandler(
+      fakeDevice,
+      args,
+      undefined,
+      undefined,
+      interactionDeps,
+    )) as ToolResponse;
     expect(response.isError).toBeUndefined();
     expect(parsePayload(response).message).toBe("Selected all text in focused input field");
   });
@@ -312,23 +341,29 @@ describe("pressButtonHandler (registered handler wiring)", () => {
   const args: PressButtonArgs = { button: "back", platform: "android" };
 
   afterEach(() => {
-    resetPressButtonFactory();
+    delete interactionDeps.pressButtonFactory;
   });
 
   const fakeResult = (overrides: Partial<PressButtonResult>): PressButtonResult =>
     ({ success: false, button: "back", keyCode: 4, ...overrides }) as PressButtonResult;
 
   test("a failure sets isError and reports the failure, not a completed press", async () => {
-    setPressButtonFactory(() => ({
+    interactionDeps.pressButtonFactory = () => ({
       execute: async () =>
         fakeResult({
           error: "iOS has no menu hardware button",
           code: "unsupported_button",
           retryable: false,
         }),
-    }));
+    });
 
-    const response = (await pressButtonHandler(fakeDevice, args)) as ToolResponse;
+    const response = (await pressButtonHandler(
+      fakeDevice,
+      args,
+      undefined,
+      undefined,
+      interactionDeps,
+    )) as ToolResponse;
     expect(response.isError).toBe(true);
     expect(parsePayload(response).message).toBe(
       "Failed to press button back: iOS has no menu hardware button",
@@ -338,11 +373,17 @@ describe("pressButtonHandler (registered handler wiring)", () => {
   });
 
   test("a success has no isError and the unchanged success message", async () => {
-    setPressButtonFactory(() => ({
+    interactionDeps.pressButtonFactory = () => ({
       execute: async () => fakeResult({ success: true }),
-    }));
+    });
 
-    const response = (await pressButtonHandler(fakeDevice, args)) as ToolResponse;
+    const response = (await pressButtonHandler(
+      fakeDevice,
+      args,
+      undefined,
+      undefined,
+      interactionDeps,
+    )) as ToolResponse;
     expect(response.isError).toBeUndefined();
     expect(parsePayload(response).message).toBe("Pressed button back");
   });
@@ -356,7 +397,7 @@ describe("rotateHandler (registered handler wiring)", () => {
   };
 
   afterEach(() => {
-    resetRotateFactory();
+    delete interactionDeps.rotateFactory;
   });
 
   const fakeResult = (overrides: Partial<RotateResult>): RotateResult => ({
@@ -368,40 +409,46 @@ describe("rotateHandler (registered handler wiring)", () => {
 
   test("forwards the internal absolute deadline to the per-call factory", async () => {
     let receivedOptions: RotateOptions | undefined;
-    setRotateFactory((_device, options) => {
+    interactionDeps.rotateFactory = (_device, options) => {
       receivedOptions = options;
       return { execute: async () => fakeResult({ success: true }) };
-    });
+    };
     const internalArgs = { ...args, __mcpRequestDeadlineMs: 12345 };
 
-    await rotateHandler(fakeDevice, internalArgs);
+    await rotateHandler(fakeDevice, internalArgs, undefined, undefined, interactionDeps);
 
     expect(receivedOptions?.deadlineMs).toBe(12345);
   });
 
   test("omits the deadline key when the request has no deadline", async () => {
     let receivedOptions: RotateOptions | undefined;
-    setRotateFactory((_device, options) => {
+    interactionDeps.rotateFactory = (_device, options) => {
       receivedOptions = options;
       return { execute: async () => fakeResult({ success: true }) };
-    });
+    };
 
-    await rotateHandler(fakeDevice, args);
+    await rotateHandler(fakeDevice, args, undefined, undefined, interactionDeps);
 
     expect(receivedOptions).toBeDefined();
     expect("deadlineMs" in receivedOptions!).toBe(false);
   });
 
   test("a persistent-lock failure is an MCP error, not a successful rotation", async () => {
-    setRotateFactory(() => ({
+    interactionDeps.rotateFactory = () => ({
       execute: async () =>
         fakeResult({
           error: "Rotated to portrait, but the persistent orientation lock could not be confirmed.",
           orientationLockState: "unlocked",
         }),
-    }));
+    });
 
-    const response = (await rotateHandler(fakeDevice, args)) as ToolResponse;
+    const response = (await rotateHandler(
+      fakeDevice,
+      args,
+      undefined,
+      undefined,
+      interactionDeps,
+    )) as ToolResponse;
 
     expect(response.isError).toBe(true);
     expect(parsePayload(response).success).toBe(false);
@@ -427,9 +474,15 @@ describe("rotateHandler (registered handler wiring)", () => {
       observation,
       message: "Device is already in portrait orientation",
     });
-    setRotateFactory(() => ({ execute: async () => result }));
+    interactionDeps.rotateFactory = () => ({ execute: async () => result });
 
-    const response = await rotateHandler(fakeDevice, { orientation: "portrait" });
+    const response = await rotateHandler(
+      fakeDevice,
+      { orientation: "portrait" },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
 
     expect(response.isError).toBeUndefined();
     expect(response.structuredContent).toEqual(result);
@@ -438,14 +491,20 @@ describe("rotateHandler (registered handler wiring)", () => {
 
   test("forwards lockOrientation to the rotate implementation", async () => {
     let receivedLockOrientation: boolean | undefined;
-    setRotateFactory(() => ({
+    interactionDeps.rotateFactory = () => ({
       execute: async (_orientation, call) => {
         receivedLockOrientation = (call as RotateCall | undefined)?.lockOrientation;
         return fakeResult({ success: true });
       },
-    }));
+    });
 
-    const response = (await rotateHandler(fakeDevice, args)) as ToolResponse;
+    const response = (await rotateHandler(
+      fakeDevice,
+      args,
+      undefined,
+      undefined,
+      interactionDeps,
+    )) as ToolResponse;
 
     expect(response.isError).toBeUndefined();
     expect(receivedLockOrientation).toBe(true);
@@ -453,7 +512,7 @@ describe("rotateHandler (registered handler wiring)", () => {
 });
 
 describe("setPostureHandler structured result", () => {
-  afterEach(() => resetSetPostureFactory());
+  afterEach(() => delete interactionDeps.setPostureFactory);
 
   test.each([
     {
@@ -462,11 +521,17 @@ describe("setPostureHandler structured result", () => {
     },
     { status: "unsupported", message: "Physical iOS hinge posture can only be read, not set." },
   ] as const)("keeps the text payload unchanged for %j", async (result) => {
-    setSetPostureFactory(() => ({
+    interactionDeps.setPostureFactory = () => ({
       execute: async () => result,
       executeHingeAngle: async () => result,
-    }));
-    const response = await setPostureHandler(fakeDevice, { posture: "opened" });
+    });
+    const response = await setPostureHandler(
+      fakeDevice,
+      { posture: "opened" },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
     const message = "status" in result ? result.message : "Set device posture to opened";
     expect(response.structuredContent).toEqual({ message, ...result });
     expect(JSON.parse(response.content[0].text)).toEqual(response.structuredContent);
@@ -474,17 +539,17 @@ describe("setPostureHandler structured result", () => {
   });
 
   test("operational failures still throw actionable errors", async () => {
-    setSetPostureFactory(() => ({
+    interactionDeps.setPostureFactory = () => ({
       executeHingeAngle: async () => {
         throw new Error("posture failed");
       },
       execute: async () => {
         throw new Error("posture failed");
       },
-    }));
-    await expect(setPostureHandler(fakeDevice, { posture: "opened" })).rejects.toThrow(
-      "Failed to set device posture: posture failed",
-    );
+    });
+    await expect(
+      setPostureHandler(fakeDevice, { posture: "opened" }, undefined, undefined, interactionDeps),
+    ).rejects.toThrow("Failed to set device posture: posture failed");
   });
 });
 
@@ -500,7 +565,7 @@ describe("keyboard failure envelopes", () => {
           message: "unchanged",
           ...(success ? {} : { error: "operation failed" }),
         };
-        setKeyboardFactory(() => ({ execute: async () => result }));
+        interactionDeps.keyboardFactory = () => ({ execute: async () => result });
         const response = await handler("keyboard")(device, { action });
         expect(response.structuredContent).toEqual(result);
         expect(response.content).toEqual([{ type: "text", text: JSON.stringify(result) }]);
@@ -518,7 +583,7 @@ describe("keyboard failure envelopes", () => {
       open: false,
       message: "Keyboard is closed (no visible on-screen software keyboard)",
     };
-    setKeyboardFactory(() => ({ execute: async () => result }));
+    interactionDeps.keyboardFactory = () => ({ execute: async () => result });
     const response = await handler("keyboard")(device, { action: "detect" });
     expect(response.structuredContent).toEqual(result);
     expect(response.content).toEqual([{ type: "text", text: JSON.stringify(result) }]);
@@ -532,7 +597,7 @@ describe("keyboard failure envelopes", () => {
         open: action === "close",
         message: "Failed to " + action + " keyboard",
       };
-      setKeyboardFactory(() => ({ execute: async () => result }));
+      interactionDeps.keyboardFactory = () => ({ execute: async () => result });
       const response = await handler("keyboard")(device, { action });
       expect(response.structuredContent).toEqual(result);
       expect(response.content).toEqual([{ type: "text", text: JSON.stringify(result) }]);
@@ -546,7 +611,7 @@ describe("keyboard failure envelopes", () => {
       intensity: 20,
       ...(success ? {} : { error: "shake rejected" }),
     };
-    setShakeFactory(() => ({ execute: async () => result }));
+    interactionDeps.shakeFactory = () => ({ execute: async () => result });
     const response = await handler("shake")(device, { duration: 10, intensity: 20 });
     const message = success
       ? "Shook device for 10ms with intensity 20"

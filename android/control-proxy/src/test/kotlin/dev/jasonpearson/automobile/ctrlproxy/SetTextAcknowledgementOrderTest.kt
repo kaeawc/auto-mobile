@@ -47,7 +47,7 @@ class SetTextAcknowledgementOrderTest {
     val serviceSource = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     assertTrue(
       "the service's settled-hierarchy hook must wait for quiescence",
-      "hierarchyDebouncer.extractAfterQuiescenceSuspending(" in
+      "hierarchyController.debouncer.extractAfterQuiescenceSuspending(" in
         functionBody(serviceSource, "override suspend fun publishSettledHierarchy()"),
     )
 
@@ -122,11 +122,18 @@ class SetTextAcknowledgementOrderTest {
     for (signature in
       listOf(
         "private fun performGlobalActionRequest(",
-        "override suspend fun requestCommitText(",
         "override suspend fun requestClickFocusedInput(",
       )) {
       assertTrue("$signature clears caret", functionBody(serviceSource, signature).contains(forget))
     }
+    // The commit path moved to ImeController (#11876); its Host seam is wired to the same caret.
+    val imeSource =
+      KotlinSourceScan.maskLiteralsAndComments(locateSource("ImeController.kt").readText())
+    assertTrue(
+      "requestCommitText clears caret",
+      functionBody(imeSource, "suspend fun requestCommitText(")
+        .contains("host.forgetRememberedInsert()"),
+    )
     val nodeActionSource =
       KotlinSourceScan.maskLiteralsAndComments(locateSource("NodeActionController.kt").readText())
     assertTrue(

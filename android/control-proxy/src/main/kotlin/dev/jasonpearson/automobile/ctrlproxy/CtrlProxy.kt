@@ -30,10 +30,8 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme
 import dev.jasonpearson.automobile.ctrlproxy.ime.ImeCommitResult
-import dev.jasonpearson.automobile.ctrlproxy.ime.awaitImeServiceReady
-import dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.profile.KeyboardProfiles
+import dev.jasonpearson.automobile.ctrlproxy.ime.session.KeyboardProfileStore
 import dev.jasonpearson.automobile.ctrlproxy.ime.session.SharedPreferencesKeyboardProfileStore
-import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
@@ -97,8 +95,7 @@ import dev.jasonpearson.automobile.protocol.DeviceInfo
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
-import dev.jasonpearson.automobile.protocol.KeyboardProfileBehaviorInfo
-import dev.jasonpearson.automobile.protocol.KeyboardProfileInfo
+import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.LifecycleEventData
 import dev.jasonpearson.automobile.protocol.LifecycleEventResponse
 import dev.jasonpearson.automobile.protocol.NavigationEventData
@@ -149,14 +146,10 @@ import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import java.io.File
-import java.util.Collections
-import java.util.IdentityHashMap
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -164,8 +157,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -177,7 +168,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 
@@ -685,11 +675,11 @@ internal fun handledExceptionEventResponse(
  *
  * Serialization was hoisted out of the writer/broadcaster's own try/catch so a change is serialized
  * at most once (the one [serialize] result is reused for both [write] and [broadcast]). That move
- * exposed a leak: [CtrlProxy.extractedHierarchyFrameContexts] is a strong-keyed identity map that
- * only the broadcaster removed from, so an encode failure (e.g. a NaN/Infinity `textSizeInPx`)
- * before the broadcast would retain a full hierarchy forever. Centralizing the sequence guarantees
- * [releaseFrameContext] runs in a `finally` even when [serialize] throws, so no call site can
- * serialize-then-leak.
+ * exposed a leak: [HierarchyController.extractedHierarchyFrameContexts] is a strong-keyed identity
+ * map that only the broadcaster removed from, so an encode failure (e.g. a NaN/Infinity
+ * `textSizeInPx`) before the broadcast would retain a full hierarchy forever. Centralizing the
+ * sequence guarantees [releaseFrameContext] runs in a `finally` even when [serialize] throws, so no
+ * call site can serialize-then-leak.
  *
  * A failure in [serialize] (or [write]/[broadcast]) skips the remaining steps and rethrows so the
  * caller drops just that one frame; the frame-context entry is released regardless. This function
@@ -724,8 +714,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     private const val TAG = "CtrlProxy"
 
     // File name for app-scoped storage
-    private const val HIERARCHY_FILE_NAME = "latest_hierarchy.json"
-    private const val DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250L
 
     /**
      * The universe of accessibility event types we classify for subscription. [HANDLED_EVENT_TYPES]
@@ -904,15 +892,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   // so tests can supply a deterministic queue before onCreate, without a real HandlerThread.
   internal var gestureThreadFactory: () -> GestureThread = ::HandlerGestureThread
 
-  private class ImeCommitState {
-    val cancelled = AtomicBoolean(false)
-    val finished = CompletableDeferred<ImeCommitResult>()
-  }
-
-  // Cancelled IDs remain tombstoned until service shutdown. Request IDs are UUIDs; retaining a
-  // cancellation prevents a delayed request from starting after its cancellation was acknowledged.
-  private val imeCommitStates = java.util.concurrent.ConcurrentHashMap<String, ImeCommitState>()
-
   /**
    * Launches request-correlated raw work with [RequestIdContext] attached so [serviceScopeGuard]
    * can emit a correlated error frame if the launch throws before a guarded result helper runs.
@@ -1022,7 +1001,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val timeProvider: TimeProvider = SystemTimeProvider()
   private lateinit var webSocketServer: WebSocketServer
   private val webSocketLifecycle = ServerLifecycle<WebSocketServer> { it.stop() }
-  private lateinit var hierarchyDebouncer: HierarchyDebouncer
   private lateinit var rotationProvenance: RotationProvenanceTracker
   private var deviceStateRegistration: AutoCloseable? = null
   private val navigationEventAccumulator = NavigationEventAccumulator()
@@ -1303,6 +1281,75 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
+  internal val hierarchyController by lazy {
+    HierarchyController(
+      host =
+        object : HierarchyController.Host {
+          override fun currentFrameContext() = this@CtrlProxy.currentFrameContext()
+
+          override fun selectDisplayWindows(displayId: Int?) =
+            viewHierarchyExtractor.selectDisplayWindows(this@CtrlProxy, displayId)
+
+          override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
+
+          override fun lastWindowClassName() = this@CtrlProxy.lastWindowClassName
+
+          override fun rotationProvenance() = this@CtrlProxy.rotationProvenance
+
+          override fun occlusionEnabled() = this@CtrlProxy.occlusionEnabled
+
+          override fun wakefulness() = getWakefulness()
+
+          override fun foregroundActivity(rootPackage: String?, windowClass: String?) =
+            getForegroundActivity(rootPackage, windowClass)
+
+          override fun isEmulator() = getIsEmulator()
+
+          override fun accessibilityTool() = getAccessibilityTool()
+
+          override fun isServerRunning() =
+            ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+
+          override fun releaseRequestOwner(requestId: String?) {
+            if (::webSocketServer.isInitialized) webSocketServer.releaseRequestOwner(requestId)
+          }
+
+          override suspend fun broadcastHierarchyWithPerf(
+            routeByRequestId: Boolean,
+            messageBuilder: (perfTiming: JsonElement?) -> String,
+          ) = webSocketServer.broadcastWithPerf(routeByRequestId, messageBuilder)
+
+          override suspend fun broadcastHierarchyWithPerfSync(
+            routeByRequestId: Boolean,
+            messageBuilder: (perfTiming: JsonElement?) -> String,
+          ) = webSocketServer.broadcastWithPerfSync(routeByRequestId, messageBuilder)
+
+          override suspend fun broadcastHierarchyExtractFrame(
+            frame: ErrorResponse?,
+            externallyCorrelated: Boolean,
+          ) = this@CtrlProxy.broadcastHierarchyExtractFrame(frame, externallyCorrelated)
+
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) = this@CtrlProxy.launchRequestScope(requestId, block)
+
+          override fun openFileOutput(filename: String, mode: Int) =
+            this@CtrlProxy.openFileOutput(filename, mode)
+
+          override fun filesDir() = this@CtrlProxy.filesDir
+        },
+      serviceScope = serviceScope,
+      viewHierarchyExtractor = viewHierarchyExtractor,
+      displayController = displayController,
+      perfProvider = perfProvider,
+      timeProvider = timeProvider,
+      workStats = workStats,
+      jsonCompact = jsonCompact,
+    )
+  }
   private val screenshotController by lazy {
     ScreenshotController(
       host =
@@ -1368,13 +1415,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override suspend fun publishSettledHierarchy() {
             val freshHierarchy =
-              hierarchyDebouncer.extractAfterQuiescenceSuspending(
+              hierarchyController.debouncer.extractAfterQuiescenceSuspending(
                 quiescenceMs = HierarchyQuiescence.POLL_MS,
                 maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
                 pollIntervalMs = 10L,
               )
             if (freshHierarchy != null) {
-              broadcastHierarchyUpdate(freshHierarchy, sync = true)
+              hierarchyController.broadcastHierarchyUpdate(freshHierarchy, sync = true)
             }
           }
 
@@ -1495,13 +1542,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
           override suspend fun publishSettledHierarchy() {
             val freshHierarchy =
-              hierarchyDebouncer.extractAfterQuiescenceSuspending(
+              hierarchyController.debouncer.extractAfterQuiescenceSuspending(
                 quiescenceMs = HierarchyQuiescence.POLL_MS,
                 maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
                 pollIntervalMs = 10L,
               )
             if (freshHierarchy != null) {
-              broadcastHierarchyUpdate(freshHierarchy, sync = true)
+              hierarchyController.broadcastHierarchyUpdate(freshHierarchy, sync = true)
             }
           }
         },
@@ -1547,6 +1594,84 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun connectionCount() = webSocketServer.getConnectionCount()
         },
     )
+  /** CtrlProxyIme commitText, its cancellation tombstones, and the keyboard profile requests. */
+  private val imeController by lazy {
+    ImeController(
+      host =
+        object : ImeController.Host {
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) {
+            this@CtrlProxy.launchRequestScope(requestId, block)
+          }
+
+          override fun currentIme(): ImeController.ImeTarget? =
+            CtrlProxyIme.current()?.let { ime ->
+              object : ImeController.ImeTarget {
+                override fun commitText(
+                  text: String,
+                  priorImeId: String?,
+                  isCancelled: () -> Boolean,
+                  delivery: ImeTextDelivery,
+                  timeoutMs: Long?,
+                  requestDeadlineMs: Long,
+                  trace: Boolean,
+                  onResult: (ImeCommitResult) -> Unit,
+                ) =
+                  ime.commitText(
+                    text,
+                    priorImeId,
+                    isCancelled,
+                    delivery,
+                    timeoutMs,
+                    requestDeadlineMs,
+                    trace,
+                    onResult,
+                  )
+              }
+            }
+
+          override fun setActiveProfile(id: String, onComplete: (Boolean) -> Unit) =
+            CtrlProxyIme.setActiveProfile(id, onComplete)
+
+          override fun keyboardProfileStore(): KeyboardProfileStore =
+            SharedPreferencesKeyboardProfileStore(this@CtrlProxy)
+
+          override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
+        },
+      timeProvider = timeProvider,
+      resultBroadcaster = resultBroadcaster,
+      jsonCompact = jsonCompact,
+      responseSender =
+        object : ImeController.ResponseSender {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcastWithPerfSync(
+            type: String,
+            requestId: String?,
+            buildContent: JsonObjectBuilder.() -> Unit,
+          ) {
+            webSocketServer.broadcastWithPerfSync { perfTiming ->
+              webSocketFrameJson(
+                type,
+                requestId = requestId,
+                perfTiming = perfTiming,
+                buildContent = buildContent,
+              )
+            }
+          }
+
+          override suspend fun broadcastSetKeyboardProfileResult(
+            build: (perfTiming: String?) -> SetKeyboardProfileResult,
+          ) {
+            webSocketServer.broadcastTypedWithPerf(build)
+          }
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+        },
+    )
+  }
   /**
    * Tap, swipe, multi-finger, pinch, drag and streamed gestures plus their result frames, and the
    * dedicated gesture thread their callbacks run on.
@@ -1573,7 +1698,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           override fun forgetRememberedInsert() = textInputController.forgetRememberedInsert()
 
           override suspend fun settledHierarchy(displayId: Int?) =
-            hierarchyDebouncer.extractAfterQuiescenceSuspending(
+            hierarchyController.debouncer.extractAfterQuiescenceSuspending(
               quiescenceMs = HierarchyQuiescence.POLL_MS,
               maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
               pollIntervalMs = 10L,
@@ -1581,7 +1706,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             )
 
           override suspend fun publishHierarchy(hierarchy: ViewHierarchy) =
-            broadcastHierarchyUpdate(hierarchy, sync = true)
+            hierarchyController.broadcastHierarchyUpdate(hierarchy, sync = true)
         },
       scope = { serviceScope },
       perfProvider = perfProvider,
@@ -1611,17 +1736,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private fun currentFrameContext(): String = "$frameContextEpoch:${frameContext.get()}"
 
-  // A hierarchy has object identity for its short trip from extraction to broadcast. Retaining the
-  // extraction-time token lets broadcast fail closed if an accessibility event intervenes.
-  private val extractedHierarchyFrameContexts: MutableMap<ViewHierarchy, String> =
-    Collections.synchronizedMap(IdentityHashMap<ViewHierarchy, String>())
-
   // Not an AccessibilityServiceInfo flag — read directly by extractHierarchyDirect/extractHierarchy
   // when calling into ViewHierarchyExtractor. Set via setAccessibilityFlags (--no-occlusion).
   @Volatile private var occlusionEnabled: Boolean = true
-
-  // Job for collecting hierarchy flow results
-  private var hierarchyFlowJob: Job? = null
 
   // Job for collecting navigation event updates
   private var navigationEventJob: Job? = null
@@ -1728,11 +1845,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       object : ScreenStateHost {
         override fun refreshPrototypeWindow() = this@CtrlProxy.refreshPrototypeWindow()
 
-        override fun extractHierarchyNow() {
-          if (::hierarchyDebouncer.isInitialized) {
-            hierarchyDebouncer.extractNow()
-          }
-        }
+        override fun extractHierarchyNow() = hierarchyController.extractNow()
       },
     )
 
@@ -2053,78 +2166,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       registerReceiver(screenStateReceiver, screenStateFilter)
       Log.d(TAG, "Screen state receiver registered")
 
-      // Initialize the smart hierarchy debouncer with structural hash comparison
-      hierarchyDebouncer =
-        HierarchyDebouncer(
-          scope = serviceScope,
-          timeProvider = timeProvider,
-          perfProvider = perfProvider,
-          quickDebounceMs = 5L,
-          animationSkipWindowMs = 100L,
-          unsolicitedIntervalMs = DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS,
-          stats = workStats,
-          onDiscardedHierarchy = { extractedHierarchyFrameContexts.remove(it) },
-          extractHierarchy = { disableAllFiltering, snapshotOptions ->
-            extractHierarchyDirect(disableAllFiltering, snapshotOptions)
-          },
-        )
-
-      // Event-driven extraction is admitted before this collector at the configured interval.
-      // Deliver every admitted result so extraction time cannot cause a final refresh to be lost.
-      hierarchyFlowJob =
-        hierarchyDebouncer.hierarchyFlow
-          .onEach { result ->
-            // Guard the whole body: serialization was hoisted here (issue #5469) out of
-            // writeHierarchyToFile/broadcastHierarchyUpdate's own try/catch, so an encode failure
-            // on
-            // one frame (e.g. a NaN/Infinity textSizeInPx) would otherwise complete this collector
-            // —
-            // and it is never relaunched, silently losing all later unsolicited updates. Swallow so
-            // one bad frame is dropped, not the whole flow.
-            try {
-              when (result) {
-                is HierarchyResult.Changed -> {
-                  Log.d(
-                    TAG,
-                    "Hierarchy changed (hash=${result.hash}, extraction=${result.extractionTimeMs}ms)",
-                  )
-                  // Serialize once for the debug file and wire; release frame context on failure.
-                  deliverHierarchyFrame(
-                    serialize = {
-                      perfProvider.track("serializeHierarchy") {
-                        jsonCompact.encodeToString(result.hierarchy)
-                      }
-                    },
-                    write = { serialized ->
-                      writeHierarchyToFile(result.hierarchy, serialized = serialized)
-                    },
-                    broadcast = { serialized ->
-                      broadcastHierarchyUpdate(result.hierarchy, serialized = serialized)
-                    },
-                    releaseFrameContext = {
-                      extractedHierarchyFrameContexts.remove(result.hierarchy)
-                    },
-                  )
-                }
-                is HierarchyResult.Unchanged -> {
-                  Log.d(
-                    TAG,
-                    "Hierarchy unchanged (animation mode, skipped=${result.skippedEventCount})",
-                  )
-                  broadcastHierarchyUpdate(result.hierarchy)
-                }
-                is HierarchyResult.Error -> {
-                  Log.w(TAG, "Hierarchy extraction error: ${result.message}")
-                }
-              }
-            } catch (e: CancellationException) {
-              // Let cooperative cancellation unwind the collector normally.
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Error handling hierarchy result — dropping this frame", e)
-            }
-          }
-          .launchIn(serviceScope)
+      hierarchyController.start()
 
       // Initialize storage subscription manager for SharedPreferences inspection
       storageSubscriptionManager = StorageSubscriptionManager(this, scope = serviceScope)
@@ -2335,7 +2377,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     // Cancel hierarchy flow subscription
-    hierarchyFlowJob?.cancel()
+    hierarchyController.stop()
 
     // Cancel navigation event flow subscription
     navigationEventJob?.cancel()
@@ -2348,9 +2390,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     // Reset debouncer
-    if (::hierarchyDebouncer.isInitialized) {
-      hierarchyDebouncer.reset()
-    }
+    hierarchyController.resetDebouncer()
 
     // Stop WebSocket server
     if (::webSocketServer.isInitialized) {
@@ -2425,48 +2465,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  override suspend fun requestHierarchy(request: RequestHierarchy) {
-    val disableAllFiltering = request.disableAllFiltering
-    val maxDepth = request.maxDepth
-    val maxNodes = request.maxNodes
-    val displayId = request.displayId
-    val requestId = request.requestId
+  override suspend fun requestHierarchy(request: RequestHierarchy) =
+    hierarchyController.requestHierarchy(request)
 
-    extractHierarchyNow(
-      disableAllFiltering,
-      HierarchySnapshotOptions(
-        maxDepth = maxDepth ?: 100,
-        maxNodes = maxNodes ?: 10_000,
-        displayId = displayId,
-      ),
-      requestId,
-    )
-  }
+  override suspend fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) =
+    hierarchyController.requestHierarchyIfStale(sinceTimestamp, requestId)
 
-  override suspend fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {
-    var extractionRequested = false
-    hierarchyDebouncer.extractIfStale(sinceTimestamp) {
-      extractionRequested = true
-      launchRequestScope(requestId) { extractHierarchyNow(requestId = requestId) }
-        .invokeOnCompletion { cause ->
-          // Also release when the service scope cancels the launch before extraction starts.
-          if (cause is CancellationException && ::webSocketServer.isInitialized) {
-            webSocketServer.releaseRequestOwner(requestId)
-          }
-        }
-    }
-    if (!extractionRequested && ::webSocketServer.isInitialized) {
-      webSocketServer.releaseRequestOwner(requestId)
-    }
-  }
-
-  override suspend fun setHierarchyInterval(intervalMs: Long?) {
-    val resolvedIntervalMs = intervalMs ?: DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
-    if (::hierarchyDebouncer.isInitialized) {
-      hierarchyDebouncer.setUnsolicitedIntervalMs(resolvedIntervalMs)
-    }
-    Log.d(TAG, "Hierarchy broadcast interval set to ${resolvedIntervalMs}ms")
-  }
+  override suspend fun setHierarchyInterval(intervalMs: Long?) =
+    hierarchyController.setHierarchyInterval(intervalMs)
 
   override suspend fun requestScreenshot(request: RequestScreenshot) {
     val requestId = request.requestId
@@ -2724,211 +2730,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
 
-  override suspend fun requestCommitText(request: RequestCommitText) {
-    val requestId = request.requestId
-    val text = request.text
-    val priorImeId = request.priorImeId
-    val delivery = request.delivery
-    val timeoutMs = request.timeoutMs
-    val trace = request.trace
+  override suspend fun requestCommitText(request: RequestCommitText) =
+    imeController.requestCommitText(request)
 
-    textInputController.forgetRememberedInsert()
-    val start = System.currentTimeMillis()
-    val requestDeadlineMs =
-      timeoutMs?.let { android.os.SystemClock.uptimeMillis() + it.coerceAtLeast(0) }
-        ?: Long.MAX_VALUE
-    val state = requestId?.let { imeCommitStates.computeIfAbsent(it) { ImeCommitState() } }
-    if (state?.cancelled?.get() == true) {
-      launchRequestScope(requestId) {
-        broadcastCommitTextResult(requestId, false, "IME commit cancelled", 0L, false)
-      }
-      return
-    }
-    launchRequestScope(requestId) {
-      fun finish(result: ImeCommitResult) {
-        state?.finished?.complete(result)
-        if (state?.cancelled?.get() == false) imeCommitStates.remove(requestId, state)
-      }
-      // `ime set` can return before Android creates the InputMethodService. Give activation a
-      // bounded window; the IME separately waits for its editor binding.
-      val ime =
-        awaitImeServiceReady(
-          nowMs = android.os.SystemClock::uptimeMillis,
-          delayMs = {
-            kotlinx.coroutines.delay(
-              minOf(it, requestDeadlineMs - android.os.SystemClock.uptimeMillis()).coerceAtLeast(0),
-            )
-          },
-          probe = {
-            CtrlProxyIme.current()?.takeIf {
-              android.os.SystemClock.uptimeMillis() < requestDeadlineMs
-            }
-          },
-          isCancelled = {
-            state?.cancelled?.get() == true ||
-              android.os.SystemClock.uptimeMillis() >= requestDeadlineMs
-          },
-        )
-      if (state?.cancelled?.get() == true) {
-        finish(ImeCommitResult(success = false, error = null))
-        broadcastCommitTextResult(
-          requestId,
-          false,
-          "IME commit cancelled",
-          System.currentTimeMillis() - start,
-          false,
-        )
-        return@launchRequestScope
-      }
-      if (ime == null) {
-        finish(ImeCommitResult(success = false, error = null))
-        broadcastCommitTextResult(
-          requestId,
-          false,
-          "IME service did not start within timeout",
-          System.currentTimeMillis() - start,
-          false,
-        )
-        return@launchRequestScope
-      }
-      ime.commitText(
-        text,
-        priorImeId,
-        { state?.cancelled?.get() == true },
-        delivery,
-        timeoutMs,
-        requestDeadlineMs,
-        trace,
-      ) { result ->
-        finish(result)
-        launchRequestScope(requestId) {
-          broadcastCommitTextResult(
-            requestId,
-            result.success,
-            result.error,
-            System.currentTimeMillis() - start,
-            result.partialApplication,
-            result.committedUnits,
-            result.insertedText,
-            if (trace) result.trace else null,
-            editorConsumed = result.editorConsumed,
-          )
-        }
-      }
-    }
-  }
+  override suspend fun requestCancelImeCommit(requestId: String?, targetRequestId: String) =
+    imeController.requestCancelImeCommit(requestId, targetRequestId)
 
-  override suspend fun requestCancelImeCommit(requestId: String?, targetRequestId: String) {
-    val tombstone =
-      ImeCommitState().apply {
-        cancelled.set(true)
-        finished.complete(ImeCommitResult(success = false, error = null))
-      }
-    val state = imeCommitStates.putIfAbsent(targetRequestId, tombstone) ?: tombstone
-    state.cancelled.set(true)
-    // An absent target is a tombstone: the original frame may still be queued on another socket.
-    launchRequestScope(requestId) {
-      val result = state.finished.await()
-      resultBroadcaster.guard(requestId, "cancel_ime_commit_result") {
-        webSocketServer.broadcastWithPerfSync { perfTiming ->
-          webSocketFrameJson(
-            "cancel_ime_commit_result",
-            requestId = requestId,
-            perfTiming = perfTiming,
-          ) {
-            put("success", true)
-            put("targetRequestId", targetRequestId)
-            put("partialApplication", result.partialApplication)
-            if (result.committedUnits > 0) put("committedUnits", result.committedUnits)
-          }
-        }
-      }
-    }
-  }
-
-  override suspend fun requestSetKeyboardProfile(requestId: String?, profileId: String) {
-    val profile = KeyboardProfiles.byId(profileId)
-    if (profile == null) {
-      val expected = KeyboardProfiles.all.joinToString(", ") { it.id }
-      launchRequestScope(requestId) {
-        broadcastSetKeyboardProfileResult(
-          requestId,
-          false,
-          error = "Unknown keyboard profile '$profileId'; expected one of: $expected",
-        )
-      }
-      return
-    }
-
-    val store = SharedPreferencesKeyboardProfileStore(this)
-    val previous = store.activeProfileId()
-    val applied = CompletableDeferred<Boolean>()
-    val live = CtrlProxyIme.setActiveProfile(profile.id) { applied.complete(it) }
-    if (!live) {
-      store.setActiveProfileId(profile.id)
-      applied.complete(true)
-    }
-    launchRequestScope(requestId) {
-      val success = applied.await()
-      broadcastSetKeyboardProfileResult(
-        requestId,
-        success,
-        if (success) profile.id else null,
-        if (success) previous else null,
-        if (success) null else "Failed to apply keyboard profile",
-      )
-    }
-  }
+  override suspend fun requestSetKeyboardProfile(requestId: String?, profileId: String) =
+    imeController.requestSetKeyboardProfile(requestId, profileId)
 
   override suspend fun requestListKeyboardProfiles(
     requestId: String?,
     supportedCatalogVersions: List<Int>,
-  ) {
-    val catalogVersion = KeyboardProfiles.negotiateCatalogVersion(supportedCatalogVersions)
-    if (catalogVersion == null) {
-      launchRequestScope(requestId) {
-        broadcastKeyboardProfileCatalog(
-          requestId = requestId,
-          success = false,
-          supportedCatalogVersions = KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS,
-          error =
-            "No mutually supported keyboard profile catalog version; device supports " +
-              KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS.joinToString(", "),
-        )
-      }
-      return
-    }
-    val profiles =
-      KeyboardProfiles.all.map { profile ->
-        KeyboardProfileInfo(
-          id = profile.id,
-          displayName = profile.displayName,
-          version = profile.version,
-          evidenceStatus = profile.evidenceStatus,
-          evidenceNote = profile.evidenceNote,
-          behavior =
-            KeyboardProfileBehaviorInfo(
-              composeWords = profile.behavior.composeWords,
-              enterStrategy = profile.behavior.enterStrategy.name,
-              backspaceStrategy = profile.behavior.backspaceStrategy.name,
-              recomposeOnCursorMove = profile.behavior.recomposeOnCursorMove,
-              recomposeOnBackspaceIntoWord = profile.behavior.recomposeOnBackspaceIntoWord,
-              batchEdits = profile.behavior.batchEdits,
-            ),
-        )
-      }
-    val activeProfileId = SharedPreferencesKeyboardProfileStore(this).activeProfileId()
-    launchRequestScope(requestId) {
-      broadcastKeyboardProfileCatalog(
-        requestId = requestId,
-        success = true,
-        catalogVersion = catalogVersion,
-        supportedCatalogVersions = KeyboardProfiles.SUPPORTED_CATALOG_VERSIONS,
-        activeProfileId = activeProfileId,
-        profiles = profiles,
-      )
-    }
-  }
+  ) = imeController.requestListKeyboardProfiles(requestId, supportedCatalogVersions)
 
   override suspend fun requestImeAction(request: RequestImeAction) {
     val requestId = request.requestId
@@ -3576,9 +3390,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // observer (issue #5470): with no client connected, work.refreshesHierarchy is false, so the
       // extraction/hash is skipped. The frameContext token advanced unconditionally above.
       if (work.refreshesHierarchy) {
-        if (::hierarchyDebouncer.isInitialized) {
-          hierarchyDebouncer.onAccessibilityEvent()
-        }
+        hierarchyController.onAccessibilityEvent()
       }
     } catch (e: Exception) {
       Log.e(TAG, "Error handling accessibility event", e)
@@ -3791,249 +3603,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  /**
-   * Direct hierarchy extraction without debouncing. Used by the HierarchyDebouncer. Extracts from
-   * all visible windows to capture popups, toolbars, etc.
-   */
-  private fun extractHierarchyDirect(
-    disableAllFiltering: Boolean = false,
-    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
-  ): ViewHierarchy? {
-    val contextAtExtractionStart = currentFrameContext()
-    // Bracket every input acquisition and the extraction itself. If rotation changes anywhere in
-    // that interval, hierarchy geometry cannot be proven to match a single display orientation.
-    val selected = viewHierarchyExtractor.selectDisplayWindows(this, snapshotOptions.displayId)
-    val targetDisplayId = selected.displayId
-    val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
-    val rotationAtCaptureStart = displayController.getRotationOrNull(targetDisplayId)
-    val allWindows = selected.windows
-    val rootNode =
-      viewHierarchyExtractor.rootForDisplay(rootInActiveWindow, allWindows, targetDisplayId)
-    // Capture foreground info atomically with rootNode to avoid race conditions
-    // where the app state changes between hierarchy extraction and getForegroundActivity()
-    val capturedRootPackage = rootNode?.packageName?.toString()
-    val capturedWindowClass = lastWindowClassName
-    val screenDimensions = displayController.getScreenDimensions(targetDisplayId)
-    val insets = displayController.getObservationInsets(screenDimensions, targetDisplayId)
-
-    if (allWindows.isNullOrEmpty() && rootNode == null) {
-      Log.w(TAG, "No windows or root node available for extraction")
-      return null
-    }
-
-    // Use multi-window extraction if windows are available, otherwise fall back to single window
-    val hierarchy =
-      if (!allWindows.isNullOrEmpty()) {
-        Log.d(
-          TAG,
-          "Extracting from ${allWindows.size} windows " +
-            "(disableAllFiltering: $disableAllFiltering, occlusionEnabled: $occlusionEnabled)",
-        )
-        viewHierarchyExtractor.extractFromAllWindows(
-          allWindows,
-          rootNode,
-          null,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          occlusionEnabled,
-          snapshotOptions = snapshotOptions,
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
-        )
-      } else {
-        viewHierarchyExtractor.extractFromActiveWindow(
-          rootNode,
-          null,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          snapshotOptions = snapshotOptions,
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
-        )
-      }
-
-    if (snapshotOptions.isCancelled()) {
-      // A cancelled snapshot will not be delivered; do not retain its frame-context entry.
-      Log.d(TAG, "Discarding cancelled direct hierarchy extraction")
-      return null
-    }
-
-    val rotation =
-      rotationProvenance.rotationIfUnchanged(
-        rotationCapture,
-        rotationAtCaptureStart,
-        displayController.getRotationOrNull(targetDisplayId),
-        targetDisplayId,
-      )
-    // Bounding rectangles are only meaningful relative to the same orientation
-    // as screenDimensions. Keep the established edge insets, but avoid emitting
-    // stale geometry when the capture's orientation could not be proven.
-    val captureInsets =
-      if (rotation == null) {
-        insets.copy(displayCutoutInfo = DisplayCutoutInfo.unknown())
-      } else {
-        insets
-      }
-
-    // Add device metadata to the hierarchy (eliminates need for dumpsys calls on client)
-    val wakefulness = getWakefulness()
-    val foreground = getForegroundActivity(capturedRootPackage, capturedWindowClass)
-    val density = displayController.getDensity()
-    val enriched =
-      HierarchyMetadataBuilder.enrich(
-        hierarchy,
-        HierarchyMetadata(
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
-          panelFingerprint = displayController.panelFingerprint(targetDisplayId),
-          screenWidth = screenDimensions?.width,
-          screenHeight = screenDimensions?.height,
-          rotation = rotation,
-          systemInsets = legacySystemInsets(captureInsets),
-          insets = captureInsets,
-          wakefulness = wakefulness,
-          foregroundActivity = foreground,
-          density = density,
-          sdkInt = Build.VERSION.SDK_INT,
-          deviceModel = Build.MODEL,
-          isEmulator = getIsEmulator(),
-          accessibilityTool = getAccessibilityTool(),
-        ),
-      )
-    val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
-    if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
-      extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
-    }
-    return hierarchyWithScaleMetadata
-  }
-
-  /**
-   * Apply the additive #4548 scale metadata to a hierarchy response. Android accessibility bounds
-   * and screenshots are both physical pixels, so the bounds->pixel ratio is exactly 1 and the pixel
-   * dimensions equal the reported screen dimensions; the fields are omitted (null) when screen
-   * dimensions are unavailable. EVERY route that produces a hierarchy response — the debounced
-   * direct extraction ([extractHierarchyDirect]) AND the ADB EXTRACT_HIERARCHY broadcast
-   * ([extractHierarchy]) — passes through here, so the daemon can retain the metadata regardless of
-   * which route delivered the hierarchy (#4548).
-   */
-  private fun withScaleMetadata(
-    hierarchy: ViewHierarchy?,
-    screenDimensions: ScreenDimensions?,
-  ): ViewHierarchy? =
-    hierarchy?.copy(
-      nativeScale = if (screenDimensions != null) 1f else null,
-      pixelWidth = screenDimensions?.width,
-      pixelHeight = screenDimensions?.height,
-    )
-
-  /**
-   * Extract hierarchy immediately and broadcast synchronously, bypassing the debouncer and the
-   * SharedFlow async path. Used for explicit WebSocket requests where the daemon is waiting for
-   * fresh data. Matches the sync=true pattern used by tap/setText/imeAction handlers.
-   */
-  private suspend fun extractHierarchyNow(
-    disableAllFiltering: Boolean = false,
-    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
-    requestId: String? = null,
-  ) {
-    Log.d(TAG, "extractHierarchyNow (disableAllFiltering: $disableAllFiltering)")
-    val commandJob = currentCoroutineContext()[Job]
-    val cancellableOptions =
-      snapshotOptions.copy(
-        isCancelled = {
-          snapshotOptions.isCancelled() ||
-            commandJob?.isActive == false ||
-            serviceScope.coroutineContext[Job]?.isActive == false
-        },
-      )
-    try {
-      val hierarchy =
-        try {
-          hierarchyDebouncer.extractImmediately(
-            skipFlowEmit = true,
-            disableAllFiltering = disableAllFiltering,
-            snapshotOptions = cancellableOptions,
-          )
-        } catch (e: CancellationException) {
-          // Command cancellation must unwind; an independently cancelled snapshot returns null.
-          throw e
-        } catch (e: Exception) {
-          Log.e(TAG, "Error extracting WebSocket hierarchy for requestId=$requestId", e)
-          if (requestId == null) throw e
-          commandJob?.let { it.ensureActive() }
-          serviceScope.coroutineContext[Job]?.ensureActive()
-          broadcastHierarchyExtractFrame(
-            HierarchyExtractErrorFrames.thrownFrame(requestId, e),
-            externallyCorrelated = false,
-          )
-          if (::webSocketServer.isInitialized) webSocketServer.releaseRequestOwner(requestId)
-          // The extraction failure is settled here, so neither the queue nor scope guard replies.
-          return
-        }
-      if (hierarchy != null) {
-        // Explicit request: force-write the file and broadcast, serializing the tree once (#5469).
-        // Routed through deliverHierarchyFrame so the frame-context entry is released even if the
-        // encode throws (leak fix).
-        deliverHierarchyFrame(
-          serialize = {
-            commandJob?.ensureActive()
-            perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
-          },
-          write = { serialized -> writeHierarchyToFile(hierarchy, serialized = serialized) },
-          broadcast = { serialized ->
-            broadcastHierarchyUpdate(
-              hierarchy,
-              sync = true,
-              serialized = serialized,
-              requestId = requestId,
-              routeByRequestId = false,
-            )
-          },
-          releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
-        )
-      } else {
-        commandJob?.ensureActive()
-        serviceScope.coroutineContext[Job]?.ensureActive()
-        broadcastHierarchyExtractFrame(
-          HierarchyExtractErrorFrames.nullResultFrame(requestId),
-          externallyCorrelated = false,
-        )
-      }
-      if (::webSocketServer.isInitialized) webSocketServer.releaseRequestOwner(requestId)
-    } catch (e: CancellationException) {
-      if (::webSocketServer.isInitialized) webSocketServer.releaseRequestOwner(requestId)
-      throw e
-    }
-  }
-
-  /**
-   * Writes the hierarchy to a file for synchronous access. Callers that already serialized the tree
-   * for the wire frame pass that exact compact string via [serialized] so a single change is never
-   * serialized twice (issue #5469); the file therefore holds the same canonical form as the wire.
-   */
-  private fun writeHierarchyToFile(
-    hierarchy: ViewHierarchy,
-    filename: String = HIERARCHY_FILE_NAME,
-    serialized: String? = null,
-  ) {
-    try {
-      val jsonString = serialized ?: jsonCompact.encodeToString(hierarchy)
-      val jsonBytes = jsonString.toByteArray()
-      openFileOutput(filename, Context.MODE_PRIVATE).use { output ->
-        Log.d(TAG, "Writing ${jsonBytes.size} bytes to $filename")
-        output.write(jsonBytes)
-        output.flush()
-      }
-    } catch (e: Exception) {
-      Log.e(TAG, "Error writing hierarchy to file: $filename", e)
-    }
-  }
-
   private suspend fun handleCommand(intent: Intent) {
     // Clean up any lingering UUID-based hierarchy files before processing new requests
-    cleanupUuidHierarchyFiles()
+    hierarchyController.cleanupUuidHierarchyFiles()
 
     when (intent.action) {
       ACTION_EXTRACT_HIERARCHY -> {
@@ -4051,7 +3623,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         try {
           val textFilter = intent.getStringExtra("text")
           val disableAllFiltering = intent.getBooleanExtra("disableAllFiltering", false)
-          val hierarchy = extractHierarchy(textFilter, disableAllFiltering)
+          val hierarchy = hierarchyController.extractHierarchy(textFilter, disableAllFiltering)
           if (hierarchy != null) {
             val filename = "hierarchy_$uuid.json"
             // Explicit request: serialize once and reuse for the file and the wire frame (#5469).
@@ -4062,12 +3634,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
               },
               write = { serialized ->
-                writeHierarchyToFile(hierarchy, filename, serialized = serialized)
+                hierarchyController.writeHierarchyToFile(
+                  hierarchy,
+                  filename,
+                  serialized = serialized,
+                )
               },
               broadcast = { serialized ->
-                broadcastHierarchyUpdate(hierarchy, serialized = serialized, requestId = uuid)
+                hierarchyController.broadcastHierarchyUpdate(
+                  hierarchy,
+                  serialized = serialized,
+                  requestId = uuid,
+                )
               },
-              releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
+              releaseFrameContext = {
+                hierarchyController.extractedHierarchyFrameContexts.remove(hierarchy)
+              },
             )
 
             val message =
@@ -4092,96 +3674,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
     }
-  }
-
-  private fun extractHierarchy(
-    textFilter: String? = null,
-    disableAllFiltering: Boolean = false,
-  ): ViewHierarchy? {
-    val contextAtExtractionStart = currentFrameContext()
-    // This is the synchronous ADB-broadcast fallback, not the debounced direct route above. It
-    // must bracket the same inputs and extraction so the fallback never publishes a hierarchy
-    // whose geometry and rotation came from different display states.
-    val selected = viewHierarchyExtractor.selectDisplayWindows(this)
-    val targetDisplayId = selected.displayId
-    val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
-    val rotationAtCaptureStart = displayController.getRotationOrNull(targetDisplayId)
-    val allWindows = selected.windows
-    val rootNode =
-      viewHierarchyExtractor.rootForDisplay(rootInActiveWindow, allWindows, targetDisplayId)
-    val capturedRootPackage = rootNode?.packageName?.toString()
-    val capturedWindowClass = lastWindowClassName
-    val screenDimensions = displayController.getScreenDimensions(targetDisplayId)
-    val insets = displayController.getObservationInsets(screenDimensions, targetDisplayId)
-
-    if (allWindows.isNullOrEmpty() && rootNode == null) {
-      return null
-    }
-
-    val hierarchy =
-      if (!allWindows.isNullOrEmpty()) {
-        Log.d(
-          TAG,
-          "extractHierarchy from ${allWindows.size} windows " +
-            "(disableAllFiltering: $disableAllFiltering, occlusionEnabled: $occlusionEnabled)",
-        )
-        viewHierarchyExtractor.extractFromAllWindows(
-          allWindows,
-          rootNode,
-          textFilter,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          occlusionEnabled,
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
-        )
-      } else {
-        viewHierarchyExtractor.extractFromActiveWindow(
-          rootNode,
-          textFilter,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
-        )
-      }
-    val rotation =
-      rotationProvenance.rotationIfUnchanged(
-        rotationCapture,
-        rotationAtCaptureStart,
-        displayController.getRotationOrNull(targetDisplayId),
-        targetDisplayId,
-      )
-    val captureInsets =
-      if (rotation == null) insets.copy(displayCutoutInfo = DisplayCutoutInfo.unknown()) else insets
-    val enriched =
-      HierarchyMetadataBuilder.enrich(
-        hierarchy,
-        HierarchyMetadata(
-          displayId = targetDisplayId,
-          panelUniqueId = displayController.panelUniqueId(targetDisplayId),
-          panelFingerprint = displayController.panelFingerprint(targetDisplayId),
-          screenWidth = screenDimensions?.width,
-          screenHeight = screenDimensions?.height,
-          rotation = rotation,
-          systemInsets = legacySystemInsets(captureInsets),
-          insets = captureInsets,
-          wakefulness = getWakefulness(),
-          foregroundActivity = getForegroundActivity(capturedRootPackage, capturedWindowClass),
-          density = displayController.getDensity(),
-          sdkInt = Build.VERSION.SDK_INT,
-          deviceModel = Build.MODEL,
-          isEmulator = getIsEmulator(),
-          accessibilityTool = getAccessibilityTool(),
-        ),
-      )
-    val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
-    if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
-      extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
-    }
-    return hierarchyWithScaleMetadata
   }
 
   private fun sendResult(success: Boolean, data: String? = null, error: String? = null) {
@@ -4227,109 +3719,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Broadcast hierarchy update to WebSocket clients (suspend function for proper ordering).
-   *
-   * @param sync If true, enqueues for each client in call order; each client's sender drains its
-   *   queue FIFO. Returns before socket delivery.
-   */
-  private suspend fun broadcastHierarchyUpdate(
-    hierarchy: ViewHierarchy,
-    sync: Boolean = false,
-    serialized: String? = null,
-    requestId: String? = null,
-    routeByRequestId: Boolean = false,
-  ) {
-    val contextAtExtraction = extractedHierarchyFrameContexts.remove(hierarchy)
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping broadcast")
-      return
-    }
-
-    try {
-      // Reuse the string the caller already serialized for the disk file when present, so a single
-      // change is serialized at most once (issue #5469); otherwise serialize the wire form here.
-      val jsonString =
-        serialized
-          ?: perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
-
-      val messageBuilder: (kotlinx.serialization.json.JsonElement?) -> String = { perfTiming ->
-        buildString {
-          append(
-            """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$jsonString""",
-          )
-          if (requestId != null) {
-            appendJsonStringField("requestId", requestId, jsonCompact)
-          }
-          if (contextAtExtraction != null && contextAtExtraction == currentFrameContext()) {
-            appendJsonStringField("frameContext", contextAtExtraction, jsonCompact)
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
-      }
-
-      withContext(PerfRequestContext(null)) {
-        if (sync) {
-          // Enqueue in call order; each client's sender preserves FIFO without waiting for
-          // delivery.
-          webSocketServer.broadcastWithPerfSync(
-            routeByRequestId = routeByRequestId,
-            messageBuilder = messageBuilder,
-          )
-        } else {
-          // Async broadcast - for normal event-driven updates
-          webSocketServer.broadcastWithPerf(
-            routeByRequestId = routeByRequestId,
-            messageBuilder = messageBuilder,
-          )
-        }
-      }
-      Log.d(
-        TAG,
-        "Broadcasted hierarchy update to ${webSocketServer.getConnectionCount()} clients (sync=$sync)",
-      )
-    } catch (e: CancellationException) {
-      // Let cooperative cancellation unwind cleanly rather than logging it as an error (#3191).
-      throw e
-    } catch (e: Exception) {
-      Log.e(TAG, "Error broadcasting hierarchy update", e)
-    }
-  }
-
-  /** Clean up any existing UUID-based hierarchy files */
-  private fun cleanupUuidHierarchyFiles() {
-    try {
-      val filesDir = filesDir
-      val files = filesDir.listFiles() ?: return
-
-      var deletedCount = 0
-      files.forEach { file ->
-        if (
-          file.name.startsWith("hierarchy_") &&
-            file.name.endsWith(".json") &&
-            file.name != HIERARCHY_FILE_NAME
-        ) {
-          if (file.delete()) {
-            deletedCount++
-            Log.d(TAG, "Deleted old hierarchy file: ${file.name}")
-          } else {
-            Log.w(TAG, "Failed to delete hierarchy file: ${file.name}")
-          }
-        }
-      }
-
-      if (deletedCount > 0) {
-        Log.i(TAG, "Cleaned up $deletedCount old UUID hierarchy files")
-      }
-    } catch (e: Exception) {
-      Log.e(TAG, "Error cleaning up UUID hierarchy files", e)
-      // Don't let cleanup errors prevent the main operation
-    }
-  }
-
-  /**
    * Search the active window's root first, then the other windows the hierarchy extractor reports
    * for the active display (topmost first), for the first node [find] returns. The extractor's own
    * window enumeration is reused so node actions and focus read-back cannot disagree with
@@ -4348,108 +3737,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       Log.w(TAG, "Failed to enumerate display windows for node lookup", e)
       emptyList()
     }
-
-  private suspend fun broadcastCommitTextResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    partialApplication: Boolean,
-    committedUnits: Int = 0,
-    insertedText: String? = null,
-    trace: List<String>? = null,
-    editorConsumed: Boolean = false,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping commit text result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "commit_text_result") {
-      webSocketServer.broadcastWithPerfSync { perfTiming ->
-        webSocketFrameJson("commit_text_result", requestId = requestId, perfTiming = perfTiming) {
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (partialApplication) put("partialApplication", true)
-          if (committedUnits > 0) put("committedUnits", committedUnits)
-          if (insertedText != null) put("insertedText", insertedText)
-          if (editorConsumed) put("editorConsumed", true)
-          if (trace != null) put("trace", Json.encodeToJsonElement(trace))
-          if (error != null) {
-            put("error", error)
-          }
-        }
-      }
-      Log.d(
-        TAG,
-        "Broadcasted commit text result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastSetKeyboardProfileResult(
-    requestId: String?,
-    success: Boolean,
-    activeProfileId: String? = null,
-    previousProfileId: String? = null,
-    error: String? = null,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping keyboard profile result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "set_keyboard_profile_result") {
-      webSocketServer.broadcastTypedWithPerf { perfTiming ->
-        SetKeyboardProfileResult(
-          timestamp = System.currentTimeMillis(),
-          requestId = requestId,
-          success = success,
-          activeProfileId = activeProfileId,
-          previousProfileId = previousProfileId,
-          error = error,
-          perfTiming = perfTiming,
-        )
-      }
-      Log.d(
-        TAG,
-        "Broadcasted keyboard profile result to ${webSocketServer.getConnectionCount()} clients",
-      )
-    }
-  }
-
-  private suspend fun broadcastKeyboardProfileCatalog(
-    requestId: String?,
-    success: Boolean,
-    catalogVersion: Int? = null,
-    supportedCatalogVersions: List<Int>,
-    activeProfileId: String? = null,
-    profiles: List<KeyboardProfileInfo> = emptyList(),
-    error: String? = null,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping keyboard profile catalog response")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "keyboard_profiles_result") {
-      webSocketServer.broadcastWithPerfSync { perfTiming ->
-        webSocketFrameJson(
-          "keyboard_profiles_result",
-          requestId = requestId,
-          perfTiming = perfTiming,
-        ) {
-          put("success", success)
-          put("catalogId", "automobile_behavior_profiles")
-          if (catalogVersion != null) put("catalogVersion", catalogVersion)
-          put("supportedCatalogVersions", jsonCompact.encodeToJsonElement(supportedCatalogVersions))
-          if (activeProfileId != null) put("activeProfileId", activeProfileId)
-          if (success) put("profiles", jsonCompact.encodeToJsonElement(profiles))
-          if (error != null) put("error", error)
-        }
-      }
-    }
-  }
 
   /** Broadcast accessibility action result to WebSocket clients */
   private suspend fun broadcastActionResult(

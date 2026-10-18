@@ -2,15 +2,15 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { createSwipeAtHandler, swipeAtSchema } from "../../src/server/swipeAtTools";
 import {
-  resetTapAtElementFactory,
-  setTapAtElementFactory,
+  type InteractionToolDependencies,
   tapAtHandler,
   tapAtSchema,
 } from "../../src/server/interactionTools";
 
+const interactionDeps: InteractionToolDependencies = {};
 const device: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 
-afterEach(() => resetTapAtElementFactory());
+afterEach(() => delete interactionDeps.tapAtElementFactory);
 
 const swipe = { from: { x: 1, y: 2 }, to: { x: 3, y: 4 } };
 const tap = { x: 1, y: 2 };
@@ -50,17 +50,21 @@ describe("pointer option schema (#13081)", () => {
 describe("handlers forward the pointer to the action (#13081)", () => {
   test("tapAt hands a stylus pointer to the executor, so it can never run as a finger", async () => {
     const seen: unknown[] = [];
-    setTapAtElementFactory(
-      () =>
-        ({
-          execute: async (options: { pointer?: unknown }) => {
-            seen.push(options.pointer);
-            return { success: true, x: 1, y: 2, action: "tap" };
-          },
-        }) as never,
-    );
+    interactionDeps.tapAtElementFactory = () =>
+      ({
+        execute: async (options: { pointer?: unknown }) => {
+          seen.push(options.pointer);
+          return { success: true, x: 1, y: 2, action: "tap" };
+        },
+      }) as never;
 
-    await tapAtHandler(device, { x: 1, y: 2, pointer: { toolType: "stylus" } });
+    await tapAtHandler(
+      device,
+      { x: 1, y: 2, pointer: { toolType: "stylus" } },
+      undefined,
+      undefined,
+      interactionDeps,
+    );
     expect(seen).toEqual([{ toolType: "stylus" }]);
   });
 

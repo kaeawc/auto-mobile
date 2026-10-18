@@ -54,16 +54,24 @@ export class FakeElementSelector implements ElementSelector {
 
   private buildSelectionResult(
     strategy: ElementSelectionStrategy | undefined,
+    index?: number,
   ): ElementSelectionResult {
-    const element = this.nextElement;
+    const scripted = this.nextElement;
     const totalMatches =
-      typeof this.nextTotalMatches === "number" ? this.nextTotalMatches : element ? 1 : 0;
+      typeof this.nextTotalMatches === "number" ? this.nextTotalMatches : scripted ? 1 : 0;
+    // Like the real selector, an explicit `index` outside the matches selects nothing.
+    const outOfRange = index !== undefined && (index < 0 || index >= totalMatches);
+    const element = outOfRange ? null : scripted;
     const indexInMatches =
-      typeof this.nextIndexInMatches === "number" ? this.nextIndexInMatches : element ? 0 : -1;
+      typeof this.nextIndexInMatches === "number"
+        ? this.nextIndexInMatches
+        : element
+          ? (index ?? 0)
+          : -1;
     return {
       element,
-      matchedElement: this.nextMatchedElement,
-      indexInMatches,
+      matchedElement: element ? this.nextMatchedElement : undefined,
+      indexInMatches: element ? indexInMatches : -1,
       totalMatches,
       strategy: strategy ?? "first",
     };
@@ -93,7 +101,7 @@ export class FakeElementSelector implements ElementSelector {
     if (target.testTag !== undefined) {
       this.lastTestTag = target.testTag;
     }
-    return this.buildSelectionResult(options?.strategy);
+    return this.buildSelectionResult(options?.strategy, options?.index);
   }
 
   selectByText(

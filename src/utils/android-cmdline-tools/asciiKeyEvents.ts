@@ -158,16 +158,25 @@ export function buildAndroidInputTextCommand(text: string): string {
   return `shell input text ${shellQuote(text.replaceAll(" ", "%s"))}`;
 }
 
-/** Longest `input text` command, so a cancel stops between commands (#12599). */
+/** Longest `input text` command on API 31+, so a cancel stops between commands (#12599). */
 export const ANDROID_INPUT_TEXT_CHUNK_CHARS = 32;
 
 /**
- * Plan for a run of printable ASCII: one `input text` command per
- * {@link ANDROID_INPUT_TEXT_CHUNK_CHARS} characters. On API 31+ the host `cmd` client exits once
- * the events are handed to the system, long before the app consumes them, so only a short
- * command bounds how much typing a cancel can leave behind.
+ * Plan for a run of printable ASCII.
+ *
+ * On API 30 and older the host `adb shell` process is the one typing, so killing the host
+ * client stops typing immediately and one `input text` command per run is enough (#12733).
+ * Chunking there only adds per-process overhead. On API 31+ (and when the level is unknown)
+ * the host `cmd` client exits once the events are handed to the system, long before the app
+ * consumes them, so only a short command bounds how much typing a cancel can leave behind:
+ * one command per {@link ANDROID_INPUT_TEXT_CHUNK_CHARS} characters.
+ *
+ * @param apiLevel - Device API level, or null when it could not be read.
  */
-export function buildAndroidInputTextPlan(text: string): KeyEventPlan {
+export function buildAndroidInputTextPlan(text: string, apiLevel: number | null): KeyEventPlan {
+  if (apiLevel !== null && apiLevel <= 30) {
+    return { commands: [buildAndroidInputTextCommand(text)], textLength: text.length };
+  }
   const commands: string[] = [];
   for (let start = 0; start < text.length; start += ANDROID_INPUT_TEXT_CHUNK_CHARS) {
     commands.push(

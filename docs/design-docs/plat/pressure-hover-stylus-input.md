@@ -6,7 +6,9 @@ interactions or force-press menus. This note records what each platform's
 injection path can carry, states the direction that follows, and lists the follow-up
 work (#12539).
 
-It is a research note, not a design for a shipped tool. Nothing here was run on an
+**Status:** the first slice shipped in #13081: a stylus pointer on `tapAt` and a straight
+`swipeAt` for Android 12 and later, at pressure 1.0. This note is otherwise a research note,
+not a design for a shipped tool, and the rest of it is unchanged. Nothing here was run on an
 emulator, simulator or device: the capability claims are read from source or
 documentation, and every claim that needs a device is marked **unverified** and
 carried into the [verification plan](#verification-plan).
@@ -58,10 +60,11 @@ continuation, the only per-gesture knob is the target display
   `--axis` option exists for `scroll` only.
 - `motionevent` takes no `HOVER_*` action, so hover cannot be injected this way.
 
-It runs as the shell user, so it needs neither root nor an installed helper. **Not
-checked:** which releases have each command and source. Only `main` was read;
-`motionevent` and the source prefix should be confirmed against the lowest API level
-AutoMobile supports before depending on them.
+It runs as the shell user, so it needs neither root nor an installed helper. The tool type
+is only set from the source from Android 12 (API 31): `Input.java` from `android-7.0.0_r36`
+through `android-11.0.0_r48` builds the event with the legacy `MotionEvent.obtain` overload,
+which carries no tool type, while `android-12.0.0_r1` assigns it (#13081). **Not checked:**
+`motionevent` across releases, and releases before API 24.
 
 So `adb shell input` can produce a _binary_ stylus (stylus tool type, full pressure
 for the whole stroke). It cannot produce a pressure curve, tilt, an eraser or hover.

@@ -33,7 +33,7 @@ describe("navigation telemetry device and count (#10195)", () => {
     db = await createTestDatabase();
     manager = NavigationGraphManager.createForTesting(
       new NavigationRepository(db),
-      new TestCoverageRepository(undefined, db),
+      new TestCoverageRepository(db),
       new FakeTimer(),
     );
     records = [];

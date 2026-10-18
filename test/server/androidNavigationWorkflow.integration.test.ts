@@ -102,7 +102,7 @@ describe("Android navigation graph workflow (#4459)", () => {
     timer.enableAutoAdvance();
     const sessionManager = NavigationGraphManager.createForTesting(
       new NavigationRepository(harness.db),
-      new TestCoverageRepository(undefined, harness.db),
+      new TestCoverageRepository(harness.db),
       timer,
     );
     NavigationGraphManager.setInstanceForSessionForTesting(sessionUuid, sessionManager);

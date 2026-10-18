@@ -59,7 +59,11 @@ import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 
 const ECHO = "__tasks_relay_echo__";
 const WAIT = "__tasks_relay_wait__";
-const ELIGIBLE = new Set([ECHO, WAIT]);
+const CAPTURE = "__tasks_relay_capture__";
+/** The device-binding tool the proxy binds a session from: a fake boot behind a gate. */
+const START_DEVICE = "startDevice";
+const BOOTED_SESSION = "tasks-relay-booted-session";
+const ELIGIBLE = new Set([ECHO, WAIT, START_DEVICE]);
 const DECLARED_META = {
   "io.modelcontextprotocol/clientCapabilities": { extensions: { [TASKS_EXTENSION_ID]: {} } },
 };
@@ -159,11 +163,43 @@ class ProcessTaskStore implements McpTaskStore {
   }
 }
 
+/** A real daemon client that records what the proxy forwards through it. */
+class RecordingDaemonClient extends DaemonClient {
+  constructor(
+    socketPath: string,
+    private readonly forwarded: Array<{ name: string; args: Record<string, any> }>,
+    private readonly methods: Array<{ method: string; params: Record<string, any> }>,
+  ) {
+    super(socketPath, 10_000, defaultTimer, {}, null);
+  }
+
+  override callTool(
+    toolName: string,
+    params: Record<string, any>,
+    ...rest: DropFirstTwo<Parameters<DaemonClient["callTool"]>>
+  ): Promise<any> {
+    this.forwarded.push({ name: toolName, args: params });
+    return super.callTool(toolName, params, ...rest);
+  }
+
+  override callDaemonMethod(
+    method: string,
+    params: Record<string, any>,
+    ...rest: DropFirstTwo<Parameters<DaemonClient["callDaemonMethod"]>>
+  ): Promise<any> {
+    this.methods.push({ method, params });
+    return super.callDaemonMethod(method, params, ...rest);
+  }
+}
+
+type DropFirstTwo<T extends unknown[]> = T extends [unknown, unknown, ...infer Rest] ? Rest : never;
+
 function fakeDaemonState() {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
-      getSession: () => null,
+      // The session the fake boot minted is live, so the proxy's binding heartbeat is answered.
+      getSession: (sessionId: string) => (sessionId === BOOTED_SESSION ? { sessionId } : null),
       getDeviceLabels: () => undefined,
       releaseSession: async () => null,
     }),
@@ -179,6 +215,9 @@ function fakeDaemonState() {
 describe("MCP Tasks through the stdio proxy and the control socket (#4668)", () => {
   let restoreFixture: () => void;
   let releaseWait: (() => void) | undefined;
+  let releaseBoot: (() => void) | undefined;
+  let forwarded: Array<{ name: string; args: Record<string, any> }>;
+  let methods: Array<{ method: string; params: Record<string, any> }>;
   let socketPath: string;
   let store: FakeMcpTaskStore;
   let scopes: StatelessMcpRequestScope[];
@@ -198,11 +237,33 @@ describe("MCP Tasks through the stdio proxy and the control socket (#4668)", () 
       });
       return { content: [{ type: "text", text: "waited" }] };
     });
+    ToolRegistry.register(CAPTURE, "capture", z.looseObject({}), async () => ({
+      content: [{ type: "text", text: "captured" }],
+    }));
   });
+
+  /**
+   * Replace the real startDevice with a fake boot behind a gate. Each per-forward server may
+   * re-register every tool, so the fake is installed after it is built; the hermetic fixture
+   * restores the real one.
+   */
+  function installFakeBoot(): void {
+    ToolRegistry.register(START_DEVICE, "fake boot", z.looseObject({}), async (_a, _p, signal) => {
+      await new Promise<void>((resolve, reject) => {
+        releaseBoot = resolve;
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+      const runtime = { deviceId: "emulator-5554", session: { sessionUuid: BOOTED_SESSION } };
+      return {
+        content: [{ type: "text", text: JSON.stringify({ platform: "android", runtime }) }],
+      };
+    });
+  }
 
   afterAll(() => {
     ToolRegistry.unregister(ECHO);
     ToolRegistry.unregister(WAIT);
+    ToolRegistry.unregister(CAPTURE);
     restoreFixture();
   });
 
@@ -219,7 +280,9 @@ describe("MCP Tasks through the stdio proxy and the control socket (#4668)", () 
       idGenerator: new CountingIdGenerator(`scope-${randomUUID()}`),
       createServer: (context, scope) => {
         scopes.push(scope);
-        return createStatelessMcpServer(base, context, scope);
+        const server = createStatelessMcpServer(base, context, scope);
+        installFakeBoot();
+        return server;
       },
       cancelScopeExecutions: (scope, reason) =>
         executionTracker.cancelSessionExecutions(scope, reason),
@@ -228,7 +291,6 @@ describe("MCP Tasks through the stdio proxy and the control socket (#4668)", () 
     });
     socketServer = new UnixSocketServer(
       socketPath,
-      "http://127.0.0.1:1/unused",
       fakeDaemonState(),
       defaultTimer,
       null,
@@ -253,7 +315,7 @@ describe("MCP Tasks through the stdio proxy and the control socket (#4668)", () 
     daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
     const { server, proxy } = createProxyMcpServer({
       proxyConfig: {
-        clientFactory: () => new DaemonClient(socketPath, 10_000, defaultTimer, {}, null),
+        clientFactory: () => new RecordingDaemonClient(socketPath, forwarded, methods),
         daemonManager,
         autoStartDaemon: false,
       },
@@ -281,11 +343,15 @@ describe("MCP Tasks through the stdio proxy and the control socket (#4668)", () 
     socketPath = join(tmpdir(), `mcp-tasks-${randomUUID().slice(0, 8)}.sock`);
     store = new FakeMcpTaskStore(new FakeTimer());
     scopes = [];
+    forwarded = [];
+    methods = [];
   });
 
   afterEach(async () => {
     releaseWait?.();
     releaseWait = undefined;
+    releaseBoot?.();
+    releaseBoot = undefined;
     await closeProxy?.();
     closeProxy = undefined;
     isAvailableSpy?.mockRestore();
@@ -373,5 +439,88 @@ describe("MCP Tasks through the stdio proxy and the control socket (#4668)", () 
       statusMessage: TASK_INTERRUPTED_MESSAGE,
       error: { code: -32603, message: TASK_INTERRUPTED_MESSAGE },
     });
+  });
+
+  /** Binding claims of the booted session's liveness ownership: one per binding. */
+  function bindingClaims(): number {
+    return methods.filter(
+      (call) =>
+        call.method === "daemon/heartbeat" &&
+        call.params.sessionId === BOOTED_SESSION &&
+        call.params.claimLivenessOwnership === true,
+    ).length;
+  }
+
+  /** The session the proxy forwarded its latest sessionless capture call under. */
+  async function sessionOfNextCall(wire: RawWire): Promise<unknown> {
+    const frame = await wire.call(CAPTURE, {}, false);
+    expect(frame.result?.content).toEqual([{ type: "text", text: "captured" }]);
+    return forwarded.filter((call) => call.name === CAPTURE).at(-1)?.args.sessionUuid;
+  }
+
+  async function waitForBoot(): Promise<void> {
+    for (let turn = 0; turn < 200 && releaseBoot === undefined; turn++) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+
+  test("a declaring startDevice runs as a task and later calls route to the session it booted", async () => {
+    await startDaemon(manager("daemon"));
+    const wire = await connectProxy();
+
+    const created = await wire.call(START_DEVICE, { platform: "android" }, true);
+    expect(created.result).toMatchObject({ resultType: "task", status: "working" });
+    const running = await wire.task("tasks/get", created.result.taskId);
+    expect(running.result.status).toBe("working");
+    expect(await sessionOfNextCall(wire)).toBeUndefined();
+
+    await waitForBoot();
+    releaseBoot?.();
+    const done = await wire.settled(created.result.taskId);
+    await wire.task("tasks/get", created.result.taskId);
+
+    expect(done.result).toMatchObject({ status: "completed" });
+    expect(JSON.parse(done.result.result.content[0].text).runtime.session.sessionUuid).toBe(
+      BOOTED_SESSION,
+    );
+    expect(bindingClaims()).toBe(1);
+    expect(await sessionOfNextCall(wire)).toBe(BOOTED_SESSION);
+  });
+
+  test("a cancelled startDevice task binds nothing", async () => {
+    await startDaemon(manager("daemon"));
+    const wire = await connectProxy();
+    const created = await wire.call(START_DEVICE, { platform: "android" }, true);
+
+    await wire.task("tasks/cancel", created.result.taskId);
+    const settled = await wire.settled(created.result.taskId);
+
+    expect(settled.result.status).toBe("cancelled");
+    expect(bindingClaims()).toBe(0);
+    expect(await sessionOfNextCall(wire)).toBeUndefined();
+  });
+
+  test("a task that completed across a proxy reconnect binds once from the restarted daemon", async () => {
+    await startDaemon(manager("before"));
+    const wire = await connectProxy();
+    const created = await wire.call(START_DEVICE, { platform: "android" }, true);
+    await waitForBoot();
+    releaseBoot?.();
+    // Wait for the boot to settle in the store, without polling through the proxy.
+    for (let turn = 0; turn < 200; turn++) {
+      if ((await store.find(created.result.taskId))?.status === "completed") {
+        break;
+      }
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    await stopDaemon();
+    await startDaemon(manager("after"));
+    const done = await wire.task("tasks/get", created.result.taskId);
+    await wire.task("tasks/get", created.result.taskId);
+
+    expect(done.result.status).toBe("completed");
+    expect(bindingClaims()).toBe(1);
+    expect(await sessionOfNextCall(wire)).toBe(BOOTED_SESSION);
   });
 });

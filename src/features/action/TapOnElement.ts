@@ -40,20 +40,14 @@ import {
   wasHierarchyReadDuringCall,
 } from "../observe/observationReadScope";
 import { ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS, freshTapHierarchy } from "./freshTapHierarchy";
-import { type TalkBackTargetContext } from "../talkback/resourceIdActionError";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 
 import { assertLongPressFitsRequestBudget } from "./gestureTransportTimeout";
-import {
-  type DisplayFence,
-  type DisplayFenceOption,
-  type DisplayFenceDependencies,
-} from "./BaseVisualChange";
+import { type DisplayFenceDependencies } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../observe/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { isFocusEditableElement, promoteClickableAncestor } from "../utility/ElementResolver";
 import { SearchableHierarchy } from "../utility/SearchableNode";
-import { resolveViewHierarchyForSearch } from "../utility/viewHierarchySearch";
 import { DefaultHierarchyCapture, type HierarchyCapture } from "../observe/HierarchyCapture";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback, type ObservedActionResult } from "./BaseVisualChange";
@@ -117,8 +111,8 @@ import { TapIosDispatchPhase } from "./tapIosDispatchPhase";
 import { TapEnsureCheckedPhase } from "./tapEnsureCheckedPhase";
 import { TapPostTapEffectPhase } from "./tapPostTapEffectPhase";
 import { TapRetryPhase } from "./tapRetryPhase";
+import { TapTalkBackPhase } from "./tapTalkBackPhase";
 import { TapAndroidDispatchPhase, type ResolvedAndroidTapOptions } from "./tapAndroidDispatchPhase";
-import { isAndroidDocumentsUiRow } from "./androidCoordinateTapPolicy";
 import { scopeHierarchyForSelector } from "../observe/hierarchyLayer";
 import {
   getToggleContentDescription,
@@ -286,6 +280,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     talkBackStrategy: () => this.talkBackStrategy,
     talkBackDriverFactory: () => this.talkBackDriverFactory,
     executeAndroidLongPress: (...args) => this.executeAndroidLongPress(...args),
+    executeAndroidTapWithCoordinates: (...args) => this.executeAndroidTapWithCoordinates(...args),
+    reportTalkBackActivationWarning: (result, context, action) =>
+      this.reportTalkBackActivationWarning(result, context, action),
+  });
+  private readonly talkBack = new TapTalkBackPhase({
+    device: this.device,
+    talkBackStrategy: () => this.talkBackStrategy,
+    talkBackDriverFactory: () => this.talkBackDriverFactory,
+    getElementCenter: (element) => this.geometry.getElementCenter(element),
+    isScreenReaderNavigationEnabled: (options) => this.isScreenReaderNavigationEnabled(options),
+    selectElementInHierarchy: (options, hierarchy) =>
+      this.finder.selectElementInHierarchy(options, hierarchy),
+    resolveTapTargetElement: (element, hierarchy, action, targetOptions) =>
+      this.resolveTapTargetElement(element, hierarchy, action, targetOptions),
     executeAndroidTapWithCoordinates: (...args) => this.executeAndroidTapWithCoordinates(...args),
     reportTalkBackActivationWarning: (result, context, action) =>
       this.reportTalkBackActivationWarning(result, context, action),
@@ -1874,192 +1882,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
   }
 
-  private talkBackTargetContext(
-    options: (TapOnElementOptions & ResolvedAndroidTapOptions) | undefined,
-    action: string,
-    onResolvedElement: NonNullable<ResolvedAndroidTapOptions["onResolvedElement"]>,
-  ): TalkBackTargetContext {
-    let resolvedSelection: ElementSelectionResult | undefined;
-    let resolvedHierarchy: ViewHierarchyResult | undefined;
-    const hasSelector =
-      options && [options.text, options.textAny, options.elementId, options.testTag].some(Boolean);
-    return {
-      hierarchy: resolveViewHierarchyForSearch(options?.resolvedHierarchy),
-      reResolve: hasSelector
-        ? (hierarchy) => {
-            const selection = this.finder.selectElementInHierarchy(
-              options,
-              scopeHierarchyForSelector(hierarchy, options.layer),
-            ).selection;
-            resolvedSelection = selection;
-            resolvedHierarchy = hierarchy;
-            return selection.element
-              ? this.resolveTapTargetElement(selection.element, hierarchy, action, {
-                  requireResourceId: true,
-                  scoped: options.container !== undefined,
-                }).element
-              : null;
-          }
-        : undefined,
-      onResolvedElement: (element) =>
-        onResolvedElement(element, resolvedSelection, resolvedHierarchy),
-    };
-  }
-
-  private async executeAndroidTapWithAccessibility(
-    action: string,
-    x: number,
-    y: number,
-    element: Element,
-    durationMs: number,
-    options?: TapOnElementOptions &
-      ResolvedAndroidTapOptions & { onActivationWarning?: (warning: string) => void },
-    signal?: AbortSignal,
+  private executeAndroidTapWithAccessibility(
+    ...args: Parameters<TapTalkBackPhase["executeAndroidTapWithAccessibility"]>
   ): Promise<ScreenReaderNavigationResult | undefined> {
-    const fence = this.readOptionalDisplayFence(options);
-    const driver = this.talkBackDriverFactory.createDriver(this.device);
-    let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
-    const targetContext = this.talkBackTargetContext(
-      options,
-      action,
-      (current, selection, hierarchy) => {
-        element = current;
-        const center = this.geometry.getElementCenter(current);
-        x = center.x;
-        y = center.y;
-        options?.onResolvedElement?.(current, selection, hierarchy);
-      },
-    );
-
-    if (action === "longPress") {
-      // Long press: try ACTION_LONG_CLICK first, then coordinate gesture fallback
-      const longPressResult = await this.talkBackStrategy.executeLongPress(
-        x,
-        y,
-        durationMs,
-        element,
-        driver,
-        { displayFence: fence, ...targetContext },
-      );
-
-      if (!longPressResult.success) {
-        if (longPressResult.semanticActionFailure) {
-          throw new ActionableError(
-            `Semantic long press failed for the selected element: ${longPressResult.error ?? "unknown error"}`,
-          );
-        }
-        logger.warn(
-          `[TapOnElement] Long press accessibility methods failed (${longPressResult.error}), ` +
-            `falling back to ADB tap at (${x}, ${y})`,
-        );
-        await this.executeAndroidTapWithCoordinates(
-          action,
-          x,
-          y,
-          durationMs,
-          element,
-          signal,
-          // TalkBackTapStrategy.executeLongPress already ran the uniqueness guard
-          // and attempted long_click for this selector; continue with coordinates.
-          true,
-          { displayFence: fence },
-        );
-      }
-      return undefined;
-    }
-
-    // Long press returned above; the remaining actions are tap and doubleTap.
-    if (this.isScreenReaderNavigationEnabled(options)) {
-      // Opt-in fidelity mode (#3937): move the TalkBack cursor onto the target with
-      // ACTION_ACCESSIBILITY_FOCUS, then activate. A failure after the focus request was sent
-      // throws; only a failure before anything was dispatched returns here and may fall back.
-      const result = await this.talkBackStrategy.executeTap(
-        this.device.deviceId,
-        element,
-        driver,
-        fence,
-        signal,
-      );
-
-      if (result.success) {
-        // A focus-navigation gesture is acknowledged, not confirmed as an activation.
-        this.reportTalkBackActivationWarning(result, options, action);
-        return result.screenReaderNavigation;
-      }
-
-      logger.warn(
-        `[TapOnElement] Focus navigation unavailable (${result.error}); nothing was dispatched, ` +
-          `falling back to coordinate-based tap at (${x}, ${y})`,
-      );
-      screenReaderNavigation = result.screenReaderNavigation;
-    } else if (action === "tap") {
-      // Default (#3936): directly activate the target node via ACTION_CLICK,
-      // without moving the cursor. doubleTap has no single accessibility action,
-      // so it drops straight to the coordinate fallback below.
-      const result = await this.talkBackStrategy.executeDirectActivation(
-        element,
-        driver,
-        targetContext,
-      );
-
-      if (result.success) {
-        return undefined;
-      }
-
-      logger.warn(
-        `[TapOnElement] Direct accessibility activation failed (${result.error}), ` +
-          `falling back to coordinate-based tap at (${x}, ${y})`,
-      );
-    }
-
-    // DocumentsUI item gestures can be acknowledged without activation, including
-    // this TalkBack fallback path. Use the same row activation/input recovery.
-    if (isAndroidDocumentsUiRow(element)) {
-      await this.executeAndroidTapWithCoordinates(
-        action,
-        x,
-        y,
-        durationMs,
-        element,
-        signal,
-        false,
-        { displayFence: fence },
-      );
-      return screenReaderNavigation;
-    }
-
-    // Fallback to coordinate-based taps via accessibility service dispatchGesture
-    const fallbackAction = action as "tap" | "doubleTap" | "longPress";
-    const fallbackResult =
-      fallbackAction === "tap"
-        ? await this.talkBackStrategy.executePreciseTap(x, y, driver, fence)
-        : await this.talkBackStrategy.executeCoordinateFallback(
-            x,
-            y,
-            fallbackAction,
-            durationMs,
-            driver,
-            { displayFence: fence },
-          );
-
-    if (!fallbackResult.success) {
-      logger.warn(
-        `[TapOnElement] Accessibility coordinate tap failed (${fallbackResult.error}), ` +
-          `falling back to ADB tap at (${x}, ${y})`,
-      );
-      await this.executeAndroidTapWithCoordinates(
-        action,
-        x,
-        y,
-        durationMs,
-        element,
-        signal,
-        false,
-        { displayFence: fence },
-      );
-    }
-    this.reportTalkBackActivationWarning(fallbackResult, options, action);
-    return screenReaderNavigation;
+    return this.talkBack.executeAndroidTapWithAccessibility(...args);
   }
 
   private executeiOSTap(...args: Parameters<TapIosDispatchPhase["executeiOSTap"]>): Promise<void> {
@@ -2076,10 +1902,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     ...args: Parameters<TapIosDispatchPhase["executeIOSTapWithVoiceOver"]>
   ): Promise<void> {
     return this.iosDispatch.executeIOSTapWithVoiceOver(...args);
-  }
-
-  private readOptionalDisplayFence(options?: DisplayFenceOption): DisplayFence | undefined {
-    return options?.displayFence;
   }
 
   private getLongPressDuration(options: TapOnElementOptions): number {

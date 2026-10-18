@@ -83,14 +83,14 @@ export class PostNotification {
   private adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
   private window: WindowInterface;
-  private simctl: SimCtlClient;
+  private simctl: Pick<SimCtlClient, "pushNotification">;
   private fileSystem: FileSystem;
 
   constructor(
     device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
     window: WindowInterface | null = null,
-    simctl: SimCtlClient | null = null,
+    simctl: Pick<SimCtlClient, "pushNotification"> | null = null,
     fileSystem: FileSystem | null = null,
   ) {
     this.device = device;

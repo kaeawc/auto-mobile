@@ -190,31 +190,24 @@ class SetTextAcknowledgementOrderTest {
         outcome > selectionDecision,
     )
     assertTrue("acknowledgement must include the computed outcome", broadcast > outcome)
+    // The wire encoding (omitted optionals, partialApplication only when true) is pinned
+    // byte-for-byte against the old hand-built frame in ResultFramesGoldenTest.
     val broadcaster = functionBody(source, "private suspend fun broadcastInsertTextResult(")
-    val rawBroadcaster =
-      functionBody(readTextInputSource(), "private suspend fun broadcastInsertTextResult(")
-    assertTrue(
-      "legacy partialApplication must be serialized",
-      "put(\"partialApplication\", true)" in rawBroadcaster,
-    )
-    assertTrue("success must be serialized", "put(\"success\", success)" in rawBroadcaster)
-    assertTrue("partialApplication must be guarded", "if (partialApplication)" in broadcaster)
     assertTrue(
       "insert acknowledgements must be synchronous",
       "responseSender.broadcastWithPerfSync" in broadcaster,
     )
-    assertTrue("error must be serialized", "put(\"error\", error)" in rawBroadcaster)
-    for (field in listOf("warning", "caretPlaced", "resultingTextLength")) {
-      val guard = broadcaster.indexOf("if ($field != null)")
-      assertTrue("optional $field must be guarded", guard >= 0)
-      assertTrue(
-        "optional $field must serialize its value",
-        "put(\"$field\", $field)" in rawBroadcaster,
-      )
-      assertTrue(
-        "optional $field must be serialized after its guard",
-        broadcaster.indexOf("put(", startIndex = guard) > guard,
-      )
+    for (field in
+      listOf(
+        "success",
+        "totalTimeMs",
+        "error",
+        "warning",
+        "caretPlaced",
+        "resultingTextLength",
+        "partialApplication",
+      )) {
+      assertTrue("$field must reach the typed body", "$field = $field" in broadcaster)
     }
   }
 

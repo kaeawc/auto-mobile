@@ -1,5 +1,5 @@
-import { sql, type Kysely } from "kysely";
-import { getDatabase } from "../../db/database";
+import type { Kysely } from "kysely";
+import { MemoryBaselineRepository } from "../../db/memoryBaselineRepository";
 import { Database, MemoryBaseline } from "../../db/types";
 import { logger } from "../../utils/logger";
 import { MemoryMetrics } from "./MemoryMetricsCollector";
@@ -9,22 +9,16 @@ import { safeDivide, getCutoffDate, DEFAULT_EMA_ALPHA, DEFAULT_TTL } from "../sh
  * Manages adaptive memory baselines per app/device/tool combination
  */
 export class MemoryBaselineManager {
-  private readonly injectedDb: Kysely<Database> | null;
+  private readonly repository: MemoryBaselineRepository;
 
   /**
-   * @param db Optional Kysely handle. Resolved LAZILY (per use, via {@link db})
-   * rather than in a field initializer so merely constructing a manager — e.g.
-   * for a pure-logic test of {@link calculateAnomalyMultiplier} — does not open
-   * the real file-backed database. Inject an in-memory DB (`createTestDatabase`)
+   * @param db Optional Kysely handle. The repository resolves it LAZILY (per use) so merely
+   * constructing a manager — e.g. for a pure-logic test of {@link calculateAnomalyMultiplier} —
+   * does not open the real file-backed database. Inject an in-memory DB (`createTestDatabase`)
    * for tests that exercise the query paths (issue #3067).
    */
   constructor(db?: Kysely<Database>) {
-    this.injectedDb = db ?? null;
-  }
-
-  /** The injected DB, or the shared singleton resolved on first use. */
-  private get db(): Kysely<Database> {
-    return this.injectedDb ?? getDatabase();
+    this.repository = new MemoryBaselineRepository(db);
   }
 
   /**
@@ -36,15 +30,7 @@ export class MemoryBaselineManager {
     toolName: string,
   ): Promise<MemoryBaseline | null> {
     try {
-      const baseline = await this.db
-        .selectFrom("memory_baselines")
-        .selectAll()
-        .where("device_id", "=", deviceId)
-        .where("package_name", "=", packageName)
-        .where("tool_name", "=", toolName)
-        .executeTakeFirst();
-
-      return baseline || null;
+      return await this.repository.get(deviceId, packageName, toolName);
     } catch (error) {
       logger.warn(`[MemoryBaselineManager] Failed to get baseline: ${error}`);
       return null;
@@ -66,32 +52,18 @@ export class MemoryBaselineManager {
       const now = new Date().toISOString();
       const unreachableObjects = metrics.unreachableObjects?.count || 0;
 
-      await this.db
-        .insertInto("memory_baselines")
-        .values({
-          device_id: deviceId,
-          package_name: packageName,
-          tool_name: toolName,
-          java_heap_baseline_mb: metrics.postSnapshot.javaHeapMb,
-          native_heap_baseline_mb: metrics.postSnapshot.nativeHeapMb,
-          gc_count_baseline: metrics.gcCount,
-          gc_duration_baseline_ms: metrics.gcTotalDurationMs,
-          unreachable_objects_baseline: unreachableObjects,
-          sample_count: 1,
-          last_updated: now,
-        })
-        .onConflict((oc) =>
-          oc.columns(["device_id", "package_name", "tool_name"]).doUpdateSet({
-            java_heap_baseline_mb: sql<number>`${alpha} * ${metrics.postSnapshot.javaHeapMb} + (1 - ${alpha}) * java_heap_baseline_mb`,
-            native_heap_baseline_mb: sql<number>`${alpha} * ${metrics.postSnapshot.nativeHeapMb} + (1 - ${alpha}) * native_heap_baseline_mb`,
-            gc_count_baseline: sql<number>`${alpha} * ${metrics.gcCount} + (1 - ${alpha}) * gc_count_baseline`,
-            gc_duration_baseline_ms: sql<number>`${alpha} * ${metrics.gcTotalDurationMs} + (1 - ${alpha}) * gc_duration_baseline_ms`,
-            unreachable_objects_baseline: sql<number>`${alpha} * ${unreachableObjects} + (1 - ${alpha}) * unreachable_objects_baseline`,
-            sample_count: sql<number>`sample_count + 1`,
-            last_updated: now,
-          }),
-        )
-        .execute();
+      await this.repository.upsertEma({
+        deviceId,
+        packageName,
+        toolName,
+        javaHeapMb: metrics.postSnapshot.javaHeapMb,
+        nativeHeapMb: metrics.postSnapshot.nativeHeapMb,
+        gcCount: metrics.gcCount,
+        gcDurationMs: metrics.gcTotalDurationMs,
+        unreachableObjects,
+        alpha,
+        now,
+      });
 
       logger.info(`[MemoryBaselineManager] Upserted baseline for ${packageName}/${toolName}`);
     } catch (error) {
@@ -150,12 +122,7 @@ export class MemoryBaselineManager {
       // `executeTakeFirst().numDeletedRows` is the actual deleted-row count;
       // `execute()` returns a single DeleteResult per statement, so its
       // `.length` is always 1 and would log "Cleaned up 1" even for no-ops.
-      const deleted = await this.db
-        .deleteFrom("memory_baselines")
-        .where(sql`datetime(last_updated)`, "<", sql`datetime(${cutoffDate})`)
-        .executeTakeFirst();
-
-      const deletedCount = Number(deleted.numDeletedRows) || 0;
+      const deletedCount = await this.repository.deleteOlderThan(cutoffDate);
       if (deletedCount > 0) {
         logger.info(
           `[MemoryBaselineManager] Cleaned up ${deletedCount} stale baselines older than ${daysOld} days`,
@@ -171,14 +138,7 @@ export class MemoryBaselineManager {
    */
   async getPackageBaselines(deviceId: string, packageName: string): Promise<MemoryBaseline[]> {
     try {
-      const baselines = await this.db
-        .selectFrom("memory_baselines")
-        .selectAll()
-        .where("device_id", "=", deviceId)
-        .where("package_name", "=", packageName)
-        .execute();
-
-      return baselines;
+      return await this.repository.listForPackage(deviceId, packageName);
     } catch (error) {
       logger.warn(`[MemoryBaselineManager] Failed to get package baselines: ${error}`);
       return [];

@@ -102,7 +102,7 @@ import { attachRawViewHierarchy } from "../utility/viewHierarchySearch";
 import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 import type { IosVoiceOverDetector } from "../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../accessibility/IosVoiceOverDetector";
-import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
+import { FeatureFlagService, type FeatureFlagReader } from "../featureFlags/FeatureFlagService";
 import { IOS_HIERARCHY_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyHierarchy";
 import { IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS } from "../observe/ios/CtrlProxyVoiceOver";
 import type { AccessibilityDetector } from "../accessibility/interfaces/AccessibilityDetector";
@@ -148,7 +148,7 @@ interface TapAnyElementDependencies extends DisplayFenceDependencies {
   timer?: Timer;
   elementSelector?: ElementSelector;
   iosVoiceOverDetector?: IosVoiceOverDetector;
-  featureFlags?: FeatureFlagService;
+  featureFlags?: FeatureFlagReader;
   accessibilityDetector?: AccessibilityDetector;
   talkBackStrategy?: Pick<
     TalkBackTapStrategy,
@@ -411,7 +411,7 @@ export class TapAnyElement extends BaseVisualChange {
   private viewHierarchy: ViewHierarchy;
   private hierarchyCapture: HierarchyCapture;
   private iosVoiceOverDetector: IosVoiceOverDetector;
-  private featureFlags: FeatureFlagService;
+  private featureFlags: FeatureFlagReader;
   private accessibilityDetector: AccessibilityDetector;
   private talkBackStrategy: Pick<
     TalkBackTapStrategy,

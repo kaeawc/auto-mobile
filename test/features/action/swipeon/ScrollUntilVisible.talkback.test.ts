@@ -15,7 +15,7 @@ import type {
   TalkBackSwipeRunner,
   VoiceOverSwipeRunner,
 } from "../../../../src/features/action/swipeon/types";
-import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
+import type { FeatureFlagReader } from "../../../../src/features/featureFlags/FeatureFlagService";
 import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
@@ -75,7 +75,7 @@ function makeScrollUntilVisible({
    */
   resolveObservation?: (callIdx: number) => ObserveResult;
   talkBackExecutor: TalkBackSwipeRunner;
-  featureFlags?: FeatureFlagService;
+  featureFlags?: FeatureFlagReader;
   device?: BootedDevice;
   voiceOverExecutor?: VoiceOverSwipeRunner;
 }): ScrollUntilVisible {
@@ -246,7 +246,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
     test("forwards the injected featureFlags to detectMethod (#3925 regression)", async () => {
       scrollResolver.setNextScrollableContainer(CONTAINER_ELEMENT);
       lookup.nextElementByText = TARGET_ELEMENT;
-      const sentinelFlags = { __sentinel: true } as unknown as FeatureFlagService;
+      const sentinelFlags = { __sentinel: true, isEnabled: () => false };
 
       const suv = makeScrollUntilVisible({
         accessibilityDetector: detector,

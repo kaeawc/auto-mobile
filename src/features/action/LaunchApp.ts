@@ -1,5 +1,5 @@
 import { DUMPSYS_MAX_BUFFER } from "../../utils/android-cmdline-tools/dumpsysLimits";
-import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
+import { unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange } from "./BaseVisualChange";
@@ -28,10 +28,7 @@ import {
 } from "./confirmAndroidPackageInstalledLive";
 import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import {
-  resolveIosColdAppCheckKind,
-  resolveIosDeviceKind,
-} from "../../utils/ios-cmdline-tools/IosDeviceKind";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import {
   resolveIosLaunchBackend,
@@ -39,18 +36,14 @@ import {
 } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { runWithNestedPerfTracker } from "../../utils/PerfContext";
-import { DisplayedTimeMetricsCollector } from "../performance/DisplayedTimeMetricsCollector";
 import {
   getPerformanceMonitor,
-  setLastTtiMs,
   type PerformanceSamplingCoordinator,
 } from "../performance/PerformanceMonitor";
-import { serverConfig } from "../../utils/ServerConfig";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../observe/android";
-import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { shellQuote } from "../../utils/shellQuote";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
@@ -72,6 +65,19 @@ import {
   PACKAGE_NOT_INSTALLED_ERROR,
 } from "./LaunchPackageRemovedError";
 import { OBSERVED_INTERACTION_PROFILES } from "./observedInteractionProfiles";
+
+import {
+  checkColdIosAppNotInstalled,
+  launchColdIosProcess,
+  launchWarmIosProcess,
+  needsIosColdStart,
+  type IosLaunchProcessOptions,
+} from "./launchApp/iosLaunchProcess";
+import {
+  prepareAndroidLaunchProcess,
+  resolveAndroidLaunchInstalledApps,
+} from "./launchApp/androidLaunchPreparation";
+import { observeAndroidAppLaunch } from "./launchApp/androidLaunchObservation";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -159,29 +165,6 @@ function resolvePerformanceSamplingCoordinator(
   dependencies: LaunchAppDependencies,
 ): PerformanceSamplingCoordinator {
   return dependencies.performanceSamplingCoordinator ?? getPerformanceMonitor();
-}
-
-interface IosLaunchProcessOptions {
-  launchArguments?: string[];
-  launchEnvironment?: Record<string, string>;
-}
-
-function needsIosColdStart(
-  coldBoot: boolean,
-  clearAppData: boolean,
-  { launchArguments, launchEnvironment }: IosLaunchProcessOptions,
-): boolean {
-  return (
-    coldBoot || clearAppData || Boolean(launchArguments?.length) || launchEnvironment !== undefined
-  );
-}
-
-function coldIosLaunchOptions({ launchArguments, launchEnvironment }: IosLaunchProcessOptions) {
-  return {
-    foregroundIfRunning: false,
-    launchArguments,
-    ...(launchEnvironment === undefined ? {} : { environment: launchEnvironment }),
-  };
 }
 
 interface AndroidLaunchOptions {
@@ -625,16 +608,19 @@ export class LaunchApp extends BaseVisualChange {
           // Reject missing apps before termination, data clearing, or CtrlProxy
           // targeting only with a trustworthy inventory. Unknown IDs cannot
           // safely use the physical lister: its routing differs from launch.
-          if (
-            needsColdStart &&
-            !isSystemBundleId &&
-            resolveIosColdAppCheckKind(this.device) !== undefined
-          ) {
-            const missingApp = await this.checkIosAppNotInstalled(bundleId, perf, signal, true);
-            if (missingApp) {
-              perf.end();
-              return missingApp;
-            }
+          const checkInstalled = this.checkIosAppNotInstalled.bind(this);
+          const missingApp = await checkColdIosAppNotInstalled({
+            needsColdStart,
+            isSystemBundleId,
+            device: this.device,
+            bundleId,
+            perf,
+            signal,
+            checkInstalled,
+          });
+          if (missingApp) {
+            perf.end();
+            return missingApp;
           }
 
           // Set bundle ID before starting CtrlProxy so it targets the app, not SpringBoard
@@ -643,89 +629,34 @@ export class LaunchApp extends BaseVisualChange {
           }
           const ctrlProxyClient = IOSCtrlProxyClient.getInstance(this.device);
 
-          let launchResult: { success: boolean; pid?: number; error?: string };
-
-          if (needsColdStart) {
-            // Cold boot: use simctl (simulator) / devicectl (device) directly.
-            // XCUIApplication.launch() is slow for heavy apps (10s+ timeout) while
-            // simctl launch completes in ~500ms. CtrlProxy's value is in the
-            // activate() fast path, not cold boot.
-            const terminator = resolveIosColdStartTerminateBackend(this.device.deviceId, {
-              simctl: this.simctl,
-            });
-            if (terminator) {
-              // simctl launch does not terminate an already-running instance, so
-              // terminate first for cold-boot semantics. Physical devices skip this:
-              // the devicectl launch below passes `--terminate-existing`, which is
-              // the authoritative cold-boot relaunch (an explicit pre-terminate
-              // would add a redundant round-trip).
-              await perf.track("terminateApp", () =>
-                this.terminateIosAppBeforeLaunch(terminator, bundleId),
-              );
-              this.assertLaunchNotAborted(signal);
-            }
-
-            // Wipe the app's data container (fastest iOS "clear data": no reinstall,
-            // keeps permission grants). System bundles (com.apple.*) are skipped —
-            // we never want to wipe SpringBoard/Settings data.
-            if (clearAppData && !isSystemBundleId) {
-              const clearResult = await perf.track("clearAppData", () =>
-                this.clearAppDataFactory(this.device, this.simctl).execute(bundleId),
-              );
-              this.assertLaunchNotAborted(signal);
-              if (!clearResult.success) {
-                // Do NOT launch with stale data — callers request clearAppData to
-                // guarantee a clean launch. Fail loudly instead of silently
-                // reporting success on an un-cleared app.
-                const error = `Failed to clear app data: ${clearResult.error ?? "unknown error"}`;
-                logger.warn(`[LaunchApp] iOS clearAppData failed for ${bundleId}: ${error}`);
-                perf.end();
-                return { success: false, packageName: bundleId, error };
-              }
-            } else if (clearAppData && isSystemBundleId) {
-              logger.warn(`[LaunchApp] Ignoring clearAppData for system bundle ${bundleId}`);
-            }
-
-            // Re-wire CtrlProxy to the (re)launched app. The bundle is already
-            // re-targeted above (setTargetBundleId); after a data wipe the app gets
-            // a brand-new process, so drop the cached hierarchy too — otherwise
-            // waitForIosHierarchyReady returns stale pre-terminate data via the
-            // cache fast path. clearCache() nulls the cache entirely, which is what we
-            // need here: invalidateCache() (fixed in #4193) forces a refetch, but the
-            // invalidated entry is still served as a stale fallback if that refetch
-            // fails — and pre-terminate data for a wiped app must never be served.
-            ctrlProxyClient.clearCache();
-            IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(
-              bundleId,
-            );
-            launchResult = await perf.track("launch", () =>
-              backend.launchApp(bundleId, coldIosLaunchOptions(processOptions)),
-            );
-            this.assertLaunchNotAborted(signal);
-          } else {
-            // Warm launch. Simulator: simctl launch foregrounds a backgrounded app
-            // and is faster than the CtrlProxy WebSocket round-trip (~4-5s). Device:
-            // devicectl has no foreground verb, so relaunch via --terminate-existing.
-            launchResult = await perf.track("launch", () =>
-              backend.launchApp(bundleId, { launchArguments }),
-            );
-            this.assertLaunchNotAborted(signal);
-
-            if (!launchResult.success) {
-              logger.warn(`[LaunchApp] launch failed: ${launchResult.error ?? "unknown error"}`);
-            }
-
-            // Only check installed apps on the fallback path, and only on
-            // simulators — simctl listapps is slow (~2s) and returns nothing for
-            // a physical device, where devicectl's launch error is authoritative.
-            if (!launchResult.success && !isSystemBundleId && simulator) {
-              const missingApp = await this.checkIosAppNotInstalled(bundleId, perf, signal);
-              if (missingApp) {
-                perf.end();
-                return missingApp;
-              }
-            }
+          const launchOutcome = needsColdStart
+            ? await launchColdIosProcess({
+                device: this.device,
+                bundleId,
+                clearAppData,
+                isSystemBundleId,
+                perf,
+                signal,
+                processOptions,
+                backend,
+                simctl: this.simctl,
+                ctrlProxyClient,
+                clearAppDataFactory: this.clearAppDataFactory.bind(this),
+                terminateBeforeLaunch: this.terminateIosAppBeforeLaunch.bind(this),
+              })
+            : await launchWarmIosProcess({
+                bundleId,
+                isSystemBundleId,
+                perf,
+                signal,
+                backend,
+                launchArguments,
+                checkInstalled,
+              });
+          if (launchOutcome.kind === "failed") {
+            return launchOutcome.result;
           }
+          const launchResult = launchOutcome.result;
 
           if (launchResult.error) {
             perf.end();
@@ -1114,25 +1045,12 @@ export class LaunchApp extends BaseVisualChange {
     if (targetUserResult.status === "rejected") {
       throw targetUserResult.reason;
     }
-    if (installedAppsResult.status === "rejected") {
-      throw installedAppsResult.reason;
-    }
-
     const targetUserId = targetUserResult.value;
-    const listing = installedAppsResult.value;
-    if (!listing.successful) {
-      throw toActionableError(
-        listing.error ??
-          new Error(
-            `installed-app listing did not complete successfully for ${this.device.deviceId}`,
-          ),
-        `Could not determine whether ${packageName} is installed`,
-      );
-    }
-    const installedApps = listing.apps;
-    logger.info(`[LaunchApp] Found ${installedApps.length} installed app(s)`);
-    logger.info(`[LaunchApp] Looking for package: ${packageName}`);
-    logger.info(`[LaunchApp] Installed apps: ${installedApps.join(", ")}`);
+    const installedApps = resolveAndroidLaunchInstalledApps({
+      installedAppsResult,
+      deviceId: this.device.deviceId,
+      packageName,
+    });
     if (
       !(await this.isInstalledOrLiveConfirmed(
         installedApps,
@@ -1154,88 +1072,23 @@ export class LaunchApp extends BaseVisualChange {
       };
     }
 
-    // Check if app is running
-    const isRunning = await perf.track("checkRunning", async () => {
-      const isRunningArgs = ["shell", "dumpsys", "activity", "processes"];
-      logger.info(`[LaunchApp] Checking if app is running: ${isRunningArgs.join(" ")}`);
-      const result = await readAndroidPackageProcesses(this.adb, packageName, {
-        userId: targetUserId,
-        signal,
-        timer: this.timer,
-      });
-      logger.info(
-        `[LaunchApp] App running: ${result.isRunning} (processes: ${JSON.stringify(result.processes)})`,
-      );
-      return result.isRunning;
+    const preparation = await prepareAndroidLaunchProcess({
+      device: this.device,
+      packageName,
+      targetUserId,
+      clearAppData,
+      coldBoot,
+      perf,
+      signal,
+      adb: this.adb,
+      timer: this.timer,
+      createClearAppData: this.createAndroidClearAppData.bind(this),
+      createColdBoot: this.createAndroidColdBoot.bind(this),
     });
-    this.assertLaunchNotAborted(signal);
-
-    let didTerminateOrClear = false;
-    let alreadyForeground: boolean | null = false;
-
-    if (isRunning) {
-      if (clearAppData) {
-        const clearResult = await perf.track("clearAppData", async () => {
-          return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
-        });
-        this.assertLaunchNotAborted(signal);
-        if (!clearResult.success) {
-          const error = `Failed to clear app data: ${clearResult.error ?? "unknown error"}`;
-          logger.warn(`[LaunchApp] Android clearAppData failed for ${packageName}: ${error}`);
-          perf.end();
-          return { success: false, packageName, userId: targetUserId, error };
-        }
-        didTerminateOrClear = true;
-      } else if (coldBoot) {
-        const coldBootResult = await perf.track("terminateApp", async () => {
-          return this.createAndroidColdBoot(this.device).execute(packageName, {
-            skipObservation: true,
-            userId: targetUserId,
-          });
-        });
-        this.assertLaunchNotAborted(signal);
-        if (!coldBootResult.success) {
-          const error = `Cold boot could not stop ${packageName}: ${coldBootResult.error ?? "unknown error"}`;
-          logger.warn(`[LaunchApp] ${error}`);
-          perf.end();
-          return { success: false, packageName, userId: targetUserId, error };
-        }
-        didTerminateOrClear = true;
-      }
-
-      // Skip foreground check if we just terminated or cleared - we know app is not in foreground
-      if (!didTerminateOrClear) {
-        // Check if app is in foreground - use getForegroundApp which returns user context
-        const foregroundApp = await perf.track(`checkForeground`, async () => {
-          return this.adb.getForegroundApp();
-        });
-        this.assertLaunchNotAborted(signal);
-
-        alreadyForeground =
-          foregroundApp &&
-          foregroundApp.packageName === packageName &&
-          foregroundApp.userId === targetUserId;
-
-        if (alreadyForeground) {
-          logger.info(
-            `[LaunchApp] App ${packageName} is already in foreground in user ${targetUserId}`,
-          );
-        }
-      }
-    } else {
-      if (clearAppData) {
-        const clearResult = await perf.track("clearAppData", async () => {
-          return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
-        });
-        this.assertLaunchNotAborted(signal);
-        if (!clearResult.success) {
-          const error = `Failed to clear app data: ${clearResult.error ?? "unknown error"}`;
-          logger.warn(`[LaunchApp] Android clearAppData failed for ${packageName}: ${error}`);
-          perf.end();
-          return { success: false, packageName, userId: targetUserId, error };
-        }
-      }
+    if ("failure" in preparation) {
+      return preparation.failure;
     }
+    const { isRunning, didTerminateOrClear, alreadyForeground } = preparation;
 
     // A launch from not-running, or after a terminate/clear, starts a new process: the SDK route
     // the last one reported no longer names its screen.
@@ -1243,170 +1096,43 @@ export class LaunchApp extends BaseVisualChange {
       this.cacheInvalidator.retireAppProcess(this.device, packageName);
     }
 
-    if (alreadyForeground) {
-      // "Make this app foreground" is a goal, not a transition: the goal already
-      // holds, so this is a success flagged with `alreadyForeground` — not an
-      // error a client has to string-match to decide whether to continue, which
-      // also discarded the observation a launch normally returns (issue #6868).
-      const result = await this.observedInteraction(
-        async () => {
-          perf.end();
-          return {
-            success: true,
-            alreadyForeground: true,
-            packageName,
-            activityName,
-            userId: targetUserId,
-          };
-        },
-        {
-          ...OBSERVED_INTERACTION_PROFILES.appLaunch,
-          perf,
-          packageName,
-          signal,
-          skipUiStability: skipUiStability ?? false,
-        },
-      );
-      // The foreground read and this observation are two separate device reads,
-      // so another app or a system surface can take over in between. Reconcile
-      // through the SAME validation the launch path uses rather than asserting
-      // `alreadyForeground: true` over a capture of a different app, which
-      // `buildLaunchAppResponse` would surface as a clean success with a
-      // mismatched `observedAppId` and no error (issue #6868 review).
-      const settledResult = await this.ensureLaunchObservationMatchesPackage(
-        result,
-        packageName,
-        ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
-        undefined,
-        signal,
-        { coldBoot, expectedUserId: targetUserId },
-      );
-      await this.captureTerminalObservationScreenshot(settledResult.observation, perf, signal);
-      return settledResult;
-    }
-
-    logger.info(`[LaunchApp] Proceeding with app launch`);
-    this.assertLaunchNotAborted(signal);
-
-    const captureDisplayedMetrics = serverConfig.isUiPerfModeEnabled();
-    logger.info(
-      `[LaunchApp] captureDisplayedMetrics=${captureDisplayedMetrics} (isUiPerfModeEnabled)`,
-    );
-    const displayedMetricsCollector = captureDisplayedMetrics
-      ? new DisplayedTimeMetricsCollector(this.device, this.adbFactory)
-      : null;
-    let displayedMetricsStartMs: number | null = null;
-
-    const foregroundWaitTimeoutMs = LAUNCH_OBSERVATION_TIMEOUT_MS;
-    const foregroundPollIntervalMs = LAUNCH_OBSERVATION_POLL_INTERVAL_MS;
-    let observationTimestampMs: number | undefined;
-
-    const launchResult = await this.observedInteraction<LaunchAppResult>(
-      async () => {
-        if (displayedMetricsCollector) {
-          displayedMetricsStartMs = await perf.track("displayedLogcatStartTime", () =>
-            this.adb.getDeviceTimestampMs(),
-          );
-        }
-        const launchOutcome = await this.performLaunch(
-          packageName,
-          activityName,
-          targetUserId,
-          perf,
-          signal,
-        );
-        signal?.throwIfAborted();
-        const foregroundReady = await this.waitForAppForeground(
-          packageName,
-          targetUserId,
-          foregroundWaitTimeoutMs,
-          foregroundPollIntervalMs,
-          perf,
-          signal,
-        );
-        if (!foregroundReady) {
-          logger.warn(
-            `[LaunchApp] ${packageName} did not become the foreground app before observation; continuing to validate launch observation`,
-          );
-        }
-        observationTimestampMs = await this.adb.getDeviceTimestampMs();
-        return launchOutcome;
-      },
-      {
-        ...OBSERVED_INTERACTION_PROFILES.appLaunch,
-        perf,
-        skipUiStability: skipUiStability ?? false,
-        packageName,
-        foregroundAppMayChange: true,
-        observationTimestampProvider: () => observationTimestampMs,
-        signal,
-      },
-    ).catch((error: unknown) => {
-      if (error instanceof LaunchPackageRemovedError) {
-        perf.end();
-        return { success: false, packageName, userId: targetUserId, error: error.message };
-      }
-      throw error;
-    });
-
-    signal?.throwIfAborted();
-    if (!launchResult.success && launchResult.error === PACKAGE_NOT_INSTALLED_ERROR) {
-      return launchResult;
-    }
-    const settledLaunchResult = await this.ensureLaunchObservationMatchesPackage(
-      launchResult,
+    return observeAndroidAppLaunch({
+      device: this.device,
+      adb: this.adb,
+      adbFactory: this.adbFactory,
       packageName,
-      ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
-      undefined,
+      targetUserId,
+      activityName,
+      clearAppData,
+      skipUiStability,
       signal,
-      { coldBoot, expectedUserId: targetUserId },
-    );
-    if (clearAppData && settledLaunchResult.success && settledLaunchResult.observation) {
-      await this.waitForAndroidColdStableFrame(settledLaunchResult, packageName, signal);
-    }
-    await this.captureTerminalObservationScreenshot(settledLaunchResult.observation, perf, signal);
-
-    logger.info(
-      `[LaunchApp] TTI capture check: collector=${!!displayedMetricsCollector}, startMs=${displayedMetricsStartMs}, hasObservation=${!!settledLaunchResult?.observation}`,
-    );
-    if (
-      displayedMetricsCollector &&
-      displayedMetricsStartMs !== null &&
-      settledLaunchResult?.observation
-    ) {
-      const displayedMetricsEndMs = await perf.track("displayedLogcatEndTime", () =>
-        this.adb.getDeviceTimestampMs(),
-      );
-      logger.info(
-        `[LaunchApp] Capturing displayed metrics: startMs=${displayedMetricsStartMs}, endMs=${displayedMetricsEndMs}`,
-      );
-      const displayedTimeMetrics = await displayedMetricsCollector.captureDisplayedMetrics(
-        {
+      perf,
+      alreadyForeground,
+      observedInteraction: this.observedInteraction.bind(this),
+      performLaunch: () =>
+        this.performLaunch(packageName, activityName, targetUserId, perf, signal),
+      waitForForeground: () =>
+        this.waitForAppForeground(
           packageName,
-          startTimestampMs: displayedMetricsStartMs,
-          endTimestampMs: displayedMetricsEndMs,
-        },
-        perf,
-      );
-      logger.info(`[LaunchApp] Captured ${displayedTimeMetrics.length} displayed metrics`);
-      settledLaunchResult.observation.displayedTimeMetrics = displayedTimeMetrics;
-
-      // Store TTI for the performance monitor to report
-      // Use the first displayed metric as the TTI (time to first frame / interactive)
-      if (displayedTimeMetrics.length > 0) {
-        const firstMetric = displayedTimeMetrics[0];
-        setLastTtiMs(this.device.deviceId, packageName, firstMetric.displayedTimeMs);
-        logger.info(
-          `[LaunchApp] Recorded TTI for ${packageName}: ${firstMetric.displayedTimeMs}ms`,
-        );
-      } else {
-        logger.info(`[LaunchApp] No displayed metrics found for ${packageName}`);
-      }
-    } else {
-      logger.info(`[LaunchApp] Skipping TTI capture - conditions not met`);
-    }
-
-    return settledLaunchResult;
+          targetUserId,
+          LAUNCH_OBSERVATION_TIMEOUT_MS,
+          LAUNCH_OBSERVATION_POLL_INTERVAL_MS,
+          perf,
+          signal,
+        ),
+      settleObservation: (result) =>
+        this.ensureLaunchObservationMatchesPackage(
+          result,
+          packageName,
+          ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS,
+          undefined,
+          signal,
+          { coldBoot, expectedUserId: targetUserId },
+        ),
+      captureScreenshot: (observation) =>
+        this.captureTerminalObservationScreenshot(observation, perf, signal),
+      waitForColdFrame: (result) => this.waitForAndroidColdStableFrame(result, packageName, signal),
+    });
   }
 
   private async waitForAndroidColdStableFrame(

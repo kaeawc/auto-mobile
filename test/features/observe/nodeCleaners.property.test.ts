@@ -6,6 +6,8 @@ import { sanitizeObserveResult } from "../../../src/features/observe/output/Obse
 import { CtrlProxyHierarchy } from "../../../src/features/observe/ios/CtrlProxyHierarchy";
 import { cleanupIosXCTestHierarchy } from "../../../src/features/observe/ios/cleanupIosHierarchy";
 import { SeededRandom } from "../../fakes/SeededRandom";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { RequestManager } from "../../../src/utils/RequestManager";
 
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 80 } as const;
 
@@ -104,13 +106,17 @@ function generatedAttrs(random: Random): Record<string, unknown> {
 }
 
 const viewCleaner = Object.create(ViewHierarchy.prototype) as ViewHierarchy;
-const ctrlCleaner = new CtrlProxyHierarchy({} as never) as unknown as {
-  cleanAttributes(attrs: Record<string, unknown>): Record<string, unknown>;
-  filterHierarchyNode(
-    node: { $: Record<string, unknown>; node?: { $: Record<string, unknown> }[] },
-    isRoot?: boolean,
-  ): { $: Record<string, unknown> } | null;
-};
+const ctrlTimer = new FakeTimer();
+const ctrlCleaner = new CtrlProxyHierarchy({
+  getWebSocket: () => null,
+  requestManager: new RequestManager(ctrlTimer),
+  timer: ctrlTimer,
+  ensureConnected: async () => false,
+  cancelScreenshotBackoff: () => {},
+  cacheFreshTtlMs: 0,
+  getCachedHierarchy: () => null,
+  setCachedHierarchy: () => {},
+});
 
 function cleanAndroidNode(attrs: Record<string, unknown>): Record<string, unknown> {
   return viewCleaner.cleanNodeProperties({ $: { ...attrs } });
@@ -121,11 +127,11 @@ function trimOutputNode(attrs: Record<string, unknown>): Record<string, unknown>
     { viewHierarchy: { hierarchy: { node: { ...attrs } } } } as never,
     { dropElements: false, project: "full" },
   );
-  return result.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+  return result.viewHierarchy!.hierarchy!.node!;
 }
 
 function cleanCtrlProxyNode(attrs: Record<string, unknown>): Record<string, unknown> {
-  return ctrlCleaner.filterHierarchyNode({ $: { ...attrs } }, true)?.$ ?? {};
+  return ctrlCleaner.testHooks.filterHierarchyNode({ $: { ...attrs } })?.$ ?? {};
 }
 
 function cleanIosNode(attrs: Record<string, unknown>): Record<string, unknown> {

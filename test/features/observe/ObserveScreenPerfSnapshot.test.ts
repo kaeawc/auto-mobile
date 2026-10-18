@@ -10,27 +10,16 @@ import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeScreenshotStateStore } from "../../fakes/FakeScreenshotStateStore";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { resetScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
-import type { HierarchyCollector } from "../../../src/features/observe/collectors/HierarchyCollector";
-import type { DeviceStateCollector } from "../../../src/features/observe/collectors/DeviceStateCollector";
-import type { PerformanceAuditor } from "../../../src/features/observe/audits/PerformanceAuditor";
-import type { AccessibilityAuditor } from "../../../src/features/observe/audits/AccessibilityAuditor";
-import type { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
 import { getPerfWindowBuffer } from "../../../src/features/performance/PerfWindowBuffer";
 import {
   _resetPerformanceMonitor,
   getPerformanceMonitor,
 } from "../../../src/features/performance/PerformanceMonitor";
 import type { BootedDevice } from "../../../src/models";
+import { noopObserveAudits } from "../../fakes/noopObserveAudits";
 
 const ENABLE_ENV = "AUTOMOBILE_OBSERVE_PERF_SNAPSHOT";
 const DEVICE_ID = "perf-device";
-
-class NoOpAuditor implements Pick<
-  PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector,
-  "run"
-> {
-  async run(): Promise<void> {}
-}
 
 const device: BootedDevice = {
   deviceId: DEVICE_ID,
@@ -47,11 +36,9 @@ function createObserveScreen(): RealObserveScreen {
       cacheStore: new FakeObserveCacheStore(fakeTimer),
       screenshotStateStore: new FakeScreenshotStateStore(fakeTimer),
       screenshotRecorder: new FakeScreenshotRecorder(),
-      hierarchyCollector: new FakeHierarchyCollector() as unknown as HierarchyCollector,
-      deviceStateCollector: new FakeDeviceStateCollector() as unknown as DeviceStateCollector,
-      performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
-      accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
-      accessibilityStateDetector: new NoOpAuditor() as unknown as AccessibilityStateDetector,
+      hierarchyCollector: new FakeHierarchyCollector(),
+      deviceStateCollector: new FakeDeviceStateCollector(),
+      ...noopObserveAudits(),
     },
     fakeTimer,
   );

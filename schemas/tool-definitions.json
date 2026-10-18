@@ -1367,6 +1367,74 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "snapshotName": {
+          "type": "string"
+        },
+        "snapshotType": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "deviceName": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string"
+        },
+        "manifest": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "bundleStatuses": {
+          "type": "array",
+          "items": {}
+        },
+        "evictedSnapshotNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "restoreMode": {
+          "type": "string",
+          "enum": ["vm", "settings_only"]
+        },
+        "restoreNote": {
+          "type": "string"
+        },
+        "restoredAt": {
+          "type": "string"
+        },
+        "deviceSessionUuid": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": ["message", "snapshotName", "snapshotType", "deviceId", "deviceName"]
     }
   },
   {
@@ -27729,6 +27797,51 @@
       },
       "required": ["appId", "paths"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "container": {
+          "type": "string"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": ["reset", "missing", "failed"]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": ["path", "status"],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": ["success", "deviceId", "platform", "appId", "container", "entries"],
+      "additionalProperties": {}
     }
   },
   {

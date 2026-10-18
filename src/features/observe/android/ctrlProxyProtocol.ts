@@ -469,7 +469,7 @@ export interface ShowPrototypeMessage {
   type: "show_prototype";
   requestId: string;
   spec: PrototypeSpec;
-  /** Android logical display; omitted for the default display. Requires prototype_display_id_v1. */
+  /** Android logical display; omitted for the default display. Requires prototype_display_id_v2. */
   displayId?: number;
   /**
    * Only `true` is sent. A show whose spec.id is the prototype on screen replaces it in place (pages
@@ -1104,8 +1104,12 @@ export const ANDROID_CAPABILITY_REQUEST_TYPES = [
 /**
  * Advertised only by a CtrlProxy that attaches `show_prototype` to the requested `displayId`. An
  * older device would ignore the unknown field and show the prototype on the default display.
+ *
+ * v2, not v1: APKs cut before #13148 advertised `prototype_display_id_v1` on API 30/31 too, where a
+ * non-default display throws SecurityException/BadTokenException (#9934). Only APKs that gate the
+ * flag on API 32+ advertise v2, so the host cannot be fooled by a stale v1 claim (#13164).
  */
-export const PROTOTYPE_DISPLAY_CAPABILITY = "prototype_display_id_v1";
+export const PROTOTYPE_DISPLAY_CAPABILITY = "prototype_display_id_v2";
 
 /**
  * Advertised only by a CtrlProxy that honours spec `window.layer` and `window.persistence`. An older

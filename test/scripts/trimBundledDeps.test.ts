@@ -1,14 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../helpers/scratchRoot";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+
 import path from "node:path";
 import {
   collectBundledPackages,
@@ -19,15 +12,9 @@ import {
   type TrimOptions,
 } from "../../scripts/release/trim-bundled-deps";
 
-const roots: string[] = [];
-afterEach(() => {
-  for (const root of roots.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+const scratch = useScratchRoot("trimBundledDeps-");
 function fixture() {
-  const root = mkdtempSync(path.join(tmpdir(), "pack-trim-"));
-  roots.push(root);
+  const root = scratch.next();
   const put = (filename: string, value: unknown) => {
     const full = path.join(root, filename);
     mkdirSync(path.dirname(full), { recursive: true });

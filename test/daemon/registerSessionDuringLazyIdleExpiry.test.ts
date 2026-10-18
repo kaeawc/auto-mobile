@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { expireIfDue } from "../helpers/expireIfDue";
 import type { Kysely } from "kysely";
 import {
   DAEMON_REGISTER_SESSION_METHOD,
@@ -162,7 +163,7 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
 
   test("a finished idle release refuses registration", async () => {
     expireWithoutLookup();
-    expect(manager.getSession(SESSION)).toBeNull();
+    expect(expireIfDue(manager, SESSION)).toBeNull();
     finishRestore();
     await manager.waitForSessionRelease(SESSION);
 

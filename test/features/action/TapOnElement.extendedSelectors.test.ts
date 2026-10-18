@@ -177,7 +177,7 @@ describe("TapOnElement extended selectors", () => {
   });
 
   describe("findElementInHierarchy", () => {
-    test("delegates text to selectByText", () => {
+    test("delegates text to select", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
@@ -190,7 +190,7 @@ describe("TapOnElement extended selectors", () => {
       expect(selector.lastText).toBe("Login");
     });
 
-    test("delegates elementId to selectByResourceId", () => {
+    test("delegates elementId to select", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
@@ -203,7 +203,7 @@ describe("TapOnElement extended selectors", () => {
       expect(selector.lastResourceId).toBe("com.app:id/btn");
     });
 
-    test("delegates testTag to selectByTestTag", () => {
+    test("delegates testTag to select", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
@@ -216,7 +216,7 @@ describe("TapOnElement extended selectors", () => {
       expect(selector.lastTestTag).toBe("message_row_42");
     });
 
-    test("text + sibling delegates to selectClickableSiblingOfText", () => {
+    test("text + sibling selects a sibling query", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
@@ -229,7 +229,7 @@ describe("TapOnElement extended selectors", () => {
       expect(selector.lastText).toBe("Accept Terms");
     });
 
-    test("elementId + sibling delegates to selectClickableSiblingOfResourceId", () => {
+    test("elementId + sibling selects a sibling query", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
@@ -244,9 +244,9 @@ describe("TapOnElement extended selectors", () => {
 
     test("textAny tries variants in order and returns the first match", () => {
       class VariantSelector extends FakeElementSelector {
-        override selectByText(...args: Parameters<FakeElementSelector["selectByText"]>) {
-          this.setNextElement(args[1] === "Add" ? makeElement() : null);
-          return super.selectByText(...args);
+        override select(...args: Parameters<FakeElementSelector["select"]>) {
+          this.setNextElement(args[1].text === "Add" ? makeElement() : null);
+          return super.select(...args);
         }
       }
       const selector = new VariantSelector(null);
@@ -266,9 +266,9 @@ describe("TapOnElement extended selectors", () => {
       const offScreenElement = makeElement({ left: -300, top: 0, right: -200, bottom: 50 });
       const visibleElement = makeElement({ left: 20, top: 20, right: 120, bottom: 70 });
       class VariantSelector extends FakeElementSelector {
-        override selectByText(...args: Parameters<FakeElementSelector["selectByText"]>) {
-          this.setNextElement(args[1] === "Done" ? offScreenElement : visibleElement);
-          return super.selectByText(...args);
+        override select(...args: Parameters<FakeElementSelector["select"]>) {
+          this.setNextElement(args[1].text === "Done" ? offScreenElement : visibleElement);
+          return super.select(...args);
         }
       }
       const selector = new VariantSelector(null);
@@ -288,9 +288,9 @@ describe("TapOnElement extended selectors", () => {
       const doneElement = makeElement({ left: -300, top: 0, right: -200, bottom: 50 });
       const addElement = makeElement({ left: 220, top: 20, right: 320, bottom: 70 });
       class VariantSelector extends FakeElementSelector {
-        override selectByText(...args: Parameters<FakeElementSelector["selectByText"]>) {
-          this.setNextElement(args[1] === "Done" ? doneElement : addElement);
-          return super.selectByText(...args);
+        override select(...args: Parameters<FakeElementSelector["select"]>) {
+          this.setNextElement(args[1].text === "Done" ? doneElement : addElement);
+          return super.select(...args);
         }
       }
       const selector = new VariantSelector(null);

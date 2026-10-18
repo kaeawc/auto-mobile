@@ -279,12 +279,7 @@ function connect(socket: UnixSocketServer, socketSessionId: string): DaemonMcpPr
 }
 
 function newSocketServer(): UnixSocketServer {
-  return new UnixSocketServer(
-    "/private/tmp/unused-11235.sock",
-    "http://localhost:0/mcp",
-    DaemonState.getInstance(),
-    timer,
-  );
+  return new UnixSocketServer("/private/tmp/unused-11235.sock", DaemonState.getInstance(), timer);
 }
 
 test("a read naming another connection's session watches it without binding the caller (#11235)", async () => {

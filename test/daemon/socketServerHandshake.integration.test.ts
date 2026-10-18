@@ -45,14 +45,10 @@ describe("UnixSocketServer version/build-identity handshake gate", () => {
 
   async function startServer(enforce = true): Promise<void> {
     socketPath = join(tmpdir(), `t-hs-${randomUUID().slice(0, 8)}.sock`);
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      new FakeTimer(),
-      null,
-      { identity: daemonIdentity, enforce },
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), new FakeTimer(), null, {
+      identity: daemonIdentity,
+      enforce,
+    });
     await server.start();
   }
 

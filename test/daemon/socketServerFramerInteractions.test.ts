@@ -105,7 +105,6 @@ beforeEach(() => {
   }));
   server = createTestUnixSocketServer(
     "unused",
-    "http://localhost:0/mcp",
     createFakeDaemonState(new Map()) as DaemonStateAccess,
     new FakeTimer(),
   );

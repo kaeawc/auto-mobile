@@ -25,7 +25,6 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { setObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { readFileSync } from "node:fs";
@@ -39,6 +38,7 @@ import {
   type ObservationFrameInvalidator,
 } from "../../../src/features/observe/ObservationFrameInvalidator";
 import { logger } from "../../../src/utils/logger";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 class FakeObservationFrameInvalidator implements ObservationFrameInvalidator {
   readonly deviceIds: string[] = [];
@@ -252,9 +252,9 @@ describe("display transitions", () => {
           updatedAt: 2,
         },
       ]);
-      const client = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      const client = spyOnIosClientInstance({
         getLatestHierarchy: async () => ({ hierarchy: null }),
-      } as unknown as IOSCtrlProxyClient);
+      });
       try {
         const screen = new RealObserveScreen(
           rotatingDevice,
@@ -295,9 +295,9 @@ describe("display transitions", () => {
     hierarchy.configureHierarchy(captured);
     const cacheStore = new FakeObserveCacheStore(timer);
     setObserveCacheStore(cacheStore);
-    const client = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+    const client = spyOnIosClientInstance({
       getLatestHierarchy: async () => ({ hierarchy: null }),
-    } as unknown as IOSCtrlProxyClient);
+    });
     const screen = new RealObserveScreen(
       duo,
       adbFactory,

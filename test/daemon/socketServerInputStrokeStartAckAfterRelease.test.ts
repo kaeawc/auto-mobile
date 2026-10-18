@@ -135,7 +135,6 @@ describe("a release that cuts an input/gestureStart still in flight on the devic
     const fakePool = createFakeDaemonState().getDevicePool();
     const server = createTestUnixSocketServer(
       "unused",
-      "http://localhost:0/mcp",
       {
         isInitialized: () => true,
         getSessionManager: () => sessionManager,

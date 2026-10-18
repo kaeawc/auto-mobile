@@ -167,12 +167,7 @@ describe("auxiliary socket inbound frame limit", () => {
 
 describe("control socket inbound frame limit", () => {
   function connect(socket: FlushingSocket): UnixSocketServer {
-    const server = createTestUnixSocketServer(
-      "unused",
-      "http://localhost:0/mcp",
-      undefined,
-      new FakeTimer(),
-    );
+    const server = createTestUnixSocketServer("unused", undefined, new FakeTimer());
     const internals = server as unknown as {
       acceptingRequests: boolean;
       maxInboundFrameBytes: number;
@@ -235,12 +230,7 @@ describe("per-server inbound frame limits", () => {
     expect(CONTROL_SOCKET_MAX_FRAME_BYTES).toBe(256 * 1024 * 1024);
     expect(AUX_SOCKET_MAX_FRAME_BYTES).toBe(1024 * 1024);
     expect(FAILURES_STREAM_MAX_FRAME_BYTES).toBeGreaterThan(AUX_SOCKET_MAX_FRAME_BYTES);
-    const control = createTestUnixSocketServer(
-      "unused",
-      "http://localhost:0/mcp",
-      undefined,
-      new FakeTimer(),
-    );
+    const control = createTestUnixSocketServer("unused", undefined, new FakeTimer());
     expect((control as unknown as { maxInboundFrameBytes: number }).maxInboundFrameBytes).toBe(
       CONTROL_SOCKET_MAX_FRAME_BYTES,
     );

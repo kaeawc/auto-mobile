@@ -28,7 +28,6 @@ function fixture() {
   const timer = new FakeTimer();
   const server = createTestUnixSocketServer(
     "unused",
-    "http://localhost:0/mcp",
     { isInitialized: () => false } as DaemonStateAccess,
     timer,
   );

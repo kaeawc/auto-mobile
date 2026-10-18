@@ -21,7 +21,7 @@ import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigation
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 const scope = { elementId: "item_42", container: { elementId: "cart_A" } };
 function node(id: string, children: LogicalNode[] = [], top = 0): LogicalNode {
@@ -550,9 +550,7 @@ test.each([true, false])(
   "tapAny scoped VoiceOver activation is bounded (label=%s)",
   async (labelled) => {
     const client = new FakeIOSCtrlProxy();
-    const override = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      client as IOSCtrlProxyClient,
-    );
+    const override = spyOnIosClientInstance(client);
     try {
       const detector = new FakeIosVoiceOverDetector();
       detector.setVoiceOverEnabled(true);

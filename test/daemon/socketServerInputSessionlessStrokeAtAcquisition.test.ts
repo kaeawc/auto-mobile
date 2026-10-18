@@ -115,7 +115,6 @@ describe("an open sessionless input stroke vs. a session acquiring its device", 
     const fakePool = createFakeDaemonState().getDevicePool();
     const server = createTestUnixSocketServer(
       "unused",
-      "http://localhost:0/mcp",
       {
         isInitialized: () => true,
         getSessionManager: () => sessionManager,

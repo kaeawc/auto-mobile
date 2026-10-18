@@ -211,12 +211,7 @@ describe("UnixSocketServer cancel frame (issue #6384)", () => {
     callsChanged = new Condition();
     const serverTimer = new FakeTimer();
     serverTimer.enableAutoAdvance();
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      serverTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), serverTimer);
     server.mcpClientFactory = async () => ({
       listTools: async () => ({ tools: [] }),
       // Settles only when the test says so, or rejects on abort like the MCP SDK client.
@@ -365,12 +360,7 @@ describe("UnixSocketServer provisionDevice cancel reply (issue #11074)", () => {
     calls = [];
     callsChanged = new Condition();
     serverTimer = new FakeTimer();
-    server = new UnixSocketServer(
-      socketPath,
-      "http://localhost:0/mcp",
-      createFakeDaemonState(),
-      serverTimer,
-    );
+    server = new UnixSocketServer(socketPath, createFakeDaemonState(), serverTimer);
     server.mcpClientFactory = async () => ({
       listTools: async () => ({ tools: [] }),
       callTool: (

@@ -33,6 +33,7 @@ import type {
   VirtualDeviceLifecycleCoordinator,
   VirtualDeviceLifecycleLease,
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
+import { toolJson } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -127,9 +128,7 @@ describe("platform device preparation tools", () => {
       throw new Error(`${name} is not registered`);
     }
     const result = await tool.handler(args);
-    return JSON.parse(
-      typeof result === "string" ? result : ((result as any).content?.[0]?.text ?? "{}"),
-    );
+    return typeof result === "string" ? JSON.parse(result) : toolJson(result);
   }
 
   test("getAndroid retains a bounded Android discovery failure before lifecycle allocation", async () => {

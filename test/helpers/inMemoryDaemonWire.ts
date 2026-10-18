@@ -240,7 +240,6 @@ export class InMemoryControlSocket {
           });
     const server = createTestUnixSocketServer(
       assertNotHostDaemonPath("control socket path", IN_MEMORY_SOCKET_PATH),
-      "http://in-memory.invalid/mcp",
       daemonState,
       deps.timer,
       null,

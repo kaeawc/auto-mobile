@@ -31,6 +31,7 @@ import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
 } from "../../src/server/videoRecordingManager";
+import { toolJson } from "../helpers/toolResponse";
 
 isolateToolRegistry();
 
@@ -109,9 +110,7 @@ describe("startDevice --create-if-missing wiring", () => {
       throw new Error("startDevice not registered");
     }
     const result = await tool.handler(args);
-    return JSON.parse(
-      typeof result === "string" ? result : ((result as any).content?.[0]?.text ?? "{}"),
-    );
+    return typeof result === "string" ? JSON.parse(result) : toolJson(result);
   }
 
   it("accepts createIfMissing through the tool schema", () => {

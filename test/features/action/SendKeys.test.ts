@@ -50,7 +50,6 @@ import {
 } from "../../../src/utils/PostActionCaptureContext";
 import { FakeWebSocket } from "../../fakes/FakeWebSocket";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { CtrlProxyText } from "../../../src/features/observe/ios/CtrlProxyText";
 import { CtrlProxyText as AndroidText } from "../../../src/features/observe/android/CtrlProxyText";
 import { createIosDelegateHarness } from "../../helpers/iosDelegateHarness";
@@ -58,6 +57,7 @@ import {
   clearAndroidImeQuarantine,
   withAndroidImeLock,
 } from "../../../src/features/action/androidImeLock";
+import { spyOnIosClientInstance } from "../../helpers/iosCtrlProxyClientSpies";
 
 describe("SendKeys iOS text transport", () => {
   test.each([5, 1000])("passes a scaled timeout for %s characters", async (length) => {
@@ -111,9 +111,7 @@ describe("SendKeys iOS text transport", () => {
     async (failure) => {
       const h = createIosDelegateHarness();
       const text = new CtrlProxyText(h.context);
-      const getInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        text as unknown as IOSCtrlProxyClient,
-      );
+      const getInstance = spyOnIosClientInstance(text);
       try {
         const observer = createObserver();
         const executor = new DefaultSendKeysCommandExecutor(

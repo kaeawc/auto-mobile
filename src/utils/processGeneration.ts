@@ -401,3 +401,14 @@ export const currentDaemonProcessGenerationToken = (): string | undefined =>
   testOverrides.processGenerationCaptureDisabled?.()
     ? undefined
     : readCurrentDaemonProcessGenerationToken();
+
+/** The platform-appropriate generation token for a live PID, or undefined where none can be read. */
+export function readProcessGenerationTokenForPid(pid: number): string | undefined {
+  if (process.platform === "darwin") {
+    return readDarwinProcessGenerationToken(pid);
+  }
+  if (process.platform === "linux") {
+    return readLinuxProcessGenerationToken(pid);
+  }
+  return undefined;
+}

@@ -11,27 +11,22 @@ import {
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { type AddressInfo, Socket } from "node:net";
+import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { z } from "zod/v4";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
+import { InProcessMcpDispatcher } from "../../src/daemon/inProcessMcpDispatcher";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
-import {
-  StatelessMcpHttpEndpoint,
-  type StatelessMcpRequestScope,
-} from "../../src/daemon/statelessMcpHttpEndpoint";
+import type { StatelessMcpRequestScope } from "../../src/daemon/statelessMcpHttpEndpoint";
+import { createStatelessMcpServer } from "../../src/daemon/statelessMcpServerFactory";
 import type { DaemonResponse } from "../../src/daemon/types";
+import { getToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 import { executionTracker } from "../../src/server/executionTracker";
-import { createMcpServer } from "../../src/server/index";
-import { MCP_SESSION_KEY_HEADER } from "../../src/server/mcpSessionKey";
 import { SessionToolBindingStore } from "../../src/server/sessionToolBindingStore";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer } from "../../src/utils/SystemTimer";
-import { FakeTimer } from "../fakes/FakeTimer";
 import { fakeBindLock } from "../helpers/createTestUnixSocketServer";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import {
@@ -42,13 +37,12 @@ import {
 } from "./helpers/socketRequest";
 
 /**
- * Slice C of #4678 against the REAL stateless endpoint (slice B): the socket server's pooled
- * loopback client talks to a `StatelessMcpHttpEndpoint` over real HTTP, and every request it
- * serves builds a real `createMcpServer` exactly as the daemon does. Only the device boundary
- * (hermetic fixture) and the daemon state are fake.
+ * Control-socket forwards run in process (#11820): every forward reaches its own real
+ * `createMcpServer` through the daemon's `InProcessMcpDispatcher`, keyed on the socket session that
+ * sent it. Only the device boundary (hermetic fixture) and the daemon state are fake.
  */
-const PROBE_TOOL = "statelessLoopbackProbe";
-const HOLD_TOOL = "statelessLoopbackHold";
+const PROBE_TOOL = "inProcessForwardProbe";
+const HOLD_TOOL = "inProcessForwardHold";
 
 function fakeDaemonState() {
   return {
@@ -72,31 +66,23 @@ function toolText(response: DaemonResponse): string {
   return result?.content?.[0]?.text ?? "";
 }
 
-interface LoopbackHarness {
-  readonly url: string;
-  /** The session-key header of every POST the endpoint served, in arrival order. */
-  readonly headerKeys: Array<string | undefined>;
-  /** The JSON-RPC method and HTTP status of every POST, in arrival order. */
-  readonly posts: Array<{ method: string; status: () => number }>;
-  readonly scopes: StatelessMcpRequestScope[];
-  /** Swap in a fresh endpoint behind the same listener: a daemon MCP layer restart. */
-  restartEndpoint(): void;
-}
-
-describe("socket loopback through the real stateless MCP endpoint", () => {
+describe("control-socket forwards through the in-process MCP dispatcher", () => {
   let restoreFixture: () => void;
-  let httpServer: Server;
-  let harness: LoopbackHarness;
   let socketServer: UnixSocketServer;
+  let dispatcher: InProcessMcpDispatcher;
   let socketPath: string;
+  let scopes: StatelessMcpRequestScope[];
+  /** The session key the probe's tools/call ran under (its in-band key). */
+  let probeCallerKeys: Array<string | undefined>;
   let holdStarted: ((signal: AbortSignal | undefined) => void) | undefined;
   let holdAborted: (() => void) | undefined;
 
   beforeAll(() => {
     restoreFixture = installHermeticServerFixture();
-    ToolRegistry.register(PROBE_TOOL, "test probe", z.object({}), async () => ({
-      content: [{ type: "text", text: "probe ok" }],
-    }));
+    ToolRegistry.register(PROBE_TOOL, "test probe", z.object({}), async () => {
+      probeCallerKeys.push(getToolSelectionContext()?.callerMcpSessionId);
+      return { content: [{ type: "text", text: "probe ok" }] };
+    });
     ToolRegistry.register(
       HOLD_TOOL,
       "test hold",
@@ -123,68 +109,28 @@ describe("socket loopback through the real stateless MCP endpoint", () => {
   });
 
   beforeEach(async () => {
-    const headerKeys: Array<string | undefined> = [];
-    const posts: LoopbackHarness["posts"] = [];
-    const scopes: StatelessMcpRequestScope[] = [];
+    scopes = [];
+    probeCallerKeys = [];
     const store = new SessionToolBindingStore();
-    const makeEndpoint = () =>
-      new StatelessMcpHttpEndpoint<
-        IncomingMessage,
-        ServerResponse,
-        NodeStreamableHTTPServerTransport
-      >({
-        timer: new FakeTimer(),
-        idGenerator: new CountingIdGenerator(`scope-${randomUUID()}`),
-        keepaliveIntervalMs: 30_000,
-        createTransport: () =>
-          new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined }),
-        createServer: (_req, scope) => {
-          scopes.push(scope);
-          return createMcpServer({
-            sessionContext: { sessionId: scope.requestScopeId },
-            daemonMode: true,
-            requestMcpSessionId: scope.requestMcpSessionId,
-            stateless: true,
-            sessionToolBindingStore: store,
-          });
-        },
-        cancelScopeExecutions: (scope, reason) =>
-          executionTracker.cancelSessionExecutions(scope, reason),
-        forgetScopeBindings: (scope) => store.forget(scope),
-        closeReason: () => "streamable_http_onclose",
-      });
-    let endpoint = makeEndpoint();
-    httpServer = createServer((req, res) => {
-      const chunks: Buffer[] = [];
-      req.on("data", (chunk: Buffer) => chunks.push(chunk));
-      req.on("end", () => {
-        const header = req.headers[MCP_SESSION_KEY_HEADER];
-        headerKeys.push(typeof header === "string" ? header : undefined);
-        const text = Buffer.concat(chunks).toString("utf8");
-        const body = text ? (JSON.parse(text) as { method?: string }) : undefined;
-        posts.push({ method: body?.method ?? req.method ?? "", status: () => res.statusCode });
-        void endpoint.handle(req, res, text ? JSON.parse(text) : undefined, () => {});
-      });
-    });
-    await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
-    const { port } = httpServer.address() as AddressInfo;
-    harness = {
-      url: `http://127.0.0.1:${port}/auto-mobile/streamable`,
-      headerKeys,
-      posts,
-      scopes,
-      restartEndpoint: () => {
-        endpoint = makeEndpoint();
+    dispatcher = new InProcessMcpDispatcher({
+      idGenerator: new CountingIdGenerator(`scope-${randomUUID()}`),
+      createServer: (context, scope) => {
+        scopes.push(scope);
+        return createStatelessMcpServer({ sessionToolBindingStore: store }, context, scope);
       },
-    };
-    socketPath = join(tmpdir(), `mcp-sl-${randomUUID().slice(0, 8)}.sock`);
+      cancelScopeExecutions: (scope, reason) =>
+        executionTracker.cancelSessionExecutions(scope, reason),
+      forgetScopeBindings: (scope) => store.forget(scope),
+      closeReason: () => "mcp_forward_closed",
+    });
+    socketPath = join(tmpdir(), `mcp-ip-${randomUUID().slice(0, 8)}.sock`);
     socketServer = new UnixSocketServer(
       socketPath,
-      harness.url,
+      "http://127.0.0.1:1/unused",
       fakeDaemonState(),
       defaultTimer,
       null,
-      {},
+      { mcpDispatcher: dispatcher },
       new CountingIdGenerator("socket"),
       { bindLock: fakeBindLock },
     );
@@ -195,10 +141,6 @@ describe("socket loopback through the real stateless MCP endpoint", () => {
     holdStarted = undefined;
     holdAborted = undefined;
     await socketServer.close();
-    await new Promise<void>((resolve) => {
-      httpServer.closeAllConnections();
-      httpServer.close(() => resolve());
-    });
     if (existsSync(socketPath)) {
       await unlink(socketPath);
     }
@@ -214,50 +156,46 @@ describe("socket loopback through the real stateless MCP endpoint", () => {
       })
     ).response;
 
-  test("every forwarded POST carries the socket session id of the forward that sent it", async () => {
+  test("every forward's server is keyed on the socket session that sent it", async () => {
     const first = await callTool(PROBE_TOOL);
     const second = await callTool(PROBE_TOOL);
 
     expect(toolText(first)).toBe("probe ok");
     expect(toolText(second)).toBe("probe ok");
-    // Every request a forward sends (the pooled client's initialize included) names the
-    // socket connection that issued it, and each connection names its own.
-    expect(harness.headerKeys.length).toBeGreaterThanOrEqual(2);
-    expect(harness.headerKeys.every((key) => key?.startsWith("socket-"))).toBe(true);
-    const keys = new Set(harness.scopes.map((scope) => scope.requestMcpSessionId));
-    expect(keys.size).toBe(2);
-    expect([...keys].every((key) => key?.startsWith("socket-"))).toBe(true);
+    const keys = scopes.map((scope) => scope.requestMcpSessionId);
+    expect(new Set(keys).size).toBe(2);
+    expect(keys.every((key) => key?.startsWith("socket-"))).toBe(true);
+    // Each forward closed its client and server when it ended.
+    expect(dispatcher.inFlightCount).toBe(0);
   });
 
-  test("a restarted endpoint serves the next forward with no 404 and no replay", async () => {
-    const { response: before, socket } = await sendPersistentSocketRequest(
+  test("tools/list and tools/call on one connection bind under the same session key (#13062)", async () => {
+    const { response: list, socket } = await sendPersistentSocketRequest(
       socketPath,
-      "tools/call",
-      { name: PROBE_TOOL, arguments: {} },
+      "tools/list",
+      {},
     );
     try {
-      expect(toolText(before)).toBe("probe ok");
-      const postsBefore = harness.posts.length;
-
-      harness.restartEndpoint();
-      const after = await sendRequestOnPersistentSocket(socket, "tools/call", {
+      const call = await sendRequestOnPersistentSocket(socket, "tools/call", {
         name: PROBE_TOOL,
         arguments: {},
       });
 
-      expect(after.success).toBe(true);
-      expect(toolText(after)).toBe("probe ok");
-      // The same pooled client sends exactly one tools/call POST: no re-initialize, no 404, no
-      // replay, because there is no transport session for the restart to expire.
-      const sent = harness.posts.slice(postsBefore);
-      expect(sent.map((post) => post.method)).toEqual(["tools/call"]);
-      expect(sent[0].status()).toBe(200);
+      expect(list.success).toBe(true);
+      expect(toolText(call)).toBe("probe ok");
+      // The list's server key (what tools/list and resources bind under) is the call's key.
+      const [listScope, callScope] = scopes;
+      expect(listScope.requestMcpSessionId).toStartWith("socket-");
+      expect(callScope.requestMcpSessionId).toBe(listScope.requestMcpSessionId);
+      expect(probeCallerKeys).toEqual([listScope.requestMcpSessionId]);
+      // A fresh server per forward: no state rides on a pooled client.
+      expect(listScope.requestScopeId).not.toBe(callScope.requestScopeId);
     } finally {
       socket.destroy();
     }
   });
 
-  test("a socket cancel frame stops the forwarded call on the endpoint at once (#13067)", async () => {
+  test("a socket cancel frame stops the forwarded call at once (#13067)", async () => {
     const started = new Promise<AbortSignal | undefined>((resolve) => {
       holdStarted = resolve;
     });
@@ -266,13 +204,11 @@ describe("socket loopback through the real stateless MCP endpoint", () => {
     });
     const socket = new Socket();
     const deadline = defaultTimer.setTimeout(() => socket.destroy(), SOCKET_REQUEST_DEADLINE_MS);
-    const frames: string[] = [];
     try {
       await new Promise<void>((resolve, reject) => {
         socket.once("error", reject);
         socket.connect(socketPath, resolve);
       });
-      socket.on("data", (chunk: Buffer) => frames.push(chunk.toString("utf8")));
       const send = (frame: Record<string, unknown>) => socket.write(`${JSON.stringify(frame)}\n`);
       send({
         id: "hold",
@@ -281,9 +217,8 @@ describe("socket loopback through the real stateless MCP endpoint", () => {
         params: { name: HOLD_TOOL, arguments: {} },
       });
       const signal = await started;
-      const socketSessionId = harness.scopes.at(-1)?.requestMcpSessionId ?? "";
+      const socketSessionId = scopes.at(-1)?.requestMcpSessionId ?? "";
       expect(executionTracker.hasActiveSessionExecutions(socketSessionId)).toBe(true);
-      const postsBefore = harness.posts.length;
 
       send({
         id: "cancel",
@@ -291,24 +226,18 @@ describe("socket loopback through the real stateless MCP endpoint", () => {
         method: DAEMON_CANCEL_REQUEST_METHOD,
         params: { requestId: "hold" },
       });
-      // The handler stops while the socket is still open: the cancel, not a disconnect.
       await aborted;
 
+      // The handler stopped while the socket is still open: the cancel, not a disconnect.
       expect(signal?.aborted).toBe(true);
       expect(socket.destroyed).toBe(false);
-      const cancelPost = harness.posts
-        .slice(postsBefore)
-        .findIndex((post) => post.method === "notifications/cancelled");
-      expect(cancelPost).toBeGreaterThanOrEqual(0);
-      // The cancellation POST names the forward's socket session, as its tools/call did.
-      expect(harness.headerKeys[postsBefore + cancelPost]).toBe(socketSessionId);
     } finally {
       defaultTimer.clearTimeout(deadline);
       socket.destroy();
     }
   });
 
-  test("a socket disconnect cancels the execution the endpoint keyed on its session id", async () => {
+  test("a socket disconnect cancels the execution keyed on its session id", async () => {
     const started = new Promise<AbortSignal | undefined>((resolve) => {
       holdStarted = resolve;
     });
@@ -345,8 +274,7 @@ describe("socket loopback through the real stateless MCP endpoint", () => {
         })}\n`,
       );
       const signal = await started;
-      expect(signal).toBeDefined();
-      const socketSessionId = harness.scopes.at(-1)?.requestMcpSessionId ?? "";
+      const socketSessionId = scopes.at(-1)?.requestMcpSessionId ?? "";
       expect(socketSessionId).toStartWith("socket-");
       expect(executionTracker.hasActiveSessionExecutions(socketSessionId)).toBe(true);
 
@@ -354,8 +282,6 @@ describe("socket loopback through the real stateless MCP endpoint", () => {
       await aborted;
 
       expect(signal?.aborted).toBe(true);
-      // The disconnect itself reached the execution through the socket session key, not
-      // only the loopback POST closing.
       expect(await disconnectCancel).toEqual({ key: socketSessionId, cancelled: 1 });
     } finally {
       spy.mockRestore();

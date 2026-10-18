@@ -1,7 +1,6 @@
 import { AsyncResource } from "node:async_hooks";
 import type { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport, type McpServer } from "@modelcontextprotocol/server";
-import { ENV, readEnvTrimmed } from "../config/env";
 import type { ExecutionCancellationReason } from "../server/executionTracker";
 import { describeUnknownError } from "../utils/describeUnknownError";
 import type { IdGenerator } from "../utils/IdGenerator";
@@ -13,10 +12,15 @@ import {
 import { JsonBoundaryTransport } from "./jsonBoundaryTransport";
 import { LoopbackMcpClient } from "./socketServer/loopbackMcpClient";
 import type { StatelessMcpRequestScope } from "./statelessMcpHttpEndpoint";
+import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
+import { executionTracker } from "../server/executionTracker";
+import { defaultIdGenerator } from "../utils/IdGenerator";
 import {
   buildMcpRequestContext,
+  createStatelessMcpServer,
   type McpForwardRequestContext,
   type McpRequestSessionContext,
+  type StatelessMcpServerBase,
 } from "./statelessMcpServerFactory";
 
 /**
@@ -69,23 +73,6 @@ export function rootAsyncScope(name: string): AsyncScope {
 /** A forward's context, plus the socket session key that names its caller. */
 export interface InProcessMcpForward extends McpForwardRequestContext {
   readonly sessionKey?: string;
-}
-
-/** How control-socket forwards reach the MCP server. */
-export type McpForwardTransport = "http" | "in-process";
-
-/**
- * The forward transport: `configured` when given, else what the environment selects, which is
- * in process only when asked for (#11820).
- */
-export function mcpForwardTransportFromEnv(
-  env: NodeJS.ProcessEnv,
-  configured?: McpForwardTransport,
-): McpForwardTransport {
-  if (configured) {
-    return configured;
-  }
-  return readEnvTrimmed(ENV.MCP_FORWARD_TRANSPORT, env) === "in-process" ? "in-process" : "http";
 }
 
 interface InFlightForward {
@@ -193,4 +180,27 @@ export class InProcessMcpDispatcher {
       }
     }
   }
+}
+
+/** Why a forward that closes outside shutdown is cancelled: its caller is done with it. */
+export const MCP_FORWARD_CLOSED_REASON = "mcp_forward_closed";
+
+/**
+ * The daemon's dispatcher: request servers from the shared stateless factory, scope executions
+ * cancelled through the execution tracker, keyless bindings forgotten in the daemon-scoped store.
+ */
+export function createDaemonMcpDispatcher(options: {
+  /** Read per forward, so daemon state set after construction (iOS dependencies) applies. */
+  base: () => StatelessMcpServerBase;
+  idGenerator?: IdGenerator;
+  closeReason?: () => ExecutionCancellationReason;
+}): InProcessMcpDispatcher {
+  return new InProcessMcpDispatcher({
+    idGenerator: options.idGenerator ?? defaultIdGenerator,
+    createServer: (context, scope) => createStatelessMcpServer(options.base(), context, scope),
+    cancelScopeExecutions: (requestScopeId, reason) =>
+      executionTracker.cancelSessionExecutions(requestScopeId, reason),
+    forgetScopeBindings: (requestScopeId) => daemonSessionToolBindingStore().forget(requestScopeId),
+    closeReason: options.closeReason ?? (() => MCP_FORWARD_CLOSED_REASON),
+  });
 }

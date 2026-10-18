@@ -1,9 +1,8 @@
 # MCP SDK v2 and stateless daemon layer: decision record
 
-Status: **landed except slice L (#4678)**, epic [#4665](https://github.com/kaeawc/auto-mobile/issues/4665).
-Step 1 (SDK v2 split packages) and the stateless daemon layer (slices A to K) are on
-main. Slice L (device-control transport recovery on the socket server, #11820) is in
-progress; sections that mention it say so.
+Status: **landed (#4678)**, epic [#4665](https://github.com/kaeawc/auto-mobile/issues/4665).
+Step 1 (SDK v2 split packages), the stateless daemon layer (slices A to K) and slice L
+(control-socket forwards in process, #11820) are on main.
 
 This record began as the feasibility spike for #4666 (kept in full at the end as the
 [original spike assessment](#appendix-original-spike-assessment-2026-07-29)). The
@@ -20,6 +19,7 @@ spike's go/no-go has since been replaced by owner decisions, summarised here.
 | 5   | Desktop keeps device binding by sending one generated id per app session on every call.                                                                                                                                               | Landed (#13046)                 |
 | 6   | `tools/list`, `tools/call` and resources stay on our own request handlers, not SDK `registerTool` dispatch.                                                                                                                           | Decided                         |
 | 7   | `tools/list_changed` stays an internal push, with a polling fallback in the proxy.                                                                                                                                                    | Landed (#13048)                 |
+| 8   | Control-socket forwards run in process; the HTTP endpoint serves only the desktop app and external clients.                                                                                                                           | Landed (#11820)                 |
 
 ## Split packages (step 1)
 
@@ -33,9 +33,9 @@ test helpers are `test/helpers/fakeServerContext.ts` and
 
 ## Stateless daemon MCP layer (landed, #4678)
 
-The daemon's internal HTTP endpoint (`/auto-mobile/streamable`) is the loopback hop the
-socket server uses to reach the tools, and it is also called directly by the desktop app's
-Kotlin client (`McpHttpClient`). After this change:
+The daemon's HTTP endpoint (`/auto-mobile/streamable`) was the loopback hop the socket
+server used to reach the tools until slice L (below); it is also called directly by the
+desktop app's Kotlin client (`McpHttpClient`) and external clients. After this change:
 
 - Each `POST` builds its own server and transport and closes them when the response
   closes. There is no `transports` map, no idle timer, no per-session in-flight
@@ -71,7 +71,7 @@ shared, which cut the `tool-definitions` p50 from 10.07 ms to 0.16 ms (#13051).
 | #13041, #13054 | G      | Wire baseline and its fixes.                                                                                                                                               |
 | #13044         | H1     | Boundary guard (`scripts/check-mcp-sdk-boundary.ts`), now also covering `test/`.                                                                                           |
 | #13046         | K      | Desktop sends the session-key header.                                                                                                                                      |
-| #11820 (open)  | L      | Device-control transport recovery in the socket server: in progress.                                                                                                       |
+| #11820         | L      | Control-socket forwards run in process; the loopback client pool and device-control transport recovery are deleted.                                                        |
 | (this change)  | H2     | Last boundary allowlist entries removed (`sessionIdGenerator` is omitted rather than set to `undefined`); the allowlist is empty.                                          |
 
 ### Restart-404 recovery removed
@@ -81,8 +81,54 @@ socket server detected the resulting `404` ("expired loopback session") and repl
 request on a fresh session. With no transport session there is nothing to expire, so that
 detection and replay (`isExpiredLoopbackMcpSession`, `retryExpiredMcpSession`), the session
 termination step in the loopback client pool, and its timeout constant are deleted. The
-tests that asserted the replay assert there is none. Device-control transport recovery is
-a different mechanism and stays (#11820).
+tests that asserted the replay assert there is none. Device-control transport recovery went
+with the loopback hop in slice L.
+
+## Control-socket forwards in process (slice L, #11820)
+
+The socket server no longer reaches the tools over its own HTTP endpoint. Each forward gets
+its own MCP client and its own stateless server from the factory the endpoint uses
+(`src/daemon/statelessMcpServerFactory.ts`: `buildMcpRequestContext` reads the context from
+headers or from the forward's struct, `createStatelessMcpServer` builds the server), linked by
+an `InMemoryTransport` pair in `InProcessMcpDispatcher` (`src/daemon/inProcessMcpDispatcher.ts`).
+
+What the HTTP hop gave a forward is kept on purpose:
+
+- **Wire bytes.** Every message crosses a JSON boundary (`JsonBoundaryTransport`: stringify,
+  parse, `parseJSONRPCMessage`), as the streamable HTTP transports do, so `undefined` fields
+  drop and shared references break exactly as before. Errors still pass through
+  `LoopbackMcpClient`'s v1 mapping, and an aborted call still rejects with the caller's own
+  abort reason.
+- **Async context.** The HTTP server's request handler ran outside the socket chain's
+  AsyncLocalStorage stores. The dispatcher enters each server from a root `AsyncResource`
+  captured when the daemon builds it, so a handler sees its own request's abort signal, request
+  context, tool selection, acquisition receipt and display pin, never the socket handler's.
+- **Per-request cancellation.** A forward runs under its own request scope, cancelled before
+  its server closes. Because the pair is private to the forward, an aborted call's
+  `notifications/cancelled` reaches the server that is running it, which the stateless HTTP
+  endpoint could only approximate (#13067).
+- **Shutdown.** With no `503`, the dispatcher is the admission gate: shutdown stops it
+  accepting forwards when it quiesces ingress, and closes running forwards with
+  `DaemonHandoffInterruptionError` beside the HTTP requests.
+
+`test/daemon/mcpForwardByteParity.integration.test.ts` pins this: the same socket frames go
+through an MCP client over the real HTTP endpoint and through the dispatcher, and the socket
+lines must be byte-identical (results, tool and protocol errors, lists, progress, socket
+cancel, every refusal fixture), with a context-leak probe that also shows an unrooted pair
+would leak. A forwarded `tools/call` of a trivial tool went from a p50 of about 0.4 to 0.5 ms
+over the HTTP hop to about 0.3 ms in process.
+
+Deleted with the hop: the loopback client pool and its idle close, `loopbackMcpFetch` and
+`LoopbackMcpConnectionError`, the session-key fetch wrapper, the streamable HTTP
+reconnection options and the device-control transport recovery (reconnect, pin, replay). The
+`device_control_transport_failure` wire type stays: the proxy and the daemon client still
+read it from a daemon of an older version. A per-execution-key idle timer remains only to
+drop the cached Android append helper.
+
+The HTTP endpoint now serves only the desktop app and external clients. It keeps the
+admission gate, DNS-rebinding protection, SSE keepalive, session-context headers and its
+`notifications/cancelled` resolution, which also matches a header-less cancellation by
+request id when exactly one in-flight request has it.
 
 ## The one session key
 
@@ -90,7 +136,8 @@ a different mechanism and stays (#11820).
 (`x-auto-mobile-mcp-session-id`) and `readMcpSessionKey(headers)`. This is the only key for
 per-session tool binding and `tools/list` filtering in daemon mode.
 
-- The socket server forwards the socket session id in this header on every loopback request.
+- The socket server keys every forward's server on the socket session id (in process since
+  #11820; it was this header on every loopback request before).
 - The desktop client generates one id per app session and sends it in the same header on
   every call. The header is preferred over the in-band argument.
 - The in-band `__mcpSessionId` argument is still accepted and stripped from tool

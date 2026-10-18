@@ -58,10 +58,7 @@ import {
   DaemonUnavailableError,
   DaemonRequestNotDeliveredError,
 } from "../../src/daemon/client";
-import {
-  DeviceControlTransportError,
-  LoopbackMcpConnectionError,
-} from "../../src/daemon/deviceControlTransportFailure";
+import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
 import { ToolUnavailableError, UnknownToolError } from "../../src/server/toolUnavailableError";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
@@ -1183,10 +1180,6 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   [
     DaemonRequestNotDeliveredError,
     "uncoded pre-dispatch transport failure used for safe proxy replay; shapeToolCallError returns plain 'Error: ...' text",
-  ],
-  [
-    LoopbackMcpConnectionError,
-    "uncoded loopback fetch cause; socketServer normalizes it into DeviceControlTransportError before the wire",
   ],
   [
     PooledAvdIdentityError,

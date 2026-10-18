@@ -58,6 +58,7 @@ test/daemon/socketServerFeatureFlags.integration.test.ts | safe | tmpdir socket 
 test/daemon/socketServerHandshake.integration.test.ts | safe | tmpdir socket L47
 test/daemon/socketServerIdeForwardRoute.integration.test.ts | safe | tmpdir socket L72, fake state
 test/daemon/socketServerIdeStatus.integration.test.ts | safe | tmpdir sockets, managers spied L866-L907, AUTOMOBILE_VERSION env only
+test/daemon/socketServerInProcessForward.integration.test.ts | safe | tmpdir socket L130, in-process dispatcher, hermetic fixture device boundary
 test/daemon/socketServerInputGesture.integration.test.ts | safe | tmpdir socket L45, fake harness
 test/daemon/socketServerInputKey.integration.test.ts | safe | tmpdir socket L83, fakes
 test/daemon/socketServerInputPressButton.integration.test.ts | safe | tmpdir socket L116, fakes
@@ -73,7 +74,6 @@ test/daemon/socketServerOneShotCliAcquisition.integration.test.ts | safe | in-me
 test/daemon/socketServerPermissions.integration.test.ts | safe | mkdtemp socket dir L32
 test/daemon/socketServerReaffirmedProfileAcquisition.integration.test.ts | safe | tmpdir socket L50, fake daemon state L30, FakeDaemonManager L61
 test/daemon/socketServerScopeKey.integration.test.ts | safe | tmpdir socket L72
-test/daemon/socketServerStatelessLoopback.integration.test.ts | safe | tmpdir socket L164, loopback ephemeral port L153, hermetic fixture device boundary
 test/daemon/socketServerToolCapabilities.integration.test.ts | safe | tmpdir socket L62
 test/daemon/telemetryPushSocketServer.integration.test.ts | safe | FakeSocket, FakeTimer, in-memory singleton DB
 test/daemon/videoStreamSocketServer.integration.test.ts | safe | mkdtemp socket dir L144, fake H264 capture source and timer

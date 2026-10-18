@@ -31,8 +31,10 @@ class FakeResponse extends EventEmitter {
   headersSent = false;
   writableEnded = false;
   destroyed = false;
-  writeHead(): this {
+  status: number | undefined;
+  writeHead(status: number): this {
     this.headersSent = true;
+    this.status = status;
     return this;
   }
   write(): boolean {
@@ -428,6 +430,51 @@ describe("StatelessMcpHttpEndpoint (#4678)", () => {
     expect(h.executions.runningCount).toBe(2);
     await Promise.all(h.endpoint.inFlightRequests().map((request) => request.close()));
     await Promise.all([first, second].map(async (response) => (await response).text()));
+  });
+
+  test("a cancellation that resumes after shutdown stopped accepting is refused, not served (#13049)", async () => {
+    const transport = new BlockingTransport();
+    const cancelGate = Promise.withResolvers<number>();
+    let serversBuilt = 0;
+    const endpoint = new StatelessMcpHttpEndpoint<FakeRequest, FakeResponse, BlockingTransport>({
+      timer: new FakeTimer(),
+      idGenerator: new CountingIdGenerator("scope"),
+      keepaliveIntervalMs: 30_000,
+      createTransport: () => transport,
+      createServer: () => {
+        serversBuilt += 1;
+        return { connect: async () => {}, close: async () => {} };
+      },
+      cancelScopeExecutions: () => cancelGate.promise,
+      forgetScopeBindings: () => {},
+      closeReason: () => "streamable_http_onclose",
+    });
+    const keyed = (): FakeRequest =>
+      Object.assign(new FakeRequest(), { headers: { [MCP_SESSION_KEY_HEADER]: "socket-1" } });
+    const call = endpoint.handle(
+      keyed(),
+      new FakeResponse(),
+      { jsonrpc: "2.0", id: 5, method: "tools/call" },
+      () => {},
+    );
+    await transport.started;
+    const cancelResponse = new FakeResponse();
+    const cancellation = endpoint.handle(
+      keyed(),
+      cancelResponse,
+      { jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 5 } },
+      () => {},
+    );
+
+    // Shutdown stops accepting and drops tracking while the cancellation awaits its close.
+    endpoint.stopAccepting();
+    endpoint.clear();
+    cancelGate.resolve(1);
+    await cancellation;
+    await call;
+
+    expect(cancelResponse.status).toBe(503);
+    expect(serversBuilt).toBe(1);
   });
 
   test.each(["response", "socket"] as const)(

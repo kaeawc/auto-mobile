@@ -976,7 +976,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
   test("binds a generated selection profile to the socket and reuses it for discovery", async () => {
     const clients: FakeMcpClient[] = [];
-    server.mcpClientFactory = async () => {
+    server.mcpClientFactory = async (_sessionUuid, toolSelectionProfileUuid) => {
       const client: FakeMcpClient = {
         callTool: async () => ({
           content: [
@@ -986,7 +986,9 @@ describe("UnixSocketServer MCP forward serialization", () => {
             },
           ],
         }),
-        listTools: async () => ({ tools: [{ name: `profile-client-${clients.length}` }] }),
+        listTools: async () => ({
+          tools: [{ name: `profile:${toolSelectionProfileUuid ?? "-"}` }],
+        }),
         listResources: async () => ({ resources: [] }),
         readResource: async () => ({ contents: [] }),
         listResourceTemplates: async () => ({ resourceTemplates: [] }),
@@ -1006,11 +1008,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
       const list = await client.request("tools/list", {});
 
       expect(set.success).toBe(true);
-      expect(list.result).toEqual({ tools: [{ name: "profile-client-1" }] });
-      // `clients.length` is one while listTools executes: the generated profile
-      // stayed on the socket's loopback transport instead of falling back to an
-      // unbound tools/list client.
-      expect(clients).toHaveLength(1);
+      // The generated profile stayed bound to the socket: the tools/list forward's client was
+      // seeded with it instead of falling back to an unbound one.
+      expect(list.result).toEqual({ tools: [{ name: "profile:profile-a" }] });
+      expect(clients).toHaveLength(2);
     } finally {
       client.close();
     }
@@ -1198,8 +1199,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
       });
 
       expect(reaffirm.success).toBe(true);
-      // One loopback client: the reaffirm reused the bound device route.
-      expect(factoryArguments).toEqual([["device-session-a", "profile-a"]]);
+      // The reaffirm reused the bound device route: its forward was seeded like the first.
+      expect(factoryArguments).toEqual([
+        ["device-session-a", "profile-a"],
+        ["device-session-a", "profile-a"],
+      ]);
     } finally {
       client.close();
     }
@@ -1219,11 +1223,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await server.start();
 
     const clients: FakeMcpClient[] = [];
-    const forwardedCalls: Array<{ clientIndex: number; toolName: string | undefined }> = [];
-    server.mcpClientFactory = async () => {
-      const clientIndex = clients.length;
+    const forwardedCalls: Array<{ clientIndex: string; toolName: string | undefined }> = [];
+    server.mcpClientFactory = async (boundSessionUuid, toolSelectionProfileUuid) => {
+      // Each forward opens its own client (#11820), labelled by what it was seeded with.
+      const clientIndex = `${boundSessionUuid ?? "-"}|${toolSelectionProfileUuid ?? "-"}`;
       const client: FakeMcpClient = {
-        listTools: async () => ({ tools: [{ name: `client-${clientIndex}` }] }),
+        listTools: async () => ({ tools: [{ name: clientIndex }] }),
         callTool: async (...args: unknown[]) => {
           forwardedCalls.push({
             clientIndex,
@@ -1258,18 +1263,18 @@ describe("UnixSocketServer MCP forward serialization", () => {
       const refreshedList = await client.request("tools/list", {});
 
       expect(initialList.success).toBe(true);
-      expect(initialList.result).toEqual({ tools: [{ name: "client-0" }] });
+      expect(initialList.result).toEqual({ tools: [{ name: "-|-" }] });
       expect(call.success).toBe(true);
       expect(sessionlessCall.success).toBe(true);
       expect(navigationGraph.success).toBe(true);
       expect(refreshedList.success).toBe(true);
-      expect(refreshedList.result).toEqual({ tools: [{ name: "client-1" }] });
+      expect(refreshedList.result).toEqual({ tools: [{ name: "session-a|-" }] });
       expect(forwardedCalls).toEqual([
-        { clientIndex: 1, toolName: "observe" },
-        { clientIndex: 1, toolName: "videoRecording" },
-        { clientIndex: 1, toolName: "getNavigationGraph" },
+        { clientIndex: "session-a|-", toolName: "observe" },
+        { clientIndex: "session-a|-", toolName: "videoRecording" },
+        { clientIndex: "session-a|-", toolName: "getNavigationGraph" },
       ]);
-      expect(clients).toHaveLength(2);
+      expect(clients).toHaveLength(5);
     } finally {
       client.close();
     }
@@ -1501,13 +1506,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
-  test("re-arms the idle close after a queued forward times out in the queue", async () => {
-    // An unbound forward that waits behind another request for the same shared
-    // route until its timeout budget is exhausted throws the pre-forward
-    // deadline BEFORE the forward body's own cleanup. The active-client wrapper
-    // cleared the cached client's idle timer on entry, so without a re-arm the
-    // inactive transport would stay cached until another request or shutdown
-    // (issue #4610).
+  test("a forward that times out in the queue opens no client, and the one that ran closes its own", async () => {
+    // A forward that waits behind another request for the same route until its timeout budget
+    // is exhausted throws the pre-forward deadline before it opens a client; the forward that ran
+    // closes the client it opened (#4610, #11820).
     await server.close();
     socketPath = join(tmpdir(), `mcp-queue-timeout-idle-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
@@ -1571,15 +1573,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(secondResult.error).toContain("waiting in queue");
     expect(secondResult.code).toBe("daemon_queue_timeout");
 
-    // Nothing has closed the shared transport yet.
-    expect(closeCalls).toBe(0);
-
-    // Advancing the idle window must close the cached transport — proving a
-    // replacement idle timer was scheduled after the queued-timeout throw.
-    await fakeTimer.advanceTimeAsync(5 * 60 * 1000);
-    for (let i = 0; i < 20 && closeCalls === 0; i++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
+    expect(callCount).toBe(1);
     expect(closeCalls).toBe(1);
   });
 
@@ -1587,17 +1581,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
     sessionDevices.set("session-a", "device-a");
     sessionDevices.set("session-b", "device-a");
     const clients: FakeMcpClient[] = [];
-    server.mcpClientFactory = async () => {
-      let boundSessionUuid: string | undefined;
+    server.mcpClientFactory = async (boundSessionUuid) => {
       const client: FakeMcpClient = {
         listTools: async () => ({
           tools: [{ name: boundSessionUuid ?? "unbound" }],
         }),
-        callTool: async (...args: unknown[]) => {
-          const request = args[0] as { arguments?: { sessionUuid?: string } };
-          boundSessionUuid = request.arguments?.sessionUuid;
-          return { content: [] };
-        },
+        callTool: async () => ({ content: [] }),
         listResources: async () => ({ resources: [] }),
         readResource: async () => ({ contents: [] }),
         listResourceTemplates: async () => ({ resourceTemplates: [] }),
@@ -1628,7 +1617,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       expect(secondBoundCall.success).toBe(true);
       expect(firstList.result).toEqual({ tools: [{ name: "session-a" }] });
       expect(secondList.result).toEqual({ tools: [{ name: "session-b" }] });
-      expect(clients).toHaveLength(2);
+      expect(clients).toHaveLength(4);
     } finally {
       firstSocket.close();
       secondSocket.close();
@@ -1808,20 +1797,15 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(clientBindings).toEqual([["released-session", "released-session"]]);
   });
 
-  test("retains a bound socket transport past the idle client deadline", async () => {
+  test("retains a socket's bound route past the old idle client deadline", async () => {
     sessionDevices.set("session-a", "device-a");
     let closeCalls = 0;
-    server.mcpClientFactory = async () => {
-      let boundSessionUuid: string | undefined;
+    server.mcpClientFactory = async (boundSessionUuid) => {
       return {
         listTools: async () => ({
           tools: [{ name: boundSessionUuid ?? "unbound" }],
         }),
-        callTool: async (...args: unknown[]) => {
-          const request = args[0] as { arguments?: { sessionUuid?: string } };
-          boundSessionUuid = request.arguments?.sessionUuid;
-          return { content: [] };
-        },
+        callTool: async () => ({ content: [] }),
         listResources: async () => ({ resources: [] }),
         readResource: async () => ({ contents: [] }),
         listResourceTemplates: async () => ({ resourceTemplates: [] }),
@@ -1843,14 +1827,15 @@ describe("UnixSocketServer MCP forward serialization", () => {
       const list = await client.request("tools/list", {});
 
       expect(boundCall.success).toBe(true);
-      expect(closeCalls).toBe(0);
+      // Each forward closed its own client; the socket's binding outlived the idle window.
+      expect(closeCalls).toBe(2);
       expect(list.result).toEqual({ tools: [{ name: "session-a" }] });
     } finally {
       client.close();
     }
   });
 
-  test("retains a disconnected socket's transport while its device call is active", async () => {
+  test("keeps a running forward's client open after its socket binding is cleared", async () => {
     await server.close();
     socketPath = join(tmpdir(), `mcp-active-client-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
@@ -1924,12 +1909,14 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
       try {
         expect(boundCall.success).toBe(true);
-        expect(closeCalls).toBe(0);
+        // Only the finished forward closed its client: the running one keeps its own open.
+        expect(closeCalls).toBe(1);
       } finally {
         releaseLongCall();
         await longCallFinished;
         await longCall;
       }
+      expect(closeCalls).toBe(2);
     } finally {
       releaseLongCall();
       client.close();
@@ -1950,11 +1937,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
     await server.start();
 
     const clients: FakeMcpClient[] = [];
-    const forwardedCalls: Array<{ clientIndex: number; toolName: string | undefined }> = [];
-    server.mcpClientFactory = async () => {
-      const clientIndex = clients.length;
+    const forwardedCalls: Array<{ clientIndex: string; toolName: string | undefined }> = [];
+    server.mcpClientFactory = async (boundSessionUuid, toolSelectionProfileUuid) => {
+      // Each forward opens its own client (#11820), labelled by what it was seeded with.
+      const clientIndex = `${boundSessionUuid ?? "-"}|${toolSelectionProfileUuid ?? "-"}`;
       const client: FakeMcpClient = {
-        listTools: async () => ({ tools: [{ name: `client-${clientIndex}` }] }),
+        listTools: async () => ({ tools: [{ name: clientIndex }] }),
         callTool: async (...args: unknown[]) => {
           const request = args[0] as { name?: string; arguments?: { sessionUuid?: string } };
           forwardedCalls.push({ clientIndex, toolName: request.name });
@@ -1993,11 +1981,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
       expect(boundCall.success).toBe(true);
       expect(failedCall.success).toBe(false);
       expect(sessionlessCall.success).toBe(true);
-      expect(refreshedList.result).toEqual({ tools: [{ name: "client-1" }] });
+      expect(refreshedList.result).toEqual({ tools: [{ name: "session-a|-" }] });
       expect(forwardedCalls).toEqual([
-        { clientIndex: 1, toolName: "observe" },
-        { clientIndex: 2, toolName: "clipboard" },
-        { clientIndex: 1, toolName: "exportPlan" },
+        { clientIndex: "session-a|-", toolName: "observe" },
+        { clientIndex: "session-b|-", toolName: "clipboard" },
+        { clientIndex: "session-a|-", toolName: "exportPlan" },
       ]);
     } finally {
       client.close();
@@ -2006,11 +1994,12 @@ describe("UnixSocketServer MCP forward serialization", () => {
 
   test("preserves a profile-only binding for sessionless follow-up calls", async () => {
     const clients: FakeMcpClient[] = [];
-    const forwardedCalls: Array<{ clientIndex: number; toolName: string | undefined }> = [];
-    server.mcpClientFactory = async () => {
-      const clientIndex = clients.length;
+    const forwardedCalls: Array<{ clientIndex: string; toolName: string | undefined }> = [];
+    server.mcpClientFactory = async (boundSessionUuid, toolSelectionProfileUuid) => {
+      // Each forward opens its own client (#11820), labelled by what it was seeded with.
+      const clientIndex = `${boundSessionUuid ?? "-"}|${toolSelectionProfileUuid ?? "-"}`;
       const client: FakeMcpClient = {
-        listTools: async () => ({ tools: [{ name: `client-${clientIndex}` }] }),
+        listTools: async () => ({ tools: [{ name: clientIndex }] }),
         callTool: async (...args: unknown[]) => {
           forwardedCalls.push({
             clientIndex,
@@ -2044,10 +2033,10 @@ describe("UnixSocketServer MCP forward serialization", () => {
       expect(recordingStop.success).toBe(true);
       expect(sessionlessCall.success).toBe(true);
       expect(forwardedCalls).toEqual([
-        { clientIndex: 1, toolName: "videoRecording" },
-        { clientIndex: 1, toolName: "exportPlan" },
+        { clientIndex: "profile-only|-", toolName: "videoRecording" },
+        { clientIndex: "profile-only|-", toolName: "exportPlan" },
       ]);
-      expect(refreshedList.result).toEqual({ tools: [{ name: "client-1" }] });
+      expect(refreshedList.result).toEqual({ tools: [{ name: "profile-only|-" }] });
     } finally {
       client.close();
     }

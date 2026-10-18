@@ -17,9 +17,11 @@ import {
 import {
   assertLifecycleCallerHoldsDevice,
   assertLifecycleCallerNotOnForeignBinding,
+} from "./lifecycleDeviceOwnership";
+import {
   lifecycleRequester,
   type LifecycleRequester,
-} from "./lifecycleDeviceOwnership";
+} from "../features/deviceLifecycle/lifecycleRequester";
 import { DaemonState } from "../daemon/daemonState";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { assertDeviceGestureRecordingStartHeldDevice } from "../daemon/deviceGestureRecordingStartAdmission";

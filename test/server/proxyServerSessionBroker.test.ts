@@ -1,4 +1,4 @@
-import { Client } from "../helpers/v1ViewMcpClient";
+import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";

@@ -455,3 +455,35 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"no new type errors"* ]]
 }
+
+@test "--project=test type-checks tsconfig.test.json against its own baseline (issue #11787)" {
+  unset TYPECHECK_BASELINE
+  grep -q 'test/\*\*/\*.ts' "$REPO_ROOT/tsconfig.test.json"
+  run grep -n 'TSCONFIG="tsconfig.test.json"' "$SCRIPT"
+  [ "$status" -eq 0 ]
+  run grep -n 'typecheck-test-baseline.txt' "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -f "$REPO_ROOT/scripts/typecheck-test-baseline.txt" ]
+  grep -q '^# generated-with: tsgo' "$REPO_ROOT/scripts/typecheck-test-baseline.txt"
+}
+
+@test "--project=test writes compact file/code/count rows and ratchets on counts" {
+  local two='printf "%s\n" "test/a.test.ts(1,1): error TS2345: x." "test/a.test.ts(9,9): error TS2345: y."'
+  TYPECHECK_TSC_CMD="$two" bash "$SCRIPT" --project=test --update
+  grep -qx 'test/a.test.ts TS2345 2' "$TYPECHECK_BASELINE"
+  TYPECHECK_TSC_CMD="$two" run bash "$SCRIPT" --project=test
+  [ "$status" -eq 0 ]
+  # A third error of the same code in the same file fails.
+  local three="$two"' && printf "%s\n" "test/a.test.ts(20,1): error TS2345: z."'
+  TYPECHECK_TSC_CMD="$three" run bash "$SCRIPT" --project=test
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"test/a.test.ts TS2345: 2 -> 3"* ]]
+  # --update refuses to grow without --allow-grow.
+  TYPECHECK_TSC_CMD="$three" run bash "$SCRIPT" --project=test --update
+  [ "$status" -eq 1 ]
+  # A shrink passes and suggests ratcheting.
+  local one='printf "%s\n" "test/a.test.ts(1,1): error TS2345: x."'
+  TYPECHECK_TSC_CMD="$one" run bash "$SCRIPT" --project=test
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no longer occur"* ]]
+}

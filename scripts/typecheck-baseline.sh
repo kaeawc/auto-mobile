@@ -46,11 +46,19 @@
 # already gates this step on `ts_changed`, so native-only PRs skip it entirely.)
 #
 # Scope: `tsconfig.json` includes `src` and compile-only `test/**/*.typecheck.ts`
-# contract fixtures. Runtime test files remain outside this gate; extending
-# coverage to them would need a separate test-scoped tsconfig and its own baseline.
+# contract fixtures. Runtime test files are covered by a second, independent pass
+# (issue #11787): `--project=test` runs the same gate over `tsconfig.test.json`
+# (every `test/**/*.ts`) against its own baseline,
+# scripts/typecheck-test-baseline.txt. That baseline is COMPACT: one
+# `<file> <TScode> <count>` row per file and error code (message text is not
+# recorded), so it stays small and stable across diagnostic rewording. Ratchet:
+# a count may shrink; a higher count or a new file/code pair fails, and
+# `--update` refuses to grow the total without `--allow-grow`. The burn-down of
+# the recorded test errors is separate work.
 #
 # Usage:
 #   scripts/typecheck-baseline.sh                     # check mode (CI gate)
+#   scripts/typecheck-baseline.sh --project=test      # same gate over test/
 #   scripts/typecheck-baseline.sh --update            # regenerate (refuses to grow)
 #   scripts/typecheck-baseline.sh --update --allow-grow  # regenerate, allow growth
 
@@ -63,7 +71,9 @@ export LC_ALL=C
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # TYPECHECK_BASELINE overrides the baseline location (used by the BATS tests so
 # they never touch the committed baseline).
-BASELINE="${TYPECHECK_BASELINE:-$ROOT/scripts/typecheck-baseline.txt}"
+DEFAULT_BASELINE="$ROOT/scripts/typecheck-baseline.txt"
+TSCONFIG="tsconfig.json"
+PROJECT="src"
 cd "$ROOT"
 
 MODE="check"
@@ -72,12 +82,18 @@ for arg in "$@"; do
   case "$arg" in
     --update) MODE="update" ;;
     --allow-grow) ALLOW_GROW="true" ;;
+    --project=test)
+      TSCONFIG="tsconfig.test.json"
+      PROJECT="test"
+      DEFAULT_BASELINE="$ROOT/scripts/typecheck-test-baseline.txt"
+      ;;
     *)
-      echo "Unknown argument: $arg (expected --update and/or --allow-grow)" >&2
+      echo "Unknown argument: $arg (expected --update, --allow-grow and/or --project=test)" >&2
       exit 2
       ;;
   esac
 done
+BASELINE="${TYPECHECK_BASELINE:-$DEFAULT_BASELINE}"
 if [[ "$ALLOW_GROW" == "true" && "$MODE" != "update" ]]; then
   echo "--allow-grow is only valid with --update" >&2
   exit 2
@@ -99,7 +115,7 @@ run_tsc() {
   if [[ -n "${TYPECHECK_TSC_CMD:-}" ]]; then
     eval "$TYPECHECK_TSC_CMD" 2>&1
   else
-    bunx tsgo --noEmit -p tsconfig.json 2>&1
+    bunx tsgo --noEmit -p "$TSCONFIG" 2>&1
   fi
 }
 
@@ -314,6 +330,65 @@ baseline_signatures() {
   { grep -v '^#' "$BASELINE" || true; } | canonicalize_unions
 }
 
+# Compact per-file/per-code counts (test project only): `<file> <TScode> <count>`.
+compact_counts() {
+  { grep -E '^[^[:space:]].*\([0-9]+,[0-9]+\): error TS[0-9]+' || true; } \
+    | sed -E 's/^([^(]*)\([0-9]+,[0-9]+\): error (TS[0-9]+).*/\1 \2/' \
+    | sort | uniq -c | awk '{print $2 " " $3 " " $1}' | sort
+}
+
+# Sum of the count column of compact rows on stdin.
+compact_total() {
+  awk '!/^#/ && NF == 3 { n += $3 } END { print n + 0 }'
+}
+
+run_compact_mode() {
+  local rows total
+  rows="$(printf '%s\n' "$raw_tsc" | compact_counts)"
+  total="$(printf '%s\n' "$rows" | compact_total)"
+  if [[ "$MODE" == "update" ]]; then
+    if [[ -f "$BASELINE" && "$ALLOW_GROW" != "true" ]]; then
+      local prev
+      prev="$(compact_total < "$BASELINE")"
+      if [[ "$total" -gt "$prev" ]]; then
+        echo "❌ refusing to grow the baseline: $prev -> $total error(s)." >&2
+        echo "Re-run with: bash scripts/typecheck-baseline.sh --project=test --update --allow-grow" >&2
+        exit 1
+      fi
+    fi
+    {
+      echo "# AutoMobile test typecheck baseline (issue #11787) -- see scripts/typecheck-baseline.sh"
+      echo "# generated-with: tsgo ${tsc_version:-unknown}"
+      echo "# format: <file> <TScode> <count>"
+      printf '%s\n' "$rows"
+    } > "$BASELINE"
+    echo "Updated $BASELINE ($total baseline error(s), tsgo ${tsc_version:-unknown})."
+    exit 0
+  fi
+  if [[ ! -f "$BASELINE" ]]; then
+    echo "ERROR: baseline missing: $BASELINE" >&2
+    exit 1
+  fi
+  local worse
+  worse="$(awk 'NR == FNR { if (!/^#/ && NF == 3) base[$1 " " $2] = $3; next }
+    { k = $1 " " $2; b = (k in base) ? base[k] : 0
+      if ($3 > b) print k ": " b " -> " $3 }' "$BASELINE" <(printf '%s\n' "$rows"))"
+  if [[ -n "$worse" ]]; then
+    echo "" >&2
+    echo "❌ typecheck gate (test): error count grew for:" >&2
+    printf '%s\n' "$worse" | sed 's/^/  /' >&2
+    echo "Fix the error(s). If intended (rare): bash scripts/typecheck-baseline.sh --project=test --update --allow-grow" >&2
+    exit 1
+  fi
+  local prev_total
+  prev_total="$(compact_total < "$BASELINE")"
+  echo "✅ typecheck gate (test): no new type errors ($prev_total known error(s) in baseline)."
+  if [[ "$total" -lt "$prev_total" ]]; then
+    echo "🎉 $((prev_total - total)) baseline error(s) no longer occur. Ratchet down: bun run typecheck:test:update"
+  fi
+  exit 0
+}
+
 # tsc exits 0 on a clean check and non-zero (2) when it reports diagnostics --
 # the normal case here -- so capture the status instead of letting `set -e` abort.
 raw_tsc="$(run_tsc)" && tsc_status=0 || tsc_status=$?
@@ -331,6 +406,10 @@ if [[ "$tsc_status" -ne 0 && "$current_count" -eq 0 ]]; then
 fi
 
 tsc_version="$(detect_tsc_version)"
+
+if [[ "$PROJECT" == "test" ]]; then
+  run_compact_mode
+fi
 
 if [[ "$MODE" == "update" ]]; then
   # Enforce the ratchet: refuse to grow the baseline unless explicitly allowed.

@@ -21,7 +21,7 @@ import type { ObserveResult } from "../../../src/models/ObserveResult";
  * Round-trip coverage for issue #6218: the skeleton projection emits an
  * `s-<hash>` content-derived id (`assignStableViewIds`, #3228) as the SOLE
  * `elementId` for a node with no `resource-id`/`text`. `tapOn`/`sendKeys`
- * resolve `elementId` through `ResolverElementSelector.selectByResourceId` →
+ * resolve `elementId` through `ResolverElementSelector.select` →
  * `ElementResolver`, which previously only ever compared against
  * `resource-id` — so a skeleton-emitted `s-<hash>` id could never match
  * anything, despite the tool docs promising it is "directly usable as a
@@ -102,7 +102,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // the one element it was derived from — not any other row.
     for (const entry of skeleton) {
       expect(entry.elementId).toMatch(/^s2-[0-9a-f]{16}(-\d+)?$/);
-      const result = selector.selectByResourceId(viewHierarchy, entry.elementId!);
+      const result = selector.select(viewHierarchy, { elementId: entry.elementId! });
       expect(result.element).not.toBeNull();
       expect(result.totalMatches).toBe(1);
       const b = result.element!.bounds;
@@ -154,14 +154,14 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
 
     // Each suffix is assigned to one node within this capture, so
     // the selector handed out by skeleton must round-trip to that exact row.
-    const firstResult = selector.selectByResourceId(viewHierarchy, idA);
+    const firstResult = selector.select(viewHierarchy, { elementId: idA });
     expect(firstResult.totalMatches).toBe(1);
     expect(firstResult.element!.bounds).toEqual(nodeA.bounds);
 
     // The shared bare form still cannot select one of the duplicate rows. Its
     // recovery hint must name only selector fields tapOn actually accepts.
     const base = idA.split("~")[0];
-    const findBase = () => selector.selectByResourceId(viewHierarchy, base);
+    const findBase = () => selector.select(viewHierarchy, { elementId: base });
     expect(findBase).toThrow(/textAny/i);
     expect(findBase).toThrow(new RegExp(idA));
     expect(findBase).toThrow(new RegExp(idB));
@@ -210,10 +210,9 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(survivorId).toMatch(/^s2-[0-9a-f]{16}$/);
     expect(survivorId).not.toBe(observedIdForA);
 
-    const result = selector.selectByResourceId(
-      { hierarchy: afterRemoval } as ViewHierarchyResult,
-      observedIdForA,
-    );
+    const result = selector.select({ hierarchy: afterRemoval } as ViewHierarchyResult, {
+      elementId: observedIdForA,
+    });
     expect(result.element).toBeNull();
     expect(result.totalMatches).toBe(0);
   });
@@ -234,7 +233,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     const after = { node: [row("Bob", "bob")] };
     assignStableViewIds(after);
     expect(after.node[0]["view-id"]).toMatch(/^s2-[0-9a-f]{16}$/);
-    const result = selector.selectByResourceId({ hierarchy: after }, staleAliceId);
+    const result = selector.select({ hierarchy: after }, { elementId: staleAliceId });
     expect(result.element).toBeNull();
     expect(result.totalMatches).toBe(0);
   });
@@ -258,7 +257,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     const id = (rawRoot.node[0] as Record<string, unknown>)["view-id"] as string;
     expect(id).toMatch(/^s2-[0-9a-f]{16}$/);
 
-    const result = selector.selectByResourceId(viewHierarchy, id);
+    const result = selector.select(viewHierarchy, { elementId: id });
     expect(result.element).not.toBeNull();
     expect(result.totalMatches).toBe(1);
     expect(result.element!["content-desc"]).toBe("solo-row");
@@ -287,12 +286,12 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     };
     const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
 
-    const result = selector.selectByResourceId(viewHierarchy, `${STABLE_VIEW_ID_PREFIX}a-2`);
+    const result = selector.select(viewHierarchy, { elementId: `${STABLE_VIEW_ID_PREFIX}a-2` });
     expect(result.element).not.toBeNull();
     expect(result.totalMatches).toBe(1);
     expect(result.element!.bounds).toEqual({ left: 0, top: 60, right: 100, bottom: 110 });
 
-    const resultBase = selector.selectByResourceId(viewHierarchy, `${STABLE_VIEW_ID_PREFIX}a`);
+    const resultBase = selector.select(viewHierarchy, { elementId: `${STABLE_VIEW_ID_PREFIX}a` });
     expect(resultBase.element).not.toBeNull();
     expect(resultBase.totalMatches).toBe(1);
     expect(resultBase.element!.bounds).toEqual({ left: 0, top: 0, right: 100, bottom: 50 });
@@ -363,7 +362,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // The current capture assigns this exact ordinal to A. Without
     // capture-origin provenance, a selector resolves the current exact id;
     // #7219 requires that behavior for same-capture skeleton round-trips.
-    const result = selector.selectByResourceId(reorderedViewHierarchy, originalIdB);
+    const result = selector.select(reorderedViewHierarchy, { elementId: originalIdB });
     expect(result.totalMatches).toBe(1);
     expect(result.element!["view-id"]).toBe(originalIdB);
   });
@@ -411,16 +410,24 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     expect(idInContainer1).toMatch(/^s2-[0-9a-f]{16}-1$/);
     expect(idInContainer2).toBe(`${idInContainer1.replace(/-1$/, "")}-2`);
 
-    expect(selector.selectByResourceId(viewHierarchy, idInContainer1).totalMatches).toBe(1);
+    expect(selector.select(viewHierarchy, { elementId: idInContainer1 }).totalMatches).toBe(1);
     expect(
-      selector.selectByResourceId(viewHierarchy, idInContainer1, {
-        container: { elementId: "com.app:id/container1" },
-      }).totalMatches,
+      selector.select(
+        viewHierarchy,
+        { elementId: idInContainer1 },
+        {
+          container: { elementId: "com.app:id/container1" },
+        },
+      ).totalMatches,
     ).toBe(1);
     expect(
-      selector.selectByResourceId(viewHierarchy, idInContainer2, {
-        container: { elementId: "com.app:id/container2" },
-      }).totalMatches,
+      selector.select(
+        viewHierarchy,
+        { elementId: idInContainer2 },
+        {
+          container: { elementId: "com.app:id/container2" },
+        },
+      ).totalMatches,
     ).toBe(1);
   });
 
@@ -472,11 +479,15 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // usable selector for the currently assigned row (the capture-local
     // contract #7219 restores for skeleton ids).
     expect(
-      selector.selectByResourceId(viewHierarchy, observedIdForA, {
-        container: { elementId: "com.app:id/c1" },
-      }).totalMatches,
+      selector.select(
+        viewHierarchy,
+        { elementId: observedIdForA },
+        {
+          container: { elementId: "com.app:id/c1" },
+        },
+      ).totalMatches,
     ).toBe(1);
-    expect(selector.selectByResourceId(viewHierarchy, observedIdForA).totalMatches).toBe(1);
+    expect(selector.select(viewHierarchy, { elementId: observedIdForA }).totalMatches).toBe(1);
   });
 
   test("a real resource-id colliding with a synthetic ordinal outside a container does not prevent its current-capture resolution", () => {
@@ -526,18 +537,26 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     // Container-scoped to c1: the real id in c2 remains outside scope, while
     // c1's exact ordinal is uniquely assigned in the current capture.
     expect(
-      selector.selectByResourceId(viewHierarchy, idInContainer1, {
-        container: { elementId: "com.app:id/c1" },
-      }).totalMatches,
+      selector.select(
+        viewHierarchy,
+        { elementId: idInContainer1 },
+        {
+          container: { elementId: "com.app:id/c1" },
+        },
+      ).totalMatches,
     ).toBe(1);
 
     // Without a container, the whole capture IS the active scope, so the
     // real id in c2 legitimately wins - this is existing, intentional
     // behavior (review threads PRRT_kwDOP-GF5M6fo13g, PRRT_kwDOP-GF5M6fo2Iq)
     // and must be unaffected by this fix.
-    const result = selector.selectByResourceId(viewHierarchy, idInContainer1, {
-      intentAction: "inspect",
-    }).element;
+    const result = selector.select(
+      viewHierarchy,
+      { elementId: idInContainer1 },
+      {
+        intentAction: "inspect",
+      },
+    ).element;
     expect(result?.["content-desc"]).toBe("decoy-node");
   });
 
@@ -571,10 +590,9 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
         clickable: [parser.parseNodeBounds(firstCapture.node[0] as never) as Element],
       }),
     );
-    const result = selector.selectByResourceId(
-      { hierarchy: secondCapture } as ViewHierarchyResult,
-      skeleton[0].elementId!,
-    );
+    const result = selector.select({ hierarchy: secondCapture } as ViewHierarchyResult, {
+      elementId: skeleton[0].elementId!,
+    });
     expect(result.element).not.toBeNull();
     expect(result.element!["content-desc"]).toBe("fresh-capture-node");
   });
@@ -592,7 +610,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
       ],
     };
     const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
-    const result = selector.selectByResourceId(viewHierarchy, "com.app:id/submit");
+    const result = selector.select(viewHierarchy, { elementId: "com.app:id/submit" });
     expect(result.element).not.toBeNull();
     expect(result.element!.text).toBe("Submit");
   });
@@ -629,7 +647,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
       };
       const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
 
-      const result = selector.selectByResourceId(viewHierarchy, collidingId);
+      const result = selector.select(viewHierarchy, { elementId: collidingId });
       expect(result.element).not.toBeNull();
       expect(result.totalMatches).toBe(1);
       expect(result.element!.text).toBe("Real Control");
@@ -667,7 +685,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
         ],
       } as ViewHierarchyResult;
 
-      const result = selector.selectByResourceId(viewHierarchy, collidingId);
+      const result = selector.select(viewHierarchy, { elementId: collidingId });
       expect(result.element).not.toBeNull();
       expect(result.totalMatches).toBe(1);
       expect(result.element!.text).toBe("Window Control");
@@ -702,7 +720,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
       };
       const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
 
-      const sibling = selector.selectClickableSiblingOfResourceId(viewHierarchy, collidingId);
+      const sibling = selector.select(viewHierarchy, { sibling: { elementId: collidingId } });
       expect(sibling.totalMatches).toBe(1);
       expect(sibling.element?.bounds).toEqual({ left: 0, top: 0, right: 50, bottom: 50 });
     });
@@ -756,7 +774,7 @@ describe("skeleton elementId round-trips through tapOn's ElementSelector (issue 
     };
     const viewHierarchy: ViewHierarchyResult = { hierarchy: rawRoot };
 
-    const result = selector.selectByResourceId(viewHierarchy, `${STABLE_VIEW_ID_PREFIX}a`);
+    const result = selector.select(viewHierarchy, { elementId: `${STABLE_VIEW_ID_PREFIX}a` });
     expect(result.element).not.toBeNull();
     expect(result.totalMatches).toBe(1);
     expect(result.element!.text).toBe("Real Short Id");

@@ -31,8 +31,7 @@ export interface ElementSelectionOptions {
 
 /**
  * The element selection service. `select` is the one entry point: it resolves a query against a
- * captured hierarchy through the shared ElementResolver. The `selectBy*` and `selectClickable*`
- * methods are deprecated adapters over it that remain only for the tap actions' call sites.
+ * captured hierarchy through the shared ElementResolver.
  */
 export interface ElementSelector {
   select(
@@ -47,99 +46,4 @@ export interface ElementSelector {
     strategy?: ElementSelectionStrategy,
   ): Element | undefined;
   hasContainer?(capture: ViewHierarchyResult, container: ElementContainerSelector): boolean;
-  /** @deprecated Use `select` with an ElementQuery. */
-  selectByText(
-    viewHierarchy: ViewHierarchyResult,
-    text: string,
-    options?: {
-      container?: ElementContainerSelector | null;
-      partialMatch?: boolean;
-      caseSensitive?: boolean;
-      strategy?: ElementSelectionStrategy;
-      intentAction?: ResolutionAction;
-      selectionIntent?: TextSelectionIntent;
-      /** Internal action-target opt-in; discovery and predicates leave this off. */
-      allowHintFallback?: boolean;
-      /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
-      index?: number;
-      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
-    },
-  ): ElementSelectionResult;
-
-  /** @deprecated Use `select` with an ElementQuery. */
-  selectByResourceId(
-    viewHierarchy: ViewHierarchyResult,
-    resourceId: string,
-    options?: {
-      container?: ElementContainerSelector | null;
-      partialMatch?: boolean;
-      strategy?: ElementSelectionStrategy;
-      intentAction?: ResolutionAction;
-      selectionIntent?: TextSelectionIntent;
-      /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
-      index?: number;
-      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
-    },
-  ): ElementSelectionResult;
-
-  /** @deprecated Use `select` with an ElementQuery. */
-  selectByTestTag(
-    viewHierarchy: ViewHierarchyResult,
-    testTag: string,
-    options?: {
-      container?: ElementContainerSelector | null;
-      strategy?: ElementSelectionStrategy;
-      intentAction?: ResolutionAction;
-      selectionIntent?: TextSelectionIntent;
-      /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
-      index?: number;
-      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
-    },
-  ): ElementSelectionResult;
-
-  /** @deprecated Use `select` with an ElementQuery. */
-  selectClickable(
-    viewHierarchy: ViewHierarchyResult,
-    options?: {
-      container?: ElementContainerSelector | null;
-      strategy?: ElementSelectionStrategy;
-      intentAction?: ResolutionAction;
-      selectionIntent?: TextSelectionIntent;
-      scrollableContainer?: boolean;
-      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
-    },
-  ): ElementSelectionResult;
-
-  /** @deprecated Use `select` with an ElementQuery. */
-  selectClickableSiblingOfText(
-    viewHierarchy: ViewHierarchyResult,
-    text: string,
-    options?: {
-      container?: ElementContainerSelector | null;
-      fuzzyMatch?: boolean;
-      caseSensitive?: boolean;
-      strategy?: ElementSelectionStrategy;
-      intentAction?: ResolutionAction;
-      selectionIntent?: TextSelectionIntent;
-      /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
-      index?: number;
-      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
-    },
-  ): ElementSelectionResult;
-
-  /** @deprecated Use `select` with an ElementQuery. */
-  selectClickableSiblingOfResourceId(
-    viewHierarchy: ViewHierarchyResult,
-    resourceId: string,
-    options?: {
-      container?: ElementContainerSelector | null;
-      partialMatch?: boolean;
-      strategy?: ElementSelectionStrategy;
-      intentAction?: ResolutionAction;
-      selectionIntent?: TextSelectionIntent;
-      /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
-      index?: number;
-      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
-    },
-  ): ElementSelectionResult;
 }

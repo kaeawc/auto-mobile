@@ -590,7 +590,8 @@ test("labels copied from skeleton resolve hoisted, whitespace-normalized, and up
     expect(result.matchMode).toBe("exact");
     expect(result.chosen?.nativeId).toBe(id);
     expect(
-      publicSelector.selectByText(hierarchy, displayed!, { partialMatch: false }).element?.bounds,
+      publicSelector.select(hierarchy, { text: displayed! }, { partialMatch: false }).element
+        ?.bounds,
     ).toEqual(result.chosen?.bounds);
   }
   expect(
@@ -828,25 +829,29 @@ describe("ensureChecked selection intent", () => {
 
   test("baseline inspect tap lookup picks the labelled row", () => {
     expect(
-      selector.selectByText(settings(), "Wi-Fi", {
-        intentAction: "inspect",
-        selectionIntent: "tap",
-      }).element?.["resource-id"],
+      selector.select(
+        settings(),
+        { text: "Wi-Fi" },
+        {
+          intentAction: "inspect",
+          selectionIntent: "tap",
+        },
+      ).element?.["resource-id"],
     ).toBe("row");
   });
   test("toggle intent selects the same-label switch and its checked state", () => {
-    const selected = selector.selectByText(settings(), "Wi-Fi", options);
+    const selected = selector.select(settings(), { text: "Wi-Fi" }, options);
     expect(selected.element?.["resource-id"]).toBe("switch");
     expect(selected.element?.checked).toBe(true);
   });
   test("toggle intent selects an unlabelled descendant switch", () => {
-    expect(selector.selectByText(settings(""), "Wi-Fi", options).element?.["resource-id"]).toBe(
+    expect(selector.select(settings(""), { text: "Wi-Fi" }, options).element?.["resource-id"]).toBe(
       "switch",
     );
   });
   test("toggle intent without a checkable descendant still selects the row", () => {
     expect(
-      selector.selectByText(settings("", false), "Wi-Fi", options).element?.["resource-id"],
+      selector.select(settings("", false), { text: "Wi-Fi" }, options).element?.["resource-id"],
     ).toBe("row");
   });
   test("exact text precedes substring toggles and narrows within exact matches", () => {
@@ -859,9 +864,11 @@ describe("ensureChecked selection intent", () => {
         ],
       },
     };
-    expect(selector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe("exact");
+    expect(selector.select(capture, { text: "Wi-Fi" }, options).element?.["resource-id"]).toBe(
+      "exact",
+    );
     const partialOnly = { hierarchy: { node: capture.hierarchy.node.slice(0, 2) } };
-    expect(selector.selectByText(partialOnly, "Wi-Fi", options).element?.["resource-id"]).toBe(
+    expect(selector.select(partialOnly, { text: "Wi-Fi" }, options).element?.["resource-id"]).toBe(
       "row",
     );
   });
@@ -871,7 +878,9 @@ describe("ensureChecked selection intent", () => {
         node: [node("row", "Wi-Fi"), node("backup", "Wi-Fi backup", { checkable: true })],
       },
     };
-    expect(selector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe("row");
+    expect(selector.select(capture, { text: "Wi-Fi" }, options).element?.["resource-id"]).toBe(
+      "row",
+    );
   });
   test("toggle intent selects the exact row's descendant before a substring switch", () => {
     const capture = settings("");
@@ -879,7 +888,7 @@ describe("ensureChecked selection intent", () => {
       node("backup", "Wi-Fi backup", { checkable: true }),
       capture.hierarchy.node,
     ];
-    expect(selector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe(
+    expect(selector.select(capture, { text: "Wi-Fi" }, options).element?.["resource-id"]).toBe(
       "switch",
     );
   });
@@ -887,7 +896,7 @@ describe("ensureChecked selection intent", () => {
     const capture = {
       hierarchy: { node: node("backup", "Wi-Fi backup", { checkable: true }) },
     };
-    expect(selector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe(
+    expect(selector.select(capture, { text: "Wi-Fi" }, options).element?.["resource-id"]).toBe(
       "backup",
     );
   });
@@ -896,24 +905,26 @@ describe("ensureChecked selection intent", () => {
     capture.windows = [
       { windowLayer: 10, hierarchy: { node: node("dialog", "Wi-Fi", { checkable: true }) } },
     ];
-    expect(selector.selectByText(capture, "Wi-Fi", options).element?.["resource-id"]).toBe(
+    expect(selector.select(capture, { text: "Wi-Fi" }, options).element?.["resource-id"]).toBe(
       "dialog",
     );
   });
   test("explicit index and element ID retain their targets", () => {
     expect(
-      selector.selectByText(settings(), "Wi-Fi", { ...options, index: 0 }).element?.["resource-id"],
+      selector.select(settings(), { text: "Wi-Fi" }, { ...options, index: 0 }).element?.[
+        "resource-id"
+      ],
     ).toBe("row");
-    expect(selector.selectByResourceId(settings(), "row", options).element?.["resource-id"]).toBe(
-      "row",
-    );
+    expect(
+      selector.select(settings(), { elementId: "row" }, options).element?.["resource-id"],
+    ).toBe("row");
   });
 });
 
 test("toggle intent selects the iOS descendant control with checked state", () => {
-  const result = new ResolverElementSelector().selectByText(
+  const result = new ResolverElementSelector().select(
     iosFormsSwitch("true"),
-    "Enable Notifications",
+    { text: "Enable Notifications" },
     {
       intentAction: "inspect",
       selectionIntent: "toggle",

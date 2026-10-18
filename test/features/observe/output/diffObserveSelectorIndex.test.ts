@@ -62,9 +62,9 @@ function expectReplay(baseline: ObserveResult, expectedIndex: number | undefined
   expect(row).toBeDefined();
   expect(selector.index).toBe(expectedIndex);
   expect(selector.index).toBe(row!.index);
-  const resolved = new ResolverElementSelector().selectByResourceId(
+  const resolved = new ResolverElementSelector().select(
     next.viewHierarchy!,
-    selector.elementId!,
+    { elementId: selector.elementId! },
     { index: selector.index },
   );
   expect(resolved.element?.bounds).toEqual(bounds);
@@ -259,10 +259,14 @@ describe("diff selector replay indexes (#9693)", () => {
     expect(selector.index).toBe(1);
     expect(selector.index).toBe(row.index);
     expect(
-      new ResolverElementSelector().selectByText(next.viewHierarchy!, selector.label!, {
-        index: selector.index,
-        partialMatch: false,
-      }).element?.bounds,
+      new ResolverElementSelector().select(
+        next.viewHierarchy!,
+        { text: selector.label! },
+        {
+          index: selector.index,
+          partialMatch: false,
+        },
+      ).element?.bounds,
     ).toEqual(parseBounds(changed.bounds));
   });
 
@@ -302,9 +306,13 @@ describe("diff selector replay indexes (#9693)", () => {
     expect(selector.index).toBe(1);
     expect(rows.find((row) => row.bounds[3] === bounds.bottom)!.index).toBe(selector.index);
     expect(
-      new ResolverElementSelector().selectByResourceId(next.viewHierarchy!, resourceId, {
-        index: selector.index,
-      }).element?.bounds,
+      new ResolverElementSelector().select(
+        next.viewHierarchy!,
+        { elementId: resourceId },
+        {
+          index: selector.index,
+        },
+      ).element?.bounds,
     ).toEqual(parseBounds(changed.bounds));
   });
 
@@ -327,9 +335,9 @@ describe("diff selector replay indexes (#9693)", () => {
         (row) => row.elementId === resourceId,
       ),
     ).toHaveLength(2);
-    const promoted = new ResolverElementSelector().selectByResourceId(
+    const promoted = new ResolverElementSelector().select(
       next.viewHierarchy!,
-      resourceId,
+      { elementId: resourceId },
       { index: 1 },
     );
     expect(promoted.totalMatches).toBe(2);
@@ -363,9 +371,13 @@ describe("diff selector replay indexes (#9693)", () => {
       expect(selector.index).toBe(expectedIndex);
       expect(selector).not.toHaveProperty("ambiguous");
       expect(
-        new ResolverElementSelector().selectByResourceId(next.viewHierarchy!, resourceId, {
-          index: selector.index,
-        }).element?.bounds,
+        new ResolverElementSelector().select(
+          next.viewHierarchy!,
+          { elementId: resourceId },
+          {
+            index: selector.index,
+          },
+        ).element?.bounds,
       ).toEqual(parseBounds(changed.bounds));
     }
   });
@@ -389,9 +401,13 @@ describe("diff selector replay indexes (#9693)", () => {
     expect(selector.index).toBe(0);
     expect(selector).not.toHaveProperty("ambiguous");
     expect(
-      new ResolverElementSelector().selectByResourceId(next.viewHierarchy!, resourceId, {
-        index: selector.index,
-      }).element?.bounds,
+      new ResolverElementSelector().select(
+        next.viewHierarchy!,
+        { elementId: resourceId },
+        {
+          index: selector.index,
+        },
+      ).element?.bounds,
     ).toEqual(parseBounds(changed.bounds));
   });
 

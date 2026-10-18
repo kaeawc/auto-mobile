@@ -399,41 +399,6 @@ const noAccumulatorForEachRule = {
   },
 };
 
-// The ElementSelector service has one entry point, `select(capture, query, options)`. The older
-// per-field adapters survive only for ResolverElementSelector's own tests until they move (issue #11838).
-const SELECTOR_FACADE_METHODS = new Set([
-  "selectByText",
-  "selectByResourceId",
-  "selectByTestTag",
-  "selectClickable",
-  "selectClickableSiblingOfText",
-  "selectClickableSiblingOfResourceId",
-]);
-const SELECTOR_FACADE_ALLOWED_FILES =
-  /(?:^|\/)src\/features\/utility\/ResolverElementSelector\.ts$/;
-const noDeprecatedSelectorFacadeRule = {
-  meta: {
-    type: "problem",
-    messages: {
-      facade:
-        "selectByText/selectByResourceId/selectByTestTag/selectClickable* are deprecated adapters; call ElementSelector.select(capture, query, options) with a named policy from SelectionPolicy. Only ResolverElementSelector, which defines them, may use them (oxlint-plugins/auto-mobile.mjs, issue #11838).",
-    },
-  },
-  create(context) {
-    const filename = context.filename.replaceAll("\\", "/");
-    if (!/(?:^|\/)src\//.test(filename) || SELECTOR_FACADE_ALLOWED_FILES.test(filename)) return {};
-    return {
-      CallExpression(node) {
-        if (
-          node.callee?.type === "MemberExpression" &&
-          SELECTOR_FACADE_METHODS.has(propertyName(node.callee.property))
-        )
-          context.report({ node, messageId: "facade" });
-      },
-    };
-  },
-};
-
 // A bare `expect(...)` used as a statement asserts nothing: no matcher is
 // chained, so nothing runs and it can never fail (issue #4198). The ESLint
 // version used the esquery selector
@@ -1835,7 +1800,6 @@ const plugin = {
     "no-direct-bun-spawn": noDirectBunSpawnRule,
     "no-raw-timer": noRawTimerRule,
     "no-raw-selector-field-read": noRawSelectorFieldReadRule,
-    "no-deprecated-selector-facade": noDeprecatedSelectorFacadeRule,
     "no-structured-content-read": noStructuredContentReadRule,
     "naming-convention": namingConventionRule,
     "no-raw-env-number-parse": noRawEnvNumberParseRule,

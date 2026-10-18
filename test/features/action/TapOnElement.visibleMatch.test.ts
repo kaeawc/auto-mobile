@@ -208,10 +208,14 @@ describe("tapOn visible matched element", () => {
   for (const platform of ["ios", "android"] as const) {
     test(`${platform} refuses off-screen label promoted to full-screen container`, async () => {
       const initial = hierarchy(offscreenLabel, offscreenRow, 790);
-      const selection = new ResolverElementSelector().selectByText(initial, "Forms & Input", {
-        intentAction: "inspect",
-        selectionIntent: "tap",
-      });
+      const selection = new ResolverElementSelector().select(
+        initial,
+        { text: "Forms & Input" },
+        {
+          intentAction: "inspect",
+          selectionIntent: "tap",
+        },
+      );
       expect(selection.matchedElement?.bounds).toEqual(offscreenLabel);
       expect(selection.element?.bounds).toEqual(screen);
 

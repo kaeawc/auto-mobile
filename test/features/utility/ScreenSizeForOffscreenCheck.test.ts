@@ -235,7 +235,7 @@ test.each(rows)("four consumers: $name", (row) => {
         new Map(),
         options,
       ) !== null,
-    resolver: resolver.selectByText(hierarchy, "D43 target").element !== null,
+    resolver: resolver.select(hierarchy, { text: "D43 target" }).element !== null,
   }).toEqual({
     tapAny: row.accepted,
     tapOn: row.accepted,

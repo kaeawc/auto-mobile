@@ -108,12 +108,11 @@ const inside: Element = { ...target, bounds: { left: 100, right: 200, top: 100, 
 test("resolver selector path rejects a centre outside the targeted panel", () => {
   // ResolverElementSelector is the selector tapOn and tapAny construct by default.
   const selector = new ResolverElementSelector(undefined, undefined, wrongSizeOptions);
-  expect(selector.selectByText(coverHierarchy(), target.text!).element).toBeNull();
+  expect(selector.select(coverHierarchy(), { text: target.text! }).element).toBeNull();
   // Positive control: same hierarchy shape and text, centre inside the panel.
-  const found = selector.selectByText(
-    coverHierarchy({ hierarchy: { node: [{ ...inside }] } }),
-    target.text!,
-  ).element;
+  const found = selector.select(coverHierarchy({ hierarchy: { node: [{ ...inside }] } }), {
+    text: target.text!,
+  }).element;
   expect(found?.bounds).toEqual(inside.bounds);
 });
 

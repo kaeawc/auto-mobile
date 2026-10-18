@@ -18,11 +18,15 @@ function select(
   container: { elementId: string; container?: { elementId: string } },
   options: { strategy?: "unique"; intentAction?: "tap" | "focus-input" } = {},
 ) {
-  return new ResolverElementSelector().selectByResourceId(hierarchy(), elementId, {
-    container,
-    strategy: options.strategy,
-    intentAction: options.intentAction ?? "tap",
-  });
+  return new ResolverElementSelector().select(
+    hierarchy(),
+    { elementId: elementId },
+    {
+      container,
+      strategy: options.strategy,
+      intentAction: options.intentAction ?? "tap",
+    },
+  );
 }
 
 describe("iOS container captured twice with one id (#10266)", () => {

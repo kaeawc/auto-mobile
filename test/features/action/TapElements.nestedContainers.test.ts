@@ -256,16 +256,24 @@ test("unique cannot be weakened by a per-container first strategy", async () => 
 test("ambiguity lists at most five resource IDs, texts and bounds", () => {
   const h = harness("tapOn", capture("target"));
   expect(() =>
-    h.selector.selectByResourceId(capture("target"), "remove", {
-      container: scope,
-      strategy: "unique",
-    }),
+    h.selector.select(
+      capture("target"),
+      { elementId: "remove" },
+      {
+        container: scope,
+        strategy: "unique",
+      },
+    ),
   ).toThrow(/Candidates:.*resourceId=.*text=.*bounds=/);
   try {
-    h.selector.selectByResourceId(capture("target"), "remove", {
-      container: scope,
-      strategy: "unique",
-    });
+    h.selector.select(
+      capture("target"),
+      { elementId: "remove" },
+      {
+        container: scope,
+        strategy: "unique",
+      },
+    );
   } catch (error) {
     expect(String(error).match(/bounds=/g)).toHaveLength(5);
     return;
@@ -466,10 +474,14 @@ for (const action of ["tap", "longPress"] as const) {
       adb as AdbClient,
       { timer, talkBackStrategy: talkBack, talkBackDriverFactory: { createDriver: () => driver } },
     );
-    const element = new ResolverElementSelector().selectByResourceId(capture(), "remove", {
-      container: scope,
-      strategy: "unique",
-    }).element;
+    const element = new ResolverElementSelector().select(
+      capture(),
+      { elementId: "remove" },
+      {
+        container: scope,
+        strategy: "unique",
+      },
+    ).element;
     if (!element) {
       throw new Error("Expected scoped target");
     }
@@ -518,10 +530,14 @@ test("tapOn scoped long press does not reselect a global native resource ID", as
     adb as AdbClient,
     { timer },
   );
-  const element = new ResolverElementSelector().selectByResourceId(capture(), "remove", {
-    container: scope,
-    strategy: "unique",
-  }).element;
+  const element = new ResolverElementSelector().select(
+    capture(),
+    { elementId: "remove" },
+    {
+      container: scope,
+      strategy: "unique",
+    },
+  ).element;
   if (!element) {
     throw new Error("Expected scoped target");
   }

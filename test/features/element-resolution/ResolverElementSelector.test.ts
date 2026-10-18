@@ -21,7 +21,7 @@ test("a checkable SwiftUI Toggle ranks its smaller control ahead of the labelled
   toggleRow.$!.class = "SwiftUIToggle";
   toggleRow.node![0].$!.class = "SwiftUIToggle";
 
-  const selected = new ResolverElementSelector().selectByText(capture, "Enable Notifications");
+  const selected = new ResolverElementSelector().select(capture, { text: "Enable Notifications" });
   expect(selected.element?.bounds).toEqual({ left: 301, top: 296, right: 364, bottom: 324 });
 });
 const bounds = { left: 0, top: 0, right: 100, bottom: 100 };
@@ -36,10 +36,12 @@ const hierarchy = {
 
 test("action adapter defaults to namespace IDs and exact-first text", () => {
   const selector = new ResolverElementSelector();
-  expect(selector.selectByResourceId(hierarchy, "login").element?.["resource-id"]).toBe(
+  expect(selector.select(hierarchy, { elementId: "login" }).element?.["resource-id"]).toBe(
     "app:id/login",
   );
-  expect(selector.selectByText(hierarchy, "Login").element?.["resource-id"]).toBe("app:id/login");
+  expect(selector.select(hierarchy, { text: "Login" }).element?.["resource-id"]).toBe(
+    "app:id/login",
+  );
 });
 
 test("fuzzy sibling selection keeps partial label anchors", () => {
@@ -54,10 +56,14 @@ test("fuzzy sibling selection keeps partial label anchors", () => {
       },
     },
   };
-  const result = new ResolverElementSelector().selectClickableSiblingOfText(capture, "Email", {
-    fuzzyMatch: true,
-    index: 1,
-  });
+  const result = new ResolverElementSelector().select(
+    capture,
+    { sibling: { text: "Email" } },
+    {
+      fuzzyMatch: true,
+      index: 1,
+    },
+  );
   expect(result.element?.text).toBe("Email backup");
 });
 
@@ -69,9 +75,9 @@ test("raw element search uses attached raw nodes even with an actionable snapsho
   identifyObservedHierarchy("android", filtered, "cached-ok");
   attachRawViewHierarchy(filtered, raw);
   serverConfig.setRawElementSearchEnabled(true);
-  expect(new ResolverElementSelector().selectByText(filtered, "Hidden target").element?.text).toBe(
-    "Hidden target",
-  );
+  expect(
+    new ResolverElementSelector().select(filtered, { text: "Hidden target" }).element?.text,
+  ).toBe("Hidden target");
 });
 
 test("iOS observed selectors cannot reopen an attached offscreen raw tree", () => {
@@ -91,8 +97,8 @@ test("iOS observed selectors cannot reopen an attached offscreen raw tree", () =
   attachRawViewHierarchy(visible, raw);
   serverConfig.setRawElementSearchEnabled(true);
   const selector = new ResolverElementSelector();
-  expect(selector.selectByText(visible, "Visible").element?.["resource-id"]).toBe("visible");
-  expect(selector.selectByText(visible, "Hidden").element).toBeNull();
+  expect(selector.select(visible, { text: "Visible" }).element?.["resource-id"]).toBe("visible");
+  expect(selector.select(visible, { text: "Hidden" }).element).toBeNull();
   expect(selector.hasContainer(visible, { elementId: "hidden" })).toBe(false);
 });
 
@@ -105,7 +111,7 @@ test("adapter fails ambiguity before returning any action target", () => {
       ],
     },
   };
-  expect(() => new ResolverElementSelector().selectByResourceId(capture, "map")).toThrow(
+  expect(() => new ResolverElementSelector().select(capture, { elementId: "map" })).toThrow(
     "Ambiguous",
   );
 });
@@ -125,7 +131,11 @@ test("tapAny only indexes action-eligible nodes across windows", () => {
       },
     ],
   };
-  const result = new ResolverElementSelector().selectClickable(capture, { strategy: "first" });
+  const result = new ResolverElementSelector().select(
+    capture,
+    {},
+    { intentAction: "tap", strategy: "first" },
+  );
   expect(result.element?.["resource-id"]).toBe("dialog");
   expect(result.totalMatches).toBe(2);
 });
@@ -141,15 +151,15 @@ test("action adapter skips offscreen duplicate targets", () => {
       ],
     },
   };
-  expect(new ResolverElementSelector().selectByText(capture, "Done").element?.bounds?.left).toBe(
-    20,
-  );
+  expect(
+    new ResolverElementSelector().select(capture, { text: "Done" }).element?.bounds?.left,
+  ).toBe(20);
 });
 
 test("missing container remains retryable but synthetic container keys are recognized", () => {
   const selector = new ResolverElementSelector();
   expect(
-    selector.selectByText(hierarchy, "Login", { container: { elementId: "missing" } }).element,
+    selector.select(hierarchy, { text: "Login" }, { container: { elementId: "missing" } }).element,
   ).toBeNull();
   const capture = {
     hierarchy: {
@@ -158,7 +168,7 @@ test("missing container remains retryable but synthetic container keys are recog
   };
   expect(selector.hasContainer(capture, { elementId: "s-container" })).toBe(true);
   expect(
-    selector.selectByText(capture, "Login", { container: { elementId: "s-container" } }).element
+    selector.select(capture, { text: "Login" }, { container: { elementId: "s-container" } }).element
       ?.text,
   ).toBe("Login");
 });
@@ -179,25 +189,28 @@ test("tapAny scrollable scope selects clickable rows instead of the scrolling li
   };
   const selector = new ResolverElementSelector();
   expect(
-    selector.selectClickable(capture, { scrollableContainer: true }).element?.["resource-id"],
+    selector.select(capture, {}, { intentAction: "tap", scrollableContainer: true }).element?.[
+      "resource-id"
+    ],
   ).toBe("row");
   expect(
-    selector.selectClickable(capture, {
-      scrollableContainer: true,
-      container: { elementId: "outside" },
-    }).element,
+    selector.select(
+      capture,
+      {},
+      { intentAction: "tap", scrollableContainer: true, container: { elementId: "outside" } },
+    ).element,
   ).toBeNull();
 });
 
 test("long press falls back to ordinary clickable targets for tapOn and tapAny", () => {
   const selector = new ResolverElementSelector();
   expect(
-    selector.selectByText(hierarchy, "Login", { intentAction: "long-press" }).element?.[
+    selector.select(hierarchy, { text: "Login" }, { intentAction: "long-press" }).element?.[
       "resource-id"
     ],
   ).toBe("app:id/login");
   expect(
-    selector.selectClickable(hierarchy, { intentAction: "long-press", index: 0 }).element?.[
+    selector.select(hierarchy, {}, { intentAction: "long-press", index: 0 }).element?.[
       "resource-id"
     ],
   ).toBe("app:id/login_help");
@@ -213,18 +226,24 @@ test("long-press candidate set includes an ordinary clickable control alongside 
       ],
     },
   };
-  const first = new ResolverElementSelector(new ElementResolver(() => 0)).selectClickable(capture, {
-    intentAction: "long-press",
-    strategy: "first",
-  });
+  const first = new ResolverElementSelector(new ElementResolver(() => 0)).select(
+    capture,
+    {},
+    {
+      intentAction: "long-press",
+      strategy: "first",
+    },
+  );
   expect(first.totalMatches).toBe(2);
   expect(first.element?.["resource-id"]).toBe("A");
-  const randomFirst = new ResolverElementSelector(new ElementResolver(() => 0)).selectClickable(
+  const randomFirst = new ResolverElementSelector(new ElementResolver(() => 0)).select(
     capture,
+    {},
     { intentAction: "long-press", strategy: "random" },
   );
-  const randomLast = new ResolverElementSelector(new ElementResolver(() => 0.99)).selectClickable(
+  const randomLast = new ResolverElementSelector(new ElementResolver(() => 0.99)).select(
     capture,
+    {},
     { intentAction: "long-press", strategy: "random" },
   );
   expect(randomFirst.totalMatches).toBe(2);
@@ -246,13 +265,13 @@ test("indexed and random selection count only onscreen action candidates", async
     },
   };
   const selector = new ResolverElementSelector(new ElementResolver(() => 0));
-  const first = selector.selectByText(capture, "Done", { index: 0 });
+  const first = selector.select(capture, { text: "Done" }, { index: 0 });
   expect(first.element?.bounds?.left).toBe(20);
   expect(first.totalMatches).toBe(1);
-  expect(selector.selectByText(capture, "Done", { index: 1 }).element).toBeNull();
-  expect(selector.selectByText(capture, "Done", { strategy: "random" }).element?.bounds?.left).toBe(
-    20,
-  );
+  expect(selector.select(capture, { text: "Done" }, { index: 1 }).element).toBeNull();
+  expect(
+    selector.select(capture, { text: "Done" }, { strategy: "random" }).element?.bounds?.left,
+  ).toBe(20);
 });
 
 test("tap lookup preserves a bounded inert label inside a scroll container", () => {
@@ -267,10 +286,14 @@ test("tap lookup preserves a bounded inert label inside a scroll container", () 
     },
   };
   expect(
-    new ResolverElementSelector().selectByText(capture, "Details", {
-      intentAction: "inspect",
-      selectionIntent: "tap",
-    }).element?.bounds,
+    new ResolverElementSelector().select(
+      capture,
+      { text: "Details" },
+      {
+        intentAction: "inspect",
+        selectionIntent: "tap",
+      },
+    ).element?.bounds,
   ).toEqual(labelBounds);
 });
 
@@ -292,10 +315,14 @@ test("tap intent ranks a clickable text peer ahead of a smaller input", () => {
     },
   };
   expect(
-    new ResolverElementSelector().selectByText(capture, "Login", {
-      intentAction: "inspect",
-      selectionIntent: "tap",
-    }).element?.bounds?.top,
+    new ResolverElementSelector().select(
+      capture,
+      { text: "Login" },
+      {
+        intentAction: "inspect",
+        selectionIntent: "tap",
+      },
+    ).element?.bounds?.top,
   ).toBe(40);
 });
 
@@ -312,9 +339,13 @@ test("focus promotes a Compose label child to its editable ancestor (#7759)", ()
       },
     },
   };
-  const result = new ResolverElementSelector().selectByText(capture, "Basic Text Field", {
-    intentAction: "focus-input",
-  });
+  const result = new ResolverElementSelector().select(
+    capture,
+    { text: "Basic Text Field" },
+    {
+      intentAction: "focus-input",
+    },
+  );
   expect(result.element?.bounds).toEqual(inputBounds);
 });
 
@@ -347,9 +378,13 @@ test("focus prefers an exact label's promoted field over a partial match elsewhe
       },
     ],
   };
-  const result = new ResolverElementSelector().selectByText(capture, "Email", {
-    intentAction: "focus-input",
-  });
+  const result = new ResolverElementSelector().select(
+    capture,
+    { text: "Email" },
+    {
+      intentAction: "focus-input",
+    },
+  );
   expect(result.element?.bounds).toEqual(exactInputBounds);
 });
 
@@ -368,9 +403,13 @@ test("focus rejects a nested label outside a distant editable ancestor (#7759)",
       },
     },
   };
-  const result = new ResolverElementSelector().selectByText(capture, "Email", {
-    intentAction: "focus-input",
-  });
+  const result = new ResolverElementSelector().select(
+    capture,
+    { text: "Email" },
+    {
+      intentAction: "focus-input",
+    },
+  );
   expect(result.element).toBeNull();
   expect(result.element?.bounds).not.toEqual(outerBounds);
 });
@@ -396,9 +435,13 @@ test("focus rejects a label three hops below a full-screen editable ancestor (#7
       },
     },
   };
-  const result = new ResolverElementSelector().selectByText(capture, "Email", {
-    intentAction: "focus-input",
-  });
+  const result = new ResolverElementSelector().select(
+    capture,
+    { text: "Email" },
+    {
+      intentAction: "focus-input",
+    },
+  );
   expect(result.element).toBeNull();
   expect(result.element?.bounds).not.toEqual(outerBounds);
 });
@@ -418,8 +461,11 @@ test("focus stops at an interactive ancestor before a distant editable input (#7
     },
   };
   expect(
-    new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
-      .element,
+    new ResolverElementSelector().select(
+      capture,
+      { text: "Email" },
+      { intentAction: "focus-input" },
+    ).element,
   ).toBeNull();
 });
 
@@ -436,9 +482,9 @@ test("focus promotes an iOS text label to its text-field role ancestor (#7759)",
   };
   // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
   expect(
-    new ResolverElementSelector(undefined, undefined, { platform: "ios" }).selectByText(
+    new ResolverElementSelector(undefined, undefined, { platform: "ios" }).select(
       capture,
-      "Email",
+      { text: "Email" },
       { intentAction: "focus-input" },
     ).element?.bounds,
   ).toEqual(inputBounds);
@@ -458,8 +504,11 @@ test("focus resolves a label merged from flattened skeleton siblings (#7759)", (
   expect(skeleton.find((row) => row.affordances.includes("input"))?.label).toBe("Email");
   const capture = { hierarchy: { node: { ...input, node: [label] } } };
   expect(
-    new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
-      .element?.bounds,
+    new ResolverElementSelector().select(
+      capture,
+      { text: "Email" },
+      { intentAction: "focus-input" },
+    ).element?.bounds,
   ).toEqual(inputBounds);
 });
 
@@ -473,8 +522,11 @@ test("focus rejects a stray non-editable label beside an unrelated input (#7759)
     },
   };
   expect(
-    new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
-      .element,
+    new ResolverElementSelector().select(
+      capture,
+      { text: "Email" },
+      { intentAction: "focus-input" },
+    ).element,
   ).toBeNull();
 });
 
@@ -488,10 +540,14 @@ test("indexed focus excludes an exact clickable Email before the exact input (#7
       ],
     },
   };
-  const result = new ResolverElementSelector().selectByText(capture, "Email", {
-    intentAction: "focus-input",
-    index: 0,
-  });
+  const result = new ResolverElementSelector().select(
+    capture,
+    { text: "Email" },
+    {
+      intentAction: "focus-input",
+      index: 0,
+    },
+  );
   expect(result.element?.bounds).toEqual(inputBounds);
   expect(result.totalMatches).toBe(1);
 });
@@ -510,9 +566,13 @@ test("tap lookup falls back to a bounded Compose ID when exact native ID is unbo
     },
   };
   expect(
-    new ResolverElementSelector().selectByResourceId(capture, "app:id/login", {
-      intentAction: "inspect",
-    }).element?.["resource-id"],
+    new ResolverElementSelector().select(
+      capture,
+      { elementId: "app:id/login" },
+      {
+        intentAction: "inspect",
+      },
+    ).element?.["resource-id"],
   ).toBe("login");
 });
 
@@ -531,15 +591,19 @@ test("selector adapter requires an explicit hint opt-in even for focus-input", (
     },
   };
   const selector = new ResolverElementSelector();
-  expect(selector.selectByText(capture, "Phone").element).toBeNull();
+  expect(selector.select(capture, { text: "Phone" }).element).toBeNull();
   expect(
-    selector.selectByText(capture, "Phone", { intentAction: "focus-input" }).element,
+    selector.select(capture, { text: "Phone" }, { intentAction: "focus-input" }).element,
   ).toBeNull();
   expect(
-    selector.selectByText(capture, "Phone", {
-      intentAction: "focus-input",
-      allowHintFallback: true,
-    }).element?.["resource-id"],
+    selector.select(
+      capture,
+      { text: "Phone" },
+      {
+        intentAction: "focus-input",
+        allowHintFallback: true,
+      },
+    ).element?.["resource-id"],
   ).toBe("phone");
 });
 
@@ -549,12 +613,16 @@ const tapCallSites = [
   {
     name: "text, partial and case-insensitive with hint fallback",
     adapter: (s: ResolverElementSelector) =>
-      s.selectByText(hierarchy, "login", {
-        partialMatch: true,
-        caseSensitive: false,
-        intentAction: "inspect",
-        allowHintFallback: true,
-      }),
+      s.select(
+        hierarchy,
+        { text: "login" },
+        {
+          partialMatch: true,
+          caseSensitive: false,
+          intentAction: "inspect",
+          allowHintFallback: true,
+        },
+      ),
     select: (s: ResolverElementSelector) =>
       s.select(
         hierarchy,
@@ -570,13 +638,13 @@ const tapCallSites = [
   {
     name: "resource ID, exact",
     adapter: (s: ResolverElementSelector) =>
-      s.selectByResourceId(hierarchy, "login", { partialMatch: false, intentAction: "inspect" }),
+      s.select(hierarchy, { elementId: "login" }, { partialMatch: false, intentAction: "inspect" }),
     select: (s: ResolverElementSelector) =>
       s.select(hierarchy, { elementId: "login" }, { partialMatch: false, intentAction: "inspect" }),
   },
   {
     name: "clickable with no query",
-    adapter: (s: ResolverElementSelector) => s.selectClickable(hierarchy, { intentAction: "tap" }),
+    adapter: (s: ResolverElementSelector) => s.select(hierarchy, {}, { intentAction: "tap" }),
     select: (s: ResolverElementSelector) => s.select(hierarchy, {}, { intentAction: "tap" }),
   },
 ];

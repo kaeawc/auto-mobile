@@ -40,9 +40,9 @@ function loadFocusCapture(moment: "pre" | "post"): ViewHierarchyResult {
 }
 
 function capturedFocusSelection() {
-  const selection = new ResolverElementSelector().selectByText(
+  const selection = new ResolverElementSelector().select(
     loadFocusCapture("pre"),
-    "Basic Text Field",
+    { text: "Basic Text Field" },
     { intentAction: "focus-input" },
   );
   if (!selection.element) {
@@ -586,10 +586,14 @@ describe("TapOnElement selectionStrategy", () => {
     async (label) => {
       const pre = loadFocusCapture("pre");
       const resolver = new ResolverElementSelector();
-      const target = resolver.selectByText(pre, label, { intentAction: "focus-input" }).element!;
+      const target = resolver.select(
+        pre,
+        { text: label },
+        { intentAction: "focus-input" },
+      ).element!;
       const id = target["view-id"]!;
       expect(id.startsWith("s2-")).toBe(true);
-      const selection = resolver.selectByResourceId(pre, id, { intentAction: "focus-input" });
+      const selection = resolver.select(pre, { elementId: id }, { intentAction: "focus-input" });
       expect(selection.element?.class).toBe("android.widget.EditText");
       expect(selection.matchedElement?.text).not.toBe(label);
       expect(selection.element?.focused).not.toBe("true");

@@ -88,7 +88,7 @@ describe("ExploreElementExtraction", () => {
         expect(element.node).toBeUndefined();
         expect(tapSelectorFor(element, hierarchy)).toEqual({ text: "Skip" });
         // The resolver promotes the non-clickable label to its clickable owner (#10268).
-        const selected = new ResolverElementSelector().selectByText(hierarchy, "Skip");
+        const selected = new ResolverElementSelector().select(hierarchy, { text: "Skip" });
         expect(selected.element?.bounds).toEqual(parent.bounds);
         expect(selected.element?.clickable).toBe("true");
       });
@@ -110,9 +110,9 @@ describe("ExploreElementExtraction", () => {
         expect(candidate).toBeDefined();
         const target = tapSelectorFor(candidate!, capture.viewHierarchy);
         expect(target).toHaveProperty("text", text);
-        const selected = new ResolverElementSelector().selectByText(
+        const selected = new ResolverElementSelector().select(
           capture.viewHierarchy,
-          text,
+          { text: text },
           target ?? {},
         );
         expect(selected.element).toBeDefined();
@@ -137,7 +137,7 @@ describe("ExploreElementExtraction", () => {
       const selector = new ResolverElementSelector();
       for (const [index, element] of elements.entries()) {
         expect(tapSelectorFor(element, hierarchy)).toEqual({ text: "Next", index });
-        expect(selector.selectByText(hierarchy, "Next", { index }).element?.bounds).toEqual(
+        expect(selector.select(hierarchy, { text: "Next" }, { index }).element?.bounds).toEqual(
           parents[index].bounds,
         );
         expect(getElementKey(element, hierarchy)).toBe(`sel-text:Next#${index}`);

@@ -63,7 +63,8 @@ test.each([false, true])(
     }
     expect(roots[1].node["view-id"]).toStartWith(STABLE_VIEW_ID_PREFIX);
     expect(
-      new ResolverElementSelector().selectByResourceId(converted, roots[1].node["view-id"]).element,
+      new ResolverElementSelector().select(converted, { elementId: roots[1].node["view-id"] })
+        .element,
     ).not.toBeNull();
     const projected = projectActionableHierarchy("android", converted);
     expect(projected.windows?.[1].hierarchy).toBe(roots[1]);
@@ -90,7 +91,7 @@ test.each([false, true])(
     expect(skeleton).toHaveLength(3);
     const liveSelector = new ResolverElementSelector();
     const selectedRows = [0, 1, 2].map(
-      (index) => liveSelector.selectByText(projected, "Open", { index }).element,
+      (index) => liveSelector.select(projected, { text: "Open" }, { index }).element,
     );
     expect(selectedRows.map((element) => element?.["resource-id"])).toEqual([
       undefined,
@@ -150,10 +151,14 @@ test("linked activity/dialog duplicate skeleton indexes replay the resolver's to
   const selector = new ResolverElementSelector();
   for (const row of rows) {
     expect(row.index).toBeDefined();
-    const selection = selector.selectByResourceId(hierarchy, row.elementId!, {
-      index: row.index,
-      intentAction: "inspect",
-    });
+    const selection = selector.select(
+      hierarchy,
+      { elementId: row.elementId! },
+      {
+        index: row.index,
+        intentAction: "inspect",
+      },
+    );
     expect(selection.element?.bounds).toEqual({
       left: row.bounds[0],
       top: row.bounds[1],
@@ -161,9 +166,13 @@ test("linked activity/dialog duplicate skeleton indexes replay the resolver's to
       bottom: row.bounds[3],
     });
   }
-  const defaultPick = selector.selectByResourceId(hierarchy, "app:id/ok", {
-    intentAction: "inspect",
-  });
+  const defaultPick = selector.select(
+    hierarchy,
+    { elementId: "app:id/ok" },
+    {
+      intentAction: "inspect",
+    },
+  );
   expect(rows.find((row) => row.index === 0)?.bounds).toEqual([
     0,
     0,

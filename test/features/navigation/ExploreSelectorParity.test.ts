@@ -116,12 +116,16 @@ function select(
 ) {
   // Exactly tapSelectorFor's options: Explore supplies no screenSizeOptions at either boundary.
   return input.kind === "id"
-    ? selector.selectByResourceId(capture, input.value, { partialMatch: false, index })
-    : selector.selectByText(capture, input.value, {
-        partialMatch: true,
-        caseSensitive: false,
-        index,
-      });
+    ? selector.select(capture, { elementId: input.value }, { partialMatch: false, index })
+    : selector.select(
+        capture,
+        { text: input.value },
+        {
+          partialMatch: true,
+          caseSensitive: false,
+          index,
+        },
+      );
 }
 
 function elementRecord(element: Element | null, nodes: ViewHierarchyNode[]) {

@@ -28,11 +28,15 @@ describe("iOS container duplicated by a stale SDK snapshot (#10266)", () => {
   });
 
   test("a cart_A > item_42 scope resolves within the XCUITest cart", () => {
-    const result = new ResolverElementSelector().selectByResourceId(hierarchy(), "quantity", {
-      container: { elementId: "item_42", container: { elementId: "cart_A" } },
-      strategy: "unique",
-      intentAction: "focus-input",
-    });
+    const result = new ResolverElementSelector().select(
+      hierarchy(),
+      { elementId: "quantity" },
+      {
+        container: { elementId: "item_42", container: { elementId: "cart_A" } },
+        strategy: "unique",
+        intentAction: "focus-input",
+      },
+    );
     expect(result.error).toBeUndefined();
     expect(result.element?.["resource-id"]).toBe("quantity");
     expect(result.element?.bounds).toEqual({ left: 12, top: 261, right: 296, bottom: 296 });
@@ -40,11 +44,15 @@ describe("iOS container duplicated by a stale SDK snapshot (#10266)", () => {
 
   test("two XCUITest containers sharing an id are still ambiguous", () => {
     expect(() =>
-      new ResolverElementSelector().selectByResourceId(hierarchy(), "quantity", {
-        container: { elementId: "item_42" },
-        strategy: "unique",
-        intentAction: "focus-input",
-      }),
+      new ResolverElementSelector().select(
+        hierarchy(),
+        { elementId: "quantity" },
+        {
+          container: { elementId: "item_42" },
+          strategy: "unique",
+          intentAction: "focus-input",
+        },
+      ),
     ).toThrow("Container level 1 ambiguous: item_42");
   });
 });

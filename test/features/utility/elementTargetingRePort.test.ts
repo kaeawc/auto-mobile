@@ -21,20 +21,24 @@ describe("resolver selector compatibility with the shared resolution contract", 
     };
     const capture: ViewHierarchyResult = { hierarchy: { node: [partial, exact] } };
     const inInbox = { container: { text: "Inbox" }, intentAction: "inspect" } as const;
-    expect(selector.selectByText(capture, "Target", inInbox).element?.bounds.top).toBe(110);
+    expect(selector.select(capture, { text: "Target" }, inInbox).element?.bounds.top).toBe(110);
     expect(
-      selector.selectByText({ hierarchy: { node: [partial] } }, "Target", inInbox).element?.bounds
-        .top,
+      selector.select({ hierarchy: { node: [partial] } }, { text: "Target" }, inInbox).element
+        ?.bounds.top,
     ).toBe(10);
     const production = new ResolverElementSelector();
     expect(production.hasContainer(capture, { text: "Inbox" })).toBe(true);
     expect(
-      production.selectByText(capture, "Inbox", { intentAction: "inspect" }).element?.text,
+      production.select(capture, { text: "Inbox" }, { intentAction: "inspect" }).element?.text,
     ).toBe("Inbox");
     expect(
-      production.selectByText({ hierarchy: { node: [partial] } }, "Inbox", {
-        intentAction: "inspect",
-      }).element?.text,
+      production.select(
+        { hierarchy: { node: [partial] } },
+        { text: "Inbox" },
+        {
+          intentAction: "inspect",
+        },
+      ).element?.text,
     ).toBe("Inbox (12)");
   });
 
@@ -47,13 +51,13 @@ describe("resolver selector compatibility with the shared resolution contract", 
         ],
       },
     };
-    expect(selector.selectByResourceId(capture, "pkg:id/action").element?.["resource-id"]).toBe(
+    expect(selector.select(capture, { elementId: "pkg:id/action" }).element?.["resource-id"]).toBe(
       "pkg:id/action",
     );
     expect(
-      selector.selectByResourceId(
+      selector.select(
         { hierarchy: { node: [{ "resource-id": "action", bounds: bounds(0, 10) }] } },
-        "pkg:id/action",
+        { elementId: "pkg:id/action" },
         { intentAction: "inspect" },
       ).element?.["resource-id"],
     ).toBe("action");
@@ -66,13 +70,13 @@ describe("resolver selector compatibility with the shared resolution contract", 
         node: [{ "resource-id": "path", bounds: bounds(0, 10), clickable: true }, view],
       },
     };
-    expect(selector.selectByResourceId(capture, "runner/path").element?.["view-id"]).toBe(
+    expect(selector.select(capture, { elementId: "runner/path" }).element?.["view-id"]).toBe(
       "runner/path",
     );
     expect(() =>
-      selector.selectByResourceId(
+      selector.select(
         { hierarchy: { node: [view, { ...view, bounds: bounds(120, 220) }] } },
-        "runner/path",
+        { elementId: "runner/path" },
       ),
     ).toThrow("ambiguous");
   });
@@ -94,7 +98,7 @@ describe("resolver selector compatibility with the shared resolution contract", 
     const production = new ResolverElementSelector();
     for (const row of rows) {
       expect(
-        production.selectByResourceId(capture, "pkg:id/repeat", { index: row.index }).element
+        production.select(capture, { elementId: "pkg:id/repeat" }, { index: row.index }).element
           ?.bounds,
       ).toEqual({
         left: row.bounds[0],
@@ -104,6 +108,8 @@ describe("resolver selector compatibility with the shared resolution contract", 
       });
     }
     expect(rows.find((row) => row.index === 0)?.bounds[1]).toBe(120);
-    expect(production.selectByResourceId(capture, "pkg:id/repeat").element?.bounds.top).toBe(120);
+    expect(production.select(capture, { elementId: "pkg:id/repeat" }).element?.bounds.top).toBe(
+      120,
+    );
   });
 });

@@ -1510,10 +1510,9 @@ describe("Explore", () => {
         try {
           expect(await perform(candidate, observation)).toBe(true);
           expect(calls).toEqual([{ text: "Skip", action: "tap" }]);
-          const selection = new ResolverElementSelector().selectByText(
-            observation.viewHierarchy!,
-            "Skip",
-          );
+          const selection = new ResolverElementSelector().select(observation.viewHierarchy!, {
+            text: "Skip",
+          });
           // tapOn's resolver-backed selector promotes the label to its clickable owner.
           expect(selection.element?.bounds).toEqual(parent.bounds);
           expect(selection.element?.clickable).toBe("true");

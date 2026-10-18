@@ -57,8 +57,8 @@ for (const [reason, message] of [
       const selector = new ResolverElementSelector({ resolve: () => resolution });
       const error = thrown(() =>
         tool === "tapOn"
-          ? selector.selectByText(capture, "target", { container: nested })
-          : selector.selectClickable(capture, { container: nested }),
+          ? selector.select(capture, { text: "target" }, { container: nested })
+          : selector.select(capture, {}, { intentAction: "tap", container: nested }),
       );
       expect(error.message).toBe(message);
       expect(error).toHaveProperty("containerFailure", containerFailure);
@@ -77,7 +77,7 @@ test("ordinary selector errors keep their message and plain MCP envelope", () =>
   const selector = new ResolverElementSelector({
     resolve: () => ({ ...empty, error: "Target ambiguous: 2 matches" }),
   });
-  const error = thrown(() => selector.selectByText(capture, "target"));
+  const error = thrown(() => selector.select(capture, { text: "target" }));
   expect(error.message).toBe("Target ambiguous: 2 matches");
   expect(error).not.toHaveProperty("containerFailure");
   expect(shapeToolCallError(error, { toolName: "tapOn", source: "MCP" })).toEqual({

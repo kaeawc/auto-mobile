@@ -138,9 +138,9 @@ describe("assignStableViewIds (#3228)", () => {
     expect(observedBobId).toMatch(/^s2-[0-9a-f]{16}~[0-9a-f]{8}$/);
     expect(observedCarolId).toMatch(/^s2-[0-9a-f]{16}~[0-9a-f]{8}$/);
 
-    const resolved = new ResolverElementSelector().selectByResourceId(
+    const resolved = new ResolverElementSelector().select(
       { hierarchy: after.root } as ViewHierarchyResult,
-      observedBobId,
+      { elementId: observedBobId },
       { intentAction: "inspect" },
     ).element;
     expect(resolved?.bounds).toEqual(after.rows[0].bounds);
@@ -577,9 +577,9 @@ describe("assignStableViewIds (#3228)", () => {
     expect(after.fields[0]["view-id"]).toBe(observedEmailId);
     expect(after.fields[1]["view-id"]).toBe(observedPasswordId);
 
-    const resolved = new ResolverElementSelector().selectByResourceId(
+    const resolved = new ResolverElementSelector().select(
       { hierarchy: after.root } as ViewHierarchyResult,
-      observedPasswordId,
+      { elementId: observedPasswordId },
       { intentAction: "inspect" },
     ).element;
     expect(resolved?.bounds).toEqual(after.fields[1].bounds);
@@ -647,9 +647,9 @@ describe("assignStableViewIds (#3228)", () => {
     expect(after.fields[1]["view-id"]).toBe(observedPasswordId);
     expect(after.fields[0]["view-id"]).not.toBe(after.fields[1]["view-id"]);
 
-    const resolved = new ResolverElementSelector().selectByResourceId(
+    const resolved = new ResolverElementSelector().select(
       { hierarchy: after.root } as ViewHierarchyResult,
-      observedEmailId,
+      { elementId: observedEmailId },
       { intentAction: "inspect" },
     ).element;
     expect(resolved?.bounds).toEqual(after.fields[0].bounds);

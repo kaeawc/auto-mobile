@@ -607,7 +607,7 @@ describe("TalkBack resolved result and fallback coordinates", () => {
     await expect(
       new TalkBackTapStrategy().executeDirectActivation(selected, driver, {
         reResolve: (hierarchy) =>
-          selector.selectByText(hierarchy, "Apps", { strategy: "unique", intentAction: "tap" })
+          selector.select(hierarchy, { text: "Apps" }, { strategy: "unique", intentAction: "tap" })
             .element,
       }),
     ).rejects.toThrow("original selector cannot resolve unambiguously");

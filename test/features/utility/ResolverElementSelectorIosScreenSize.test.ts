@@ -36,7 +36,7 @@ test.each([false, true])(
       timer: new FakeTimer(),
     });
     expect(
-      tap["elementSelector"].selectByText(hierarchy, duoSelectionText).element?.bounds,
+      tap["elementSelector"].select(hierarchy, { text: duoSelectionText }).element?.bounds,
     ).toEqual(duoSelectionBounds);
   },
 );
@@ -46,7 +46,7 @@ test("drag default selector receives the Duo flag", () => {
   const device = selectionFixtureDevice();
   const timer = new FakeTimer();
   const drag = new DragAndDrop(device, new FakeAdbExecutor(), timer);
-  expect(drag["selector"].selectByText(hierarchy, duoSelectionText).element?.bounds).toEqual(
+  expect(drag["selector"].select(hierarchy, { text: duoSelectionText }).element?.bounds).toEqual(
     duoSelectionBounds,
   );
 });
@@ -64,7 +64,7 @@ test("setUIState default selector receives the Duo flag", () => {
 test("projection stamp takes precedence even in a selector without a device flag", () => {
   const hierarchy = { ...projectActionableHierarchy("ios", issue8379SelectionHierarchy(), true) };
   expect(
-    new ResolverElementSelector().selectByText(hierarchy, duoSelectionText).element?.bounds,
+    new ResolverElementSelector().select(hierarchy, { text: duoSelectionText }).element?.bounds,
   ).toEqual(duoSelectionBounds);
 });
 

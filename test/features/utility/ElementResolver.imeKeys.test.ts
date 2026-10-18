@@ -39,13 +39,17 @@ function load(fixture: Capture, linked: boolean): ViewHierarchyResult {
 }
 
 function selectText(capture: ViewHierarchyResult, text: string, index?: number) {
-  return new ResolverElementSelector().selectByText(capture, text, {
-    partialMatch: true,
-    caseSensitive: false,
-    intentAction: "inspect",
-    selectionIntent: "tap",
-    index,
-  });
+  return new ResolverElementSelector().select(
+    capture,
+    { text: text },
+    {
+      partialMatch: true,
+      caseSensitive: false,
+      intentAction: "inspect",
+      selectionIntent: "tap",
+      index,
+    },
+  );
 }
 
 describe.each([true, false])(
@@ -76,9 +80,9 @@ describe.each([true, false])(
     });
 
     test("a key stays reachable by its resource id", () => {
-      const result = new ResolverElementSelector().selectByResourceId(
+      const result = new ResolverElementSelector().select(
         load(postTap, linked),
-        `${GBOARD}:id/key_pos_del`,
+        { elementId: `${GBOARD}:id/key_pos_del` },
         { intentAction: "inspect" },
       );
       expect(result.element?.["content-desc"]).toBe("Delete");

@@ -59,9 +59,13 @@ function windowRoot(hierarchy: ViewHierarchyResult, windowId: number): ViewHiera
 }
 
 function selectSettings(hierarchy: ViewHierarchyResult): number | undefined {
-  const selection = new ResolverElementSelector().selectByText(hierarchy, "Settings", {
-    partialMatch: false,
-  });
+  const selection = new ResolverElementSelector().select(
+    hierarchy,
+    { text: "Settings" },
+    {
+      partialMatch: false,
+    },
+  );
   return selection.element?.bounds.top;
 }
 
@@ -278,7 +282,8 @@ describe('app-layer prototype windows (window.layer "app", aovl D4)', () => {
   // Captured: CtrlProxy's TYPE_APPLICATION_OVERLAY window (a11y TYPE_SYSTEM, no prototype metadata)
   // floating over the Playground, beside SystemUI's TYPE_SYSTEM status bar.
   const selectByText = (hierarchy: ViewHierarchyResult, text: string) =>
-    new ResolverElementSelector().selectByText(hierarchy, text, { partialMatch: false }).element;
+    new ResolverElementSelector().select(hierarchy, { text: text }, { partialMatch: false })
+      .element;
 
   test("the captured app-layer window is AutoMobile's prototype and the status bar is not", () => {
     const hierarchy = capturedAppLayerPrototypeHierarchy();
@@ -337,7 +342,7 @@ describe("app rows under a floating prototype (#10608/#10544, aovl D6 host half)
   // device's occlusion pass dropped it from the ordinary capture. Once a capture keeps the row,
   // layer "app" must return it and a tap on it must be refused as covered, not "not found".
   const elevated = (hierarchy: ViewHierarchyResult) =>
-    new ResolverElementSelector().selectByResourceId(hierarchy, "button_elevated").element;
+    new ResolverElementSelector().select(hierarchy, { elementId: "button_elevated" }).element;
 
   test('"app" returns the covered row and the tap guard refuses its centre', () => {
     const hierarchy = capturedFloatingCoverHierarchy();

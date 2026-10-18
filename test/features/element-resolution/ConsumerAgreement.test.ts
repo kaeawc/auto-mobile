@@ -108,15 +108,19 @@ test("tap and highlight agree on scoped default target and ranked explicit indic
   };
   const container = { elementId: "scope" };
   const selector = new ResolverElementSelector();
-  const tap = selector.selectByText(hierarchy, "Save", { container });
-  const highlight = selector.selectByText(hierarchy, "Save", {
-    container,
-    intentAction: "highlight",
-  });
+  const tap = selector.select(hierarchy, { text: "Save" }, { container });
+  const highlight = selector.select(
+    hierarchy,
+    { text: "Save" },
+    {
+      container,
+      intentAction: "highlight",
+    },
+  );
   // Scoped taps can use an inert match's own bounds, just like highlight.
   expect(tap.element?.["resource-id"]).toBe("label");
   expect(highlight.element?.["resource-id"]).toBe("label");
   expect(
-    selector.selectByText(hierarchy, "Save", { container, index: 0 }).element?.["resource-id"],
+    selector.select(hierarchy, { text: "Save" }, { container, index: 0 }).element?.["resource-id"],
   ).toBe("label");
 });

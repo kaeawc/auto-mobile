@@ -204,10 +204,9 @@ test.each(rows)("cross-path off-screen agreement: $name", (row) => {
   expect(tapOnSize).toEqual(row.resolvedSize);
   const verdicts = {
     resolver:
-      new ResolverElementSelector(undefined, undefined, options).selectByText(
-        hierarchy,
-        target.text!,
-      ).element === null,
+      new ResolverElementSelector(undefined, undefined, options).select(hierarchy, {
+        text: target.text!,
+      }).element === null,
     tapAny: tapAny["findClickableElement"]({ action: "tap" }, hierarchy, options).element === null,
     tapOn: tapOn["isElementTapTargetOffScreen"](selection, hierarchy, tapOnSize),
   };

@@ -62,10 +62,14 @@ for (const row of scopedSelectionMatrix) {
       }),
     });
     const select = () =>
-      selector.selectByResourceId(capture, "android:id/title", {
-        container: row.container,
-        strategy: row.selectionStrategy,
-      });
+      selector.select(
+        capture,
+        { elementId: "android:id/title" },
+        {
+          container: row.container,
+          strategy: row.selectionStrategy,
+        },
+      );
     if (row.nested) {
       expect(select).toThrow("Container level 1 not found");
     } else {

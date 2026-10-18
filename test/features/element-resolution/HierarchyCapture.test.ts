@@ -144,9 +144,13 @@ describe("hierarchy capture freshness policy", () => {
     try {
       const diagnostic = await capture.capture({ freshness: "fresh", searchRaw: true });
       expect(
-        new ResolverElementSelector().selectByText(diagnostic.hierarchy, "Target", {
-          intentAction: "drag",
-        }).element?.bounds.left,
+        new ResolverElementSelector().select(
+          diagnostic.hierarchy,
+          { text: "Target" },
+          {
+            intentAction: "drag",
+          },
+        ).element?.bounds.left,
       ).toBe(5000);
       const actionable = await capture.capture({ freshness: "fresh" });
       expect(diagnostic.nodes[0].bounds?.left).toBe(5000);

@@ -899,9 +899,9 @@ describe("capture-local synthetic element ids", () => {
     expect(afterMapping.get(survivorUuid!)).toBe("s2-3340048129449c01");
 
     const selector = new ResolverElementSelector();
-    expect(selector.selectByResourceId(before, oldId).element).not.toBeNull();
-    expect(selector.selectByResourceId(after, oldId).element).toBeNull();
-    expect(selector.selectByResourceId(after, "s2-3340048129449c01").element).not.toBeNull();
+    expect(selector.select(before, { elementId: oldId }).element).not.toBeNull();
+    expect(selector.select(after, { elementId: oldId }).element).toBeNull();
+    expect(selector.select(after, { elementId: "s2-3340048129449c01" }).element).not.toBeNull();
     const tapOn = createDefaultTapOnElement();
     await expect(
       tapOn["handleElementNotFound"]({ action: "tap", elementId: oldId }),

@@ -1122,10 +1122,14 @@ describe("toSkeleton — acceptance criteria", () => {
 
       const selector = new ResolverElementSelector();
       for (const row of rows) {
-        const result = selector.selectByResourceId(viewHierarchy, resourceId, {
-          index: row.index,
-          intentAction: "long-press",
-        });
+        const result = selector.select(
+          viewHierarchy,
+          { elementId: resourceId },
+          {
+            index: row.index,
+            intentAction: "long-press",
+          },
+        );
         expect(result.element?.bounds).toEqual(bounds(...row.bounds));
       }
     });
@@ -1154,11 +1158,15 @@ describe("toSkeleton — acceptance criteria", () => {
 
       const selector = new ResolverElementSelector();
       for (const row of rows) {
-        const result = selector.selectByText(viewHierarchy, label, {
-          index: row.index,
-          partialMatch: false,
-          intentAction: row.affordances.includes("scroll") ? "scroll" : "tap",
-        });
+        const result = selector.select(
+          viewHierarchy,
+          { text: label },
+          {
+            index: row.index,
+            partialMatch: false,
+            intentAction: row.affordances.includes("scroll") ? "scroll" : "tap",
+          },
+        );
         expect(result.element?.bounds).toEqual(bounds(...row.bounds));
       }
     });
@@ -1198,10 +1206,14 @@ describe("toSkeleton — acceptance criteria", () => {
 
       const selector = new ResolverElementSelector();
       for (const row of rows) {
-        const result = selector.selectByResourceId(viewHierarchy, resourceId, {
-          index: row.index,
-          selectionIntent: "focus-input",
-        });
+        const result = selector.select(
+          viewHierarchy,
+          { elementId: resourceId },
+          {
+            index: row.index,
+            selectionIntent: "focus-input",
+          },
+        );
         expect(result.element?.bounds).toEqual(bounds(...row.bounds));
       }
     });
@@ -1243,10 +1255,14 @@ describe("toSkeleton — acceptance criteria", () => {
       // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
       const selector = new ResolverElementSelector(undefined, undefined, { platform: "ios" });
       for (const row of indexed) {
-        const result = selector.selectByText(viewHierarchy, row.label!, {
-          index: row.index,
-          partialMatch: false,
-        });
+        const result = selector.select(
+          viewHierarchy,
+          { text: row.label! },
+          {
+            index: row.index,
+            partialMatch: false,
+          },
+        );
         expect(result.element?.bounds).toEqual(bounds(...row.bounds));
       }
     });
@@ -1289,10 +1305,14 @@ describe("toSkeleton — acceptance criteria", () => {
         // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
         const selector = new ResolverElementSelector(undefined, undefined, { platform: "ios" });
         for (const row of rows) {
-          const result = selector.selectByText(viewHierarchy, label, {
-            index: row.index,
-            partialMatch: false,
-          });
+          const result = selector.select(
+            viewHierarchy,
+            { text: label },
+            {
+              index: row.index,
+              partialMatch: false,
+            },
+          );
           expect(result.element?.bounds).toEqual(bounds(...row.bounds));
         }
       } finally {
@@ -1346,10 +1366,14 @@ describe("toSkeleton — acceptance criteria", () => {
 
       const selector = new ResolverElementSelector();
       for (const row of rows) {
-        const result = selector.selectByText(viewHierarchy, row.label!, {
-          index: row.index,
-          partialMatch: false,
-        });
+        const result = selector.select(
+          viewHierarchy,
+          { text: row.label! },
+          {
+            index: row.index,
+            partialMatch: false,
+          },
+        );
         expect(result.element?.bounds).toEqual(bounds(...row.bounds));
       }
     });
@@ -1387,10 +1411,14 @@ describe("toSkeleton — acceptance criteria", () => {
       // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
       const selector = new ResolverElementSelector(undefined, undefined, { platform: "ios" });
       for (const row of rows) {
-        const result = selector.selectByText(viewHierarchy, row.label!, {
-          index: row.index,
-          partialMatch: false,
-        });
+        const result = selector.select(
+          viewHierarchy,
+          { text: row.label! },
+          {
+            index: row.index,
+            partialMatch: false,
+          },
+        );
         expect(result.element?.bounds).toEqual(bounds(...row.bounds));
       }
     });
@@ -1494,9 +1522,9 @@ describe("toSkeleton — acceptance criteria", () => {
 
       const selector = new ResolverElementSelector();
       for (const entry of dupEntries) {
-        const result = selector.selectByResourceId(
+        const result = selector.select(
           viewHierarchy as unknown as ViewHierarchyResult,
-          "com.example:id/onoff",
+          { elementId: "com.example:id/onoff" },
           { index: entry.index },
         );
         expect(result.element).not.toBeNull();

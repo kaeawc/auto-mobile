@@ -90,59 +90,6 @@ export class ResolverElementSelector implements ElementSelector {
     private readonly options: ScreenSizeForOffscreenCheckOptions = {},
   ) {}
 
-  /** @deprecated Use `select` with `{ text }`. */
-  selectByText(
-    capture: ViewHierarchyResult,
-    text: string,
-    options: SelectionOptions = {},
-  ): ElementSelectionResult {
-    return this.select(capture, { text }, options);
-  }
-
-  /** @deprecated Use `select` with `{ elementId }`. */
-  selectByResourceId(
-    capture: ViewHierarchyResult,
-    elementId: string,
-    options: SelectionOptions = {},
-  ): ElementSelectionResult {
-    return this.select(capture, { elementId }, options);
-  }
-
-  /** @deprecated Use `select` with `{ testTag }`. */
-  selectByTestTag(
-    capture: ViewHierarchyResult,
-    testTag: string,
-    options: SelectionOptions = {},
-  ): ElementSelectionResult {
-    return this.select(capture, { testTag }, options);
-  }
-
-  /** @deprecated Use `select` with `{}` and a tap intent. */
-  selectClickable(
-    capture: ViewHierarchyResult,
-    options: SelectionOptions = {},
-  ): ElementSelectionResult {
-    return this.select(capture, {}, { ...options, intentAction: options.intentAction ?? "tap" });
-  }
-
-  /** @deprecated Use `select` with `{ sibling: { text } }`. */
-  selectClickableSiblingOfText(
-    capture: ViewHierarchyResult,
-    text: string,
-    options: SelectionOptions = {},
-  ): ElementSelectionResult {
-    return this.select(capture, { sibling: { text } }, options);
-  }
-
-  /** @deprecated Use `select` with `{ sibling: { elementId } }`. */
-  selectClickableSiblingOfResourceId(
-    capture: ViewHierarchyResult,
-    elementId: string,
-    options: SelectionOptions = {},
-  ): ElementSelectionResult {
-    return this.select(capture, { sibling: { elementId } }, options);
-  }
-
   hasContainer(capture: ViewHierarchyResult, container: ElementContainerSelector): boolean {
     return this.containerResolution(capture, container).scope !== undefined;
   }

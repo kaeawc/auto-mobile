@@ -25,7 +25,7 @@ describe("testTag selector falls back to an untagged node's exact resource-id (#
     ["A_pick", { left: 39, top: 331, right: 186, bottom: 448 }],
     ["A_fab", { left: 39, top: 1957, right: 180, bottom: 2074 }],
   ])("selects the captured prototype node tagged %s", (tag, bounds) => {
-    const selected = new ResolverElementSelector().selectByTestTag(prototype(), tag);
+    const selected = new ResolverElementSelector().select(prototype(), { testTag: tag });
     expect(selected.element?.["resource-id"]).toBe(tag);
     expect(selected.element?.bounds).toEqual(bounds);
   });
@@ -51,7 +51,7 @@ describe("testTag selector falls back to an untagged node's exact resource-id (#
     const capture = prototype();
     const tagged = { ...taggedSubmitNode(), "test-tag": "A_on2" };
     capture.hierarchy.node.push(tagged);
-    const selected = new ResolverElementSelector().selectByTestTag(capture, "A_on2");
+    const selected = new ResolverElementSelector().select(capture, { testTag: "A_on2" });
     expect(selected.element?.["test-tag"]).toBe("A_on2");
     expect(selected.element?.["resource-id"]).toBe("example.app:id/submit");
   });
@@ -59,7 +59,7 @@ describe("testTag selector falls back to an untagged node's exact resource-id (#
   test("a node whose test-tag differs is not matched through its resource-id", () => {
     const capture = prototype();
     capture.hierarchy.node[1] = { ...capture.hierarchy.node[1], "test-tag": "other-tag" };
-    expect(new ResolverElementSelector().selectByTestTag(capture, "A_on2").element).toBeNull();
+    expect(new ResolverElementSelector().select(capture, { testTag: "A_on2" }).element).toBeNull();
   });
 
   test("the fallback is exact: a bare tag does not match a package-qualified View id", () => {
@@ -67,9 +67,9 @@ describe("testTag selector falls back to an untagged node's exact resource-id (#
     delete untagged["test-tag"];
     const capture = { hierarchy: { node: [untagged] } };
     const selector = new ResolverElementSelector();
-    expect(selector.selectByTestTag(capture, "submit").element).toBeNull();
+    expect(selector.select(capture, { testTag: "submit" }).element).toBeNull();
     // The full id is the node's exact reported identifier, so it matches when the node has no tag.
-    expect(selector.selectByTestTag(capture, "example.app:id/submit").element?.text).toBe(
+    expect(selector.select(capture, { testTag: "example.app:id/submit" }).element?.text).toBe(
       "Submit form",
     );
   });

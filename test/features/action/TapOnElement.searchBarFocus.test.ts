@@ -98,9 +98,13 @@ describe("iOS search bar focus fixture", () => {
     // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
     const selection = new ResolverElementSelector(undefined, undefined, {
       platform: "ios",
-    }).selectByText(hierarchy, "Search videos", {
-      selectionIntent: "focus-input",
-    });
+    }).select(
+      hierarchy,
+      { text: "Search videos" },
+      {
+        selectionIntent: "focus-input",
+      },
+    );
     expect(selection.element?.class).toBe("UISearchBar");
     expect(verifySelectedField(hierarchy, selection.element!)).toBe(true);
   });
@@ -162,9 +166,13 @@ describe("iOS search bar focus fixture", () => {
     // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
     const parent = new ResolverElementSelector(undefined, undefined, {
       platform: "ios",
-    }).selectByText(hierarchy, "Search videos", {
-      selectionIntent: "focus-input",
-    }).element!;
+    }).select(
+      hierarchy,
+      { text: "Search videos" },
+      {
+        selectionIntent: "focus-input",
+      },
+    ).element!;
     const root = hierarchy.hierarchy.node!;
     const bar = root.node![0];
     bar.$.focused = false;
@@ -180,9 +188,13 @@ describe("iOS search bar focus fixture", () => {
     // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
     const selection = new ResolverElementSelector(undefined, undefined, {
       platform: "ios",
-    }).selectByText(hierarchy, "Search videos", {
-      selectionIntent: "focus-input",
-    });
+    }).select(
+      hierarchy,
+      { text: "Search videos" },
+      {
+        selectionIntent: "focus-input",
+      },
+    );
     expect(selection.element).toBeDefined();
     expect(verifySelectedField(hierarchy, selection.element!)).toBe(false);
   });

@@ -454,9 +454,13 @@ describe("SetUIState", () => {
           ).viewHierarchy;
         const pre = loadCapture("pre");
         const post = loadCapture("post");
-        const target = new ResolverElementSelector().selectByText(pre, "Basic Text Field", {
-          intentAction: "focus-input",
-        }).element!;
+        const target = new ResolverElementSelector().select(
+          pre,
+          { text: "Basic Text Field" },
+          {
+            intentAction: "focus-input",
+          },
+        ).element!;
         expect(target["view-id"]).toBe("s2-0a67f33121084cd4");
         const detect = spyOn(fakeFieldTypeDetector, "detect");
         fakeObserve.setResultFactory(() =>
@@ -529,9 +533,9 @@ describe("SetUIState", () => {
             : `label-${index}`;
         });
         const resolver = new ResolverElementSelector();
-        const selected = resolver.selectByResourceId(
+        const selected = resolver.select(
           hierarchy,
-          sharedId ? "shared-label" : "label-1",
+          { elementId: sharedId ? "shared-label" : "label-1" },
           { intentAction: "focus-input" },
         );
         expect(selected.element?.["resource-id"]).toBe(sharedId ? "field-first" : "field-second");
@@ -1897,9 +1901,9 @@ describe("SetUIState iOS Forms nodes", () => {
     const tapOnElement = {
       execute: async (...args: Parameters<FakeTapOnElement["execute"]>) => {
         const [options] = args;
-        const selected = new ResolverElementSelector().selectByText(
+        const selected = new ResolverElementSelector().select(
           iosFormsSwitch("true"),
-          options.text!,
+          { text: options.text! },
           { intentAction: "tap" },
         );
         tappedBounds = selected.element?.bounds;

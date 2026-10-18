@@ -363,10 +363,14 @@ test("observation keeps main-first row order but indexes duplicates in resolver 
   expect(observed.map((row) => row.index)).toEqual([1, 0]);
   const selector = new ResolverElementSelector();
   for (const row of observed) {
-    const result = selector.selectByText(hierarchy, row.label!, {
-      index: row.index,
-      partialMatch: false,
-    });
+    const result = selector.select(
+      hierarchy,
+      { text: row.label! },
+      {
+        index: row.index,
+        partialMatch: false,
+      },
+    );
     expect(result.element?.bounds).toEqual({
       left: row.bounds[0],
       top: row.bounds[1],

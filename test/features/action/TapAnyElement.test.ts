@@ -106,7 +106,7 @@ describe("TapAnyElement", () => {
   });
 
   describe("findClickableElement", () => {
-    test("delegates to selectClickable", () => {
+    test("delegates to select", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapAny = createTapAnyElement(selector);
 

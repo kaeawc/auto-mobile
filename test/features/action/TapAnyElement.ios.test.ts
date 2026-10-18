@@ -480,11 +480,11 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
     fakeIosClient.setHierarchyData({ packageName: "com.test.app", updatedAt: Date.now() });
     const hierarchyRequests = spyOn(fakeIosClient, "requestHierarchySync");
-    // First selectClickable call (before the search loop) reports nothing
+    // First select call (before the search loop) reports nothing
     // found; the fake element selector's default (call-through) behavior on
     // every later call keeps returning the configured clickable element, so
     // the search loop finds it on its first iteration.
-    spyOn(fakeElementSelector, "selectClickable").mockImplementationOnce(() => ({
+    spyOn(fakeElementSelector, "select").mockImplementationOnce(() => ({
       element: null,
       indexInMatches: -1,
       totalMatches: 0,
@@ -513,7 +513,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
   test("does not tap a hierarchy refresh that returns at the search deadline", async () => {
     fakeVoiceOverDetector.setVoiceOverEnabled(false);
     const hierarchy = createObserveResult().viewHierarchy;
-    spyOn(fakeElementSelector, "selectClickable")
+    spyOn(fakeElementSelector, "select")
       .mockImplementationOnce(() => ({
         element: null,
         indexInMatches: -1,

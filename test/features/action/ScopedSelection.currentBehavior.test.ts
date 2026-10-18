@@ -32,7 +32,7 @@ for (const row of scopedSelectionMatrix) {
   const options = { container: row.container, selectionStrategy: row.selectionStrategy };
   test(`tapOn lookup scope: ${row.name}`, () => {
     const selector = new ResolverElementSelector();
-    const select = spyOn(selector, "selectByResourceId");
+    const select = spyOn(selector, "select");
     const tap = new TapOnElement(device, new FakeAdbExecutor(), {
       timer: new FakeTimer(),
       elementSelector: selector,
@@ -100,8 +100,8 @@ for (const row of scopedSelectionMatrix) {
     const adapter = new ResolverElementSelector();
     // Preserve the captured hierarchy and fake only selection and availability.
     const hasContainer = spyOn(adapter, "hasContainer").mockReturnValue(true);
-    const select = spyOn(adapter, "selectClickable").mockImplementation((...args) =>
-      selector.selectClickable(...args),
+    const select = spyOn(adapter, "select").mockImplementation((...args) =>
+      selector.select(...args),
     );
     const tap = new TapAnyElement(device, new FakeAdbExecutor(), {
       timer,
@@ -139,8 +139,8 @@ for (const row of scopedSelectionMatrix) {
     const adapter = new ResolverElementSelector();
     // Preserve the captured hierarchy and fake only selection and availability.
     const hasContainer = spyOn(adapter, "hasContainer").mockReturnValue(true);
-    const select = spyOn(adapter, "selectClickable").mockImplementation((...args) =>
-      selector.selectClickable(...args),
+    const select = spyOn(adapter, "select").mockImplementation((...args) =>
+      selector.select(...args),
     );
     const tap = new TapAnyElement(device, new FakeAdbExecutor(), {
       timer,
@@ -174,7 +174,7 @@ for (const row of scopedSelectionMatrix) {
   test(`tapOn focus classification: ${row.name}`, () => {
     const selector = new ResolverElementSelector();
     const available = spyOn(selector, "hasContainer").mockReturnValue(true);
-    const select = spyOn(selector, "selectByResourceId")
+    const select = spyOn(selector, "select")
       .mockImplementationOnce(() => {
         throw new ActionableError("strict miss");
       })

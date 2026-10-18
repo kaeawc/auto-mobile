@@ -2,7 +2,7 @@ import { DEFAULT_DEVICE_SNAPSHOT_CONFIG } from "../../src/features/snapshot/Devi
 import {
   DEFAULT_VM_SNAPSHOT_TIMEOUT_MS,
   MAX_VM_SNAPSHOT_TIMEOUT_MS,
-} from "../../src/features/snapshot/deviceSnapshotTimeout";
+} from "../../src/models/deviceSnapshotTimeout";
 import { MAX_VM_SNAPSHOT_TIMEOUT_MS as schemaSnapshotMaxMs } from "../../src/server/snapshotTools";
 import { BARRIER_TIMEOUT_MS as coordinatorDefaultMs } from "../../src/server/CriticalSectionCoordinator";
 import { BARRIER_TIMEOUT_MS } from "../../src/features/action/coordinationTimeout";

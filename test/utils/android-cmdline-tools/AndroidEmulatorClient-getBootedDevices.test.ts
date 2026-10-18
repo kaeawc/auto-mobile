@@ -62,18 +62,12 @@ class DeferredAvdNameAdbExecutor extends FakeAdbExecutor {
     });
   }
 
-  override async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-  ): Promise<ExecResult> {
+  override async executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult> {
     if (command === "emu avd name") {
       this.signalAvdNameProbeStarted();
       return await this.avdNameProbe;
     }
-    return await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    return await super.executeCommand(command, options);
   }
 
   rejectAvdNameProbe(error: Error): void {
@@ -100,18 +94,12 @@ class SequencedDeferredAvdNameAdbExecutor extends FakeAdbExecutor {
     ];
   }
 
-  override async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-  ) {
+  override async executeCommand(command: string, options?: AdbExecuteOptions) {
     if (command === "emu avd name") {
       this.avdNameProbeStarted.resolve();
       return await this.avdNameProbe.promise;
     }
-    return await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    return await super.executeCommand(command, options);
   }
 
   resolveAvdName(name: string): void {
@@ -135,15 +123,9 @@ class DelayedAvdNameAdbExecutor extends FakeAdbExecutor {
     super();
   }
 
-  override async executeCommand(
-    command: string,
-    timeoutMs?: number,
-    maxBuffer?: number,
-    noRetry?: boolean,
-    signal?: AbortSignal,
-  ): Promise<ExecResult> {
+  override async executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult> {
     if (command !== "emu avd name") {
-      return await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      return await super.executeCommand(command, options);
     }
 
     this.concurrency.active++;
@@ -343,10 +325,7 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     class AdvancingAdbExecutor extends FakeAdbExecutor {
       override async executeCommand(
         command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
+        options?: AdbExecuteOptions,
       ): Promise<ExecResult> {
         if (command === "emu avd name") {
           timer.advanceTime(1800);
@@ -354,7 +333,7 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
         if (command === "shell getprop ro.product.model") {
           timer.advanceTime(150);
         }
-        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return super.executeCommand(command, options);
       }
     }
     const adb = new AdvancingAdbExecutor();
@@ -390,15 +369,12 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     class BudgetSpentAdbExecutor extends FakeAdbExecutor {
       override async executeCommand(
         command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
+        options?: AdbExecuteOptions,
       ): Promise<ExecResult> {
         if (command === "emu avd name") {
           timer.advanceTime(2000);
         }
-        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return super.executeCommand(command, options);
       }
     }
     const adb = new BudgetSpentAdbExecutor();
@@ -429,16 +405,13 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       class AbortingAdbExecutor extends FakeAdbExecutor {
         override async executeCommand(
           command: string,
-          timeoutMs?: number,
-          maxBuffer?: number,
-          noRetry?: boolean,
-          signal?: AbortSignal,
+          options?: AdbExecuteOptions,
         ): Promise<ExecResult> {
           if (command === abortedCommand) {
             controller.abort(reason);
             throw new Error("adb cancelled");
           }
-          return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+          return super.executeCommand(command, options);
         }
       }
       const adb = new AbortingAdbExecutor();

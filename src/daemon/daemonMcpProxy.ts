@@ -816,6 +816,8 @@ export class DaemonMcpProxy {
   private mintedTaskOwnerKey: string | undefined;
   /** Device-binding calls relayed as MCP tasks, bound once from their completed result (#4668). */
   private deviceBindingTasks: TaskSessionBindings<ForwardedResultContext> | undefined;
+  /** A device-binding task outlasted the close's drain: its late bind must publish nothing (#13155). */
+  private deviceBindingTasksAbandoned = false;
   private readonly buildIdentity: BuildIdentity;
   private readonly clientVersion: string;
   private readonly clientAssetVersion: string | null;
@@ -3431,6 +3433,9 @@ export class DaemonMcpProxy {
           throw error;
         }
       },
+      abandon: () => {
+        this.deviceBindingTasksAbandoned = true;
+      },
       retain: ({ learnsResultSession, callReleaseEpoch }) =>
         this.releaseLedger.retainAcquisitionReleaseEpoch(learnsResultSession, callReleaseEpoch),
       release: ({ learnsResultSession, callReleaseEpoch }) =>
@@ -5491,7 +5496,9 @@ export class DaemonMcpProxy {
       fenceReleasedForwardedSession: (...args) => this.fenceReleasedForwardedSession(...args),
       throwIfSessionReleasedSince: (...args) => this.throwIfSessionReleasedSince(...args),
       sessionReleaseReasonSince: (sessionUuid, forwardEpoch) =>
-        this.releaseLedger.sessionReleaseReasonSince(sessionUuid, forwardEpoch),
+        this.deviceBindingTasksAbandoned
+          ? "proxy_closing"
+          : this.releaseLedger.sessionReleaseReasonSince(sessionUuid, forwardEpoch),
       invalidateListCache: (...args) => this.invalidateListCache(...args),
       notifyListChanged: (...args) => this.notifyListChanged(...args),
       holdPreviousBinding: (...args) => this.holdPreviousBinding(...args),

@@ -8,15 +8,15 @@ import { DefaultAccessibilityDetector } from "../../../../src/features/accessibi
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeIosVoiceOverDetector } from "../../../fakes/FakeIosVoiceOverDetector";
 import { FakeIOSCtrlProxy } from "../../../fakes/FakeIOSCtrlProxy";
+import { createObserveResultForTest } from "../flatHierarchyBuilders";
 import type { FeatureFlagReader } from "../../../../src/features/featureFlags/FeatureFlagService";
 import { invalidateReadinessForDisabledAccessibility } from "../../../../src/server/observeTools";
 
 function makeResult(): ObserveResult {
-  return {
+  return createObserveResultForTest({
     updatedAt: "2026-01-01T00:00:00.000Z",
     screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  } as ObserveResult;
+  });
 }
 
 const androidDevice: BootedDevice = { deviceId: "dev-1", name: "android", platform: "android" };
@@ -154,12 +154,17 @@ describe("AccessibilityStateDetector", () => {
 
   test("detection failure does not pollute result.errors", async () => {
     const detector = new AccessibilityStateDetector({
-      device: { ...androidDevice, platform: "unknown" as any },
+      device: androidDevice,
       adb: new FakeAdbExecutor(),
+      featureFlags: {
+        isEnabled: () => {
+          throw new Error("feature flags unavailable");
+        },
+      },
     });
     const result = makeResult();
     await detector.run(result, new NoOpPerformanceTracker());
-    // Unknown platform branch falls through with no state assigned.
+    // A throwing detection is swallowed with no state assigned.
     expect(result.accessibilityState).toBeUndefined();
     expect(result.errors).toBeUndefined();
   });

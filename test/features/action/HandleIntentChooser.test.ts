@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { HandleIntentChooser } from "../../../src/features/action/HandleIntentChooser";
 import { selectAndroidOpenLinkChooser } from "../../../src/server/interactionTools";
 import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
@@ -84,7 +84,7 @@ describe("HandleIntentChooser", () => {
     // These cases exercise chooser routing. BaseVisualChange's observation and
     // settle contract is covered independently, so invoke the feature block
     // directly with the configured fake observation.
-    (handleIntentChooser as any).observedInteraction = async (block: any) =>
+    handleIntentChooser.observedInteraction = async (block) =>
       block(await fakeObserveScreen.getMostRecentCachedObserveResult());
   });
 
@@ -187,10 +187,10 @@ describe("HandleIntentChooser", () => {
 
     test("passes the opened URL to DeepLinkManager", async () => {
       const calls: unknown[][] = [];
-      (fakeDeepLinkManager as any).handleIntentChooser = async (...args: unknown[]) => {
+      spyOn(fakeDeepLinkManager, "handleIntentChooser").mockImplementation(async (...args) => {
         calls.push(args);
         return { success: true, detected: true, action: "custom" };
-      };
+      });
 
       await handleIntentChooser.execute("custom", "com.example.customapp", "example://item");
 

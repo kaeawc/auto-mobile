@@ -493,7 +493,7 @@ describe("IME identity precedence (#6871)", () => {
  * button; the IME lives in its own window root. Package-only membership must
  * not reach across the window boundary (issue #6871).
  */
-function sharedPackageObservation(): ObserveResult {
+function sharedPackageObservation({ imeKeys = true } = {}): ObserveResult {
   const viewHierarchy = {
     hierarchy: {
       node: {
@@ -516,16 +516,18 @@ function sharedPackageObservation(): ObserveResult {
         hierarchy: {
           node: {
             $: { extras: { "automobile:imePackage": "com.keyboard" } },
-            node: [
-              {
-                $: {
-                  "resource-id": "com.keyboard:id/key_pos_0_0",
-                  text: "q",
-                  clickable: true,
-                  bounds: { left: 0, top: 600, right: 10, bottom: 640 },
-                },
-              },
-            ],
+            node: imeKeys
+              ? [
+                  {
+                    $: {
+                      "resource-id": "com.keyboard:id/key_pos_0_0",
+                      text: "q",
+                      clickable: true,
+                      bounds: { left: 0, top: 600, right: 10, bottom: 640 },
+                    },
+                  },
+                ]
+              : [],
           },
         },
       },
@@ -542,16 +544,9 @@ function sharedPackageObservation(): ObserveResult {
 
 describe("IME window membership (#6871)", () => {
   test("a captured IME with no accessible keys never folds same-package app controls", () => {
-    const source = sharedPackageObservation();
     // Drop every key: the capture still vouches for the IME, but no collected
     // node can place its window, so nothing may be folded by package alone.
-    (
-      source.viewHierarchy as unknown as { windows: { hierarchy: { node: ViewHierarchyNode } }[] }
-    ).windows[0].hierarchy.node.node = [];
-    source.elements = new DefaultObserveElementCollector().collect(
-      source.viewHierarchy!,
-      "android",
-    );
+    const source = sharedPackageObservation({ imeKeys: false });
     const result = sanitizeObserveResult(source, { dropElements: true, project: "skeleton" });
     expect(result.skeleton!.map((entry) => entry.elementId)).toEqual(["com.keyboard:id/save"]);
     expect(result.keyboard).toEqual({ visible: true, package: "com.keyboard" });

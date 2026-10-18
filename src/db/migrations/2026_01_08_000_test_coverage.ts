@@ -1,6 +1,6 @@
 import { type Kysely, sql } from "kysely";
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   // Create test_coverage_sessions table to track test run sessions
   await db.schema
     .createTable("test_coverage_sessions")
@@ -102,7 +102,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropTable("test_edge_coverage").execute();
   await db.schema.dropTable("test_node_coverage").execute();
   await db.schema.dropTable("test_coverage_sessions").execute();

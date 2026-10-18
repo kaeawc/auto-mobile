@@ -8,10 +8,11 @@ import {
   SYSTEM_TRAY_PACKAGE,
   matchesNotificationResourceId,
 } from "../../../src/features/systemTray/notificationHints";
+import { wireCapture } from "../../helpers/wireCapture";
 
 /** A capture wrapping an arbitrary hierarchy shape, as it would arrive off the wire. */
-function viewHierarchy(hierarchy: unknown): unknown {
-  return { hierarchy };
+function viewHierarchy(hierarchy: object) {
+  return wireCapture({ hierarchy });
 }
 
 describe("getNodeProperties", () => {
@@ -45,8 +46,9 @@ describe("getHierarchyRoots", () => {
   it("returns [] when the hierarchy carries an error", () => {
     expect(getHierarchyRoots(viewHierarchy({ error: "boom", node: { $: {} } }))).toEqual([]);
   });
-  it("returns [] when the hierarchy is missing", () => {
-    expect(getHierarchyRoots(viewHierarchy(undefined))).toEqual([]);
+  it("treats an empty hierarchy object as its own root, as before the wire-boundary refactor", () => {
+    const empty = {};
+    expect(getHierarchyRoots(viewHierarchy(empty))).toEqual([empty]);
   });
   it("wraps a single node object in an array", () => {
     const single = { $: { class: "A" } };

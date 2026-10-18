@@ -23,6 +23,7 @@ import {
 } from "./screenshot/ObserveScreenshotRecorder";
 import { HierarchyCollector } from "./collectors/HierarchyCollector";
 import { DeviceStateCollector } from "./collectors/DeviceStateCollector";
+import type { DeviceStateCollectorPort } from "./collectors/collectorPorts";
 import { PerformanceAuditor } from "./audits/PerformanceAuditor";
 import {
   AccessibilityAuditor,
@@ -42,7 +43,7 @@ interface ObserveScreenWiringSources {
   identity: {
     device: () => BootedDevice;
     viewHierarchy: () => ViewHierarchy;
-    deviceStateCollector: () => DeviceStateCollector;
+    deviceStateCollector: () => DeviceStateCollectorPort;
     timer: () => Timer;
     platformValidator: () => HierarchyPlatformValidator;
     resolveObservationTimestampMs: (result: ObserveResult) => number | undefined;

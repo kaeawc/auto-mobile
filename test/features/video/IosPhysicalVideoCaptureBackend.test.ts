@@ -37,7 +37,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 
 const PHYSICAL_UDID = "00008030-001C2D3E1234567A";
 
-class FakeFfmpegProcess extends EventEmitter {
+class FakeFfmpegProcess extends EventEmitter implements FfmpegProcess {
   readonly binaryPath = "ffmpeg";
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
@@ -112,8 +112,7 @@ class FakeFfmpegClient implements FfmpegClient {
     this.startRequests.push(request);
     const process = new FakeFfmpegProcess();
     this.processes.push(process);
-    const tracked = process as unknown as FfmpegProcess;
-    return { process: tracked, tracker: trackProcess(tracked) };
+    return { process, tracker: trackProcess(process) };
   }
 
   async run(): Promise<never> {

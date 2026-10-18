@@ -176,6 +176,12 @@ export type Hierarchy = {
   unavailableReason?: HierarchyUnavailableReason;
   unavailableDetail?: string;
   node?: ViewHierarchyNode;
+  /** Raw (unconverted) iOS XCTest root: `XCUIElementTypeApplication`, carried without `node`. */
+  type?: string;
+  /** Raw iOS XCTest element kind of the root, e.g. `application`. */
+  elementType?: string;
+  /** Raw iOS root bundle identifier; present without `node` on unconverted captures. */
+  bundleId?: string;
   /** iOS root XCTestNode bounds (points): {left, top, right, bottom} */
   bounds?: { left?: number; top?: number; right: number; bottom: number };
   /**
@@ -281,6 +287,13 @@ export type ViewHierarchyNode = {
   occludedByViewId?: string;
   "test-tag"?: string;
   "view-id"?: string;
+  /** Flat Android attributes real dumps put on the node itself (see {@link NodeAttributes}). */
+  "resource-id"?: string;
+  "content-desc"?: string;
+  clickable?: boolean | string;
+  text?: string;
+  class?: string;
+  checked?: boolean | string;
   extras?: Record<string, string>;
 };
 

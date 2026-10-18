@@ -43,7 +43,7 @@ describe("DefaultScrollableElementsQuery", () => {
   const query = new DefaultScrollableElementsQuery();
 
   test("returns empty for a missing hierarchy", () => {
-    expect(query.findScrollableElements(null as unknown as ViewHierarchyResult)).toEqual([]);
+    expect(query.findScrollableElements(null)).toEqual([]);
   });
 
   test("returns empty when nothing scrolls", () => {
@@ -78,7 +78,7 @@ describe("DefaultClickableElementsQuery", () => {
   const query = new DefaultClickableElementsQuery();
 
   test("returns empty for a missing hierarchy", () => {
-    expect(query.findClickableElements(null as unknown as ViewHierarchyResult)).toEqual([]);
+    expect(query.findClickableElements(null)).toEqual([]);
   });
 
   test("keeps clickable nodes and drops non-clickable ones", () => {

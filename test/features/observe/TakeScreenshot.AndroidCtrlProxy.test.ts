@@ -162,7 +162,6 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
       undefined,
       () => cacheDir,
     );
-    (screenshot as any).window = { getActiveHash: async () => "mock-hash" };
     const result = await screenshot.execute();
     const executedCommands = testFakeAdb.getExecutedCommands();
     const captureCommand = executedCommands.find((command) => command.includes("screencap"));

@@ -767,13 +767,15 @@ describe("WcagAudit", function () {
     // regardless of text sizes in the hierarchy.
     function hierarchyWithHeadingHeights(heights: number[]): ViewHierarchyNode {
       return {
-        class: "View",
-        children: heights.map((h, i) => ({
-          class: "android.widget.TextView",
-          text: `Heading ${i}`,
-          bounds: { left: 0, top: i * 200, right: 300, bottom: i * 200 + h },
+        $: { class: "View" },
+        node: heights.map((h, i) => ({
+          $: {
+            class: "android.widget.TextView",
+            text: `Heading ${i}`,
+            bounds: { left: 0, top: i * 200, right: 300, bottom: i * 200 + h },
+          },
         })),
-      } as unknown as ViewHierarchyNode;
+      };
     }
 
     it.each([

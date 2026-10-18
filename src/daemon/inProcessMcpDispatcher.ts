@@ -121,6 +121,7 @@ export class InProcessMcpDispatcher {
     const scope: StatelessMcpRequestScope = {
       requestScopeId: this.deps.idGenerator.next(),
       requestMcpSessionId: forward.sessionKey,
+      trustedForwarder: true,
       ...(forward.taskOwnerKey !== undefined && { taskOwnerKey: forward.taskOwnerKey }),
     };
     const enterRoot = <T>(fn: () => T): T => this.root.run(fn);

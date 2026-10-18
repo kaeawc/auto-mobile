@@ -1,4 +1,5 @@
 import { describe, test } from "bun:test";
+import { FakeElementParser } from "../../../fakes/FakeElementParser";
 import fc from "fast-check";
 import { OverlayDetector } from "../../../../src/features/action/swipeon/OverlayDetector";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
@@ -10,7 +11,7 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 // `finder`/`elementParser` are unused by intersectBounds/computeSafeSwipeCoordinates,
 // so minimal stubs are sufficient; `geometry` is the real implementation because
 // computeSafeSwipeCoordinates delegates to its getSwipeWithinBounds.
-const detector = new OverlayDetector(new DefaultElementGeometry(), {} as any);
+const detector = new OverlayDetector(new DefaultElementGeometry(), new FakeElementParser());
 
 // Arbitrary rectangles, allowing some degenerate/inverted ones (width/height <= 0)
 // so intersectBounds's null-handling for non-overlapping/empty rects is exercised.

@@ -601,7 +601,7 @@ export class PinchOn extends BaseVisualChange {
     return prepared;
   }
 
-  private async resolveTarget(
+  async resolveTarget(
     options: PinchOnOptions,
     signal?: AbortSignal,
     displayObservation?: ObserveResult,

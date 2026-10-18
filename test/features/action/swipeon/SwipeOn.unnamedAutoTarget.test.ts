@@ -61,6 +61,8 @@ function harness({
     new FakeAdbClient(),
     {
       timer,
+      awaitIdle: new FakeAwaitIdle(),
+      window: new FakeWindow(),
       observeScreen: observe,
       executeGesture: gesture,
       accessibilityDetector,
@@ -69,8 +71,6 @@ function harness({
       scrollables: elementFinder,
     },
   );
-  action.awaitIdle = new FakeAwaitIdle() as unknown as typeof action.awaitIdle;
-  action.window = new FakeWindow() as unknown as typeof action.window;
   return { action, gesture, ctrl };
 }
 

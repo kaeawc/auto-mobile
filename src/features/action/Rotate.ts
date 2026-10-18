@@ -195,7 +195,7 @@ export class Rotate extends BaseVisualChange {
     return orientationFromRotation(rotation, await this.readNaturalAxes(signal)) ?? "landscape";
   }
 
-  private getRotationLock(): Mutex {
+  getRotationLock(): Mutex {
     let lock = Rotate.rotationLocks.get(this.device.deviceId);
     if (!lock) {
       lock = new Mutex();

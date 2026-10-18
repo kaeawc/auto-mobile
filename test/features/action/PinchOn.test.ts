@@ -96,16 +96,21 @@ describe("PinchOn", () => {
     );
     iosGetInstanceSpy = spyOnIosClientInstance(fakeIosService);
 
-    pinchOn = new PinchOn(device, fakeAdb, {
-      capture: new FakeHierarchyCapture(
+    pinchOn = createPinchOn(
+      new FakeHierarchyCapture(
         async () => (await fakeObserveScreen.getMostRecentCachedObserveResult()).viewHierarchy!,
       ),
+    );
+  });
+
+  const createPinchOn = (capture: FakeHierarchyCapture) =>
+    new PinchOn(device, fakeAdb, {
+      capture,
       observeScreen: fakeObserveScreen,
       awaitIdle: fakeAwaitIdle,
       window: fakeWindow,
       timer: fakeTimer,
     });
-  });
 
   afterEach(() => {
     serverConfig.setRawElementSearchEnabled(false);
@@ -239,12 +244,12 @@ describe("PinchOn", () => {
 
   test("abort during target capture stops before pinch dispatch", async () => {
     const controller = new AbortController();
-    Object.defineProperty(pinchOn, "capture", {
-      value: new FakeHierarchyCapture(() => {
+    pinchOn = createPinchOn(
+      new FakeHierarchyCapture(() => {
         controller.abort();
         return createHierarchy();
       }),
-    });
+    );
     await expect(
       pinchOn.execute({ direction: "in", autoTarget: false }, { signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
@@ -253,8 +258,8 @@ describe("PinchOn", () => {
   test("fresh pinch selector capture requests raw hierarchy when enabled", async () => {
     serverConfig.setRawElementSearchEnabled(true);
     const capture = new FakeHierarchyCapture(createHierarchy);
-    (pinchOn as any).capture = capture;
-    await (pinchOn as any).resolveTarget({
+    pinchOn = createPinchOn(capture);
+    await pinchOn.resolveTarget({
       direction: "in",
       container: { elementId: "container-id" },
     });
@@ -280,11 +285,13 @@ describe("PinchOn", () => {
       ...createObserveResult(),
       systemInsets: { top: 80, bottom: 100, left: 0, right: 0 },
     });
-    (pinchOn as any).capture = new FakeHierarchyCapture(() => ({
-      hierarchy: { node: { bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } } },
-      systemInsets: { top: 0, bottom: 0, left: 40, right: 60 },
-    }));
-    const target = await (pinchOn as any).resolveTarget({ direction: "out", autoTarget: false });
+    pinchOn = createPinchOn(
+      new FakeHierarchyCapture(() => ({
+        hierarchy: { node: { bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } } },
+        systemInsets: { top: 0, bottom: 0, left: 40, right: 60 },
+      })),
+    );
+    const target = await pinchOn.resolveTarget({ direction: "out", autoTarget: false });
     expect(target.bounds).toEqual({ left: 40, top: 0, right: 1860, bottom: 1080 });
   });
 
@@ -293,31 +300,35 @@ describe("PinchOn", () => {
       ...createObserveResult(),
       systemInsets: { top: 80, bottom: 100, left: 0, right: 0 },
     });
-    (pinchOn as any).capture = new FakeHierarchyCapture(() => ({
-      hierarchy: { node: { bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } } },
-    }));
-    const target = await (pinchOn as any).resolveTarget({ direction: "out", autoTarget: false });
+    pinchOn = createPinchOn(
+      new FakeHierarchyCapture(() => ({
+        hierarchy: { node: { bounds: { left: 0, top: 0, right: 1920, bottom: 1080 } } },
+      })),
+    );
+    const target = await pinchOn.resolveTarget({ direction: "out", autoTarget: false });
     expect(target.bounds).toEqual({ left: 0, top: 0, right: 1920, bottom: 1080 });
   });
 
   test("auto-target favors the full-screen map over a top-window keyboard key", async () => {
     const mapBounds = { left: 0, top: 0, right: 1000, bottom: 1500 };
-    (pinchOn as any).capture = new FakeHierarchyCapture(() => ({
-      hierarchy: { node: { "resource-id": "app:id/map", bounds: mapBounds, scrollable: true } },
-      windows: [
-        {
-          windowLayer: 10,
-          hierarchy: {
-            node: {
-              "resource-id": "ime:id/key",
-              clickable: true,
-              bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+    pinchOn = createPinchOn(
+      new FakeHierarchyCapture(() => ({
+        hierarchy: { node: { "resource-id": "app:id/map", bounds: mapBounds, scrollable: true } },
+        windows: [
+          {
+            windowLayer: 10,
+            hierarchy: {
+              node: {
+                "resource-id": "ime:id/key",
+                clickable: true,
+                bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+              },
             },
           },
-        },
-      ],
-    }));
-    const target = await (pinchOn as any).resolveTarget({ direction: "out" });
+        ],
+      })),
+    );
+    const target = await pinchOn.resolveTarget({ direction: "out" });
     expect(target.bounds).toEqual(mapBounds);
   });
 
@@ -444,7 +455,7 @@ describe("PinchOn", () => {
         },
       },
     }));
-    (pinchOn as any).capture = capture;
+    pinchOn = createPinchOn(capture);
     const result = await pinchOn.execute({
       direction: "out",
       container: { elementId: "container-id" },
@@ -456,9 +467,11 @@ describe("PinchOn", () => {
   });
 
   test("does not fall back to cached bounds when fresh capture fails", async () => {
-    (pinchOn as any).capture = new FakeHierarchyCapture(() => {
-      throw new Error("fresh capture failed");
-    });
+    pinchOn = createPinchOn(
+      new FakeHierarchyCapture(() => {
+        throw new Error("fresh capture failed");
+      }),
+    );
     const result = await pinchOn.execute({
       direction: "out",
       container: { elementId: "container-id" },
@@ -473,12 +486,11 @@ describe("PinchOn", () => {
       "resource-id": "container-id",
       bounds: { left: 300, top: 300, right: 700, bottom: 700 },
     };
-    (pinchOn as any).capture = new FakeHierarchyCapture(
-      () =>
-        ({
-          ...createHierarchy(),
-          windows: [{ windowLayer: 5, hierarchy: { node: upper } }],
-        }) as any,
+    pinchOn = createPinchOn(
+      new FakeHierarchyCapture(() => ({
+        ...createHierarchy(),
+        windows: [{ windowLayer: 5, hierarchy: { node: [upper] } }],
+      })),
     );
     const result = await pinchOn.execute({
       direction: "out",

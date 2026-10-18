@@ -29,13 +29,17 @@ import {
 } from "node:http";
 import { ActionableError } from "../models/ActionableError";
 import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
-import { createMcpServer } from "../server";
 import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
 import {
   StatelessMcpHttpEndpoint,
   type StatelessMcpRequestScope,
   type StatelessMcpServer,
 } from "./statelessMcpHttpEndpoint";
+import {
+  buildMcpRequestContext,
+  createStatelessMcpServer,
+  type StatelessMcpServerBase,
+} from "./statelessMcpServerFactory";
 import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { createIosDoctorDependencies } from "../doctor/checks/ios";
 import { logger } from "../utils/logger";
@@ -128,9 +132,6 @@ import {
   DEFAULT_SOCKET_PATH,
   SOCKET_PATH,
   MCP_STREAMABLE_PATH,
-  DAEMON_SESSION_TOOL_BINDING_HEADER,
-  DAEMON_RELEASED_SESSION_HEADER,
-  DAEMON_TOOL_SELECTION_PROFILE_HEADER,
   DAEMON_PORT_RANGE_START,
   DAEMON_PORT_RANGE_END,
   DAEMON_LAUNCH_LOG_PATH_ENV,
@@ -2119,40 +2120,6 @@ export class Daemon {
     res.end(JSON.stringify(result.body));
   }
 
-  private createHttpSessionContext(req: IncomingMessage): {
-    sessionId?: string;
-    initialSessionToolBinding?: string;
-    initialReleasedSession?: string;
-    initialToolSelectionProfile?: string;
-  } {
-    const boundSessionUuid = req.headers[DAEMON_SESSION_TOOL_BINDING_HEADER];
-    const boundToolSelectionProfileUuid = req.headers[DAEMON_TOOL_SELECTION_PROFILE_HEADER];
-    const sessionContext: {
-      sessionId?: string;
-      initialSessionToolBinding?: string;
-      initialReleasedSession?: string;
-      initialToolSelectionProfile?: string;
-    } = {
-      ...(typeof boundSessionUuid === "string" &&
-      boundSessionUuid.trim().length > 0 &&
-      !(
-        typeof req.headers[DAEMON_RELEASED_SESSION_HEADER] === "string" &&
-        req.headers[DAEMON_RELEASED_SESSION_HEADER].trim() === boundSessionUuid.trim()
-      )
-        ? { initialSessionToolBinding: boundSessionUuid }
-        : {}),
-      ...(typeof req.headers[DAEMON_RELEASED_SESSION_HEADER] === "string" &&
-      req.headers[DAEMON_RELEASED_SESSION_HEADER].trim().length > 0
-        ? { initialReleasedSession: req.headers[DAEMON_RELEASED_SESSION_HEADER] }
-        : {}),
-      ...(typeof boundToolSelectionProfileUuid === "string" &&
-      boundToolSelectionProfileUuid.trim().length > 0
-        ? { initialToolSelectionProfile: boundToolSelectionProfileUuid }
-        : {}),
-    };
-    return sessionContext;
-  }
-
   /**
    * Refuse a direct HTTP MCP request during shutdown, and hold it until startup
    * (device discovery and session rehydration) completes, as the Unix socket
@@ -2247,25 +2214,25 @@ export class Daemon {
     return this.mcpHttpEndpoint.handle(req, res, parsedBody, sendJsonRpcError);
   }
 
-  /**
-   * Build one request's MCP server (#4678 stateless). The request scope id is its
-   * session-context id, so the executions it starts cancel with its response;
-   * the caller's session key travels as `requestMcpSessionId`.
-   */
+  /** Build one request's MCP server from its headers (#4678 stateless, #11820). */
   private createRequestMcpServer(
     req: IncomingMessage,
     scope: StatelessMcpRequestScope,
-  ): ReturnType<typeof createMcpServer> {
-    // Stateless + daemon mode: keyed bindings live in the daemon-scoped store (#4678).
-    return createMcpServer({
+  ): ReturnType<typeof createStatelessMcpServer> {
+    return createStatelessMcpServer(
+      this.statelessMcpServerBase(),
+      buildMcpRequestContext({ headers: req.headers }),
+      scope,
+    );
+  }
+
+  /** The daemon-wide options every request's MCP server is built with. */
+  private statelessMcpServerBase(): StatelessMcpServerBase {
+    return {
       iosDependencies: this.iosDoctorDependencies,
       debug: this.debug,
-      sessionContext: { ...this.createHttpSessionContext(req), sessionId: scope.requestScopeId },
-      daemonMode: true,
       acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
-      requestMcpSessionId: scope.requestMcpSessionId,
-      stateless: true,
-    });
+    };
   }
 
   private sendHttpJsonRpcError(

@@ -11,6 +11,7 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { Element } from "../../../src/models/Element";
+import type { ObserveResult } from "../../../src/models/ObserveResult";
 import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 import { nodeAttributes } from "../../../src/models/ViewHierarchyResult";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
@@ -92,7 +93,7 @@ async function executeFocus(
       platform: "android",
       deviceId: "emulator-5554",
     } as any,
-    new FakeAdbClient() as any,
+    new FakeAdbClient(),
     {
       timer: new FakeTimer(),
       elementSelector: fakeSelector,
@@ -133,17 +134,17 @@ async function executeFocus(
     }
     return { ...actionResult, observation };
   };
-  (tapOnElement as any).executeAndroidTap = async () => {
+  tapOnElement.executeAndroidTap = async () => {
     tapped = true;
   };
-  (tapOnElement as any).prepareSelectionCapture = async () => null;
-  (tapOnElement as any).deriveTapEffectAfterPostTapObservation = async (
+  tapOnElement.prepareSelectionCapture = async () => null;
+  tapOnElement.deriveTapEffectAfterPostTapObservation = async (
     _previousObservation: unknown,
-    currentObservation: typeof observation,
-  ) => ({ observation: currentObservation });
+    currentObservation: ObserveResult,
+  ) => ({ effect: undefined, observation: currentObservation });
   (tapOnElement as any).captureTerminalObservationScreenshot = async () => {};
   (tapOnElement as any).recordDeferredPredictionOutcome = async () => {};
-  (tapOnElement as any).enforceFreshnessConsistencyWithEffect = () => {};
+  tapOnElement.enforceFreshnessConsistencyWithEffect = () => {};
 
   const result = await tapOnElement.execute({
     ...(elementId
@@ -168,14 +169,14 @@ describe("TapOnElement selectionStrategy", () => {
         platform: "android",
         deviceId: "emulator-5554",
       } as any,
-      new FakeAdbClient() as any,
+      new FakeAdbClient(),
       {
         timer: new FakeTimer(),
         elementSelector: fakeSelector,
       },
     );
 
-    const result = (tapOnElement as any).findElementInHierarchy(
+    const result = tapOnElement.findElementInHierarchy(
       {
         text: "Match",
         action: "tap",
@@ -199,20 +200,20 @@ describe("TapOnElement selectionStrategy", () => {
         platform: "android",
         deviceId: "emulator-5554",
       } as any,
-      new FakeAdbClient() as any,
+      new FakeAdbClient(),
       {
         timer: new FakeTimer(),
         elementSelector: fakeSelector,
       },
     );
 
-    (tapOnElement as any).findElementInHierarchy(
+    tapOnElement.findElementInHierarchy(
       { text: "Match", action: "tap" },
       { hierarchy: { node: {} } },
     );
     expect(fakeSelector.lastTextSelectionIntent).toBe("tap");
 
-    (tapOnElement as any).findElementInHierarchy(
+    tapOnElement.findElementInHierarchy(
       { textAny: ["Match"], action: "focus" },
       { hierarchy: { node: {} } },
     );
@@ -231,13 +232,13 @@ describe("TapOnElement selectionStrategy", () => {
         platform: "android",
         deviceId: "emulator-5554",
       } as any,
-      new FakeAdbClient() as any,
+      new FakeAdbClient(),
       { timer: new FakeTimer(), elementSelector: fakeSelector },
     );
     let tapped = false;
     (tapOnElement as any).observedInteraction = async (action: (observation: unknown) => unknown) =>
       action(recordObservationRead({ viewHierarchy: { hierarchy: { node: {} } } }));
-    (tapOnElement as any).executeAndroidTap = async () => {
+    tapOnElement.executeAndroidTap = async () => {
       tapped = true;
     };
 

@@ -42,7 +42,7 @@ function createTapOnElement(
       platform,
       deviceId: "emulator-5554",
     } as any,
-    new FakeAdbClient() as any,
+    new FakeAdbClient(),
     { timer, waitForCondition },
   );
   return { tap, timer };
@@ -64,22 +64,22 @@ describe("retryTapIfNoChange", () => {
     const preHierarchy = makeHierarchy("before");
     const postHierarchy = makeHierarchy("after");
 
-    (tap as any).refreshViewHierarchy = async () => postHierarchy;
+    tap.refreshViewHierarchy = async () => postHierarchy;
 
     let tapCallCount = 0;
-    (tap as any).executeAndroidTap = async () => {
+    tap.executeAndroidTap = async () => {
       tapCallCount++;
     };
 
     const preTapHash = (tap as any).hashViewHierarchy(preHierarchy);
 
-    await (tap as any).retryTapIfNoChange(
+    await tap.retryTapIfNoChange(
       preTapHash,
       { x: 60, y: 45 },
       "tap",
       0,
       makeElement(),
-      {},
+      { action: "tap" },
       false,
       { width: 1080, height: 1920 },
     );
@@ -91,22 +91,22 @@ describe("retryTapIfNoChange", () => {
     const { tap } = createTapOnElement();
     const hierarchy = makeHierarchy("same-state");
 
-    (tap as any).refreshViewHierarchy = async () => hierarchy;
+    tap.refreshViewHierarchy = async () => hierarchy;
 
     let tapCallCount = 0;
-    (tap as any).executeAndroidTap = async () => {
+    tap.executeAndroidTap = async () => {
       tapCallCount++;
     };
 
     const preTapHash = (tap as any).hashViewHierarchy(hierarchy);
 
-    await (tap as any).retryTapIfNoChange(
+    await tap.retryTapIfNoChange(
       preTapHash,
       { x: 60, y: 45 },
       "tap",
       0,
       makeElement(),
-      {},
+      { action: "tap" },
       false,
       { width: 1080, height: 1920 },
     );
@@ -118,22 +118,22 @@ describe("retryTapIfNoChange", () => {
     const { tap } = createTapOnElement();
     const preHierarchy = makeHierarchy("before");
 
-    (tap as any).refreshViewHierarchy = async () => null;
+    tap.refreshViewHierarchy = async () => null;
 
     let tapCallCount = 0;
-    (tap as any).executeAndroidTap = async () => {
+    tap.executeAndroidTap = async () => {
       tapCallCount++;
     };
 
     const preTapHash = (tap as any).hashViewHierarchy(preHierarchy);
 
-    await (tap as any).retryTapIfNoChange(
+    await tap.retryTapIfNoChange(
       preTapHash,
       { x: 60, y: 45 },
       "tap",
       0,
       makeElement(),
-      {},
+      { action: "tap" },
       false,
       { width: 1080, height: 1920 },
     );
@@ -145,8 +145,8 @@ describe("retryTapIfNoChange", () => {
     const { tap, timer } = createTapOnElement();
     const hierarchy = makeHierarchy("same-state");
 
-    (tap as any).refreshViewHierarchy = async () => hierarchy;
-    (tap as any).executeAndroidTap = async () => {};
+    tap.refreshViewHierarchy = async () => hierarchy;
+    tap.executeAndroidTap = async () => {};
 
     const sleepDurations: number[] = [];
     const origSleep = timer.sleep.bind(timer);
@@ -157,13 +157,13 @@ describe("retryTapIfNoChange", () => {
 
     const preTapHash = (tap as any).hashViewHierarchy(hierarchy);
 
-    await (tap as any).retryTapIfNoChange(
+    await tap.retryTapIfNoChange(
       preTapHash,
       { x: 60, y: 45 },
       "tap",
       0,
       makeElement(),
-      {},
+      { action: "tap" },
       false,
       { width: 1080, height: 1920 },
     );
@@ -249,7 +249,7 @@ describe("deriveTapEffect", () => {
       );
       return { success: true, action: "tap", element: makeElement(), observation: source };
     };
-    (tap as any).deriveTapEffectAfterPostTapObservation = async () => ({
+    tap.deriveTapEffectAfterPostTapObservation = async () => ({
       effect: { screenChanged: true, basis: "activeWindow changed" },
       observation: destination,
     });
@@ -305,7 +305,7 @@ describe("deriveTapEffect", () => {
     };
     const { tap } = createTapOnElement("android", waitForCondition);
 
-    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(stale, stale);
+    const postTap = await tap.deriveTapEffectAfterPostTapObservation(stale, stale);
 
     expect(waitCalls).toBe(1);
     expect(postTap.effect).toEqual({
@@ -342,7 +342,7 @@ describe("deriveTapEffect", () => {
     };
     const { tap } = createTapOnElement("android", waitForCondition);
 
-    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(stale, stale);
+    const postTap = await tap.deriveTapEffectAfterPostTapObservation(stale, stale);
 
     expect(postTap.effect).toEqual({
       screenChanged: true,
@@ -382,7 +382,7 @@ describe("deriveTapEffect", () => {
     };
     const { tap } = createTapOnElement("android", waitForCondition);
 
-    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(stale, destination);
+    const postTap = await tap.deriveTapEffectAfterPostTapObservation(stale, destination);
 
     expect(postTap.effect).toEqual({
       screenChanged: true,
@@ -416,10 +416,7 @@ describe("deriveTapEffect", () => {
     };
     const { tap } = createTapOnElement("ios", waitForCondition);
 
-    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(
-      observation,
-      observation,
-    );
+    const postTap = await tap.deriveTapEffectAfterPostTapObservation(observation, observation);
 
     expect(postTap.effect).toEqual({
       screenChanged: false,
@@ -436,10 +433,10 @@ describe("retryTapIfNoChange passes isTalkBackEnabled to executeAndroidTap", () 
       const { tap } = createTapOnElement();
       const hierarchy = makeHierarchy("same-state");
 
-      (tap as any).refreshViewHierarchy = async () => hierarchy;
+      tap.refreshViewHierarchy = async () => hierarchy;
 
       let capturedIsTalkBackEnabled: boolean | undefined;
-      (tap as any).executeAndroidTap = async (
+      tap.executeAndroidTap = async (
         _action: string,
         _x: number,
         _y: number,
@@ -454,13 +451,13 @@ describe("retryTapIfNoChange passes isTalkBackEnabled to executeAndroidTap", () 
 
       const preTapHash = (tap as any).hashViewHierarchy(hierarchy);
 
-      await (tap as any).retryTapIfNoChange(
+      await tap.retryTapIfNoChange(
         preTapHash,
         { x: 60, y: 45 },
         "tap",
         0,
         makeElement(),
-        {},
+        { action: "tap" },
         talkBackEnabled,
         { width: 1080, height: 1920 },
       );
@@ -535,7 +532,7 @@ describe("enforceFreshnessConsistencyWithEffect", () => {
       }),
     };
 
-    (tap as any).enforceFreshnessConsistencyWithEffect(previous, result);
+    tap.enforceFreshnessConsistencyWithEffect(previous, result);
 
     expect(result.observation?.freshness?.verified).toBe(false);
     expect(result.observation?.freshness?.isFresh).toBe(false);
@@ -563,7 +560,7 @@ describe("enforceFreshnessConsistencyWithEffect", () => {
       }),
     };
 
-    (tap as any).enforceFreshnessConsistencyWithEffect(previous, result);
+    tap.enforceFreshnessConsistencyWithEffect(previous, result);
 
     expect(result.observation?.freshness?.verified).toBe(true);
     expect(result.observation?.freshness?.isFresh).toBe(true);
@@ -581,7 +578,7 @@ describe("enforceFreshnessConsistencyWithEffect", () => {
       }),
     };
 
-    (tap as any).enforceFreshnessConsistencyWithEffect(previous, result);
+    tap.enforceFreshnessConsistencyWithEffect(previous, result);
 
     expect(result.observation?.freshness?.verified).toBe(true);
     expect(result.observation?.freshness?.isFresh).toBe(true);

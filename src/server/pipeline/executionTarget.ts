@@ -13,7 +13,6 @@ import {
 import { AndroidCtrlProxyClient } from "../../features/observe/android";
 import { IOSCtrlProxyClient } from "../../features/observe/ios";
 import { logger, type Logger } from "../../utils/logger";
-import { DaemonState } from "../../daemon/daemonState";
 import { defaultDaemonContext } from "../../daemon/daemonContext";
 import {
   defaultDeviceObservationAccess,
@@ -351,14 +350,19 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     }
 
     logger.info(
-      `[ToolRegistry] Tool ${name} called, sessionUuid=${sessionUuid}, daemonInitialized=${DaemonState.getInstance().isInitialized()}`,
+      `[ToolRegistry] Tool ${name} called, sessionUuid=${sessionUuid}, daemonInitialized=${defaultDaemonContext.isInitialized()}`,
     );
 
     // If session UUID provided, resolve device from session
-    if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
+    const resolvingSessionManager =
+      shouldResolveDevice && sessionUuid ? defaultDaemonContext.sessionManager() : undefined;
+    const resolvingDevicePool = resolvingSessionManager
+      ? defaultDaemonContext.fullDevicePool()
+      : undefined;
+    if (shouldResolveDevice && sessionUuid && resolvingSessionManager && resolvingDevicePool) {
       logger.info(`[ToolRegistry] Entering session-based device assignment for ${sessionUuid}`);
-      const sessionManager = DaemonState.getInstance().getSessionManager();
-      const devicePool = DaemonState.getInstance().getDevicePool();
+      const sessionManager = resolvingSessionManager;
+      const devicePool = resolvingDevicePool;
       if (!readSession) {
         refuseControlCallBeforeAdmission(name, providedDeviceId, sessionUuid);
       }
@@ -508,7 +512,7 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // settings), so a call without a deviceId is checked against the device it would land
         // on first: a refused call leaves the holder's device untouched (#10828).
         let readinessTarget = providedDeviceId;
-        if (!providedDeviceId && DaemonState.getInstance().isInitialized()) {
+        if (!providedDeviceId && defaultDaemonContext.isInitialized()) {
           readinessTarget = await predictReadinessTarget(
             platform,
             deviceSessionManager,

@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../../helpers/scratchRoot";
 import { promises as fs } from "fs";
-import * as os from "os";
+
 import * as path from "path";
 import { ClearAppData, IosAppReinstaller } from "../../../src/features/action/ClearAppData";
 import { ActionableError, AppNotInstalledError } from "../../../src/models/ActionableError";
@@ -254,17 +255,10 @@ describe("ClearAppData", () => {
       deviceId: "00008030-001A2B3C0E11002E",
     };
     const bundleId = "com.example.app";
-    const tempDirs: string[] = [];
-
-    afterEach(async () => {
-      for (const dir of tempDirs.splice(0)) {
-        await fs.rm(dir, { recursive: true, force: true });
-      }
-    });
+    const scratch = useScratchRoot("automobile-clear-");
 
     async function makeContainer(): Promise<string> {
-      const root = await fs.mkdtemp(path.join(os.tmpdir(), "automobile-clear-"));
-      tempDirs.push(root);
+      const root = scratch.next();
       await fs.mkdir(path.join(root, "Documents"), { recursive: true });
       await fs.writeFile(path.join(root, "Documents", "state.json"), "{}");
       await fs.mkdir(path.join(root, "Library", "Preferences"), { recursive: true });

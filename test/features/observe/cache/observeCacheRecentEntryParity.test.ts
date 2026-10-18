@@ -2,11 +2,12 @@ import {
   hasWrongWindowEvidence,
   recordWrongWindowEvidence,
 } from "../../../../src/features/observe/observationFreshness";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
+import { useScratchRoot } from "../../../helpers/scratchRoot";
 import path from "path";
 import os from "os";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+
 import { FileSystemObserveCacheStore } from "../../../../src/features/observe/cache/FileSystemObserveCacheStore";
 import type { ObserveResultCacheStore } from "../../../../src/features/observe/cache/ObserveResultCacheStore";
 import { FakeObserveCacheStore } from "../../../fakes/FakeObserveCacheStore";
@@ -29,13 +30,13 @@ function makeResult(label: string): ObserveResult {
  * about which device wins a tie, every such test validates the wrong device.
  */
 describe("getRecentInMemoryEntry same-tick tie-break parity", function () {
+  const scratch = useScratchRoot("observe-cache-parity-");
   let cacheDir: string;
   let timer: FakeTimer;
   let stores: Array<{ name: string; store: ObserveResultCacheStore }>;
 
   beforeEach(function () {
-    cacheDir = path.join(os.tmpdir(), `observe-cache-parity-${randomUUID()}`);
-    mkdirSync(cacheDir, { recursive: true });
+    cacheDir = scratch.next();
     timer = new FakeTimer();
     timer.setCurrentTime(1_000_000);
     stores = [
@@ -45,12 +46,6 @@ describe("getRecentInMemoryEntry same-tick tie-break parity", function () {
       },
       { name: "FakeObserveCacheStore", store: new FakeObserveCacheStore(timer) },
     ];
-  });
-
-  afterEach(function () {
-    if (existsSync(cacheDir)) {
-      rmSync(cacheDir, { recursive: true, force: true });
-    }
   });
 
   test("wrong-window provenance survives production memory-cache clones without output fields", async () => {

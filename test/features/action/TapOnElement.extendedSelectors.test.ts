@@ -29,7 +29,7 @@ const createTapOnElement = (selector: FakeElementSelector) => {
       platform: "android",
       deviceId: "emulator-5554",
     } as any,
-    new FakeAdbClient() as any,
+    new FakeAdbClient(),
     {
       timer: new FakeTimer(),
       elementSelector: selector,
@@ -44,7 +44,7 @@ const createDefaultTapOnElement = () => {
       platform: "android",
       deviceId: "emulator-5554",
     } as any,
-    new FakeAdbClient() as any,
+    new FakeAdbClient(),
     {
       timer: new FakeTimer(),
     },
@@ -181,7 +181,7 @@ describe("TapOnElement extended selectors", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
-      const result = (tapOn as any).findElementInHierarchy(
+      const result = tapOn.findElementInHierarchy(
         { text: "Login", action: "tap" },
         { hierarchy: { node: {} } },
       );
@@ -194,7 +194,7 @@ describe("TapOnElement extended selectors", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
-      const result = (tapOn as any).findElementInHierarchy(
+      const result = tapOn.findElementInHierarchy(
         { elementId: "com.app:id/btn", action: "tap" },
         { hierarchy: { node: {} } },
       );
@@ -207,7 +207,7 @@ describe("TapOnElement extended selectors", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
-      const result = (tapOn as any).findElementInHierarchy(
+      const result = tapOn.findElementInHierarchy(
         { testTag: "message_row_42", action: "tap" },
         { hierarchy: { node: {} } },
       );
@@ -220,7 +220,7 @@ describe("TapOnElement extended selectors", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
-      const result = (tapOn as any).findElementInHierarchy(
+      const result = tapOn.findElementInHierarchy(
         { text: "Accept Terms", sibling: true, action: "tap" },
         { hierarchy: { node: {} } },
       );
@@ -233,7 +233,7 @@ describe("TapOnElement extended selectors", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
-      const result = (tapOn as any).findElementInHierarchy(
+      const result = tapOn.findElementInHierarchy(
         { elementId: "com.app:id/label", sibling: true, action: "tap" },
         { hierarchy: { node: {} } },
       );
@@ -252,7 +252,7 @@ describe("TapOnElement extended selectors", () => {
       const selector = new VariantSelector(null);
       const tapOn = createTapOnElement(selector);
 
-      const result = (tapOn as any).findElementInHierarchy(
+      const result = tapOn.findElementInHierarchy(
         { textAny: ["Done", "Add"], action: "tap" },
         { hierarchy: { node: {} } },
       );
@@ -274,7 +274,7 @@ describe("TapOnElement extended selectors", () => {
       const selector = new VariantSelector(null);
       const tapOn = createTapOnElement(selector);
 
-      const result = (tapOn as any).findElementInHierarchy(
+      const result = tapOn.findElementInHierarchy(
         { textAny: ["Done", "Add"], action: "tap" },
         { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 },
       );
@@ -296,7 +296,7 @@ describe("TapOnElement extended selectors", () => {
       const selector = new VariantSelector(null);
       const tapOn = createTapOnElement(selector);
 
-      const result = (tapOn as any).findElementInHierarchy(
+      const result = tapOn.findElementInHierarchy(
         { textAny: ["Done", "Add"], action: "tap" },
         { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 },
       );
@@ -309,7 +309,7 @@ describe("TapOnElement extended selectors", () => {
     test("textAny skips off-screen duplicate text matches before trying later variants", () => {
       const tapOn = createDefaultTapOnElement();
 
-      const result = (tapOn as any).findElementInHierarchy(
+      const result = tapOn.findElementInHierarchy(
         { textAny: ["Done", "Add"], action: "tap" },
         {
           hierarchy: {
@@ -358,7 +358,7 @@ describe("TapOnElement extended selectors", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
-      (tapOn as any).findElementInHierarchy(
+      tapOn.findElementInHierarchy(
         { text: "Email", sibling: true, action: "tap", selectionStrategy: "random" },
         { hierarchy: { node: {} } },
       );

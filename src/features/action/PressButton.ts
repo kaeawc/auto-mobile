@@ -49,14 +49,18 @@ export class PressButton extends BaseVisualChange {
     this.device = device;
   }
 
-  /** Typed test view so home-verification tests can drive the deadline gate without a full press. */
+  /** Typed test view so tests can drive the deadline gate and the per-platform dispatch without a full press. */
   get testHooks(): {
     verifyAndroidHomeForeground: (
       options?: Parameters<BaseVisualChange["verifyAndroidHomeForeground"]>[0],
     ) => Promise<boolean>;
+    executeAndroidButtonPress: PressButton["press"];
+    executeiOSButtonPress: PressButton["press"];
   } {
     return {
       verifyAndroidHomeForeground: (options = {}) => this.verifyAndroidHomeForeground(options),
+      executeAndroidButtonPress: (...args) => this.executeAndroidButtonPress(...args),
+      executeiOSButtonPress: (...args) => this.executeiOSButtonPress(...args),
     };
   }
 
@@ -211,7 +215,7 @@ export class PressButton extends BaseVisualChange {
   // before we fall back to ADB keyevent.
   private static readonly GLOBAL_ACTION_TIMEOUT_MS = 3000;
 
-  async executeAndroidButtonPress(
+  private async executeAndroidButtonPress(
     button: string,
     timeoutMs?: number,
     frameContext?: string,
@@ -471,7 +475,7 @@ export class PressButton extends BaseVisualChange {
    * @param button - Button name to press
    * @returns Result of the button press operation
    */
-  async executeiOSButtonPress(
+  private async executeiOSButtonPress(
     button: string,
     timeoutMs?: number,
     frameContext?: string,

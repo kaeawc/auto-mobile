@@ -194,6 +194,18 @@ export class OpenURL extends BaseVisualChange {
     this.devicectl = devicectl;
   }
 
+  /** @internal Typed view of the per-platform dispatch paths for unit tests; not part of the public API. */
+  get testHooks(): {
+    executeAndroidOpenURL: OpenURL["executeAndroidOpenURL"];
+    executeiOSOpenURL: OpenURL["executeiOSOpenURL"];
+  } {
+    return {
+      executeAndroidOpenURL: (url, signal) => this.executeAndroidOpenURL(url, signal),
+      executeiOSOpenURL: (url, previousObservation, signal) =>
+        this.executeiOSOpenURL(url, previousObservation, signal),
+    };
+  }
+
   async execute(url: string, call?: ActionCall): Promise<OpenURLResult>;
   /** @deprecated Pass an {@link ActionCall} instead of positional arguments. */
   async execute(url: string, signal?: AbortSignal): Promise<OpenURLResult>;
@@ -313,7 +325,7 @@ export class OpenURL extends BaseVisualChange {
    * @param url - URL to open
    * @returns Result of the URL opening operation
    */
-  async executeAndroidOpenURL(url: string, signal?: AbortSignal): Promise<OpenURLResult> {
+  private async executeAndroidOpenURL(url: string, signal?: AbortSignal): Promise<OpenURLResult> {
     // Pass URL through as-is to am start without any reformatting.
     // Android's Intent system handles both hierarchical (scheme://authority/path)
     // and opaque (scheme:scheme-specific-part) URIs correctly.
@@ -346,7 +358,7 @@ export class OpenURL extends BaseVisualChange {
   }
 
   /** Execute iOS URL opening through the selected transport backend. */
-  async executeiOSOpenURL(
+  private async executeiOSOpenURL(
     url: string,
     previousObservation?: ObserveResult,
     signal?: AbortSignal,

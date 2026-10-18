@@ -466,8 +466,9 @@ describe("PressButton Android keycode dispatch", () => {
       const window = launcherWindow();
       const controller = new AbortController();
 
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
-      (pressButton as any).window = window;
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        window,
+      });
       const result = await (pressButton as any).executeAndroidButtonPress(
         "home",
         undefined,
@@ -492,8 +493,9 @@ describe("PressButton Android keycode dispatch", () => {
       const controller = new AbortController();
       controller.abort();
 
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
-      (pressButton as any).window = launcherWindow();
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        window: launcherWindow(),
+      });
 
       // No explicit signal forwarded -- only the ambient request signal is
       // aborted. Because the fallback COMBINES the (absent) forwarded signal
@@ -515,8 +517,9 @@ describe("PressButton Android keycode dispatch", () => {
         },
       });
       const window = launcherWindow();
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
-      (pressButton as any).window = window;
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        window,
+      });
 
       // Supply a 1234ms budget: the post-keyevent home verification must forward
       // the leftover budget into getActive rather than letting it fall back to
@@ -588,8 +591,9 @@ describe("PressButton Android keycode dispatch", () => {
         },
       });
       const controller = new AbortController();
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
-      (pressButton as any).window = launcherWindow();
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        window: launcherWindow(),
+      });
 
       await (pressButton as any).executeAndroidButtonPress(
         "home",
@@ -640,8 +644,9 @@ describe("PressButton Android keycode dispatch", () => {
         activityName: "Settings",
         layoutSeqSum: 0,
       });
-      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer);
-      (pressButton as any).window = window;
+      const pressButton = new PressButton(androidDevice, fakeAdb, fakeTimer, undefined, undefined, {
+        window,
+      });
       const controller = new AbortController();
       controller.abort();
 

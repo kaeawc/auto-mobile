@@ -10,7 +10,7 @@ import {
 } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
 import { RotationSettingManagedError } from "../../models/RotationSettingManagedError";
 import type { SettingsNamespace, SettingsValueType } from "../observe/android/types";
-import { BaseVisualChange } from "./BaseVisualChange";
+import { BaseVisualChange, type DisplayFenceDependencies } from "./BaseVisualChange";
 import { BootedDevice, ObserveResult, OrientationLockState, RotateResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -167,8 +167,9 @@ export class Rotate extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
     private readonly options: RotateOptions = {},
+    collaborators: DisplayFenceDependencies = {},
   ) {
-    super(device, adb, timer);
+    super(device, adb, timer, undefined, collaborators);
   }
 
   /** Natural orientation of the active display (the rule shared with AndroidOrientationReader). */

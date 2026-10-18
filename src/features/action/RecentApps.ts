@@ -1,7 +1,11 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  ProgressCallback,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import { ActionableError, BootedDevice, RecentAppsResult, ObserveResult } from "../../models";
 import { PressButton } from "./PressButton";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -32,8 +36,13 @@ const POST_NAVIGATION_VERIFY_DELAY_MS = 250;
 export class RecentApps extends BaseVisualChange {
   private pressButton: PressButton;
 
-  constructor(device: BootedDevice, adb: AdbExecutor | null = null, timer: Timer = defaultTimer) {
-    super(device, adb, timer);
+  constructor(
+    device: BootedDevice,
+    adb: AdbExecutor | null = null,
+    timer: Timer = defaultTimer,
+    collaborators: DisplayFenceDependencies = {},
+  ) {
+    super(device, adb, timer, undefined, collaborators);
     this.pressButton = new PressButton(device, adb);
   }
 

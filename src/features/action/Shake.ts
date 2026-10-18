@@ -2,7 +2,11 @@ import { runWithAbortSignal } from "../../utils/AbortContext";
 import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  ProgressCallback,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import { BootedDevice, ShakeOptions, ShakeResult } from "../../models";
 import {
   SHAKE_DURATION_MAX_MS,
@@ -26,8 +30,13 @@ const FALLBACK_RESTING_ACCELERATION = "0:9.77622:0";
 export class Shake extends BaseVisualChange {
   private shakeTimer: Timer;
 
-  constructor(device: BootedDevice, adb: AdbExecutor | null = null, timer: Timer = defaultTimer) {
-    super(device, adb, timer);
+  constructor(
+    device: BootedDevice,
+    adb: AdbExecutor | null = null,
+    timer: Timer = defaultTimer,
+    collaborators: DisplayFenceDependencies = {},
+  ) {
+    super(device, adb, timer, undefined, collaborators);
     this.shakeTimer = timer;
   }
 

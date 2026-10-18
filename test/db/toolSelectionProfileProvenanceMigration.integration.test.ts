@@ -3,6 +3,7 @@ import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { up, down } from "../../src/db/migrations/2026_09_06_000_tool_selection_profile_provenance";
+import { looseKyselyTables } from "../helpers/looseKyselyTables";
 
 /**
  * Migration coverage for #6225 (#6148/#6213 follow-up): the durable membership
@@ -41,13 +42,13 @@ describe("2026_09_06_000_tool_selection_profile_provenance migration", () => {
 
   test("profile_uuid is the primary key: a duplicate insert without ON CONFLICT throws", async () => {
     await up(db);
-    await db
-      .insertInto("tool_selection_profile_provenance" as any)
+    await looseKyselyTables(db)
+      .insertInto("tool_selection_profile_provenance")
       .values({ profile_uuid: "minted-uuid" })
       .execute();
     await expect(
-      db
-        .insertInto("tool_selection_profile_provenance" as any)
+      looseKyselyTables(db)
+        .insertInto("tool_selection_profile_provenance")
         .values({ profile_uuid: "minted-uuid" })
         .execute(),
     ).rejects.toThrow();
@@ -55,12 +56,12 @@ describe("2026_09_06_000_tool_selection_profile_provenance migration", () => {
 
   test("created_at defaults to the current datetime", async () => {
     await up(db);
-    await db
-      .insertInto("tool_selection_profile_provenance" as any)
+    await looseKyselyTables(db)
+      .insertInto("tool_selection_profile_provenance")
       .values({ profile_uuid: "minted-uuid" })
       .execute();
-    const row = await db
-      .selectFrom("tool_selection_profile_provenance" as any)
+    const row = await looseKyselyTables(db)
+      .selectFrom("tool_selection_profile_provenance")
       .select(["created_at"])
       .executeTakeFirstOrThrow();
     expect(typeof (row as { created_at: string }).created_at).toBe("string");

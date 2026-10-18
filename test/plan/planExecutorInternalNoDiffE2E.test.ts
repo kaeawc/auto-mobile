@@ -45,16 +45,18 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   function sameScreenObserve(): ObserveResult {
     return {
       updatedAt: 1,
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+      observationId: "obs-no-diff",
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
       activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
       viewHierarchy: {
         packageName: "com.example",
         hierarchy: {
-          node: { "resource-id": "com.example:id/root", "content-desc": "keep" } as any,
+          node: { $: { "resource-id": "com.example:id/root", "content-desc": "keep" } },
         },
       },
-    } as ObserveResult;
+    };
   }
 
   const baseSchema = z.object({

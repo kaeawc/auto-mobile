@@ -17,6 +17,7 @@
 # it (test/scripts/integrationSafeTier.test.ts enforces this). Classify by READING
 # the file, never by running it; when in doubt, unsafe.
 # Last derived from origin/main on 2026-10-10.
+test/contracts/daemonClient.integration.test.ts | safe | fake versus real DaemonClient over a unix socket in a private mkdtemp directory removed afterwards L11
 test/contracts/deviceResourceApplicationStore.integration.test.ts | safe | fake versus real DeviceResourceApplicationRepository over createTestDatabase in-memory L8
 test/contracts/deviceSessionPersistence.integration.test.ts | safe | fake versus real DeviceSessionRepository over createTestDatabase in-memory L8
 test/contracts/deviceSnapshotStore.integration.test.ts | safe | fake versus real store over a private mkdtemp directory removed afterwards L9
@@ -149,6 +150,7 @@ test/db/repairUpdatedAtDefaultsMigration.integration.test.ts | safe | in-memory 
 test/db/rowCapRetention.integration.test.ts | safe | pure retention-wrapper logic, no I/O
 test/db/rowCapRetentionTrim.integration.test.ts | safe | createTestDatabase in-memory DB L43
 test/db/sessionToolOverridesMigration.integration.test.ts | safe | BunSqliteDialect over :memory: L13
+test/db/sessionToolSelectionRepository.integration.test.ts | safe | createTestDatabase in-memory L5
 test/db/storageEventRepository.integration.test.ts | safe | createTestDatabase and :memory: DB L13/L321
 test/db/storageEventsKeyLookup.integration.test.ts | safe | :memory: BunDatabase L97
 test/db/telemetryEventIndexInventory.integration.test.ts | safe | migrations replayed on :memory: DB L148
@@ -180,7 +182,6 @@ test/features/observe/ios/ctrlProxyWireParity.integration.test.ts | safe | read-
 test/features/prototype/PrototypeHttpExecutor.integration.test.ts | safe | Bun.serve on 127.0.0.1 port 0 L4; loopback only
 test/features/screen-stream/ScreenCaptureHelperProvider.integration.test.ts | safe | fake downloader/checksum/timer; cache in tmpdir L36/L49
 test/features/shared/GenericThresholdManager.integration.test.ts | safe | createTestDatabase; static threshold calculation only L220
-test/features/toolSelection/SqliteSessionToolSelectionRepository.integration.test.ts | safe | createTestDatabase in-memory L5
 test/features/video/FfmpegVideoProcessingBackend.integration.test.ts | unsafe | node:child_process spawn/spawnSync of ffmpeg and ffprobe L15/L60
 test/features/video/hostRecorderTeardown.integration.test.ts | unsafe | spawns a real child process and signals it
 test/features/webrtc/WebRtcPublisher.loopback.integration.test.ts | unsafe | env-gated L24; real werift ICE/DTLS I/O when enabled

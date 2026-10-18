@@ -542,3 +542,46 @@ test("selector adapter requires an explicit hint opt-in even for focus-input", (
     }).element?.["resource-id"],
   ).toBe("phone");
 });
+
+// The tap actions call `select` directly with the option sets below; each row must pick what the
+// deprecated adapter picked, so removing the adapters cannot change a tap target (issue #11838).
+const tapCallSites = [
+  {
+    name: "text, partial and case-insensitive with hint fallback",
+    adapter: (s: ResolverElementSelector) =>
+      s.selectByText(hierarchy, "login", {
+        partialMatch: true,
+        caseSensitive: false,
+        intentAction: "inspect",
+        allowHintFallback: true,
+      }),
+    select: (s: ResolverElementSelector) =>
+      s.select(
+        hierarchy,
+        { text: "login" },
+        {
+          partialMatch: true,
+          caseSensitive: false,
+          intentAction: "inspect",
+          allowHintFallback: true,
+        },
+      ),
+  },
+  {
+    name: "resource ID, exact",
+    adapter: (s: ResolverElementSelector) =>
+      s.selectByResourceId(hierarchy, "login", { partialMatch: false, intentAction: "inspect" }),
+    select: (s: ResolverElementSelector) =>
+      s.select(hierarchy, { elementId: "login" }, { partialMatch: false, intentAction: "inspect" }),
+  },
+  {
+    name: "clickable with no query",
+    adapter: (s: ResolverElementSelector) => s.selectClickable(hierarchy, { intentAction: "tap" }),
+    select: (s: ResolverElementSelector) => s.select(hierarchy, {}, { intentAction: "tap" }),
+  },
+];
+
+test.each(tapCallSites)("select matches the deprecated adapter for $name", (row) => {
+  const selector = new ResolverElementSelector();
+  expect(row.select(selector)).toEqual(row.adapter(selector));
+});

@@ -23,6 +23,7 @@ import {
 import { runWithPerfTracker } from "../../../src/utils/PerfContext";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ActionableError } from "../../../src/models/ActionableError";
+import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 // Keep action tests isolated from the production SQLite repository even when a
 // scenario does not need to inspect stale-marker rows explicitly.
@@ -400,17 +401,11 @@ describe("UninstallApp (Android)", () => {
 
   test("does not invalidate the window cache when uninstall fails", async () => {
     class FailedUninstallAdb extends FakeAdbClient {
-      override async executeCommand(
-        command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
-      ) {
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
         if (command === "shell pm uninstall --user 0 'com.example.app'") {
           throw new Error("pm uninstall failed");
         }
-        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return super.executeCommand(command, options);
       }
     }
 
@@ -455,20 +450,14 @@ describe("UninstallApp (Android)", () => {
     class VerificationFailureAdb extends FakeAdbClient {
       private listPackagesCalls = 0;
 
-      override async executeCommand(
-        command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
-      ) {
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
         if (command === "shell pm list packages --user 0") {
           this.listPackagesCalls++;
           if (this.listPackagesCalls === 2) {
             throw new Error("ADB disconnected after uninstall");
           }
         }
-        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return super.executeCommand(command, options);
       }
     }
 
@@ -508,18 +497,12 @@ describe("UninstallApp (Android)", () => {
 
   test("reports success when a timed-out uninstall removed the package", async () => {
     class TimeoutUninstallAdb extends FakeAdbClient {
-      override async executeCommand(
-        command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
-      ) {
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
         if (command === "shell pm uninstall --user 0 'com.example.app'") {
-          await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+          await super.executeCommand(command, options);
           throw new AdbCommandTimeoutError("Command timed out");
         }
-        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return super.executeCommand(command, options);
       }
     }
 
@@ -545,21 +528,15 @@ describe("UninstallApp (Android)", () => {
     class TimeoutThenSuccessAdb extends FakeAdbClient {
       private uninstallAttempts = 0;
 
-      override async executeCommand(
-        command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
-      ) {
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
         if (command === "shell pm uninstall --user 0 'com.example.app'") {
           this.uninstallAttempts++;
           if (this.uninstallAttempts === 1) {
-            await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+            await super.executeCommand(command, options);
             throw new AdbCommandTimeoutError("Command timed out");
           }
         }
-        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return super.executeCommand(command, options);
       }
     }
 
@@ -584,18 +561,12 @@ describe("UninstallApp (Android)", () => {
 
   test("returns actionable diagnostics when the bounded retry also times out", async () => {
     class AlwaysTimeoutUninstallAdb extends FakeAdbClient {
-      override async executeCommand(
-        command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
-      ) {
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
         if (command === "shell pm uninstall --user 0 'com.example.app'") {
-          await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+          await super.executeCommand(command, options);
           throw new AdbCommandTimeoutError("Command timed out");
         }
-        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return super.executeCommand(command, options);
       }
     }
 
@@ -626,18 +597,12 @@ describe("UninstallApp (Android)", () => {
 
   test("reports success when the bounded retry times out after removing the package", async () => {
     class AlwaysTimeoutUninstallAdb extends FakeAdbClient {
-      override async executeCommand(
-        command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
-      ) {
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
         if (command === "shell pm uninstall --user 0 'com.example.app'") {
-          await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+          await super.executeCommand(command, options);
           throw new AdbCommandTimeoutError("Command timed out");
         }
-        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return super.executeCommand(command, options);
       }
     }
 
@@ -672,19 +637,13 @@ describe("UninstallApp (Android)", () => {
     const controller = new AbortController();
 
     class TimeoutThenAbortAdb extends FakeAdbClient {
-      override async executeCommand(
-        command: string,
-        timeoutMs?: number,
-        maxBuffer?: number,
-        noRetry?: boolean,
-        signal?: AbortSignal,
-      ) {
+      override async executeCommand(command: string, options?: AdbExecuteOptions) {
         if (command === "shell pm uninstall --user 0 'com.example.app'") {
-          await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+          await super.executeCommand(command, options);
           controller.abort();
           throw new AdbCommandTimeoutError("Command timed out");
         }
-        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+        return super.executeCommand(command, options);
       }
     }
 

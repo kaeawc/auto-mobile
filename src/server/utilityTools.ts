@@ -54,6 +54,7 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { SessionManager } from "../daemon/sessionManager";
 import {
@@ -531,17 +532,7 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
 );
 
 // Export interfaces for type safety
-export interface ChangeLocalizationArgs {
-  // #6154: optional — resolved from deviceId/session when omitted.
-  platform?: Platform;
-  appId?: string;
-  locale?: string;
-  timeZone?: string;
-  textDirection?: "ltr" | "rtl";
-  timeFormat?: "12" | "24";
-  calendarSystem?: string;
-  restartApp?: string;
-}
+export type ChangeLocalizationArgs = z.output<typeof changeLocalizationSchema>;
 
 /**
  * #6154 follow-up: `platform` is optional on the wire (resolved from
@@ -657,11 +648,12 @@ async function captureBiometricEnrollment(
   device: BootedDevice,
   args: SetDeviceStateArgs,
   deviceState: DeviceState,
+  daemon: DaemonContext = defaultDaemonContext,
 ): Promise<BiometricEnrollmentCapture> {
-  if (!args.biometrics || !args.sessionUuid || !DaemonState.getInstance().isInitialized()) {
+  const sessionManager = args.biometrics && args.sessionUuid ? daemon.sessionManager() : undefined;
+  if (!sessionManager || !args.sessionUuid) {
     return {};
   }
-  const sessionManager = DaemonState.getInstance().getSessionManager();
   if (sessionManager.getBiometricEnrollment(args.sessionUuid)) {
     return { sessionManager };
   }
@@ -954,10 +946,7 @@ export function registerUtilityTools(
     if (args.clock !== undefined) {
       validateDeviceClockInput(args.clock);
     }
-    const sessionManager =
-      args.sessionUuid && DaemonState.getInstance().isInitialized()
-        ? DaemonState.getInstance().getSessionManager()
-        : undefined;
+    const sessionManager = args.sessionUuid ? defaultDaemonContext.sessionManager() : undefined;
     const { deviceState, useIosAppNetworkRule } = createSessionDeviceState(
       device,
       args.sessionUuid,

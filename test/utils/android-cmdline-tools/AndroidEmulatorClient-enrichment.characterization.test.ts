@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { enrichDeviceInfoList } from "../../../src/utils/android-cmdline-tools/avdDeviceInfoEnrichment";
 import type {
   AvdConfig,
   AvdConfigReader,
 } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 import type { DeviceInfo } from "../../../src/models";
 import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
-import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
-import { FakeTimer } from "../../fakes/FakeTimer";
 
 const device: DeviceInfo = {
   name: "Pixel",
@@ -24,19 +22,6 @@ const device: DeviceInfo = {
   formFactor: "phone",
   capabilityInventory: { schemaVersion: 1, capabilities: [] },
 };
-function client(reader: AvdConfigReader): AndroidEmulatorClient {
-  return new AndroidEmulatorClient(
-    async () => {
-      throw new Error("unexpected command");
-    },
-    () => {
-      throw new Error("unexpected spawn");
-    },
-    new FakeTimer(),
-    new FakeAdbClientFactory(),
-    reader,
-  );
-}
 
 describe("AndroidEmulatorClient typed config enrichment characterization", () => {
   test.each([
@@ -117,7 +102,7 @@ describe("AndroidEmulatorClient typed config enrichment characterization", () =>
     "$name",
     async ({ config, expected }) => {
       const reader = new FakeAvdConfigReader(config);
-      const result = await client(reader)["enrichDeviceInfoList"]([device]);
+      const result = await enrichDeviceInfoList(reader, [device]);
       expect(result).toEqual([expected]);
       expect(reader.readConfigCalls).toEqual(["Pixel"]);
       if (config === null) {
@@ -132,7 +117,7 @@ describe("AndroidEmulatorClient typed config enrichment characterization", () =>
         throw new Error("config unavailable");
       },
     };
-    expect((await client(reader)["enrichDeviceInfoList"]([device]))[0]).toBe(device);
+    expect((await enrichDeviceInfoList(reader, [device]))[0]).toBe(device);
   });
 
   test("parallel enrichment retains input order", async () => {
@@ -148,7 +133,7 @@ describe("AndroidEmulatorClient typed config enrichment characterization", () =>
           : Promise.resolve({ apiLevel: 35 });
       },
     };
-    const pending = client(reader)["enrichDeviceInfoList"]([device, { ...device, name: "Other" }]);
+    const pending = enrichDeviceInfoList(reader, [device, { ...device, name: "Other" }]);
     expect(calls).toEqual(["Pixel", "Other"]);
     completeFirst!({ apiLevel: 36 });
     expect(await pending).toEqual([

@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   clampedIosCoordinateSwipeDuration,
+  iosSwipeDurationReport,
   withSwipeOnVelocity,
 } from "../../../../src/features/action/swipeon/swipeDurationReport";
 import { TalkBackSwipeExecutor } from "../../../../src/features/action/swipeon/TalkBackSwipeExecutor";
@@ -115,5 +116,29 @@ describe("withSwipeOnVelocity (#12968)", () => {
     expect(
       withSwipeOnVelocity({ ...base, success: false }, {}).velocityPxPerSecond,
     ).toBeUndefined();
+  });
+});
+
+describe("iosSwipeDurationReport (#13145)", () => {
+  test("a reported synthesized floor drives the velocity, not the requested duration", () => {
+    const report = iosSwipeDurationReport(500, 10, {
+      swipeRoute: "unpinnedSynthesized",
+      effectiveDurationMs: 50,
+    });
+    expect(report.effectiveDurationMs).toBe(50);
+    const swipe = { success: true, x1: 0, y1: 0, x2: 500, y2: 0, duration: 10, ...report };
+    // 500 pt over the dispatched 50 ms, not the requested 10 ms (50000 px/s).
+    expect(withSwipeOnVelocity(swipe, {}).velocityPxPerSecond).toBe(10_000);
+  });
+
+  test("without a report it falls back to the XCUICoordinate assumption", () => {
+    expect(iosSwipeDurationReport(100, 3000, {})).toMatchObject({ effectiveDurationMs: 1000 });
+    expect(iosSwipeDurationReport(300, 300, {})).toEqual({});
+  });
+
+  test("a route with no route name is treated as unreported even if a duration is present", () => {
+    expect(iosSwipeDurationReport(100, 3000, { effectiveDurationMs: 3000 })).toMatchObject({
+      effectiveDurationMs: 1000,
+    });
   });
 });

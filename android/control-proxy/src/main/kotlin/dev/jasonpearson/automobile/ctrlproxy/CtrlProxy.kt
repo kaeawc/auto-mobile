@@ -7,6 +7,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
+import android.content.BroadcastReceiver
 import android.content.ClipboardManager
 import android.content.ComponentName
 import android.content.Context
@@ -144,7 +145,6 @@ import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
-import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
@@ -1672,6 +1672,33 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
+  /** Recomposition tracking, network mock rules and error simulation broadcasts to the app. */
+  private val sdkControlController by lazy {
+    SdkControlController(
+      host =
+        object : SdkControlController.Host {
+          override fun sendBroadcast(intent: Intent) = this@CtrlProxy.sendBroadcast(intent)
+
+          override fun sendOrderedBroadcast(intent: Intent, resultReceiver: BroadcastReceiver) =
+            this@CtrlProxy.sendOrderedBroadcast(
+              intent,
+              null,
+              resultReceiver,
+              null,
+              Activity.RESULT_OK,
+              null,
+              null,
+            )
+
+          override fun replyNetworkMockRules(result: SetNetworkMockRulesResult) {
+            if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+              serviceScope.launch { webSocketServer.broadcast(result) }
+            }
+          }
+        },
+      recompositionStore = recompositionStore,
+    )
+  }
   /**
    * Tap, swipe, multi-finger, pinch, drag and streamed gestures plus their result frames, and the
    * dedicated gesture thread their callbacks run on.
@@ -2863,7 +2890,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ) = handleGetPermission(requestId, permission, requestPermission)
 
   override suspend fun setRecompositionTracking(enabled: Boolean) =
-    setRecompositionTrackingEnabled(enabled)
+    sdkControlController.setRecompositionTrackingEnabled(enabled)
 
   override suspend fun setAccessibilityFlags(
     includeNotImportantViews: Boolean,
@@ -2879,7 +2906,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
 
   override suspend fun setNetworkMockRules(requestId: String?, rulesJson: String) =
-    broadcastNetworkMockRules(requestId, rulesJson)
+    sdkControlController.broadcastNetworkMockRules(requestId, rulesJson)
 
   override suspend fun setNetworkErrorSimulation(
     enabled: Boolean,
@@ -2887,7 +2914,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     limit: Int?,
     expiresAtEpochMs: Long?,
     remainingMs: Long?,
-  ) = broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAtEpochMs, remainingMs)
+  ) =
+    sdkControlController.broadcastNetworkErrorSimulation(
+      enabled,
+      errorType,
+      limit,
+      expiresAtEpochMs,
+      remainingMs,
+    )
 
   override suspend fun getCurrentFocus(requestId: String?) =
     focusController.handleGetCurrentFocus(requestId)
@@ -3100,12 +3134,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override suspend fun requestLaunchIntent(requestId: String?, packageName: String) =
     packageController.performLaunchIntent(requestId, packageName)
 
-  private fun setRecompositionTrackingEnabled(enabled: Boolean) {
-    recompositionStore.setEnabled(enabled)
-    broadcastRecompositionControl(enabled)
-    Log.d(TAG, "Recomposition tracking ${if (enabled) "enabled" else "disabled"}")
-  }
-
   private fun applyAccessibilityFlags(
     includeNotImportantViews: Boolean,
     reportViewIds: Boolean,
@@ -3153,84 +3181,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         "retrieveInteractiveWindows=$retrieveInteractiveWindows, " +
         "occlusionEnabled=$occlusionEnabled",
     )
-  }
-
-  private fun broadcastRecompositionControl(enabled: Boolean) {
-    try {
-      val intent =
-        Intent(AutoMobileSDK.ACTION_RECOMPOSITION_CONTROL).apply {
-          putExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_ENABLED, enabled)
-        }
-      sendBroadcast(intent)
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to broadcast recomposition control", e)
-    }
-  }
-
-  private fun broadcastNetworkMockRules(requestId: String?, rulesJson: String) {
-    try {
-      val intent =
-        Intent(NetworkMockRuleStore.ACTION_NETWORK_MOCK_RULES).apply {
-          putExtra(NetworkMockRuleStore.EXTRA_RULES_JSON, rulesJson)
-        }
-      if (requestId == null) {
-        sendBroadcast(intent)
-        Log.d(TAG, "Broadcast network mock rules")
-        return
-      }
-      // The app's rule store answers an ordered broadcast through its result data (which rules the
-      // device's regex engine rejected); forward that to the host as the correlated reply. An SDK
-      // that predates the reply leaves the data null and the host reports "not confirmed".
-      sendOrderedBroadcast(
-        intent,
-        null,
-        NetworkMockRulesReplyReceiver(requestId, ::replyNetworkMockRules),
-        null,
-        Activity.RESULT_OK,
-        null,
-        null,
-      )
-      Log.d(TAG, "Broadcast network mock rules (awaiting report)")
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to broadcast network mock rules", e)
-      if (requestId != null) {
-        replyNetworkMockRules(
-          networkMockRulesFailure(
-            requestId,
-            "Failed to broadcast network mock rules: ${e.message}",
-          ),
-        )
-      }
-    }
-  }
-
-  private fun replyNetworkMockRules(result: SetNetworkMockRulesResult) {
-    if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-      serviceScope.launch { webSocketServer.broadcast(result) }
-    }
-  }
-
-  private fun broadcastNetworkErrorSimulation(
-    enabled: Boolean,
-    errorType: String?,
-    limit: Int?,
-    expiresAtEpochMs: Long?,
-    remainingMs: Long?,
-  ) {
-    try {
-      val intent =
-        Intent(NetworkMockRuleStore.ACTION_NETWORK_ERROR_SIMULATION).apply {
-          remainingMs?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_REMAINING_MS, it) }
-          putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_ENABLED, enabled)
-          errorType?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_TYPE, it) }
-          limit?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_LIMIT, it) }
-          expiresAtEpochMs?.let { putExtra(NetworkMockRuleStore.EXTRA_ERROR_SIM_EXPIRES_AT, it) }
-        }
-      sendBroadcast(intent)
-      Log.d(TAG, "Broadcast network error simulation: enabled=$enabled type=$errorType")
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to broadcast network error simulation", e)
-    }
   }
 
   /** The application in front, from the accessibility windows; null when none qualifies. */

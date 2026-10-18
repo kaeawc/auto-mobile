@@ -1,11 +1,11 @@
 {
   "version": "1.0.0",
   "thresholds": {
-    "unpackedBytes": 23592960,
+    "unpackedBytes": 15728640,
     "warnHeadroomBytes": 1048576
   },
   "metadata": {
-    "generatedAt": "2026-10-15",
-    "description": "22.5 MiB NPM unpacked-size cap (raised from 21 MiB in #12457): the static migration bundle (#12449) adds about 0.2 MB net to index.js and its source map, so the trimmed pack measures 22,369,648 bytes once the raw migrations folder is no longer shipped beside it; the cap keeps just over 1 MiB of headroom and stays below the untrimmed reference of 23,838,787 bytes (#9571) so lost trimming still fails"
+    "generatedAt": "2026-10-18",
+    "description": "15 MiB NPM unpacked-size cap (lowered from 22.5 MiB): the external source maps (about 9 MB, unused at runtime) no longer ship in the tarball (package.json files negation, enforced by packed-runtime-assets), so the pack measures 14,073,766 bytes; the cap keeps about 1.5 MiB of headroom and sits well below the old 23,061,125-byte pack so a regression that re-packs the maps fails"
   }
 }

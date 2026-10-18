@@ -58,6 +58,7 @@ test/contracts/daemonManager.test.ts TS2353 1
 test/contracts/daemonManager.test.ts TS7006 1
 test/contracts/deviceSessionManager.test.ts TS2345 1
 test/contracts/deviceWindowCacheInvalidator.test.ts TS2739 1
+test/contracts/highlightClient.test.ts TS2740 1
 test/contracts/iosCtrlProxy.test.ts TS2345 1
 test/contracts/iosCtrlProxy.test.ts TS2352 1
 test/contracts/observeScreen.test.ts TS2353 1

@@ -220,7 +220,11 @@ request, minus 2000 ms of dispatch headroom). `durationMs` cannot be combined wi
 `speed` or `lookFor`; out-of-range values and a `speed` + `durationMs` pair are rejected
 by the schema and the action before any dispatch. Velocity follows from swipe
 distance divided by duration; the result's `duration` (and `x1`/`y1`/`x2`/`y2`) report
-what was dispatched so the fling can be reproduced. With `boomerang`, `durationMs`
+what was dispatched so the fling can be reproduced, and a single successful swipe also
+reports `velocityPxPerSecond` (native px/s, points/s on iOS), computed with the same helper as
+`swipeAt` from `effectiveDurationMs` when the iOS runner clamped the stroke, else `duration`.
+It is omitted when the route ignored the duration (`durationIgnored`, the TalkBack semantic
+scroll), for `boomerang` (`duration` is both legs) and for `lookFor` searches. With `boomerang`, `durationMs`
 applies to the forward stroke only (the return leg keeps `returnSpeed`), and the
 existing 5000 ms boomerang budget still applies. `swipeAt.durationMs` shares these
 bounds; `lookFor` and `boomerang` do not apply to `swipeAt`. Real limits: the value sent is the

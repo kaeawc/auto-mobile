@@ -16,6 +16,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
 import { BaseVisualChange, type DisplayFenceDependencies } from "./BaseVisualChange";
 import { ExecuteGesture } from "./ExecuteGesture";
+import { withVelocity } from "./swipeon/swipeDurationReport";
 import { validateDurationMs } from "./swipeon/swipeTiming";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 import { resolveTapAtCoordinates } from "./TapAtCoordinate";
@@ -531,18 +532,4 @@ export class SwipeAtCoordinate extends BaseVisualChange {
       perf.end();
     }
   }
-}
-
-/** Adds the straight-line velocity of a successful swipe so the fling can be reproduced. */
-function withVelocity(
-  result: SwipeResult,
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-  duration: number,
-): SwipeResult {
-  if (duration <= 0) {
-    return result;
-  }
-  const distance = Math.hypot(to.x - from.x, to.y - from.y);
-  return { ...result, velocityPxPerSecond: Math.round((distance / duration) * 1000) };
 }

@@ -3,11 +3,10 @@
 
 setup() {
   repo_dir="$(mktemp -d)"
-  mkdir -p "$repo_dir/scripts/lib" "$repo_dir/src"
+  mkdir -p "$repo_dir/scripts/lib" "$repo_dir/src/utils"
+  cp "$BATS_TEST_DIRNAME/../../src/utils/io.ts" "$repo_dir/src/utils/"
   cp "$BATS_TEST_DIRNAME/../../scripts/check-boundary-row.ts" "$repo_dir/scripts/"
-  cp "$BATS_TEST_DIRNAME/../../scripts/lib/boundaryRows.ts" "$BATS_TEST_DIRNAME/../../scripts/lib/boundaryScanner.ts" \
-    "$BATS_TEST_DIRNAME/../../scripts/lib/xcodebuildBoundary.ts" "$BATS_TEST_DIRNAME/../../scripts/lib/executionBoundaryAst.ts" \
-    "$repo_dir/scripts/lib/"
+  cp "$BATS_TEST_DIRNAME"/../../scripts/lib/*.ts "$repo_dir/scripts/lib/"
   ln -s "$BATS_TEST_DIRNAME/../../node_modules" "$repo_dir/node_modules"
   printf '%s\n' 'spawn("xcodebuild", ["test"]);' > "$repo_dir/src/x.ts"
   printf '%s\n' \
@@ -23,7 +22,7 @@ teardown() {
   run bash -c 'cd "$1" && bun scripts/check-boundary-row.ts nope diff.patch' _ "$repo_dir"
 
   [ "$status" -eq 2 ]
-  [[ "$output" == *"usage: check-boundary-row.ts <security|simctl|xcodebuild>"* ]]
+  [[ "$output" == *"usage: check-boundary-row.ts <security|simctl|xcodebuild|plutil|ffmpeg|simulator-tcc-sqlite|android-emulator>"* ]]
 }
 
 @test "reports a violation with the row's failure header and exit 1" {
@@ -39,4 +38,28 @@ teardown() {
 
   [ "$status" -eq 0 ]
   [ -z "$output" ]
+}
+
+@test "tree rows scan src/ without a diff and keep their golden output" {
+  mkdir -p "$repo_dir/src/deep"
+  printf '%s\n' 'import { spawn } from "node:child_process"; spawn("ffmpeg", []);' > "$repo_dir/src/deep/f.ts"
+
+  run bash -c 'cd "$1" && bun scripts/check-boundary-row.ts ffmpeg' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"error: FFmpeg execution must use src/utils/media/FfmpegClient.ts:"* ]]
+  [[ "$output" == *'deep/f.ts:1:'*'spawn("ffmpeg", [])'* ]]
+}
+
+@test "tree rows pass on a clean tree with their success message" {
+  run bash -c 'cd "$1" && bun scripts/check-boundary-row.ts plutil && bun scripts/check-boundary-row.ts android-emulator' _ "$repo_dir"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"android-emulator-boundary: no direct production emulator invocations."* ]]
+}
+
+@test "diff rows still require a diff file" {
+  run bash -c 'cd "$1" && bun scripts/check-boundary-row.ts security' _ "$repo_dir"
+
+  [ "$status" -eq 2 ]
 }

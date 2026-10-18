@@ -10,6 +10,7 @@
     "src/features/observe/android/ctrlProxyWireManifest.ts",
     "src/features/observe/ios/ctrlProxyRequestTypes.ts",
     "src/features/prototype/prototypeChecks.ts",
+    "src/features/prototype/prototypeStorageRestore.ts",
     "src/server/deviceToolsSystemUiAnr.ts"
   ]
 }

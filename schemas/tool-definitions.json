@@ -844,6 +844,30 @@
       "additionalProperties": false,
       "description": "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`"
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "appId", "name"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true
     }
@@ -2913,6 +2937,28 @@
       },
       "required": ["appId", "adapterName", "name"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "adapterName": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "entries": {}
+      },
+      "required": ["success", "appId", "adapterName", "name", "entries"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
@@ -8109,6 +8155,25 @@
       },
       "required": ["appId", "adapterName"],
       "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "adapterName": {
+          "type": "string"
+        },
+        "stores": {}
+      },
+      "required": ["success", "appId", "adapterName", "stores"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true,
@@ -27217,6 +27282,33 @@
       "additionalProperties": false,
       "description": "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`"
     },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": ["success", "appId", "name", "key"],
+      "additionalProperties": {}
+    },
     "_meta": {
       "automobile/embeddedSdkOnly": true
     }
@@ -32801,6 +32893,39 @@
       "required": ["appId", "key", "value", "type"],
       "additionalProperties": false,
       "description": "Provide either `name` (iOS UserDefaults suite / Android SharedPreferences name) or `fileName`"
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "appId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "resolvedStore": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "effectiveValueDiffers": {
+          "type": "boolean"
+        }
+      },
+      "required": ["success", "appId", "name", "key", "type"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/embeddedSdkOnly": true

@@ -309,8 +309,17 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   // Shared utilities for download and checksum
-  private readonly fileDownloader: FileDownloader;
-  private readonly checksumCalculator: ChecksumCalculator;
+  private fileDownloader: FileDownloader;
+  private checksumCalculator: ChecksumCalculator;
+
+  /** Swap the download or checksum collaborator on a live manager (tests that vary them mid-flight). */
+  public setDownloadUtilitiesForTesting(deps: {
+    fileDownloader?: FileDownloader;
+    checksumCalculator?: ChecksumCalculator;
+  }): void {
+    this.fileDownloader = deps.fileDownloader ?? this.fileDownloader;
+    this.checksumCalculator = deps.checksumCalculator ?? this.checksumCalculator;
+  }
   private static readonly defaultFileDownloader: FileDownloader = new DefaultFileDownloader();
   private static readonly defaultChecksumCalculator: ChecksumCalculator =
     new DefaultChecksumCalculator();
@@ -1720,7 +1729,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     );
   }
 
-  private async installDownloadedApkGuarded(
+  /** Public so install-ordering tests can drive the guarded install step directly. */
+  async installDownloadedApkGuarded(
     apkPath: string,
     result: AccessibilityVersionCheckResult,
     isInstalled: boolean,
@@ -1996,7 +2006,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * Uninstall the legacy accessibility service package if still present on the device.
    * This cleans up the old package name left over from before the rename to CtrlProxy.
    */
-  private async uninstallLegacyPackageIfPresent(guardOwnership = false): Promise<void> {
+  async uninstallLegacyPackageIfPresent(guardOwnership = false): Promise<void> {
     let uninstallAttempted = false;
     try {
       const result = await this.adb.executeCommand(
@@ -2800,9 +2810,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     return capabilities;
   }
 
-  private async getInstalledApkSha256WithDetails(
-    signal?: AbortSignal,
-  ): Promise<InstalledApkSha256Result> {
+  /** Installed-APK digest plus where it was read from; public for diagnostics and tests. */
+  async getInstalledApkSha256WithDetails(signal?: AbortSignal): Promise<InstalledApkSha256Result> {
     const throwIfAborted = () => signal?.throwIfAborted();
     throwIfAborted();
     const apkPath = await this.getInstalledApkPath();

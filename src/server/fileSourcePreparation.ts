@@ -6,7 +6,7 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
-export interface FileSourcePreparationArgs {
+export interface FileSourceInput {
   sourcePath?: string;
   contentText?: string;
   contentBase64?: string;
@@ -45,7 +45,7 @@ const defaultFileSystem: FileSourceFileSystem = {
 };
 
 export async function prepareFileSource(
-  args: FileSourcePreparationArgs,
+  args: FileSourceInput,
   fileSystem: FileSourceFileSystem = defaultFileSystem,
 ): Promise<FileSource> {
   if (args.sourcePath !== undefined) {

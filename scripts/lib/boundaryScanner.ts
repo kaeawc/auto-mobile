@@ -1,0 +1,163 @@
+import ts from "typescript";
+
+/**
+ * Table-driven execution-boundary scanner (issue #13219). Each boundary is a
+ * row: the owner that may hold the forbidden call, path exclusions, a detector
+ * over a parsed TypeScript source file, and the failure text. The scanner owns
+ * diff parsing, ratchet scoping and output so a new boundary never needs its
+ * own checker script.
+ */
+
+export interface BoundaryHit {
+  readonly line: number;
+  readonly column: number;
+  readonly text: string;
+}
+
+export interface BoundaryRow {
+  readonly id: string;
+  /** The only repo-relative path allowed to hold the forbidden call. */
+  readonly owner: string;
+  /** Repo-relative path prefixes that are never scanned. */
+  readonly skipPrefixes: readonly string[];
+  /**
+   * `added-lines` only reports hits that overlap a line added in the diff (a
+   * ratchet that tolerates existing debt). `whole-file` reports every hit in a
+   * changed file.
+   */
+  readonly scope: "added-lines" | "whole-file";
+  /** How failures are listed: one line per file, or per hit as file:line:col: text. */
+  readonly report: "files" | "locations";
+  readonly failureHeader: string;
+  readonly successMessage?: string;
+  /** Hits as 1-based [startLine, endLine] spans plus position. */
+  readonly detect: (source: string, file: string) => readonly BoundarySpan[];
+}
+
+export interface BoundarySpan extends BoundaryHit {
+  readonly endLine: number;
+}
+
+export interface BoundaryViolation extends BoundaryHit {
+  readonly file: string;
+}
+
+export interface ChangedFile {
+  readonly path: string;
+  /** 1-based line numbers added on the new side of the diff. */
+  readonly addedLines: ReadonlySet<number>;
+}
+
+/** Parses a unified diff (`git diff` / `jj diff --git`) into changed files and their added lines. */
+export function parseUnifiedDiff(diff: string): ChangedFile[] {
+  const files = new Map<string, Set<number>>();
+  let current: Set<number> | null = null;
+  let newLine = 0;
+  let inHunk = false;
+  for (const raw of diff.split("\n")) {
+    const header = /^diff --git a\/(.+) b\/(.+)$/.exec(raw);
+    if (header) {
+      const path = header[2]!;
+      current = files.get(path) ?? new Set<number>();
+      files.set(path, current);
+      inHunk = false;
+      continue;
+    }
+    if (!inHunk && raw.startsWith("+++ ")) {
+      if (raw === "+++ /dev/null") {
+        // Deleted file: nothing on disk to scan.
+        for (const [path, lines] of files) {
+          if (lines === current) {
+            files.delete(path);
+          }
+        }
+        current = null;
+      }
+      continue;
+    }
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+    if (hunk) {
+      newLine = Number(hunk[1]);
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk || current === null) {
+      continue;
+    }
+    if (raw.startsWith("+")) {
+      current.add(newLine);
+      newLine += 1;
+    } else if (raw.startsWith(" ")) {
+      newLine += 1;
+    } else if (raw.startsWith("-") || raw.startsWith("\\")) {
+      // Removed lines and "No newline" markers do not advance the new side.
+    } else {
+      inHunk = false;
+    }
+  }
+  return [...files].map(([path, addedLines]) => ({ path, addedLines }));
+}
+
+export interface ScanOptions {
+  readonly readSource: (path: string) => string | undefined;
+}
+
+export function scanBoundary(
+  row: BoundaryRow,
+  changed: readonly ChangedFile[],
+  options: ScanOptions,
+): BoundaryViolation[] {
+  return changed.flatMap((file) => {
+    if (
+      file.path === row.owner ||
+      row.skipPrefixes.some((prefix) => file.path.startsWith(prefix))
+    ) {
+      return [];
+    }
+    const source = options.readSource(file.path);
+    if (source === undefined) {
+      return [];
+    }
+    return row
+      .detect(source, file.path)
+      .filter(
+        (hit) =>
+          row.scope === "whole-file" ||
+          [...file.addedLines].some((line) => line >= hit.line && line <= hit.endLine),
+      )
+      .map(({ line, column, text }) => ({ file: file.path, line, column, text }));
+  });
+}
+
+export function renderBoundaryResult(
+  row: BoundaryRow,
+  violations: readonly BoundaryViolation[],
+): { readonly exitCode: number; readonly stdout: string; readonly stderr: string } {
+  if (violations.length === 0) {
+    return {
+      exitCode: 0,
+      stdout: row.successMessage ? `${row.successMessage}\n` : "",
+      stderr: "",
+    };
+  }
+  const lines =
+    row.report === "files"
+      ? [...new Set(violations.map((violation) => violation.file))].map((file) => `  ${file}`)
+      : violations.map(
+          (violation) =>
+            `  ${violation.file}:${violation.line}:${violation.column}: ${violation.text}`,
+        );
+  return { exitCode: 1, stdout: "", stderr: `${[row.failureHeader, ...lines].join("\n")}\n` };
+}
+
+/** Builds a span for an AST node. */
+export function spanOf(sourceFile: ts.SourceFile, node: ts.Node, text?: string): BoundarySpan {
+  const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+  const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
+  return {
+    line: start.line + 1,
+    column: start.character + 1,
+    endLine: end.line + 1,
+    text: text ?? node.getText(sourceFile),
+  };
+}

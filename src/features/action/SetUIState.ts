@@ -1396,9 +1396,9 @@ export class SetUIState extends BaseVisualChange {
   }
 
   /**
-   * Find element in view hierarchy
+   * Resolves the element a selector names without acting on it; public for tests (null if none).
    */
-  private findElement(
+  findElement(
     selector: SetUIStateElementSelector & {
       screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },

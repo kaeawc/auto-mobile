@@ -29,10 +29,12 @@ describe("SwipeOn durationMs (#12538)", () => {
       executeGesture: gesture,
       observeScreen: observe,
       accessibilityDetector: new FakeAccessibilityDetector(),
+      // Construction-time timer: the boomerang apex pause reads it, so a post-hoc assign would sleep for real.
+      timer,
     });
     const window = new FakeWindow();
     window.configureCachedActiveWindow(null);
-    Object.assign(swipeOn, { awaitIdle: new FakeAwaitIdle(), window, timer });
+    Object.assign(swipeOn, { awaitIdle: new FakeAwaitIdle(), window });
     return swipeOn;
   };
 

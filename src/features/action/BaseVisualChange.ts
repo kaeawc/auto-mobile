@@ -74,7 +74,7 @@ import { PredictionAnalyzer, PredictionActionContext } from "../observe/Predicti
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { sequenceBackoff } from "../../utils/Backoff";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
-import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../../daemon/daemonContext";
 import {
   resolveScreenshotMode,
   shouldSkipActionObservationScreenshot,
@@ -141,22 +141,26 @@ export interface DisplayFenceDependencies {
   renderedDisplayGeneration?: RenderedDisplayRevisionReader;
 }
 
-export function sessionRenderedDisplayGeneration(deviceId: string): number | undefined {
-  const daemon = DaemonState.getInstance();
-  if (!daemon.isInitialized()) {
+export function sessionRenderedDisplayGeneration(
+  deviceId: string,
+  daemon: DaemonContext = defaultDaemonContext,
+): number | undefined {
+  const sessions = daemon.renderedDisplaySessions();
+  if (!sessions) {
     return undefined;
   }
-  const sessions = daemon.getSessionManager();
   const sessionId = sessions.getSessionForDevice(deviceId);
   return sessionId ? sessions.getLastRenderedDisplayGeneration(sessionId) : undefined;
 }
 
-function sessionRenderedDisplayRevision(deviceId: string): number | undefined {
-  const daemon = DaemonState.getInstance();
-  if (!daemon.isInitialized()) {
+function sessionRenderedDisplayRevision(
+  deviceId: string,
+  daemon: DaemonContext = defaultDaemonContext,
+): number | undefined {
+  const sessions = daemon.renderedDisplaySessions();
+  if (!sessions) {
     return undefined;
   }
-  const sessions = daemon.getSessionManager();
   const sessionId = sessions.getSessionForDevice(deviceId);
   return sessionId ? sessions.getLastRenderedDisplayRevision(sessionId) : undefined;
 }

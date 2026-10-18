@@ -555,7 +555,9 @@ export function sessionDisplayPinnedHandler(input: {
       acceptsDisplay,
       device,
       args,
-      sessionUuid: getToolSelectionContext()?.routingSessionUuid ?? args.sessionUuid,
+      sessionUuid:
+        getToolSelectionContext()?.routingSessionUuid ??
+        (typeof args.sessionUuid === "string" ? args.sessionUuid : undefined),
       invoke: (effectiveArgs) => input.handler(device, effectiveArgs, progress, signal),
     });
 }

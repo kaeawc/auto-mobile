@@ -1,4 +1,4 @@
-import { DaemonState } from "../../../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../../../daemon/daemonContext";
 import { isAlwaysOnTool } from "../../../features/toolSelection/toolSelectionControl";
 import { resolveToolSelectionBaseSessionUuid } from "../../../features/toolSelection/selectionSessionResolver";
 import {
@@ -17,6 +17,8 @@ export interface ListSessionToolsDeps {
   readonly bindingKey: string | undefined;
   readonly sessionToolBinding: SessionToolBinding;
   readonly toolSelectionProfileRegistry: ToolSelectionProfileRegistry;
+  /** Daemon state reads; defaults to the DaemonState bridge. */
+  readonly daemon?: DaemonContext;
 }
 
 /**
@@ -25,13 +27,10 @@ export interface ListSessionToolsDeps {
  */
 export function createListSessionTools(deps: ListSessionToolsDeps) {
   const { options, bindingKey, sessionToolBinding, toolSelectionProfileRegistry } = deps;
+  const daemon = deps.daemon ?? defaultDaemonContext;
   return async (routingSessionUuid = sessionToolBinding.effectiveSessionUuid(bindingKey)) => {
     const connectionProfileUuid = sessionToolBinding.connectionToolSelectionProfileUuid(bindingKey);
-    const selectionSessionManager =
-      options.toolSelectionSessionManager ??
-      (DaemonState.getInstance().isInitialized()
-        ? DaemonState.getInstance().getSessionManager()
-        : undefined);
+    const selectionSessionManager = options.toolSelectionSessionManager ?? daemon.sessionManager();
     const routingBaseSessionUuid = resolveToolSelectionBaseSessionUuid(
       routingSessionUuid,
       selectionSessionManager,

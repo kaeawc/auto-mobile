@@ -1,7 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import {
-  resetSwipeOnFactory,
-  setSwipeOnFactory,
+  type InteractionToolDependencies,
   swipeOnHandler,
   swipeOnSchema,
 } from "../../src/server/interactionTools";
@@ -12,9 +11,10 @@ import {
   validateSwipeTimingOptions,
 } from "../../src/features/action/swipeon/swipeTiming";
 
+const interactionDeps: InteractionToolDependencies = {};
 const device: BootedDevice = { deviceId: "fake", platform: "android", name: "fake" };
 
-afterEach(() => resetSwipeOnFactory());
+afterEach(() => delete interactionDeps.swipeOnFactory);
 
 const failedPaths = (input: unknown): string[] => {
   const result = swipeOnSchema.safeParse(input);
@@ -46,17 +46,21 @@ test("durationMs excludes speed and lookFor, and must fit the boomerang budget",
 
 test("handler forwards durationMs", async () => {
   let seen: SwipeOnOptions | undefined;
-  setSwipeOnFactory(
-    () =>
-      ({
-        execute: async (options: SwipeOnOptions) => {
-          seen = options;
-          return { success: true, x1: 0, y1: 0, x2: 0, y2: 0, duration: 120 };
-        },
-      }) as never,
+  interactionDeps.swipeOnFactory = () =>
+    ({
+      execute: async (options: SwipeOnOptions) => {
+        seen = options;
+        return { success: true, x1: 0, y1: 0, x2: 0, y2: 0, duration: 120 };
+      },
+    }) as never;
+  await swipeOnHandler(
+    device,
+    { direction: "up", durationMs: 120 },
+    undefined,
+    undefined,
+    interactionDeps,
   );
-  await swipeOnHandler(device, { direction: "up", durationMs: 120 });
   expect(seen?.durationMs).toBe(120);
-  await swipeOnHandler(device, { direction: "up" });
+  await swipeOnHandler(device, { direction: "up" }, undefined, undefined, interactionDeps);
   expect(seen?.durationMs).toBeUndefined();
 });

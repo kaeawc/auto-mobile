@@ -11,7 +11,7 @@ import {
 } from "./toolSchemaHelpers";
 import { computeIosSimulatorCapabilities } from "../features/utility/iosSimulatorCapabilities";
 import { DeviceState, type BiometricEnrollment } from "../features/utility/DeviceState";
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../daemon/daemonContext";
 import type { SessionManager } from "../daemon/sessionManager";
 import { runSessionBiometricMutation } from "./sessionBiometricEnrollment";
 
@@ -77,12 +77,14 @@ interface BiometricEnrollmentCapture {
 async function captureBiometricEnrollment(
   device: BootedDevice,
   args: BiometricAuthArgs,
+  daemon: DaemonContext = defaultDaemonContext,
 ): Promise<BiometricEnrollmentCapture> {
   const changesEnrollment = args.action === "enroll" || args.action === "unenroll";
-  if (!changesEnrollment || !args.sessionUuid || !DaemonState.getInstance().isInitialized()) {
+  const sessionManager =
+    changesEnrollment && args.sessionUuid ? daemon.sessionManager() : undefined;
+  if (!sessionManager || !args.sessionUuid) {
     return {};
   }
-  const sessionManager = DaemonState.getInstance().getSessionManager();
   if (sessionManager.getBiometricEnrollment(args.sessionUuid)) {
     return { sessionManager };
   }

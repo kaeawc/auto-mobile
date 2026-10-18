@@ -58,14 +58,21 @@ final class WireModelEncodingPinTests: XCTestCase {
         }
     }
 
+    /// Compares one canonical (sorted-key) serialization per capture instead of deeply comparing the
+    /// bridged object graphs: same intent (every scalar value survives the round trip), linear time.
     func testReencodingEveryCapturedPayloadPreservesEveryScalarValue() throws {
         for capture in try capturedSdkPayloads() {
-            let encoded = try reencoded(capture.data)
+            let canonicalCaptured = try canonical(capture.object)
+            let canonicalEncoded = try canonical(reencoded(capture.data))
             XCTAssertTrue(
-                NSDictionary(dictionary: capture.object).isEqual(to: encoded),
+                canonicalCaptured == canonicalEncoded,
                 "\(capture.name): re-encoding changed a value on the wire"
             )
         }
+    }
+
+    private func canonical(_ object: [String: Any]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 
     func testOptionalFieldsAreOmittedNotEncodedAsNull() throws {

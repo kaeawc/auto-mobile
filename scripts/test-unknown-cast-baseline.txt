@@ -257,7 +257,7 @@
 2	test/features/observe/AndroidCtrlProxyClientSettingsSendCommand.test.ts
 2	test/features/observe/AndroidCtrlProxyRequestSettlement.test.ts
 3	test/features/observe/CommandSupport.test.ts
-8	test/features/observe/CtrlProxyClient.test.ts
+2	test/features/observe/CtrlProxyClient.test.ts
 2	test/features/observe/CtrlProxyDelegatesSendCommand.test.ts
 2	test/features/observe/CtrlProxyRequestIdEcho.test.ts
 2	test/features/observe/CtrlProxyStorageSendCommand.test.ts
@@ -281,15 +281,12 @@
 4	test/features/observe/WaitForCondition.test.ts
 4	test/features/observe/Window.deadlineAbort.test.ts
 5	test/features/observe/android/AndroidCtrlProxyClientCapabilities.test.ts
-5	test/features/observe/android/AndroidCtrlProxyClientCloseSuppressesAdbFallback.test.ts
-1	test/features/observe/android/AndroidCtrlProxyClientConnectionFailureRecovery.test.ts
+1	test/features/observe/android/AndroidCtrlProxyClientCloseSuppressesAdbFallback.test.ts
 3	test/features/observe/android/AndroidCtrlProxyClientInputDelivery.test.ts
-1	test/features/observe/android/AndroidCtrlProxyClientShutdownRelease.test.ts
-1	test/features/observe/android/AndroidCtrlProxyMessageDispatch.test.ts
 1	test/features/observe/android/AndroidScreenIdentity.test.ts
 1	test/features/observe/android/CtrlProxyPrototypeAssets.test.ts
 1	test/features/observe/android/CtrlProxyPrototypes.test.ts
-6	test/features/observe/android/CtrlProxyText.test.ts
+4	test/features/observe/android/CtrlProxyText.test.ts
 1	test/features/observe/android/networkMockRulesPush.test.ts
 2	test/features/observe/android/screenshotHidePrototype.test.ts
 1	test/features/observe/collectors/DeviceStateCollector.test.ts

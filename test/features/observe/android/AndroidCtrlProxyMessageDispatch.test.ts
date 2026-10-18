@@ -15,17 +15,8 @@ import type { BootedDevice } from "../../../../src/models";
 import { logger } from "../../../../src/utils/logger";
 import { PortManager } from "../../../../src/utils/PortManager";
 import { displayTransitions } from "../../../../src/features/observe/DisplayTransition";
-import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
-
-interface DispatchTestClient {
-  onDisplayTransition?: (event: AndroidDisplayTransition) => void;
-  cachedHierarchy?: { hierarchy: { displayId?: number; panelUniqueId?: string } };
-  handleWebSocketMessage(data: string): Promise<void>;
-  webSocketMessageHandlers: Record<string, unknown>;
-  requestManager: RequestManager;
-}
 
 describe("Android CtrlProxy WebSocket dispatch", () => {
   const device: BootedDevice = {
@@ -35,7 +26,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
     name: "Dispatch Test Device",
   };
   let timer: FakeTimer;
-  let client: DispatchTestClient;
+  let client: AndroidCtrlProxyClient;
   let recorded: Array<{ event: SdkEvent<AndroidSdkEventPayload>; applicationId: string | null }>;
 
   beforeEach(() => {
@@ -54,7 +45,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
       },
       timer,
       sdkEventIngestor: ingestor as AndroidSdkEventIngestor,
-    }) as unknown as DispatchTestClient;
+    });
   });
 
   afterEach(() => {
@@ -66,8 +57,8 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   test("has an own handler for every typed wire variant", () => {
     // The `satisfies WebSocketMessageHandlers` clause is the union-wide compile-time check.
     // There is no separate runtime list of the union's string literals.
-    expect(Object.keys(client.webSocketMessageHandlers)).toHaveLength(62);
-    expect(Object.hasOwn(client.webSocketMessageHandlers, "custom_event")).toBe(false);
+    expect(Object.keys(client.testHooks.webSocketMessageHandlers())).toHaveLength(62);
+    expect(Object.hasOwn(client.testHooks.webSocketMessageHandlers(), "custom_event")).toBe(false);
     for (const type of [
       "keystore_discovery",
       "sdk_capabilities",
@@ -78,7 +69,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
       "lifecycle_event",
       "insert_text_state_result",
     ]) {
-      expect(Object.hasOwn(client.webSocketMessageHandlers, type)).toBe(true);
+      expect(Object.hasOwn(client.testHooks.webSocketMessageHandlers(), type)).toBe(true);
     }
   });
 
@@ -89,7 +80,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
       display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
       screenSize: { width: 2076, height: 2152 },
     });
-    await client.handleWebSocketMessage(
+    await client.testHooks.handleWebSocketMessage(
       JSON.stringify({
         type: "display_transition",
         change: "changed",
@@ -101,7 +92,9 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
         rotation: 1,
       }),
     );
-    await client.handleWebSocketMessage('{"type":"display_transition","change":"changed"}');
+    await client.testHooks.handleWebSocketMessage(
+      '{"type":"display_transition","change":"changed"}',
+    );
     expect(received).toEqual([
       {
         change: "changed",
@@ -117,7 +110,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   });
 
   test("retains optional display identity on hierarchy and screenshot responses", async () => {
-    await client.handleWebSocketMessage(
+    await client.testHooks.handleWebSocketMessage(
       JSON.stringify({
         type: "hierarchy_update",
         data: {
@@ -128,13 +121,18 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
         },
       }),
     );
-    expect(client.cachedHierarchy?.hierarchy.displayId).toBe(5);
-    expect(client.cachedHierarchy?.hierarchy.panelUniqueId).toBe("panel-rear");
+    expect(client.testHooks.cachedHierarchy()?.hierarchy.displayId).toBe(5);
+    expect(client.testHooks.cachedHierarchy()?.hierarchy.panelUniqueId).toBe("panel-rear");
 
-    const pending = client.requestManager.register("shot-display", "screenshot", 1000, () => ({
-      success: false,
-    }));
-    await client.handleWebSocketMessage(
+    const pending = client.testHooks.requestManager.register(
+      "shot-display",
+      "screenshot",
+      1000,
+      () => ({
+        success: false,
+      }),
+    );
+    await client.testHooks.handleWebSocketMessage(
       JSON.stringify({
         type: "screenshot",
         requestId: "shot-display",
@@ -153,13 +151,13 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   test.each([{ truncationReasons: undefined }, { truncationReasons: ["max_children"] }])(
     "carries optional traversal truncation reasons %j through dispatch",
     async ({ truncationReasons }) => {
-      const pending = client.requestManager.register<TraversalOrderResult>(
+      const pending = client.testHooks.requestManager.register<TraversalOrderResult>(
         "traversal-1",
         "get_traversal_order",
         1000,
         () => ({ elements: [], focusedIndex: null, totalCount: 0, totalTimeMs: 0 }),
       );
-      await client.handleWebSocketMessage(
+      await client.testHooks.handleWebSocketMessage(
         JSON.stringify({
           type: "traversal_order_result",
           requestId: "traversal-1",
@@ -171,16 +169,21 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
       const result = await pending;
       expect(result.truncationReasons).toEqual(truncationReasons);
       expect(result.elements).toEqual([]);
-      expect(client.requestManager.getPendingCount()).toBe(0);
+      expect(client.testHooks.requestManager.getPendingCount()).toBe(0);
       expect(timer.getCurrentTime()).toBe(0);
     },
   );
 
   test("a tap_coordinates_result reply, including a refusal, is marked acknowledged", async () => {
-    const pending = client.requestManager.register("tap-ack", "tap_coordinates", 1000, () => ({
-      success: false,
-    }));
-    await client.handleWebSocketMessage(
+    const pending = client.testHooks.requestManager.register(
+      "tap-ack",
+      "tap_coordinates",
+      1000,
+      () => ({
+        success: false,
+      }),
+    );
+    await client.testHooks.handleWebSocketMessage(
       JSON.stringify({
         type: "tap_coordinates_result",
         requestId: "tap-ack",
@@ -197,11 +200,16 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   });
 
   test("resolves a pending settings response through the shared helper", async () => {
-    const pending = client.requestManager.register("settings-1", "settings_get", 1000, () => ({
-      success: false,
-      value: "timeout",
-    }));
-    await client.handleWebSocketMessage(
+    const pending = client.testHooks.requestManager.register(
+      "settings-1",
+      "settings_get",
+      1000,
+      () => ({
+        success: false,
+        value: "timeout",
+      }),
+    );
+    await client.testHooks.handleWebSocketMessage(
       JSON.stringify({
         type: "settings_get_result",
         requestId: "settings-1",
@@ -212,7 +220,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
       }),
     );
     expect(await pending).toMatchObject({ success: true, value: "enabled", found: true });
-    expect(client.requestManager.getPendingCount()).toBe(0);
+    expect(client.testHooks.requestManager.getPendingCount()).toBe(0);
     expect(timer.getCurrentTime()).toBe(0);
   });
 
@@ -230,13 +238,13 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
       const nodes = [first, ...(malformed ? [{ text: "Invalid" }] : []), target];
       const debug = spyOn(logger, "debug").mockImplementation(() => {});
       try {
-        const pending = client.requestManager.register<TraversalOrderResult>(
+        const pending = client.testHooks.requestManager.register<TraversalOrderResult>(
           "traversal-1",
           "get_traversal_order",
           1000,
           () => ({ elements: [], focusedIndex: null, totalCount: 0, totalTimeMs: 0 }),
         );
-        await client.handleWebSocketMessage(
+        await client.testHooks.handleWebSocketMessage(
           JSON.stringify({
             type: "traversal_order_result",
             requestId: "traversal-1",
@@ -265,7 +273,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
         expect(drops).toEqual(
           malformed ? [["[CTRL_PROXY] Dropped 1 traversal nodes that failed conversion"]] : [],
         );
-        expect(client.requestManager.getPendingCount()).toBe(0);
+        expect(client.testHooks.requestManager.getPendingCount()).toBe(0);
       } finally {
         debug.mockRestore();
       }
@@ -276,7 +284,9 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      await expect(client.handleWebSocketMessage('{"type":"bogus_type"}')).resolves.toBeUndefined();
+      await expect(
+        client.testHooks.handleWebSocketMessage('{"type":"bogus_type"}'),
+      ).resolves.toBeUndefined();
       expect(debug.mock.calls).toEqual([
         ["[CTRL_PROXY] Ignoring unknown WebSocket message type: bogus_type"],
       ]);
@@ -293,8 +303,10 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
     const info = spyOn(logger, "info").mockImplementation(() => {});
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
-      await client.handleWebSocketMessage('{"type":"swipe_result","success":true}');
-      await client.handleWebSocketMessage('{"type":"tap_coordinates_result","success":true}');
+      await client.testHooks.handleWebSocketMessage('{"type":"swipe_result","success":true}');
+      await client.testHooks.handleWebSocketMessage(
+        '{"type":"tap_coordinates_result","success":true}',
+      );
       expect(debug.mock.calls).toEqual([
         ["[CTRL_PROXY] Swipe result (requestId: undefined, success: true)"],
       ]);
@@ -303,9 +315,11 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
       ]);
       debug.mockClear();
       info.mockClear();
-      await client.handleWebSocketMessage('{"type":"screenshot_error","error":"missing ID"}');
-      await client.handleWebSocketMessage('{"type":"hierarchy_update"}');
-      await client.handleWebSocketMessage('{"type":"frame_metrics_event"}');
+      await client.testHooks.handleWebSocketMessage(
+        '{"type":"screenshot_error","error":"missing ID"}',
+      );
+      await client.testHooks.handleWebSocketMessage('{"type":"hierarchy_update"}');
+      await client.testHooks.handleWebSocketMessage('{"type":"frame_metrics_event"}');
       expect(debug).not.toHaveBeenCalled();
       expect(info).not.toHaveBeenCalled();
       expect(warn).not.toHaveBeenCalled();
@@ -317,14 +331,14 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   });
 
   test("routes custom_event and typed SDK telemetry through the same recorder", async () => {
-    await client.handleWebSocketMessage(
+    await client.testHooks.handleWebSocketMessage(
       JSON.stringify({
         type: "custom_event",
         timestamp: 12,
         event: { applicationId: "com.example", name: "checkout" },
       }),
     );
-    await client.handleWebSocketMessage(
+    await client.testHooks.handleWebSocketMessage(
       JSON.stringify({
         type: "network_event",
         timestamp: 13,

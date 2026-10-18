@@ -100,7 +100,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
   }
 
   const budgetOf = (c: AndroidCtrlProxyClient): ForcedRestartBudget =>
-    (c as unknown as { forcedRestartBudget: ForcedRestartBudget }).forcedRestartBudget;
+    c.testHooks.forcedRestartBudget;
 
   /** Drive `count` connection failures, each a separate ensureConnected() dial. */
   const driveFailures = async (c: AndroidCtrlProxyClient, count: number): Promise<void> => {
@@ -257,7 +257,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     });
     client.ensureRecoveryStarted();
     expect(await client.awaitRecovery(10_000)).toBe("failed");
-    const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+    const budget = client.testHooks.forcedRestartBudget;
     expect(budget.snapshot()).toMatchObject({ state: "backoff", attempts: 1 });
     expect(manager.rebindIfUnhealthyCallCount).toBe(0);
   });
@@ -282,7 +282,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       await client.awaitRecovery(10_000);
       await timer.advanceTimeAsync(2000);
     }
-    const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+    const budget = client.testHooks.forcedRestartBudget;
     expect(budget.snapshot()).toMatchObject({ state: "exhausted", attempts: 3 });
   });
 
@@ -292,7 +292,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       webSocketFactory: createSuccessWebSocketFactory(timer),
       timer,
     });
-    const budget = (client as any).forcedRestartBudget as ForcedRestartBudget;
+    const budget = client.testHooks.forcedRestartBudget;
     for (const delay of [0, 30_000, 60_000]) {
       timer.advanceTime(delay);
       const token = budget.tryBeginAttempt();
@@ -367,7 +367,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
     await timer.advanceTimeAsync(2000);
     expect(await waiting).toBe("recovered");
     expect(await client.ensureConnected()).toBe(true);
-    expect((client as any).forcedRestartBudget.snapshot()).toMatchObject({
+    expect(client.testHooks.forcedRestartBudget.snapshot()).toMatchObject({
       state: "idle",
       attempts: 0,
     });
@@ -409,7 +409,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       timer,
       serviceManagerFactory: () => manager,
     });
-    const internals = client as any;
+    const internals = client.testHooks;
     client.ensureRecoveryStarted();
     const first = internals.recoveryPromise;
     for (let i = 0; i < 8; i++) {
@@ -646,10 +646,10 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       timer,
       serviceManagerFactory: () => manager,
     });
-    const internals = client as any;
+    const internals = client.testHooks;
     internals.connectionAttempts = 3;
     internals.lastConnectionAttempt = timer.now();
-    internals.config.connectionResetMs = 30_000;
+    internals.connectionResetMs = 30_000;
     expect(client.getReconnectStatus()?.connectionAttempts).toBe(3);
 
     client.ensureRecoveryStarted();
@@ -681,10 +681,10 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       timer,
       idGenerator: () => manager,
     });
-    const internals = client as any;
+    const internals = client.testHooks;
     internals.connectionAttempts = 3;
     internals.lastConnectionAttempt = timer.now();
-    internals.config.connectionResetMs = 30_000;
+    internals.connectionResetMs = 30_000;
     expect(client.getReconnectStatus()?.connectionAttempts).toBe(3);
 
     client.ensureRecoveryStarted();

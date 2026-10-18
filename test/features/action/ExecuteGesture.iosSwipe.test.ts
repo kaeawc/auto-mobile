@@ -193,8 +193,7 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
       3,
       4,
       { duration: 100 },
-      undefined,
-      controller.signal,
+      { signal: controller.signal },
     );
 
     expect(result.success).toBe(true);
@@ -209,7 +208,7 @@ describe("ExecuteGesture iOS single-finger swipe (#9972)", () => {
     controller.abort(new ActionableError("caller cancelled"));
 
     await expect(
-      new ExecuteGesture(device).swipe(1, 2, 3, 4, {}, undefined, controller.signal),
+      new ExecuteGesture(device).swipe(1, 2, 3, 4, {}, { signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
     expect(client.calls).toBe(0);
   });
@@ -278,8 +277,7 @@ describe("ExecuteGesture iOS swipe over the real transport", () => {
         3,
         4,
         {},
-        undefined,
-        controller.signal,
+        { signal: controller.signal },
       );
       await flush();
       expect(h.sentMessages).toHaveLength(1);

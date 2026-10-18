@@ -17,7 +17,7 @@ import {
   type DisplayFenceOption,
 } from "./BaseVisualChange";
 import { SwipeResult } from "../../models";
-import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
+import { type PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { isRunnerGestureOutcomeUnknown } from "../observe/ios/runnerErrorCodes";
@@ -38,6 +38,11 @@ export interface FencedGestureOptions extends GestureOptions {
   onSearchFallback?: () => void;
   searchDragState?: AndroidSearchDragState;
   displayFence?: DisplayFence;
+}
+
+/** The call's performance tracker, or a no-op one when the caller did not thread one. */
+function callPerf(call: ActionCall): PerformanceTracker {
+  return call.perf ?? new NoOpPerformanceTracker();
 }
 
 /**
@@ -82,27 +87,24 @@ export class ExecuteGesture extends BaseVisualChange {
    * @param x2 - Ending X coordinate
    * @param y2 - Ending Y coordinate
    * @param options - Additional gesture options
-   * @param perf - Optional performance tracker
+   * @param call - Request-scoped context (cancellation signal, optional performance tracker)
    * @returns Result of the swipe operation
    */
-  // Cancellation is appended to the existing positional API for compatibility.
-  // oxlint-disable-next-line max-params -- Existing positional API keeps optional cancellation last.
   async swipe(
     x1: number,
     y1: number,
     x2: number,
     y2: number,
     options: FencedGestureOptions = {},
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
+    call: ActionCall = {},
   ): Promise<SwipeResult> {
-    throwIfAborted(signal);
+    throwIfAborted(call.signal);
     // Platform-specific swipe execution (no observedInteraction - caller handles observation)
     switch (this.device.platform) {
       case "android":
-        return await this.executeAndroidSwipe(x1, y1, x2, y2, options, perf, signal);
+        return await this.executeAndroidSwipe(x1, y1, x2, y2, options, call);
       case "ios":
-        return await this.executeiOSSwipe(x1, y1, x2, y2, options, perf, signal);
+        return await this.executeiOSSwipe(x1, y1, x2, y2, options, call);
       default:
         throw unsupportedPlatformError(this.device.platform, "execute gesture");
     }
@@ -115,19 +117,19 @@ export class ExecuteGesture extends BaseVisualChange {
    * @param x2 - Ending X coordinate
    * @param y2 - Ending Y coordinate
    * @param options - Additional gesture options
-   * @param perf - Performance tracker for timing
+   * @param call - Request-scoped context (cancellation signal, optional performance tracker)
    * @returns Result of the swipe operation
    */
-  // oxlint-disable-next-line max-params -- Keep the signal adjacent to the dispatch arguments.
   private async executeAndroidSwipe(
     x1: number,
     y1: number,
     x2: number,
     y2: number,
     options: FencedGestureOptions = {},
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
+    call: ActionCall = {},
   ): Promise<SwipeResult> {
+    const { signal } = call;
+    const perf = callPerf(call);
     const duration = options.duration ?? 300; // Default duration
     const scrollMode = options.scrollMode || "adb"; // Default to ADB mode
 
@@ -146,8 +148,7 @@ export class ExecuteGesture extends BaseVisualChange {
           coordinates.endX,
           coordinates.endY,
           { duration: searchDuration, scrollMode: "adb", displayFence: options.displayFence },
-          perf,
-          signal,
+          call,
         );
       if (options.scrollMode === "adb") {
         return fallback();
@@ -169,7 +170,9 @@ export class ExecuteGesture extends BaseVisualChange {
 
     // Use accessibility service swipe if requested
     if (scrollMode === "a11y") {
-      return await this.executeA11ySwipe(x1, y1, x2, y2, duration, perf, signal, {
+      return await this.executeA11ySwipe(x1, y1, x2, y2, duration, {
+        perf,
+        signal,
         displayFence: options.displayFence,
       });
     }
@@ -213,21 +216,20 @@ export class ExecuteGesture extends BaseVisualChange {
    * @param x2 - Ending X coordinate
    * @param y2 - Ending Y coordinate
    * @param duration - Swipe duration in milliseconds
-   * @param perf - Performance tracker for timing
+   * @param call - Request-scoped context (signal, performance tracker) plus the display fence
    * @returns Result of the swipe operation
    */
-  // oxlint-disable-next-line max-params -- Keep the signal adjacent to the dispatch arguments.
   private async executeA11ySwipe(
     x1: number,
     y1: number,
     x2: number,
     y2: number,
     duration: number,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
-    fenceOptions: DisplayFenceOption = {},
+    call: ActionCall & DisplayFenceOption = {},
   ): Promise<SwipeResult> {
-    const fence = resolveDisplayFence(fenceOptions);
+    const { signal } = call;
+    const perf = callPerf(call);
+    const fence = resolveDisplayFence(call);
     let dispatched = false;
     const indeterminateResult = (reason: string): SwipeResult => ({
       success: false,
@@ -329,21 +331,18 @@ export class ExecuteGesture extends BaseVisualChange {
    * @param x2 - Ending X coordinate
    * @param y2 - Ending Y coordinate
    * @param options - Additional gesture options
-   * @param perf - Performance tracker for timing
+   * @param call - Request-scoped context (cancellation signal, optional performance tracker)
    * @returns Result of the swipe operation
    */
-  // oxlint-disable-next-line max-params -- Keep the signal adjacent to the dispatch arguments.
   private async executeiOSSwipe(
     x1: number,
     y1: number,
     x2: number,
     y2: number,
     options: FencedGestureOptions = {},
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
+    call: ActionCall = {},
   ): Promise<SwipeResult> {
-    const duration = options.duration || 300;
-    return await this.executeXCTestSwipe(x1, y1, x2, y2, duration, perf, signal, options);
+    return await this.executeXCTestSwipe(x1, y1, x2, y2, options, call);
   }
 
   /**
@@ -353,21 +352,21 @@ export class ExecuteGesture extends BaseVisualChange {
    * @param y1 - Starting Y coordinate
    * @param x2 - Ending X coordinate
    * @param y2 - Ending Y coordinate
-   * @param duration - Swipe duration in milliseconds
-   * @param perf - Performance tracker for timing
+   * @param options - Additional gesture options (duration defaults to 300 ms)
+   * @param call - Request-scoped context (cancellation signal, optional performance tracker)
    * @returns Result of the swipe operation
    */
-  // oxlint-disable-next-line max-params -- Keep the signal adjacent to the dispatch arguments.
   private async executeXCTestSwipe(
     x1: number,
     y1: number,
     x2: number,
     y2: number,
-    duration: number,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal,
     options: FencedGestureOptions = {},
+    call: ActionCall = {},
   ): Promise<SwipeResult> {
+    const duration = options.duration || 300;
+    const { signal } = call;
+    const perf = callPerf(call);
     const fence = options.displayFence;
     throwIfAborted(signal);
     const client = IOSCtrlProxyClient.getInstance(this.device);

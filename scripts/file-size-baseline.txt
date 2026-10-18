@@ -1,5 +1,5 @@
 # AutoMobile file-size ratchet baseline (non-blank lines, cap 1000) -- see scripts/file-size-baseline.sh
-2876	src/ctrlProxy/CtrlProxyManager.ts
+2873	src/ctrlProxy/CtrlProxyManager.ts
 4089	src/ctrlProxy/IOSCtrlProxyManager.ts
 1790	src/ctrlProxy/IosCtrlProxyBuilder.ts
 1752	src/ctrlProxy/RunnerReadinessService.ts
@@ -36,11 +36,11 @@
 2267	src/features/action/LaunchApp.ts
 2033	src/features/action/Rotate.ts
 1915	src/features/action/SetUIState.ts
-1891	src/features/action/TapAnyElement.ts
-1424	src/features/action/TapAtCoordinate.ts
-3788	src/features/action/TapOnElement.ts
+1893	src/features/action/TapAnyElement.ts
+1426	src/features/action/TapAtCoordinate.ts
+3790	src/features/action/TapOnElement.ts
 1423	src/features/action/swipeon/ScrollUntilVisible.ts
-1835	src/features/action/swipeon/SwipeOn.ts
+1837	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
 5888	src/features/deviceLifecycle/deviceLifecycleCore.ts
 1385	src/features/navigation/Explore.ts
@@ -88,7 +88,7 @@
 2185	src/server/videoRecordingManager.ts
 1459	src/server/videoRecordingTools.ts
 1334	src/server/webrtcStreamManager.ts
-1868	src/utils/android-cmdline-tools/AdbClient.ts
+1839	src/utils/android-cmdline-tools/AdbClient.ts
 2307	src/utils/android-cmdline-tools/AndroidEmulatorClient.ts
 2057	src/utils/fileLock.ts
 1199	src/utils/ios-cmdline-tools/DeviceAppManager.ts

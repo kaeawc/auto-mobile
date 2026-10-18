@@ -1,6 +1,6 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ListToolsResult, McpServer } from "@modelcontextprotocol/server";
+import { createSdkMcpServer } from "./sdkMcpServer";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
-import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import { installToolCallDispatcher, type ToolCallRequest } from "./toolCallDispatch";
 
@@ -196,17 +196,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
 
   // Create a new MCP server
   startupBenchmark.startPhase("sdkInitialization");
-  const server = new McpServer(
+  const server = createSdkMcpServer(
     {
       name: "AutoMobile",
       version: getMcpServerVersion(),
     },
     {
-      capabilities: {
-        resources: { subscribe: true, listChanged: true },
-        tools: {},
-        prompts: {},
-      },
+      resources: { subscribe: true, listChanged: true },
+      tools: {},
+      prompts: {},
     },
   );
   startupBenchmark.endPhase("sdkInitialization");
@@ -283,20 +281,20 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     sessionToolBinding,
     toolSelectionProfileRegistry,
   });
-  server.server.setRequestHandler(ListToolsRequestSchema, () => listSessionTools());
+  // The advertised definitions are built from our own JSON Schemas, which the SDK
+  // types only as `Record<string, unknown>`; the wire value is unchanged.
+  server.server.setRequestHandler(
+    "tools/list",
+    async () => (await listSessionTools()) as ListToolsResult,
+  );
 
   // Add ping handler as per MCP specification
-  // Note: Using runtime access since TypeScript import has issues
-  const PingRequestSchema = require("@modelcontextprotocol/sdk/types.js").PingRequestSchema;
-  server.server.setRequestHandler(PingRequestSchema, async () => {
+  server.server.setRequestHandler("ping", async () => {
     return {};
   });
 
   // Register prompts list handler (currently returns empty list since no prompts are implemented)
-  // Note: Using runtime access since TypeScript import has issues
-  const ListPromptsRequestSchema =
-    require("@modelcontextprotocol/sdk/types.js").ListPromptsRequestSchema;
-  server.server.setRequestHandler(ListPromptsRequestSchema, async () => {
+  server.server.setRequestHandler("prompts/list", async () => {
     return {
       prompts: [],
     };

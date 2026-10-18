@@ -1,7 +1,6 @@
+import { Client } from "../helpers/v1ViewMcpClient";
+import { InMemoryTransport, McpServer } from "@modelcontextprotocol/server";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 

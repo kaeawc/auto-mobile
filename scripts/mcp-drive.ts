@@ -10,7 +10,7 @@
  * stderr pipe keeps the parent alive forever; a non-unref'd timer adds a tail;
  * truncated output; no build-mismatch handling). This script keeps a single MCP
  * session open for the whole plan and reuses the official
- * `@modelcontextprotocol/sdk` transport, exactly as `scripts/live-device-acceptance.ts`
+ * `@modelcontextprotocol/client` transport, exactly as `scripts/live-device-acceptance.ts`
  * does, so the framing/stderr/timeout details are handled by the SDK rather than
  * by hand.
  *
@@ -39,8 +39,8 @@
  */
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS } from "../src/utils/deviceTimeouts";
 import { isCliToolFailure } from "../src/cli/index";
 import { coerceCliValue, getDeclaredParamTypes } from "../src/cli/cliValueCoercion";
@@ -400,10 +400,13 @@ async function createSdkClient(serverPath: string, timeoutMs: number): Promise<D
   await client.connect(transport);
   return {
     callTool: (name, args) =>
-      client.callTool({ name, arguments: args }, undefined, {
-        timeout: timeoutMs,
-        resetTimeoutOnProgress: true,
-      }),
+      client.callTool(
+        { name, arguments: args },
+        {
+          timeout: timeoutMs,
+          resetTimeoutOnProgress: true,
+        },
+      ),
     close: () => client.close(),
   };
 }

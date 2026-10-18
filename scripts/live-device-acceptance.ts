@@ -18,8 +18,8 @@ import {
 } from "node:fs";
 import { chmod, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { computeBuildIdentity, type BuildIdentity } from "../src/daemon/buildIdentity";
 import { DaemonClient } from "../src/daemon/client";
 import {
@@ -2353,7 +2353,7 @@ async function defaultCreateMcpClient(
   }
   return {
     callTool: (name, arguments_, callSignal) =>
-      client.callTool({ name, arguments: arguments_ }, undefined, { signal: callSignal }),
+      client.callTool({ name, arguments: arguments_ }, { signal: callSignal }),
     close: () => client.close(),
   };
 }

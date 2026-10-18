@@ -1,3 +1,5 @@
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import { Server } from "@modelcontextprotocol/server";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import {
   afterAll,
@@ -10,8 +12,6 @@ import {
   test,
 } from "bun:test";
 import { z } from "zod/v4";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
 import { registerAppTools } from "../../src/server/appTools";
 import { registerDatabaseTools } from "../../src/server/databaseTools";
@@ -686,7 +686,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       try {
         await fixture.setup();
         ingressHandler = registration.mock.calls.findLast(
-          ([schema]) => schema === CallToolRequestSchema,
+          ([schema]) => schema === "tools/call",
         )![1];
       } finally {
         registration.mockRestore();
@@ -750,14 +750,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
           method: "tools/call",
           params: { name: "controlProbe", arguments: { sessionUuid: agent } },
         },
-        {
-          signal,
-          requestId: "control-request",
-          sendNotification: async () => {},
-          sendRequest: async () => {
-            throw new Error("Unexpected server request");
-          },
-        },
+        fakeServerContext({ signal: signal, id: "control-request" }),
       );
     }
 

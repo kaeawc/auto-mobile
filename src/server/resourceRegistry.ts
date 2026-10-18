@@ -1,14 +1,10 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
-  Resource,
-  ResourceTemplate,
-  ReadResourceRequestSchema,
-  ListResourcesRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  SubscribeRequestSchema,
-  UnsubscribeRequestSchema,
-  McpError,
-} from "@modelcontextprotocol/sdk/types.js";
+  McpServer,
+  type ReadResourceResult,
+  type Resource,
+  type ResourceTemplateType as ResourceTemplate,
+} from "@modelcontextprotocol/server";
+import { McpError } from "./mcpError";
 import { logger } from "../utils/logger";
 import { ListChangedBroadcaster, ResourceUpdatedBroadcaster } from "./listChangedBroadcast";
 import { MALFORMED_URI_SEGMENT_MESSAGE, MalformedResourceUriError } from "./resourceUriSegments";
@@ -402,14 +398,14 @@ class ResourceRegistryClass {
     this.readContexts.set(server, getReadContext);
 
     // Set handler for listing resources
-    server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    server.server.setRequestHandler("resources/list", async () => {
       return {
         resources: this.getResourceDefinitions(),
       };
     });
 
     // Set handler for reading resource content
-    server.server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
+    server.server.setRequestHandler("resources/read", async (request, ctx) => {
       const { uri } = request.params;
       logger.info(`[ResourceRegistry] ReadResource request for URI: ${uri}`);
 
@@ -433,10 +429,10 @@ class ResourceRegistryClass {
       // First, try to find an exact match resource
       const resource = this.getResource(uri);
       if (resource) {
-        const content = await resource.handler(getReadContext(extra.signal));
+        const content = await resource.handler(getReadContext(ctx.mcpReq.signal));
         return {
           contents: [content],
-        };
+        } as ReadResourceResult;
       }
 
       // If not found, try to match a template
@@ -446,11 +442,11 @@ class ResourceRegistryClass {
         try {
           const content =
             "handlerWithReadContext" in template
-              ? await template.handlerWithReadContext(params, getReadContext(extra.signal))
+              ? await template.handlerWithReadContext(params, getReadContext(ctx.mcpReq.signal))
               : await template.handler(params);
           return {
             contents: [content],
-          };
+          } as ReadResourceResult;
         } catch (error) {
           throw malformedUriToMcpError(error, uri);
         }
@@ -471,14 +467,14 @@ class ResourceRegistryClass {
     });
 
     // Set handler for listing resource templates
-    server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+    server.server.setRequestHandler("resources/templates/list", async () => {
       return {
         resourceTemplates: this.getTemplateDefinitions(),
       };
     });
 
     // Set handler for subscribe
-    server.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+    server.server.setRequestHandler("resources/subscribe", async (request) => {
       const { uri } = request.params;
       if (!this.servers.has(server)) {
         return {};
@@ -491,7 +487,7 @@ class ResourceRegistryClass {
     });
 
     // Set handler for unsubscribe
-    server.server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+    server.server.setRequestHandler("resources/unsubscribe", async (request) => {
       const { uri } = request.params;
       this.subscriptions.get(server)?.delete(uri);
       logger.info(`[ResourceRegistry] Client unsubscribed from: ${uri}`);

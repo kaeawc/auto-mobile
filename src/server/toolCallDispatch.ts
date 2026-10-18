@@ -1,5 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, McpServer, ServerContext } from "@modelcontextprotocol/server";
 import { ActionableError } from "../models";
 import { logger } from "../utils/logger";
 
@@ -115,18 +114,33 @@ export async function dispatchToolCall<
   });
 }
 
-type McpRequestHandler = Parameters<McpServer["server"]["setRequestHandler"]>[1];
-/** The SDK's request-handler `extra` for a server-side `tools/call`. */
-export type McpToolCallExtra = Parameters<McpRequestHandler>[1];
-/** What the SDK accepts back from a server-side request handler. */
-export type McpToolCallResult = Awaited<ReturnType<McpRequestHandler>>;
+/**
+ * The v1 SDK request-handler `extra` slice the dispatch envelope and the tool
+ * executors read, adapted from the SDK v2 request context (issue #4678). Keeping
+ * the executors on this narrow shape, rather than on the SDK context, means a
+ * later transport change only rewires {@link toolCallExtraFromContext}.
+ */
+export interface McpToolCallExtra extends ToolCallExtra {
+  readonly signal: AbortSignal;
+}
+/** What a server-side `tools/call` handler returns. */
+export type McpToolCallResult = CallToolResult;
+
+/** Adapts an SDK v2 request context to {@link McpToolCallExtra}. */
+export function toolCallExtraFromContext(ctx: ServerContext): McpToolCallExtra {
+  return {
+    signal: ctx.mcpReq.signal,
+    _meta: ctx.mcpReq._meta,
+    sendNotification: (notification) => ctx.mcpReq.notify(notification),
+  };
+}
 
 /** Installs {@link dispatchToolCall} as the server's one `tools/call` handler. */
 export function installToolCallDispatcher(
   server: McpServer,
   backend: ToolCallBackend<ToolCallRequest, McpToolCallExtra, McpToolCallResult>,
 ): void {
-  server.server.setRequestHandler(CallToolRequestSchema, (request, extra) =>
-    dispatchToolCall(request, extra, backend),
+  server.server.setRequestHandler("tools/call", (request, ctx) =>
+    dispatchToolCall(request, toolCallExtraFromContext(ctx), backend),
   );
 }

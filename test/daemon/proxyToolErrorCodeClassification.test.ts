@@ -1,5 +1,5 @@
+import { McpError, ErrorCode } from "../../src/server/mcpError";
 import { describe, expect, test } from "bun:test";
-import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { daemonResponseError } from "../../src/daemon/client";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";

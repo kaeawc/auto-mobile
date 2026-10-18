@@ -1,6 +1,6 @@
+import { Client } from "../helpers/v1ViewMcpClient";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { DaemonClient } from "../../src/daemon/client";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";

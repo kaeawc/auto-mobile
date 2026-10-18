@@ -1,3 +1,5 @@
+import { Client } from "../helpers/v1ViewMcpClient";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { installFakeDeviceToolProviders } from "../helpers/hermeticDeviceTools";
@@ -11,8 +13,6 @@ import {
   spyOn,
   test,
 } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
   DAEMON_VERSION,

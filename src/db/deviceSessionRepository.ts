@@ -1,7 +1,7 @@
 import {
   MANAGED_EXECUTION_LIVENESS_POLICY,
   ignoresManagedExecutionIdleDeadline,
-} from "../daemon/sessionBroker/provisioning/executionLiveness";
+} from "../models/managedExecutionLiveness";
 import { sql, type ExpressionBuilder, type Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database, DeviceSession, DeviceSessionStatus, NewDeviceSession } from "./types";

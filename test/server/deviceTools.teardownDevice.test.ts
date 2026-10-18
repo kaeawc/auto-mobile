@@ -3145,7 +3145,7 @@ describe("deleteDevice handler", () => {
 
       expect(forceStop).toHaveBeenCalledTimes(1);
       expect(PortManager.getPort(device.deviceId!)).toBeUndefined();
-      expect((IOSCtrlProxyManager as any).instances.get(device.deviceId)).toBeUndefined();
+      expect(IOSCtrlProxyManager.registry.peek(device.deviceId)).toBeUndefined();
       expect(resolveDirectSessionDevice("late-cancelled-destroy-session")).toBeUndefined();
     } finally {
       forceStop.mockRestore();
@@ -3199,7 +3199,7 @@ describe("deleteDevice handler", () => {
 
       expect(forceStop).toHaveBeenCalledTimes(1);
       expect(PortManager.getPort(device.deviceId!)).toBeUndefined();
-      expect((IOSCtrlProxyManager as any).instances.get(device.deviceId)).toBeUndefined();
+      expect(IOSCtrlProxyManager.registry.peek(device.deviceId)).toBeUndefined();
       expect(resolveDirectSessionDevice("late-destroy-session")).toBeUndefined();
     } finally {
       forceStop.mockRestore();

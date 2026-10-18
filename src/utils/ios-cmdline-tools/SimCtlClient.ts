@@ -2706,8 +2706,8 @@ export class SimCtlClient implements SimCtl {
       signal,
     );
     try {
-      const data = JSON.parse(result.stdout) as { devicetypes?: AppleDeviceType[] };
-      return data.devicetypes ?? [];
+      const data = JSON.parse(result.stdout) as { devicetypes?: unknown } | null;
+      return Array.isArray(data?.devicetypes) ? (data.devicetypes as AppleDeviceType[]) : [];
     } catch (error) {
       logger.warn(`Failed to parse device types from simctl: ${error}`);
       return [];

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { sql, type Kysely } from "kysely";
 import { BaselineManager } from "../../src/features/accessibility/BaselineManager";
-import { SqliteFeatureFlagRepository } from "../../src/features/featureFlags/FeatureFlagRepository";
+import { SqliteFeatureFlagRepository } from "../../src/db/featureFlagRepository";
 import type { FeatureFlagDefinition } from "../../src/features/featureFlags/FeatureFlagDefinitions";
 import { MemoryBaselineManager } from "../../src/features/memory/MemoryBaselineManager";
 import type { MemoryMetrics } from "../../src/features/memory/MemoryMetricsCollector";

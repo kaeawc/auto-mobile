@@ -1,6 +1,6 @@
 import type { Kysely } from "kysely";
 import { z } from "zod/v4";
-import { DEFAULT_DEVICE_SNAPSHOT_CONFIG } from "../features/snapshot/DeviceSnapshotConfig";
+import { DEFAULT_DEVICE_SNAPSHOT_CONFIG } from "../models/DeviceSnapshotConfigDefaults";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { AppearanceConfig, DeviceSnapshotConfig, VideoRecordingConfig } from "../models";
 import { logger, type Logger } from "../utils/logger";

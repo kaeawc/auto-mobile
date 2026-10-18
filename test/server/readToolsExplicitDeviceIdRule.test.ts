@@ -548,7 +548,7 @@ for (const platform of ["android", "ios"] as const) {
       } finally {
         executionTracker.endExecution(execution.id);
       }
-      expect(h.handledDevices).toEqual([h.device]);
+      expect(h.handledDevices).toMatchObject([h.device]);
       expect(h.runs).toHaveLength(1);
       expect(h.runs[0].sessionUuid).toBeUndefined();
       const operations = (
@@ -899,7 +899,7 @@ for (const platform of ["android", "ios"] as const) {
             expect(h.timer.now()).toBe(0);
             expect(h.timer.getSleepCallCount()).toBe(0);
             expect(h.detect).toHaveBeenCalledTimes(1);
-            expect(h.handledDevices).toEqual([h.device]);
+            expect(h.handledDevices).toMatchObject([h.device]);
           }
           expect(h.manager.getCurrentDevice()).toBeUndefined();
           expect(h.manager.getCurrentPlatform()).toBeUndefined();

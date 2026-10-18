@@ -53,6 +53,13 @@ export class AndroidTapStrategy implements TapStrategy {
     return { bounds };
   }
 
+  readonly settlesPostTapEffects = true;
+  readonly rethrowsKeyboardOcclusion = true;
+
+  applyRefreshedObservationRotation(): void {
+    // Android observations carry no hierarchy-derived rotation to restamp.
+  }
+
   async isAccessibilityServiceEnabled(onWarning?: (warning: string) => void): Promise<boolean> {
     // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
     // apply to tap detection uniformly with the observe path (#3925).

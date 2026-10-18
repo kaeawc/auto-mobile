@@ -90,6 +90,9 @@ async function runTap() {
     strategy: {
       isAccessibilityServiceEnabled: async () => false,
       shouldRunPreTapStability: () => false,
+      settlesPostTapEffects: true,
+      rethrowsKeyboardOcclusion: true,
+      applyRefreshedObservationRotation: () => {},
     },
     executeAndroidTap: async () => {
       taps.push({ reportsBefore: reports.length, at: timer.now() });

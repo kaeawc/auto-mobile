@@ -16,6 +16,8 @@ import type { ViewHierarchy } from "../../src/features/observe/ViewHierarchy";
 export class FakeTapStrategy implements TapStrategy {
   longPressDurationMs: number = 500;
   retryTapIfNoChange: boolean = false;
+  settlesPostTapEffects: boolean;
+  rethrowsKeyboardOcclusion: boolean;
 
   private readonly iosClip = new IosTapStrategy({
     name: "fake",
@@ -26,6 +28,12 @@ export class FakeTapStrategy implements TapStrategy {
   private preTapStabilityGate: boolean = false;
   private filterReturnsRaw: boolean = false;
   private readonly executedOperations: string[] = [];
+
+  /** The platform flags default to the named platform's real strategy; override per test. */
+  constructor(private readonly platform: "android" | "ios" = "android") {
+    this.settlesPostTapEffects = platform === "android";
+    this.rethrowsKeyboardOcclusion = platform === "android";
+  }
 
   setAccessibilityServiceEnabled(enabled: boolean): void {
     this.accessibilityEnabled = enabled;
@@ -80,6 +88,16 @@ export class FakeTapStrategy implements TapStrategy {
   async isAccessibilityServiceEnabled(): Promise<boolean> {
     this.executedOperations.push("isAccessibilityServiceEnabled");
     return this.accessibilityEnabled;
+  }
+
+  applyRefreshedObservationRotation(
+    observation: ObserveResult,
+    hierarchyRotation: number | undefined,
+  ): void {
+    this.executedOperations.push("applyRefreshedObservationRotation");
+    if (this.platform === "ios") {
+      this.iosClip.applyRefreshedObservationRotation(observation, hierarchyRotation);
+    }
   }
 
   shouldRunPreTapStability(_options: TapOnElementOptions): boolean {

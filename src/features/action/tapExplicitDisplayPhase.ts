@@ -645,7 +645,7 @@ export class TapExplicitDisplayPhase {
         }
       } catch (error) {
         this.host.rethrowObservationAbort(error, signal, dispatchCompleted);
-        rethrowKeyboardOcclusion(this.host.device.platform, error, options.action, recovery);
+        rethrowKeyboardOcclusion(this.host.strategy(), error, options.action, recovery);
         logger.warn(`tapOn display routing failed: ${errorMessage(error)}`, error);
         const failure = completedDisplayFailure(error, dispatchCompleted);
         return withStaleDisplay(
@@ -687,14 +687,14 @@ export function completedDisplayFailure(error: unknown, dispatchCompleted: boole
 }
 
 export function rethrowKeyboardOcclusion(
-  platform: BootedDevice["platform"],
+  strategy: Pick<TapStrategy, "rethrowsKeyboardOcclusion">,
   error: unknown,
   action: TapOnElementOptions["action"],
   recovery?: { throwOnKeyboardOcclusion?: boolean },
 ): void {
   if (
     recovery?.throwOnKeyboardOcclusion &&
-    platform === "android" &&
+    strategy.rethrowsKeyboardOcclusion &&
     action === "focus" &&
     error instanceof KeyboardOcclusionError
   ) {

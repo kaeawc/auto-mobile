@@ -1,12 +1,15 @@
 import type { ObserveResult, TapOnElementResult, ViewHierarchyResult } from "../../models";
-import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
+import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
 import type { PostTapSettler } from "./tapPostTapSettler";
 
 /** What the post-tap effect/freshness phase needs from the owning tap action. */
 export interface PostTapEffectHost {
-  readonly platform: string;
+  readonly strategy: () => Pick<
+    TapStrategy,
+    "settlesPostTapEffects" | "applyRefreshedObservationRotation"
+  >;
   settler(): Pick<PostTapSettler, "waitForPostTapChange" | "settleHierarchyOnlyChange">;
   deriveTapEffect(
     previousObservation: ObserveResult | null,
@@ -76,7 +79,7 @@ export class TapPostTapEffectPhase {
     signal?: AbortSignal,
   ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
     const immediateEffect = this.host.deriveTapEffect(previousObservation, currentObservation);
-    if (this.host.platform !== "android" || !previousObservation) {
+    if (!this.host.strategy().settlesPostTapEffects || !previousObservation) {
       return { effect: immediateEffect, observation: currentObservation };
     }
 
@@ -195,12 +198,7 @@ export class TapPostTapEffectPhase {
     } else if (observeResult.screenSize) {
       observeResult.screenSize = { width: 0, height: 0 };
     }
-    if (this.host.platform === "ios") {
-      observeResult.rotation = resolveIosObserveRotation(
-        viewHierarchy.rotation,
-        observeResult.screenSize,
-      );
-    }
+    this.host.strategy().applyRefreshedObservationRotation(observeResult, viewHierarchy.rotation);
     if (refreshedFromDevice) {
       markObservationFreshAfterSyncRefresh(observeResult);
     }

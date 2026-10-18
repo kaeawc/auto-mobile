@@ -69,6 +69,10 @@ async function focusOnIos(
     isAccessibilityServiceEnabled: async () => false,
     clipNavigationTapBounds: (...args) => iosClip.clipNavigationTapBounds(...args),
     shouldRunPreTapStability: () => false,
+    settlesPostTapEffects: false,
+    rethrowsKeyboardOcclusion: false,
+    applyRefreshedObservationRotation: (...args) =>
+      iosClip.applyRefreshedObservationRotation(...args),
     retryTapIfNoChange: false,
     longPressDurationMs: 1000,
   };

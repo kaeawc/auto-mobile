@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import {
   TapPostTapEffectPhase,
   markObservationFreshAfterSyncRefresh,
@@ -54,7 +55,7 @@ describe("markObservationFreshAfterSyncRefresh", () => {
 
 function phase(effect: TapOnElementResult["effect"] | undefined, platform = "android") {
   const host: PostTapEffectHost = {
-    platform,
+    strategy: () => new FakeTapStrategy(platform === "ios" ? "ios" : "android"),
     settler: () => {
       throw new Error("settler unused");
     },

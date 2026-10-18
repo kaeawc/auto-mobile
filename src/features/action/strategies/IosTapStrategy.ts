@@ -9,6 +9,7 @@ import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
 import type { TapBoundsClip, TapViewHierarchy } from "../../../utils/interfaces/TapStrategy";
 import type { IosVoiceOverDetector } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../accessibility/IosVoiceOverDetector";
+import { resolveIosObserveRotation } from "../../observe/iosObserveRotation";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { clipIosChromeBounds } from "../swipeon/iosChromeInsets";
 import { isUsableScreenSize } from "../../utility/ElementGeometry";
@@ -25,6 +26,8 @@ import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 export class IosTapStrategy implements TapStrategy {
   readonly longPressDurationMs = 1000;
   readonly retryTapIfNoChange = false;
+  readonly settlesPostTapEffects = false;
+  readonly rethrowsKeyboardOcclusion = false;
 
   constructor(
     private readonly device: BootedDevice,
@@ -82,6 +85,13 @@ export class IosTapStrategy implements TapStrategy {
       ctrlProxy,
       this.featureFlags,
     );
+  }
+
+  applyRefreshedObservationRotation(
+    observation: ObserveResult,
+    hierarchyRotation: number | undefined,
+  ): void {
+    observation.rotation = resolveIosObserveRotation(hierarchyRotation, observation.screenSize);
   }
 
   shouldRunPreTapStability(_options: TapOnElementOptions): boolean {

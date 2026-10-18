@@ -273,7 +273,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     compareActiveWindow: (previous, current) => this.compareActiveWindow(previous, current),
   });
   private readonly postTapEffect = new TapPostTapEffectPhase({
-    platform: this.device.platform,
+    strategy: () => this.strategy,
     settler: () => this.settler,
     deriveTapEffect: (previous, current) => this.deriveTapEffect(previous, current),
     getScreenSizeFromHierarchy: (hierarchy, options) =>
@@ -2122,7 +2122,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       perf.end();
 
       // Only opted-in Android form orchestration receives the typed recovery signal.
-      rethrowKeyboardOcclusion(this.device.platform, error, requestedAction, recovery);
+      rethrowKeyboardOcclusion(this.strategy, error, requestedAction, recovery);
       logger.warn(`Tap on element failed: ${errorMessage(error)}`, error);
       const failure = completedDisplayFailure(error, completedDisplayGesture);
       if (failure instanceof StaleDisplayError || failure instanceof DispatchedObservationError) {

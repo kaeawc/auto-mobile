@@ -703,6 +703,9 @@ describe("explicit action display", () => {
         tapStrategy: {
           isAccessibilityServiceEnabled: async () => false,
           shouldRunPreTapStability: () => false,
+          settlesPostTapEffects: true,
+          rethrowsKeyboardOcclusion: true,
+          applyRefreshedObservationRotation: () => {},
         } as never,
       });
       Object.assign(action, {

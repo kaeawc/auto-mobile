@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { KeyboardOcclusionError } from "../../../src/models/KeyboardOcclusionError";
 import { DispatchedObservationError } from "../../../src/models/DispatchedObservationError";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
@@ -27,14 +28,22 @@ describe("tapExplicitDisplayPhase helpers", () => {
   test("rethrowKeyboardOcclusion only rethrows for opted-in android focus", () => {
     const error = new KeyboardOcclusionError("covered");
     expect(() =>
-      rethrowKeyboardOcclusion("android", error, "focus", { throwOnKeyboardOcclusion: true }),
+      rethrowKeyboardOcclusion(new FakeTapStrategy("android"), error, "focus", {
+        throwOnKeyboardOcclusion: true,
+      }),
     ).toThrow(error);
-    expect(() => rethrowKeyboardOcclusion("android", error, "focus")).not.toThrow();
     expect(() =>
-      rethrowKeyboardOcclusion("ios", error, "focus", { throwOnKeyboardOcclusion: true }),
+      rethrowKeyboardOcclusion(new FakeTapStrategy("android"), error, "focus"),
     ).not.toThrow();
     expect(() =>
-      rethrowKeyboardOcclusion("android", error, "tap", { throwOnKeyboardOcclusion: true }),
+      rethrowKeyboardOcclusion(new FakeTapStrategy("ios"), error, "focus", {
+        throwOnKeyboardOcclusion: true,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      rethrowKeyboardOcclusion(new FakeTapStrategy("android"), error, "tap", {
+        throwOnKeyboardOcclusion: true,
+      }),
     ).not.toThrow();
   });
 });

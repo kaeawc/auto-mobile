@@ -64,6 +64,24 @@ export interface TapStrategy {
   /** Re-tap when the view hierarchy hash is unchanged after a tap. */
   readonly retryTapIfNoChange: boolean;
 
+  /**
+   * Whether post-tap effect derivation waits out the activity-transition window and settles
+   * hierarchy-only changes before concluding what a tap did (Android only).
+   */
+  readonly settlesPostTapEffects: boolean;
+
+  /** Whether a keyboard occlusion during a focus tap is rethrown for IME recovery (Android only). */
+  readonly rethrowsKeyboardOcclusion: boolean;
+
+  /**
+   * Restamp the rotation of an observation whose hierarchy was just re-captured. Platforms
+   * that do not derive observation rotation from the hierarchy leave it untouched.
+   */
+  applyRefreshedObservationRotation(
+    observation: ObserveResult,
+    hierarchyRotation: number | undefined,
+  ): void;
+
   /** Default long-press duration in milliseconds. */
   readonly longPressDurationMs: number;
 }

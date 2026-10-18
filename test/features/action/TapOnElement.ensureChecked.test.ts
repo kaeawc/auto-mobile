@@ -44,6 +44,9 @@ function createTap(
   (tap as any).strategy = {
     isAccessibilityServiceEnabled: async () => false,
     shouldRunPreTapStability: () => false,
+    settlesPostTapEffects: true,
+    rethrowsKeyboardOcclusion: true,
+    applyRefreshedObservationRotation: () => {},
   };
   (tap as any).executeAndroidTap = async () => {
     tapCalls++;

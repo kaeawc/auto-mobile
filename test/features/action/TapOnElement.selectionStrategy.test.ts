@@ -96,6 +96,9 @@ async function executeFocus(
       tapStrategy: {
         isAccessibilityServiceEnabled: async () => false,
         shouldRunPreTapStability: () => false,
+        settlesPostTapEffects: true,
+        rethrowsKeyboardOcclusion: true,
+        applyRefreshedObservationRotation: () => {},
       } as any,
       selectionStateTracker: { finalize: async () => [] } as any,
     },

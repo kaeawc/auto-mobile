@@ -112,16 +112,21 @@ describe("agent benchmark claude invocation", () => {
   });
 
   test("the MCP server env carries only shared claim roots from the inherited env", () => {
-    const config = buildMcpConfig(PATHS, {
-      PATH: "/bin",
-      AUTOMOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/claims",
-      AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/legacy",
-      AUTOMOBILE_DB_PATH: "/resident.db",
-      ADB_SERVER_SOCKET: "tcp:remote:5037",
-      ANDROID_ADB_SERVER_ADDRESS: "remote",
-      ANDROID_ADB_SERVER_PORT: "5038",
-      ANDROID_HOME: "/sdk",
-    }) as { mcpServers: Record<string, { env: Record<string, string> }> };
+    const config = buildMcpConfig(
+      PATHS,
+      {
+        PATH: "/bin",
+        AUTOMOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/claims",
+        AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR: "/shared/legacy",
+        AUTOMOBILE_DB_PATH: "/resident.db",
+        ADB_SERVER_SOCKET: "tcp:remote:5037",
+        ANDROID_ADB_SERVER_ADDRESS: "remote",
+        ANDROID_ADB_SERVER_PORT: "5038",
+        ANDROID_HOME: "/sdk",
+      },
+      // POSIX, so the absolute paths stay as written on a Windows runner too.
+      "linux",
+    ) as { mcpServers: Record<string, { env: Record<string, string> }> };
     const env = config.mcpServers["auto-mobile"].env;
     expect(env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR).toBe("/shared/claims");
     expect(env.AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR).toBe("/shared/legacy");

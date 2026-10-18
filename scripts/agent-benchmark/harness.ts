@@ -181,7 +181,7 @@ async function stopPrivateDaemon(
 ): Promise<boolean> {
   // The same sanitized environment as the run, so an inherited socket or PID override
   // can never point this stop at the resident daemon.
-  const env = isolatedServerEnv(deps.env, paths);
+  const env = isolatedServerEnv(deps.env, paths, deps.platform);
   try {
     const result = await deps.runner.run(
       options.runtime,
@@ -455,7 +455,7 @@ async function launchClaude(
   const mcpConfigPath = join(run.runDirectory, "mcp-config.json");
   deps.fs.writeFile(
     mcpConfigPath,
-    `${JSON.stringify(buildMcpConfig(run.paths, deps.env), null, 2)}\n`,
+    `${JSON.stringify(buildMcpConfig(run.paths, deps.env, deps.platform), null, 2)}\n`,
   );
   const prompt = fillPlaceholders(suite.prompt, placeholders);
   deps.fs.writeFile(join(run.runDirectory, "prompt.md"), prompt);
@@ -479,7 +479,7 @@ async function launchClaude(
     args,
     cwd: run.claudeCwd,
     env: {
-      ...claudeLaunchEnv(deps.env, run.paths),
+      ...claudeLaunchEnv(deps.env, run.paths, deps.platform),
       // User-level CLAUDE.md, auto-memory, and managed policy skills differ per operator or
       // host; keep runs comparable.
       CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",

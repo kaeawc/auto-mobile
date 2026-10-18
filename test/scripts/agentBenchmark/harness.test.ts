@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { parseSuiteDefinition, type LoadedSuite } from "../../../scripts/agent-benchmark/config";
 import {
   runSuite,
@@ -173,8 +173,8 @@ describe("agent benchmark harness", () => {
     expect(launch.args).toContain("suite-model");
     expect(launch.timeoutMs).toBe(60_000);
     expect(launch.env).toEqual({
-      // Made absolute for the temp cwd; on Windows that adds the current drive.
-      PATH: resolve("/bin"),
+      // Already absolute for the deps' POSIX platform, on any host.
+      PATH: "/bin",
       AUTOMOBILE_AUX_SOCKET_DIR: "/tmp/amb-test",
       AUTOMOBILE_HARNESS_PRIVATE_DAEMON: "1",
       AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS: "5000",

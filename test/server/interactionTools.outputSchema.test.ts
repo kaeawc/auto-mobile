@@ -249,7 +249,7 @@ interface SourceIndex {
   source: ts.SourceFile;
   bindings: Map<string, ts.Node>;
   imports: Map<string, { file: string; name: string }>;
-  registrations: Array<{ name: string; handler: ts.Expression }>;
+  registrations: Array<{ name: string; handler: ts.Expression; nonDeviceHandler?: ts.Expression }>;
 }
 const serverDirectory = path.resolve(import.meta.dir, "../../src/server");
 // Handlers delegate response building to helpers that moved out of src/server
@@ -352,7 +352,13 @@ function indexSource(
             ts.isPropertyAssignment(property) && property.name.getText(ast) === "outputSchema",
         )
       ) {
-        index.registrations.push({ name: name.text, handler });
+        // Tools registered with `shouldEnsureDevice: () => false` do their work in
+        // `nonDeviceHandler`, so the audit must follow it as well as the positional handler.
+        const nonDeviceHandler = options.properties.find(
+          (property): property is ts.PropertyAssignment =>
+            ts.isPropertyAssignment(property) && property.name.getText(ast) === "nonDeviceHandler",
+        )?.initializer;
+        index.registrations.push({ name: name.text, handler, nonDeviceHandler });
       }
     }
     if (
@@ -500,10 +506,16 @@ beforeAll(() => {
     }
   }
   sourceAudit = [...indexes].flatMap(([file, index]) =>
-    index.registrations.map(({ name, handler }) => ({
-      name,
-      ...auditHandler(indexes, file, handler),
-    })),
+    index.registrations.map(({ name, handler, nonDeviceHandler }) => {
+      const audits = [handler, ...(nonDeviceHandler ? [nonDeviceHandler] : [])].map((target) =>
+        auditHandler(indexes, file, target),
+      );
+      return {
+        name,
+        structured: audits.some((audit) => audit.structured),
+        offenders: audits.flatMap((audit) => audit.offenders),
+      };
+    }),
   );
 });
 test("every schema registration reaches a structured builder and no text-only builder", () => {
@@ -533,6 +545,21 @@ test("source guard detects helper and raw text envelopes while exempting error e
     offenders: [],
   });
   expect(auditHandler(indexes, file, index.bindings.get("error")!).offenders).toEqual([]);
+});
+
+test("source guard captures nonDeviceHandler so session-resolved tools are audited", () => {
+  const file = path.join(serverDirectory, "nonDevice.ts");
+  const index = indexSource(
+    file,
+    `ToolRegistry.registerDeviceAware("viaNonDevice", "", schema, async () => { throw new Error("x"); }, {
+  outputSchema: schema,
+  nonDeviceHandler: async () => createJSONToolResponse({ success: true }),
+});`,
+  );
+  const indexes = new Map([[sourceKey(file), index]]);
+  const [registration] = index.registrations;
+  expect(registration?.nonDeviceHandler).toBeDefined();
+  expect(auditHandler(indexes, file, registration!.nonDeviceHandler!).offenders).toHaveLength(1);
 });
 
 test("source guard follows factory helpers returned through object shorthand", () => {

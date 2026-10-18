@@ -1,3 +1,4 @@
+import { makePool } from "../helpers/makePool";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { DeviceAllocationRequest } from "../../src/daemon/DeviceCriteriaMatcher";
@@ -8,9 +9,7 @@ import { logger } from "../../src/utils/logger";
 import { FakeDeviceHealthMarkers } from "../fakes/FakeDeviceHealthMarkers";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainUntil } from "../helpers/fakeTimerStepping";
 
 // Pure allocation unit tests: in-memory persistence and fake discovery/time only.
@@ -37,14 +36,11 @@ describe("criteria allocation rollback on thrown errors", () => {
     }));
     const deviceManager = new FakeDeviceManager();
     deviceManager.bootedDevices = devices;
-    pool = new DevicePool(
-      createDevicePoolDependencies(manager, "criteria-rollback-test", {
-        timer,
-        deviceManager,
-        deviceHealthMarkers: markers,
-        installedAppsRepository: new FakeInstalledAppsRepository(),
-      }),
-    );
+    pool = makePool(manager, "criteria-rollback-test", {
+      timer,
+      deviceManager,
+      deviceHealthMarkers: markers,
+    });
     await pool.initializeWithDevices(devices);
   });
 

@@ -4,7 +4,9 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeTimer } from "../fakes/FakeTimer";
+import { installSessionManagerCleanup, makeSessionManager } from "../helpers/sessionManagerSuite";
+
+installSessionManagerCleanup();
 
 // #11593: a request cancelled while the session it names is being minted must leave the id its
 // client chose free to be created again. A daemon-minted id is still retired for good: nobody
@@ -84,7 +86,7 @@ async function mintCancelledDuring(
   clientChosen: boolean,
 ): Promise<{ manager: SessionManager; persistence: SteppedPersistence; failure: unknown }> {
   const persistence = new SteppedPersistence();
-  const manager = new SessionManager(new FakeTimer(), persistence);
+  const manager = makeSessionManager({ persistence });
   const controller = new AbortController();
   const reached = persistence.park(step);
   const minting = runWithAbortSignal(controller.signal, () =>
@@ -148,7 +150,7 @@ describe("a mint cancelled while its session is persisted", () => {
 
   test("a receipt that names another id does not spare this one", async () => {
     const persistence = new SteppedPersistence();
-    const manager = new SessionManager(new FakeTimer(), persistence);
+    const manager = makeSessionManager({ persistence });
     const controller = new AbortController();
     try {
       const reached = persistence.park("active-row upsert");
@@ -170,7 +172,7 @@ describe("a mint cancelled while its session is persisted", () => {
 
   test("daemon shutdown still retires a client-chosen id caught mid-mint", async () => {
     const persistence = new SteppedPersistence();
-    const manager = new SessionManager(new FakeTimer(), persistence);
+    const manager = makeSessionManager({ persistence });
     try {
       const reached = persistence.park("active-row upsert");
       const minting = runWithAcquisitionReceipt({ clientChosenSessionId: SESSION_ID }, () =>

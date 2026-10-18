@@ -17,7 +17,7 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { ViewHierarchyQueryOptions } from "../../models";
 import { AndroidCtrlProxyClient } from "./android";
-import { IOSCtrlProxyClient } from "./ios";
+import { IOSCtrlProxyClient, type IOSCtrlProxy } from "./ios";
 import { IosRunnerStalledError } from "./ios/runnerErrorCodes";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
@@ -257,7 +257,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
 
   private classifyDisconnectedIosHierarchy(
     result: ViewHierarchyResult,
-    client: IOSCtrlProxyClient,
+    client: Pick<IOSCtrlProxy, "isConnected">,
   ): void {
     // A request-scoped runner error can be untyped while the host socket has
     // already closed. The known disconnect is sufficient to join recovery.

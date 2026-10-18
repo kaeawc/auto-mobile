@@ -9,8 +9,8 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import { RealSettleObserve } from "../observe/SettleObserve";
 import type { TapEffect } from "../../models/TapOnElementResult";
-import { AwaitIdle } from "../observe/AwaitIdle";
-import type { UiStabilityState } from "../observe/interfaces/AwaitIdle";
+import { AwaitIdle as RealAwaitIdle } from "../observe/AwaitIdle";
+import type { AwaitIdle, UiStabilityState } from "../observe/interfaces/AwaitIdle";
 import type {
   ObservedActionResult,
   ObservedChangeOptions,
@@ -41,7 +41,8 @@ import type {
 } from "../observe/interfaces/ObserveScreen";
 import { DispatchedObservationError } from "../../models/DispatchedObservationError";
 import { isAdoptableCapture } from "../observe/isAdoptableCapture";
-import { Window } from "../observe/Window";
+import type { Window } from "../observe/interfaces/Window";
+import { Window as RealWindow } from "../observe/Window";
 import {
   clearResolvedHomePackageCache,
   isForegroundLauncher,
@@ -239,7 +240,7 @@ export class BaseVisualChange {
     }
     // Same clock as this instance: its gfxinfo stability polls must not spend real
     // wall-clock under an injected FakeTimer.
-    this.awaitIdle = new AwaitIdle(device, this.adbFactory, timer);
+    this.awaitIdle = new RealAwaitIdle(device, this.adbFactory, timer);
     // Honor the observer seam before constructing defaults: RealObserveScreen's
     // screenshot service starts host filesystem work and retention timers.
     this.observeScreen =
@@ -249,7 +250,7 @@ export class BaseVisualChange {
     // Window derives the per-subread budgets from ITS timer — they must be the
     // same clock or a FakeTimer's elapsed time won't shrink the ADB sub-read
     // budgets in the integrated path (issue #6289).
-    this.window = new Window(device, this.adbFactory, timer);
+    this.window = new RealWindow(device, this.adbFactory, timer);
     this.predictionAnalyzer = new PredictionAnalyzer();
     this.timer = timer;
     this.renderedDisplayRevision = displayFence.renderedDisplayRevision ?? renderedDisplayRevision;

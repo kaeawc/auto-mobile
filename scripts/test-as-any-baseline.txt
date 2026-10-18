@@ -58,7 +58,7 @@
 15	test/features/action/InputText.execute.test.ts
 4	test/features/action/InputText.test.ts
 3	test/features/action/Keyboard.test.ts
-104	test/features/action/LaunchApp.test.ts
+15	test/features/action/LaunchApp.test.ts
 21	test/features/action/OpenURL.test.ts
 45	test/features/action/PinchOn.test.ts
 10	test/features/action/PinchOn.visionFallback.test.ts

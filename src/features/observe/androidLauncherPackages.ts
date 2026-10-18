@@ -297,13 +297,12 @@ export async function isForegroundLauncher(
   adb: AdbExecutor,
   deviceId: string,
   timer: Timer = defaultTimer,
-  incarnationToken?: string,
-  signal?: AbortSignal,
-  timeoutMs?: number,
+  options: { incarnationToken?: string; signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<boolean> {
   if (!appId) {
     return false;
   }
+  const { incarnationToken, signal, timeoutMs } = options;
   const configuredHome = await resolveConfiguredHomePackage(
     adb,
     deviceId,

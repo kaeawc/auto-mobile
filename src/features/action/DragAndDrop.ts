@@ -379,16 +379,16 @@ export class DragAndDrop extends BaseVisualChange {
 
           // Once beforeSend lands, also pass this as the dispatch's beforeSend.
           fence?.assertCurrent();
-          const dragResult = await this.executeDrag(
-            sourcePoint.x,
-            sourcePoint.y,
-            targetPoint.x,
-            targetPoint.y,
+          const dragResult = await this.executeDrag({
+            startX: sourcePoint.x,
+            startY: sourcePoint.y,
+            endX: targetPoint.x,
+            endY: targetPoint.y,
             pressDurationMs,
             dragDurationMs,
             holdDurationMs,
             signal,
-          );
+          });
 
           if (this.device.platform === "ios" && dragResult.success) {
             iosDispatchTimestamp = this.timer.now();
@@ -684,16 +684,25 @@ export class DragAndDrop extends BaseVisualChange {
     return value >= min && value <= max;
   }
 
-  private async executeDrag(
-    startX: number,
-    startY: number,
-    endX: number,
-    endY: number,
-    pressDurationMs: number,
-    dragDurationMs: number,
-    holdDurationMs: number,
-    signal?: AbortSignal,
-  ): Promise<{
+  private async executeDrag({
+    startX,
+    startY,
+    endX,
+    endY,
+    pressDurationMs,
+    dragDurationMs,
+    holdDurationMs,
+    signal,
+  }: {
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+    pressDurationMs: number;
+    dragDurationMs: number;
+    holdDurationMs: number;
+    signal?: AbortSignal;
+  }): Promise<{
     success: boolean;
     error?: string;
     a11yTotalTimeMs?: number;

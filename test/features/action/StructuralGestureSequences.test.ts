@@ -164,8 +164,12 @@ describe("gesture request sequences", () => {
         calls.push("resolve");
         return { sourcePoint: { x: 10, y: 20 }, targetPoint: { x: 30, y: 40 } };
       };
-      drag["executeDrag"] = async (...args) => {
-        calls.push(`drag:${args.slice(0, 7).join(":")}`);
+      drag["executeDrag"] = async (request) => {
+        const { startX, startY, endX, endY, pressDurationMs, dragDurationMs, holdDurationMs } =
+          request;
+        calls.push(
+          `drag:${[startX, startY, endX, endY, pressDurationMs, dragDurationMs, holdDurationMs].join(":")}`,
+        );
         return { success: true, a11yTotalTimeMs: 1200 };
       };
       const result = await drag.execute({ source: { text: "Source" }, target: { text: "Target" } });

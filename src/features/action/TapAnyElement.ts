@@ -603,8 +603,7 @@ export class TapAnyElement extends BaseVisualChange {
         point.x,
         point.y,
         10,
-        undefined,
-        signal,
+        { signal },
       );
     };
     if (action !== "doubleTap") {

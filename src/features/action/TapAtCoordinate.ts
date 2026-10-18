@@ -1101,17 +1101,12 @@ export class TapAtCoordinate extends BaseVisualChange {
     context: { assertCurrent: () => void; onTapDelivered: () => void },
   ): Promise<void> {
     const reportDelivery = tapDeliveryReporter(context.onTapDelivered);
-    await this.androidCoordinateTap(
-      this.androidClient,
-      this.adb,
-      point.x,
-      point.y,
-      duration,
+    await this.androidCoordinateTap(this.androidClient, this.adb, point.x, point.y, duration, {
       frameContext,
       signal,
-      context.assertCurrent,
-      reportDelivery,
-    );
+      assertCurrent: context.assertCurrent,
+      onTapDelivered: reportDelivery,
+    });
     // Legacy injected dispatchers confirm delivery by returning, without invoking the new hook.
     reportDelivery();
     throwIfAborted(signal);

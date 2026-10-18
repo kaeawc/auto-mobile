@@ -1763,9 +1763,9 @@ To rotate **without zooming**, keep the finger distance constant: pass
 together with <code>rotationDegrees</code>. <code>direction</code> is still a required
 argument but is ignored when the distance does not change, so the fingers never
 drift toward a zoom; equal distances are clamped and (on iOS) rounded together
-so they stay equal. Negative and larger-than-360 values are passed through as
-given. This is a two-finger rotate gesture, not the device <code>rotate</code>
-tool, which changes screen orientation.
+so they stay equal. Negative values are passed through as given. This is a
+two-finger rotate gesture, not the device <code>rotate</code> tool, which changes
+screen orientation.
 
 ```json
 { "direction": "out", "scale": 1, "rotationDegrees": 90, "duration": 500 }
@@ -3205,8 +3205,8 @@ Unset or other env values express no preference and use the daemon's effective s
 
 AutoMobile implements the [MCP Tasks extension](https://modelcontextprotocol.io/extensions/tasks/overview)
 (`io.modelcontextprotocol/tasks`, #4668) on the daemon's MCP endpoint. A tool that opts in can
-answer a `tools/call` with a task handle instead of blocking. `startDevice` and `executePlan` opt
-in; `installApp` and recording start and stop follow. Short interaction tools stay synchronous.
+answer a `tools/call` with a task handle instead of blocking. `startDevice`, `executePlan` and
+`installApp` opt in; recording start and stop follow. Short interaction tools stay synchronous.
 
 To opt in, a client declares the extension on **every request** that may return a task, and on
 every `tasks/*` request, in the per-request capabilities:
@@ -3251,6 +3251,15 @@ every `tasks/*` request, in the per-request capabilities:
   A plan whose steps fail completes with the same `isError` result as the synchronous call;
   a call the synchronous path answers with a JSON-RPC error (invalid arguments, for one)
   reports `failed` with that error.
+- An `installApp` task holds the session it installs onto while `working`. `tasks/get` settles
+  with the same result the synchronous call returns (a failed install is a completed task whose
+  result has `isError: true`). `tasks/cancel` aborts the `adb install` / `simctl install` process;
+  the task reports `cancelled` and the installed-app inventory is re-read. An APK only partly
+  transferred is never committed: the device discards the abandoned install session, so the
+  previously installed version (if any) stays as it was. If the transfer had already finished and
+  the device was committing, the install may still land; the re-read inventory shows the truth.
+  The Android uninstall-and-reinstall downgrade recovery, once its uninstall has run, finishes the
+  reinstall even if cancelled, so the app is not left removed.
 - A finished task stays readable for 10 minutes (its `ttlMs` is then set, counted from
   creation); afterwards `tasks/get` answers `-32602` "Task has expired" or "Task not found".
 - Tasks survive a daemon restart: a restarted daemon still answers `tasks/get`, and a task that

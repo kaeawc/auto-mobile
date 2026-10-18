@@ -545,10 +545,9 @@ export class IosH264Source implements H264CaptureSource {
           signal,
           {
             timer: this.timer,
-            pollBudgetMs: Math.max(
-              0,
-              IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS - IOS_SIMULATOR_WINDOW_POLL_INTERVAL_MS,
-            ),
+            // The loop reserves one interval before each sleep, so the budget is the whole
+            // timeout; subtracting an interval here too wasted one (#13066).
+            pollBudgetMs: Math.max(0, IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS),
           },
         ));
     this.forceRaw = options.forceRawPipeline ?? readForceRawPipeline(process.env);
@@ -2323,7 +2322,7 @@ async function defaultResolveSimulatorWindowId(
     }
     const exhausted =
       signal.aborted ||
-      poll.timer.now() - startedAt + IOS_SIMULATOR_WINDOW_POLL_INTERVAL_MS > poll.pollBudgetMs;
+      poll.timer.now() - startedAt + IOS_SIMULATOR_WINDOW_POLL_INTERVAL_MS >= poll.pollBudgetMs;
     if (exhausted) {
       throw new ActionableError(
         `No visible iOS Simulator window matched ${device.name} after ${lookups} lookup(s) over ` +

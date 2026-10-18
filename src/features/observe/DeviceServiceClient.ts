@@ -222,7 +222,7 @@ export abstract class DeviceServiceClient {
   // the socket eventually resolves; a wedged handshake would otherwise keep
   // isConnecting true until connectionTimeoutMs, stalling a fresh-port connect
   // by up to ~5s. Cleared to null the moment the handshake terminates. (#5656)
-  private pendingConnectAbort: { socket: WebSocket; abort: () => void } | null = null;
+  protected pendingConnectAbort: { socket: WebSocket; abort: () => void } | null = null;
   // Counts callers currently awaiting connectWebSocket(), so a per-caller
   // cancellation only aborts a shared pending handshake after every caller leaves.
   protected pendingConnectJoiners: number = 0;

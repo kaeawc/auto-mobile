@@ -90,6 +90,8 @@ export interface IosSdkEventIngestorDeps {
   failureRecorder?: FailureRecorderService;
   /** Whether navigation screenshots are enabled; defaults to server config. */
   navigationScreenshotsEnabled?: () => boolean;
+  /** Screenshot store for navigation nodes; defaults to the shared singleton. */
+  screenshotStore?: Pick<NavigationScreenshotManager, "storeScreenshot">;
 }
 
 export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
@@ -105,6 +107,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
   private readonly telemetryRecorderOverride?: IosTelemetryRecorder;
   private readonly failureRecorderOverride?: FailureRecorderService;
   private readonly navigationScreenshotsEnabled: () => boolean;
+  private readonly screenshotStoreOverride?: Pick<NavigationScreenshotManager, "storeScreenshot">;
 
   constructor(deps: IosSdkEventIngestorDeps) {
     this.deviceId = deps.deviceId;
@@ -114,6 +117,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     this.captureScreenshot = deps.captureScreenshot;
     this.telemetryRecorderOverride = deps.telemetryRecorder;
     this.failureRecorderOverride = deps.failureRecorder;
+    this.screenshotStoreOverride = deps.screenshotStore;
     this.navigationScreenshotsEnabled =
       deps.navigationScreenshotsEnabled ?? (() => serverConfig.isNavigationScreenshotsEnabled());
   }
@@ -617,7 +621,8 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     try {
       const result = await this.captureScreenshot(3000);
       if (result?.data) {
-        const screenshotManager = NavigationScreenshotManager.getInstance();
+        const screenshotManager =
+          this.screenshotStoreOverride ?? NavigationScreenshotManager.getInstance();
         const bytes = Buffer.from(result.data, "base64");
         return await screenshotManager.storeScreenshot(
           applicationId,

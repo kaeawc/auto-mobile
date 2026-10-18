@@ -239,10 +239,7 @@ describe("iOS opt-in tap diagnostics", () => {
       createSuccessWebSocketFactory(timer),
       timer,
     );
-    const boundary = client as unknown as {
-      requestManager: RequestManager;
-      processMessage(message: WebSocketMessage): void;
-    };
+    const boundary = client.testHooks;
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {

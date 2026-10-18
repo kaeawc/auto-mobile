@@ -2,6 +2,7 @@ import { MapDeviceClientRegistry } from "../../../ctrlProxy/deviceClientRegistry
 import { iosWireDeadlineParams, type IOSDispatchResult } from "./CtrlProxyDispatch";
 import { withCtrlProxyRecordingFromEnv } from "./CtrlProxyExchangeRecorder";
 import type { CtrlProxyMagicTapResult, CtrlProxySdkTriggerResult } from "./types";
+import type { IosCtrlProxyClientTestHooks } from "./IosCtrlProxyClientTestHooks";
 import { requestSdkTrigger, type SdkTriggerRequest } from "./CtrlProxySdkTrigger";
 /**
  * IOSCtrlProxyClient - Main client for iOS CtrlProxy.
@@ -29,7 +30,13 @@ import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import { captureIosPanelScreenshot } from "./CtrlProxyScreenshot";
 import { displayTransitions } from "../DisplayTransition";
 import { errorMessage } from "../../../utils/describeUnknownError";
-import { ForcedRestartBudget } from "../../../ctrlProxy/ForcedRestartBudget";
+import type { ForcedRestartBudget } from "../../../ctrlProxy/ForcedRestartBudget";
+import { NoOpIOSCtrlProxyManager } from "./NoOpIosCtrlProxyManager";
+import { iosBuildVersion } from "./iosBuildVersion";
+import { CtrlProxyServicePortChangedError } from "./CtrlProxyServicePortChangedError";
+import type { ScreenshotObservationStreamOptions } from "./IosCtrlProxyClientTestHooks";
+
+export { CtrlProxyServicePortChangedError };
 import {
   BootedDevice,
   HighlightShape,
@@ -101,26 +108,17 @@ import {
   getDeviceDataStreamServer,
   PerformanceStreamData,
 } from "../../../daemon/deviceDataStreamSocketServer";
-import { COORDINATE_SPACE_PX, type CoordinateSpace } from "../../../daemon/canonicalPixels";
+import { COORDINATE_SPACE_PX } from "../../../daemon/canonicalPixels";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { ScreenshotBackoffScheduler, ScreenshotCaptureResult } from "../ScreenshotBackoffScheduler";
 import {
   IOS_CTRLPROXY_SCREENSHOT_METADATA,
   metadataForScreenshotFormat,
-  type ScreenshotMetadata,
 } from "../ScreenshotMetadata";
 import { resolveAssetVersion, resolvePinnedVersion } from "../../../constants/release";
 import { compareStrictNumericVersions } from "../../../utils/deviceMatcher";
 import { serializeIosRequest } from "./serializeIosRequest";
 import { iosMutationTokens } from "../../storage/IosMutationTokens";
-
-/** Pending requests lose their transport when the service endpoint changes. */
-export class CtrlProxyServicePortChangedError extends Error {
-  constructor() {
-    super("CtrlProxy service port changed");
-    this.name = "CtrlProxyServicePortChangedError";
-  }
-}
 
 /**
  * Factory function type for creating CtrlProxyIosManager instances.
@@ -194,33 +192,6 @@ interface IosCtrlProxyClientDependencies extends IosCtrlProxyClientOptions {
   retryExecutor?: RetryExecutor;
 }
 
-interface ScreenshotObservationStreamOptions {
-  screenshotBase64: string;
-  screenWidth: number;
-  screenHeight: number;
-  metadata?: ScreenshotMetadata;
-  captureSequence?: number;
-  coordinateSpace?: CoordinateSpace;
-  nativeScale?: number;
-  frameContext?: string;
-  rotation?: number;
-}
-
-/** Validate the platform version before it becomes a wire/cache key. */
-function iosBuildVersion(raw: string): { versionCode: number; versionKey?: string } | null {
-  const trimmed = raw.trim();
-  // 64 characters accommodates build labels while bounding wire/cache keys.
-  // Metadata and provenance share the trimmed platform value.
-  if (!trimmed || trimmed.length > 64 || /[\u0000-\u001f\u007f-\u009f]/.test(trimmed)) {
-    return null;
-  }
-  const numeric = Number(trimmed);
-  if (/^\d+$/.test(trimmed) && Number.isSafeInteger(numeric)) {
-    return { versionCode: numeric };
-  }
-  return { versionCode: 0, versionKey: trimmed };
-}
-
 interface IosBuildContextAttempt {
   generation: number;
   controller: AbortController;
@@ -288,43 +259,6 @@ export class SdkCapabilityProbeSupersededError extends ActionableError {
 /** Default production lister that queries the real device manager. */
 const defaultBootedDeviceLister: BootedDeviceLister = () =>
   PlatformDeviceManagerFactory.getInstance().getBootedDevices("ios");
-
-/**
- * No-op factory used by createForTesting so that tests which don't supply
- * a factory never trigger real CtrlProxy setup on connection failure.
- */
-class NoOpIOSCtrlProxyManager implements CtrlProxyIosManager {
-  private readonly forcedRestartBudget = new ForcedRestartBudget();
-  getForcedRestartBudget(): ForcedRestartBudget {
-    return this.forcedRestartBudget;
-  }
-  async setup(): Promise<{ success: false; message: string }> {
-    return { success: false, message: "no-op test stub" };
-  }
-  async isInstalled(): Promise<boolean> {
-    return false;
-  }
-  async isRunning(): Promise<boolean> {
-    return false;
-  }
-  async isAvailable(): Promise<boolean> {
-    return false;
-  }
-  async start(): Promise<void> {}
-  async stop(): Promise<void> {}
-  getServicePort(): number {
-    return 0;
-  }
-  async getReportedRunnerPort(): Promise<number | null> {
-    return null;
-  }
-  setAutoRestart(): void {}
-  isAutoRestartEnabled(): boolean {
-    return false;
-  }
-  async forceRestart(): Promise<void> {}
-  resetSetupState(): void {}
-}
 
 const noOpServiceManagerFactory: ServiceManagerFactory = () => new NoOpIOSCtrlProxyManager();
 
@@ -1582,6 +1516,72 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.resolvedBuildContexts.delete(appId);
     this.contentHashProvider?.invalidate(this.device.deviceId, appId);
     this.clearClientBuildContext(appId);
+  }
+
+  /**
+   * Typed view of the internals unit tests drive. Production code never reads it.
+   */
+  public get testHooks(): IosCtrlProxyClientTestHooks {
+    const client = this;
+    // Arrow functions keep `this` bound to the client; getters/setters forward live state.
+    return {
+      requestManager: this.requestManager,
+      screenGeometry: this.screenGeometry,
+      hierarchyObservationStreamSuppressions: this.hierarchyObservationStreamSuppressions,
+      get pendingConnectAbort() {
+        return client.pendingConnectAbort;
+      },
+      get pendingRestartToken() {
+        return client.pendingRestartToken;
+      },
+      get sdkEventPollGeneration() {
+        return client.sdkEventPollGeneration;
+      },
+      get sdkEventPollConsecutiveEmpty() {
+        return client.sdkEventPollConsecutiveEmpty;
+      },
+      get recoveryPromise() {
+        return client.recoveryPromise;
+      },
+      set recoveryPromise(value) {
+        client.recoveryPromise = value;
+      },
+      get isRequestingServiceRestart() {
+        return client.isRequestingServiceRestart;
+      },
+      set isRequestingServiceRestart(value) {
+        client.isRequestingServiceRestart = value;
+      },
+      get cachedHierarchy() {
+        return client.cachedHierarchy;
+      },
+      set cachedHierarchy(value) {
+        client.cachedHierarchy = value;
+      },
+      get reportedScaleMetadata() {
+        return client.reportedScaleMetadata;
+      },
+      set reportedScaleMetadata(value) {
+        client.reportedScaleMetadata = value;
+      },
+      processMessage: (message) => client.processMessage(message),
+      handleMessage: (data) => client.handleMessage(data),
+      pushHierarchyToObservationStream: (hierarchy, source) =>
+        client.pushHierarchyToObservationStream(hierarchy, source),
+      pushScreenshotToObservationStream: (options) =>
+        client.pushScreenshotToObservationStream(options),
+      decodeSdkEventBatches: (batches, generation) =>
+        client.decodeSdkEventBatches(batches, generation),
+      runSdkEventPollCycle: (generation) => client.runSdkEventPollCycle(generation),
+      currentSdkEventPollIntervalMs: () => client.currentSdkEventPollIntervalMs(),
+      stopSdkEventPolling: () => client.stopSdkEventPolling(),
+      updatePort: (port) => client.updatePort(port),
+      getWebSocketUrl: () => client.getWebSocketUrl(),
+      connectWebSocket: () => client.connectWebSocket(),
+      onConnectAttemptFailed: () => client.onConnectAttemptFailed(),
+      onConnectionClosed: () => client.onConnectionClosed(),
+      scheduleReconnect: () => client.scheduleReconnect(),
+    };
   }
 
   /**

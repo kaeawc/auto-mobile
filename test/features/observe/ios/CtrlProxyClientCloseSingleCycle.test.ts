@@ -3,6 +3,7 @@ import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { BootedDevice } from "../../../../src/models";
 import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { createJsonFakeFetch } from "../../../fakes/FakeFetch";
 import { drainUntil } from "../../../helpers/fakeTimerStepping";
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 
@@ -50,10 +51,7 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
     // onConnectionEstablished(). Stub fetch so the unit test makes no real
     // network call and leaks no polling handles into sibling suites.
     originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => ({
-      ok: true,
-      json: async () => [],
-    })) as unknown as typeof fetch;
+    globalThis.fetch = createJsonFakeFetch(() => []);
   });
 
   afterEach(async () => {
@@ -179,9 +177,7 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
 
     const replacementConnection = client.ensureConnected();
     await flushSetImmediate();
-    const lifecycle = client as unknown as {
-      pendingConnectAbort: { socket: FakeWebSocket } | null;
-    };
+    const lifecycle = client.testHooks;
     expect(lifecycle.pendingConnectAbort?.socket).toBe(sockets[1]);
 
     sockets[0].emit("close");
@@ -211,11 +207,7 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
     expect(await client.ensureConnected()).toBe(true);
     // A drag stays a plain rejecting request; swipe reports a closed socket as unconfirmed (#9972).
     const request = client.requestDrag(0, 0, 10, 10, 0, 300, 0, 60_000);
-    const requestManager = (
-      client as unknown as {
-        requestManager: { getPendingCount(): number };
-      }
-    ).requestManager;
+    const requestManager = client.testHooks.requestManager;
     // Microtasks only: a real turn would let auto-advance expire the request first.
     await drainUntil(() => requestManager.getPendingCount() === 1, {
       description: "the drag request to register",

@@ -154,7 +154,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
       }),
     );
 
-    expect((result.hierarchy.node as any).$["semantic-links"]).toEqual([
+    expect(result.hierarchy.node?.$?.["semantic-links"]).toEqual([
       { text: "Terms of Service", occurrence: 0 },
     ]);
   });
@@ -868,7 +868,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
       { nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 0 },
     ];
     for (const partial of partials) {
-      const result = subject.convertToViewHierarchyResult({ ...base, ...partial } as any);
+      const result = subject.convertToViewHierarchyResult({ ...base, ...partial });
       expect("nativeScale" in result).toBe(false);
       expect("pixelWidth" in result).toBe(false);
       expect("pixelHeight" in result).toBe(false);

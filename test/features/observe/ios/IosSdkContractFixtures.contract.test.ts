@@ -6,6 +6,7 @@ import {
   DefaultIosSdkEventIngestor,
   type IosTelemetryRecorder,
 } from "../../../../src/features/observe/ios/IosSdkEventIngestor";
+import type { NavigationEvent } from "../../../../src/utils/interfaces/NavigationGraph";
 import { FakeFailureRecorder } from "../../../fakes/FakeFailureRecorder";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { createSuccessWebSocketFactory } from "../../../fakes/FakeWebSocket";
@@ -41,52 +42,68 @@ function decodeFixture(name: string): DecodedEvent {
     createSuccessWebSocketFactory(timer),
     timer,
   );
-  const decoder = client as unknown as {
-    decodeSdkEventBatches(batches: FixtureBatch[], generation: number): DecodedEvent[];
-  };
-  const events = decoder.decodeSdkEventBatches([batch], 0);
+  const events = client.testHooks.decodeSdkEventBatches([batch], 0);
   expect(events).toHaveLength(1);
   expect(events[0].applicationId).toBe(batch.bundleId);
   expect(events[0].eventType).toBe(batch.events[0].eventType);
   return events[0];
 }
 
-async function ingest(event: DecodedEvent): Promise<{
+type RecordedCalls = {
   navigation: Record<string, unknown>[];
-  graph: Record<string, unknown>[];
+  graph: NavigationEvent[];
   os: Record<string, unknown>[];
   storage: Record<string, unknown>[];
-}> {
-  const calls = {
-    navigation: [] as Record<string, unknown>[],
-    graph: [] as Record<string, unknown>[],
-    os: [] as Record<string, unknown>[],
-    storage: [] as Record<string, unknown>[],
-  };
+};
+
+/** Records the telemetry calls the contract tests assert on; the rest are no-ops. */
+class ContractRecorder implements IosTelemetryRecorder {
+  constructor(
+    private readonly calls: RecordedCalls,
+    private readonly readContext: () => { deviceId: string | null; sessionId: string | null },
+    private readonly writeContext: (next: {
+      deviceId: string | null;
+      sessionId: string | null;
+    }) => void,
+  ) {}
+  getContext(): { deviceId: string | null; sessionId: string | null } {
+    return this.readContext();
+  }
+  setContext(deviceId: string | null, sessionId: string | null): void {
+    this.writeContext({ deviceId, sessionId });
+  }
+  async recordNavigationEvent(value: Parameters<IosTelemetryRecorder["recordNavigationEvent"]>[0]) {
+    this.calls.navigation.push(value);
+  }
+  async recordOsEvent(value: Parameters<IosTelemetryRecorder["recordOsEvent"]>[0]) {
+    this.calls.os.push(value);
+  }
+  async recordStorageEvent(value: Parameters<IosTelemetryRecorder["recordStorageEvent"]>[0]) {
+    this.calls.storage.push(value);
+  }
+  async recordNetworkEvent(): Promise<void> {}
+  async recordLogEvent(): Promise<void> {}
+  async recordLayoutEvent(): Promise<void> {}
+}
+
+async function ingest(event: DecodedEvent): Promise<RecordedCalls> {
+  const calls: RecordedCalls = { navigation: [], graph: [], os: [], storage: [] };
   let context: { deviceId: string | null; sessionId: string | null } = {
     deviceId: null,
     sessionId: null,
   };
-  const recorder = {
-    getContext: () => context,
-    setContext: (deviceId: string | null, sessionId: string | null) => {
-      context = { deviceId, sessionId };
+  const recorder = new ContractRecorder(
+    calls,
+    () => context,
+    (next) => {
+      context = next;
     },
-    recordNavigationEvent: async (value: Record<string, unknown>) => {
-      calls.navigation.push(value);
-    },
-    recordOsEvent: async (value: Record<string, unknown>) => {
-      calls.os.push(value);
-    },
-    recordStorageEvent: async (value: Record<string, unknown>) => {
-      calls.storage.push(value);
-    },
-  } as unknown as IosTelemetryRecorder;
+  );
   const ingestor = new DefaultIosSdkEventIngestor({
     deviceId: "fixture-device",
     getNavigationGraphManager: () => ({
       recordNavigationEvent: async (value) => {
-        calls.graph.push(value as unknown as Record<string, unknown>);
+        calls.graph.push(value);
       },
       updateNodeScreenshot: async () => {},
     }),

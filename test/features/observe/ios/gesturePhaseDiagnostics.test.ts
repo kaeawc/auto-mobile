@@ -133,10 +133,7 @@ describe("iOS gesture phase diagnostics", () => {
       createSuccessWebSocketFactory(timer),
       timer,
     );
-    const boundary = client as unknown as {
-      requestManager: RequestManager;
-      processMessage(message: WebSocketMessage): void;
-    };
+    const boundary = client.testHooks;
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     try {
@@ -170,10 +167,7 @@ describe("iOS gesture phase diagnostics", () => {
       createSuccessWebSocketFactory(timer),
       timer,
     );
-    const boundary = client as unknown as {
-      requestManager: RequestManager;
-      processMessage(message: WebSocketMessage): void;
-    };
+    const boundary = client.testHooks;
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     try {
       const pending = boundary.requestManager.register(

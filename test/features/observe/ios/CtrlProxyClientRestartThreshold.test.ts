@@ -373,7 +373,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
     const waiting = client.awaitRecovery(20_000);
     expect(await client.ensureConnected()).toBe(true);
     await timer.advanceTimeAsync(2000);
-    expect((client as any).pendingRestartToken).toBeDefined();
+    expect(client.testHooks.pendingRestartToken).toBeDefined();
     sockets[0]!.terminate();
     await new Promise<void>((resolve) => setImmediate(resolve));
     releaseRestart!();
@@ -483,7 +483,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
           releases.push(() => resolve([]));
         }),
     );
-    const internals = client as any;
+    const internals = client.testHooks;
     client.ensureRecoveryStarted();
     const first = internals.recoveryPromise;
     expect(releases).toHaveLength(1);

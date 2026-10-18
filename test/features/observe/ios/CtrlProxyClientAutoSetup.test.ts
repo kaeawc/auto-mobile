@@ -151,9 +151,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     const sameClient = IOSCtrlProxyClient.getInstance(testDevice, 8767);
 
     expect(sameClient).toBe(client);
-    expect((sameClient as unknown as { getWebSocketUrl: () => string }).getWebSocketUrl()).toBe(
-      "ws://127.0.0.1:8767/ws",
-    );
+    expect(sameClient.testHooks.getWebSocketUrl()).toBe("ws://127.0.0.1:8767/ws");
 
     await client.close();
   });
@@ -174,7 +172,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
 
     expect(await client.ensureConnected()).toBe(true);
 
-    (client as unknown as { updatePort: (port: number) => void }).updatePort(8767);
+    client.testHooks.updatePort(8767);
 
     expect(await client.ensureConnected()).toBe(true);
     expect(urls).toEqual(["ws://127.0.0.1:8765/ws", "ws://127.0.0.1:8767/ws"]);
@@ -204,15 +202,12 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     // Exercise the base-class connect directly so the assertion targets the
     // generation guard without the iOS auto-setup wrapper reacting to a failed
     // handshake.
-    const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
-      .connectWebSocket;
-    const updatePort = (
-      client as unknown as { updatePort: (port: number) => void }
-    ).updatePort.bind(client);
+    const connect = client.testHooks.connectWebSocket;
+    const updatePort = client.testHooks.updatePort;
     try {
       // Start a connect and let it reach the in-flight state: socket CONNECTING,
       // this.ws still null, isConnecting true. The URL was built from the old port.
-      const connectPromise = connect.call(client);
+      const connectPromise = connect();
       await flushPromises(8);
       expect(sockets.length).toBe(1);
       expect(sockets[0].url).toBe("ws://127.0.0.1:8765/ws");
@@ -232,7 +227,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
 
       // AC2: a fresh connect targets the NEW port and succeeds — no wedged
       // isConnecting / stale-port state left behind.
-      const secondPromise = connect.call(client);
+      const secondPromise = connect();
       await flushPromises(8);
       const latest = sockets[sockets.length - 1];
       expect(sockets.length).toBe(2);
@@ -274,15 +269,14 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       manualTimer,
       createManagerFactory(),
     );
-    const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
-      .connectWebSocket;
+    const connect = client.testHooks.connectWebSocket;
     try {
-      const first = connect.call(client);
+      const first = connect();
       await flushPromises(8);
       manualTimer.advanceTime(5_000);
       await expect(first).resolves.toBe(false);
 
-      const replacement = connect.call(client);
+      const replacement = connect();
       await flushPromises(8);
       expect(sockets).toHaveLength(2);
       sockets[1].readyState = WebSocketState.OPEN;
@@ -320,15 +314,12 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       manualTimer,
       createManagerFactory(),
     );
-    const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
-      .connectWebSocket;
-    const updatePort = (
-      client as unknown as { updatePort: (port: number) => void }
-    ).updatePort.bind(client);
+    const connect = client.testHooks.connectWebSocket;
+    const updatePort = client.testHooks.updatePort;
     try {
       // Start a connect and let it reach the in-flight state: socket CONNECTING,
       // this.ws still null, isConnecting true, emitting nothing.
-      const connectPromise = connect.call(client);
+      const connectPromise = connect();
       await flushPromises(8);
       expect(sockets.length).toBe(1);
       expect(sockets[0].url).toBe("ws://127.0.0.1:8765/ws");
@@ -347,7 +338,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       // any 5s stall. Before the fix, isConnecting stayed true, so this connect
       // took the "connection already in progress, waiting…" branch and polled a
       // frozen timer forever — no second socket would ever be created.
-      const secondPromise = connect.call(client);
+      const secondPromise = connect();
       await flushPromises(8);
       expect(sockets.length).toBe(2);
       const latest = sockets[sockets.length - 1];
@@ -382,18 +373,15 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       manualTimer,
       createManagerFactory(),
     );
-    const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
-      .connectWebSocket;
-    const updatePort = (
-      client as unknown as { updatePort: (port: number) => void }
-    ).updatePort.bind(client);
+    const connect = client.testHooks.connectWebSocket;
+    const updatePort = client.testHooks.updatePort;
     try {
       // Exhaust the attempt budget against the old port (default max is 3).
       for (let i = 0; i < 3; i += 1) {
-        expect(await connect.call(client)).toBe(false);
+        expect(await connect()).toBe(false);
       }
       // Now cooled down: another old-port connect is refused without dialing.
-      expect(await connect.call(client)).toBe(false);
+      expect(await connect()).toBe(false);
       expect(client.getReconnectStatus()).not.toBeNull();
 
       // A real port change resets the per-endpoint budget...
@@ -402,7 +390,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
 
       // ...so a fresh connect to the new port succeeds immediately — no waiting out
       // the old port's cooldown.
-      expect(await connect.call(client)).toBe(true);
+      expect(await connect()).toBe(true);
       expect(client.isConnected()).toBe(true);
     } finally {
       await client.close();

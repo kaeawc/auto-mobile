@@ -46,6 +46,8 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
   private shouldForceRestartFail: boolean = false;
   private shouldIsRunningFail: boolean = false;
   private lastSetupMinimumHealthPollDurationMs: number | undefined;
+  private setupResultOverride: CtrlProxyIosSetupResult | null = null;
+  private recoveryInFlight = false;
 
   // MARK: - Configuration Methods
 
@@ -103,6 +105,20 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   setSetupShouldFail(shouldFail: boolean): void {
     this.shouldSetupFail = shouldFail;
+  }
+
+  /**
+   * Make setup() return exactly this result (takes precedence over every other setup mode).
+   */
+  setSetupResult(result: CtrlProxyIosSetupResult | null): void {
+    this.setupResultOverride = result;
+  }
+
+  /**
+   * Set what isRecoveryInFlight() reports.
+   */
+  setRecoveryInFlight(inFlight: boolean): void {
+    this.recoveryInFlight = inFlight;
   }
 
   /**
@@ -221,6 +237,10 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
     this.executedOperations.push(`setup:force=${force}`);
     this.lastSetupMinimumHealthPollDurationMs = minimumHealthPollDurationMs;
 
+    if (this.setupResultOverride) {
+      return this.setupResultOverride;
+    }
+
     if (this.shouldSetupFail) {
       return {
         success: false,
@@ -265,6 +285,10 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     this.runningState = true;
+  }
+
+  isRecoveryInFlight(): boolean {
+    return this.recoveryInFlight;
   }
 
   resetSetupState(): void {

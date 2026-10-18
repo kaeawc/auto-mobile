@@ -21,7 +21,16 @@ import { throwIfAborted } from "../../../utils/toolUtils";
 import { hasIosHeaderTrait } from "./semanticRoles";
 import { IOS_WINDOW_LAYER_EXTRA } from "./iosWindowLayer";
 import { maxObservationAgeMs } from "../observationFreshness";
-import { assignIosStableViewIds, GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
+import { assignIosStableViewIds } from "../android/StableNodeIdentity";
+import {
+  hasContentProperties,
+  hasStandaloneContentProperties,
+  hasStateProperties,
+  isRedundantStaticTextChild,
+  noiseSiblingKey,
+  normalizedText,
+  type ConvertedNode,
+} from "./ctrlProxyNodePredicates";
 import type {
   HierarchyDelegateContext,
   CtrlProxyNode,
@@ -35,13 +44,6 @@ import {
   resolveAccessibilityHierarchyArgs,
   type AccessibilityHierarchyRequest,
 } from "../hierarchyReadArgs";
-
-/** Converted node format — `$` carries standard attributes, `extras` carries SDK walker data. */
-interface ConvertedNode {
-  $: Record<string, unknown>;
-  extras?: Record<string, string>;
-  node?: ConvertedNode[];
-}
 
 /**
  * Default per-request timeout for fetching the iOS accessibility hierarchy —
@@ -1053,17 +1055,6 @@ export class CtrlProxyHierarchy {
   }
 
   /**
-   * Check if a node has meaningful content (text, identifier, test-tag)
-   */
-  private hasContentProperties(attrs: Record<string, unknown>): boolean {
-    const contentFields = ["text", "value", "resource-id", "content-desc", "test-tag", "role"];
-    return Boolean(
-      contentFields.some((field) => attrs[field] && attrs[field] !== "") ||
-      this.hasMeaningfulViewId(attrs),
-    );
-  }
-
-  /**
    * Check if a node has meaningful interaction properties
    * Note: iOS marks many containers as clickable, so we're more selective here
    */
@@ -1086,7 +1077,7 @@ export class CtrlProxyHierarchy {
       className === "UIWindow" || className === "UIView" || className === "UIImageView";
 
     // Not a wrapper if it has content or is focused/selected/scrollable
-    if (this.hasContentProperties(attrs) || this.hasInteractionProperties(attrs)) {
+    if (hasContentProperties(attrs) || this.hasInteractionProperties(attrs)) {
       return false;
     }
 
@@ -1292,7 +1283,7 @@ export class CtrlProxyHierarchy {
     attrs: Record<string, unknown>,
     children: ConvertedNode[],
   ): boolean {
-    const hasContent = this.hasContentProperties(attrs);
+    const hasContent = hasContentProperties(attrs);
     const hasInteraction = this.hasInteractionProperties(attrs);
     const isClickable = attrs["clickable"] === "true";
     return (
@@ -1315,8 +1306,8 @@ export class CtrlProxyHierarchy {
       !node.node?.length &&
       !node.extras &&
       !protectedFields.some((field) => Boolean(attrs[field])) &&
-      !this.hasStandaloneContentProperties(attrs) &&
-      !this.hasStateProperties(attrs) &&
+      !hasStandaloneContentProperties(attrs) &&
+      !hasStateProperties(attrs) &&
       attrs["long-clickable"] !== "true" &&
       attrs["checkable"] !== "true"
     );
@@ -1327,7 +1318,7 @@ export class CtrlProxyHierarchy {
     const result: ConvertedNode[] = [];
 
     for (const child of children) {
-      const key = this.noiseSiblingKey(child);
+      const key = noiseSiblingKey(child);
       if (key) {
         if (seen.has(key)) {
           continue;
@@ -1344,12 +1335,12 @@ export class CtrlProxyHierarchy {
     parentAttrs: Record<string, unknown>,
     children: ConvertedNode[],
   ): ConvertedNode[] {
-    const parentText = this.normalizedText(parentAttrs["text"]);
+    const parentText = normalizedText(parentAttrs["text"]);
     if (!parentText || !this.canOwnStaticText(parentAttrs)) {
       return children;
     }
 
-    return children.filter((child) => !this.isRedundantStaticTextChild(parentText, child));
+    return children.filter((child) => !isRedundantStaticTextChild(parentText, child));
   }
 
   private canOwnStaticText(attrs: Record<string, unknown>): boolean {
@@ -1357,102 +1348,5 @@ export class CtrlProxyHierarchy {
     return (
       attrs["clickable"] === "true" || role === "button" || role === "link" || role === "listitem"
     );
-  }
-
-  private hasChildrenOrExtras(node: ConvertedNode): boolean {
-    if (node.node && node.node.length > 0) {
-      return true;
-    }
-    if (node.extras && Object.keys(node.extras).length > 0) {
-      return true;
-    }
-    return false;
-  }
-
-  private isRedundantStaticTextChild(parentText: string, child: ConvertedNode): boolean {
-    if (this.hasChildrenOrExtras(child)) {
-      return false;
-    }
-
-    const attrs = nodeAttributes(child);
-    const className = typeof attrs["class"] === "string" ? attrs["class"] : "";
-    const role = typeof attrs["role"] === "string" ? attrs["role"] : "";
-    if (className !== "UILabel" || (role !== "" && role !== "text")) {
-      return false;
-    }
-    if (this.normalizedText(attrs["text"]) !== parentText) {
-      return false;
-    }
-    if (Array.isArray(attrs["actions"]) && attrs["actions"].length > 0) {
-      return false;
-    }
-    if (this.hasStateProperties(attrs) || this.hasDirectActionProperties(attrs)) {
-      return false;
-    }
-
-    return !this.hasStandaloneContentProperties(attrs);
-  }
-
-  private hasStandaloneContentProperties(attrs: Record<string, unknown>): boolean {
-    return Boolean(
-      (attrs["value"] && attrs["value"] !== "") ||
-      (attrs["resource-id"] && attrs["resource-id"] !== "") ||
-      (attrs["content-desc"] && attrs["content-desc"] !== "") ||
-      (attrs["test-tag"] && attrs["test-tag"] !== "") ||
-      this.hasMeaningfulViewId(attrs),
-    );
-  }
-
-  private hasMeaningfulViewId(attrs: Record<string, unknown>): boolean {
-    const viewId = attrs["view-id"];
-    return typeof viewId === "string" && viewId !== "" && !GENERATED_VIEW_ID_PATTERN.test(viewId);
-  }
-
-  private hasDirectActionProperties(attrs: Record<string, unknown>): boolean {
-    return Boolean(
-      attrs["clickable"] === "true" ||
-      attrs["focusable"] === "true" ||
-      attrs["long-clickable"] === "true" ||
-      attrs["checkable"] === "true",
-    );
-  }
-
-  private hasStateProperties(attrs: Record<string, unknown>): boolean {
-    return Boolean(
-      attrs["scrollable"] === "true" ||
-      attrs["focused"] === "true" ||
-      attrs["accessibility-focused"] === "true" ||
-      attrs["selected"] === "true" ||
-      attrs["checked"] === "true",
-    );
-  }
-
-  private normalizedText(value: unknown): string {
-    return typeof value === "string" ? value.trim() : "";
-  }
-
-  private noiseSiblingKey(node: ConvertedNode): string | null {
-    if (this.hasChildrenOrExtras(node)) {
-      return null;
-    }
-
-    const attrs = nodeAttributes(node);
-    if (Array.isArray(attrs["actions"]) && attrs["actions"].length > 0) {
-      return null;
-    }
-    if (this.hasStateProperties(attrs)) {
-      return null;
-    }
-
-    const text = typeof attrs["text"] === "string" ? attrs["text"].trim().toLowerCase() : "";
-    const isKnownNoise = text.includes("scroll bar") || text === "dictate" || text === "dictation";
-    if (!isKnownNoise) {
-      return null;
-    }
-
-    return JSON.stringify([
-      ...["class", "text", "resource-id"].map((field) => attrs[field] ?? ""),
-      attrs["bounds"] ?? null,
-    ]);
   }
 }

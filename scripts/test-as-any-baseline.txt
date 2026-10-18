@@ -126,9 +126,7 @@
 2	test/features/observe/collectors/DeviceStateCollector.test.ts
 17	test/features/observe/collectors/HierarchyCollector.test.ts
 1	test/features/observe/freshnessRegressionRepro.test.ts
-2	test/features/observe/ios/CtrlProxyClientRestartThreshold.test.ts
 1	test/features/observe/ios/CtrlProxyGestures.test.ts
-2	test/features/observe/ios/CtrlProxyHierarchy.test.ts
 1	test/features/observe/ios/IosScreenIdentity.test.ts
 1	test/features/observe/ios/ctrlProxyRequestSnapshots.test.ts
 1	test/features/observe/shared/SharedGestureDelegate.test.ts

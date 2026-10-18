@@ -3,6 +3,8 @@ import type {
   NativeHelperRecordStore,
 } from "../../src/utils/nativeHelpers/NativeHelperRecordStore";
 
+import { compareCodeUnits } from "../../src/utils/io";
+
 export class FakeNativeHelperRecordStore implements NativeHelperRecordStore {
   readonly records = new Map<number, NativeHelperRecord>();
   write(record: NativeHelperRecord): void {
@@ -17,6 +19,9 @@ export class FakeNativeHelperRecordStore implements NativeHelperRecordStore {
     }
   }
   list(): NativeHelperRecord[] {
-    return [...this.records.values()];
+    // The file store lists `<pid>.json` names in code-unit order, so "1000" sorts before "95".
+    return [...this.records.values()]
+      .sort((a, b) => compareCodeUnits(`${a.pid}.json`, `${b.pid}.json`))
+      .map((record) => ({ ...record }));
   }
 }

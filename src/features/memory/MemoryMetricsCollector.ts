@@ -119,8 +119,10 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
 
   /**
    * Parse dumpsys meminfo output
+   *
+   * Public (not private) so unit tests call this pure parser directly instead of casting.
    */
-  private parseMeminfo(output: string): {
+  parseMeminfo(output: string): {
     javaHeapMb: number;
     nativeHeapMb: number;
     totalPssMb: number;
@@ -321,8 +323,10 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
    * process's GC to the audited one. `startTimestamp`/`endTimestamp` are applied the same way:
    * a line with a parseable epoch timestamp outside the window is dropped; a line with no
    * timestamp (e.g. a bare fixture without the logcat prefix) is kept for backward compatibility.
+   *
+   * Public (not private) so unit tests call this pure parser directly instead of casting.
    */
-  private parseGCEvents(
+  parseGCEvents(
     output: string,
     startTimestamp: number,
     endTimestamp: number,
@@ -501,8 +505,10 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
 
   /**
    * Parse unreachable objects from dumpsys output
+   *
+   * Public (not private) so unit tests call this pure parser directly instead of casting.
    */
-  private parseUnreachableObjects(output: string): UnreachableObjectsInfo {
+  parseUnreachableObjects(output: string): UnreachableObjectsInfo {
     // Pattern: "Unreachable memory: 123 bytes in 45 unreachable objects"
     const unreachableMatch = output.match(
       /Unreachable memory:\s+(\d+)\s+bytes in\s+(\d+)\s+unreachable objects/i,

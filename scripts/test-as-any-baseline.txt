@@ -58,7 +58,7 @@
 15	test/features/action/InputText.execute.test.ts
 4	test/features/action/InputText.test.ts
 3	test/features/action/Keyboard.test.ts
-104	test/features/action/LaunchApp.test.ts
+15	test/features/action/LaunchApp.test.ts
 22	test/features/action/OpenURL.test.ts
 46	test/features/action/PinchOn.test.ts
 10	test/features/action/PinchOn.visionFallback.test.ts
@@ -110,7 +110,6 @@
 1	test/features/element-resolution/HierarchyNormalization.test.ts
 4	test/features/failures/FailureRecorder.test.ts
 9	test/features/memory/MemoryAudit.test.ts
-57	test/features/memory/MemoryMetricsCollector.test.ts
 47	test/features/navigation/Explore.test.ts
 24	test/features/navigation/ExploreElementScoring.test.ts
 2	test/features/navigation/navigateToInternalNoDiffE2E.test.ts

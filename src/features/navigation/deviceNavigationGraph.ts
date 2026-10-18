@@ -1,7 +1,7 @@
 import type { BootedDevice } from "../../models";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
-import { NavigationGraphManager } from "./NavigationGraphManager";
+import { NavigationGraphManager, type NavigationGraphService } from "./NavigationGraphManager";
 
 /** The device identity needed to find the session its navigation events are recorded for. */
 export type NavigationDeviceRef = Pick<BootedDevice, "deviceId" | "platform">;
@@ -9,8 +9,8 @@ export type NavigationDeviceRef = Pick<BootedDevice, "deviceId" | "platform">;
 /** The session a device's CtrlProxy client is currently bound to, or null when unbound. */
 export type BoundSessionLookup = (device: NavigationDeviceRef) => string | null;
 
-/** Picks the NavigationGraphManager a device's navigation state lives on. */
-export type NavigationGraphResolver = (device?: NavigationDeviceRef) => NavigationGraphManager;
+/** Picks the NavigationGraphService a device's navigation state lives on. */
+export type NavigationGraphResolver = (device?: NavigationDeviceRef) => NavigationGraphService;
 
 /**
  * The session the device's existing CtrlProxy client records navigation events for

@@ -6,7 +6,7 @@
 import type { BootedDevice } from "../../../models";
 import type {
   NavigationBuildContext,
-  NavigationGraphManager,
+  NavigationGraphService,
 } from "../../navigation/NavigationGraphManager";
 import {
   createContentHashProvider,
@@ -24,7 +24,7 @@ export interface AndroidBuildContextContext {
   readonly adb: AdbExecutor;
   readonly timer: Pick<Timer, "setTimeout">;
   getNavigationGraphManager(): Pick<
-    NavigationGraphManager,
+    NavigationGraphService,
     "setBuildContext" | "clearBuildContext"
   >;
   requestPackageInfo(

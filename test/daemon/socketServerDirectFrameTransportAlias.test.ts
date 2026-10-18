@@ -1,4 +1,3 @@
-import type { Client } from "@modelcontextprotocol/client";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -20,6 +19,8 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { createAndroidTestClient } from "../helpers/androidCtrlProxyClientSpies";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
 import { spyOnIosClientFactory } from "../helpers/iosCtrlProxyClientSpies";
 
 /**
@@ -112,22 +113,22 @@ describe("a direct frame naming a held handset by its other transport id", () =>
 
     // The direct frames discover through the process device manager: the raw `adb devices` rows.
     PlatformDeviceManagerFactory.setInstance(manager);
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation((device) => ({
-      getScreenScaleMetadata: () => null,
-      requestTapCoordinates: async (
-        ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
-      ) => {
-        args[6]?.();
-        driven.push(`tap:${device.deviceId}`);
-        return { success: true };
-      },
-      setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
-        if (typeof args[5] === "object") {
-          args[5].onDispatch?.();
-        }
-        driven.push(`setPreference:${device.deviceId}`);
-      },
-    }));
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation((device) =>
+      createAndroidTestClient(device, {
+        getScreenScaleMetadata: () => null,
+        requestTapCoordinates: async (...args) => {
+          args[6]?.();
+          driven.push(`tap:${device.deviceId}`);
+          return { success: true, totalTimeMs: 0 };
+        },
+        setPreference: async (...args) => {
+          if (typeof args[5] === "object") {
+            args[5].onDispatch?.();
+          }
+          driven.push(`setPreference:${device.deviceId}`);
+        },
+      }),
+    );
     spyOnIosClientFactory((device) => ({
       getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
       requestTapCoordinates: async (
@@ -144,27 +145,28 @@ describe("a direct frame naming a held handset by its other transport id", () =>
         driven.push(`ios-setPreference:${device.deviceId}`);
       },
     }));
-    spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
-      (device) =>
-        ({
-          ensureCompatibleVersion: async () => {
-            driven.push(`updateService:${device.deviceId}`);
-            return { status: "compatible" };
-          },
-        }) as unknown as AndroidCtrlProxyManager,
-    );
+    spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation((device) => {
+      const proxyManager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        device,
+        new FakeAdbExecutor(),
+      );
+      spyOn(proxyManager, "ensureCompatibleVersion").mockImplementation(async () => {
+        driven.push(`updateService:${device.deviceId}`);
+        return { status: "compatible" };
+      });
+      return proxyManager;
+    });
     DaemonState.getInstance().initialize(sessionManager, pool);
     wire = InMemoryControlSocket.attach({
       timer,
       connectionIds: new FakeIdGenerator(),
       loopback: async () =>
-        ({
-          readResource: async ({ uri }: { uri: string }) => {
+        new StubMcpClient({
+          readResource: async ({ uri }) => {
             reads.push(uri);
             return { contents: [{ uri, mimeType: "image/png", blob: "fake-screenshot" }] };
           },
-          close: async () => {},
-        }) as unknown as Client,
+        }),
       startupOptions: {
         sessionToolSelectionService: { isEnabled: async () => true, setEnabled: async () => {} },
       },

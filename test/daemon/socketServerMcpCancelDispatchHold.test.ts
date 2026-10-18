@@ -1,14 +1,19 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
 import { describe, expect, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INTERNAL_LIVE_DEADLINE_KEY_PARAM } from "../../src/daemon/constants";
 import { getLiveTextRequestState } from "../../src/daemon/liveDeadlineRegistry";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
-import { type UnixSocketServer } from "../../src/daemon/socketServer";
+import type { CallToolResult } from "@modelcontextprotocol/client";
 import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { createFakeDaemonState } from "./helpers/inputSocketHarness";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
+import {
+  createHarnessServer,
+  type UnixSocketServerHarness,
+} from "./helpers/UnixSocketServerHarness";
 
 let socketCounter = 0;
 
@@ -18,38 +23,12 @@ let socketCounter = 0;
  * `input/*` frames do through dispatchedRequestHold (#11967). The loopback SDK call rejects at once
  * on abort, so without a hold the next queued call interleaves with the still-writing tool.
  */
-function createServer(timer: FakeTimer): UnixSocketServer {
-  return createTestUnixSocketServer(
+function createServer(timer: FakeTimer): UnixSocketServerHarness {
+  return createHarnessServer(
     join(tmpdir(), `cancel-dispatch-hold-${++socketCounter}.sock`),
-    {
-      isInitialized: () => true,
-      getSessionManager: () => ({
-        getSession: () => null,
-        getDeviceLabels: () => undefined,
-        releaseSession: async () => null,
-      }),
-      getDevicePool: () => ({
-        refreshDevices: async () => 0,
-        getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
-        releaseDevice: async () => {},
-        resolveAutolockSessionForMcpSession: () => undefined,
-      }),
-    },
+    createFakeDaemonState(),
     timer,
   );
-}
-
-interface Internals {
-  runKeyedMcpForward: <T>(key: string, fn: () => Promise<T>) => Promise<T>;
-  handleIdeRequest: (
-    client: unknown,
-    request: DaemonRequest,
-    timeoutMs: number,
-    socketSessionId: string,
-    deadline: ProgressExtendableDeadline,
-    originalTimeoutMs: number,
-    signal?: AbortSignal,
-  ) => Promise<unknown>;
 }
 
 const TIMEOUT_MS = 10_000;
@@ -58,41 +37,37 @@ const KEY = "device:A";
 function setup(dispatchBeforeCancel: boolean) {
   const timer = new FakeTimer();
   const server = createServer(timer);
-  const internals = server as unknown as Internals;
   const controller = new AbortController();
   let completeDispatch: ((confirmed: boolean) => void) | undefined;
-  let replyTool: ((value: unknown) => void) | undefined;
+  let replyTool: ((value: CallToolResult) => void) | undefined;
   let liveKey: string | undefined;
   let toolStarted = false;
   // Mirrors the SDK client: abort rejects the call at once, the tool keeps running in-process.
-  const client = {
-    callTool: (
-      params: { arguments: Record<string, unknown> },
-      options: { signal?: AbortSignal },
-    ) => {
+  const client = new StubMcpClient({
+    callTool: (params, options) => {
       toolStarted = true;
-      liveKey = String(params.arguments[INTERNAL_LIVE_DEADLINE_KEY_PARAM]);
+      liveKey = String(params.arguments?.[INTERNAL_LIVE_DEADLINE_KEY_PARAM]);
       const state = getLiveTextRequestState(liveKey);
       if (dispatchBeforeCancel) {
         completeDispatch = state?.dispatched();
       }
-      return new Promise((resolve, reject) => {
+      return new Promise<CallToolResult>((resolve, reject) => {
         replyTool = resolve;
-        options.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+        options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
           once: true,
         });
       });
     },
-  };
+  });
   const request: DaemonRequest = {
     id: "call-1",
     type: "mcp_request",
     method: "tools/call",
     params: { name: "inputText", arguments: { text: "hi", deviceId: "A" } },
   };
-  const first = internals
-    .runKeyedMcpForward(KEY, () =>
-      internals.handleIdeRequest(
+  const first = server
+    .runKeyedForward(KEY, () =>
+      server.forwardIdeRequest(
         client,
         request,
         TIMEOUT_MS,
@@ -107,7 +82,7 @@ function setup(dispatchBeforeCancel: boolean) {
       (error: unknown) => ({ error }),
     );
   let secondStarted = false;
-  const second = internals.runKeyedMcpForward(KEY, async () => {
+  const second = server.runKeyedForward(KEY, async () => {
     secondStarted = true;
   });
   return {
@@ -118,7 +93,7 @@ function setup(dispatchBeforeCancel: boolean) {
     isToolStarted: () => toolStarted,
     isSecondStarted: () => secondStarted,
     finishTool: () => completeDispatch?.(true),
-    replyTool: (value: unknown) => replyTool?.(value),
+    replyTool: (value: CallToolResult) => replyTool?.(value),
     isStateRegistered: () =>
       liveKey !== undefined && getLiveTextRequestState(liveKey) !== undefined,
   };
@@ -174,7 +149,7 @@ describe("tools/call client cancel after device dispatch (#12393)", () => {
     const t = setup(true);
     await drainMicrotasks(50);
     expect(t.isSecondStarted()).toBe(false);
-    const result = { content: [{ type: "text", text: "typed" }] };
+    const result: CallToolResult = { content: [{ type: "text", text: "typed" }] };
     t.finishTool();
     t.replyTool(result);
     expect(await t.first).toEqual({ value: result });

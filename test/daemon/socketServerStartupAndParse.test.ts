@@ -1,17 +1,12 @@
-import { createTestUnixSocketServer } from "../helpers/createTestUnixSocketServer";
+import { createHarnessServer } from "./helpers/UnixSocketServerHarness";
+import { StubMcpClient } from "./helpers/fakeMcpClient";
+import { createFakeDaemonState } from "./helpers/inputSocketHarness";
 import { describe, expect, spyOn, test } from "bun:test";
-import type { Socket } from "node:net";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DAEMON_CANCEL_REQUEST_METHOD } from "../../src/daemon/constants";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
-
-interface ServerInternals {
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-}
 
 class RpcSocket extends FakeSocket {
   setTimeout(_ms: number): this {
@@ -37,30 +32,21 @@ function deferredStartup() {
 
 function createHarness(startupCompletion: Promise<void>) {
   const timer = new FakeTimer();
-  const state = {
-    isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null }),
-    getDevicePool: () => ({ releaseMcpSessionBindings: () => {} }),
-  } as unknown as DaemonStateAccess;
-  const server = createTestUnixSocketServer("/fake/socket", state, timer, null, {
+  const state = createFakeDaemonState();
+  const server = createHarnessServer("/fake/socket", state, timer, null, {
     startupCompletion,
   });
   let forwarded = 0;
-  server.mcpClientFactory = async () => ({
-    callTool: async () => {
-      forwarded++;
-      return { content: [] };
-    },
-    listTools: async () => ({ tools: [] }),
-    listResources: async () => ({ resources: [] }),
-    readResource: async () => ({ contents: [] }),
-    listResourceTemplates: async () => ({ resourceTemplates: [] }),
-    close: async () => {},
-  });
-  const internals = server as unknown as ServerInternals;
-  internals.acceptingRequests = true;
+  server.mcpClientFactory = async () =>
+    new StubMcpClient({
+      callTool: async () => {
+        forwarded++;
+        return { content: [] };
+      },
+    });
+  server.allowRequests();
   const socket = new RpcSocket();
-  internals.handleConnection(socket as unknown as Socket);
+  server.connect(socket);
   return { socket, timer, forwarded: () => forwarded };
 }
 

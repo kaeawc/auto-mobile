@@ -24,6 +24,9 @@ import { emulatorConsoleReportsFailure } from "../utility/DeviceState";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
 import { OBSERVED_INTERACTION_PROFILES } from "./observedInteractionProfiles";
 
+/** Bound on restoring the emulator acceleration sensor after a shake. */
+const SHAKE_RESTORE_TIMEOUT_MS = 1_000;
+
 // Issue #10250 reports this as the emulator's default resting gravity vector.
 const FALLBACK_RESTING_ACCELERATION = "0:9.77622:0";
 
@@ -200,9 +203,13 @@ export class Shake extends BaseVisualChange {
         raceWithDeadline(
           () =>
             this.adb.executeCommand(`emu sensor set acceleration ${acceleration}`, {
-              timeoutMs: 1000,
+              timeoutMs: SHAKE_RESTORE_TIMEOUT_MS,
             }),
-          { timer: this.shakeTimer, timeoutMs: 1000, label: "Restore shake acceleration" },
+          {
+            timer: this.shakeTimer,
+            timeoutMs: SHAKE_RESTORE_TIMEOUT_MS,
+            label: "Restore shake acceleration",
+          },
         ),
       );
       if (emulatorConsoleReportsFailure(result.stdout, result.stderr)) {

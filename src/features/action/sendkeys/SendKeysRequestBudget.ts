@@ -15,6 +15,9 @@ import type {
   SendKeysSemanticKey,
 } from "../SendKeys";
 
+/** Deadline for an iOS IME interaction request. */
+const IOS_IME_INTERACTION_TIMEOUT_MS = 5_000;
+
 export class SendKeysBudgetError extends Error {
   constructor() {
     super(
@@ -188,7 +191,7 @@ export class SendKeysRequestBudget {
       try {
         return await raceWithDeadline(startInteraction, {
           timer: this.deps.timer,
-          timeoutMs: 5000,
+          timeoutMs: IOS_IME_INTERACTION_TIMEOUT_MS,
           label: "iOS IME interaction",
           timeoutError: () => deadline,
         });

@@ -32,6 +32,9 @@ import {
 import { resolveRotateCall, type RotateCall } from "./ActionCall";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 
+/** Bound on `cmd display get-displays` when enumerating displays. */
+const DISPLAY_LIST_TIMEOUT_MS = 2_000;
+
 export interface RotationRestoreState {
   accelerometerRotation: 0 | 1 | null;
   userRotation: number | null;
@@ -1468,7 +1471,7 @@ export class Rotate extends BaseVisualChange {
     let availableDisplayIds: string[] = [];
     try {
       const displayOutput = await this.adb.executeCommand("shell cmd display get-displays", {
-        timeoutMs: 2000,
+        timeoutMs: DISPLAY_LIST_TIMEOUT_MS,
         noRetry: true,
         signal,
       });

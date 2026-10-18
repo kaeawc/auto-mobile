@@ -25,6 +25,9 @@ import {
 import { selectedDisplayPin } from "../observe/SessionDisplayContext";
 import { INTERMEDIATE_OBSERVATION_OPTIONS } from "./BaseVisualChange";
 
+/** Bound on `cmd display get-displays` when enumerating displays. */
+const DISPLAY_LIST_TIMEOUT_MS = 2_000;
+
 export { buildDisconnectedPanelMessage } from "../../models/DisplayPanel";
 
 async function readActionDisplayInfos(
@@ -34,7 +37,7 @@ async function readActionDisplayInfos(
   throwIfAborted(signal);
   try {
     const output = await adb.executeCommand("shell cmd display get-displays", {
-      timeoutMs: 2000,
+      timeoutMs: DISPLAY_LIST_TIMEOUT_MS,
       noRetry: true,
       signal,
     });

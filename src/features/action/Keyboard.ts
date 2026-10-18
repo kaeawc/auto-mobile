@@ -168,6 +168,7 @@ export class Keyboard {
   // fixed post-action sleep always sampled the stale state (#4238). Poll instead:
   // return as soon as the observed state matches, bounded by the timeout below.
   private static readonly STATE_CONFIRMATION_TIMEOUT_MS = 2_000;
+  private static readonly CLOSE_FOLLOW_UP_DETECT_TIMEOUT_MS = 2_000;
   private static readonly IOS_KEYBOARD_VISIBILITY_TIMEOUT_MS = 2_000;
   private static readonly STATE_CONFIRMATION_POLL_INTERVAL_MS = 100;
   private device: BootedDevice;
@@ -363,11 +364,19 @@ export class Keyboard {
     try {
       throwIfAborted(signal);
       const detected = await awaitWhileRequestIsLive(
-        raceWithDeadline(client.requestKeyboard("detect", 2000, undefined, signal), {
-          timer: this.timer,
-          timeoutMs: 2000,
-          label: "Keyboard close follow-up detect",
-        }),
+        raceWithDeadline(
+          client.requestKeyboard(
+            "detect",
+            Keyboard.CLOSE_FOLLOW_UP_DETECT_TIMEOUT_MS,
+            undefined,
+            signal,
+          ),
+          {
+            timer: this.timer,
+            timeoutMs: Keyboard.CLOSE_FOLLOW_UP_DETECT_TIMEOUT_MS,
+            label: "Keyboard close follow-up detect",
+          },
+        ),
         signal,
       );
       return detected.success && !detected.open;

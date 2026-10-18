@@ -469,7 +469,7 @@ describe("parseStackTrace", () => {
         className: "android.os.MessageQueue",
         methodName: "nativePollOnce",
         fileName: "Native Method",
-        lineNumber: undefined,
+        lineNumber: null,
         isAppCode: false,
       },
     ]);

@@ -7,6 +7,9 @@ import { registerInteractionTools } from "../../src/server/interactionTools";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("ToolRegistry Android session context", () => {
   const androidDeviceA: BootedDevice = {

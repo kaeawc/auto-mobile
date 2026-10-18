@@ -31,6 +31,9 @@ import {
 } from "../helpers/navigationTestHarness";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 describe("Android navigation graph workflow (#4459)", () => {
   const device: BootedDevice = {

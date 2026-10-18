@@ -17,6 +17,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // Inventory contract: every surface reports the same holder for a device. The listDevices tool
 // names the session from the pool's own assignment (`pooled.sessionId`); the booted resource names

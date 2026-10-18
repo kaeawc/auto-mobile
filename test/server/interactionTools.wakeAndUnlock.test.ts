@@ -13,6 +13,9 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { IosLockScreenUnlocker } from "../../src/features/action/IosLockScreenUnlocker";
 import { getStructuredPayload } from "../../src/utils/toolUtils";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const interactionDeps: InteractionToolDependencies = {};
 const handler = cancellationHandlers(["wakeAndUnlock"], interactionDeps);

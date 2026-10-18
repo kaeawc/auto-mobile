@@ -59,9 +59,10 @@ import type { ScreenIdentity } from "../../../models/ObserveResult";
 
 import {
   HostForwardClientConnectionProbe,
-  NoForwardClientConnectionProbe,
   type ForwardClientConnectionProbe,
 } from "./CtrlProxyForwardClientProbe";
+import { NoForwardClientConnectionProbe } from "./NoForwardClientConnectionProbe";
+import { NoOpCtrlProxyForwardLease } from "./NoOpCtrlProxyForwardLease";
 import {
   BootedDevice,
   ImeAction,
@@ -177,11 +178,8 @@ import {
   serializeCtrlProxyRequest,
 } from "./ctrlProxyProtocol";
 import type { StorageSubscription } from "../../storage/storageTypes";
-import {
-  ObserverPendingRequestTimeoutError,
-  WebSocketFactory,
-  defaultWebSocketFactory,
-} from "../DeviceServiceClient";
+import { WebSocketFactory, defaultWebSocketFactory } from "../DeviceServiceClient";
+import { ObserverPendingRequestTimeoutError } from "../ObserverPendingRequestTimeoutError";
 import {
   observationStreamDeviceConnectionLostNotifier,
   type DeviceConnectionLostNotifier,
@@ -194,11 +192,7 @@ import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator
 import { errorMessage } from "../../../utils/describeUnknownError";
 import {} from "../../../utils/screenshot/screenshotFormats";
 import { shellQuote } from "../../../utils/shellQuote";
-import {
-  FileCtrlProxyForwardLease,
-  NoOpCtrlProxyForwardLease,
-  type CtrlProxyForwardLease,
-} from "./CtrlProxyForwardLease";
+import { FileCtrlProxyForwardLease, type CtrlProxyForwardLease } from "./CtrlProxyForwardLease";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";

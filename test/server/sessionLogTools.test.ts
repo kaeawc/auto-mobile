@@ -4,6 +4,9 @@ import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerSessionLogTools } from "../../src/server/sessionLogTools";
 import type { ResetAppLogsRequest, SessionLogService } from "../../src/server/sessionLogService";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 

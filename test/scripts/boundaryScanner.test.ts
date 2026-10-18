@@ -206,6 +206,65 @@ describe("tree rows", () => {
   });
 });
 
+describe("exception-listed tree rows", () => {
+  const treeFile = (path: string, source: string) => ({
+    path,
+    addedLines: new Set<number>(),
+    source,
+  });
+
+  test("ios-ctrl-proxy-process skips documented exceptions and renders bare locations", () => {
+    const pid = 'import { spawn } from "node:child_process"; spawn("ps", ["-p", "1"]);';
+    const found = scan("ios-ctrl-proxy-process", [
+      treeFile("src/devices/hostEmulatorProcessStopper.ts", pid),
+      treeFile("src/y.ts", pid),
+    ]);
+
+    expect(found.map(({ file }) => file)).toEqual(["src/y.ts"]);
+    expect(renderBoundaryResult(row("ios-ctrl-proxy-process"), found).stderr).toMatch(
+      /^src\/y\.ts:1:\d+: spawn\("ps"/,
+    );
+  });
+
+  test("app-bundle-metadata flags aliased codesign and skips the exception", () => {
+    const source = 'const t = "codesign"; hostExec(t, []);';
+
+    expect(
+      scan("app-bundle-metadata", [
+        treeFile("src/utils/ios-cmdline-tools/CtrlProxyCodesignVerifier.ts", source),
+        treeFile("src/y.ts", source),
+      ]).map(({ file }) => file),
+    ).toEqual(["src/y.ts"]);
+  });
+
+  test("child-process-import allows listed importers and flags import, equals and require", () => {
+    const source =
+      'import a from "child_process"; import b = require("node:child_process"); require("child_process");';
+    const found = scan("child-process-import", [
+      treeFile("src/daemon/devicePool.ts", source),
+      treeFile("src/utils/HostCommandExecutor.ts", source),
+      treeFile("src/y.ts", source),
+    ]);
+
+    expect(found.map(({ file, column }) => [file, column])).toEqual([
+      ["src/y.ts", 1],
+      ["src/y.ts", 32],
+      ["src/y.ts", 74],
+    ]);
+    expect(renderBoundaryResult(row("child-process-import"), found).stderr).toContain(
+      "\nsrc/y.ts:1:1\nsrc/y.ts:1:32\n",
+    );
+  });
+
+  test("an empty failureHeader prints the violations alone", () => {
+    const result = renderBoundaryResult(row("ios-ctrl-proxy-process"), [
+      { file: "src/a.ts", line: 1, column: 2, text: "t" },
+    ]);
+
+    expect(result.stderr).toBe("src/a.ts:1:2: t\n");
+  });
+});
+
 describe("renderBoundaryResult", () => {
   test("lists each violating file once for file-report rows", () => {
     const result = renderBoundaryResult(row("security"), [

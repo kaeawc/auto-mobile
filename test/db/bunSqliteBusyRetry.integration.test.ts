@@ -88,9 +88,9 @@ describe("BunSqliteConnectionState BUSY/constraint-aware retry (issue #2874)", (
       random: zeroRandom,
     });
 
-    const result = await state.executeQuery(SELECT, Symbol("owner"));
+    const result = await state.executeQuery<{ v: number }>(SELECT, Symbol("owner"));
 
-    expect(result.rows).toEqual([{ v: 1 }] as any);
+    expect(result.rows).toEqual([{ v: 1 }]);
     expect(invocations()).toBe(2); // one failure + one success
     expect(timer.getSleepHistory().length).toBe(1); // exactly one backoff sleep
   });
@@ -108,7 +108,7 @@ describe("BunSqliteConnectionState BUSY/constraint-aware retry (issue #2874)", (
       random: zeroRandom,
     });
 
-    await state.executeQuery(SELECT, Symbol("owner"));
+    await state.executeQuery<{ v: number }>(SELECT, Symbol("owner"));
     expect(invocations()).toBe(2);
   });
 
@@ -155,7 +155,7 @@ describe("BunSqliteConnectionState BUSY/constraint-aware retry (issue #2874)", (
       random: zeroRandom,
     });
 
-    await state.executeQuery(SELECT, Symbol("owner"));
+    await state.executeQuery<{ v: number }>(SELECT, Symbol("owner"));
     expect(invocations()).toBe(2);
   });
 
@@ -171,7 +171,9 @@ describe("BunSqliteConnectionState BUSY/constraint-aware retry (issue #2874)", (
       random: zeroRandom,
     });
 
-    const error = await state.executeQuery(SELECT, Symbol("owner")).catch((e) => e as Error);
+    const error = await state
+      .executeQuery<{ v: number }>(SELECT, Symbol("owner"))
+      .catch((e) => e as Error);
     expect(error).toBeInstanceOf(Error);
     // The #2793 cause-identity contract: the original SqliteError is reachable.
     expect((error as Error).cause).toBe(busy);
@@ -214,7 +216,7 @@ describe("BunSqliteConnectionState BUSY/constraint-aware retry (issue #2874)", (
       random: zeroRandom,
     });
 
-    await expect(state.executeQuery(SELECT, Symbol("owner"))).rejects.toThrow();
+    await expect(state.executeQuery<{ v: number }>(SELECT, Symbol("owner"))).rejects.toThrow();
     expect(invocations()).toBe(1);
   });
 });

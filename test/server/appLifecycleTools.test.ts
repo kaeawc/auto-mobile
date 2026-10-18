@@ -10,6 +10,9 @@ import type { AppLifecycleResult, BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models";
 import type { AppLifecycleExecutionOptions } from "../../src/features/action/AppLifecycle";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const device: BootedDevice = { deviceId: "fake", name: "Fake", platform: "android" };
 const appId = "com.example.app";

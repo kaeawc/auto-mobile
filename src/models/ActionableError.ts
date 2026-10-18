@@ -1,4 +1,4 @@
-import type { ResolverSelector } from "../server/elementSelectorSchemas";
+import type { ResolverSelector } from "./ResolverSelector";
 import { errorMessage } from "./describeUnknownError";
 // Structural match for ElementResolution.containerFailure from dependency PR #10292.
 export interface ContainerFailure {

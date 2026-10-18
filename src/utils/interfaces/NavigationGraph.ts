@@ -1,3 +1,4 @@
+import type { SelectedElement, SelectedElementDetection } from "../../models/SelectedElement";
 /**
  * Represents a navigation event received from the Android SDK.
  */
@@ -47,18 +48,7 @@ export interface ModalState {
 /**
  * Represents a selected UI element (tab, menu item, etc.) captured at the time of a tool call.
  */
-export interface SelectedElementDetection {
-  method: "accessibility" | "visual";
-  confidence: number;
-  reason?: string;
-}
-
-export interface SelectedElement {
-  text?: string;
-  resourceId?: string;
-  contentDesc?: string;
-  selectedState?: SelectedElementDetection;
-}
+export type { SelectedElement, SelectedElementDetection };
 
 /**
  * Represents scroll position needed to make a navigation element visible.

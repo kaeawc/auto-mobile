@@ -5,10 +5,8 @@ import {
 import { runWithAbortSignal } from "../../../../src/utils/AbortContext";
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyText } from "../../../../src/features/observe/ios/CtrlProxyText";
-import {
-  IosRunnerBusyError,
-  IosRunnerStalledError,
-} from "../../../../src/features/observe/ios/runnerErrorCodes";
+import { IosRunnerBusyError } from "../../../../src/features/observe/ios/runnerErrorCodes";
+import { IosRunnerStalledError } from "../../../../src/features/observe/ios/IosRunnerStalledError";
 import { createIosDelegateHarness } from "../../../helpers/iosDelegateHarness";
 
 describe("iOS text transport safety", () => {

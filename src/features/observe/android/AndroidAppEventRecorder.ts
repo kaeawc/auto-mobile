@@ -226,7 +226,7 @@ export function parseStackTrace(stackTrace: string, packageName: string): StackT
     const match = trimmed.match(/^at\s+([a-zA-Z0-9$_.]+)\.([a-zA-Z0-9$_<>]+)\(([^:)]+):?(\d+)?\)$/);
     if (match) {
       const [, fullClassName, methodName, fileName, lineNumberStr] = match;
-      const lineNumber = lineNumberStr ? parseInt(lineNumberStr, 10) : undefined;
+      const lineNumber = lineNumberStr ? parseInt(lineNumberStr, 10) : null;
 
       const isAppCode =
         fullClassName.startsWith(packageName) ||

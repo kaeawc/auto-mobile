@@ -14,6 +14,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
   for (const cleanupKind of ["setup", "keep-awake", "biometric", "network"] as const) {

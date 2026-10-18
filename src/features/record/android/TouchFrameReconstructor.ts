@@ -100,16 +100,12 @@ export class TouchFrameReconstructor {
             slot.trackingId = -1;
           }
         } else {
-          // New or continuing contact; a new tracking id starts a fresh contact, so per-contact pen
-          // state from the slot's previous occupant must not carry over to it. Tool type and distance
-          // are kept: the kernel only re-sends ABS_MT_TOOL_TYPE / ABS_MT_DISTANCE when they change, so
-          // a second pen contact on the slot arrives without them, and a finger replacing a pen
-          // arrives with an explicit tool type 0.
-          const slot = this.getOrCreateSlot();
-          if (slot.trackingId !== value) {
-            clearPenState(slot);
-          }
-          slot.trackingId = value;
+          // New or continuing contact. Per-slot axes (tool type, distance, tilt) are kept across a
+          // new tracking id: the kernel only re-sends an ABS_MT_* / ABS_TILT_* value when it changes,
+          // so a second pen contact on the slot arrives without them, and a finger replacing a pen
+          // arrives with an explicit tool type 0. Stylus buttons are node-wide and never stored on
+          // the slot, and a finger contact is reported without the retained tilt (withPenState).
+          this.getOrCreateSlot().trackingId = value;
         }
         break;
 
@@ -286,6 +282,9 @@ export class TouchFrameReconstructor {
   private withPenState(slot: TouchSlot): TouchSlot {
     const penSlot = this.options.singleTouch || slot.toolType !== undefined;
     if (!penSlot) {
+      // Tilt is retained per slot for a later pen contact, but a finger never reports it.
+      delete slot.tiltX;
+      delete slot.tiltY;
       return slot;
     }
     if (this.options.singleTouch) {
@@ -332,10 +331,4 @@ export class TouchFrameReconstructor {
       delete slot.unknownAxes;
     }
   }
-}
-
-function clearPenState(slot: TouchSlot): void {
-  delete slot.buttons;
-  delete slot.tiltX;
-  delete slot.tiltY;
 }

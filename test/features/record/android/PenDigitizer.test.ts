@@ -429,6 +429,31 @@ describe("a slot reused by a pen then a finger", () => {
     expect(gestures.map((gesture) => gesture.toolType)).toEqual(["stylus", "stylus"]);
   });
 
+  test("a second pen contact keeps the tilt the kernel does not re-send", () => {
+    const lines = [
+      "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",
+      "[  1.0] EV_ABS    ABS_MT_TOOL_TYPE     00000001",
+      "[  1.0] EV_ABS    ABS_TILT_X           0000000a",
+      "[  1.0] EV_ABS    ABS_TILT_Y           fffffffb",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_X    000001a4",
+      "[  1.0] EV_ABS    ABS_MT_POSITION_Y    000002b0",
+      "[  1.0] EV_SYN    SYN_REPORT           00000000",
+      "[  1.1] EV_ABS    ABS_MT_TRACKING_ID   ffffffff",
+      "[  1.1] EV_SYN    SYN_REPORT           00000000",
+      "[  2.0] EV_ABS    ABS_MT_TRACKING_ID   00000002",
+      "[  2.0] EV_ABS    ABS_MT_POSITION_X    000001b0",
+      "[  2.0] EV_ABS    ABS_MT_POSITION_Y    000002c0",
+      "[  2.0] EV_SYN    SYN_REPORT           00000000",
+    ];
+    const contacts = run(lines).frames.filter((frame) => frame.activeSlots.length > 0);
+    expect(
+      contacts.map((frame) => [frame.activeSlots[0].tiltX, frame.activeSlots[0].tiltY]),
+    ).toEqual([
+      [10, -5],
+      [10, -5],
+    ]);
+  });
+
   test("an explicit finger tool type clears a pen tool type", () => {
     const lines = [
       "[  1.0] EV_ABS    ABS_MT_TRACKING_ID   00000001",

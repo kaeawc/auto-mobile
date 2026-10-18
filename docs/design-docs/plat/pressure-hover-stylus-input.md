@@ -130,8 +130,8 @@ Two consequences, both **unverified** until run:
 The runner on a physical device uses the same XCTest event synthesis. There is no
 public XCTest API for Pencil input, so a real Pencil's pressure, tilt and hover look
 **impossible without the accessory** and, with the private paths, unverified.
-Recorded iOS input is not captured at the event level today, so there is no iOS
-recorder representation to extend.
+`recordDeviceGestures` is Android-only (`deviceGestureRecordingManager.ts` rejects other
+platforms), so there is no iOS recorder representation to extend.
 
 ## Capability matrix
 

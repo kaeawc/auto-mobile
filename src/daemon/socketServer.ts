@@ -143,10 +143,7 @@ import { deviceIncarnationToken } from "../utils/deviceIncarnation";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { DAEMON_RPC_SOCKET_MAX_QUEUED_BYTES } from "./outboundWriteGuard";
 import { ControlConnection } from "./socketServer/ControlConnection";
-import {
-  DeviceControlTransportRecovery,
-  isRetryableSessionRecoveryResult,
-} from "./socketServer/DeviceControlTransportRecovery";
+import { isRetryableSessionRecoveryResult } from "./socketServer/DeviceControlTransportRecovery";
 import { ReleasedBoundSessionError } from "./socketServer/ReleasedBoundSessionError";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
@@ -272,17 +269,13 @@ import {
   type McpClientFactory,
   runWithForwardSessionKey,
 } from "./socketServer/forwardSessionKey";
+import { createMcpForwardPipeline } from "./socketServer/forwardPipeline";
 import { runKeyedSerial, type McpForwardChainWait } from "./socketServer/keyedSerialQueue";
 import {
   MAX_MCP_FORWARD_REROUTES,
-  McpForwardRouter,
-  acquisitionMcpForwardRoute,
   isNonBlankSessionUuid,
   readSessionUuid,
-  readToolSelectionProfileUuid,
-  sessionScopedForwardRoute,
   sharedMcpForwardRoute,
-  toolSelectionProfileScopedForwardRoute,
   type McpForwardRoute,
 } from "./socketServer/McpForwardRouter";
 export { MAX_MCP_FORWARD_REROUTES };
@@ -2148,7 +2141,7 @@ export class UnixSocketServer {
       await this.waitForStartup(request, context.deadline, mcpRequest.signal);
       const result = await this.forwardMcpRequest({
         request,
-        route: this.sharedMcpForwardRoute(`method:${request.method}`),
+        route: sharedMcpForwardRoute(`method:${request.method}`),
         socketSessionId: sessionId,
         signal: mcpRequest.signal,
         totalTimeoutMs: context.totalTimeoutMs,
@@ -2486,47 +2479,36 @@ export class UnixSocketServer {
     );
   }
 
-  private readonly transportRecovery = new DeviceControlTransportRecovery({
-    isReleasedSessionInRestartRecoveryWindow: async (sessionUuid) =>
-      await this.daemonState
-        .getSessionManager()
-        .isReleasedSessionInRestartRecoveryWindow?.(sessionUuid),
-    terminalReleaseSnapshot: (sessionUuid) =>
-      this.daemonState.getSessionManager().getTerminalReleaseSnapshot?.(sessionUuid),
-    expiredReleaseSnapshot: async (sessionUuid) =>
-      await this.daemonState.getSessionManager().getExpiredReleaseSnapshot?.(sessionUuid),
-  });
-
-  private readonly mcpForwardRouter = new McpForwardRouter({
-    withAdmittedBoundSession: (args, forward, socketSessionId) =>
-      this.withAdmittedBoundSession(args, forward, socketSessionId),
-    boundClientRoute: (socketSessionId, recoverable) =>
-      this.getBoundMcpClientRoute(socketSessionId, recoverable),
-    requestArgumentScopeKey: (args) => this.getRequestArgumentScopeKey(args),
-    implicitAutolockScopeKey: (mcpSessionId, args) =>
-      this.getImplicitAutolockScopeKey(mcpSessionId, args),
-    implicitAutolockSession: (mcpSessionId, args) =>
-      this.resolveImplicitAutolockSession(mcpSessionId, args),
-    resolveDeviceLabelSession: (base, label) => this.resolveDeviceLabelSession(base, label),
-    hasActiveSession: (sessionUuid) => this.hasActiveDaemonSession(sessionUuid),
-    deviceHolderSession: (deviceId) => this.getDeviceHolderSession(deviceId),
-    toolSelectionBaseSession: (sessionUuid) =>
-      resolveToolSelectionBaseSessionUuid(sessionUuid, this.daemonState.getSessionManager()),
-    ownedDeviceSessionForMcpSession: (mcpSessionId, deviceId) =>
-      this.daemonState
-        .getDevicePool()
-        .resolveOwnedDeviceSessionForMcpSession?.(mcpSessionId, deviceId),
-    isDeviceReadCall: (toolName, args) => this.deviceReadToolCallClassifier(toolName, args),
-    admissionArgs: (request) => this.boundSessionAdmissionArgs(request),
-    runKeyed: (executionKey, fn, idleCloseKey, chainWait) =>
-      this.runKeyedMcpForward(executionKey, fn, idleCloseKey, chainWait),
-  });
+  private readonly forwardPipeline = createMcpForwardPipeline(
+    {
+      getSessionManager: () => this.daemonState.getSessionManager(),
+      getDevicePool: () => this.daemonState.getDevicePool(),
+    },
+    {
+      isReleasedBoundSession: (args, socketSessionId) =>
+        this.isReleasedBoundSession(args, socketSessionId),
+      boundClientRoute: (socketSessionId, recoverable) =>
+        this.getBoundMcpClientRoute(socketSessionId, recoverable),
+      requestArgumentScopeKey: (args) => this.getRequestArgumentScopeKey(args),
+      implicitAutolockScopeKey: (mcpSessionId, args) =>
+        this.getImplicitAutolockScopeKey(mcpSessionId, args),
+      implicitAutolockSession: (mcpSessionId, args) =>
+        this.resolveImplicitAutolockSession(mcpSessionId, args),
+      resolveDeviceLabelSession: (base, label) => this.resolveDeviceLabelSession(base, label),
+      hasActiveSession: (sessionUuid) => this.hasActiveDaemonSession(sessionUuid),
+      deviceHolderSession: (deviceId) => this.getDeviceHolderSession(deviceId),
+      isDeviceReadCall: (toolName, args) => this.deviceReadToolCallClassifier(toolName, args),
+      admissionArgs: (request) => this.boundSessionAdmissionArgs(request),
+      runKeyed: (executionKey, fn, idleCloseKey, chainWait) =>
+        this.runKeyedMcpForward(executionKey, fn, idleCloseKey, chainWait),
+    },
+  );
 
   private getMcpForwardRoute(
     request: DaemonRequest,
     socketSessionId: string,
   ): McpForwardRoute | Promise<McpForwardRoute> {
-    return this.mcpForwardRouter.resolve(request, socketSessionId);
+    return this.forwardPipeline.router.resolve(request, socketSessionId);
   }
 
   private getToolsCallForwardRoute(
@@ -2534,7 +2516,7 @@ export class UnixSocketServer {
     socketSessionId: string,
     toolName?: unknown,
   ): McpForwardRoute | Promise<McpForwardRoute> {
-    return this.mcpForwardRouter.resolveToolsCall(args, socketSessionId, toolName);
+    return this.forwardPipeline.router.resolveToolsCall(args, socketSessionId, toolName);
   }
 
   private runMcpForwardForCurrentRoute<T>(
@@ -2544,61 +2526,13 @@ export class UnixSocketServer {
     fn: (route: McpForwardRoute) => Promise<T>,
     chainWait?: McpForwardChainWait,
   ): Promise<T> {
-    return this.mcpForwardRouter.runForCurrentRoute(
+    return this.forwardPipeline.router.runForCurrentRoute(
       initialRoute,
       request,
       socketSessionId,
       fn,
       chainWait,
     );
-  }
-
-  private sharedMcpForwardRoute(key: string): McpForwardRoute {
-    return sharedMcpForwardRoute(key);
-  }
-
-  private acquisitionMcpForwardRoute(
-    socketSessionId: string,
-    toolName: string,
-    toolSelectionProfileUuid: string | undefined,
-  ): McpForwardRoute {
-    return acquisitionMcpForwardRoute(socketSessionId, toolName, toolSelectionProfileUuid);
-  }
-
-  private sessionScopedForwardRoute(
-    socketSessionId: string,
-    sessionUuid: string,
-    scopedKey: string | undefined,
-    toolSelectionProfileUuid?: string,
-    releasedSessionUuid?: string,
-  ): McpForwardRoute {
-    return sessionScopedForwardRoute(
-      socketSessionId,
-      sessionUuid,
-      scopedKey,
-      toolSelectionProfileUuid,
-      releasedSessionUuid,
-    );
-  }
-
-  private toolSelectionProfileScopedForwardRoute(
-    socketSessionId: string,
-    toolSelectionProfileUuid: string,
-    scopedKey: string | undefined,
-  ): McpForwardRoute {
-    return toolSelectionProfileScopedForwardRoute(
-      socketSessionId,
-      toolSelectionProfileUuid,
-      scopedKey,
-    );
-  }
-
-  private getSessionUuid(args: unknown): string | undefined {
-    return readSessionUuid(args);
-  }
-
-  private getToolSelectionProfileUuid(params: unknown): string | undefined {
-    return readToolSelectionProfileUuid(params);
   }
 
   /** The session holding a device: its live owner, or its autolock holder. */
@@ -2762,7 +2696,7 @@ export class UnixSocketServer {
     if (isDeviceInventoryTool(request.params?.name)) {
       return;
     }
-    const sessionUuid = this.getSessionUuid(request.params?.arguments);
+    const sessionUuid = readSessionUuid(request.params?.arguments);
     if (!sessionUuid) {
       this.recordGeneratedToolSelectionProfile(request, response, socketSessionId, route);
       return;
@@ -2801,7 +2735,7 @@ export class UnixSocketServer {
     args: Record<string, unknown>,
     socketSessionId?: string,
   ): boolean {
-    const sessionUuid = this.getSessionUuid(args);
+    const sessionUuid = readSessionUuid(args);
     if (args[DAEMON_BOUND_SESSION_PARAM] !== sessionUuid) {
       return false;
     }
@@ -3038,7 +2972,7 @@ export class UnixSocketServer {
 
   private wasRequestSessionActive(request: DaemonRequest): boolean {
     const sessionUuid =
-      request.method === "tools/call" ? this.getSessionUuid(request.params?.arguments) : undefined;
+      request.method === "tools/call" ? readSessionUuid(request.params?.arguments) : undefined;
     return sessionUuid ? this.hasActiveDaemonSession(sessionUuid) : false;
   }
 
@@ -3070,7 +3004,7 @@ export class UnixSocketServer {
       return false;
     }
     const record = args as Record<string, unknown>;
-    const sessionUuid = this.getSessionUuid(record);
+    const sessionUuid = readSessionUuid(record);
     return (
       sessionUuid !== undefined &&
       this.honoursBoundSessionMarker(record, socketSessionId) &&
@@ -3079,7 +3013,7 @@ export class UnixSocketServer {
   }
 
   private boundSessionAdmissionArgs(request: DaemonRequest): unknown {
-    const sessionUuid = this.getSessionUuid(request.params);
+    const sessionUuid = readSessionUuid(request.params);
     return request.method === "resources/read" &&
       sessionUuid !== undefined &&
       request.params?.[DAEMON_RELEASED_SESSION_PARAM] === sessionUuid &&
@@ -3093,10 +3027,7 @@ export class UnixSocketServer {
     forward: (recoverableSessionUuid?: string) => T,
     socketSessionId?: string,
   ): T | Promise<T> {
-    return this.transportRecovery.withAdmittedBoundSession(
-      this.isReleasedBoundSession(args, socketSessionId) ? this.getSessionUuid(args)! : undefined,
-      forward,
-    );
+    return this.forwardPipeline.withAdmittedBoundSession(args, forward, socketSessionId);
   }
 
   private getRequestArgumentScopeKey(args: unknown): string | undefined {

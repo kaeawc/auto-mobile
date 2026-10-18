@@ -72,12 +72,8 @@ import { typedRefusalFields } from "../models/typedRefusalFields";
 import { isTypedToolRefusal, shapeToolCallError } from "./shapeToolCallError";
 import { runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import {
-  healthSummaryField,
-  planHealthWriterFromEnv,
-  reportPlanHealth,
-  type PlanHealthWriter,
-} from "./planHealthSummary";
+import { healthSummaryField, planHealthWriterFromEnv, reportPlanHealth } from "./planHealthSummary";
+import { type PlanHealthWriter } from "./filePlanHealthWriter";
 
 /**
  * Test metadata captured per-execution for the test-execution timing repository.

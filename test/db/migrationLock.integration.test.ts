@@ -15,12 +15,12 @@ import {
   FileMigrationLock,
   IN_MEMORY_DATABASE_PATH,
   IN_MEMORY_DB_OPT_IN_ENV,
-  NoOpMigrationLock,
   isInMemoryDatabaseOptInEnabled,
   isInMemoryDatabasePath,
   migrationLockPathFor,
   selectMigrationLock,
 } from "../../src/db/migrationLock";
+import { NoOpMigrationLock } from "../../src/db/NoOpMigrationLock";
 import { ActionableError } from "../../src/models/ActionableError";
 import { FakeTimer } from "../fakes/FakeTimer";
 

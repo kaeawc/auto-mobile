@@ -43,7 +43,7 @@
 1834	src/features/action/swipeon/SwipeOn.ts
 1234	src/features/device/SetPosture.ts
 5888	src/features/deviceLifecycle/deviceLifecycleCore.ts
-1385	src/features/navigation/Explore.ts
+1429	src/features/navigation/Explore.ts
 2576	src/features/navigation/NavigationGraphManager.ts
 1568	src/features/observe/DeviceServiceClient.ts
 1866	src/features/observe/ObserveScreen.ts
@@ -66,7 +66,7 @@
 1399	src/features/utility/ElementResolver.ts
 1712	src/features/video/FfmpegVideoProcessingBackend.ts
 1163	src/features/video/IosPhysicalVideoCaptureBackend.ts
-2323	src/features/webrtc/IosH264Source.ts
+2322	src/features/webrtc/IosH264Source.ts
 2259	src/features/webrtc/PersistentEncoderH264Source.ts
 1005	src/features/webrtc/WebRtcPublisher.ts
 2370	src/server/appFileService.ts

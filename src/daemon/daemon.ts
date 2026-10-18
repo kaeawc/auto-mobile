@@ -297,6 +297,7 @@ import {
   LEGACY_PROVENANCE_SENTINEL,
   NavigationGraphManager,
 } from "../features/navigation/NavigationGraphManager";
+import type { NavigationGraphStreamSource } from "../features/navigation/NavigationGraphStreamSource";
 import {
   convertSummaryToStreamData,
   createNavigationGraphRequestHandler,
@@ -813,10 +814,10 @@ export class Daemon {
     DefaultObservationInitialFrameCoordinator
   >();
   private deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
-  private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphManager>();
+  private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphStreamSource>();
   private readonly navigationGraphSeededStreamManagers = new WeakMap<
     DeviceDataStreamSocketServer,
-    WeakSet<NavigationGraphManager>
+    WeakSet<NavigationGraphStreamSource>
   >();
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
   private unsubscribeSessionExecutionEnded: (() => void) | null = null;
@@ -2949,14 +2950,14 @@ export class Daemon {
     logger.info("[Daemon] Navigation graph stream listener configured");
   }
 
-  private resolveUnscopedNavigationGraphManager(): NavigationGraphManager {
+  private resolveUnscopedNavigationGraphManager(): NavigationGraphStreamSource {
     const sessions = this.sessionManager.getAllSessions();
     return sessions.length === 1
       ? NavigationGraphManager.getInstanceForSession(sessions[0]!.sessionId)
       : NavigationGraphManager.getInstance();
   }
 
-  private setupNavigationGraphUpdateListener(navGraphManager: NavigationGraphManager): void {
+  private setupNavigationGraphUpdateListener(navGraphManager: NavigationGraphStreamSource): void {
     const streamServer = this.deviceDataStreamServer;
     if (
       streamServer &&
@@ -2964,7 +2965,7 @@ export class Daemon {
     ) {
       const seededManagers =
         this.navigationGraphSeededStreamManagers.get(streamServer) ??
-        new WeakSet<NavigationGraphManager>();
+        new WeakSet<NavigationGraphStreamSource>();
       seededManagers.add(navGraphManager);
       this.navigationGraphSeededStreamManagers.set(streamServer, seededManagers);
       for (const context of navGraphManager.getBuildContexts()) {

@@ -2,7 +2,7 @@ import {
   DEFAULT_VM_SNAPSHOT_TIMEOUT_MS,
   MAX_VM_SNAPSHOT_TIMEOUT_MS,
   SNAPSHOT_MCP_TIMEOUT_HEADROOM_MS,
-} from "../features/snapshot/deviceSnapshotTimeout";
+} from "../models/deviceSnapshotTimeout";
 import { BARRIER_TIMEOUT_MS } from "../features/action/coordinationTimeout";
 import { DEFAULT_EXPLORE_TIMEOUT_MS } from "../features/navigation/exploreTimeout";
 import {

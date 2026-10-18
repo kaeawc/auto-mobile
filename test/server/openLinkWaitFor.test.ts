@@ -8,14 +8,13 @@ import type {
   TapOnElementResult,
 } from "../../src/models";
 import {
+  type InteractionToolDependencies,
   acceptIosAppOpenAlert,
   buildOpenLinkPayload,
   isIosAppOpenAlert,
   openLinkSchema,
   registerInteractionTools,
   selectAndroidOpenLinkChooser,
-  resetTapOnElementFactory,
-  setTapOnElementFactory,
 } from "../../src/server/interactionTools";
 import { DeepLinkManager } from "../../src/features/utility/DeepLinkManager";
 import { OpenURL } from "../../src/features/action/OpenURL";
@@ -28,6 +27,7 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
 
+const interactionDeps: InteractionToolDependencies = {};
 isolateToolRegistry();
 
 const makeObservation = (marker: string): ObserveResult => ({
@@ -67,7 +67,7 @@ test("registered openLink retries a multi-panel first observation without hierar
   const sleepSpy = spyOn(defaultTimer, "sleep").mockImplementation((ms) => timer.sleep(ms));
   const nowSpy = spyOn(defaultTimer, "now").mockImplementation(() => timer.now());
   try {
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     const handler = ToolRegistry.getTool("openLink")?.deviceAwareHandler;
     expect(handler).toBeDefined();
     const result = await handler!(device, {
@@ -121,7 +121,7 @@ test("registered openLink waits for a known lone panel after a stub activeDispla
   const sleepSpy = spyOn(defaultTimer, "sleep").mockImplementation((ms) => timer.sleep(ms));
   const nowSpy = spyOn(defaultTimer, "now").mockImplementation(() => timer.now());
   try {
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     const handler = ToolRegistry.getTool("openLink")?.deviceAwareHandler;
     expect(handler).toBeDefined();
     const result = await handler!(device, {
@@ -269,7 +269,7 @@ test("registered openLink probes the chooser with the normalized opened URL", as
     },
   );
   try {
-    registerInteractionTools();
+    registerInteractionTools(interactionDeps);
     const handler = ToolRegistry.getTool("openLink")?.deviceAwareHandler;
     expect(handler).toBeDefined();
     await handler!(device, {
@@ -399,7 +399,7 @@ describe("openLink iOS app-open alert acceptance", () => {
   } as BootedDevice;
 
   afterEach(() => {
-    resetTapOnElementFactory();
+    delete interactionDeps.tapOnElementFactory;
   });
 
   test("recognizes only an Open button inside an Open in app confirmation", () => {
@@ -416,7 +416,7 @@ describe("openLink iOS app-open alert acceptance", () => {
 
   test("taps Open through the normal hierarchy-driven action", async () => {
     const options: unknown[] = [];
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async (received) => {
         options.push(received);
         return {
@@ -426,9 +426,15 @@ describe("openLink iOS app-open alert acceptance", () => {
           observation: makeObservation("slack"),
         } as TapOnElementResult;
       },
-    }));
+    });
 
-    const result = await acceptIosAppOpenAlert(iosDevice, appOpenAlertObservation);
+    const result = await acceptIosAppOpenAlert(
+      iosDevice,
+      appOpenAlertObservation,
+      undefined,
+      undefined,
+      { tapOnElementFactory: interactionDeps.tapOnElementFactory },
+    );
 
     expect(result?.success).toBe(true);
     expect(options).toEqual([{ text: "Open", action: "tap" }]);
@@ -437,7 +443,7 @@ describe("openLink iOS app-open alert acceptance", () => {
   test("forces a current hierarchy when the open-time observation is stale", async () => {
     let refreshCalls = 0;
     let tapCalls = 0;
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async () => {
         tapCalls += 1;
         return {
@@ -446,18 +452,21 @@ describe("openLink iOS app-open alert acceptance", () => {
           element: { bounds: { left: 0, top: 0, right: 1, bottom: 1 } },
         } as TapOnElementResult;
       },
-    }));
+    });
 
     const result = await acceptIosAppOpenAlert(
       iosDevice,
       makeObservation("stale-welcome"),
       undefined,
       undefined,
-      async () => {
-        refreshCalls += 1;
-        return refreshCalls === 1
-          ? (appOpenAlertObservation.viewHierarchy ?? null)
-          : noAlertHierarchy;
+      {
+        tapOnElementFactory: interactionDeps.tapOnElementFactory,
+        refreshHierarchy: async () => {
+          refreshCalls += 1;
+          return refreshCalls === 1
+            ? (appOpenAlertObservation.viewHierarchy ?? null)
+            : noAlertHierarchy;
+        },
       },
     );
 
@@ -474,10 +483,12 @@ describe("openLink iOS app-open alert acceptance", () => {
       makeObservation("stale-welcome"),
       undefined,
       undefined,
-      undefined,
-      async () => {
-        systemTapCalls += 1;
-        return { success: true };
+      {
+        tapOnElementFactory: interactionDeps.tapOnElementFactory,
+        tapSystemAlert: async () => {
+          systemTapCalls += 1;
+          return { success: true };
+        },
       },
     );
 
@@ -489,29 +500,32 @@ describe("openLink iOS app-open alert acceptance", () => {
   test("retries the live button when the dialog remains after a successful tap", async () => {
     let refreshCalls = 0;
     let systemTapCalls = 0;
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async () =>
         ({
           success: true,
           action: "tap",
           element: { text: "Open", bounds: { left: 0, top: 0, right: 1, bottom: 1 } },
         }) as TapOnElementResult,
-    }));
+    });
 
     const result = await acceptIosAppOpenAlert(
       iosDevice,
       appOpenAlertObservation,
       undefined,
       undefined,
-      async () => {
-        refreshCalls += 1;
-        return refreshCalls === 1
-          ? (appOpenAlertObservation.viewHierarchy ?? null)
-          : noAlertHierarchy;
-      },
-      async () => {
-        systemTapCalls += 1;
-        return { success: true };
+      {
+        tapOnElementFactory: interactionDeps.tapOnElementFactory,
+        refreshHierarchy: async () => {
+          refreshCalls += 1;
+          return refreshCalls === 1
+            ? (appOpenAlertObservation.viewHierarchy ?? null)
+            : noAlertHierarchy;
+        },
+        tapSystemAlert: async () => {
+          systemTapCalls += 1;
+          return { success: true };
+        },
       },
     );
 
@@ -521,23 +535,20 @@ describe("openLink iOS app-open alert acceptance", () => {
   });
 
   test("rejects inconclusive verification snapshots after tapping", async () => {
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async () =>
         ({
           success: true,
           action: "tap",
           element: { text: "Open", bounds: { left: 0, top: 0, right: 1, bottom: 1 } },
         }) as TapOnElementResult,
-    }));
+    });
 
     await expect(
-      acceptIosAppOpenAlert(
-        iosDevice,
-        appOpenAlertObservation,
-        undefined,
-        undefined,
-        async () => null,
-      ),
+      acceptIosAppOpenAlert(iosDevice, appOpenAlertObservation, undefined, undefined, {
+        tapOnElementFactory: interactionDeps.tapOnElementFactory,
+        refreshHierarchy: async () => null,
+      }),
     ).rejects.toThrow("dialog remained visible");
   });
 
@@ -564,13 +575,18 @@ describe("openLink iOS app-open alert acceptance", () => {
       localizedObservation,
       undefined,
       undefined,
-      async () => {
-        refreshCalls += 1;
-        return refreshCalls === 1 ? (localizedObservation.viewHierarchy ?? null) : noAlertHierarchy;
-      },
-      async () => {
-        systemTapCalls += 1;
-        return { success: true };
+      {
+        tapOnElementFactory: interactionDeps.tapOnElementFactory,
+        refreshHierarchy: async () => {
+          refreshCalls += 1;
+          return refreshCalls === 1
+            ? (localizedObservation.viewHierarchy ?? null)
+            : noAlertHierarchy;
+        },
+        tapSystemAlert: async () => {
+          systemTapCalls += 1;
+          return { success: true };
+        },
       },
     );
 
@@ -601,11 +617,14 @@ describe("openLink iOS app-open alert acceptance", () => {
         },
         undefined,
         undefined,
-        async () => {
-          refreshCalls += 1;
-          return localizedHierarchy;
+        {
+          tapOnElementFactory: interactionDeps.tapOnElementFactory,
+          refreshHierarchy: async () => {
+            refreshCalls += 1;
+            return localizedHierarchy;
+          },
+          tapSystemAlert: async () => ({ success: true }),
         },
-        async () => ({ success: true }),
       ),
     ).rejects.toThrow("dialog remained visible");
     expect(refreshCalls).toBe(5);
@@ -613,21 +632,27 @@ describe("openLink iOS app-open alert acceptance", () => {
 
   test("does nothing when the alert is absent", async () => {
     let calls = 0;
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async () => {
         calls += 1;
         throw new Error("must not tap");
       },
-    }));
+    });
 
-    const result = await acceptIosAppOpenAlert(iosDevice, makeObservation("home"));
+    const result = await acceptIosAppOpenAlert(
+      iosDevice,
+      makeObservation("home"),
+      undefined,
+      undefined,
+      { tapOnElementFactory: interactionDeps.tapOnElementFactory },
+    );
 
     expect(result).toBeNull();
     expect(calls).toBe(0);
   });
 
   test("surfaces failure when the observed alert cannot be accepted", async () => {
-    setTapOnElementFactory(() => ({
+    interactionDeps.tapOnElementFactory = () => ({
       execute: async () =>
         ({
           success: false,
@@ -635,11 +660,13 @@ describe("openLink iOS app-open alert acceptance", () => {
           error: "Open was no longer hittable",
           element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
         }) as TapOnElementResult,
-    }));
+    });
 
-    await expect(acceptIosAppOpenAlert(iosDevice, appOpenAlertObservation)).rejects.toThrow(
-      "Failed to accept iOS app-open alert: Open was no longer hittable",
-    );
+    await expect(
+      acceptIosAppOpenAlert(iosDevice, appOpenAlertObservation, undefined, undefined, {
+        tapOnElementFactory: interactionDeps.tapOnElementFactory,
+      }),
+    ).rejects.toThrow("Failed to accept iOS app-open alert: Open was no longer hittable");
   });
 });
 

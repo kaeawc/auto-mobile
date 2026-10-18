@@ -13,6 +13,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
 import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
+import type { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { getAbortSignal } from "../../src/utils/AbortContext";
@@ -797,4 +798,42 @@ export function requirePooledDevice(pool: DevicePool, deviceId: string): PooledD
     throw new Error("expected pooled device");
   }
   return pooled;
+}
+
+/** The not-running local "Pixel 8" AVD image that pool tests start devices from. */
+export function pixel8Source(): DeviceInfo {
+  return { name: "Pixel 8", platform: "android", isRunning: false, source: "local" };
+}
+
+/** Run `run` with reboot-on-death recovery enabled, restoring the environment afterwards. */
+export async function withRebootOnDeath(run: () => Promise<void>): Promise<void> {
+  const restore = enableRebootOnDeath();
+  try {
+    await run();
+  } finally {
+    restore();
+  }
+}
+
+/**
+ * The ready/removed pool callbacks the daemon wires to a session registry. `getPool` is lazy
+ * because the pool being built is the one the callbacks read from.
+ */
+export function registryDeviceHooks(
+  registry: DeviceSessionRegistry,
+  getPool: () => DevicePool,
+): Pick<DevicePoolOverrides, "onDeviceReady" | "onDeviceRemoved"> {
+  return {
+    onDeviceReady: (deviceId) => {
+      const pooled = getPool().getDevice(deviceId);
+      if (pooled) {
+        registry.onDeviceConnected({
+          deviceId: pooled.id,
+          platform: pooled.platform,
+          incarnation: pooled.incarnation,
+        });
+      }
+    },
+    onDeviceRemoved: (deviceId) => registry.onDeviceDisconnected(deviceId),
+  };
 }

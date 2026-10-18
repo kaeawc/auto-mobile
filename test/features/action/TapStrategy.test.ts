@@ -311,3 +311,26 @@ describe("clipNavigationTapBounds", () => {
     expect(strategy.clipNavigationTapBounds(bounds, hierarchy, undefined, [])).toEqual({ bounds });
   });
 });
+
+test("platform tap refinements are Android-only capabilities of the strategy", () => {
+  const android = createTapStrategy(
+    { name: "a", deviceId: "emulator-5554", platform: "android" },
+    new FakeAdbClient(),
+    new FakeAccessibilityDetector(),
+    new FakeIosVoiceOverDetector(),
+  );
+  const ios = createTapStrategy(
+    { name: "i", deviceId: "sim", platform: "ios" },
+    new FakeAdbClient(),
+    new FakeAccessibilityDetector(),
+    new FakeIosVoiceOverDetector(),
+  );
+  const flags = (s: TapStrategy) => [
+    s.warnsOnDisabledElement,
+    s.settlesPostTapChange,
+    s.verifiesRefreshedDisplay,
+    s.promotesClickableAncestor,
+  ];
+  expect(flags(android)).toEqual([true, true, true, true]);
+  expect(flags(ios)).toEqual([false, false, false, false]);
+});

@@ -5,23 +5,14 @@ import {
   resetInstalledAppResourceRefresh,
 } from "../../src/server/appTools";
 import {
-  setPressButtonFactory,
-  resetPressButtonFactory,
-  setWakeAndUnlockFactory,
-  resetWakeAndUnlockFactory,
+  registerInteractionTools,
+  type InteractionToolDependencies,
 } from "../../src/server/interactionTools";
 import Ajv2020 from "ajv/dist/2020";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
 import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
-import {
-  rotateHandler,
-  setPostureHandler,
-  setRotateFactory,
-  resetRotateFactory,
-  setSetPostureFactory,
-  resetSetPostureFactory,
-} from "../../src/server/interactionTools";
+import { rotateHandler, setPostureHandler } from "../../src/server/interactionTools";
 import {
   afterAll,
   afterEach,
@@ -42,6 +33,7 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { createAppToolsHarness } from "../helpers/appToolsHarness";
 
+const interactionDeps: InteractionToolDependencies = {};
 const appTools = createAppToolsHarness();
 
 isolateToolRegistry();
@@ -416,10 +408,10 @@ describe("device lifecycle ordinary-client structured output", () => {
   });
 
   afterEach(() => {
-    resetRotateFactory();
-    resetSetPostureFactory();
-    resetPressButtonFactory();
-    resetWakeAndUnlockFactory();
+    delete interactionDeps.rotateFactory;
+    delete interactionDeps.setPostureFactory;
+    delete interactionDeps.pressButtonFactory;
+    delete interactionDeps.wakeAndUnlockFactory;
     resetInstalledAppResourceRefresh();
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
   });
@@ -436,25 +428,25 @@ describe("device lifecycle ordinary-client structured output", () => {
   ] as const)(
     "%s retains structuredContent for an ordinary client and respects suppression",
     async (name) => {
-      setRotateFactory(() => ({
+      interactionDeps.rotateFactory = () => ({
         execute: async () => ({
           success: true,
           orientation: "portrait",
           value: 0,
           rotationPerformed: false,
         }),
-      }));
-      setSetPostureFactory(() => ({
+      });
+      interactionDeps.setPostureFactory = () => ({
         executeHingeAngle: async () => ({ status: "unsupported", message: "unused angle fake" }),
         execute: async () => ({
           posture: "opened",
           display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
         }),
-      }));
-      setPressButtonFactory(() => ({
+      });
+      interactionDeps.pressButtonFactory = () => ({
         execute: async () => ({ success: true, button: "home", keyCode: 3 }),
-      }));
-      setWakeAndUnlockFactory(() => ({
+      });
+      interactionDeps.wakeAndUnlockFactory = () => ({
         execute: async () => ({
           success: true,
           platform: "android",
@@ -462,7 +454,7 @@ describe("device lifecycle ordinary-client structured output", () => {
           wasLocked: false,
           unlocked: true,
         }),
-      }));
+      });
       appTools.configure("launchApp", {
         createLaunchApp: () => ({
           execute: async () => ({ success: true, packageName: "com.example" }),
@@ -481,6 +473,10 @@ describe("device lifecycle ordinary-client structured output", () => {
       const state = { success: true, deviceId: device.deviceId, platform: device.platform };
       const getStateSpy = spyOn(DeviceState.prototype, "getState").mockResolvedValue(state);
       const setStateSpy = spyOn(DeviceState.prototype, "setState").mockResolvedValue(state);
+      if (name === "pressButton" || name === "wakeAndUnlock") {
+        // Re-register with the fakes so the registered handler reaches them.
+        registerInteractionTools(interactionDeps);
+      }
       const tool = ToolRegistry.getRegisteredTool(name)!;
       expect(tool.outputSchema).toBeDefined();
       const args =
@@ -498,9 +494,21 @@ describe("device lifecycle ordinary-client structured output", () => {
       const handlerSpy = spyOn(tool, "handler").mockImplementation(async () => {
         const response =
           name === "rotate"
-            ? await rotateHandler(device, { orientation: "portrait" })
+            ? await rotateHandler(
+                device,
+                { orientation: "portrait" },
+                undefined,
+                undefined,
+                interactionDeps,
+              )
             : name === "setPosture"
-              ? await setPostureHandler(device, { posture: "opened" })
+              ? await setPostureHandler(
+                  device,
+                  { posture: "opened" },
+                  undefined,
+                  undefined,
+                  interactionDeps,
+                )
               : await tool.deviceAwareHandler!(device, args);
         return finalizeToolResponse(response, {
           name,

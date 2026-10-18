@@ -69,6 +69,15 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Run a command the way an `if` condition would (errexit is ignored inside it)
+# and record its exit status in RUN_STATUS, so callers can branch on it without
+# a function name in a condition.
+RUN_STATUS=0
+run_capture_status() {
+    RUN_STATUS=0
+    "$@" || RUN_STATUS=$?
+}
+
 # Capture optional command availability without invoking a function in a
 # conditional context, where Bash would suppress its internal errexit behavior.
 command_exists_check() {
@@ -97,7 +106,7 @@ run_desktop_app_privileged() {
         # Prefer the unprivileged operation for same-user processes; fall back
         # to sudo below when the process belongs to another user.
         return 0
-    elif command_exists sudo; then
+    elif command -v sudo >/dev/null 2>&1; then
         sudo "$@"
     else
         log_error "Administrator privileges are required to remove the AutoMobile desktop app."
@@ -199,7 +208,7 @@ GUM_BINARY="${GUM_INSTALL_DIR}/gum"
 
 ensure_gum() {
     # Check if gum is available
-    if command_exists gum; then
+    if command -v gum >/dev/null 2>&1; then
         return 0
     fi
 
@@ -260,7 +269,8 @@ detect_mcp_configs() {
         format=$(echo "${entry}" | cut -d'|' -f3)
 
         if [[ -f "${path}" ]]; then
-            if config_has_automobile "${path}" "${format}"; then
+            run_capture_status config_has_automobile "${path}" "${format}"
+            if (( RUN_STATUS == 0 )); then
                 MCP_CONFIGS_FOUND+=("${entry}")
             fi
         fi
@@ -292,7 +302,7 @@ detect_desktop_app() {
 
     # This is a capability predicate; absence means there is no package to inspect.
     # shellcheck disable=SC2310
-    if [[ "${os}" == "linux" ]] && command_exists dpkg-query; then
+    if [[ "${os}" == "linux" ]] && command -v dpkg-query >/dev/null 2>&1; then
         local package status
         for package in automobile auto-mobile; do
             status=$(dpkg-query -W -f='${db:Status-Status}' "${package}" 2>/dev/null || true)
@@ -561,7 +571,7 @@ config_has_automobile() {
 }
 
 detect_marketplace() {
-    if command_exists claude; then
+    if command -v claude >/dev/null 2>&1; then
         # Get list of marketplaces and find auto-mobile related ones
         local marketplace_output
         marketplace_output=$(claude plugin marketplace list 2>/dev/null || true)
@@ -582,7 +592,7 @@ detect_marketplace() {
 }
 
 detect_cli() {
-    if command_exists auto-mobile; then
+    if command -v auto-mobile >/dev/null 2>&1; then
         CLI_INSTALLED=true
     else
         CLI_INSTALLED=false
@@ -987,10 +997,10 @@ remove_cli() {
 
     if [[ "${DRY_RUN}" == "true" ]]; then
         log_info "[DRY-RUN] Would remove AutoMobile CLI"
-        if command_exists bun; then
+        if command -v bun >/dev/null 2>&1; then
             log_info "[DRY-RUN]   - bun remove -g @kaeawc/auto-mobile"
         fi
-        if command_exists npm; then
+        if command -v npm >/dev/null 2>&1; then
             log_info "[DRY-RUN]   - npm uninstall -g @kaeawc/auto-mobile (legacy cleanup)"
         fi
         return 0
@@ -998,12 +1008,12 @@ remove_cli() {
 
     log_info "Removing AutoMobile CLI..."
 
-    if command_exists bun; then
+    if command -v bun >/dev/null 2>&1; then
         bun remove -g @kaeawc/auto-mobile 2>/dev/null || true
     fi
 
     # Also remove legacy npm global install (older versions used npm install -g)
-    if command_exists npm; then
+    if command -v npm >/dev/null 2>&1; then
         npm uninstall -g @kaeawc/auto-mobile 2>/dev/null || true
     fi
 
@@ -1207,9 +1217,9 @@ remove_desktop_app() {
         done
     elif [[ "${os}" == "linux" ]]; then
         log_info "Removing AutoMobile desktop package: ${DESKTOP_APP_PACKAGE}..."
-        if command_exists apt-get; then
+        if command -v apt-get >/dev/null 2>&1; then
             run_desktop_app_privileged apt-get remove -y "${DESKTOP_APP_PACKAGE}" || return 1
-        elif command_exists dpkg; then
+        elif command -v dpkg >/dev/null 2>&1; then
             run_desktop_app_privileged dpkg --remove "${DESKTOP_APP_PACKAGE}" || return 1
         else
             log_error "apt-get or dpkg is required to remove the AutoMobile desktop app package."
@@ -1225,7 +1235,8 @@ remove_desktop_app() {
 # Interactive Selection
 # ============================================================================
 select_components() {
-    if ! ensure_gum; then
+    run_capture_status ensure_gum
+    if (( RUN_STATUS != 0 )); then
         log_error "gum is required for interactive mode. Use --all for non-interactive uninstall."
         exit 1
     fi
@@ -1378,7 +1389,10 @@ main() {
     parse_args "$@"
 
     echo ""
-    if ensure_gum; then
+    run_capture_status ensure_gum
+    local gum_available=false
+    if (( RUN_STATUS == 0 )); then gum_available=true; fi
+    if [[ "${gum_available}" == "true" ]]; then
         gum style --bold "AutoMobile Uninstaller"
     else
         echo -e "${BOLD}AutoMobile Uninstaller${RESET}"
@@ -1386,14 +1400,14 @@ main() {
     echo ""
 
     if [[ "${DRY_RUN}" == "true" ]]; then
-        if ensure_gum; then
+        if [[ "${gum_available}" == "true" ]]; then
             gum style --foreground 214 --bold "DRY-RUN MODE: No changes will be made"
         else
             echo -e "${YELLOW}${BOLD}DRY-RUN MODE: No changes will be made${RESET}"
         fi
         echo ""
     elif [[ "${RECORD_MODE}" == "true" ]]; then
-        if ensure_gum; then
+        if [[ "${gum_available}" == "true" ]]; then
             gum style --foreground 212 --bold "RECORD MODE: Auto-selecting all components"
         else
             echo -e "${YELLOW}${BOLD}RECORD MODE: Auto-selecting all components${RESET}"
@@ -1465,7 +1479,7 @@ main() {
     fi
 
     # Confirm
-    if ensure_gum; then
+    if [[ "${gum_available}" == "true" ]]; then
         confirm_uninstall
     elif [[ "${FORCE}" != "true" && "${RECORD_MODE}" != "true" && "${DRY_RUN}" != "true" ]]; then
         echo ""
@@ -1482,7 +1496,8 @@ main() {
     # Perform uninstall
     echo ""
     if [[ "${UNINSTALL_DESKTOP_APP}" == "true" ]]; then
-        if ! stop_desktop_app_processes; then
+        run_capture_status stop_desktop_app_processes
+        if (( RUN_STATUS != 0 )); then
             log_error "Could not stop the AutoMobile desktop app; uninstall aborted."
             exit 1
         fi
@@ -1526,7 +1541,8 @@ main() {
     fi
 
     if [[ "${UNINSTALL_DESKTOP_APP}" == "true" && "${daemon_stop_status}" == 0 ]]; then
-        if ! remove_desktop_app; then
+        run_capture_status remove_desktop_app
+        if (( RUN_STATUS != 0 )); then
             log_error "Could not remove the AutoMobile desktop app; uninstall aborted."
             exit 1
         fi

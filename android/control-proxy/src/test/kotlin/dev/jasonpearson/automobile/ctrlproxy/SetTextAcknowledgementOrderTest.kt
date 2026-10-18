@@ -123,17 +123,24 @@ class SetTextAcknowledgementOrderTest {
       listOf(
         "private suspend fun performNodeAction(",
         "private fun performGlobalActionRequest(",
-        "override suspend fun requestGestureStart(",
-        "override suspend fun requestGestureMove(",
-        "override suspend fun requestGestureEnd(",
         "override suspend fun requestCommitText(",
         "override suspend fun requestClickFocusedInput(",
       )) {
       assertTrue("$signature clears caret", functionBody(serviceSource, signature).contains(forget))
     }
-    val gestureStart = serviceSource.indexOf("private fun dispatchGestureWithResult(")
-    val gestureLifecycle = serviceSource.indexOf("val lifecycle", gestureStart)
-    assertTrue(serviceSource.substring(gestureStart, gestureLifecycle).contains(forget))
+    // Gestures reach the caret through GestureController.Host, which the service wires to it.
+    assertTrue(serviceSource.contains("override fun forgetRememberedInsert() = $forget"))
+    val gestureSource = KotlinSourceScan.maskLiteralsAndComments(readGestureSource())
+    val hostForget = "host.forgetRememberedInsert()"
+    for (signature in listOf("fun startStream(", "fun moveStream(", "fun endStream(")) {
+      assertTrue(
+        "$signature clears caret",
+        functionBody(gestureSource, signature).contains(hostForget),
+      )
+    }
+    val gestureStart = gestureSource.indexOf("private fun dispatchGestureWithResult(")
+    val gestureLifecycle = gestureSource.indexOf("val lifecycle", gestureStart)
+    assertTrue(gestureSource.substring(gestureStart, gestureLifecycle).contains(hostForget))
     val events = functionBody(serviceSource, "override fun onAccessibilityEvent(")
     assertTrue(events.indexOf(forget) in 0 until events.indexOf("val connectionCount"))
     assertTrue(events.contains("AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED"))
@@ -250,6 +257,8 @@ class SetTextAcknowledgementOrderTest {
   private fun readCtrlProxySource(): String = locateSource("CtrlProxy.kt").readText()
 
   private fun readTextInputSource(): String = locateSource("TextInputController.kt").readText()
+
+  private fun readGestureSource(): String = locateSource("GestureController.kt").readText()
 
   private fun locateSource(fileName: String): File {
     val rel = "src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/$fileName"

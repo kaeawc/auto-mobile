@@ -79,7 +79,8 @@ class CtrlProxyOnDestroyTest {
 
     // Observe the real router's result sink without launching IO work or opening a socket. The
     // service, router, session, coordinator and AccessibilityStrokeDispatcher remain real.
-    val router = ReflectionHelpers.getField<GestureStreamRouter>(service, "gestureStreamRouter")
+    val gestures = ReflectionHelpers.getField<GestureController>(service, "gestureController")
+    val router = ReflectionHelpers.getField<GestureStreamRouter>(gestures, "gestureStreamRouter")
     val onResult: (String?, Boolean, String?) -> Unit = { id, success, error ->
       if (error == "Gesture stream closed") {
         assertTerminalLift()

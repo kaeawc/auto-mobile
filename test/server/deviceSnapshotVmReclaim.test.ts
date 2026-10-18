@@ -1,7 +1,6 @@
+import type { McpServer } from "@modelcontextprotocol/server";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { SubscribeRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
   ActionableError,
   type BootedDevice,
@@ -312,7 +311,7 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       "application/json",
       async () => ({ uri: DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE, text: "{}" }),
     );
-    const subscribe = server.server.handlersBySchema.get(SubscribeRequestSchema);
+    const subscribe = server.server.handlersBySchema.get("resources/subscribe");
     expect(subscribe).toBeDefined();
     await subscribe!({ params: { uri: DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE } });
 

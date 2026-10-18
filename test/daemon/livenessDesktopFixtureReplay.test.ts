@@ -86,6 +86,8 @@ describe("started daemon desktop fixture replay", () => {
     expect(
       readdirSync(FIXTURE_DIR)
         .filter((name) => name.endsWith(".json"))
+        // Not a liveness scenario: statelessWireParity.test.ts owns this handshake fixture.
+        .filter((name) => name !== "stateless-handshake.json")
         .sort(),
     ).toEqual(ROWS.map(({ name }) => `${name}.json`).sort());
   });

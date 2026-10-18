@@ -1688,10 +1688,7 @@ describe("a client cancels and dies in the same tick (#11058, #11066)", () => {
     );
     server.mcpClientFactory = async () => ({
       listTools: async () => ({ tools: [] }),
-      callTool: async (
-        params: { name: string; arguments?: Record<string, unknown> },
-        _schema: unknown,
-      ) => {
+      callTool: async (params: { name: string; arguments?: Record<string, unknown> }) => {
         const connection = String(params.arguments?.__mcpSessionId);
         if (params.name === "getAndroid") {
           await scenario.daemonToolCallWith({ deviceId: DEVICE_A }, "getAndroid", connection);

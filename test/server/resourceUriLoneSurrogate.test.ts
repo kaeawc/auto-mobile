@@ -1,9 +1,10 @@
+import { fakeServerContext } from "../helpers/fakeServerContext";
+import type { McpServer } from "@modelcontextprotocol/server";
+import { McpError } from "../../src/server/mcpError";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "fs";
 import { parseGuardSource } from "../lint/astGuard";
 import { collectSourceFacts } from "../lint/sourceFacts";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { McpError, ReadResourceRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { buildAppFileResourceUri } from "../../src/server/appFileContract";
 import { buildObservationScreenshotUri } from "../../src/server/observationResourceUris";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
@@ -94,7 +95,7 @@ describe("the registry backstop blames the client only for its own URI (#10135)"
     );
     const server = new FakeMcpServer();
     ResourceRegistry.registerWithServer(server as unknown as McpServer, () => ({}));
-    const handler = server.server.handlersBySchema.get(ReadResourceRequestSchema);
+    const handler = server.server.handlersBySchema.get("resources/read");
     if (!handler) {
       throw new Error("read handler not registered");
     }
@@ -107,7 +108,7 @@ describe("the registry backstop blames the client only for its own URI (#10135)"
   });
 
   function failureOf(uri: string): Promise<unknown> {
-    return readHandler({ params: { uri } }, {}).then(
+    return readHandler({ params: { uri } }, fakeServerContext()).then(
       () => undefined,
       (caught: unknown) => caught,
     );

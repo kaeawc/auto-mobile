@@ -5,7 +5,6 @@ import {
   dynamicImports,
   functionBody,
   ifStatements,
-  newExpressions,
   parseSource,
   swapNodes,
   variableDeclarations,
@@ -56,7 +55,7 @@ function invocationGuardViolations(source: string): string[] {
     "tool registration",
     callsTo(sf, "registerMcpTools", "daemonMode"),
   );
-  const stdioStartup = check.require("stdio transport", newExpressions(sf, "StdioServerTransport"));
+  const stdioStartup = check.require("stdio transport", callsTo(sf, "createStdioServerTransport"));
   check.require(
     "process.exit(1) in the invalidInvocation guard",
     rejection ? callsTo(rejection, "process.exit", "1") : [],

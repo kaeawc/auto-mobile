@@ -1,16 +1,12 @@
 import { errorMessage } from "../utils/describeUnknownError";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  ListResourcesRequestSchema,
-  ReadResourceRequestSchema,
-  SubscribeRequestSchema,
-  UnsubscribeRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  type CallToolResult,
-  McpError,
-} from "@modelcontextprotocol/sdk/types.js";
+import type {
+  CallToolResult,
+  ListToolsResult,
+  McpServer,
+  ServerCapabilities,
+} from "@modelcontextprotocol/server";
+import { createSdkMcpServer } from "./sdkMcpServer";
+import { McpError } from "./mcpError";
 import { logger } from "../utils/logger";
 import {
   DaemonBoundSessionExpiredError,
@@ -322,7 +318,7 @@ export function mcpOverloadResult(
 export function mcpOverloadResult(error: McpOverloadError, hasOutputSchema = true): CallToolResult {
   const payload = mcpOverloadPayload(error);
   const result = {
-    content: [{ type: "text", text: JSON.stringify(payload) }],
+    content: [{ type: "text" as const, text: JSON.stringify(payload) }],
     structuredContent: payload,
     isError: true,
   };
@@ -515,8 +511,8 @@ function refuseToolsWithoutReadyBrokerSession(
   server: McpServer,
   result: SessionBrokerResult,
 ): void {
-  server.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
-  server.server.setRequestHandler(CallToolRequestSchema, async (request) =>
+  server.server.setRequestHandler("tools/list", async () => ({ tools: [] }));
+  server.server.setRequestHandler("tools/call", async (request) =>
     unavailableBrokerSessionToolResult(result, request.params.name),
   );
 }
@@ -535,7 +531,7 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
   // connecting when no connection exists yet, deferring the daemon connect to the
   // first tool call (issue #5879) so a host that enumerates resources on init
   // never blocks on a wedged daemon. Once connected, the live list is served.
-  server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  server.server.setRequestHandler("resources/list", async () => {
     try {
       const resources = await proxy.listAdvertisedResources();
       return { resources };
@@ -559,7 +555,7 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
 
   // Register resources/templates/list handler. Cold-serves without connecting
   // (see resources/list above); defers the daemon connect to the first tool call.
-  server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+  server.server.setRequestHandler("resources/templates/list", async () => {
     try {
       const resourceTemplates = await proxy.listAdvertisedResourceTemplates();
       return { resourceTemplates };
@@ -582,7 +578,7 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
   });
 
   // Register resources/read handler - forward to daemon
-  server.server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
+  server.server.setRequestHandler("resources/read", async (request, ctx) => {
     const uri = request.params.uri;
 
     if (!uri) {
@@ -592,10 +588,10 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
     logger.info(`[ProxyServer] Forwarding resource read: ${uri}`);
 
     try {
-      const result = await proxy.readResource(uri, { signal: extra.signal });
+      const result = await proxy.readResource(uri, { signal: ctx.mcpReq.signal });
       return result;
     } catch (error) {
-      extra.signal.throwIfAborted();
+      ctx.mcpReq.signal.throwIfAborted();
       if (error instanceof DaemonBoundSessionExpiredError) {
         throw sessionOwnershipLostError(error);
       }
@@ -656,14 +652,12 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   let toolListEpoch = 0;
 
   // Create the MCP server
-  const server = new McpServer(
+  const server = createSdkMcpServer(
     {
       name: "AutoMobile",
       version: getMcpServerVersion(),
     },
-    {
-      capabilities: proxyServerCapabilities(options),
-    },
+    proxyServerCapabilities(options) as ServerCapabilities,
   );
 
   // Forward daemon-emitted list-changed notifications to the external client
@@ -705,7 +699,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     });
   };
 
-  server.server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+  server.server.setRequestHandler("resources/subscribe", async (request) => {
     try {
       await proxy.subscribeResource(request.params.uri);
       return {};
@@ -713,7 +707,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       throw toActionableError(error, "Failed to subscribe to daemon resource");
     }
   });
-  server.server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+  server.server.setRequestHandler("resources/unsubscribe", async (request) => {
     try {
       await proxy.unsubscribeResource(request.params.uri);
       return {};
@@ -723,15 +717,12 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   });
 
   // Register ping handler as per MCP specification
-  const PingRequestSchema = require("@modelcontextprotocol/sdk/types.js").PingRequestSchema;
-  server.server.setRequestHandler(PingRequestSchema, async () => {
+  server.server.setRequestHandler("ping", async () => {
     return {};
   });
 
   // Register prompts list handler (returns empty list)
-  const ListPromptsRequestSchema =
-    require("@modelcontextprotocol/sdk/types.js").ListPromptsRequestSchema;
-  server.server.setRequestHandler(ListPromptsRequestSchema, async () => {
+  server.server.setRequestHandler("prompts/list", async () => {
     return {
       prompts: [],
     };
@@ -741,7 +732,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   // connecting to the daemon when no connection exists yet, deferring the daemon
   // connect/start to the first actual tool call (issue #5879). Once connected,
   // the accurate session-scoped list is served.
-  server.server.setRequestHandler(ListToolsRequestSchema, async () => {
+  server.server.setRequestHandler("tools/list", async (): Promise<ListToolsResult> => {
     try {
       if (brokerSessionHasEnded(proxy, options.session)) {
         return { tools: [] }; // Broker connections cannot discover generic acquisition tools.
@@ -774,7 +765,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
           advertisedToolOutputSchemas.set(tool.name, tool.outputSchema !== undefined);
         }
       }
-      return { tools };
+      // Daemon definitions are forwarded verbatim; the SDK types their schemas
+      // more narrowly than the proxy's `Record<string, unknown>`.
+      return { tools } as ListToolsResult;
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
         throw sessionOwnershipLostError(error);

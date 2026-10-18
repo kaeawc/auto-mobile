@@ -72,6 +72,7 @@ test/daemon/socketServerOneShotCliAcquisition.integration.test.ts | safe | in-me
 test/daemon/socketServerPermissions.integration.test.ts | safe | mkdtemp socket dir L32
 test/daemon/socketServerReaffirmedProfileAcquisition.integration.test.ts | safe | tmpdir socket L50, fake daemon state L30, FakeDaemonManager L61
 test/daemon/socketServerScopeKey.integration.test.ts | safe | tmpdir socket L72
+test/daemon/socketServerStatelessLoopback.integration.test.ts | safe | tmpdir socket L164, loopback ephemeral port L153, hermetic fixture device boundary
 test/daemon/socketServerToolCapabilities.integration.test.ts | safe | tmpdir socket L62
 test/daemon/telemetryPushSocketServer.integration.test.ts | safe | FakeSocket, FakeTimer, in-memory singleton DB
 test/daemon/videoStreamSocketServer.integration.test.ts | safe | mkdtemp socket dir L144, fake H264 capture source and timer

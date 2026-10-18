@@ -36,7 +36,7 @@ export interface BindingResourceUsage {
   preparing: number;
   /** Bound old devices named by an open replace in intent or deleting phase. */
   deleting: number;
-  /** Daemon-named inventory devices without a registry commitment. */
+  /** Running (or power-unknown) daemon-named inventory devices without a registry commitment. */
   orphaned: number;
 }
 
@@ -77,6 +77,8 @@ interface ResourceCharge {
   platform: BindingPlatform;
   stableDeviceId: string;
   journal?: BindingJournalEntry;
+  name?: string;
+  orphanState?: "running" | "power_unknown";
 }
 
 type ChargedEvidence = BindingBudgetEvidence["charged"][number];
@@ -88,6 +90,68 @@ const chargeKindOrder: ChargedEvidence["kind"][] = [
   "preparing",
   "orphaned",
 ];
+
+/** Most charged devices listed in refusal evidence and the human message (#13017). */
+export const MAX_CHARGED_EVIDENCE = 10;
+
+const chargeReasonText: Record<ChargedEvidence["kind"], string> = {
+  assigned_active: "committed: in use by a session",
+  assigned_idle: "committed: assigned to a binding",
+  free: "free",
+  deleting: "committed: being deleted",
+  deletion_stuck: "committed: deletion stuck",
+  preparing: "committed: being prepared",
+  orphaned: "orphaned",
+};
+
+function chargeReason(charge: ChargedEvidence): string {
+  if (charge.kind !== "orphaned") {
+    return chargeReasonText[charge.kind];
+  }
+  return charge.orphanState === "power_unknown"
+    ? "orphaned: power state unknown"
+    : "orphaned: running";
+}
+
+/** The wire evidence of an exhausted admission (drops the discriminant). */
+export function budgetEvidenceOf(
+  admission: BindingBudgetEvidence & { kind?: string },
+): BindingBudgetEvidence {
+  const { limit, usage, charged, chargedOmitted, retained, evictionFailures } = admission;
+  return {
+    limit,
+    usage,
+    charged,
+    ...(chargedOmitted ? { chargedOmitted } : {}),
+    retained,
+    evictionFailures,
+  };
+}
+
+/** Message and wire evidence for a `binding_budget_exhausted` refusal. */
+export function budgetRefusal(admission: BindingBudgetEvidence & { kind?: string }): {
+  message: string;
+  budget: BindingBudgetEvidence;
+} {
+  const budget = budgetEvidenceOf(admission);
+  return { message: describeBudgetExhaustion(budget), budget };
+}
+
+/** Human message naming the devices that consume the budget, bounded to the evidence list. */
+export function describeBudgetExhaustion(evidence: BindingBudgetEvidence): string {
+  const base = `Managed-binding total-resource budget is exhausted (${evidence.usage.total} charged, limit ${evidence.limit}).`;
+  if (evidence.charged.length === 0) {
+    return base;
+  }
+  const listed = evidence.charged
+    .map(
+      (charge) =>
+        `${charge.name ?? charge.stableDeviceId} (${charge.platform}, ${chargeReason(charge)})`,
+    )
+    .join("; ");
+  const omitted = evidence.chargedOmitted ?? 0;
+  return `${base} Charged devices: ${listed}${omitted > 0 ? `; and ${omitted} more` : ""}.`;
+}
 
 function chargedEvidence(charges: readonly ResourceCharge[]): ChargedEvidence[] {
   const kindFor: Record<ResourceCharge["category"], ChargedEvidence["kind"]> = {
@@ -102,6 +166,8 @@ function chargedEvidence(charges: readonly ResourceCharge[]): ChargedEvidence[] 
       platform: charge.platform,
       stableDeviceId: charge.stableDeviceId,
       kind: kindFor[charge.category],
+      ...(charge.name ? { name: charge.name } : {}),
+      ...(charge.orphanState ? { orphanState: charge.orphanState } : {}),
     }))
     .sort(
       (a, b) =>
@@ -226,10 +292,18 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
   return charges;
 }
 
+/**
+ * A known powered-off image with no registry commitment holds no live resource and is never
+ * deleted by the budget, so it must not block creation (#13017). Unknown power state still counts.
+ */
+function isPoweredOffLeftover(device: DeviceInfo): boolean {
+  return device.isRunning === false && device.isRunningStateKnown !== false;
+}
+
 function chargeOrphans(input: LedgerInput, charges: ResourceCharge[], seen: Set<string>): void {
   for (const device of input.inventory ?? []) {
     const stableId = deviceStableId(device);
-    if (!stableId || !isProductBrokerDevice(device.name)) {
+    if (!stableId || !isProductBrokerDevice(device.name) || isPoweredOffLeftover(device)) {
       continue;
     }
     const key = resourceKey(device.platform, stableId);
@@ -247,7 +321,13 @@ function chargeOrphans(input: LedgerInput, charges: ResourceCharge[], seen: Set<
             )),
       );
     if (!known && !seen.has(key) && !device.name.startsWith(LEGACY_DEVICE_NAME_PREFIX)) {
-      charges.push({ category: "orphaned", platform: device.platform, stableDeviceId: stableId });
+      charges.push({
+        category: "orphaned",
+        platform: device.platform,
+        stableDeviceId: stableId,
+        name: device.name,
+        orphanState: device.isRunning === true ? "running" : "power_unknown",
+      });
       seen.add(key);
     }
   }
@@ -407,7 +487,10 @@ export class RegistryBindingResourceBudget implements BindingResourceBudget {
           kind: "exhausted",
           limit,
           usage,
-          charged: ledger.charged,
+          charged: ledger.charged.slice(0, MAX_CHARGED_EVIDENCE),
+          ...(ledger.charged.length > MAX_CHARGED_EVIDENCE
+            ? { chargedOmitted: ledger.charged.length - MAX_CHARGED_EVIDENCE }
+            : {}),
           retained: [],
           evictionFailures: [],
         };

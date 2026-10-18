@@ -1,5 +1,5 @@
+import type { Transport } from "@modelcontextprotocol/server";
 import { describe, expect, test } from "bun:test";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { EarlyStartTransport } from "../../src/server/earlyStartTransport";
 
 type Message = Parameters<Transport["send"]>[0];

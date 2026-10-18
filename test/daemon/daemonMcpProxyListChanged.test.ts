@@ -712,3 +712,110 @@ describe("DaemonMcpProxy subscription background connection", () => {
     }
   });
 });
+
+// #4678: when the daemon does not acknowledge the list_changed subscription, the
+// proxy polls tools/list and resources/list and re-emits list_changed itself.
+describe("DaemonMcpProxy list_changed polling fallback", () => {
+  const POLL_MS = 5_000;
+
+  function pollingSetup(options: { failSubscribe: boolean }) {
+    const timer = new FakeTimer();
+    const daemonMethodResults = new Map<string, any>([
+      ["tools/list", TOOLS_V1],
+      ["resources/list", RESOURCES_V1],
+      ["resources/list-templates", TEMPLATES_V1],
+    ]);
+    const client = new FakeDaemonClient({ daemonMethodResults });
+    client.shouldFailSubscribe = options.failSubscribe;
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => client,
+      daemonManager: runningManager(),
+      autoStartDaemon: false,
+      timer,
+      listPollIntervalMs: POLL_MS,
+    });
+    const emitted: string[] = [];
+    proxy.onListChanged((kind) => emitted.push(kind));
+    const listCalls = () =>
+      client.callDaemonMethodCalls.filter(
+        (call) => call.method === "tools/list" || call.method === "resources/list",
+      ).length;
+    const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+    const poll = () => timer.advanceTimeAsync(POLL_MS);
+    return { client, proxy, emitted, daemonMethodResults, listCalls, settle, poll };
+  }
+
+  test("an unacknowledged subscription polls and re-emits a changed tool list", async () => {
+    mockDaemonAvailable();
+    const { proxy, emitted, daemonMethodResults, settle, poll } = pollingSetup({
+      failSubscribe: true,
+    });
+    try {
+      await proxy.listTools();
+      await settle();
+      await poll();
+      expect(emitted).toEqual([]);
+
+      daemonMethodResults.set("tools/list", { tools: [{ name: "toolB", inputSchema: {} }] });
+      await poll();
+
+      expect(emitted).toEqual(["tools"]);
+      expect((await proxy.listTools()).map((tool) => tool.name)).toEqual(["toolB"]);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("an acknowledged subscription does not poll", async () => {
+    mockDaemonAvailable();
+    const { proxy, emitted, daemonMethodResults, listCalls, settle, poll } = pollingSetup({
+      failSubscribe: false,
+    });
+    try {
+      await proxy.listTools();
+      await settle();
+      const before = listCalls();
+      daemonMethodResults.set("tools/list", { tools: [] });
+      await poll();
+      await poll();
+
+      expect(listCalls()).toBe(before);
+      expect(emitted).toEqual([]);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("a push and a poll for the same change emit list_changed once", async () => {
+    mockDaemonAvailable();
+    const { client, proxy, emitted, daemonMethodResults, settle, poll } = pollingSetup({
+      failSubscribe: true,
+    });
+    try {
+      await proxy.listResources();
+      await settle();
+      daemonMethodResults.set("resources/list", { resources: [] });
+
+      client.emitNotification("notifications/resources/list_changed");
+      await poll();
+      await settle();
+
+      expect(emitted).toEqual(["resources"]);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("close stops polling", async () => {
+    mockDaemonAvailable();
+    const { proxy, listCalls, settle, poll } = pollingSetup({ failSubscribe: true });
+    await proxy.listTools();
+    await settle();
+    await proxy.close();
+    const before = listCalls();
+
+    await poll();
+
+    expect(listCalls()).toBe(before);
+  });
+});

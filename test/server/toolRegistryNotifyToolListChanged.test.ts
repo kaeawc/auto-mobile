@@ -1,8 +1,13 @@
+import type { McpServer } from "@modelcontextprotocol/server";
 import { FakeMcpServer } from "../fakes/FakeMcpServer";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
+
+// The one cast: FakeMcpServer implements only what the registry touches.
+function asServer(fake: FakeMcpServer): McpServer {
+  return fake as unknown as McpServer;
+}
 
 // Minimal MCP-server stand-in: registerWithServer only calls registerTool (no-op
 // here), tracks the server, and hooks the underlying Protocol onclose for
@@ -21,7 +26,7 @@ describe("ToolRegistry.notifyToolListChanged", () => {
 
   test("delegates to server.sendToolListChanged() after registerWithServer", () => {
     const server = new FakeMcpServer();
-    ToolRegistry.registerWithServer(server as unknown as McpServer);
+    ToolRegistry.registerWithServer(asServer(server));
 
     ToolRegistry.notifyToolListChanged();
 
@@ -31,7 +36,7 @@ describe("ToolRegistry.notifyToolListChanged", () => {
   test("swallows sendToolListChanged errors (best-effort, never throws)", () => {
     const server = new FakeMcpServer();
     server.shouldThrow = true;
-    ToolRegistry.registerWithServer(server as unknown as McpServer);
+    ToolRegistry.registerWithServer(asServer(server));
 
     expect(() => ToolRegistry.notifyToolListChanged()).not.toThrow();
     expect(server.calls).toBe(1);
@@ -40,8 +45,8 @@ describe("ToolRegistry.notifyToolListChanged", () => {
   test("fans out to every registered server, not just the last one (issue #3223)", () => {
     const first = new FakeMcpServer();
     const second = new FakeMcpServer();
-    ToolRegistry.registerWithServer(first as unknown as McpServer);
-    ToolRegistry.registerWithServer(second as unknown as McpServer);
+    ToolRegistry.registerWithServer(asServer(first));
+    ToolRegistry.registerWithServer(asServer(second));
 
     ToolRegistry.notifyToolListChanged();
 
@@ -53,8 +58,8 @@ describe("ToolRegistry.notifyToolListChanged", () => {
     const throwing = new FakeMcpServer();
     throwing.shouldThrow = true;
     const healthy = new FakeMcpServer();
-    ToolRegistry.registerWithServer(throwing as unknown as McpServer);
-    ToolRegistry.registerWithServer(healthy as unknown as McpServer);
+    ToolRegistry.registerWithServer(asServer(throwing));
+    ToolRegistry.registerWithServer(asServer(healthy));
 
     expect(() => ToolRegistry.notifyToolListChanged()).not.toThrow();
     expect(healthy.calls).toBe(1);
@@ -63,8 +68,8 @@ describe("ToolRegistry.notifyToolListChanged", () => {
   test("prunes a server when its underlying transport closes", () => {
     const closing = new FakeMcpServer();
     const surviving = new FakeMcpServer();
-    ToolRegistry.registerWithServer(closing as unknown as McpServer);
-    ToolRegistry.registerWithServer(surviving as unknown as McpServer);
+    ToolRegistry.registerWithServer(asServer(closing));
+    ToolRegistry.registerWithServer(asServer(surviving));
 
     // Simulate the session teardown the SDK performs on transport close.
     closing.server.onclose?.();
@@ -80,7 +85,7 @@ describe("ToolRegistry.notifyToolListChanged", () => {
     server.server.onclose = () => {
       priorHookCalls += 1;
     };
-    ToolRegistry.registerWithServer(server as unknown as McpServer);
+    ToolRegistry.registerWithServer(asServer(server));
 
     server.server.onclose?.();
 
@@ -89,12 +94,48 @@ describe("ToolRegistry.notifyToolListChanged", () => {
 
   test("re-registering the same server does not double-notify", () => {
     const server = new FakeMcpServer();
-    ToolRegistry.registerWithServer(server as unknown as McpServer);
-    ToolRegistry.registerWithServer(server as unknown as McpServer);
+    ToolRegistry.registerWithServer(asServer(server));
+    ToolRegistry.registerWithServer(asServer(server));
 
     ToolRegistry.notifyToolListChanged();
 
     expect(server.calls).toBe(1);
+  });
+
+  test("an ephemeral per-request server is never sent tools/list_changed (#4678)", () => {
+    const ephemeral = new FakeMcpServer();
+    const session = new FakeMcpServer();
+    const kinds: string[] = [];
+    const unsubscribe = ListChangedBroadcaster.subscribe((kind) => {
+      kinds.push(kind);
+    });
+    try {
+      ToolRegistry.registerWithServer(asServer(ephemeral), { ephemeral: true });
+      ToolRegistry.registerWithServer(asServer(session));
+
+      ToolRegistry.notifyToolListChanged();
+
+      expect(ephemeral.calls).toBe(0);
+      expect(session.calls).toBe(1);
+      // Its clients learn of the change through the broadcaster instead.
+      expect(kinds).toEqual(["tools"]);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  test("ephemeral servers are tracked only until they close, so none leak", () => {
+    const servers = Array.from({ length: 3 }, () => new FakeMcpServer());
+    for (const server of servers) {
+      ToolRegistry.registerWithServer(asServer(server), { ephemeral: true });
+    }
+    expect(ToolRegistry.trackedServerCountsForTesting()).toEqual({ notified: 0, ephemeral: 3 });
+
+    for (const server of servers) {
+      server.server.onclose?.();
+    }
+
+    expect(ToolRegistry.trackedServerCountsForTesting()).toEqual({ notified: 0, ephemeral: 0 });
   });
 
   test("emits on the ListChangedBroadcaster even with zero servers", () => {

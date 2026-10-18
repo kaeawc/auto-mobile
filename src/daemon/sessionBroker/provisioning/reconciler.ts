@@ -18,6 +18,7 @@ import {
   type ResolvedExactDeviceSpecification,
 } from "../../../devices/exactDeviceProvisioning";
 import type { BindingResourceBudget, BindingResourceAdmission } from "./resourceBudget";
+import { budgetRefusal } from "./resourceBudget";
 import type { DeviceInfo } from "../../../models/index";
 import type { BindingBudgetEvidence } from "./acquisitionResult";
 import type { FormFactor } from "../../../models/DeviceMatchCriteria";
@@ -2087,12 +2088,8 @@ export class BindingReconciler {
     if (admission.kind === "unknown") {
       throw new ReconcileAbort(failure("discovery_incomplete", admission.message));
     }
-    const { limit, usage, charged, retained, evictionFailures } = admission;
-    throw new ReconcileAbort(
-      failure("binding_budget_exhausted", "Managed-binding total-resource budget is exhausted.", {
-        budget: { limit, usage, charged, retained, evictionFailures },
-      }),
-    );
+    const { message, budget } = budgetRefusal(admission);
+    throw new ReconcileAbort(failure("binding_budget_exhausted", message, { budget }));
   }
 
   private async removeFailedUnboundBinding(

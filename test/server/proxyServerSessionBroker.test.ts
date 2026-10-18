@@ -1,6 +1,6 @@
+import { Client } from "../helpers/v1ViewMcpClient";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { SessionBrokerResult } from "../../src/devices/sessionBrokerResult";
 import { SESSION_EXPERIMENTAL_CAPABILITY } from "../../src/devices/sessionConfig";
 import { createProxyMcpServer } from "../../src/server/proxyServer";

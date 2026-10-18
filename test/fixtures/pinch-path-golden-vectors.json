@@ -1,0 +1,77 @@
+{
+  "description": "Single source of truth for the cross-platform two-finger pinch PATH geometry (issue #12996). A rotating pinch follows an arc, not the straight start-to-end chord, so a pure rotation (distanceStart == distanceEnd) never zooms. Each row is (centerX, centerY, distanceStart, distanceEnd, rotationDegrees, fraction) and the expected UNORDERED pair of finger positions [x, y] after that fraction (0..1) of the gesture: the axis angle is rotationDegrees * fraction and the radius is linearly interpolated from distanceStart / 2 to distanceEnd / 2. The Android PinchGeometryTest.kt and iOS PinchGeometryTests.swift inline path tables are verified against this file by test/parity/pinchGoldenVectorParity.test.ts.",
+  "vectors": [
+    {
+      "centerX": 200,
+      "centerY": 400,
+      "distanceStart": 100,
+      "distanceEnd": 100,
+      "rotationDegrees": 90,
+      "fraction": 0.5,
+      "expected": [
+        [235.355339, 435.355339],
+        [164.644661, 364.644661]
+      ]
+    },
+    {
+      "centerX": 200,
+      "centerY": 400,
+      "distanceStart": 100,
+      "distanceEnd": 100,
+      "rotationDegrees": 90,
+      "fraction": 0.25,
+      "expected": [
+        [246.193977, 419.134172],
+        [153.806023, 380.865828]
+      ]
+    },
+    {
+      "centerX": 300,
+      "centerY": 500,
+      "distanceStart": 200,
+      "distanceEnd": 80,
+      "rotationDegrees": -60,
+      "fraction": 0.5,
+      "expected": [
+        [360.621778, 465],
+        [239.378222, 535]
+      ]
+    },
+    {
+      "centerX": 0,
+      "centerY": 0,
+      "distanceStart": 200,
+      "distanceEnd": 200,
+      "rotationDegrees": 0,
+      "fraction": 0.5,
+      "expected": [
+        [100, 0],
+        [-100, 0]
+      ]
+    },
+    {
+      "centerX": 540,
+      "centerY": 960,
+      "distanceStart": 100,
+      "distanceEnd": 300,
+      "rotationDegrees": 45,
+      "fraction": 1,
+      "expected": [
+        [646.066017, 1066.066017],
+        [433.933983, 853.933983]
+      ]
+    },
+    {
+      "centerX": 540,
+      "centerY": 960,
+      "distanceStart": 100,
+      "distanceEnd": 300,
+      "rotationDegrees": 45,
+      "fraction": 0.5,
+      "expected": [
+        [632.387953, 998.268343],
+        [447.612047, 921.731657]
+      ]
+    }
+  ]
+}

@@ -43,7 +43,7 @@ describe("FailureEventRepository", () => {
   beforeEach(async () => {
     db = await createTestDatabase();
     timer = new FakeTimer();
-    repo = new FailureEventRepository(timer, db);
+    repo = new FailureEventRepository(db, timer);
   });
 
   afterEach(async () => {
@@ -52,7 +52,7 @@ describe("FailureEventRepository", () => {
 
   test("primes independent crash and ANR sweeps for each repository lifetime", async () => {
     for (let lifetime = 0; lifetime < 2; lifetime++) {
-      const fresh = new FailureEventRepository(timer, db);
+      const fresh = new FailureEventRepository(db, timer);
       const crashes = spyOn(fresh as any, "pruneCrashesToRowCap");
       const anrs = spyOn(fresh as any, "pruneAnrsToRowCap");
       try {

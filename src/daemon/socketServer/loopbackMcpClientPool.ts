@@ -1,7 +1,7 @@
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { AsyncLocalStorage } from "node:async_hooks";
+import type { Client } from "@modelcontextprotocol/client";
+import { MCP_SESSION_KEY_HEADER } from "../../server/mcpSessionKey";
 import { logger } from "../../utils/logger";
-import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 
 /**
@@ -12,7 +12,33 @@ import type { Timer } from "../../utils/SystemTimer";
  */
 
 export const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
-export const MCP_SESSION_TERMINATION_TIMEOUT_MS = 2_000;
+
+/**
+ * The socket session id of the forward in flight, read by {@link withLoopbackSessionKey} when the
+ * shared pooled client sends the request. Pooled clients outlive any one socket, so the session key
+ * cannot be fixed at client creation; it travels with the async call chain instead.
+ */
+const loopbackSessionKey = new AsyncLocalStorage<string>();
+
+/** Run `fn` so every loopback request it issues carries `sessionKey` in the session-key header. */
+export function runWithLoopbackSessionKey<T>(sessionKey: string, fn: () => Promise<T>): Promise<T> {
+  return loopbackSessionKey.run(sessionKey, fn);
+}
+
+type LoopbackFetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
+
+/** Wrap a fetch so each request carries the session key of the forward that issued it. */
+export function withLoopbackSessionKey(inner: LoopbackFetch): LoopbackFetch {
+  return (url, init) => {
+    const sessionKey = loopbackSessionKey.getStore();
+    if (sessionKey === undefined) {
+      return inner(url, init);
+    }
+    const headers = new Headers(init?.headers);
+    headers.set(MCP_SESSION_KEY_HEADER, sessionKey);
+    return inner(url, { ...init, headers });
+  };
+}
 
 export type McpClientFactory = (
   boundSessionUuid?: string,
@@ -110,21 +136,8 @@ export async function resetPooledClient(
   }
 }
 
-export async function closePooledClient(timer: Timer, key: string, client: Client): Promise<void> {
-  const transport = client.transport;
-  if (transport instanceof StreamableHTTPClientTransport && transport.sessionId) {
-    try {
-      await raceWithDeadline(transport.terminateSession(), {
-        timer,
-        timeoutMs: MCP_SESSION_TERMINATION_TIMEOUT_MS,
-        label: "MCP session termination",
-        timeoutError: () => new Error("MCP session termination timed out"),
-      });
-    } catch (error) {
-      // A failed DELETE is best-effort; closing the local client still releases its resources.
-      logger.debug(`Could not terminate MCP session for key ${key}: ${error}`);
-    }
-  }
+/** The loopback endpoint is stateless, so there is no server-side session to terminate. */
+export async function closePooledClient(client: Client): Promise<void> {
   await client.close();
 }
 

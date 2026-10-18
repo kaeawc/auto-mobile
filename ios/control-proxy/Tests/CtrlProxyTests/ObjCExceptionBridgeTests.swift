@@ -17,8 +17,11 @@ final class ObjCExceptionBridgeTests: XCTestCase {
         func testDisplayPinchOffIOSReportsSymbolsUnavailable() {
             var unavailable: ObjCBool = false
             var message: NSString?
-            let points = ObjCExceptionCatcher_computePinchPoints(508, 202, 100, 300, 0)
-            XCTAssertFalse(ObjCExceptionCatcher_synthesizeDisplayPinch(points, 0.3, 2, 1, &unavailable, &message))
+            let first: [NSNumber] = [458, 202, 358, 202]
+            let second: [NSNumber] = [558, 202, 658, 202]
+            XCTAssertFalse(ObjCExceptionCatcher_synthesizeDisplayPinch(
+                first, second, 0.3, 2, 1, &unavailable, &message
+            ))
             XCTAssertTrue(unavailable.boolValue)
             XCTAssertEqual(message as String?, "XCTest private display-targeted synthesis is only available on iOS")
         }

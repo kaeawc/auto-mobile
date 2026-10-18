@@ -28,8 +28,14 @@ import {
   type ServerResponse,
 } from "node:http";
 import { ActionableError } from "../models/ActionableError";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { NodeStreamableHTTPServerTransport as StreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { createMcpServer } from "../server";
+import { daemonSessionToolBindingStore } from "../server/daemonSessionToolBindingStore";
+import {
+  StatelessMcpHttpEndpoint,
+  type StatelessMcpRequestScope,
+  type StatelessMcpServer,
+} from "./statelessMcpHttpEndpoint";
 import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { createIosDoctorDependencies } from "../doctor/checks/ios";
 import { logger } from "../utils/logger";
@@ -355,7 +361,7 @@ import {
   type AdbTransportRestartLookup,
 } from "../utils/android-cmdline-tools/AdbTransportRestartRegistry";
 import { MISSING_DEVICE_MISS_THRESHOLD } from "./missingDeviceLiveness";
-import { describeUnknownError, errorMessage } from "../utils/describeUnknownError";
+import { errorMessage } from "../utils/describeUnknownError";
 import { writeEmergencyLog } from "../utils/loggingConfig";
 import { exitAfterDatabaseHealthFailure } from "./databaseHealthExit";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
@@ -412,7 +418,6 @@ export type {
 
 const HTTP_BODY_TIMEOUT_MS = 60_000;
 const HTTP_BODY_MAX_BYTES = 256 * 1024 * 1024;
-const HTTP_SESSION_IDLE_TIMEOUT_MS = 30 * 60_000;
 // The HTTP listener binds before device discovery (<=5 s) and session rehydration
 // (<=15 s). A direct HTTP MCP request waits this long for startup to finish so it
 // cannot take a device whose persisted session is about to be rehydrated (#11156);
@@ -680,9 +685,41 @@ export class Daemon {
    * close (and every later shutdown stage) open (#11189).
    */
   private readonly shutdownIngressAbort = new AbortController();
-  private transports: Map<string, StreamableHTTPServerTransport> = new Map();
-  private readonly httpSessionIdleTimers = new Map<string, NodeJS.Timeout>();
-  private readonly activeHttpRequests = new Map<string, number>();
+  /** Host headers the HTTP listener admits; set when it starts. */
+  private httpAllowedHosts: string[] = [];
+  /** Builds one MCP request's transport (stateless: no transport session id, #4678); tests replace it with a double. */
+  private mcpHttpTransportFactory = (allowedHosts: string[]): StreamableHTTPServerTransport =>
+    new StreamableHTTPServerTransport({
+      enableDnsRebindingProtection: true,
+      allowedHosts,
+    });
+  /** Builds one MCP request's server; tests replace it with a double. */
+  private mcpRequestServerFactory = (
+    req: IncomingMessage,
+    scope: StatelessMcpRequestScope,
+  ): StatelessMcpServer<StreamableHTTPServerTransport> => this.createRequestMcpServer(req, scope);
+  /** One server and transport per MCP POST, closed with its response (#4678). */
+  private readonly mcpHttpEndpoint = new StatelessMcpHttpEndpoint<
+    IncomingMessage,
+    ServerResponse,
+    StreamableHTTPServerTransport
+  >({
+    timer: {
+      setInterval: (callback, ms) => this.timer.setInterval(callback, ms),
+      clearInterval: (handle) => this.timer.clearInterval(handle),
+    },
+    idGenerator: { next: () => this.idGenerator.next() },
+    keepaliveIntervalMs: SSE_KEEPALIVE_INTERVAL_MS,
+    createTransport: () => this.mcpHttpTransportFactory(this.httpAllowedHosts),
+    createServer: (req, scope) => this.mcpRequestServerFactory(req, scope),
+    cancelScopeExecutions: (requestScopeId, reason) =>
+      executionTracker.cancelSessionExecutions(requestScopeId, reason),
+    forgetScopeBindings: (requestScopeId) => daemonSessionToolBindingStore().forget(requestScopeId),
+    closeReason: () =>
+      this.shutdownInProgress
+        ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
+        : "streamable_http_onclose",
+  });
   /** HTTP requests whose response is still open (SSE streams included). */
   private openHttpRequests = 0;
   /** HTTP requests ever received. */
@@ -1956,12 +1993,13 @@ export class Daemon {
     this.httpServerClosePromise = null;
     this.acceptingHttpSessions = true;
     const allowedHosts = [`127.0.0.1:${this.port}`, `localhost:${this.port}`, `[::1]:${this.port}`];
+    this.httpAllowedHosts = allowedHosts;
 
     // Disable default timeouts on this loopback-only server. Node.js 18+ sets
     // requestTimeout to 300 000 ms (5 min), which kills Streamable HTTP
     // connections for long-running tool calls like executePlan. With the timeout
     // active the HTTP response is silently dropped after ~5 min, the
-    // StreamableHTTPServerTransport fires onclose, and the MCP client never
+    // request's transport closes, and the MCP client never
     // receives the result — even when the tool completed successfully.
     this.httpServer.requestTimeout = 0;
     this.httpServer.headersTimeout = 0;
@@ -1970,8 +2008,8 @@ export class Daemon {
     const handleRequest = (req: IncomingMessage, res: ServerResponse): Promise<void> =>
       this.handleHttpRequest(req, res, allowedHosts);
     this.httpServer.on("request", (req, res) => {
-      // Counted for the orphaned private-daemon watchdog (#10497): a retained
-      // MCP session is not a connected client, but an open request is.
+      // Counted for the orphaned private-daemon watchdog (#10497): an open
+      // request is a connected client.
       this.openHttpRequests++;
       this.httpRequestsSeen++;
       res.once("close", () => {
@@ -2041,7 +2079,7 @@ export class Daemon {
     }
 
     if (url.pathname === MCP_STREAMABLE_PATH) {
-      return this.handleMcpHttpRequest(req, res, allowedHosts);
+      return this.handleMcpHttpRequest(req, res);
     } else {
       // 404 for unknown paths
       res.writeHead(404, { "Content-Type": "application/json" });
@@ -2168,19 +2206,11 @@ export class Daemon {
     }
   }
 
-  private async handleMcpHttpRequest(
-    req: IncomingMessage,
-    res: ServerResponse,
-    allowedHosts: string[],
-  ): Promise<void> {
+  private async handleMcpHttpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (!(await this.admitHttpMcpRequest(res))) {
       return;
     }
 
-    // Get session ID from header
-    const sessionId = req.headers["mcp-session-id"] as string | undefined;
-
-    let streamableTransport: StreamableHTTPServerTransport;
     let parsedBody: unknown;
 
     // Parse body for POST requests
@@ -2202,85 +2232,40 @@ export class Daemon {
       }
     }
 
-    // Check if this is an initialization request
-    const isInitializeRequest = this.isHttpInitializeRequest(parsedBody);
     const sendJsonRpcError = (message: string, error?: unknown) =>
       this.sendHttpJsonRpcError(res, parsedBody, message, error);
 
     // A request may have begun reading its body just before shutdown
-    // quiesced the listener. Recheck admission before it can create or use
-    // a transport after the shutdown session snapshot is taken.
+    // quiesced the listener. Recheck admission before it can create a
+    // server after the shutdown in-flight snapshot is taken.
     if (!this.acceptingHttpSessions) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Daemon is shutting down" }));
       return;
     }
 
-    if (sessionId && this.transports.has(sessionId)) {
-      // Use existing transport
-      streamableTransport = this.transports.get(sessionId)!;
-    } else if (isInitializeRequest || !sessionId) {
-      // Create new transport for initialization or when no session ID
-      const sessionContext = this.createHttpSessionContext(req);
-      streamableTransport = new StreamableHTTPServerTransport({
-        enableDnsRebindingProtection: true,
-        allowedHosts,
-        sessionIdGenerator: () => this.idGenerator.next(),
-        onsessioninitialized: (newSessionId) => {
-          if (!this.registerHttpTransport(newSessionId, streamableTransport)) {
-            return;
-          }
-          sessionContext.sessionId = newSessionId;
-          logger.info(`Streamable HTTP session initialized: ${newSessionId}`);
-        },
-      });
-
-      // Create and connect MCP server
-      let mcpServer;
-      try {
-        mcpServer = createMcpServer({
-          iosDependencies: this.iosDoctorDependencies,
-          debug: this.debug,
-          sessionContext,
-          daemonMode: true,
-          acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
-        });
-      } catch (error) {
-        logger.error("Failed to create MCP server:", error);
-        sendJsonRpcError("Server error", error);
-        return;
-      }
-
-      // Setup cleanup handlers
-      this.configureHttpTransportCallbacks(streamableTransport);
-
-      try {
-        logger.info("Connecting MCP server to Streamable HTTP transport");
-        await mcpServer.connect(streamableTransport);
-        logger.info("MCP server connected to Streamable HTTP transport");
-      } catch (error) {
-        logger.error("MCP server connect failed:", error);
-        sendJsonRpcError("Server error", error);
-        return;
-      }
-    } else {
-      // Invalid session
-      res.writeHead(404, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "Session not found" }));
-      return;
-    }
-
-    return this.dispatchMcpHttpRequest(req, res, streamableTransport, parsedBody, sendJsonRpcError);
+    return this.mcpHttpEndpoint.handle(req, res, parsedBody, sendJsonRpcError);
   }
 
-  private isHttpInitializeRequest(parsedBody: unknown): unknown {
-    return (
-      parsedBody &&
-      typeof parsedBody === "object" &&
-      true &&
-      "method" in parsedBody &&
-      parsedBody.method === "initialize"
-    );
+  /**
+   * Build one request's MCP server (#4678 stateless). The request scope id is its
+   * session-context id, so the executions it starts cancel with its response;
+   * the caller's session key travels as `requestMcpSessionId`.
+   */
+  private createRequestMcpServer(
+    req: IncomingMessage,
+    scope: StatelessMcpRequestScope,
+  ): ReturnType<typeof createMcpServer> {
+    // Stateless + daemon mode: keyed bindings live in the daemon-scoped store (#4678).
+    return createMcpServer({
+      iosDependencies: this.iosDoctorDependencies,
+      debug: this.debug,
+      sessionContext: { ...this.createHttpSessionContext(req), sessionId: scope.requestScopeId },
+      daemonMode: true,
+      acceptanceDiscoveryCapability: this.acceptanceDiscoveryCapability,
+      requestMcpSessionId: scope.requestMcpSessionId,
+      stateless: true,
+    });
   }
 
   private sendHttpJsonRpcError(
@@ -2306,162 +2291,6 @@ export class Daemon {
         },
       }),
     );
-  }
-
-  private async dispatchMcpHttpRequest(
-    req: IncomingMessage,
-    res: ServerResponse,
-    streamableTransport: StreamableHTTPServerTransport,
-    parsedBody: unknown,
-    sendJsonRpcError: (message: string, error?: unknown) => void,
-  ): Promise<void> {
-    // SSE keepalive: prevent the fetch() response stream from going idle
-    // during long-running tool calls (e.g. executePlan at ~6-10 min).
-    // Without traffic the client-side stream silently dies; the server
-    // writes the result to a dead pipe and the client eventually times out.
-    // SSE comment lines (`:`) are ignored by EventSourceParserStream.
-    const keepaliveTimer =
-      req.method === "POST"
-        ? this.timer.setInterval(() => {
-            if (res.headersSent && !res.writableEnded && !res.destroyed) {
-              res.write(":keepalive\n\n");
-            }
-          }, SSE_KEEPALIVE_INTERVAL_MS)
-        : undefined;
-
-    const clearKeepalive = () => {
-      if (keepaliveTimer) {
-        this.timer.clearInterval(keepaliveTimer);
-      }
-    };
-    res.on("close", clearKeepalive);
-    res.on("finish", clearKeepalive);
-
-    // Let the transport handle the request
-    const activeSessionId = streamableTransport.sessionId;
-    if (activeSessionId) {
-      this.beginHttpRequest(activeSessionId);
-    }
-    try {
-      await streamableTransport.handleRequest(req, res, parsedBody);
-    } catch (error) {
-      logger.error("Streamable HTTP request handling failed:", error);
-      sendJsonRpcError("Server error", error);
-    } finally {
-      clearKeepalive();
-      if (activeSessionId) {
-        this.endHttpRequest(activeSessionId);
-      }
-    }
-  }
-
-  private configureHttpTransportCallbacks(
-    streamableTransport: StreamableHTTPServerTransport,
-  ): void {
-    const handleClose = async (): Promise<void> => {
-      if (streamableTransport.sessionId) {
-        this.clearHttpSessionIdleTimer(streamableTransport.sessionId);
-        this.activeHttpRequests.delete(streamableTransport.sessionId);
-        const cancelled = await executionTracker.cancelSessionExecutions(
-          streamableTransport.sessionId,
-          this.shutdownInProgress
-            ? new DaemonHandoffInterruptionError(DAEMON_HANDOFF_INTERRUPTED_MESSAGE)
-            : "streamable_http_onclose",
-        );
-        this.transports.delete(streamableTransport.sessionId);
-        logger.info(
-          `Streamable HTTP session closed: ${streamableTransport.sessionId} (cancelled ${cancelled} executions)`,
-        );
-      }
-    };
-    streamableTransport.onclose = () => {
-      handleClose().catch((error) => {
-        logger.warn(`HTTP transport close callback failed: ${errorMessage(error)}`, error);
-      });
-    };
-    const handleError = async (error: Error): Promise<void> => {
-      if (streamableTransport.sessionId) {
-        this.handleHttpTransportError(streamableTransport.sessionId, error);
-      }
-    };
-    streamableTransport.onerror = (error) => {
-      handleError(error).catch((callbackError) => {
-        logger.warn(
-          `HTTP transport error callback failed: ${errorMessage(callbackError)}`,
-          callbackError,
-        );
-      });
-    };
-  }
-
-  private registerHttpTransport(
-    sessionId: string,
-    transport: StreamableHTTPServerTransport,
-  ): boolean {
-    if (!this.acceptingHttpSessions) {
-      void transport.close().catch((error) => {
-        logger.warn(`Failed to close HTTP session ${sessionId} rejected during shutdown`, error);
-      });
-      return false;
-    }
-    this.transports.set(sessionId, transport);
-    this.armHttpSessionIdleTimer(sessionId, transport);
-    return true;
-  }
-
-  private handleHttpTransportError(sessionId: string, error: unknown): void {
-    // The SDK also reports recoverable per-request failures here; keep the live session.
-    logger.warn(
-      `Streamable HTTP transport error for session ${sessionId}: ${describeUnknownError(error)}`,
-    );
-  }
-
-  private clearHttpSessionIdleTimer(sessionId: string): void {
-    const timer = this.httpSessionIdleTimers.get(sessionId);
-    if (timer) {
-      this.timer.clearTimeout(timer);
-      this.httpSessionIdleTimers.delete(sessionId);
-    }
-  }
-
-  private armHttpSessionIdleTimer(
-    sessionId: string,
-    transport: StreamableHTTPServerTransport,
-  ): void {
-    this.clearHttpSessionIdleTimer(sessionId);
-    const timer = this.timer.setTimeout(() => {
-      this.httpSessionIdleTimers.delete(sessionId);
-      if (this.transports.get(sessionId) !== transport) {
-        return;
-      }
-      if ((this.activeHttpRequests.get(sessionId) ?? 0) > 0) {
-        this.armHttpSessionIdleTimer(sessionId, transport);
-        return;
-      }
-      void transport.close().catch((error) => {
-        logger.warn(`Failed to reap idle HTTP session ${sessionId}`, error);
-        this.armHttpSessionIdleTimer(sessionId, transport);
-      });
-    }, HTTP_SESSION_IDLE_TIMEOUT_MS);
-    this.httpSessionIdleTimers.set(sessionId, timer);
-  }
-
-  private beginHttpRequest(sessionId: string): void {
-    this.clearHttpSessionIdleTimer(sessionId);
-    this.activeHttpRequests.set(sessionId, (this.activeHttpRequests.get(sessionId) ?? 0) + 1);
-  }
-
-  private endHttpRequest(sessionId: string): void {
-    const remaining = (this.activeHttpRequests.get(sessionId) ?? 1) - 1;
-    if (remaining > 0) {
-      this.activeHttpRequests.set(sessionId, remaining);
-    } else {
-      this.activeHttpRequests.delete(sessionId);
-      const transport = this.transports.get(sessionId);
-      if (transport) {
-        this.armHttpSessionIdleTimer(sessionId, transport);
-      }
-    }
   }
 
   private readHttpBody(req: IncomingMessage): Promise<HttpBodyResult> {
@@ -5070,12 +4899,12 @@ export class Daemon {
     this.socketServer = server as UnixSocketServer | null;
   }
 
-  /** Test seam: register an HTTP transport double that shutdown must close. */
+  /** Test seam: register an in-flight HTTP request double that shutdown must close. */
   registerTransportForTesting(
-    sessionId: string,
+    requestScopeId: string,
     transport: Pick<StreamableHTTPServerTransport, "close">,
   ): void {
-    this.transports.set(sessionId, transport as StreamableHTTPServerTransport);
+    this.mcpHttpEndpoint.trackForTesting(requestScopeId, () => transport.close());
   }
 
   /** Test seam: behave as if shutdown had already started, without running it. */
@@ -5279,9 +5108,9 @@ export class Daemon {
         // No deadline per transport: one that wedges is covered by this stage's deadline, which
         // also marks the stage as still running for the database stage.
         runShutdownCleanupStages(
-          Array.from(this.transports, ([sessionId, streamableTransport]) => ({
-            name: `Streamable HTTP session ${sessionId}`,
-            run: () => streamableTransport.close(),
+          this.mcpHttpEndpoint.inFlightRequests().map(({ requestScopeId, close }) => ({
+            name: `Streamable HTTP request ${requestScopeId}`,
+            run: close,
           })),
           (message, error) => logger.warn(message, error),
         ),
@@ -5431,11 +5260,7 @@ export class Daemon {
   }
 
   private clearHttpSessionRegistry(): void {
-    for (const sessionId of this.httpSessionIdleTimers.keys()) {
-      this.clearHttpSessionIdleTimer(sessionId);
-    }
-    this.activeHttpRequests.clear();
-    this.transports.clear();
+    this.mcpHttpEndpoint.clear();
   }
 
   private async drainShutdownDatabaseWrites(timeoutMs: number): Promise<void> {

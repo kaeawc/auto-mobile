@@ -24,7 +24,7 @@ import {
 } from "./ScreenshotBackoffScheduler";
 
 import WebSocket from "ws";
-import { ActionableError, toActionableError } from "../../models/ActionableError";
+import { toActionableError } from "../../models/ActionableError";
 import { exponentialBackoff } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -41,6 +41,8 @@ import { CtrlProxyForwardingLeaseConflictError } from "./shared/CtrlProxyForward
 import { currentProcessEntrypoint, isBunTestRunnerProcess } from "../../utils/bunTestRunnerProcess";
 import type { DelegateContext } from "./shared/types";
 import type { HierarchyNavigationDetector } from "../navigation/HierarchyNavigationDetector";
+import { RealCtrlProxyWebSocketInTestError } from "./RealCtrlProxyWebSocketInTestError";
+import { ObserverPendingRequestTimeoutError } from "./ObserverPendingRequestTimeoutError";
 
 /**
  * Factory function type for creating WebSocket instances.
@@ -59,20 +61,6 @@ export const REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV = "AUTOMOBILE_ALLOW_REAL_CTRL_
 function isRealCtrlProxyWebSocketOptInEnabled(env: NodeJS.ProcessEnv): boolean {
   const normalized = env[REAL_CTRL_PROXY_WEBSOCKET_OPT_IN_ENV]?.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes";
-}
-
-/**
- * Thrown by {@link assertUnitTestRealWebSocketAllowed}. It is a test-harness
- * misconfiguration, not a connect failure: every catch on the connect path
- * rethrows it before recording a failed attempt, so a leaking unit test fails
- * loudly and never counts toward the platform clients' service recovery or
- * restart (which would act on an attached device).
- */
-export class RealCtrlProxyWebSocketInTestError extends ActionableError {
-  constructor(message: string) {
-    super(message);
-    this.name = "RealCtrlProxyWebSocketInTestError";
-  }
 }
 
 /** Rethrow {@link RealCtrlProxyWebSocketInTestError} from a connect-path catch that would otherwise degrade it. */
@@ -165,12 +153,6 @@ const LIVENESS_TIMEOUT_INTERVAL_MULTIPLIER = 2;
 // ping-then-terminate probe immediately instead of waiting for the next
 // periodic health-check tick.
 const REQUEST_TIMEOUT_LIVENESS_THRESHOLD = 3;
-
-export class ObserverPendingRequestTimeoutError extends Error {
-  constructor() {
-    super("Owner's in-flight request exceeded the observer hierarchy deadline");
-  }
-}
 
 /**
  * Abstract base class for device service WebSocket clients.

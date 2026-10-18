@@ -5,6 +5,7 @@ import type { MigrationProvider } from "kysely/migration";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { up as profileTypeMigration } from "../../src/db/migrations/2026_08_24_000_installed_apps_profile_type";
 import { runMigrations } from "../../src/db/migrator";
+import { looseKyselyTables } from "../helpers/looseKyselyTables";
 
 const MIGRATION_NAME = "2026_08_24_000_installed_apps_profile_type";
 
@@ -38,8 +39,8 @@ describe("installed apps profile-type migration", () => {
 
     await runMigrations(db, { provider: provider(), env: {} });
 
-    const migration = await db
-      .selectFrom("kysely_migration" as any)
+    const migration = await looseKyselyTables(db)
+      .selectFrom("kysely_migration")
       .select("name")
       .where("name", "=", MIGRATION_NAME)
       .executeTakeFirst();

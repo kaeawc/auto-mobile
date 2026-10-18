@@ -435,9 +435,11 @@ export class TapAtCoordinate extends BaseVisualChange {
       display,
       this.observeScreen,
       this.adb,
-      this.lastRenderedObservation,
-      signal,
-      this.displayTransitionReader,
+      {
+        lastRenderedObservation: this.lastRenderedObservation,
+        signal,
+        transitions: this.displayTransitionReader,
+      },
     );
     const stale = this.staleSnapshotReason(options, observation);
     if (stale) {

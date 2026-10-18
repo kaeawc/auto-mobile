@@ -74,7 +74,7 @@ interface SqlRow {
   sql: string | null;
 }
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   // Fast path: only the tables whose `updated_at` column exists AND has no
   // default need a rebuild. On a fresh/already-fixed schema this is empty, so we
   // return WITHOUT touching PRAGMA foreign_keys — leaving the connection's FK
@@ -124,7 +124,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
  * quirk, see #2922's test), which here — where null is the very signal that
  * triggers a rebuild — would spuriously rebuild a fresh table.
  */
-async function updatedAtLacksDefault(db: Kysely<unknown>, table: string): Promise<boolean> {
+async function updatedAtLacksDefault<DB>(db: Kysely<DB>, table: string): Promise<boolean> {
   const columns = await sql<ColumnInfoRow>`
     SELECT name, dflt_value FROM pragma_table_info(${sql.lit(table)})
   `.execute(db);
@@ -138,10 +138,7 @@ async function updatedAtLacksDefault(db: Kysely<unknown>, table: string): Promis
  * `DEFAULT` clause changes; the column set and order are untouched, so
  * `INSERT ... SELECT *` lines the rows up 1:1.
  */
-async function rebuildTableWithUpdatedAtDefault(
-  trx: Kysely<unknown>,
-  table: string,
-): Promise<void> {
+async function rebuildTableWithUpdatedAtDefault<DB>(trx: Kysely<DB>, table: string): Promise<void> {
   const createRow = await sql<SqlRow>`
     SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ${table}
   `.execute(trx);
@@ -190,7 +187,7 @@ async function rebuildTableWithUpdatedAtDefault(
  * is not AUTOINCREMENT / has never been inserted into (no sequence row) or the
  * `sqlite_sequence` table does not exist (no AUTOINCREMENT table in the DB).
  */
-async function captureSequence(trx: Kysely<unknown>, table: string): Promise<number | undefined> {
+async function captureSequence<DB>(trx: Kysely<DB>, table: string): Promise<number | undefined> {
   const hasSequenceTable = await sql<{ name: string }>`
     SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'
   `.execute(trx);

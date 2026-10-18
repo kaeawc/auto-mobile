@@ -1,6 +1,6 @@
 import type { Kysely } from "kysely";
 
-export async function up(db: Kysely<unknown>): Promise<void> {
+export async function up<DB>(db: Kysely<DB>): Promise<void> {
   // Add session tracking columns to installed_apps table
   await db.schema.alterTable("installed_apps").addColumn("daemon_session_id", "text").execute();
 
@@ -18,7 +18,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .execute();
 }
 
-export async function down(db: Kysely<unknown>): Promise<void> {
+export async function down<DB>(db: Kysely<DB>): Promise<void> {
   await db.schema.dropIndex("idx_installed_apps_session").execute();
 
   await db.schema.alterTable("installed_apps").dropColumn("daemon_session_id").execute();

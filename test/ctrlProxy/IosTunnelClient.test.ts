@@ -305,7 +305,7 @@ describe("IosTunnelClient", () => {
       await client.start(request);
       child.stderr.emit("data", "  " + "x".repeat(700) + "  ");
       expect(info.mock.calls).toEqual([
-        ["[IOSCtrlProxy] Starting iproxy tunnel (localhost:8765 -> device:8765)"],
+        ["[IosCtrlProxy] Starting iproxy tunnel (localhost:8765 -> device:8765)"],
       ]);
       expect(warn.mock.calls.some(([line]) => line === "[iproxy stderr] " + "x".repeat(500))).toBe(
         true,

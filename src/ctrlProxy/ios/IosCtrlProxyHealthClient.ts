@@ -93,12 +93,12 @@ export class IosCtrlProxyHealthClient {
       // Failed port probes are expected while a runner is starting; the typed reason is safe to return.
       if (reason === "unknown") {
         logger.warn(
-          `[IOSCtrlProxy] Health probe on port ${port} failed (${reason}): ${error}`,
+          `[IosCtrlProxy] Health probe on port ${port} failed (${reason}): ${error}`,
           error,
         );
       } else {
         logger.debug(
-          `[IOSCtrlProxy] Health probe on port ${port} failed (${reason}): ${error}`,
+          `[IosCtrlProxy] Health probe on port ${port} failed (${reason}): ${error}`,
           error,
         );
       }
@@ -157,12 +157,12 @@ export class IosCtrlProxyHealthClient {
       // A runner may be starting or gone; keep the transport reason for status callers.
       if (reason === "unknown") {
         logger.warn(
-          `[IOSCtrlProxy] Health probe on port ${port} failed (${reason}): ${error}`,
+          `[IosCtrlProxy] Health probe on port ${port} failed (${reason}): ${error}`,
           error,
         );
       } else {
         logger.debug(
-          `[IOSCtrlProxy] Health probe on port ${port} failed (${reason}): ${error}`,
+          `[IosCtrlProxy] Health probe on port ${port} failed (${reason}): ${error}`,
           error,
         );
       }

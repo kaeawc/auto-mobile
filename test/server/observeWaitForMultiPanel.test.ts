@@ -45,11 +45,12 @@ async function waitForTarget(
     undefined,
     false,
     timer,
-    device.platform,
-    "none",
-    undefined,
-    "multi",
-    device.displays?.panels ?? [],
+    {
+      platform: device.platform,
+      screenshot: "none",
+      displayInventory: "multi",
+      displayPanels: device.displays?.panels ?? [],
+    },
   );
 }
 

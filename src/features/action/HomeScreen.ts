@@ -14,7 +14,7 @@ import {
   ViewHierarchyResult,
 } from "../../models";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -429,7 +429,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async tryIosRunnerHome(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     timeoutMs: number,
     perf: PerformanceTracker | undefined,
     frameContext: string | undefined,
@@ -464,7 +464,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async verifyIosHomeForeground(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     perf?: PerformanceTracker,
     retryDelaysMs: readonly number[] = HomeScreen.IOS_HOME_RETRY_DELAYS_MS,
     timeoutMs: number = HomeScreen.IOS_HOME_VERIFICATION_TIMEOUT_MS,
@@ -539,7 +539,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async readIosHomeForeground(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     perf: PerformanceTracker | undefined,
     remainingMs: number,
     signal?: AbortSignal,
@@ -564,7 +564,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private throwIosHomeNotForeground(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     lastHierarchy: CtrlProxyHierarchy | undefined,
   ): never {
     const foregroundApp = lastHierarchy?.packageName ?? "unknown app";

@@ -120,7 +120,7 @@ export class IosCtrlProxyProcessClient {
         ),
       ];
     } catch (error) {
-      logger.debug(`[IOSCtrlProxy] Failed to find listener PIDs for port ${port}: ${error}`);
+      logger.debug(`[IosCtrlProxy] Failed to find listener PIDs for port ${port}: ${error}`);
       return [];
     }
   }
@@ -158,7 +158,7 @@ export class IosCtrlProxyProcessClient {
       if (options.strict) {
         throw error;
       }
-      logger.debug(`[IOSCtrlProxy] Failed to inspect PID ${pid}: ${error}`);
+      logger.debug(`[IosCtrlProxy] Failed to inspect PID ${pid}: ${error}`);
       return null;
     }
   }
@@ -193,7 +193,7 @@ export class IosCtrlProxyProcessClient {
       // caller's cleanup budget remains. Do not turn deadline expiry into a
       // successful exit observation.
       this.remainingTimeoutMs(deadline);
-      logger.debug(`[IOSCtrlProxy] Failed to check PID ${pid}: ${error}`);
+      logger.debug(`[IosCtrlProxy] Failed to check PID ${pid}: ${error}`);
       // `kill -0` exits non-zero for both EPERM (process exists, owned by
       // another user) and ESRCH (no such process), so the exec seam's throw
       // path can't be told apart by exit code alone. Classify from the
@@ -260,7 +260,7 @@ export class IosCtrlProxyProcessClient {
       }
       return descendants;
     } catch (error) {
-      logger.debug(`[IOSCtrlProxy] Failed to enumerate descendants of PID ${rootPid}: ${error}`);
+      logger.debug(`[IosCtrlProxy] Failed to enumerate descendants of PID ${rootPid}: ${error}`);
       if (options.throwOnError) {
         throw error;
       }
@@ -412,7 +412,7 @@ export class IosCtrlProxyProcessClient {
         this.remainingTimeoutMs(deadline);
       }
       logger.warn(
-        `[IOSCtrlProxy] Runner ownership unconfirmed, refusing to signal PID ${pid}: ${error}`,
+        `[IosCtrlProxy] Runner ownership unconfirmed, refusing to signal PID ${pid}: ${error}`,
       );
       throw new ActionableError(
         `CtrlProxy runner ownership unconfirmed; refusing to signal PID ${pid}`,
@@ -462,7 +462,7 @@ export class IosCtrlProxyProcessClient {
       return false;
     }
     identities.dropped.add(pid);
-    logger.warn(`[IOSCtrlProxy] PID ${pid} now names a different process; skipping signal`);
+    logger.warn(`[IosCtrlProxy] PID ${pid} now names a different process; skipping signal`);
     return true;
   }
 
@@ -561,7 +561,7 @@ export class IosCtrlProxyProcessClient {
           return Number.isNaN(pid) ? [] : [pid];
         });
     } catch (error) {
-      logger.debug(`[IOSCtrlProxy] Failed to enumerate ${pattern} PIDs: ${error}`);
+      logger.debug(`[IosCtrlProxy] Failed to enumerate ${pattern} PIDs: ${error}`);
       return [];
     }
   }
@@ -575,7 +575,7 @@ export class IosCtrlProxyProcessClient {
       );
       return stdout.trim() || undefined;
     } catch (error) {
-      logger.debug(`[IOSCtrlProxy] Failed to inspect environment for PID ${pid}: ${error}`);
+      logger.debug(`[IosCtrlProxy] Failed to inspect environment for PID ${pid}: ${error}`);
       return undefined;
     }
   }
@@ -605,7 +605,7 @@ export class IosCtrlProxyProcessClient {
     try {
       await this.executeCommand("kill", [`-${signal}`, "--", `-${pid}`], deadline);
     } catch (error) {
-      logger.debug(`[IOSCtrlProxy] PID ${pid} is not a signalable process group: ${error}`);
+      logger.debug(`[IosCtrlProxy] PID ${pid} is not a signalable process group: ${error}`);
     }
   }
 
@@ -622,7 +622,7 @@ export class IosCtrlProxyProcessClient {
       try {
         await this.executeCommand("kill", [`-${signal}`, String(pid)], deadline);
       } catch (error) {
-        logger.debug(`[IOSCtrlProxy] PID ${pid} exited before ${signal}: ${error}`);
+        logger.debug(`[IosCtrlProxy] PID ${pid} exited before ${signal}: ${error}`);
       }
     }
   }

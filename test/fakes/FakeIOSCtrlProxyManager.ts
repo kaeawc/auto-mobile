@@ -196,7 +196,7 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
     this.executedOperations.push("start");
 
     if (this.shouldStartFail) {
-      throw new Error("Failed to start IOSCtrlProxy");
+      throw new Error("Failed to start IosCtrlProxy");
     }
 
     this.runningState = true;
@@ -206,7 +206,7 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
     this.executedOperations.push("stop");
 
     if (this.shouldStopFail) {
-      throw new Error("Failed to stop IOSCtrlProxy");
+      throw new Error("Failed to stop IosCtrlProxy");
     }
 
     this.runningState = false;
@@ -224,7 +224,7 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
     if (this.shouldSetupFail) {
       return {
         success: false,
-        message: "Failed to setup IOSCtrlProxy",
+        message: "Failed to setup IosCtrlProxy",
         error: "Mock setup failure",
       };
     }
@@ -233,13 +233,13 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
       this.runningState = true;
       return {
         success: true,
-        message: "IOSCtrlProxy started successfully",
+        message: "IosCtrlProxy started successfully",
       };
     }
 
     return {
       success: true,
-      message: "IOSCtrlProxy was already running",
+      message: "IosCtrlProxy was already running",
     };
   }
 
@@ -261,7 +261,7 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
     this.executedOperations.push("forceRestart");
 
     if (this.shouldForceRestartFail) {
-      throw new Error("Failed to force-restart IOSCtrlProxy");
+      throw new Error("Failed to force-restart IosCtrlProxy");
     }
 
     this.runningState = true;

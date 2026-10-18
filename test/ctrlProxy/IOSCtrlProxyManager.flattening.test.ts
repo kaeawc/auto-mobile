@@ -127,7 +127,7 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       expect(warn.mock.calls).toEqual(
         branch === "throws"
           ? Array.from({ length: 2 }, () => [
-              "[IOSCtrlProxy] Error checking installation: Error: installer unavailable",
+              "[IosCtrlProxy] Error checking installation: Error: installer unavailable",
             ])
           : [],
       );
@@ -203,13 +203,13 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
         expected.push("wait");
       }
       if (branch === "ready") {
-        expected.push("[IOSCtrlProxy] Using prefetched build result");
+        expected.push("[IosCtrlProxy] Using prefetched build result");
       }
       if (branch === "waited") {
-        expected.push("[IOSCtrlProxy] Using completed prefetch build result");
+        expected.push("[IosCtrlProxy] Using completed prefetch build result");
       }
       if (["build", "failed build"].includes(branch)) {
-        expected.push("[IOSCtrlProxy] Downloading CtrlProxy bundle", "build");
+        expected.push("[IosCtrlProxy] Downloading CtrlProxy bundle", "build");
       }
       if (setup.success) {
         expected.push("start");
@@ -423,24 +423,24 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       }
       const expected = [
         "probe:1",
-        "[IOSCtrlProxy] Terminating stale CtrlProxy process tree rooted at 4444 for listener 5555 on port 8765",
+        "[IosCtrlProxy] Terminating stale CtrlProxy process tree rooted at 4444 for listener 5555 on port 8765",
         "terminate:4444",
       ];
       if (branch !== "graceful") {
-        expected.push("[IOSCtrlProxy] Stale runner tree 4444 survived termination: survived");
+        expected.push("[IosCtrlProxy] Stale runner tree 4444 survived termination: survived");
       }
       expected.push("probe:2");
       if (branch !== "graceful") {
         expected.push(
-          "[IOSCtrlProxy] CtrlProxy listener 5555 still holds port 8765; force-terminating remaining owned process tree",
+          "[IosCtrlProxy] CtrlProxy listener 5555 still holds port 8765; force-terminating remaining owned process tree",
           "terminate:5555",
-          "[IOSCtrlProxy] Listener 5555 survived forced termination: survived",
+          "[IosCtrlProxy] Listener 5555 survived forced termination: survived",
           "probe:3",
         );
       }
       if (branch === "foreign") {
         expected.push(
-          "[IOSCtrlProxy] Port 8765 is held by a foreign process; reallocating CtrlProxy port",
+          "[IosCtrlProxy] Port 8765 is held by a foreign process; reallocating CtrlProxy port",
           "probe:4",
         );
       }
@@ -531,7 +531,7 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
             ? ["tunnel"]
             : [
                 "tunnel",
-                "[IOSCtrlProxy] Existing CtrlProxy process uses a host port that is no longer available; restarting",
+                "[IosCtrlProxy] Existing CtrlProxy process uses a host port that is no longer available; restarting",
                 "restart",
                 "health",
                 "complete",
@@ -612,9 +612,9 @@ describe("IOSCtrlProxyManager flattening characterization", () => {
       "CtrlProxy failed to start within timeout (30s)",
     );
     expect(events).toEqual([
-      "[IOSCtrlProxy] Deferred-to CtrlProxy runner (PID 123) never became healthy within 30s; terminating it so the next start spawns a fresh runner",
+      "[IosCtrlProxy] Deferred-to CtrlProxy runner (PID 123) never became healthy within 30s; terminating it so the next start spawns a fresh runner",
       "remote stop",
-      "[IOSCtrlProxy] Remote runner stop of hung runner 123 failed: remote stop unavailable",
+      "[IosCtrlProxy] Remote runner stop of hung runner 123 failed: remote stop unavailable",
       "cache",
       "supervisor stop",
       "supervisor start",

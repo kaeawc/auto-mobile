@@ -21,16 +21,12 @@ export interface SnapshotCropResult {
   screenshotOrientation: "display" | "native";
 }
 
-/** Pure geometry plus an injected image backend; the caller owns capture and persistence. */
-// oxlint-disable-next-line complexity -- validation, clipping, and raster bounds form one atomic crop mapping.
-export async function cropSnapshot(
-  source: Buffer,
+function clipToScreen(
   requestedBounds: ElementBounds,
-  geometry: SnapshotGeometry,
-  backend: ImageBackend,
-  label: string = "snapshotOf",
-): Promise<SnapshotCropResult> {
-  const { width, height } = geometry.screenSize;
+  screenSize: SnapshotGeometry["screenSize"],
+  label: string,
+): ElementBounds {
+  const { width, height } = screenSize;
   const { left, top, right, bottom } = requestedBounds;
   if (
     ![width, height, left, top, right, bottom].every(Number.isFinite) ||
@@ -50,6 +46,22 @@ export async function cropSnapshot(
   if (clippedBounds.right <= clippedBounds.left || clippedBounds.bottom <= clippedBounds.top) {
     throw new ActionableError(`${label} rectangle is outside the visible screen`);
   }
+  return clippedBounds;
+}
+
+function sameBounds(a: ElementBounds, b: ElementBounds): boolean {
+  return a.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom;
+}
+
+/** Pure geometry plus an injected image backend; the caller owns capture and persistence. */
+export async function cropSnapshot(
+  source: Buffer,
+  requestedBounds: ElementBounds,
+  geometry: SnapshotGeometry,
+  backend: ImageBackend,
+  label: string = "snapshotOf",
+): Promise<SnapshotCropResult> {
+  const clippedBounds = clipToScreen(requestedBounds, geometry.screenSize, label);
   const metadata = await backend.metadata(source);
   const { quarterTurn, halfTurn, pixelsPerNativeUnit, scaleProvenance } = snapshotRasterGeometry(
     metadata,
@@ -92,11 +104,7 @@ export async function cropSnapshot(
     imageSize,
     pixelsPerNativeUnit,
     scaleProvenance,
-    clipped:
-      left !== clippedBounds.left ||
-      top !== clippedBounds.top ||
-      right !== clippedBounds.right ||
-      bottom !== clippedBounds.bottom,
+    clipped: !sameBounds(requestedBounds, clippedBounds),
     rasterBounds,
     screenshotOrientation: "display",
   };

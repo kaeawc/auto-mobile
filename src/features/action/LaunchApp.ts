@@ -47,7 +47,7 @@ import {
 } from "../performance/PerformanceMonitor";
 import { serverConfig } from "../../utils/ServerConfig";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { IOSCtrlProxyManager } from "../../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
@@ -801,7 +801,7 @@ export class LaunchApp extends BaseVisualChange {
   }
 
   private requestIosLaunchRetarget(
-    ctrlProxyClient: IOSCtrlProxy,
+    ctrlProxyClient: IosCtrlProxy,
     bundleId: string,
     perf: PerformanceTracker,
   ) {
@@ -831,7 +831,7 @@ export class LaunchApp extends BaseVisualChange {
   }
 
   private requestIosHierarchyForPackage(
-    xcTestClient: IOSCtrlProxy,
+    xcTestClient: IosCtrlProxy,
     expectedPackageName: string,
     timeoutMs: number,
   ): Promise<string> {

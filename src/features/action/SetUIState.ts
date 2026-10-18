@@ -1085,19 +1085,17 @@ export class SetUIState extends BaseVisualChange {
     return new Promise<T | "timed-out">((resolve, reject) => {
       let settled = false;
       let timeoutHandle: NodeJS.Timeout | undefined;
-      // Declared (not yet assigned) BEFORE the first arm: on a
+      // Held in a mutable slot that exists BEFORE the first arm: on a
       // FakeTimer-driven test, `startWork()`'s own synchronous prefix can
       // advance the clock far enough to fire the timeout re-entrantly,
       // synchronously, before `startWork()` even returns -- at which point
-      // this closure has not yet been assigned. `let` (rather than `const`)
-      // avoids a TDZ crash in that case: a bare `let x;` initializes its
-      // binding to `undefined` immediately at THIS line, so the timeout
-      // closure below can safely read it even if it fires before the
-      // assignment further down ever runs. The guard below skips tracing
-      // when it is still `undefined`, and the post-`startWork()` check a few
-      // lines down handles that case instead.
-      // oxlint-disable-next-line prefer-const -- see comment above: `let` is required for TDZ safety, not a style preference.
-      let workPromise: Promise<T> | undefined;
+      // the promise has not been assigned yet. The slot is initialized
+      // immediately, so the timeout closure below can safely read it (as
+      // `undefined`) even if it fires before the assignment further down
+      // ever runs. The guard below skips tracing when it is still
+      // `undefined`, and the post-`startWork()` check a few lines down
+      // handles that case instead.
+      const work: { promise?: Promise<T> } = {};
       let unsubscribeCutoffMoves: (() => void) | undefined;
 
       const finishTimedOut = (): void => {
@@ -1110,8 +1108,8 @@ export class SetUIState extends BaseVisualChange {
           this.timer.clearTimeout(timeoutHandle);
           timeoutHandle = undefined;
         }
-        if (workPromise) {
-          logBackgroundSettlement(workPromise);
+        if (work.promise) {
+          logBackgroundSettlement(work.promise);
         }
         resolve("timed-out");
       };
@@ -1151,12 +1149,12 @@ export class SetUIState extends BaseVisualChange {
         unsubscribeCutoffMoves = subscribeToCutoffMoves?.(armTimeout);
       }
       // Armed above; only now does the work actually start.
-      workPromise = startWork(onTick);
-      const startedWorkPromise = workPromise;
+      const startedWorkPromise = startWork(onTick);
+      work.promise = startedWorkPromise;
       if (settled) {
         // The timeout above already fired (synchronously, budget<=0, or
         // re-entrantly while `startWork()` was still running synchronously)
-        // before this closure could observe it via `workPromise` -- trace
+        // before this closure could observe it via `work.promise` -- trace
         // its eventual settlement here instead.
         logBackgroundSettlement(startedWorkPromise);
         return;

@@ -49,7 +49,7 @@ export class IosDeviceDetector {
         }
         return this.listsDevice(result.data.stdout);
       } catch (error) {
-        logger.warn(`[IOSCtrlProxy] Remote idevice_id probe failed: ${errorMessage(error)}`, error);
+        logger.warn(`[IosCtrlProxy] Remote idevice_id probe failed: ${errorMessage(error)}`, error);
         return false;
       }
     }
@@ -99,7 +99,7 @@ export class IosDeviceDetector {
       if (!this.warnedIdeviceIdUnavailable) {
         this.warnedIdeviceIdUnavailable = true;
         logger.warn(
-          `[IOSCtrlProxy] idevice_id probe failed (is libimobiledevice installed?): ${errorMessage(error)}`,
+          `[IosCtrlProxy] idevice_id probe failed (is libimobiledevice installed?): ${errorMessage(error)}`,
           error,
         );
       }

@@ -1438,17 +1438,9 @@ describe("waitForObservation activeWindow", () => {
       display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
     });
     await expect(
-      waitForObservation(
-        screen,
-        { posture: "closed", timeout: 500 },
-        undefined,
-        false,
-        timer,
-        undefined,
-        undefined,
-        undefined,
-        "single",
-      ),
+      waitForObservation(screen, { posture: "closed", timeout: 500 }, undefined, false, timer, {
+        displayInventory: "single",
+      }),
     ).rejects.toThrow(
       "Cannot wait for posture: this device has no display inventory. Select a device that reports display panels and posture and retry.",
     );
@@ -1474,10 +1466,7 @@ describe("waitForObservation activeWindow", () => {
         undefined,
         false,
         timer,
-        platform,
-        undefined,
-        undefined,
-        "multi",
+        { platform, displayInventory: "multi" },
       );
       expect(outcome.matched).toBe(true);
       expect(outcome.timedOut).toBe(false);
@@ -1496,10 +1485,7 @@ describe("waitForObservation activeWindow", () => {
         undefined,
         false,
         timer,
-        platform,
-        undefined,
-        undefined,
-        "multi",
+        { platform, displayInventory: "multi" },
       );
       expect(outcome.timedOut).toBe(true);
       expect(outcome.timeoutReason).toBe(
@@ -1519,10 +1505,7 @@ describe("waitForObservation activeWindow", () => {
         undefined,
         false,
         timer,
-        platform,
-        undefined,
-        undefined,
-        "unavailable",
+        { platform, displayInventory: "unavailable" },
       );
       expect(outcome.timedOut).toBe(true);
       expect(outcome.timeoutReason).toBe(
@@ -1558,17 +1541,10 @@ describe("waitForObservation activeWindow", () => {
     const screen = new FakeObserveScreen();
     screen.setObserveResult(postureObservation("closed"));
     await expect(
-      waitForObservation(
-        screen,
-        { posture: "closed" },
-        undefined,
-        false,
-        timer,
-        "android",
-        undefined,
-        undefined,
-        "single",
-      ),
+      waitForObservation(screen, { posture: "closed" }, undefined, false, timer, {
+        platform: "android",
+        displayInventory: "single",
+      }),
     ).rejects.toThrow("Cannot wait for posture: this device has no display inventory.");
     expect(screen.getExecuteCallCount()).toBe(1);
   });
@@ -1603,10 +1579,7 @@ describe("waitForObservation activeWindow", () => {
         undefined,
         false,
         timer,
-        "ios",
-        undefined,
-        undefined,
-        inventory,
+        { platform: "ios", displayInventory: inventory },
       );
       expect(outcome.matched).toBe(true);
       expect(screen.getExecuteCallCount()).toBe(3);
@@ -1626,10 +1599,7 @@ describe("waitForObservation activeWindow", () => {
         undefined,
         false,
         timer,
-        "ios",
-        undefined,
-        undefined,
-        inventory,
+        { platform: "ios", displayInventory: inventory },
       );
       expect(outcome.timeoutReason).toBe(
         'Timed out after 200 ms waiting for posture "closed"; last observed posture "unknown"',
@@ -1775,11 +1745,7 @@ describe("waitForObservation activeWindow", () => {
           undefined,
           false,
           timer,
-          platform,
-          undefined,
-          undefined,
-          "multi",
-          activePanels,
+          { platform, displayInventory: "multi", displayPanels: activePanels },
         );
         expect(outcome.awaitTimeout).toBe(false);
         expect(screen.getExecuteCallCount()).toBe(2);
@@ -1800,11 +1766,7 @@ describe("waitForObservation activeWindow", () => {
         undefined,
         false,
         new FakeTimer(),
-        "ios",
-        undefined,
-        undefined,
-        "multi",
-        activePanels,
+        { platform: "ios", displayInventory: "multi", displayPanels: activePanels },
       ),
     ).rejects.toThrow(activeDisplayFailure);
     expect(screen.getExecuteCallCount()).toBe(1);
@@ -1824,11 +1786,11 @@ describe("waitForObservation activeWindow", () => {
         undefined,
         false,
         new FakeTimer(),
-        "ios",
-        undefined,
-        undefined,
-        "single",
-        [{ key: "main", role: "inner" }],
+        {
+          platform: "ios",
+          displayInventory: "single",
+          displayPanels: [{ key: "main", role: "inner" }],
+        },
       );
       expect(outcome.matched).toBe(true);
       expect(outcome.awaitTimeout).toBe(false);
@@ -1846,11 +1808,11 @@ describe("waitForObservation activeWindow", () => {
         undefined,
         false,
         new FakeTimer(),
-        "ios",
-        undefined,
-        undefined,
-        "single",
-        [{ key: "main", role: "inner" }],
+        {
+          platform: "ios",
+          displayInventory: "single",
+          displayPanels: [{ key: "main", role: "inner" }],
+        },
       ),
     ).rejects.toThrow(activeDisplayFailure);
     expect(screen.getExecuteCallCount()).toBe(1);
@@ -1867,11 +1829,7 @@ describe("waitForObservation activeWindow", () => {
       undefined,
       false,
       timer,
-      "ios",
-      undefined,
-      undefined,
-      "single",
-      [],
+      { platform: "ios", displayInventory: "single", displayPanels: [] },
     );
     expect(outcome.matched).toBe(true);
     expect(outcome.awaitTimeout).toBe(false);
@@ -1900,11 +1858,7 @@ describe("waitForObservation activeWindow", () => {
       undefined,
       false,
       timer,
-      "ios",
-      undefined,
-      undefined,
-      "single",
-      [{ key: "0", role: "inner" }],
+      { platform: "ios", displayInventory: "single", displayPanels: [{ key: "0", role: "inner" }] },
     );
     expect(outcome.matched).toBe(true);
     expect(outcome.awaitTimeout).toBe(false);
@@ -1922,10 +1876,7 @@ describe("waitForObservation activeWindow", () => {
       undefined,
       false,
       timer,
-      "ios",
-      undefined,
-      undefined,
-      "unavailable",
+      { platform: "ios", displayInventory: "unavailable" },
     );
     expect(outcome).toMatchObject({
       timedOut: true,
@@ -1947,11 +1898,7 @@ describe("waitForObservation activeWindow", () => {
       undefined,
       false,
       timer,
-      "ios",
-      undefined,
-      undefined,
-      "multi",
-      activePanels,
+      { platform: "ios", displayInventory: "multi", displayPanels: activePanels },
     );
     expect(outcome.timeoutReason).toBe(
       'Timed out after 200 ms waiting for activeDisplay "cover"; the active display was never observable because no hierarchy was captured',
@@ -1976,11 +1923,7 @@ describe("waitForObservation activeWindow", () => {
         undefined,
         false,
         timer,
-        "android",
-        undefined,
-        undefined,
-        "multi",
-        activePanels,
+        { platform: "android", displayInventory: "multi", displayPanels: activePanels },
       );
       expect(outcome.timedOut).toBe(true);
       expect(outcome.timeoutReason).toContain("no hierarchy was captured");
@@ -1999,11 +1942,7 @@ describe("waitForObservation activeWindow", () => {
       undefined,
       false,
       timer,
-      "ios",
-      undefined,
-      undefined,
-      "multi",
-      activePanels,
+      { platform: "ios", displayInventory: "multi", displayPanels: activePanels },
     );
     expect(outcome.timeoutReason).toBe(
       'Timed out after 200 ms waiting for activeDisplay "cover"; last observed active display "inner" (inner)',
@@ -2021,11 +1960,7 @@ describe("waitForObservation activeWindow", () => {
       undefined,
       false,
       timer,
-      "android",
-      undefined,
-      undefined,
-      "multi",
-      activePanels,
+      { platform: "android", displayInventory: "multi", displayPanels: activePanels },
     );
     expect(first.awaitTimeout).toBe(false);
     expect(firstScreen.getExecuteCallCount()).toBe(1);
@@ -2038,11 +1973,7 @@ describe("waitForObservation activeWindow", () => {
       undefined,
       false,
       timer,
-      "android",
-      undefined,
-      undefined,
-      "multi",
-      activePanels,
+      { platform: "android", displayInventory: "multi", displayPanels: activePanels },
     );
     expect(mismatch.awaitTimeout).toBe(true);
     expect(mismatchScreen.getExecuteCallCount()).toBeGreaterThan(1);
@@ -2354,7 +2285,7 @@ describe("waitForObservation activeWindow", () => {
       undefined,
       false,
       timer,
-      "ios",
+      { platform: "ios" },
     );
 
     expect(outcome.awaitTimeout).toBe(false);

@@ -58,16 +58,16 @@ export class DefaultIosAppBundleGuard implements IosAppBundleGuard {
       if (isInstalled === null) {
         return;
       }
-      logger.info(`[IOSCtrlProxy] Found legacy app ${legacyAppBundleId}, uninstalling`);
+      logger.info(`[IosCtrlProxy] Found legacy app ${legacyAppBundleId}, uninstalling`);
       await this.uninstall(legacyAppBundleId);
-      logger.info(`[IOSCtrlProxy] Legacy app uninstalled`);
+      logger.info(`[IosCtrlProxy] Legacy app uninstalled`);
     } catch (error) {
       if (error instanceof SimctlCommandTimeoutError) {
         // The lookup was killed, so the legacy app's presence is unknown rather than absent:
         // do not record the check as done, so the next setup looks again.
         this.legacyCheckDone = false;
       }
-      logger.warn(`[IOSCtrlProxy] Failed to check/uninstall legacy app: ${error}`);
+      logger.warn(`[IosCtrlProxy] Failed to check/uninstall legacy app: ${error}`);
     }
   }
 
@@ -80,7 +80,7 @@ export class DefaultIosAppBundleGuard implements IosAppBundleGuard {
     const expectedHash = this.options.getExpectedAppHash(simulator ? "simulator" : "device");
     if (!expectedHash) {
       logger.warn(
-        "[IOSCtrlProxy] CtrlProxy app hash verification skipped (no expected hash configured)",
+        "[IosCtrlProxy] CtrlProxy app hash verification skipped (no expected hash configured)",
       );
       return;
     }
@@ -91,25 +91,25 @@ export class DefaultIosAppBundleGuard implements IosAppBundleGuard {
       simulator,
     );
     if (!deviceHash) {
-      logger.warn("[IOSCtrlProxy] Unable to read installed CtrlProxy app hash from device");
+      logger.warn("[IosCtrlProxy] Unable to read installed CtrlProxy app hash from device");
       return;
     }
 
     if (deviceHash.toLowerCase() !== expectedHash.toLowerCase()) {
-      logger.warn("[IOSCtrlProxy] Installed CtrlProxy app hash mismatch", {
+      logger.warn("[IosCtrlProxy] Installed CtrlProxy app hash mismatch", {
         deviceHash,
         expectedHash,
       });
       try {
         await this.uninstall(this.options.appBundleId);
-        logger.info("[IOSCtrlProxy] Uninstalled CtrlProxy app to force reinstall");
+        logger.info("[IosCtrlProxy] Uninstalled CtrlProxy app to force reinstall");
       } catch (error) {
-        logger.warn(`[IOSCtrlProxy] Failed to uninstall CtrlProxy app: ${errorMessage(error)}`);
+        logger.warn(`[IosCtrlProxy] Failed to uninstall CtrlProxy app: ${errorMessage(error)}`);
       }
       return;
     }
 
-    logger.info("[IOSCtrlProxy] Installed CtrlProxy app hash matches expected bundle");
+    logger.info("[IosCtrlProxy] Installed CtrlProxy app hash matches expected bundle");
   }
 
   private uninstall(bundleId: string): Promise<void> {

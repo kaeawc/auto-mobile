@@ -32,8 +32,14 @@ export function classifyDisplayInventory(
 /** Inventory evidence threaded to a display-stamp wait. */
 export function displayWaitInventory(
   device: Pick<BootedDevice, "displays" | typeof displayInventoryOutcome>,
-): readonly [DisplayInventoryClassification, readonly Pick<DisplayPanel, "key" | "role">[]] {
-  return [classifyDisplayInventory(device), device.displays?.panels ?? []];
+): {
+  displayInventory: DisplayInventoryClassification;
+  displayPanels: readonly Pick<DisplayPanel, "key" | "role">[];
+} {
+  return {
+    displayInventory: classifyDisplayInventory(device),
+    displayPanels: device.displays?.panels ?? [],
+  };
 }
 
 /** Whether hydrated inventory can contain a panel with the requested key or role. */

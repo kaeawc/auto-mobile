@@ -125,6 +125,45 @@ export const buildConditionPredicate = (
   }
 };
 
+// Omit collectDeferredBackStack here: explicit skipBackStack opts out of terminal reads too.
+const withoutDeferredBackStack = (observeScreen: ObserveScreen): ObserveScreen => ({
+  execute: (options?: ObserveScreenExecuteOptions) =>
+    observeScreen.execute({ ...options, skipBackStack: true }),
+  appendRawViewHierarchy: (result, abortSignal) =>
+    observeScreen.appendRawViewHierarchy(result, abortSignal),
+  getMostRecentCachedObserveResult: () => observeScreen.getMostRecentCachedObserveResult(),
+  ...(observeScreen.captureScreenshot
+    ? {
+        captureScreenshot: (...args: Parameters<NonNullable<ObserveScreen["captureScreenshot"]>>) =>
+          observeScreen.captureScreenshot!(...args),
+      }
+    : {}),
+  ...(observeScreen.runAccessibilityAudit
+    ? {
+        runAccessibilityAudit: (
+          ...args: Parameters<NonNullable<ObserveScreen["runAccessibilityAudit"]>>
+        ) => observeScreen.runAccessibilityAudit!(...args),
+      }
+    : {}),
+  ...(observeScreen.processRecomposition
+    ? {
+        processRecomposition: (
+          ...args: Parameters<NonNullable<ObserveScreen["processRecomposition"]>>
+        ) => observeScreen.processRecomposition!(...args),
+      }
+    : {}),
+  ...(observeScreen.captureCacheGeneration
+    ? { captureCacheGeneration: () => observeScreen.captureCacheGeneration!() }
+    : {}),
+  ...(observeScreen.cacheObserveResult
+    ? {
+        cacheObserveResult: (
+          ...args: Parameters<NonNullable<ObserveScreen["cacheObserveResult"]>>
+        ) => observeScreen.cacheObserveResult!(...args),
+      }
+    : {}),
+});
+
 /**
  * Run the declarative `for` DSL (issue #4398) and adapt its result to the shared
  * `waitForObservation` return shape. `stable` runs the settle loop
@@ -133,7 +172,6 @@ export const buildConditionPredicate = (
  * for settle / countStable, which have no single element); `awaitTimeout` reflects
  * "did not settle" / "timed out".
  */
-// eslint-disable-next-line complexity -- primitive dispatch and its additive settled gate share the DSL outcome boundary.
 const runWaitForConditionDsl = async (
   observeScreen: ObserveScreen,
   waitFor: WaitForConditionDsl,
@@ -147,46 +185,8 @@ const runWaitForConditionDsl = async (
     waitFor.timeout ??
     waitFor.timeoutMs ??
     (waitFor.for === "stable" ? DEFAULT_STABLE_WAIT_FOR_TIMEOUT_MS : DEFAULT_WAIT_FOR_TIMEOUT_MS);
-  // Omit collectDeferredBackStack here: explicit skipBackStack opts out of terminal reads too.
   const pollingScreen: ObserveScreen = skipBackStack
-    ? {
-        execute: (options?: ObserveScreenExecuteOptions) =>
-          observeScreen.execute({ ...options, skipBackStack: true }),
-        appendRawViewHierarchy: (result, abortSignal) =>
-          observeScreen.appendRawViewHierarchy(result, abortSignal),
-        getMostRecentCachedObserveResult: () => observeScreen.getMostRecentCachedObserveResult(),
-        ...(observeScreen.captureScreenshot
-          ? {
-              captureScreenshot: (
-                ...args: Parameters<NonNullable<ObserveScreen["captureScreenshot"]>>
-              ) => observeScreen.captureScreenshot!(...args),
-            }
-          : {}),
-        ...(observeScreen.runAccessibilityAudit
-          ? {
-              runAccessibilityAudit: (
-                ...args: Parameters<NonNullable<ObserveScreen["runAccessibilityAudit"]>>
-              ) => observeScreen.runAccessibilityAudit!(...args),
-            }
-          : {}),
-        ...(observeScreen.processRecomposition
-          ? {
-              processRecomposition: (
-                ...args: Parameters<NonNullable<ObserveScreen["processRecomposition"]>>
-              ) => observeScreen.processRecomposition!(...args),
-            }
-          : {}),
-        ...(observeScreen.captureCacheGeneration
-          ? { captureCacheGeneration: () => observeScreen.captureCacheGeneration!() }
-          : {}),
-        ...(observeScreen.cacheObserveResult
-          ? {
-              cacheObserveResult: (
-                ...args: Parameters<NonNullable<ObserveScreen["cacheObserveResult"]>>
-              ) => observeScreen.cacheObserveResult!(...args),
-            }
-          : {}),
-      }
+    ? withoutDeferredBackStack(observeScreen)
     : observeScreen;
   const settled = (waitFor as WaitForWithSettled).settled;
   const pollMs = waitFor.pollMs;
@@ -330,18 +330,31 @@ function scopedWaitTimeoutMetadata(evaluation: ObserveConditionEvaluation, waitM
   };
 }
 
+/** Device and screenshot context threaded to {@link waitForObservation}. */
+export interface WaitForObservationContext {
+  platform?: BootedDevice["platform"];
+  screenshot?: ScreenshotMode;
+  screenshotOptions?: ObserveScreenshotOptions;
+  displayInventory?: DisplayInventoryClassification;
+  displayPanels?: readonly Pick<DisplayPanel, "key" | "role">[];
+}
+
+const resolveWaitContext = ({
+  displayInventory = "unavailable",
+  displayPanels = [],
+  ...rest
+}: WaitForObservationContext) => ({ ...rest, displayInventory, displayPanels });
+
 export const waitForObservation = async (
   observeScreen: ObserveScreen,
   waitFor: WaitForWithSettled,
   signal?: AbortSignal,
   skipBackStack: boolean = false,
   timer: Timer = defaultTimer,
-  platform?: BootedDevice["platform"],
-  screenshot?: ScreenshotMode,
-  screenshotOptions?: ObserveScreenshotOptions,
-  displayInventory: DisplayInventoryClassification = "unavailable",
-  displayPanels: readonly Pick<DisplayPanel, "key" | "role">[] = [],
+  context: WaitForObservationContext = {},
 ): Promise<WaitForObservationOutcome> => {
+  const { platform, screenshot, screenshotOptions, displayInventory, displayPanels } =
+    resolveWaitContext(context);
   const iosMultiPanel = hasIosWaitPanels(platform, displayPanels);
   const postureEvidence: DisplayWaitTimeoutEvidence = {
     lastObservedReason: 'last observed posture "unknown"',

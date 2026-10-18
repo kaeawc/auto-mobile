@@ -67,7 +67,7 @@ import {
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import type { AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
-import type { IOSCtrlProxy } from "../features/observe/ios/IOSCtrlProxyClient";
+import type { IosCtrlProxy } from "../features/observe/ios/IOSCtrlProxyClient";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { ObserveScreenCache } from "../models/ObserveScreenCache";
 import {
@@ -150,7 +150,7 @@ export interface DeviceClientProvider {
   getAndroidCtrlProxyManager(device: BootedDevice): CtrlProxyManager;
   getAndroidCtrlProxyClient(device: BootedDevice): AndroidCtrlProxy;
   getIOSCtrlProxyManager(device: BootedDevice): CtrlProxyIosManager;
-  getIOSCtrlProxyClient(device: BootedDevice, port: number): IOSCtrlProxy;
+  getIOSCtrlProxyClient(device: BootedDevice, port: number): IosCtrlProxy;
   getWindow(device: BootedDevice): Window;
   getObserveScreenCache(): ObserveScreenCache;
 }
@@ -224,7 +224,7 @@ export class DefaultDeviceClientProvider implements DeviceClientProvider {
     return IOSCtrlProxyManager.getInstance(device);
   }
 
-  getIOSCtrlProxyClient(device: BootedDevice, port: number): IOSCtrlProxy {
+  getIOSCtrlProxyClient(device: BootedDevice, port: number): IosCtrlProxy {
     return IOSCtrlProxyClient.getInstance(device, port);
   }
 
@@ -498,7 +498,7 @@ export class DeviceReadiness implements DeviceReadiness {
     | undefined;
 
   // Client recreation after an iOS device restart needs a fresh callback.
-  private static pushUpdateListenersRegistered: WeakSet<IOSCtrlProxy> = new WeakSet();
+  private static pushUpdateListenersRegistered: WeakSet<IosCtrlProxy> = new WeakSet();
 
   private constructor(
     provider: DeviceClientProvider,

@@ -66,7 +66,7 @@ describe("IOSCtrlProxyManager shutdown and eviction", function () {
         await shutdown;
 
         expect(warn).toHaveBeenCalledWith(
-          "[IOSCtrlProxy] Failed to stop instance during shutdown: Error: timed out after 1200ms",
+          "[IosCtrlProxy] Failed to stop instance during shutdown: Error: timed out after 1200ms",
         );
         expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
         stop.resolve();

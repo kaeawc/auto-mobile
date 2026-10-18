@@ -1,3 +1,4 @@
+import { legacyDebugSearchCriteria, legacyVisionSearchCriteria } from "./legacySearchCriteria";
 import { freshSwipeHierarchy, withSwipeObservationReadScope } from "./freshSwipeHierarchy";
 import {
   pendingWindowResolutionGeneration,
@@ -1317,7 +1318,6 @@ export class SwipeOn extends BaseVisualChange {
     return this.withAutoTargetDecision({ result, decision });
   }
 
-  // oxlint-disable-next-line max-lines-per-function -- Keep the existing dispatch branches together while threading cancellation.
   private async executeLegacy(
     options: SwipeOnOptions,
     progress?: ProgressCallback,
@@ -1345,89 +1345,69 @@ export class SwipeOn extends BaseVisualChange {
     try {
       return await SwipeOn.dispatchLegacySwipe(this, normalizedOptions, progress, perf, signal);
     } catch (error) {
-      perf.end();
-      if (error instanceof SwipeSearchCancelledError) {
-        throw error;
-      }
-      throwIfAbortedKeepingForwardNote(signal, error);
-
-      logger.warn(`Swipe failed: ${errorMessage(error)}`, error);
-      if (error instanceof StaleDisplayError || error instanceof DispatchedObservationError) {
-        return withStaleDisplay(this.createErrorResult(error.message), error);
-      }
-
-      // Build debug context if debug mode is enabled and we have search criteria
-      const debugContext =
-        normalizedOptions.lookFor || normalizedOptions.container
-          ? await buildElementSearchDebugContext(
-              this.device,
-              SwipeOn.legacyDebugSearchCriteria(normalizedOptions),
-            )
-          : undefined;
-      throwIfAborted(signal);
-
-      // Apply vision fallback for element-related errors
-      const baseErrorMessage = errorMessage(error);
-      let errorMsg = `Failed to perform swipeOn: ${baseErrorMessage}`;
-
-      const searchCriteria = SwipeOn.legacyVisionSearchCriteria(this, normalizedOptions);
-      if (searchCriteria) {
-        throwIfAborted(signal);
-        const cachedObserve = await this.observeScreen.getMostRecentCachedObserveResult();
-        const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
-        errorMsg = await getVisionEnrichedError(
-          this.screenshotCapturer,
-          viewHierarchy,
-          searchCriteria,
-          this.visionConfig,
-          errorMsg,
-          undefined,
-          this.visionAnalyzer,
-        );
-      }
-
-      return SwipeOn.legacyFailureResult({
-        action: this,
-        normalizedOptions,
-        perf,
-        errorMsg,
-        debugContext,
-        cause: error,
-      });
+      return SwipeOn.recoverLegacyFailure(this, error, normalizedOptions, perf, signal);
     }
   }
 
-  private static legacyDebugSearchCriteria(normalizedOptions: SwipeOnResolvedOptions) {
-    return {
-      text: normalizedOptions.lookFor?.text,
-      resourceId: normalizedOptions.lookFor?.elementId || normalizedOptions.container?.elementId,
-      container: normalizedOptions.container,
-    };
-  }
-
-  private static legacyVisionSearchCriteria(
+  private static async recoverLegacyFailure(
     action: SwipeOn,
+    error: unknown,
     normalizedOptions: SwipeOnResolvedOptions,
-  ) {
-    if (action.visionConfig.enabled && (normalizedOptions.lookFor || normalizedOptions.container)) {
-      let searchCriteria: import("../../../vision/VisionTypes").ElementSearchCriteria | null = null;
-      if (normalizedOptions.lookFor) {
-        searchCriteria = {
-          text: normalizedOptions.lookFor.text,
-          resourceId: normalizedOptions.lookFor.elementId,
-          description: "Target element to scroll to",
-        };
-      } else if (normalizedOptions.container) {
-        searchCriteria = {
-          text: normalizedOptions.container.text,
-          resourceId: normalizedOptions.container.elementId,
-          description: "Container element for swiping",
-        };
-      }
-
-      return searchCriteria;
+    perf: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<SwipeOnResult> {
+    perf.end();
+    if (error instanceof SwipeSearchCancelledError) {
+      throw error;
     }
-    return null;
+    throwIfAbortedKeepingForwardNote(signal, error);
+
+    logger.warn(`Swipe failed: ${errorMessage(error)}`, error);
+    if (error instanceof StaleDisplayError || error instanceof DispatchedObservationError) {
+      return withStaleDisplay(action.createErrorResult(error.message), error);
+    }
+
+    // Build debug context if debug mode is enabled and we have search criteria
+    const debugContext =
+      normalizedOptions.lookFor || normalizedOptions.container
+        ? await buildElementSearchDebugContext(
+            action.device,
+            legacyDebugSearchCriteria(normalizedOptions),
+          )
+        : undefined;
+    throwIfAborted(signal);
+
+    // Apply vision fallback for element-related errors
+    const baseErrorMessage = errorMessage(error);
+    let errorMsg = `Failed to perform swipeOn: ${baseErrorMessage}`;
+
+    const searchCriteria = legacyVisionSearchCriteria(
+      action.visionConfig.enabled,
+      normalizedOptions,
+    );
+    if (searchCriteria) {
+      throwIfAborted(signal);
+      const cachedObserve = await action.observeScreen.getMostRecentCachedObserveResult();
+      const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
+      errorMsg = await getVisionEnrichedError(
+        action.screenshotCapturer,
+        viewHierarchy,
+        searchCriteria,
+        action.visionConfig,
+        errorMsg,
+        undefined,
+        action.visionAnalyzer,
+      );
+    }
+
+    return SwipeOn.legacyFailureResult({
+      action,
+      normalizedOptions,
+      perf,
+      errorMsg,
+      debugContext,
+      cause: error,
+    });
   }
 
   private static legacyFailureResult({

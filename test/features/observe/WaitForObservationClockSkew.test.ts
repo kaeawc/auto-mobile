@@ -32,7 +32,7 @@ describe("legacy waitForObservation device clock floor", () => {
       undefined,
       false,
       timer,
-      "android",
+      { platform: "android" },
     );
 
     expect(outcome.matched).toBe(true);
@@ -54,7 +54,7 @@ describe("legacy waitForObservation device clock floor", () => {
       undefined,
       false,
       timer,
-      "android",
+      { platform: "android" },
     );
 
     expect(outcome.matched).toBe(true);
@@ -77,7 +77,7 @@ describe("legacy waitForObservation device clock floor", () => {
       undefined,
       false,
       timer,
-      "android",
+      { platform: "android" },
     );
 
     expect(outcome.matched).toBe(true);
@@ -103,7 +103,7 @@ describe("legacy waitForObservation device clock floor", () => {
       undefined,
       false,
       timer,
-      "android",
+      { platform: "android" },
     );
 
     expect(outcome.matched).toBe(true);
@@ -128,7 +128,7 @@ describe("legacy waitForObservation device clock floor", () => {
       undefined,
       false,
       timer,
-      "android",
+      { platform: "android" },
     );
 
     expect(outcome.matched).toBe(true);
@@ -189,7 +189,7 @@ describe("waitFor settled gate device clock floor", () => {
       undefined,
       false,
       timer,
-      platform,
+      { platform },
     );
     return { outcome, screen };
   };

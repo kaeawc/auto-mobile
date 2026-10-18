@@ -591,10 +591,12 @@ function observeWaitParameters(
     signal,
     args.skipBackStack ?? false,
     dependencies.timer ?? defaultTimer,
-    device.platform,
-    screenshot.mode,
-    screenshot.options,
-    ...displayWaitInventory(device),
+    {
+      platform: device.platform,
+      screenshot: screenshot.mode,
+      screenshotOptions: screenshot.options,
+      ...displayWaitInventory(device),
+    },
   ];
 }
 

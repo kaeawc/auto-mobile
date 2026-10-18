@@ -2963,10 +2963,7 @@ export function registerInteractionTools(deps: InteractionToolDependencies = {})
           signal,
           false,
           defaultTimer,
-          device.platform,
-          undefined,
-          undefined,
-          ...displayWaitInventory(device),
+          { platform: device.platform, ...displayWaitInventory(device) },
         )
       : null;
 

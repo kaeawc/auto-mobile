@@ -11,7 +11,7 @@ import {
   type IosVoiceOverDetector,
 } from "../../accessibility/interfaces/IosVoiceOverDetector";
 import { withEpilogueWarning } from "../../../utils/bestEffortEpilogue";
-import type { IOSCtrlProxy } from "../../observe/ios";
+import type { IosCtrlProxy } from "../../observe/ios";
 import { Timer } from "../../../utils/interfaces/Timer";
 import type { FeatureFlagReader } from "../../featureFlags/FeatureFlagService";
 import { throwIfAborted } from "../../../utils/toolUtils";
@@ -34,7 +34,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
   constructor(
     private readonly device: BootedDevice,
     private readonly executeGesture: GestureExecutor,
-    private readonly iosClient: IOSCtrlProxy,
+    private readonly iosClient: IosCtrlProxy,
     private readonly iosVoiceOverDetector: IosVoiceOverDetector,
     private readonly timer: Timer,
     private readonly featureFlags?: FeatureFlagReader,

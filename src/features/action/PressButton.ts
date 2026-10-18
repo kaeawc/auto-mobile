@@ -12,7 +12,7 @@ import {
 } from "./BaseVisualChange";
 import { BootedDevice, PressButtonResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBackend";
@@ -533,7 +533,7 @@ export class PressButton extends BaseVisualChange {
   }
 
   private async executeiOSNavigationButton(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     button: string,
     timeoutMs?: number,
     frameContext?: string,

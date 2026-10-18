@@ -44,7 +44,7 @@ describe("IOSCtrlProxyManager", function () {
         message: "Failed to setup CtrlProxy",
         error: "health probe unavailable",
       });
-      expect(warn).toHaveBeenCalledWith("[IOSCtrlProxy] Setup failed: health probe unavailable");
+      expect(warn).toHaveBeenCalledWith("[IosCtrlProxy] Setup failed: health probe unavailable");
       checkRunning.mockResolvedValue(true);
       expect((await manager.setup()).success).toBe(true);
     } finally {

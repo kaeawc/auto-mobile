@@ -102,7 +102,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
         this.iproxyLocalPort = null;
       },
       onRestartFailure: (error) =>
-        logger.warn(`[IOSCtrlProxy] Failed to restart iproxy: ${errorMessage(error)}`),
+        logger.warn(`[IosCtrlProxy] Failed to restart iproxy: ${errorMessage(error)}`),
     });
   }
   /** Live view of the tunnel's process bookkeeping (tests, doctor). */
@@ -178,7 +178,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
       // dialling a port nothing forwards, so replace it, stopping it by its
       // recorded handle before the new one is spawned.
       logger.warn(
-        `[IOSCtrlProxy] Live iproxy tunnel forwards localhost:${this.iproxyLocalPort ?? "unknown"} ` +
+        `[IosCtrlProxy] Live iproxy tunnel forwards localhost:${this.iproxyLocalPort ?? "unknown"} ` +
           `but the runner port is ${this.options.getServicePort()}; restarting the tunnel`,
       );
     }
@@ -186,7 +186,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
     await this.stop({ stopSupervisor: options.supervise !== false });
 
     logger.info(
-      `[IOSCtrlProxy] Starting iproxy tunnel (localhost:${this.options.getServicePort()} -> device:${this.options.getServicePort()})`,
+      `[IosCtrlProxy] Starting iproxy tunnel (localhost:${this.options.getServicePort()} -> device:${this.options.getServicePort()})`,
     );
     // Spawn the resident iproxy tunnel detached from any request perf tracker,
     // so its `exit`/`error` callbacks (which drive supervisor restarts) do not
@@ -251,7 +251,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
         return;
       }
       if (!this.options.isStopping()) {
-        logger.warn("[IOSCtrlProxy] iproxy exited unexpectedly");
+        logger.warn("[IosCtrlProxy] iproxy exited unexpectedly");
         this.iproxySupervisor.processExited();
       }
     });
@@ -261,7 +261,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
         return;
       }
       if (!this.options.isStopping()) {
-        logger.warn(`[IOSCtrlProxy] iproxy error: ${error.message}`);
+        logger.warn(`[IosCtrlProxy] iproxy error: ${error.message}`);
         this.iproxySupervisor.processExited();
       }
     });
@@ -317,7 +317,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
         const result = await this.options.remoteRunner.stopIproxy({ pid: this.iproxyProcessId });
         if (!result.success) {
           logger.warn(
-            `[IOSCtrlProxy] Failed to stop host iproxy: ${result.error || "Unknown error"}`,
+            `[IosCtrlProxy] Failed to stop host iproxy: ${result.error || "Unknown error"}`,
           );
         }
       }
@@ -328,7 +328,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
         this.signalTrackedProcess(this.iproxyProcessId, this.iproxyProcessGenerationToken);
       } catch (error) {
         // iproxy may have exited before cleanup; forgetting its retired PID remains safe.
-        logger.debug(`[IOSCtrlProxy] iproxy cleanup found no live process: ${errorMessage(error)}`);
+        logger.debug(`[IosCtrlProxy] iproxy cleanup found no live process: ${errorMessage(error)}`);
       }
     }
     this.iproxyProcessId = null;
@@ -361,7 +361,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
           }
         } catch (error) {
           // A child can exit between tracking and shutdown.
-          logger.debug(`[IOSCtrlProxy] Forced iproxy termination was already complete: ${error}`);
+          logger.debug(`[IosCtrlProxy] Forced iproxy termination was already complete: ${error}`);
         }
       },
     };
@@ -370,7 +370,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
   private signalTrackedProcess(pid: number, token?: string, signal?: NodeJS.Signals): void {
     if (token !== undefined && this.processGeneration.compare(pid, token) === "different") {
       logger.warn(
-        `[IOSCtrlProxy] iproxy PID ${pid} now names a different process; skipping signal`,
+        `[IosCtrlProxy] iproxy PID ${pid} now names a different process; skipping signal`,
       );
       return;
     }
@@ -390,7 +390,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
     try {
       iproxyProcess.kill();
     } catch (error) {
-      logger.debug(`[IOSCtrlProxy] Local iproxy exited before graceful shutdown: ${error}`);
+      logger.debug(`[IosCtrlProxy] Local iproxy exited before graceful shutdown: ${error}`);
       return;
     }
 
@@ -402,7 +402,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
       iproxyProcess.kill("SIGKILL");
     } catch (error) {
       // Ignore errors if the process exited while escalating.
-      logger.debug(`[IOSCtrlProxy] Local iproxy exited before forced shutdown: ${error}`);
+      logger.debug(`[IosCtrlProxy] Local iproxy exited before forced shutdown: ${error}`);
     }
     await this.waitForLocalIproxyExit(iproxyProcess);
   }
@@ -488,7 +488,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
     const isConnected = await this.options.isConnected();
     if (!isConnected) {
       logger.warn(
-        `[IOSCtrlProxy] Device ${this.options.getDeviceId()} not detected, stopping iproxy monitoring`,
+        `[IosCtrlProxy] Device ${this.options.getDeviceId()} not detected, stopping iproxy monitoring`,
       );
       await this.stop({ clearDevicePort: true });
       return true;
@@ -500,7 +500,7 @@ export class DefaultIosTunnelClient implements IosTunnelClient {
     // separate process supervisor.
     const iproxyAlive = await this.isAlive();
     if (!iproxyAlive) {
-      logger.warn("[IOSCtrlProxy] iproxy process is no longer running, scheduling restart");
+      logger.warn("[IosCtrlProxy] iproxy process is no longer running, scheduling restart");
       await this.stop({ stopSupervisor: false });
     }
     return iproxyAlive;

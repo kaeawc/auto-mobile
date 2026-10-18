@@ -19,7 +19,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { DefaultFocusedInputQuery } from "../utility/FocusedInput";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios";
+import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
 import type { CtrlProxyKeyboardResult } from "../observe/ios/types";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
@@ -300,7 +300,7 @@ export class Keyboard {
   private async iosFailure(
     action: KeyboardAction,
     result: CtrlProxyKeyboardResult,
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     signal?: AbortSignal,
   ): Promise<KeyboardResult> {
     if (
@@ -325,7 +325,7 @@ export class Keyboard {
   }
 
   private async confirmIOSCloseAfterTimeout(
-    client: IOSCtrlProxy,
+    client: IosCtrlProxy,
     signal?: AbortSignal,
   ): Promise<boolean> {
     try {

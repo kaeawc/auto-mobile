@@ -757,7 +757,7 @@ describe("IOSCtrlProxyClient restart threshold", () => {
       expect(manager.getForcedRestartBudget().snapshot()).toMatchObject({
         state: "exhausted",
         attempts: 3,
-        lastFailureReason: "Failed to force-restart IOSCtrlProxy",
+        lastFailureReason: "Failed to force-restart IosCtrlProxy",
       });
       fakeTimer.advanceTime(3_600_000);
       for (let i = 0; i < 30; i++) {

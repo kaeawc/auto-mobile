@@ -548,7 +548,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
     keep(debug);
     await manager.forceStopForShutdown(5000);
     expect(debug).toHaveBeenCalledWith(
-      "[IOSCtrlProxy] Forced iproxy termination was already complete: Error: already exited",
+      "[IosCtrlProxy] Forced iproxy termination was already complete: Error: already exited",
     );
   });
   test.each([false, true])(
@@ -609,7 +609,7 @@ describe("manager with DefaultIosTunnelClient over fake processes", () => {
     keep(warning);
     expect(await supervisor.isAlive()).toBe(true);
     expect(warning).toHaveBeenCalledWith(
-      `[IOSCtrlProxy] Device ${device.deviceId} not detected, stopping iproxy monitoring`,
+      `[IosCtrlProxy] Device ${device.deviceId} not detected, stopping iproxy monitoring`,
     );
     expect(events).toEqual(["unsupervise"]);
   });

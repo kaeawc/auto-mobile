@@ -27,7 +27,7 @@ import {
 } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
-import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import type { IosCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import { getAbortSignal } from "../../src/utils/AbortContext";
 import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
 import { EmulatorLaunchCancelledError } from "../../src/models/EmulatorLaunchCancelledError";
@@ -78,12 +78,12 @@ function stubAndroidCtrlProxy(overrides: Partial<AndroidCtrlProxy>): AndroidCtrl
   } as unknown as AndroidCtrlProxy;
 }
 
-function stubIOSCtrlProxy(overrides: Partial<IOSCtrlProxy>): IOSCtrlProxy {
+function stubIOSCtrlProxy(overrides: Partial<IosCtrlProxy>): IosCtrlProxy {
   return {
     resetConnectionBudget: () => {},
     terminateStaleConnection: () => {},
     ...overrides,
-  } as unknown as IOSCtrlProxy;
+  } as unknown as IosCtrlProxy;
 }
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -835,7 +835,7 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
       isConnected: () => true,
       verifyServiceReady,
       onPushUpdate: () => () => {},
-    } as unknown as IOSCtrlProxy;
+    } as unknown as IosCtrlProxy;
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl, {
       iosCtrlProxyManager: iosManager,
       iosCtrlProxyClient: iosClient,

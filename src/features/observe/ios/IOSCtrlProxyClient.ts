@@ -327,8 +327,7 @@ import { NoOpIOSCtrlProxyManager } from "./NoOpIOSCtrlProxyManager";
  * Interface for CtrlProxy providing iOS UI hierarchy and interaction capabilities
  * via WebSocket connection to iOS CtrlProxy
  */
-// oxlint-disable-next-line auto-mobile/naming-convention -- IOS is an acronym, not a Hungarian-notation interface prefix
-export interface IOSCtrlProxy extends CtrlProxyClient {
+export interface IosCtrlProxy extends CtrlProxyClient {
   getSupportedCommands?(): Promise<string[] | null>;
   connectWithoutSetup(signal?: AbortSignal): Promise<boolean>;
   getLatestHierarchy(
@@ -352,7 +351,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): ReturnType<IOSCtrlProxy["requestHierarchySync"]>;
+  ): ReturnType<IosCtrlProxy["requestHierarchySync"]>;
   requestAddHighlight(
     id: string,
     shape: HighlightShape,
@@ -710,7 +709,7 @@ export function getRequiredIosRunnerFeatureFlags(
  *
  * Extends DeviceServiceClient for shared connection lifecycle management.
  */
-export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlProxy {
+export class IOSCtrlProxyClient extends DeviceServiceClient implements IosCtrlProxy {
   private readonly streamedCaptureSequences = new WeakMap<XCTestHierarchy, number>();
   /** Per-device client instances (#11847); retired-device state stays on IOSCtrlProxyManager. */
   public static readonly registry = new MapDeviceClientRegistry<IOSCtrlProxyClient>();
@@ -2533,7 +2532,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           this.sdkEventPollInFlight = null;
         }
       })
-      .catch((error) => logger.debug(`[IOSCtrlProxy] SDK event poll cleanup failed: ${error}`));
+      .catch((error) => logger.debug(`[IosCtrlProxy] SDK event poll cleanup failed: ${error}`));
     return promise;
   }
 
@@ -2566,7 +2565,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return pollResult;
     } catch (error) {
       // Polling failure is non-fatal (endpoint down, timeout) — trace at debug.
-      logger.debug(`[IOSCtrlProxy] SDK event poll failed: ${error}`);
+      logger.debug(`[IosCtrlProxy] SDK event poll failed: ${error}`);
       return this.emptySdkEventPollResult();
     } finally {
       this.timer.clearTimeout(timeoutId);
@@ -3630,7 +3629,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): ReturnType<IOSCtrlProxy["requestHierarchySync"]> {
+  ): ReturnType<IosCtrlProxy["requestHierarchySync"]> {
     return this.hierarchy.requestHierarchySync(
       perf,
       disableAllFiltering,

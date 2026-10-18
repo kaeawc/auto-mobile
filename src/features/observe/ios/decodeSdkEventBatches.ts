@@ -35,7 +35,7 @@ export function decodeSdkEventBatches(
       try {
         events.push(decodeSdkEventEnvelope(batch.bundleId, envelope, now));
       } catch (error) {
-        logger.warn("[IOSCtrlProxy] skipping malformed SDK event envelope", error);
+        logger.warn("[IosCtrlProxy] skipping malformed SDK event envelope", error);
         malformedErrors.push(error);
       }
     }

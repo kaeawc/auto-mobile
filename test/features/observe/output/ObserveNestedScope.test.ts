@@ -239,8 +239,7 @@ describe("nested observe subtree scope", () => {
       undefined,
       true,
       timer,
-      "android",
-      "none",
+      { platform: "android", screenshot: "none" },
     );
     expect(outcome.matched).toBe(false);
     expect(outcome.containerFailure).toMatchObject({
@@ -261,8 +260,7 @@ describe("nested observe subtree scope", () => {
       undefined,
       true,
       timer,
-      "android",
-      "none",
+      { platform: "android", screenshot: "none" },
     );
     expect(outcome.containerFailure).toMatchObject({ level: 1, reason: "not-found" });
   });
@@ -285,8 +283,7 @@ describe("nested observe subtree scope", () => {
         undefined,
         true,
         timer,
-        "android",
-        "none",
+        { platform: "android", screenshot: "none" },
       );
       expect(outcome.timedOut).toBe(true);
       expect(JSON.parse(JSON.stringify(outcome.containerFailure))).toEqual({

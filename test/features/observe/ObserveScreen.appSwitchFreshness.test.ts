@@ -163,8 +163,7 @@ describe("observe app-switch cache recovery", () => {
         undefined,
         true,
         h.timer,
-        "android",
-        "none",
+        { platform: "android", screenshot: "none" },
       );
       expect(result.observation.freshness?.category).toBe("window_identity");
       expect(h.reads).toHaveLength(1);

@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { AMBIENT_ENV, readEnvRaw } from "../config/env";
 
 export interface EnvBootstrapDeps {
   env: NodeJS.ProcessEnv;
@@ -101,7 +102,7 @@ function systemPathCandidates({ env, platform, homedir }: EnvBootstrapDeps): str
   }
 
   if (platform === "win32") {
-    const localAppData = env.LOCALAPPDATA;
+    const localAppData = readEnvRaw(AMBIENT_ENV.LOCALAPPDATA, env);
     const sdk = localAppData ? path.join(localAppData, "Android", "Sdk") : "";
     return [
       ...(sdk
@@ -129,7 +130,7 @@ function androidHomeCandidates({ env, platform, homedir }: EnvBootstrapDeps): st
   }
 
   if (platform === "win32") {
-    const localAppData = env.LOCALAPPDATA;
+    const localAppData = readEnvRaw(AMBIENT_ENV.LOCALAPPDATA, env);
     return localAppData ? [path.join(localAppData, "Android", "Sdk")] : [];
   }
 

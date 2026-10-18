@@ -6,11 +6,11 @@ import type { FileSystem } from "./filesystem/DefaultFileSystem";
 import { serverConfig } from "./ServerConfig";
 import { getTempDir, TEMP_SUBDIRS } from "./tempDir";
 import { firstFlagValue } from "./cliArgs";
+import { ENV, readEnvRaw } from "../config/env";
 
 export const TOOL_OUTPUTS_DIR_FLAG = "--tool-outputs-dir";
 export const TOOL_OUTPUT_DIR_FLAG_ALIAS = "--tool-output-dir";
-export const TOOL_OUTPUTS_DIR_ENV = "AUTOMOBILE_TOOL_OUTPUTS_DIR";
-export const TOOL_OUTPUTS_DIR_ENV_ALIAS = "AUTO_MOBILE_TOOL_OUTPUTS_DIR";
+export const TOOL_OUTPUTS_DIR_ENV = ENV.TOOL_OUTPUTS_DIR.name;
 
 export interface ToolOutputsDirValidationDeps extends Pick<FileSystem, "ensureDir"> {
   stat(dirPath: string): Promise<{ isDirectory(): boolean }>;
@@ -45,10 +45,7 @@ export function parseToolOutputsDirConfig(
   launchCwd: string,
 ): string | undefined {
   const cliValue = firstFlagValue(args, [TOOL_OUTPUTS_DIR_FLAG, TOOL_OUTPUT_DIR_FLAG_ALIAS]);
-  return normalizeConfiguredPath(
-    cliValue ?? env[TOOL_OUTPUTS_DIR_ENV] ?? env[TOOL_OUTPUTS_DIR_ENV_ALIAS],
-    launchCwd,
-  );
+  return normalizeConfiguredPath(cliValue ?? readEnvRaw(ENV.TOOL_OUTPUTS_DIR, env), launchCwd);
 }
 
 export function getDefaultToolOutputsDir(): string {

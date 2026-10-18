@@ -1,8 +1,9 @@
 import { firstFlagValue } from "./cliArgs";
 import { findValueOperand } from "./flagTokens";
+import { ENV, readEnvRaw } from "../config/env";
 
 export const EVENT_ALL_MARKERS_FLAG = "--event-all-markers";
-export const EVENT_ALL_MARKERS_ENV = "AUTOMOBILE_EVENT_ALL_MARKERS";
+export const EVENT_ALL_MARKERS_ENV = ENV.EVENT_ALL_MARKERS.name;
 
 export function hasEventAllMarkersCliOverride(args: string[]): boolean {
   // `--event-all-markers=` (explicit, empty) is an override; a bare flag with no value is not.
@@ -26,7 +27,8 @@ export function splitMarkers(value: string): string[] {
  * which leaves marker-based auto-promotion disabled.
  */
 export function parseEventAllMarkersConfig(args: string[], env: NodeJS.ProcessEnv): string[] {
-  const raw = firstFlagValue(args, [EVENT_ALL_MARKERS_FLAG]) ?? env[EVENT_ALL_MARKERS_ENV];
+  const raw =
+    firstFlagValue(args, [EVENT_ALL_MARKERS_FLAG]) ?? readEnvRaw(ENV.EVENT_ALL_MARKERS, env);
   if (!raw) {
     return [];
   }

@@ -136,8 +136,6 @@ import {
   MCP_STREAMABLE_PATH,
   DAEMON_PORT_RANGE_START,
   DAEMON_PORT_RANGE_END,
-  DAEMON_LAUNCH_LOG_PATH_ENV,
-  ACCEPTANCE_DISCOVERY_CAPABILITY_ENV,
   SESSION_RELEASE_DRAIN_TIMEOUT_MS,
 } from "./constants";
 import { DaemonOptions, PidFileData, type AuxiliaryDaemonSocketName } from "./types";
@@ -412,7 +410,7 @@ import {
   type DaemonProcessBirthTimeProvider,
   type DaemonProcessGenerationTokenProvider,
 } from "./daemonDependencies";
-import { ENV } from "../config/env";
+import { ENV, readEnvRaw } from "../config/env";
 
 export type {
   DaemonDependencies,
@@ -823,7 +821,7 @@ export class Daemon {
   private unsubscribeSessionExecutionEnded: (() => void) | null = null;
   private readonly deviceStateChangeNotifier: DeviceStateChangeNotifier;
   private options: DaemonOptions;
-  private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
+  private readonly acceptanceDiscoveryCapability = readEnvRaw(ENV.ACCEPTANCE_DISCOVERY_CAPABILITY);
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
   /** Redrives retained startup recorder descriptors when a device incarnation is assigned. */
@@ -2461,7 +2459,7 @@ export class Daemon {
   }
 
   private launchLogPath(): string | null {
-    const logPath = process.env[DAEMON_LAUNCH_LOG_PATH_ENV];
+    const logPath = readEnvRaw(ENV.DAEMON_LAUNCH_LOG_PATH);
     return logPath && isAbsolute(logPath) ? logPath : null;
   }
 

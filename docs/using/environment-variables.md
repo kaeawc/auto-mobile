@@ -810,15 +810,18 @@ does not spend an attempt either way.
 
 Not AutoMobile-specific; read to locate the Android emulator and the default SDK locations.
 
-| Variable                                                | Use                                                                                                  | Default             |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | ------------------- |
-| `ANDROID_HOME`, `ANDROID_SDK_ROOT`                      | Android SDK root used to find `emulator/emulator`.                                                   | unset               |
-| `ANDROID_SDK_HOME`                                      | Android user-data home; only reported in emulator-not-found diagnostics.                             | unset               |
-| `HOME`                                                  | POSIX home directory; used to probe the default Android SDK locations.                               | unset               |
-| `USERPROFILE`                                           | Windows home directory, consulted when `HOME` is unset or empty.                                     | unset               |
-| `PATH`                                                  | Executable search path; only reported in emulator-not-found diagnostics.                             | unset               |
-| `ADB_SERVER_SOCKET`                                     | ADB server endpoint (`tcp:host:port` or a local socket); keys the per-ADB-server coordination scope. | unset               |
-| `ANDROID_ADB_SERVER_ADDRESS`, `ANDROID_ADB_SERVER_PORT` | ADB server host and port when `ADB_SERVER_SOCKET` is unset.                                          | `localhost`, `5037` |
+| Variable                                                | Use                                                                                                           | Default             |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `ANDROID_HOME`, `ANDROID_SDK_ROOT`                      | Android SDK root used to find `emulator/emulator`.                                                            | unset               |
+| `ANDROID_SDK_HOME`                                      | Android user-data home; only reported in emulator-not-found diagnostics.                                      | unset               |
+| `HOME`                                                  | POSIX home directory; used to probe the default Android SDK locations.                                        | unset               |
+| `USERPROFILE`                                           | Windows home directory, consulted when `HOME` is unset or empty.                                              | unset               |
+| `PATH`                                                  | Executable search path; only reported in emulator-not-found diagnostics.                                      | unset               |
+| `ADB_SERVER_SOCKET`                                     | ADB server endpoint (`tcp:host:port` or a local socket); keys the per-ADB-server coordination scope.          | unset               |
+| `ANDROID_ADB_SERVER_ADDRESS`, `ANDROID_ADB_SERVER_PORT` | ADB server host and port when `ADB_SERVER_SOCKET` is unset.                                                   | `localhost`, `5037` |
+| `LOCALAPPDATA`                                          | Windows local application data directory; used to probe the default Android SDK location.                     | unset               |
+| `MCP_SERVER_VERSION`                                    | Exact MCP server version override for CI and test pins; never stamped with git metadata.                      | unset               |
+| `npm_package_version`                                   | Package version exported by npm and `bun run`; last-resort fallback when the manifest version is unavailable. | unset               |
 
 ### Boot capacity
 
@@ -1052,3 +1055,12 @@ version mismatch as a failure) together with
 | `AUTOMOBILE_TOUCH_LATENCY_SAMPLING`                                       | Opt into synthetic tap latency sampling; `1`, `true`, `yes` enables (case-insensitive, trimmed).                                        | off       |
 
 </div>
+
+## Internal variables
+
+Set by AutoMobile itself or by its test harnesses; they are not a supported configuration surface.
+
+- `AUTOMOBILE_DAEMON_LAUNCH_CWD`: caller working directory injected into a spawned daemon so relative paths resolve against the launch directory.
+- `AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH`: launch log ownership marker injected into a spawned daemon.
+- `AUTOMOBILE_STARTUP_BENCHMARK`, `AUTO_MOBILE_STARTUP_BENCHMARK`: startup benchmark harness activation (`1`, `true` or `yes`), with `AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT` / `AUTO_MOBILE_STARTUP_BENCHMARK_OUTPUT` as the output file and `AUTOMOBILE_STARTUP_BENCHMARK_LABEL` / `AUTO_MOBILE_STARTUP_BENCHMARK_LABEL` as the sample label.
+- `AUTOMOBILE_ACCEPTANCE_LIVE`, `AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER`, `AUTOMOBILE_ACCEPTANCE_DISCOVERY_CAPABILITY`, `AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET`: live acceptance harness activation, discovery ordering and private inter-process capabilities.

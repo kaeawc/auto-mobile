@@ -1,5 +1,6 @@
 import { isAlwaysOnTool } from "./toolSelectionControl";
 import { logger } from "../../utils/logger";
+import { ENV, readEnvRaw } from "../../config/env";
 
 /** One tool's enable/disable decision inside a batch write. */
 export interface SessionToolSelectionEntry {
@@ -154,8 +155,8 @@ export function getEnvironmentToolDefaults(
     );
   }
 
-  const enabled = parseToolNames(environment.AUTOMOBILE_ENABLED_TOOLS);
-  const disabled = parseToolNames(environment.AUTOMOBILE_DISABLED_TOOLS);
+  const enabled = parseToolNames(readEnvRaw(ENV.ENABLED_TOOLS, environment));
+  const disabled = parseToolNames(readEnvRaw(ENV.DISABLED_TOOLS, environment));
   const configurable = getConfigurableToolNames(
     [...enabled, ...disabled],
     knownToolNames,

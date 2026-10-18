@@ -35,7 +35,7 @@ export function parsePassiveWorkSettings(
       readEnvRaw(ENV.ANDROID_OBSERVATION_STREAM_DEVICES, env),
     ),
     iosWarmupDevices: parseDeviceIds(readEnvRaw(ENV.IOS_WARMUP_DEVICES, env)),
-    appearanceSyncEnabled: isAppearanceSyncEnabled(env.AUTOMOBILE_APPEARANCE_SYNC),
+    appearanceSyncEnabled: isAppearanceSyncEnabled(readEnvRaw(ENV.APPEARANCE_SYNC, env)),
     iosPassiveWorkEnabled: env[iosAcceptanceSecretEnv] === undefined,
   };
 }

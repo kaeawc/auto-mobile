@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
 import { logger, resolveAutomobileLogFormat } from "./logger";
+import { ENV, readEnvRaw } from "../config/env";
 
 const STARTUP_BENCHMARK_PREFIX = "STARTUP_BENCHMARK";
 
@@ -27,11 +28,7 @@ export function isStartupBenchmarkEnabled(
     return true;
   }
 
-  const envEnabled = (
-    environment.AUTOMOBILE_STARTUP_BENCHMARK ??
-    environment.AUTO_MOBILE_STARTUP_BENCHMARK ??
-    ""
-  ).toLowerCase();
+  const envEnabled = (readEnvRaw(ENV.STARTUP_BENCHMARK, environment) ?? "").toLowerCase();
   return (
     args.includes("--daemon-mode") &&
     (envEnabled === "1" || envEnabled === "true" || envEnabled === "yes")
@@ -40,12 +37,9 @@ export function isStartupBenchmarkEnabled(
 
 const enabled = isStartupBenchmarkEnabled(process.argv, process.env);
 
-const outputPath =
-  process.env.AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT ??
-  process.env.AUTO_MOBILE_STARTUP_BENCHMARK_OUTPUT;
+const outputPath = readEnvRaw(ENV.STARTUP_BENCHMARK_OUTPUT);
 
-const label =
-  process.env.AUTOMOBILE_STARTUP_BENCHMARK_LABEL ?? process.env.AUTO_MOBILE_STARTUP_BENCHMARK_LABEL;
+const label = readEnvRaw(ENV.STARTUP_BENCHMARK_LABEL);
 
 export interface StartupBenchmarkOptions {
   outputPath?: string;

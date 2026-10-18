@@ -30,6 +30,7 @@ export {
   type LogFormat,
   type LogSink,
 } from "./loggingConfig";
+import { ENV, readEnvRaw } from "../config/env";
 
 /**
  * Interface for logger functionality
@@ -151,9 +152,7 @@ export function resolveProcessLogPrefix(argv: readonly string[], pid: number): s
 // DaemonManager-spawned daemon inherits the var via its `{ ...process.env }`
 // child env. Falls back to INFO when unset/unrecognized; still overridable at
 // runtime via setLogLevel.
-let currentLogLevel: LogLevel =
-  parseAutomobileLogLevel(process.env.AUTOMOBILE_LOG_LEVEL ?? process.env.AUTO_MOBILE_LOG_LEVEL) ??
-  LogLevel.INFO;
+let currentLogLevel: LogLevel = parseAutomobileLogLevel(readEnvRaw(ENV.LOG_LEVEL)) ?? LogLevel.INFO;
 
 const logFormat = resolveAutomobileLogFormat();
 const logSink = resolveAutomobileLogSink();

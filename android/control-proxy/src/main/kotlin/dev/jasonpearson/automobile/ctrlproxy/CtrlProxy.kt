@@ -156,7 +156,6 @@ import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
-import dev.jasonpearson.automobile.sdk.logging.AutoMobileLog
 import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -742,7 +741,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // File name for app-scoped storage
     private const val HIERARCHY_FILE_NAME = "latest_hierarchy.json"
     private const val DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250L
-    private const val REMEMBER_TTL_MS = 5_000L
 
     /**
      * The universe of accessibility event types we classify for subscription. [HANDLED_EVENT_TYPES]
@@ -1419,6 +1417,89 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         },
     )
   }
+  /**
+   * Set text, insert text, IME actions and select all. Constructed eagerly (not `by lazy`) because
+   * gesture, event and command paths invalidate its remembered insert caret from the first event.
+   */
+  private val textInputController =
+    TextInputController(
+      host =
+        object : TextInputController.Host {
+          override fun launchRequestScope(
+            requestId: String?,
+            block: suspend CoroutineScope.() -> Unit,
+          ) {
+            this@CtrlProxy.launchRequestScope(requestId, block)
+          }
+
+          override fun activeWindowRoot(): AccessibilityNodeInfo? = rootInActiveWindow
+
+          override fun screenDimensions(displayId: Int) = getScreenDimensions(displayId)
+
+          override fun hideSoftKeyboard() {
+            softKeyboardController.setShowMode(AccessibilityService.SHOW_MODE_HIDDEN)
+          }
+
+          override suspend fun performImeNavigationAction(actionId: Int) =
+            CtrlProxyIme.current()?.performNavigationAction(actionId)
+
+          override fun sendKeycodeEnter() =
+            Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
+
+          override suspend fun publishSettledHierarchy() {
+            val freshHierarchy =
+              hierarchyDebouncer.extractAfterQuiescenceSuspending(
+                quiescenceMs = HierarchyQuiescence.POLL_MS,
+                maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
+                pollIntervalMs = 10L,
+              )
+            if (freshHierarchy != null) {
+              broadcastHierarchyUpdate(freshHierarchy, sync = true)
+            }
+          }
+        },
+      serviceScope = serviceScope,
+      perfProvider = perfProvider,
+      timeProvider = timeProvider,
+      resultBroadcaster = resultBroadcaster,
+      jsonCompact = jsonCompact,
+      responseSender =
+        object : TextInputController.ResponseSender {
+          override fun isRunning() = ::webSocketServer.isInitialized && webSocketServer.isRunning()
+
+          override suspend fun broadcastWithPerf(
+            type: String,
+            requestId: String?,
+            buildContent: JsonObjectBuilder.() -> Unit,
+          ) {
+            webSocketServer.broadcastWithPerf { perfTiming ->
+              webSocketFrameJson(
+                type,
+                requestId = requestId,
+                perfTiming = perfTiming,
+                buildContent = buildContent,
+              )
+            }
+          }
+
+          override suspend fun broadcastWithPerfSync(
+            type: String,
+            requestId: String?,
+            buildContent: JsonObjectBuilder.() -> Unit,
+          ) {
+            webSocketServer.broadcastWithPerfSync { perfTiming ->
+              webSocketFrameJson(
+                type,
+                requestId = requestId,
+                perfTiming = perfTiming,
+                buildContent = buildContent,
+              )
+            }
+          }
+
+          override fun connectionCount() = webSocketServer.getConnectionCount()
+        },
+    )
   @Volatile private var lastWindowClassName: String? = null
   /**
    * Changes immediately on a native UI event; capture and input share this device-owned context.
@@ -2463,7 +2544,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val y = request.y
     val displayId = request.displayId
 
-    rememberedInsert = null
+    textInputController.forgetRememberedInsert()
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
       broadcastGestureResult(requestId, false, "Streaming gestures require Android 8.0 (API 26)")
       return
@@ -2554,7 +2635,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     x: Double,
     y: Double,
   ) {
-    rememberedInsert = null
+    textInputController.forgetRememberedInsert()
     gestureStreamRouter.move(requestId, gestureId, x.toFloat(), y.toFloat())
   }
 
@@ -2565,7 +2646,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     y: Double,
     cancel: Boolean,
   ) {
-    rememberedInsert = null
+    textInputController.forgetRememberedInsert()
     gestureStreamRouter.end(
       requestId,
       gestureId,
@@ -2625,9 +2706,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       StaleFrameContextAction.TAP -> broadcastTapCoordinatesResult(requestId, false, error, 0)
       StaleFrameContextAction.SWIPE -> broadcastSwipeResult(requestId, false, error, 0, null)
       StaleFrameContextAction.DRAG -> broadcastDragResult(requestId, false, error, 0, null)
-      StaleFrameContextAction.SET_TEXT -> broadcastSetTextResult(requestId, false, error, 0)
+      StaleFrameContextAction.SET_TEXT ->
+        textInputController.broadcastSetTextResult(requestId, false, error, 0)
       StaleFrameContextAction.IME_ACTION ->
-        broadcastImeActionResult(requestId, action.wireName, false, error, 0)
+        textInputController.broadcastImeActionResult(requestId, action.wireName, false, error, 0)
       StaleFrameContextAction.GLOBAL_ACTION ->
         webSocketServer.broadcast(
           dev.jasonpearson.automobile.protocol.GlobalActionResult(
@@ -2649,46 +2731,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val frameContext = request.frameContext
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SET_TEXT)) return
-    performSetText(requestId, text, resourceId, dismissKeyboard)
+    textInputController.performSetText(requestId, text, resourceId, dismissKeyboard)
   }
 
-  override suspend fun requestInsertTextState(requestId: String?) {
-    // The host awaits this reply BEFORE dispatching ADB key events. No baseline is stored globally.
-    launchRequestScope(requestId) {
-      if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-        Log.d(TAG, "WebSocket server not running, skipping insert text state result broadcast")
-        return@launchRequestScope
-      }
-      val node = findFocusedEditableNode(rootInActiveWindow)
-      val state =
-        try {
-          if (
-            node != null && node.refresh() && node.isEditable && node.isFocused && !node.isPassword
-          ) {
-            InsertTextSnapshot(
-              node.text?.toString(),
-              node.isShowingHintTextCompat(),
-              node.textSelectionStart,
-              node.textSelectionEnd,
-            )
-          } else null
-        } finally {
-          node?.recycle()
-        }
-      resultBroadcaster.guard(requestId, "insert_text_state_result") {
-        webSocketServer.broadcastWithPerfSync { perfTiming ->
-          webSocketFrameJson(
-            "insert_text_state_result",
-            requestId = requestId,
-            perfTiming = perfTiming,
-          ) {
-            put("success", true)
-            if (state != null) put("state", jsonCompact.encodeToJsonElement(state))
-          }
-        }
-      }
-    }
-  }
+  override suspend fun requestInsertTextState(requestId: String?) =
+    textInputController.handleInsertTextState(requestId)
 
   override suspend fun requestInsertText(request: RequestInsertText) {
     val requestId = request.requestId
@@ -2697,7 +2744,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val acceptsCaretNotPlaced = request.acceptsCaretNotPlaced
     val precedingState = request.precedingState
 
-    performInsertText(requestId, text, expectedSuffix, acceptsCaretNotPlaced, precedingState)
+    textInputController.performInsertText(
+      requestId,
+      text,
+      expectedSuffix,
+      acceptsCaretNotPlaced,
+      precedingState,
+    )
   }
 
   override suspend fun requestCommitText(request: RequestCommitText) {
@@ -2708,7 +2761,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val timeoutMs = request.timeoutMs
     val trace = request.trace
 
-    rememberedInsert = null
+    textInputController.forgetRememberedInsert()
     val start = System.currentTimeMillis()
     val requestDeadlineMs =
       timeoutMs?.let { android.os.SystemClock.uptimeMillis() + it.coerceAtLeast(0) }
@@ -2912,13 +2965,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val frameContext = request.frameContext
 
     if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.IME_ACTION)) return
-    performImeAction(requestId, action)
+    textInputController.performImeAction(requestId, action)
   }
 
-  override suspend fun requestSelectAll(requestId: String?) = performSelectAll(requestId)
+  override suspend fun requestSelectAll(requestId: String?) =
+    textInputController.performSelectAll(requestId)
 
   override suspend fun requestClickFocusedInput(requestId: String?) {
-    rememberedInsert = null
+    textInputController.forgetRememberedInsert()
     val startTime = System.currentTimeMillis()
     // Like performNodeAction, stay on the inbound command queue until settling and replying.
     try {
@@ -3510,16 +3564,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         AccessibilityEvent.TYPE_WINDOWS_CHANGED,
         AccessibilityEvent.TYPE_VIEW_FOCUSED,
         AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
-        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED -> rememberedInsert = null
-        AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
-          val caret = rememberedInsert?.second?.caret
-          if (
-            caret != null &&
-              (event.fromIndex != caret.reportedStart || event.toIndex != caret.reportedEnd)
-          ) {
-            rememberedInsert = null
-          }
-        }
+        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED ->
+          textInputController.forgetRememberedInsert()
+        AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED ->
+          textInputController.onTextSelectionChanged(event.fromIndex, event.toIndex)
       }
       if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
         lastWindowClassName = event.className?.toString()
@@ -4060,7 +4108,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /** Handle a request_global_action WebSocket message. */
   private fun performGlobalActionRequest(requestId: String?, action: String) {
-    rememberedInsert = null
+    textInputController.forgetRememberedInsert()
     val startTime = System.currentTimeMillis()
     val success = executeGlobalAction(action)
     val totalTimeMs = System.currentTimeMillis() - startTime
@@ -4772,7 +4820,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     beforeCompletedResult: suspend () -> Unit = {},
     onResult: (GestureDispatchOutcome) -> Unit,
   ) {
-    rememberedInsert = null
+    textInputController.forgetRememberedInsert()
     val lifecycle =
       GestureDispatchLifecycle(
         startTimeMs = startTimeMs,
@@ -5006,7 +5054,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               perfProvider.complete(ownedPerf)
             },
           )
-        rememberedInsert = null
+        textInputController.forgetRememberedInsert()
         lifecycle.startDispatch()
         val onResult: (GestureDispatchOutcome) -> Unit = { dragResultReporter(requestId, it) }
         val posted = gestureThread.post {
@@ -5341,836 +5389,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
-   * Perform text input using AccessibilityService's ACTION_SET_TEXT. This is significantly faster
-   * than ADB's input text command.
-   */
-  private suspend fun performSetText(
-    requestId: String?,
-    text: String,
-    resourceId: String?,
-    dismissKeyboard: Boolean = false,
-  ) {
-    rememberedInsert = null
-    val startTime = System.currentTimeMillis()
-    // Never log the text: the target may be a password field.
-    Log.d(TAG, "performSetText: ${text.length} chars resourceId=$resourceId")
-    perfProvider.serial("performSetText")
-
-    try {
-      perfProvider.startOperation("findNode")
-      val root = rootInActiveWindow
-      var foundTargetNode: android.view.accessibility.AccessibilityNodeInfo? = null
-      try {
-        foundTargetNode =
-          if (resourceId != null) {
-            // Find node by resource-id
-            findNodeByResourceIdOnRootDisplay(root, resourceId, ::getScreenDimensions)
-          } else {
-            // Find currently focused input node
-            findFocusedEditableNode(root)
-          }
-      } finally {
-        if (root !== foundTargetNode) {
-          root?.recycle()
-        }
-      }
-      val targetNode = foundTargetNode
-      perfProvider.endOperation("findNode")
-
-      if (targetNode == null) {
-        perfProvider.end()
-        val errorTime = System.currentTimeMillis()
-        val error =
-          if (resourceId != null) {
-            "No node found with resource-id: $resourceId"
-          } else {
-            "No focused editable node found"
-          }
-        Log.w(TAG, error)
-        launchRequestScope(requestId) {
-          broadcastSetTextResult(requestId, false, error, errorTime - startTime)
-        }
-        return
-      }
-
-      perfProvider.startOperation("setText")
-      val arguments =
-        android.os.Bundle().apply {
-          putCharSequence(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-            text,
-          )
-        }
-      val success =
-        try {
-          targetNode.performAction(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT,
-            arguments,
-          )
-        } finally {
-          targetNode.recycle()
-        }
-      perfProvider.endOperation("setText")
-      perfProvider.end()
-
-      Log.d(TAG, "Set text completed: success=$success")
-
-      // Dismiss the soft keyboard if requested.
-      // When enabled (via --dismiss-keyboard-after-input or per-call dismissKeyboard param),
-      // SHOW_MODE_HIDDEN suppresses the keyboard globally for the accessibility service.
-      // This prevents the keyboard from stealing touch events and accessibility focus
-      // from UI elements behind it during subsequent tapOn steps.
-      if (success && dismissKeyboard) {
-        try {
-          softKeyboardController.setShowMode(
-            android.accessibilityservice.AccessibilityService.SHOW_MODE_HIDDEN,
-          )
-          Log.d(TAG, "[KeyboardDismiss] Set SHOW_MODE_HIDDEN after text injection")
-        } catch (e: CancellationException) {
-          throw e
-        } catch (e: Exception) {
-          Log.w(TAG, "[KeyboardDismiss] softKeyboardController failed", e)
-        }
-      }
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "Set text completed in ${totalTime}ms")
-      // ACTION_SET_TEXT and the requested keyboard state are complete, so acknowledge before
-      // optional hierarchy work. Waiting for quiescence/extraction first can turn a completed
-      // write into a host-side timeout.
-      broadcastSetTextResult(
-        requestId,
-        success,
-        if (success) null else "performAction returned false",
-        totalTime,
-      )
-
-      if (success) refreshHierarchyAfterTextInput()
-    } catch (e: CancellationException) {
-      perfProvider.end()
-      throw e
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing set text", e)
-      broadcastSetTextResult(requestId, false, e.message, errorTime - startTime)
-    }
-  }
-
-  /**
-   * Publishes the settled text state after a successful text mutation without delaying its result.
-   */
-  private fun refreshHierarchyAfterTextInput() {
-    serviceScope.launch {
-      try {
-        val freshHierarchy =
-          hierarchyDebouncer.extractAfterQuiescenceSuspending(
-            quiescenceMs = HierarchyQuiescence.POLL_MS,
-            maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-            pollIntervalMs = 10L,
-          )
-        if (freshHierarchy != null) {
-          broadcastHierarchyUpdate(freshHierarchy, sync = true)
-        }
-      } catch (e: CancellationException) {
-        throw e
-      } catch (e: Exception) {
-        Log.w(TAG, "Failed to refresh hierarchy after text input", e)
-      }
-    }
-  }
-
-  private data class InsertNodeKey(
-    val windowId: Int,
-    val packageName: String?,
-    val className: String?,
-    val viewId: String?,
-  )
-
-  private data class RememberedCaretAt(val caret: RememberedCaret, val atMs: Long)
-
-  // Compose may expose no stable view ID. Exact text AND reported selection, command/event
-  // invalidation, and a 5s TTL bound reuse to a continuation of the previous insert.
-  @Volatile private var rememberedInsert: Pair<InsertNodeKey, RememberedCaretAt>? = null
-
-  /**
-   * Insert text at the focused field's current selection using accessibility actions.
-   *
-   * Android exposes replacement through ACTION_SET_TEXT but no separate insert primitive. Build the
-   * new value from the node's UTF-16 selection range, then restore the caret immediately after the
-   * inserted text. This matches ordinary typing: a collapsed selection inserts at the caret, while
-   * a non-empty selection is replaced. If the selection is invalid, refresh the node once and
-   * append at the end of its current text if the refreshed selection is still invalid.
-   */
-  private suspend fun performInsertText(
-    requestId: String?,
-    text: String,
-    expectedSuffix: String?,
-    acceptsCaretNotPlaced: Boolean,
-    precedingState: InsertTextSnapshot? = null,
-  ) {
-    val startTime = System.currentTimeMillis()
-    // Suspend waits can resume on another IO thread; keep timing out of a thread-local stack.
-    val insertPerf = MutablePerfEntry("performInsertText", startTime)
-    fun finishPerf() {
-      if (insertPerf.endTime == null) {
-        insertPerf.endTime = System.currentTimeMillis()
-        perfProvider.complete(insertPerf)
-      }
-    }
-
-    var nodeToRecycle: android.view.accessibility.AccessibilityNodeInfo? = null
-    val warnings = mutableListOf<String>()
-    var textMutated = false
-    try {
-      val originalNode = findFocusedEditableNode(rootInActiveWindow)
-      if (originalNode == null) {
-        rememberedInsert = null
-        finishPerf()
-        launchRequestScope(requestId) {
-          broadcastInsertTextResult(
-            requestId,
-            false,
-            "No focused editable node found",
-            System.currentTimeMillis() - startTime,
-          )
-        }
-        return
-      }
-
-      var targetNode: android.view.accessibility.AccessibilityNodeInfo = originalNode
-      nodeToRecycle = targetNode
-      if (targetNode.isPassword) {
-        rememberedInsert = null
-        targetNode.recycle()
-        nodeToRecycle = null
-        finishPerf()
-        broadcastInsertTextResult(
-          requestId,
-          false,
-          "Cannot insert text into a password field without exposing its original value",
-          System.currentTimeMillis() - startTime,
-        )
-        return
-      }
-
-      fun nodeKey() =
-        InsertNodeKey(
-          targetNode.windowId,
-          targetNode.packageName?.toString(),
-          targetNode.className?.toString(),
-          targetNode.viewIdResourceName,
-        )
-
-      fun readFreshSnapshot(): InsertTextSnapshot? {
-        if (nodeToRecycle == null) return null
-        if (!targetNode.refresh()) {
-          val replacementNode = findFocusedEditableNode(rootInActiveWindow)
-          targetNode.recycle()
-          nodeToRecycle = replacementNode
-          if (replacementNode == null) {
-            rememberedInsert = null
-            return null
-          }
-          targetNode = replacementNode
-        }
-        // Re-found nodes may be password/non-editable fields. Never read their text or mutate them.
-        if (!targetNode.isEditable || !targetNode.isFocused || targetNode.isPassword) {
-          rememberedInsert = null
-          return null
-        }
-        if (rememberedInsert?.first != nodeKey()) rememberedInsert = null
-        return InsertTextSnapshot(
-          targetNode.text?.toString(),
-          targetNode.isShowingHintTextCompat(),
-          targetNode.textSelectionStart,
-          targetNode.textSelectionEnd,
-        )
-      }
-
-      // Every insert, including a caret-warning remainder, plans against a refreshed node.
-      var snapshot = readFreshSnapshot()
-      val waitStarted = android.os.SystemClock.uptimeMillis()
-      val remembered = rememberedInsert?.takeIf {
-        it.first == nodeKey() &&
-          android.os.SystemClock.uptimeMillis() - it.second.atMs <= REMEMBER_TTL_MS
-      }
-      if (remembered == null) rememberedInsert = null
-      val rememberedTextMatched = remembered?.let {
-        snapshot?.let { s -> !s.isShowingHintText && s.text.orEmpty() == it.second.caret.text }
-      }
-      if (remembered != null && snapshot != null && rememberedTextMatched == false) {
-        val matched =
-          awaitPrecedingInput(
-            expectedSuffix = "",
-            readSnapshot = { readFreshSnapshot().also { snapshot = it } },
-            nowMs = { android.os.SystemClock.uptimeMillis() },
-            pause = { ms -> kotlinx.coroutines.delay(ms) },
-            matches = { s ->
-              nodeKey() == remembered.first &&
-                !s.isShowingHintText &&
-                s.text.orEmpty() == remembered.second.caret.text
-            },
-          )
-        if (!matched) {
-          rememberedInsert = null
-          warnings.add(
-            "The field changed since the previous insert; its text did not match within 300ms, so the reported selection was used",
-          )
-        }
-      }
-      if (snapshot != null && shouldWaitForPrecedingInput(expectedSuffix)) {
-        val observed =
-          awaitPrecedingInput(
-            expectedSuffix = requireNotNull(expectedSuffix),
-            baseline = precedingState,
-            readSnapshot = { readFreshSnapshot().also { snapshot = it } },
-            nowMs = { android.os.SystemClock.uptimeMillis() },
-            pause = { ms -> kotlinx.coroutines.delay(ms) },
-          )
-        if (!observed) {
-          warnings.add(
-            "Preceding key-event input was not observed in the field within 300ms; the inserted text was planned against the latest observed value, so earlier input may have been overwritten",
-          )
-        }
-      }
-      AutoMobileLog.d(
-        TAG,
-        "insertText rememberedTextMatchedInitially=${rememberedTextMatched == true} rememberedTextMatchedAfterWait=${remembered != null && snapshot?.text == remembered.second.caret.text && snapshot?.isShowingHintText == false} waitMs=${android.os.SystemClock.uptimeMillis() - waitStarted}",
-      )
-      val liveSnapshot = snapshot
-      if (liveSnapshot == null) {
-        val error =
-          when {
-            nodeToRecycle == null -> "No focused editable node found"
-            targetNode.isPassword ->
-              "Cannot insert text into a password field without exposing its original value"
-            !targetNode.isEditable -> "Focused node is not editable"
-            else -> "No focused editable node found"
-          }
-        nodeToRecycle?.recycle()
-        nodeToRecycle = null
-        rememberedInsert = null
-        finishPerf()
-        broadcastInsertTextResult(
-          requestId,
-          false,
-          error,
-          System.currentTimeMillis() - startTime,
-          warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
-        )
-        return
-      }
-      // Reuse only when no command/event invalidated the same entry during polling.
-      val caret =
-        rememberedInsert
-          ?.takeIf {
-            it == remembered &&
-              android.os.SystemClock.uptimeMillis() - it.second.atMs <= REMEMBER_TTL_MS
-          }
-          ?.second
-          ?.caret
-      val plan =
-        planInsertText(
-          liveSnapshot.text,
-          liveSnapshot.isShowingHintText,
-          liveSnapshot.selectionStart,
-          liveSnapshot.selectionEnd,
-          text,
-          caret,
-        )
-      if (!plan.usedRememberedCaret) rememberedInsert = null
-      val precedingWarning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" ")
-      AutoMobileLog.d(
-        TAG,
-        "insertText selectionBeforeStart=${liveSnapshot.selectionStart} selectionBeforeEnd=${liveSnapshot.selectionEnd} textLength=${liveSnapshot.text.orEmpty().length}",
-      )
-
-      val actionIds = targetNode.actionList.map { it.id }.toSet()
-      AutoMobileLog.d(
-        TAG,
-        "insertText selectionActionListed=${android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION in actionIds}",
-      )
-      val requiredActions =
-        if (plan.usedFallbackCaret || plan.usedRememberedCaret) {
-          mapOf(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT to "ACTION_SET_TEXT",
-          )
-        } else {
-          mapOf(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT to "ACTION_SET_TEXT",
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION to
-              "ACTION_SET_SELECTION",
-          )
-        }
-      val unsupportedAction = requiredActions.entries.firstOrNull { it.key !in actionIds }
-      if (unsupportedAction != null) {
-        targetNode.recycle()
-        nodeToRecycle = null
-        finishPerf()
-        broadcastInsertTextResult(
-          requestId,
-          false,
-          "Focused editable node does not support ${unsupportedAction.value}",
-          System.currentTimeMillis() - startTime,
-          warning = precedingWarning,
-        )
-        return
-      }
-
-      val setTextArguments =
-        android.os.Bundle().apply {
-          putCharSequence(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-            plan.updatedText,
-          )
-        }
-      val setTextSucceeded =
-        targetNode.performAction(
-          android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT,
-          setTextArguments,
-        )
-      textMutated = setTextSucceeded
-      // Compose may acknowledge SET_TEXT before its semantics reflect the replacement. Wait
-      // briefly on the same node before reading selection support and placing the caret (#10414).
-      val mutationNodeKey = nodeKey()
-      fun readMutationSnapshot(): InsertTextSnapshot? {
-        // After writing, never re-find and move a caret in a different focused field.
-        if (
-          !targetNode.refresh() ||
-            nodeKey() != mutationNodeKey ||
-            !targetNode.isEditable ||
-            !targetNode.isFocused ||
-            targetNode.isPassword
-        )
-          return null
-        return InsertTextSnapshot(
-          targetNode.text?.toString(),
-          targetNode.isShowingHintTextCompat(),
-          targetNode.textSelectionStart,
-          targetNode.textSelectionEnd,
-        )
-      }
-      val afterSetText =
-        if (setTextSucceeded) {
-          awaitInsertTextMutation(
-            plan,
-            readSnapshot = ::readMutationSnapshot,
-            nowMs = { android.os.SystemClock.uptimeMillis() },
-            pause = { ms -> kotlinx.coroutines.delay(ms) },
-          )
-        } else null
-      AutoMobileLog.d(
-        TAG,
-        "insertText selectionAfterSetTextStart=${afterSetText?.selectionStart ?: -1} selectionAfterSetTextEnd=${afterSetText?.selectionEnd ?: -1}",
-      )
-      val selectionAttempted =
-        setTextSucceeded &&
-          afterSetText != null &&
-          android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION in
-            targetNode.actionList.map { it.id }
-      val selectionReturned =
-        if (selectionAttempted) {
-          val selectionArguments =
-            android.os.Bundle().apply {
-              putInt(
-                android.view.accessibility.AccessibilityNodeInfo
-                  .ACTION_ARGUMENT_SELECTION_START_INT,
-                plan.caret,
-              )
-              putInt(
-                android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
-                plan.caret,
-              )
-            }
-          targetNode.performAction(
-            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
-            selectionArguments,
-          )
-        } else false
-      // A widget may reject SET_SELECTION when SET_TEXT already placed the caret correctly.
-      val observedSelection =
-        if (selectionAttempted && !selectionReturned) readMutationSnapshot() else afterSetText
-      val selectionSucceeded =
-        insertTextSelectionSucceeded(
-          setTextSucceeded,
-          selectionAttempted,
-          selectionReturned,
-          plan,
-          observedSelection,
-        )
-      AutoMobileLog.d(
-        TAG,
-        "insertText selectionAttempted=$selectionAttempted selectionReturned=$selectionReturned",
-      )
-      // Record the reported selection after placement, including the rejected-action refresh.
-      val afterSelection =
-        if (afterSetText != null)
-          InsertTextSnapshot(
-            targetNode.text?.toString(),
-            targetNode.isShowingHintTextCompat(),
-            targetNode.textSelectionStart,
-            targetNode.textSelectionEnd,
-          )
-        else null
-      val outcome =
-        insertTextOutcome(
-          setTextSucceeded,
-          selectionAttempted,
-          selectionSucceeded,
-          precedingWarning,
-          acceptsCaretNotPlaced,
-        )
-      rememberedInsert = afterSelection?.let { s ->
-        nextRememberedCaret(outcome, plan, s.selectionStart, s.selectionEnd)?.let {
-          nodeKey() to RememberedCaretAt(it, android.os.SystemClock.uptimeMillis())
-        }
-      }
-      nodeToRecycle?.recycle()
-      nodeToRecycle = null
-      finishPerf()
-
-      broadcastInsertTextResult(
-        requestId,
-        outcome.success,
-        outcome.error,
-        System.currentTimeMillis() - startTime,
-        outcome.partialApplication,
-        outcome.warning,
-        outcome.caretPlaced,
-        if (setTextSucceeded && acceptsCaretNotPlaced) plan.updatedText.length else null,
-      )
-      if (setTextSucceeded) refreshHierarchyAfterTextInput()
-    } catch (e: CancellationException) {
-      rememberedInsert = null
-      nodeToRecycle?.recycle()
-      finishPerf()
-      throw e
-    } catch (e: Exception) {
-      rememberedInsert = null
-      nodeToRecycle?.recycle()
-      finishPerf()
-      Log.e(TAG, "Error inserting text", e)
-      broadcastInsertTextResult(
-        requestId,
-        false,
-        e.message,
-        System.currentTimeMillis() - startTime,
-        partialApplication = textMutated,
-        warning = warnings.takeIf { it.isNotEmpty() }?.joinToString(" "),
-      )
-    }
-  }
-
-  internal enum class ImeActionStep(val error: String? = null, val approximated: Boolean? = null) {
-    NO_FOCUSED_EDITABLE("No focused editable node found for IME action"),
-    NEXT(approximated = true),
-    PREVIOUS(approximated = true),
-    EDITOR_NEXT,
-    EDITOR_PREVIOUS,
-    IME_ENTER,
-    KEYCODE_ENTER,
-    UNSUPPORTED;
-
-    companion object {
-      fun select(
-        action: String,
-        hasFocusedEditable: Boolean,
-        sdkInt: Int,
-        hasImeConnection: Boolean = false,
-      ): ImeActionStep {
-        if (hasImeConnection) {
-          if (action == "next") return EDITOR_NEXT
-          if (action == "previous") return EDITOR_PREVIOUS
-        }
-        if (!hasFocusedEditable) {
-          return NO_FOCUSED_EDITABLE
-        }
-        return when (action) {
-          "next" -> NEXT
-          "previous" -> PREVIOUS
-          "done",
-          "go",
-          "send",
-          "search" -> if (sdkInt >= android.os.Build.VERSION_CODES.R) IME_ENTER else KEYCODE_ENTER
-          else -> UNSUPPORTED
-        }
-      }
-    }
-  }
-
-  /**
-   * Dispatch navigation through the active IME when possible, otherwise approximate it with focus
-   * traversal. Other keyboard actions retain their AccessibilityService handling.
-   */
-  private suspend fun performImeAction(requestId: String?, action: String) {
-    rememberedInsert = null
-    val startTime = System.currentTimeMillis()
-    Log.d(TAG, "performImeAction: action='$action'")
-    // Suspend waits can resume on another IO thread; keep timing out of a thread-local stack.
-    val imePerf = MutablePerfEntry("performImeAction", startTime)
-    fun finishPerf() {
-      if (imePerf.endTime == null) {
-        imePerf.endTime = System.currentTimeMillis()
-        perfProvider.complete(imePerf)
-      }
-    }
-
-    var root: android.view.accessibility.AccessibilityNodeInfo? = null
-    var focusedNode: android.view.accessibility.AccessibilityNodeInfo? = null
-    var approximated: Boolean? = null
-    try {
-      val findFocusedNodePerf = MutablePerfEntry("findFocusedNode", System.currentTimeMillis())
-      imePerf.children.add(findFocusedNodePerf)
-      root = rootInActiveWindow
-      focusedNode = findFocusedEditableNode(root)
-      findFocusedNodePerf.endTime = System.currentTimeMillis()
-
-      val navigationActionId =
-        when (action) {
-          "next" -> android.view.inputmethod.EditorInfo.IME_ACTION_NEXT
-          "previous" -> android.view.inputmethod.EditorInfo.IME_ACTION_PREVIOUS
-          else -> null
-        }
-      val editorActionResult =
-        if (navigationActionId != null) {
-          CtrlProxyIme.current()?.performNavigationAction(navigationActionId)
-        } else null
-      // Accessibility nodes expose no configured imeOptions. ACTION_IME_ENTER alone does not
-      // prove the editor is configured for NEXT, so an unavailable IME uses traversal.
-      val step =
-        ImeActionStep.select(
-          action,
-          focusedNode != null,
-          android.os.Build.VERSION.SDK_INT,
-          hasImeConnection = editorActionResult != null,
-        )
-      approximated = step.approximated
-      val error = step.error
-      if (error != null) {
-        finishPerf()
-        val errorTime = System.currentTimeMillis()
-        Log.w(TAG, error)
-        launchRequestScope(requestId) {
-          broadcastImeActionResult(requestId, action, false, error, errorTime - startTime)
-        }
-        return
-      }
-
-      val executeActionPerf = MutablePerfEntry("executeAction", System.currentTimeMillis())
-      imePerf.children.add(executeActionPerf)
-      val success =
-        when (step) {
-          ImeActionStep.EDITOR_NEXT,
-          ImeActionStep.EDITOR_PREVIOUS -> editorActionResult == true
-          ImeActionStep.NEXT -> {
-            // Find next focusable element and focus it
-            val nextNode = findNextFocusableNode(root, focusedNode!!)
-            if (nextNode != null) {
-              val focusSuccess =
-                nextNode.performAction(
-                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS,
-                )
-              nextNode.recycle()
-              focusSuccess
-            } else {
-              Log.w(TAG, "No next focusable node found")
-              false
-            }
-          }
-          ImeActionStep.PREVIOUS -> {
-            // Find previous focusable element and focus it
-            val prevNode = findPreviousFocusableNode(root, focusedNode!!)
-            if (prevNode != null) {
-              val focusSuccess =
-                prevNode.performAction(
-                  android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS,
-                )
-              prevNode.recycle()
-              focusSuccess
-            } else {
-              Log.w(TAG, "No previous focusable node found")
-              false
-            }
-          }
-          ImeActionStep.IME_ENTER -> {
-            // API 30+: Use ACTION_IME_ENTER for proper IME action handling
-            @Suppress("NewApi")
-            val actionId =
-              android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER
-                .id
-            val imeResult = focusedNode!!.performAction(actionId)
-            Log.d(TAG, "ACTION_IME_ENTER result: $imeResult")
-            imeResult
-          }
-          ImeActionStep.KEYCODE_ENTER -> {
-            // Pre-API 30: Fall back to pressing Enter key via input shell command
-            // This is less reliable but works on older devices
-            Log.d(TAG, "Pre-API 30: falling back to KEYCODE_ENTER")
-            try {
-              Runtime.getRuntime().exec(arrayOf("input", "keyevent", "66")).waitFor() == 0
-            } catch (e: CancellationException) {
-              throw e
-            } catch (e: Exception) {
-              Log.e(TAG, "Failed to send KEYCODE_ENTER", e)
-              false
-            }
-          }
-          else -> {
-            Log.w(TAG, "Unknown IME action: $action")
-            false
-          }
-        }
-      executeActionPerf.endTime = System.currentTimeMillis()
-
-      finishPerf()
-
-      Log.d(TAG, "IME action completed: success=$success")
-
-      // Wait for UI to settle, then extract fresh hierarchy
-      if (success) {
-        val freshHierarchy =
-          hierarchyDebouncer.extractAfterQuiescenceSuspending(
-            quiescenceMs = HierarchyQuiescence.POLL_MS,
-            maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
-            pollIntervalMs = 10L,
-          )
-        if (freshHierarchy != null) {
-          broadcastHierarchyUpdate(freshHierarchy, sync = true)
-        }
-      }
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "IME action total time: ${totalTime}ms")
-
-      broadcastImeActionResult(
-        requestId,
-        action,
-        success,
-        if (success) null else "Action failed",
-        totalTime,
-        approximated,
-      )
-    } catch (e: CancellationException) {
-      finishPerf()
-      throw e
-    } catch (e: Exception) {
-      finishPerf()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing IME action", e)
-      broadcastImeActionResult(
-        requestId,
-        action,
-        false,
-        e.message,
-        errorTime - startTime,
-        approximated,
-      )
-    } finally {
-      if (focusedNode !== root) {
-        focusedNode?.recycle()
-      }
-      root?.recycle()
-    }
-  }
-
-  /**
-   * Perform select all text using AccessibilityService's ACTION_SET_SELECTION. This is
-   * significantly faster than using ADB double-tap gestures.
-   */
-  private suspend fun performSelectAll(requestId: String?) {
-    rememberedInsert = null
-    val startTime = System.currentTimeMillis()
-    Log.d(TAG, "performSelectAll")
-    perfProvider.serial("performSelectAll")
-
-    try {
-      perfProvider.startOperation("findFocusedNode")
-      val focusedNode = findFocusedEditableNode(rootInActiveWindow)
-      perfProvider.endOperation("findFocusedNode")
-
-      if (focusedNode == null) {
-        perfProvider.end()
-        val errorTime = System.currentTimeMillis()
-        val error = "No focused editable node found"
-        Log.w(TAG, error)
-        broadcastSelectAllResult(requestId, false, error, errorTime - startTime)
-        return
-      }
-
-      perfProvider.startOperation("setSelection")
-      // Get the text length to set selection from 0 to end
-      val text = focusedNode.text
-      val plan =
-        planSelectAll(
-          text?.length ?: 0,
-          focusedNode.isShowingHintTextCompat(),
-          focusedNode.textSelectionStart,
-          focusedNode.textSelectionEnd,
-        )
-      val textLength = plan.textLength
-
-      val outcome =
-        if (plan.shouldPerformAction) {
-          // Use ACTION_SET_SELECTION with start=0 and end=textLength to select all
-          val arguments =
-            android.os.Bundle().apply {
-              putInt(
-                android.view.accessibility.AccessibilityNodeInfo
-                  .ACTION_ARGUMENT_SELECTION_START_INT,
-                0,
-              )
-              putInt(
-                android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
-                textLength,
-              )
-            }
-          val actionSucceeded =
-            focusedNode.performAction(
-              android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
-              arguments,
-            )
-          val selectionRefreshed = !actionSucceeded && focusedNode.refresh()
-          selectAllOutcome(
-            textLength,
-            actionSucceeded,
-            selectionRefreshed,
-            if (selectionRefreshed) focusedNode.textSelectionStart else -1,
-            if (selectionRefreshed) focusedNode.textSelectionEnd else -1,
-          )
-        } else {
-          // No text to select, or all text is already selected
-          if (textLength == 0) Log.d(TAG, "No text in focused node to select")
-          SelectAllOutcome(true, null)
-        }
-      val success = outcome.success
-
-      focusedNode.recycle()
-      perfProvider.endOperation("setSelection")
-      perfProvider.end()
-
-      Log.d(TAG, "Select all completed: success=$success, textLength=$textLength")
-
-      val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "Select all total time: ${totalTime}ms")
-
-      broadcastSelectAllResult(
-        requestId,
-        success,
-        outcome.error,
-        totalTime,
-      )
-    } catch (e: CancellationException) {
-      throw e
-    } catch (e: Exception) {
-      perfProvider.end()
-      val errorTime = System.currentTimeMillis()
-      Log.e(TAG, "Error performing select all", e)
-      broadcastSelectAllResult(requestId, false, e.message, errorTime - startTime)
-    }
-  }
-
-  /**
    * Perform an accessibility action on a node selected from observed stable fields. Resource ID is
    * preserved as the legacy selector; newer clients can additionally use test tags, Android unique
    * IDs, and collection coordinates.
@@ -6303,7 +5521,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     resourceId: String?,
     selector: NodeSelector?,
   ) {
-    rememberedInsert = null
+    textInputController.forgetRememberedInsert()
     val startTime = System.currentTimeMillis()
     val effectiveSelector = selector?.takeIf { it.hasCriteria() }
     val targetDescription = effectiveSelector?.toString() ?: "resource-id: $resourceId"
@@ -6410,32 +5628,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       emptyList()
     }
 
-  /** Broadcast set text result to WebSocket clients */
-  private suspend fun broadcastSetTextResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping set text result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "set_text_result") {
-      webSocketServer.broadcastWithPerfSync { perfTiming ->
-        webSocketFrameJson("set_text_result", requestId = requestId, perfTiming = perfTiming) {
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (error != null) {
-            put("error", error)
-          }
-        }
-      }
-      Log.d(TAG, "Broadcasted set text result to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
   private suspend fun broadcastCommitTextResult(
     requestId: String?,
     success: Boolean,
@@ -6536,97 +5728,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           if (error != null) put("error", error)
         }
       }
-    }
-  }
-
-  /** Broadcast insert text result to WebSocket clients. */
-  private suspend fun broadcastInsertTextResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    partialApplication: Boolean = false,
-    warning: String? = null,
-    caretPlaced: Boolean? = null,
-    resultingTextLength: Int? = null,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping insert text result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "insert_text_result") {
-      webSocketServer.broadcastWithPerfSync { perfTiming ->
-        webSocketFrameJson("insert_text_result", requestId = requestId, perfTiming = perfTiming) {
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (error != null) {
-            put("error", error)
-          }
-          if (warning != null) put("warning", warning)
-          if (caretPlaced != null) put("caretPlaced", caretPlaced)
-          if (resultingTextLength != null) put("resultingTextLength", resultingTextLength)
-          if (partialApplication) {
-            put("partialApplication", true)
-          }
-        }
-      }
-    }
-  }
-
-  /** Broadcast IME action result to WebSocket clients */
-  private suspend fun broadcastImeActionResult(
-    requestId: String?,
-    action: String,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-    approximated: Boolean? = null,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping IME action result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "ime_action_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        webSocketFrameJson("ime_action_result", requestId = requestId, perfTiming = perfTiming) {
-          if (approximated != null) put("approximated", approximated)
-          put("action", action)
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (error != null) {
-            put("error", error)
-          }
-        }
-      }
-      Log.d(TAG, "Broadcasted IME action result to ${webSocketServer.getConnectionCount()} clients")
-    }
-  }
-
-  /** Broadcast select all result to WebSocket clients */
-  private suspend fun broadcastSelectAllResult(
-    requestId: String?,
-    success: Boolean,
-    error: String?,
-    totalTimeMs: Long,
-  ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping select all result broadcast")
-      return
-    }
-
-    resultBroadcaster.guard(requestId, "select_all_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        webSocketFrameJson("select_all_result", requestId = requestId, perfTiming = perfTiming) {
-          put("success", success)
-          put("totalTimeMs", totalTimeMs)
-          if (error != null) {
-            put("error", error)
-          }
-        }
-      }
-      Log.d(TAG, "Broadcasted select all result to ${webSocketServer.getConnectionCount()} clients")
     }
   }
 
@@ -7126,7 +6227,3 @@ internal data class ImeFocusCandidate(
 
 internal fun isImeFocusCandidate(row: ImeFocusCandidate): Boolean =
   row.isEditable && row.isFocusable && row.isVisibleToUser && row.isEnabled
-
-/** `isShowingHintText` is API 26+; older platforms cannot report it, so treat the text as real. */
-private fun AccessibilityNodeInfo.isShowingHintTextCompat(): Boolean =
-  Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && isShowingHintText

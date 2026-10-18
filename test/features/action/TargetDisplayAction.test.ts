@@ -1,7 +1,7 @@
+import { FakeOpenSocket } from "../../fakes/FakeOpenSocket";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { StaleDisplayError } from "../../../src/features/observe/StaleDisplayError";
 import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
-import type WebSocket from "ws";
 import { CtrlProxyGestures } from "../../../src/features/observe/android/CtrlProxyGestures";
 import { RequestManager } from "../../../src/utils/RequestManager";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
@@ -2125,14 +2125,11 @@ describe("display gesture dispatch boundary race", () => {
         const wireTimer = new FakeTimer();
         const requestManager = new RequestManager(wireTimer);
         const sent: string[] = [];
-        const socket = {
-          readyState: 1,
-          send: (data: string) => {
-            sent.push(data);
-            const message = JSON.parse(data) as { requestId: string };
-            requestManager.resolve(message.requestId, { success: true, totalTimeMs: 0 });
-          },
-        } as WebSocket;
+        const socket = new FakeOpenSocket((data) => {
+          sent.push(data);
+          const message = JSON.parse(data) as { requestId: string };
+          requestManager.resolve(message.requestId, { success: true, totalTimeMs: 0 });
+        });
         const deps = {
           timer,
           lastRenderedObservation: () => observation,
@@ -2337,10 +2334,10 @@ describe("post-action screenshot resolved display", () => {
         const socket = new FakeWebSocket("ws://fake", "none", 0, wireTimer);
         socket.readyState = WebSocketState.OPEN;
         const client = AndroidCtrlProxyClient.createForTesting(android, executor, {
-          webSocketFactory: () => socket as WebSocket,
+          webSocketFactory: () => socket,
           timer: wireTimer,
         });
-        client["ws"] = socket as WebSocket;
+        client["ws"] = socket;
         client["connectWebSocket"] = async () => true;
         client["screenshotBackoffScheduler"] = new FakeScreenshotBackoffScheduler();
         socket.send = (data: string) => {

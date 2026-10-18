@@ -269,7 +269,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       webSocketFactory: (url) => {
         const socket = new FakeWebSocket(url, "none", 0, timer);
         socket.on("open", () => timer.setTimeout(() => socket.terminate(), 1000));
-        return socket as WebSocket;
+        return socket;
       },
       timer,
       serviceManagerFactory: () => manager,
@@ -353,7 +353,7 @@ describe("AndroidCtrlProxyClient - connection-failure escalation to service reco
       webSocketFactory: (url) => {
         const socket = new FakeWebSocket(url, "none", 0, timer);
         sockets.push(socket);
-        return socket as WebSocket;
+        return socket;
       },
       timer,
       serviceManagerFactory: () => manager,

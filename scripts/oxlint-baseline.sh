@@ -10,11 +10,12 @@
 #
 # The rules gated here are the ones .oxlintrc.json sets to "warn" because they
 # carry pre-existing violations (complexity, max-depth, max-params,
-# max-lines-per-function,
-# auto-mobile/catch-convention, and the two type-aware promise rules, whose
-# baseline is currently zero but which stay here because the fast `oxlint` stage
-# does not run `--type-aware`). Every OTHER rule is "error" in the config and is
-# gated directly by `oxlint` (a non-zero exit), so it does not belong here. The
+# max-lines-per-function, auto-mobile/catch-convention, ...), plus the two
+# type-aware promise rules. Those are "error" in the config with a zero baseline,
+# but they only run under `--type-aware`, which the fast `oxlint` stage does not
+# use, so this gate is what enforces them (any diagnostic is a new violation).
+# Every OTHER rule is "error" in the config and is gated directly by `oxlint` (a
+# non-zero exit), so it does not belong here. The
 # promise rules need type information, so this gate runs oxlint with
 # `--type-aware` (tsgolint) -- which is why the main `oxlint --fix` does not, and
 # CI type-checks only once. As these are burned down the baseline shrinks; it is
@@ -86,8 +87,9 @@ fi
 
 # The oxlint rule codes gated by this ratchet (including max-params and
 # max-lines-per-function). Kept in lock-step with the "warn"
-# rules in .oxlintrc.json. The two typescript(no-*-promises) codes have a zero
-# baseline; they stay here because only this stage runs `--type-aware`.
+# rules in .oxlintrc.json. The two typescript(no-*-promises) codes are "error" with
+# a zero baseline; they stay here because only this stage runs `--type-aware`,
+# so removing them would leave them unenforced.
 RATCHET_CODES="eslint(complexity) eslint(max-depth) eslint(max-params) eslint(max-lines-per-function) eslint(max-classes-per-file) auto-mobile(max-class-lines) auto-mobile(catch-convention) typescript(no-floating-promises) typescript(no-misused-promises)"
 
 # Emit the JSON report. OXLINT_JSON_CMD overrides the invocation -- used by the

@@ -73,7 +73,7 @@ export function relativeImportTargets(file: string): string[] {
       (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
         (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
       node.arguments.length === 1 &&
-      ts.isStringLiteral(node.arguments[0])
+      ts.isStringLiteralLike(node.arguments[0])
     ) {
       record(node.arguments[0].text);
     }

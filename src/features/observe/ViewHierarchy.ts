@@ -14,9 +14,10 @@ import { ViewHierarchyResult } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
+import { findAccessibilityFocusedElement, findFocusedElement } from "./HierarchyFocus";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { ViewHierarchyQueryOptions } from "../../models";
-import { AndroidCtrlProxyClient } from "./android";
+import { AndroidCtrlProxyClient, type ViewHierarchyAndroidCtrlProxy } from "./android";
 import { IOSCtrlProxyClient, type IOSCtrlProxy } from "./ios";
 import { IosRunnerStalledError } from "./ios/runnerErrorCodes";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -77,7 +78,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   private device: BootedDevice;
   private parser: ElementParser;
   private geometry: ElementGeometry;
-  private accessibilityServiceClient: AndroidCtrlProxyClient;
+  private accessibilityServiceClient: ViewHierarchyAndroidCtrlProxy;
   private adbFactory: AdbClientFactory;
   private timer: Timer;
   private observeAccessibilityManagerFactory: ObserveAccessibilityManagerFactory;
@@ -91,7 +92,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    accessibilityServiceClient: AndroidCtrlProxyClient | null = null,
+    accessibilityServiceClient: ViewHierarchyAndroidCtrlProxy | null = null,
     timer: Timer = defaultTimer,
     observeAccessibilityManagerFactory: ObserveAccessibilityManagerFactory = defaultObserveAccessibilityManagerFactory,
   ) {
@@ -926,7 +927,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * @returns The focused element or null if none found
    */
   findFocusedElement(viewHierarchy: any): Element | null {
-    return this.findElementByProperty(viewHierarchy, "focused");
+    return findFocusedElement(viewHierarchy, this.parser);
   }
 
   /**
@@ -934,61 +935,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * First checks the top-level accessibility-focused-element field, then traverses if needed.
    */
   findAccessibilityFocusedElement(viewHierarchy: any): Element | null {
-    if (!viewHierarchy) {
-      return null;
-    }
-
-    // First check if accessibility-focused-element is provided at the top level (from Kotlin)
-    if (viewHierarchy["accessibility-focused-element"]) {
-      const element = this.parseNodeBounds(viewHierarchy["accessibility-focused-element"]);
-      if (element) {
-        element["accessibility-focused"] = true;
-        return element;
-      }
-    }
-
-    // Fallback: traverse the hierarchy to find the accessibility-focused element
-    return this.findElementByProperty(viewHierarchy, "accessibility-focused");
-  }
-
-  private findElementByProperty(viewHierarchy: any, propertyName: string): Element | null {
-    if (!viewHierarchy) {
-      return null;
-    }
-
-    let foundElement: Element | null = null;
-
-    const traverseNode = (node: any): void => {
-      if (foundElement) {
-        return;
-      }
-
-      const props = nodeAttributes(node);
-      if (props[propertyName] === "true" || props[propertyName] === true) {
-        const element = this.parseNodeBounds(node);
-        if (element) {
-          element[propertyName] = true;
-          foundElement = element;
-          return;
-        }
-      }
-
-      if (node.node) {
-        const children = Array.isArray(node.node) ? node.node : [node.node];
-        for (const child of children) {
-          traverseNode(child);
-          if (foundElement) {
-            break;
-          }
-        }
-      }
-    };
-
-    if (viewHierarchy.hierarchy) {
-      traverseNode(viewHierarchy.hierarchy);
-    }
-
-    return foundElement;
+    return findAccessibilityFocusedElement(viewHierarchy, this.parser);
   }
 
   /**

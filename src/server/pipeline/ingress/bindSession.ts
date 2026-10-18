@@ -1,4 +1,5 @@
 import { DaemonState } from "../../../daemon/daemonState";
+import { defaultDaemonContext, type DaemonContext } from "../../../daemon/daemonContext";
 import { isDeviceInventoryTool } from "../../../daemon/daemonMcpProxy";
 import { SessionReleaseBroadcaster } from "../../sessionReleaseBroadcast";
 import {
@@ -259,8 +260,8 @@ function lookupSessionForBinding(
     : undefined;
 }
 
-function currentSessionManager(): DaemonSessionManager | undefined {
-  return DaemonState.getInstance().isInitialized()
-    ? DaemonState.getInstance().getSessionManager()
-    : undefined;
+function currentSessionManager(
+  daemon: DaemonContext = defaultDaemonContext,
+): DaemonSessionManager | undefined {
+  return daemon.sessionManager();
 }

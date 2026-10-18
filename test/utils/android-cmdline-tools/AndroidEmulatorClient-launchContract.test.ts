@@ -53,20 +53,15 @@ function createClient(
   for (const file of ["poster image.PNG", "poster.jpg", "poster.jpeg"]) {
     posterFileSystem.setExists(resolve(file), true);
   }
-  const client = new AndroidEmulatorClient(
-    async () => execResult(),
-    spawnFn as never,
+  const client = new AndroidEmulatorClient({
+    execAsync: async () => execResult(),
+    spawnFn: spawnFn as never,
     timer,
     adbFactory,
-    { readConfig: async () => ({ ramSizeMb: 2048 }) },
-    undefined,
-    undefined,
+    avdConfigReader: { readConfig: async () => ({ ramSizeMb: 2048 }) },
     hostPortAvailabilityChecker,
-    undefined,
-    undefined,
-    undefined,
     posterFileSystem,
-  );
+  });
   (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =
     async () => "emulator";
   (client as unknown as { listAvds: () => Promise<DeviceInfo[]> }).listAvds = async () => [

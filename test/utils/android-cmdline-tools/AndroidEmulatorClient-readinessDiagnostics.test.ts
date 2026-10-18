@@ -90,18 +90,12 @@ function clientWith(
   timer: FakeTimer,
   consoleBusyRegistry?: FakeEmulatorConsoleBusyRegistry,
 ): AndroidEmulatorClient {
-  return new AndroidEmulatorClient(
-    async () => result(),
-    null,
+  return new AndroidEmulatorClient({
+    execAsync: async () => result(),
     timer,
-    new ReadinessAdbFactory(adb),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+    adbFactory: new ReadinessAdbFactory(adb),
     consoleBusyRegistry,
-  );
+  });
 }
 
 function configureReadyDevice(adb: ReadinessAdbExecutor): void {

@@ -27,7 +27,7 @@ test.each([false, true])(
     const target = new DefaultElementParser().parseNodeBounds(raw.hierarchy.node!.node![1])!;
     const selector = new FakeElementSelector(target);
     let selectedSize: ObserveResult["screenSize"] | undefined;
-    selector.selectClickable = (capture, options) => {
+    selector.select = (capture, _query, options) => {
       selectedSize = screenSizeForOffscreenCheck(capture, options?.screenSizeOptions);
       return { element: target, totalMatches: 1, indexInMatches: 0, strategy: "first" };
     };
@@ -55,7 +55,7 @@ test("tapAny single-panel iOS converges on runner geometry while Android keeps d
   const hierarchy = issue8379Hierarchy();
   const selector = new FakeElementSelector();
   let selectedSize: ObserveResult["screenSize"] | undefined;
-  selector.selectClickable = (capture, options) => {
+  selector.select = (capture, _query, options) => {
     selectedSize = screenSizeForOffscreenCheck(capture, options?.screenSizeOptions);
     return { element: null, totalMatches: 0, indexInMatches: -1, strategy: "first" };
   };
@@ -115,7 +115,7 @@ test("tapAny folded portrait stand-in, single iPhone and Android preserve the pr
   const hierarchy = structuredClone(portraitCapture.viewHierarchy);
   const selector = new FakeElementSelector();
   let selectedSize: ObserveResult["screenSize"] | undefined;
-  selector.selectClickable = (capture, options) => {
+  selector.select = (capture, _query, options) => {
     selectedSize = screenSizeForOffscreenCheck(capture, options?.screenSizeOptions);
     return { element: null, totalMatches: 0, indexInMatches: -1, strategy: "first" };
   };

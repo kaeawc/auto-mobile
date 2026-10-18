@@ -325,7 +325,7 @@ class AmbientAbortAdbClient extends FakeAdbClient {
   override async executeCommand(
     ...args: Parameters<FakeAdbClient["executeCommand"]>
   ): ReturnType<FakeAdbClient["executeCommand"]> {
-    (args[4] ?? getAbortSignal())?.throwIfAborted();
+    (args[1]?.signal ?? getAbortSignal())?.throwIfAborted();
     return super.executeCommand(...args);
   }
 

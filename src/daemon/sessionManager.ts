@@ -10476,7 +10476,7 @@ export class SessionManager {
       upsertSettled = undefined;
     };
     const write = (options: UpsertActiveSessionOptions | undefined) => {
-      const statement = this.deviceSessionRepository.upsertActiveSession(
+      const statement = this.rowWriter.upsertLive(
         {
           sessionUuid: session.sessionId,
           deviceId: session.assignedDevice,
@@ -10534,7 +10534,7 @@ export class SessionManager {
         write({ ...upsertOptions, rewriteOverSupersededRelease: next }),
       );
     }
-    await this.deviceSessionRepository.replaceLivenessOwnership(
+    await this.rowWriter.replaceLiveOwnership(
       session.sessionId,
       session.livenessOwnerToken ?? null,
     );
@@ -10743,7 +10743,7 @@ export class SessionManager {
     update: DeviceSessionActivityUpdate,
   ): Promise<void> {
     try {
-      await this.deviceSessionRepository.recordActivity(session.sessionId, update);
+      await this.rowWriter.recordLiveActivity(session.sessionId, update);
       return;
     } catch (error) {
       if (!(error instanceof DeviceSessionNotActiveError)) {

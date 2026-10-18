@@ -27,6 +27,10 @@ public struct WebSocketResponse: Codable, Sendable {
     /// `pinch_result` responses (issue #2910); nil elsewhere.
     public let pinchPath: String?
     public let tapDiagnostics: TapDiagnostics?
+    /// Single-finger swipe only (#13145): the dispatch route that ran (`SwipeRoute` raw value) and
+    /// the stroke duration it really used. Absent from older runners and from other results.
+    public let swipeRoute: String?
+    public let effectiveDurationMs: Int64?
     public let resolvedStore: String?
     var effectiveValueDiffers: Bool?
 
@@ -47,7 +51,9 @@ public struct WebSocketResponse: Codable, Sendable {
         warning: String? = nil,
         pinchPath: String? = nil,
         resolvedStore: String? = nil,
-        tapDiagnostics: TapDiagnostics? = nil
+        tapDiagnostics: TapDiagnostics? = nil,
+        swipeRoute: String? = nil,
+        effectiveDurationMs: Int64? = nil
     ) {
         self.type = type
         self.timestamp = timestamp
@@ -66,6 +72,8 @@ public struct WebSocketResponse: Codable, Sendable {
         self.tapDiagnostics = tapDiagnostics
         self.pinchPath = pinchPath
         self.resolvedStore = resolvedStore
+        self.swipeRoute = swipeRoute
+        self.effectiveDurationMs = effectiveDurationMs
     }
 
     public static func success(
@@ -76,7 +84,9 @@ public struct WebSocketResponse: Codable, Sendable {
         pinchPath: String? = nil,
         resolvedStore: String? = nil,
         tapDiagnostics: TapDiagnostics? = nil,
-        warning: String? = nil
+        warning: String? = nil,
+        swipeRoute: String? = nil,
+        effectiveDurationMs: Int64? = nil
     )
         -> WebSocketResponse
     {
@@ -89,7 +99,9 @@ public struct WebSocketResponse: Codable, Sendable {
             warning: warning,
             pinchPath: pinchPath,
             resolvedStore: resolvedStore,
-            tapDiagnostics: tapDiagnostics
+            tapDiagnostics: tapDiagnostics,
+            swipeRoute: swipeRoute,
+            effectiveDurationMs: effectiveDurationMs
         )
     }
 
@@ -132,7 +144,9 @@ public struct WebSocketResponse: Codable, Sendable {
             warning: warning,
             pinchPath: pinchPath,
             resolvedStore: resolvedStore,
-            tapDiagnostics: tapDiagnostics
+            tapDiagnostics: tapDiagnostics,
+            swipeRoute: swipeRoute,
+            effectiveDurationMs: effectiveDurationMs
         )
         response.effectiveValueDiffers = effectiveValueDiffers
         return response

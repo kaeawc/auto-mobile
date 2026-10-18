@@ -453,7 +453,7 @@ describe("managed execution recovery is gated before publication", () => {
     await reowner.whenIdle();
     expect(calls).toHaveLength(1);
     expect(calls[0][1]).toBe("binding-ownership-lost");
-    expect(calls[0][5]).toEqual({ cutCallsLearnRelease: true });
+    expect(calls[0][2]).toEqual({ cutCallsLearnRelease: true });
     expect(sessions.hasSession(ID)).toBe(false);
     expect(sessions.getTerminalReleaseSnapshot(ID)?.releaseReason).toBe("binding-ownership-lost");
     expect(sessions.hasDeviceCleanupInProgress(DEVICE)).toBe(false);

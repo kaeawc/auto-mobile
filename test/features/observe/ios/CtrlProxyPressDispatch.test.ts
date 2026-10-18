@@ -1,3 +1,4 @@
+import { staleDisplayError } from "../../../../src/features/observe/StaleDisplayError";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { getEventListeners } from "node:events";
 import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
@@ -372,5 +373,30 @@ describe("IOSCtrlProxyClient press option forwarding", () => {
       swipe.mockRestore();
       await client.close();
     }
+  });
+});
+
+describe("iOS press beforeSend display fence", () => {
+  test("a StaleDisplayError from the fence is rethrown, not reported as a transport failure", async () => {
+    const h = createIosDelegateHarness();
+    const stale = staleDisplayError(1, 2);
+    const pending = new CtrlProxyGestures(h.context).requestMultiFingerSwipe(
+      1,
+      2,
+      3,
+      4,
+      2,
+      300,
+      50,
+      undefined,
+      10,
+      undefined,
+      undefined,
+      () => {
+        throw stale;
+      },
+    );
+    await expect(pending).rejects.toBe(stale);
+    expect(h.sentMessages).toHaveLength(0);
   });
 });

@@ -1,4 +1,5 @@
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
+import { expireIfDue } from "../helpers/expireIfDue";
 import { describe, expect, test, spyOn } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
@@ -39,9 +40,10 @@ describe("SessionManager", () => {
       // belongs to the heartbeat lease only: idleness releases exactly at the deadline.
       sessionManager.recordHeartbeat("session-1");
       fakeTimer.advanceTime(1000);
-      expect(sessionManager.getSession("session-1")).not.toBeNull();
+      expect(expireIfDue(sessionManager, "session-1")).not.toBeNull();
 
       fakeTimer.advanceTime(1);
+      expect(expireIfDue(sessionManager, "session-1")).toBeNull();
       expect(sessionManager.getSession("session-1")).toBeNull();
     });
   });

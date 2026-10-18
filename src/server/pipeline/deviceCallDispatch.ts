@@ -9,6 +9,7 @@ import { ActionableError, BootedDevice, SomePlatform } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { DaemonState } from "../../daemon/daemonState";
+import { defaultDaemonContext } from "../../daemon/daemonContext";
 import { reconcileDiscoveryObservation } from "../../daemon/discoveryReconcile";
 import { PlatformDeviceManagerFactory } from "../../utils/factories/PlatformDeviceManagerFactory";
 import { hasRecentReadTransportListingFailure } from "../../daemon/toolCallDeviceIdentity";
@@ -172,7 +173,7 @@ export function refuseControlCallBeforeAdmission(
   providedDeviceId: string | undefined,
   sessionUuid: string,
 ): void {
-  const session = DaemonState.getInstance().getSessionManager().getSession(sessionUuid);
+  const session = defaultDaemonContext.sessionManager()?.getSession(sessionUuid);
   assertSessionDeviceRouting(
     toolName,
     providedDeviceId,
@@ -180,7 +181,7 @@ export function refuseControlCallBeforeAdmission(
     session?.assignedDevice,
     session?.platform,
   );
-  DaemonState.getInstance().getDevicePool().assertSessionReadyForAutomation(sessionUuid);
+  defaultDaemonContext.devicePool()?.assertSessionReadyForAutomation(sessionUuid);
 }
 
 interface ToolTargetIdentityInput {
@@ -305,7 +306,9 @@ export function assertToolCallerHoldsDevice(
   sessionUuid: string | undefined,
   autolockEnabled: boolean,
 ): void {
-  if (!deviceId || !DaemonState.getInstance().isInitialized()) {
+  const devicePool = defaultDaemonContext.devicePool();
+  const sessionManager = defaultDaemonContext.sessionManager();
+  if (!deviceId || !devicePool || !sessionManager) {
     return;
   }
   if (readOnly) {
@@ -313,12 +316,10 @@ export function assertToolCallerHoldsDevice(
   }
   // An autolocked device is governed by autolock's own check and remedies. Like the general check,
   // it runs before readiness touches the device (#10833).
-  const devicePool = DaemonState.getInstance().getDevicePool();
   if (autolockEnabled && devicePool.getDevice(deviceId)?.autolockSessionId) {
     devicePool.assertAutolockAccess(deviceId, sessionUuid, autolockEnabled);
     return;
   }
-  const sessionManager = DaemonState.getInstance().getSessionManager();
   const ownerSessionUuid = sessionManager.getSessionForDevice(deviceId) ?? undefined;
   assertInputRequesterHoldsDevice({
     action: toolName,
@@ -555,7 +556,9 @@ export function sessionDisplayPinnedHandler(input: {
       acceptsDisplay,
       device,
       args,
-      sessionUuid: getToolSelectionContext()?.routingSessionUuid ?? args.sessionUuid,
+      sessionUuid:
+        getToolSelectionContext()?.routingSessionUuid ??
+        (typeof args.sessionUuid === "string" ? args.sessionUuid : undefined),
       invoke: (effectiveArgs) => input.handler(device, effectiveArgs, progress, signal),
     });
 }

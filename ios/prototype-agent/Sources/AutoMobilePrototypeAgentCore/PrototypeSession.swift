@@ -453,6 +453,10 @@ struct PrototypeSession {
         for key in changed {
             stateRevisions[key] = revision
         }
+        // The size baseline moves with the structure the patch changed, so a later state write or patch
+        // is measured against the patched spec rather than the one the show measured (#13061).
+        let structureDelta = PrototypePatch.structureBytes(patched) - PrototypePatch.structureBytes(spec)
+        nonStateBytes = max(0, nonStateBytes + structureDelta)
         self.spec = patched
         structureRevision += 1
         rebuildNavigation(for: patched.root, keepingPages: pages, keepingStacks: stacks)

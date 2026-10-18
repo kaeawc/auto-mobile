@@ -214,4 +214,46 @@ final class PrototypeSessionPatchTests: XCTestCase {
         XCTAssertTrue(capabilities.contains("prototype_patch_v1"))
         XCTAssertTrue(capabilities.contains("patch_prototype"))
     }
+
+    // MARK: Size baseline (#13061)
+
+    /// A session whose spec sits 150 bytes under the cap, as measured at show.
+    private func nearCapSession() throws -> PrototypeSession {
+        var session = PrototypeSession()
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(Self.source.utf8))
+        session.show(spec, specBytes: PrototypeLimits.maxSpecBytes - 150)
+        return session
+    }
+
+    func testGrowingDataRaisesTheSizeBaselineForLaterPatches() throws {
+        var session = try nearCapSession()
+        let grown = String(repeating: "d", count: 120)
+        let (first, _) = try session.patch(
+            id: "p", baseRevision: nil,
+            ops: ops(#"[{"op":"replace","path":"/data/title","value":"\#(grown)"}]"#)
+        )
+        XCTAssertEqual(first, .applied(revision: 2))
+        let text = String(repeating: "s", count: 60)
+        let (second, _) = try session.patch(
+            id: "p", baseRevision: 2,
+            ops: ops(#"[{"op":"replace","path":"/state/count","value":"\#(text)"}]"#)
+        )
+        guard case let .rejected(message, _) = second else { return XCTFail("expected a refusal, got \(second)") }
+        XCTAssertEqual(message, "Spec byte limit exceeded")
+        XCTAssertEqual(session.state["count"], .number(1))
+    }
+
+    func testShrinkingDataLowersTheSizeBaselineForLaterPatches() throws {
+        var session = try nearCapSession()
+        let (first, _) = try session.patch(
+            id: "p", baseRevision: nil, ops: ops(#"[{"op":"remove","path":"/data/items"}]"#)
+        )
+        XCTAssertEqual(first, .applied(revision: 2))
+        let text = String(repeating: "s", count: 140)
+        let (second, _) = try session.patch(
+            id: "p", baseRevision: 2,
+            ops: ops(#"[{"op":"replace","path":"/state/count","value":"\#(text)"}]"#)
+        )
+        XCTAssertEqual(second, .applied(revision: 3))
+    }
 }

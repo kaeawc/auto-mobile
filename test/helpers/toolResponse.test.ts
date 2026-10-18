@@ -17,7 +17,12 @@ describe("toolResponse helpers", () => {
     expect(() => readToolResponse({ content: "x" })).toThrow("invalid response");
     expect(() => toolText({ content: [] })).toThrow("no text in content[0]");
     expect(() => toolText({ content: [{ type: "image" }] })).toThrow("no text");
-    expect(() => toolJson({ content: [{ text: "[1]" }] })).toThrow("not a JSON object");
+    expect(() => toolText({ content: [{ type: "image", text: "looks like text" }] })).toThrow(
+      "no text",
+    );
+    expect(() => toolJson({ content: [{ type: "text", text: "[1]" }] })).toThrow(
+      "not a JSON object",
+    );
     expect(() => toolStructured({ content: [] })).toThrow("no structuredContent");
   });
 });

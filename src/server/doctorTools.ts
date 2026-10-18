@@ -5,8 +5,9 @@
 
 import { z } from "zod/v4";
 import { definePlainTool } from "./defineTool";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
 import type { IosDoctorDependencies } from "../doctor/checks/ios";
+import { doctorReportSchema } from "./doctorToolOutputSchemas";
 import { runDoctor } from "../doctor";
 
 /**
@@ -35,9 +36,9 @@ const doctorTool = definePlainTool({
       { iosDependencies },
     );
 
-    return createJSONToolResponse(report);
+    return createStructuredToolResponse(report);
   },
-  options: { defaultEnabled: true, readOnly: true },
+  options: { defaultEnabled: true, readOnly: true, outputSchema: doctorReportSchema },
 });
 
 /** The registered (strict) schema, for wire-contract tests. */

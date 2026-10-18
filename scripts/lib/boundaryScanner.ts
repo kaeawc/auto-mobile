@@ -20,14 +20,22 @@ export interface BoundaryRow {
   readonly owner: string;
   /** Repo-relative path prefixes that are never scanned. */
   readonly skipPrefixes: readonly string[];
+  /** Repo-relative paths, beyond the owner, that are never scanned. */
+  readonly skipFiles?: readonly string[];
   /**
    * `added-lines` only reports hits that overlap a line added in the diff (a
    * ratchet that tolerates existing debt). `whole-file` reports every hit in a
-   * changed file.
+   * changed file. `tree` scans every `.ts` file under `src/` (a full-tree
+   * check) and needs no diff.
    */
-  readonly scope: "added-lines" | "whole-file";
-  /** How failures are listed: one line per file, or per hit as file:line:col: text. */
-  readonly report: "files" | "locations";
+  readonly scope: "added-lines" | "whole-file" | "tree";
+  /**
+   * How failures are listed: `files` one indented line per file; `locations`
+   * indented `file:line:col: text`; `positions` indented `file:line:col`;
+   * `src-locations` unindented `file:line:col: text` with the leading `src/`
+   * stripped.
+   */
+  readonly report: "files" | "locations" | "positions" | "src-locations";
   readonly failureHeader: string;
   readonly successMessage?: string;
   /** Hits as 1-based [startLine, endLine] spans plus position. */
@@ -110,6 +118,7 @@ export function scanBoundary(
   return changed.flatMap((file) => {
     if (
       file.path === row.owner ||
+      row.skipFiles?.includes(file.path) ||
       row.skipPrefixes.some((prefix) => file.path.startsWith(prefix))
     ) {
       return [];
@@ -122,11 +131,35 @@ export function scanBoundary(
       .detect(source, file.path)
       .filter(
         (hit) =>
-          row.scope === "whole-file" ||
+          row.scope !== "added-lines" ||
           [...file.addedLines].some((line) => line >= hit.line && line <= hit.endLine),
       )
       .map(({ line, column, text }) => ({ file: file.path, line, column, text }));
   });
+}
+
+function reportLines(
+  report: BoundaryRow["report"],
+  violations: readonly BoundaryViolation[],
+): string[] {
+  switch (report) {
+    case "files":
+      return [...new Set(violations.map((violation) => violation.file))].map((file) => `  ${file}`);
+    case "locations":
+      return violations.map(
+        (violation) =>
+          `  ${violation.file}:${violation.line}:${violation.column}: ${violation.text}`,
+      );
+    case "positions":
+      return violations.map(
+        (violation) => `  ${violation.file}:${violation.line}:${violation.column}`,
+      );
+    case "src-locations":
+      return violations.map(
+        (violation) =>
+          `${violation.file.replace(/^src\//, "")}:${violation.line}:${violation.column}: ${violation.text}`,
+      );
+  }
 }
 
 export function renderBoundaryResult(
@@ -140,13 +173,7 @@ export function renderBoundaryResult(
       stderr: "",
     };
   }
-  const lines =
-    row.report === "files"
-      ? [...new Set(violations.map((violation) => violation.file))].map((file) => `  ${file}`)
-      : violations.map(
-          (violation) =>
-            `  ${violation.file}:${violation.line}:${violation.column}: ${violation.text}`,
-        );
+  const lines = reportLines(row.report, violations);
   return { exitCode: 1, stdout: "", stderr: `${[row.failureHeader, ...lines].join("\n")}\n` };
 }
 

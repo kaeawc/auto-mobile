@@ -1,7 +1,7 @@
 import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { ActionableError, BootedDevice } from "../../src/models";
 import { z } from "zod/v4";
@@ -49,7 +49,7 @@ describe("ToolRegistry autolock session enforcement", () => {
   };
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
-  let originalDeviceSessionManager: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
   let daemonSessionManager: SessionManager | undefined;
   let restorePipelineOverrides: (() => void) | undefined;
 
@@ -81,8 +81,8 @@ describe("ToolRegistry autolock session enforcement", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
-    Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: fakeDeviceSessionManager });
     restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
       env,
       displayInventory: new FakeDisplayInventoryProvider(),
@@ -94,7 +94,7 @@ describe("ToolRegistry autolock session enforcement", () => {
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     expect(DaemonState.getInstance().isInitialized()).toBe(false);

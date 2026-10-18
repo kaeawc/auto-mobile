@@ -19,6 +19,9 @@ import {
   canJoinAndroidInputText,
 } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
 
+import { readBackWithSettle } from "./readBackWithSettle";
+import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../../utils/android-cmdline-tools/asciiKeyEvents";
+import type { Timer } from "../../../utils/SystemTimer";
 import { passwordTextPlaceholder } from "../imeFailureDiagnostics";
 interface AndroidEventAllProgress {
   mutated: boolean;
@@ -31,6 +34,7 @@ interface AndroidEventAllProgress {
 }
 export interface EventAllTyperHost {
   session: TypingSession;
+  timer: Timer;
   hasFocusedPasswordField(hierarchy: NonNullable<ObserveResult["viewHierarchy"]>): boolean;
   graphemeCodePoints(graphemes: string[]): string;
   markPartialAfterPriorMutation(
@@ -132,10 +136,12 @@ export class EventAllTyper implements AndroidModeTyper {
     if (!clearResult.success) {
       return clearResult;
     }
+    const outcome = { batchedKeyRun: false };
     const typed = await this.executeAndroidEventAllCharacters(
       graphemes,
       operation === "replace",
       operation === "replace",
+      outcome,
       signal,
     );
     if (!typed.success) {
@@ -144,7 +150,79 @@ export class EventAllTyper implements AndroidModeTyper {
     const confirmed = unchangedWarning
       ? await this.confirmReplaceAfterUnchangedClear(text, unchangedWarning, typed, signal, display)
       : typed;
-    return this.host.verifyKeyEventLetterCase(text, confirmed, "eventAll", signal, display);
+    const caseChecked = await this.host.verifyKeyEventLetterCase(
+      text,
+      confirmed,
+      "eventAll",
+      signal,
+      display,
+    );
+    return outcome.batchedKeyRun
+      ? this.verifyPre31Delivery(graphemes, caseChecked, signal, display)
+      : caseChecked;
+  }
+
+  /**
+   * `adb shell input text` on API 30 and below drops characters under load and still exits 0
+   * (#12733), so success from the dispatch proves nothing there. Read the focused field back and
+   * fail as a partial application when the typed text is not in it. Case is ignored (the
+   * letter-case check owns that), only batched `input text` runs are read (the API level is already
+   * known there, so no extra adb call), an unreadable field stays a success, and API 31+ and password
+   * fields are not read.
+   */
+  private async verifyPre31Delivery(
+    graphemes: string[],
+    typed: TextActionResult,
+    signal?: AbortSignal,
+    display?: string,
+  ): Promise<TextActionResult> {
+    if (!typed.success || this.host.session.typingPasswordField) {
+      return typed;
+    }
+    const apiLevel = await this.host.getAndroidApiLevel(signal);
+    if (apiLevel === null || apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL) {
+      return typed;
+    }
+    const expected = graphemes.join("").toLowerCase();
+    const field = await readBackWithSettle(
+      async () => this.host.readFocusedText(await this.host.readFreshObservation(signal, display)),
+      (value) => value === undefined || value.toLowerCase().includes(expected),
+      {
+        timer: this.host.timer,
+        finish: (value, accepted) => (accepted ? undefined : value),
+        beforeRead: () => this.host.checkAbort(signal),
+        onReadError: (error) => {
+          this.host.checkAbort(signal, error);
+          logger.warn(
+            `[SendKeys] eventAll delivery read-back unavailable: ${errorMessage(error)}`,
+            error,
+          );
+        },
+      },
+    );
+    if (field === undefined) {
+      return typed;
+    }
+    const committedGraphemes = this.committedPrefixLength(graphemes, field.toLowerCase());
+    const error = `eventAll typed ${graphemes.length} graphemes but the focused field does not contain them: ${committedGraphemes} leading graphemes arrived and the device dropped the rest (adb input text on API ${await this.host.getAndroidApiLevel(signal)} loses characters). Use mode "ime" or "a11y" for reliable delivery.`;
+    logger.warn(`[SendKeys] ${error}`);
+    return this.host.withTextWarnings(
+      { success: false, error, committedGraphemes, partialApplication: true },
+      typed.warning ? [typed.warning] : [],
+    );
+  }
+
+  private committedPrefixLength(graphemes: string[], fieldLower: string): number {
+    let prefix = "";
+    let count = 0;
+    for (const grapheme of graphemes) {
+      prefix += grapheme.toLowerCase();
+      if (!fieldLower.includes(prefix)) {
+        break;
+      }
+      count++;
+    }
+    return count;
   }
 
   /**
@@ -182,6 +260,7 @@ export class EventAllTyper implements AndroidModeTyper {
     graphemes: string[],
     previouslyMutated: boolean,
     replacing: boolean,
+    outcome: { batchedKeyRun: boolean },
     signal?: AbortSignal,
   ): Promise<TextActionResult> {
     const progress: AndroidEventAllProgress = {
@@ -215,6 +294,7 @@ export class EventAllTyper implements AndroidModeTyper {
             progress.warnings,
           );
         }
+        outcome.batchedKeyRun ||= run.length > 1;
         progress.mutated = true;
         progress.pendingKeyText += run.join("");
         progress.sinceLastInsertEvents = true;

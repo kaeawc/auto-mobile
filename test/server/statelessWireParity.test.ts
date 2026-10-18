@@ -227,7 +227,7 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
     const call = async (method: string): Promise<void> => {
       await Reflect.get(daemon, method).call(daemon);
     };
-    await call("startHttpServer");
+    await Reflect.get(daemon, "httpIngress").start();
     await call("resolveStartupCompletion");
     await Promise.resolve();
 
@@ -259,7 +259,7 @@ describe("desktop handshake against the real daemon streamable endpoint", () => 
         });
       }
     } finally {
-      await call("closeHttpListener");
+      await Reflect.get(daemon, "httpIngress").closeListener();
     }
     return {
       scenario: "stateless-handshake",

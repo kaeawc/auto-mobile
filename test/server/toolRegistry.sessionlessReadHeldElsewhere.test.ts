@@ -9,7 +9,11 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import type { AppearanceConfig, AppearanceMode, BootedDevice } from "../../src/models";
 import type { DeviceObservationAccess } from "../../src/server/deviceObservationAccess";
-import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
+import {
+  ToolRegistry,
+  type AuditRunnerInput,
+  type ToolRegistryCollaborators,
+} from "../../src/server/toolRegistry";
 import { isSessionlessDeviceRead } from "../../src/features/toolSelection/toolSelectionContext";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
@@ -44,9 +48,7 @@ describe("a sessionless read never readies a device held outside this daemon's s
   let pool: DevicePool;
   let sessionManager: SessionManager;
   let restorePipeline: () => void;
-  let originalDeviceSessionManager: unknown;
-  let originalToolCallRepository: unknown;
-  let originalNavigationRecorder: unknown;
+  let originalCollaborators: ToolRegistryCollaborators;
 
   const call = (name: string, args: Record<string, unknown>) =>
     ToolRegistry.getTool(name)!.handler(args);
@@ -113,12 +115,14 @@ describe("a sessionless read never readies a device held outside this daemon's s
         executionBinding: { bindDeviceExecution: () => {} },
       },
     );
-    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
-    Reflect.set(ToolRegistry, "deviceSessionManager", devices);
-    originalToolCallRepository = Reflect.get(ToolRegistry, "toolCallRepository");
-    Reflect.set(ToolRegistry, "toolCallRepository", { async recordToolCall(): Promise<void> {} });
-    originalNavigationRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", { record: () => undefined });
+    originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: devices });
+    ToolRegistry.setCollaboratorsForTesting({
+      toolCallRepository: { async recordToolCall(): Promise<void> {} },
+    });
+    ToolRegistry.setCollaboratorsForTesting({
+      navigationToolCallRecorder: { record: () => undefined },
+    });
 
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -153,9 +157,7 @@ describe("a sessionless read never readies a device held outside this daemon's s
 
   afterEach(() => {
     restorePipeline();
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
-    Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
-    Reflect.set(ToolRegistry, "navigationToolCallRecorder", originalNavigationRecorder);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();

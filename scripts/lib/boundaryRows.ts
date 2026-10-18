@@ -1,5 +1,8 @@
 import ts from "typescript";
-import { type BoundaryRow, type BoundarySpan, spanOf } from "./boundaryScanner";
+import { type BoundaryHit, type BoundaryRow, type BoundarySpan, spanOf } from "./boundaryScanner";
+import { findDirectEmulatorCalls } from "./androidEmulatorBoundary";
+import { findDirectFfmpegCalls } from "./ffmpegBoundary";
+import { findDirectSqliteCalls } from "./simulatorTccSqliteBoundary";
 import { findDirectXcodebuildCalls } from "./xcodebuildBoundary";
 
 function parse(source: string, file: string): ts.SourceFile {
@@ -108,6 +111,35 @@ function detectXcodebuild(source: string, file: string): BoundarySpan[] {
   }));
 }
 
+// Cheap prefilter: a file with no "plutil" substring cannot contain a `plutil`
+// command, so skip parsing it (issue #5121).
+function detectPlutil(source: string, file: string): BoundarySpan[] {
+  if (!source.includes("plutil")) {
+    return [];
+  }
+  const sourceFile = parse(source, file);
+  const hits: BoundarySpan[] = [];
+  walk(sourceFile, (node) => {
+    if (
+      (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) &&
+      /(?:^|\s)plutil(?:\s|$)/.test(node.text)
+    ) {
+      hits.push(spanOf(sourceFile, node));
+    }
+  });
+  return hits;
+}
+
+function fromViolations(
+  find: (file: string, source: string) => readonly BoundaryHit[],
+): (source: string, file: string) => BoundarySpan[] {
+  return (source, file) =>
+    find(file, source).map((violation) => ({
+      ...violation,
+      endLine: violation.line + violation.text.split("\n").length - 1,
+    }));
+}
+
 export const BOUNDARY_ROWS: readonly BoundaryRow[] = [
   {
     id: "security",
@@ -136,5 +168,46 @@ export const BOUNDARY_ROWS: readonly BoundaryRow[] = [
     failureHeader: "New production xcodebuild execution must go through XcodebuildClient:",
     successMessage: "xcodebuild-boundary: no new direct production xcodebuild invocations.",
     detect: detectXcodebuild,
+  },
+  {
+    id: "plutil",
+    owner: "src/utils/ios-cmdline-tools/PlistClient.ts",
+    skipPrefixes: [],
+    scope: "tree",
+    report: "positions",
+    failureHeader: "Direct production plutil execution must go through PlistClient:",
+    detect: detectPlutil,
+  },
+  {
+    id: "ffmpeg",
+    owner: "src/utils/media/FfmpegClient.ts",
+    skipPrefixes: [],
+    scope: "tree",
+    report: "src-locations",
+    failureHeader: "error: FFmpeg execution must use src/utils/media/FfmpegClient.ts:",
+    successMessage: "ffmpeg-execution-boundary: no direct production FFmpeg invocations.",
+    detect: fromViolations(findDirectFfmpegCalls),
+  },
+  {
+    id: "simulator-tcc-sqlite",
+    owner: "src/utils/ios-cmdline-tools/SimulatorTccSqliteClient.ts",
+    // A production diagnostic exception must be listed here with its rationale
+    // before it can bypass the simulator-TCC owner.
+    skipPrefixes: [],
+    scope: "tree",
+    report: "src-locations",
+    failureHeader: "error: simulator TCC sqlite3 execution must use SimulatorTccSqliteClient:",
+    successMessage: "simulator-tcc-sqlite-boundary: no direct production sqlite3 invocations.",
+    detect: fromViolations(findDirectSqliteCalls),
+  },
+  {
+    id: "android-emulator",
+    owner: "src/utils/android-cmdline-tools/AndroidEmulatorClient.ts",
+    skipPrefixes: [],
+    scope: "tree",
+    report: "src-locations",
+    failureHeader: "error: Android emulator execution must use AndroidEmulatorClient:",
+    successMessage: "android-emulator-boundary: no direct production emulator invocations.",
+    detect: fromViolations(findDirectEmulatorCalls),
   },
 ];

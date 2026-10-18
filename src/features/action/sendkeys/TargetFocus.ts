@@ -61,9 +61,11 @@ export class TargetFocus {
       display,
       { execute: (options) => this.deps.observer.execute({ ...options, skipScreenshot: true }) },
       this.deps.adb(),
-      this.deps.lastRenderedObservation(),
-      signal,
-      this.deps.displayTransitionReader,
+      {
+        lastRenderedObservation: this.deps.lastRenderedObservation(),
+        signal,
+        transitions: this.deps.displayTransitionReader,
+      },
     );
     if (
       this.deps.device.platform === "android" &&

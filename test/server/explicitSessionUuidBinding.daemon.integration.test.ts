@@ -28,7 +28,7 @@ import type { Database } from "../../src/db/types";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonState } from "../../src/daemon/daemonState";
-import { ToolRegistry } from "../../src/server/toolRegistry";
+import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
@@ -53,7 +53,7 @@ let previousAutolock: string | undefined;
 let originalRepository: ReturnType<
   typeof ToolRegistry.getCollaboratorsForTesting
 >["toolCallRepository"];
-let originalDeviceSessionManager: unknown;
+let originalCollaborators: ToolRegistryCollaborators;
 let deviceSessionManager: FakeDeviceSessionManager;
 let restorePipelineOverrides: (() => void) | undefined;
 const fixtures = new Map<string, McpTestFixture>();
@@ -62,10 +62,10 @@ let received: string[];
 let restoreSpies: Array<() => void> = [];
 
 beforeEach(async () => {
-  originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
+  originalCollaborators = ToolRegistry.getCollaboratorsForTesting();
   deviceSessionManager = new FakeDeviceSessionManager();
   deviceSessionManager.setConnectedDevices(devices);
-  Reflect.set(ToolRegistry, "deviceSessionManager", deviceSessionManager);
+  ToolRegistry.setCollaboratorsForTesting({ deviceSessionManager: deviceSessionManager });
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
   process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   db = new Kysely<Database>({
@@ -138,7 +138,7 @@ afterEach(async () => {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = previousAutolock;
     }
   } finally {
-    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
+    ToolRegistry.setCollaboratorsForTesting(originalCollaborators);
   }
 });
 

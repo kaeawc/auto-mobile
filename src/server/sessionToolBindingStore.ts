@@ -1,3 +1,6 @@
+import { logger } from "../utils/logger";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+
 /**
  * The keyed half of {@link SessionToolBinding}, lifted out of the per-server
  * instance so a binding outlives the server that recorded it (#4678). A
@@ -25,7 +28,14 @@ export interface SessionToolBindingStoreDeps {
   readonly subscribeReleases: (onReleased: (sessionUuid: string) => void) => () => void;
   /** Called once per release that actually removed a binding. */
   readonly onBindingChanged: () => void;
+  /** Clock for forgotten-key tombstone expiry; defaults to the system timer. */
+  readonly timer?: Timer;
 }
+
+/** How long a forgotten key refuses a late `bind()` (a handler still in flight at teardown). */
+export const FORGET_TOMBSTONE_TTL_MS = 60_000;
+/** Cap on live tombstones so churning connections cannot grow the set without bound. */
+export const FORGET_TOMBSTONE_MAX = 1024;
 
 const INERT_DEPS: SessionToolBindingStoreDeps = {
   subscribeReleases: () => () => {},
@@ -38,6 +48,8 @@ export class SessionToolBindingStore {
   private readonly releasedDeviceSessions = new Map<string, string>();
   private readonly toolSelectionProfiles = new Map<string, string>();
   private readonly attached = new Set<SessionToolBindingLocalState>();
+  /** Forgotten key -> expiry (timer.now() ms); insertion order is expiry order. */
+  private readonly forgottenUntil = new Map<string, number>();
   private unsubscribeReleases?: () => void;
 
   constructor(private readonly deps: SessionToolBindingStoreDeps = INERT_DEPS) {}
@@ -100,6 +112,11 @@ export class SessionToolBindingStore {
 
   /** Records `sessionUuid` as acquired and bound for `key`; true when the bound session changed. */
   bind(key: string, sessionUuid: string): boolean {
+    if (this.isForgotten(key)) {
+      // A handler that finished after its owner's teardown must not resurrect the dead key.
+      logger.debug(`ignoring bind for forgotten session key ${key}`);
+      return false;
+    }
     let acquired = this.acquiredSessions.get(key);
     if (!acquired) {
       acquired = new Set<string>();
@@ -116,6 +133,10 @@ export class SessionToolBindingStore {
 
   /** True when the profile changed. */
   bindToolSelectionProfile(key: string, profileUuid: string): boolean {
+    if (this.isForgotten(key)) {
+      logger.debug(`ignoring tool-selection profile bind for forgotten session key ${key}`);
+      return false;
+    }
     if (this.toolSelectionProfiles.get(key) === profileUuid) {
       return false;
     }
@@ -133,6 +154,39 @@ export class SessionToolBindingStore {
     this.boundDeviceSessions.delete(key);
     this.releasedDeviceSessions.delete(key);
     this.toolSelectionProfiles.delete(key);
+    this.tombstone(key);
+  }
+
+  private get timer(): Timer {
+    return this.deps.timer ?? defaultTimer;
+  }
+
+  private tombstone(key: string): void {
+    this.forgottenUntil.delete(key);
+    this.pruneTombstones();
+    while (this.forgottenUntil.size >= FORGET_TOMBSTONE_MAX) {
+      const oldest = this.forgottenUntil.keys().next().value;
+      if (oldest === undefined) {
+        break;
+      }
+      this.forgottenUntil.delete(oldest);
+    }
+    this.forgottenUntil.set(key, this.timer.now() + FORGET_TOMBSTONE_TTL_MS);
+  }
+
+  private pruneTombstones(): void {
+    const now = this.timer.now();
+    for (const [key, until] of this.forgottenUntil) {
+      if (until > now) {
+        break;
+      }
+      this.forgottenUntil.delete(key);
+    }
+  }
+
+  private isForgotten(key: string): boolean {
+    this.pruneTombstones();
+    return this.forgottenUntil.has(key);
   }
 
   /**

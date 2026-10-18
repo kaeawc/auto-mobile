@@ -58,7 +58,7 @@ interface Internals {
     appId: string,
     fileName: string,
     mutation: {
-      dispatching: () => void;
+      ideMutation: { dispatching: () => void; signal: AbortSignal } | undefined;
       viaSdk: (onDispatch: () => void) => Promise<void>;
       viaDirectFile: () => Promise<void>;
     },
@@ -758,7 +758,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
           const call = new AbortController();
           const pending = runWithAbortSignal(call.signal, () =>
             internals.runIdeKeyValueMutation("android", androidDevice, "com.example", "prefs", {
-              dispatching: () => stamps++,
+              ideMutation: { dispatching: () => stamps++, signal: call.signal },
               viaSdk: async (onDispatch) => {
                 if (sdkSent) {
                   onDispatch?.();

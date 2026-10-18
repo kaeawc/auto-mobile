@@ -6,6 +6,8 @@ export interface WindowContractHarness {
   window: Window;
   /** Make the next fresh read report window `which`. */
   show(which: "primary" | "secondary"): void;
+  /** Keep the shown window's app and activity but change only its layout sequence. */
+  relayout(): void;
 }
 
 /** Identity the fresh read must report for each window (the harness's fixtures). */
@@ -91,6 +93,19 @@ export function runWindowContract(
       expect(await window.getActiveHash()).toBe(first);
       show("secondary");
       expect(await window.getActiveHash()).not.toBe(first);
+    });
+
+    test("the activity hash changes when only the layout sequence changes", async () => {
+      const { window, show, relayout } = make();
+      show("primary");
+      const before = await window.getActiveHash();
+      const active = await window.getActive(true);
+      relayout();
+      const after = await window.getActiveHash();
+      expect(after).not.toBe(before);
+      const relaid = await window.getActive(true);
+      expect(relaid).toMatchObject(expected.primary);
+      expect(relaid.layoutSeqSum).not.toBe(active.layoutSeqSum);
     });
 
     test("the activity hash always refreshes past a stale cache", async () => {

@@ -1,9 +1,51 @@
-import { parseGuardSource, unwrapCallee } from "./astGuard";
-import { Visitor } from "oxc-parser";
+import { parseGuardSource, unwrapCallee, valueImports } from "./astGuard";
+import { Visitor, type Expression } from "oxc-parser";
 
-/** Count `DaemonState.getInstance(...)` calls (direct, optional, computed or parenthesized). */
+const CLASS_NAME = "DaemonState";
+
+/** Local names bound to the class: `DaemonState`, renamed imports, namespace members and `const A = DaemonState`. */
+function classMatcher(
+  file: string,
+  program: ReturnType<typeof parseGuardSource>,
+): (node: Expression) => boolean {
+  const aliases = new Set<string>([CLASS_NAME]);
+  const namespaces = new Set<string>();
+  for (const [local, binding] of valueImports(file, program)) {
+    if (binding.name === CLASS_NAME) {
+      aliases.add(local);
+    } else if (binding.name === "*") {
+      namespaces.add(local);
+    }
+  }
+  const isClass = (node: Expression): boolean => {
+    const target = unwrapCallee(node);
+    if (target.type === "Identifier") {
+      return aliases.has(target.name);
+    }
+    return (
+      target.type === "MemberExpression" &&
+      !target.computed &&
+      target.property.type === "Identifier" &&
+      target.property.name === CLASS_NAME &&
+      unwrapCallee(target.object).type === "Identifier" &&
+      namespaces.has((unwrapCallee(target.object) as { name: string }).name)
+    );
+  };
+  // Alias chains (`const A = DaemonState; const B = A;`) resolve in declaration order.
+  new Visitor({
+    VariableDeclarator(node) {
+      if (node.id.type === "Identifier" && node.init && isClass(node.init)) {
+        aliases.add(node.id.name);
+      }
+    },
+  }).visit(program);
+  return isClass;
+}
+
+/** Count `DaemonState.getInstance(...)` calls (direct, optional, computed, parenthesized or aliased). */
 export function countDaemonStateGetInstanceCalls(file: string, source: string): number {
   const program = parseGuardSource(file, source);
+  const isClass = classMatcher(file, program);
   let count = 0;
   new Visitor({
     CallExpression(node) {
@@ -16,7 +58,7 @@ export function countDaemonStateGetInstanceCalls(file: string, source: string): 
       const isGetInstance = callee.computed
         ? property.type === "Literal" && property.value === "getInstance"
         : property.type === "Identifier" && property.name === "getInstance";
-      if (isGetInstance && object.type === "Identifier" && object.name === "DaemonState") {
+      if (isGetInstance && isClass(object)) {
         count += 1;
       }
     },

@@ -175,8 +175,7 @@ test.each(ownerCommands)(
                   30,
                   40,
                   { duration: 100 },
-                  undefined,
-                  owner.signal,
+                  { signal: owner.signal },
                 )
               : command === ownerCommands[4]
                 ? new InputKey(device, factory, undefined, timer).press(

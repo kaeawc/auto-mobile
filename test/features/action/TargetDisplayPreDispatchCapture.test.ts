@@ -221,15 +221,9 @@ describe("explicit-display pre-dispatch read", () => {
     async (key) => {
       const observe = new CountingObserveScreen();
       observe.setObserveResult(screen(key));
-      await prepareTargetDisplayAction(
-        device,
-        key,
-        observe,
-        adb(),
-        rendered(key),
-        undefined,
-        undefined,
-      );
+      await prepareTargetDisplayAction(device, key, observe, adb(), {
+        lastRenderedObservation: rendered(key),
+      });
       expect(observe.captures).toEqual([]);
       expect(observe.audits).toEqual([]);
       expect(observe.reads).toHaveLength(1);
@@ -288,15 +282,9 @@ describe("explicit-display pre-dispatch read", () => {
         timer,
       );
       try {
-        const prepared = await prepareTargetDisplayAction(
-          target,
-          key,
-          screen,
-          adb(),
-          rendered(key),
-          undefined,
-          undefined,
-        );
+        const prepared = await prepareTargetDisplayAction(target, key, screen, adb(), {
+          lastRenderedObservation: rendered(key),
+        });
         expect(prepared.observation.display.key).toBe(key);
         expect(prepared.displayId).toBe(displayId);
         expect(recorder.startCalls + recorder.captureCalls).toBe(0);

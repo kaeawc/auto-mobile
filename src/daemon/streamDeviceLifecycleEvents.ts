@@ -33,6 +33,14 @@ export class StreamDeviceLifecycleEmitter implements StreamDeviceLifecycleEvents
       this.identityChanged.delete(callback);
     };
   }
+  /** Test-only: the device-removed subscribers, so a suite can prove it leaked none. */
+  removedListenersForTesting(): Array<(deviceId: string) => void> {
+    return [...this.removed];
+  }
+  /** Test-only: drop every device-removed subscriber (the emitter has no reset API). */
+  clearRemovedListenersForTesting(): void {
+    this.removed.clear();
+  }
   deviceRestored(deviceId: string): void {
     this.emit(this.restored, deviceId);
   }

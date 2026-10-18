@@ -43,6 +43,7 @@ import type { Logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
 import { checkForeignLeaseHolders } from "./foreignLeaseHolders";
 import { checkDeviceOwnership } from "./deviceOwnership";
+import { createReadOnlyBindingRegistry } from "../../daemon/readOnlyBindingRegistry";
 import {
   DeviceOwnershipView,
   createDefaultDeviceOwnershipSources,
@@ -740,7 +741,9 @@ export async function runAutoMobileChecks(
       dependencies.checkDeviceOwnership ??
       (() =>
         checkDeviceOwnership({
-          view: new DeviceOwnershipView(createDefaultDeviceOwnershipSources()),
+          view: new DeviceOwnershipView(
+            createDefaultDeviceOwnershipSources({ registry: createReadOnlyBindingRegistry() }),
+          ),
         }))
     )(),
   );

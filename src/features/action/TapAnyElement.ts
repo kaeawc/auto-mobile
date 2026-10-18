@@ -1857,9 +1857,11 @@ export class TapAnyElement extends BaseVisualChange {
               options.display,
               this.observeScreen,
               this.adb,
-              this.lastRenderedObservation,
-              signal,
-              this.displayTransitionReader,
+              {
+                lastRenderedObservation: this.lastRenderedObservation,
+                signal,
+                transitions: this.displayTransitionReader,
+              },
             );
       const refresh: RefreshViewHierarchy =
         targetDisplay && this.device.platform === "android"

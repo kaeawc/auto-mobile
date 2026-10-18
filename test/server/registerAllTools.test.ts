@@ -11,10 +11,9 @@ isolateToolRegistry();
 
 /** Names registered by one entry point, in registration order, starting from an empty registry. */
 function registeredNames(register: () => void): string[] {
-  const tools = ToolRegistry["tools"];
-  tools.clear();
+  ToolRegistry.clearToolsForTesting();
   register();
-  return [...tools.keys()];
+  return ToolRegistry.getEveryRegisteredTool().map((tool) => tool.name);
 }
 
 const sorted = (names: readonly string[]): string[] => [...names].sort();

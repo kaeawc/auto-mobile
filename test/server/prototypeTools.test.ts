@@ -1169,6 +1169,15 @@ describe("prototype discovery over MCP", () => {
     );
     // First listing builds every tool's schema and the client's validators; keep it out of the test.
     await fixture.client.listTools();
+    // Enabling a tool rebuilds the listing with its schemas and the client validates them; run the
+    // same enable, list, disable cycle once so the test measures steady state.
+    for (const enabled of [true, false]) {
+      await fixture.client.callTool({
+        name: "setToolEnabled",
+        arguments: { toolName: "prototype", enabled },
+      });
+      await fixture.client.listTools();
+    }
   });
   afterAll(async () => {
     unsubscribe();

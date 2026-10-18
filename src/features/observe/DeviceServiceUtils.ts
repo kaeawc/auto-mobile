@@ -1,3 +1,4 @@
+import type { CtrlSocket } from "./shared/types";
 /**
  * DeviceServiceUtils - Shared utilities for device service clients
  *
@@ -379,7 +380,7 @@ function registerCommandAbort<T>(
 }
 
 function commitCommand<T>(
-  ws: WebSocket,
+  ws: CtrlSocket,
   msg: string,
   options: SendCommandOptions<T>,
   requestId: string,

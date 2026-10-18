@@ -91,7 +91,7 @@ import {
   observationStreamDeviceConnectionLostNotifier,
   type DeviceConnectionLostNotifier,
 } from "../DeviceConnectionLostNotifier";
-import type { BaseResult } from "../shared/types";
+import type { BaseResult, CtrlSocket } from "../shared/types";
 import type { GestureTimingResult, SwipeRequestOptions } from "../shared/types";
 import type { SetTextOptions } from "../DeviceService";
 import type { SimulatedErrorType } from "../../../server/NetworkState";
@@ -909,8 +909,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private resolvePendingRestart: ((stable: boolean) => void) | undefined;
   /** Only a socket opened after forceRestart teardown may satisfy this attempt. */
   private restartAcceptsReplacement = false;
-  private restartReplacementSocket: WebSocket | null = null;
-  private restartSocketBeforeTeardown: WebSocket | null = null;
+  private restartReplacementSocket: CtrlSocket | null = null;
+  private restartSocketBeforeTeardown: CtrlSocket | null = null;
   private connectedSocketPort: number | null = null;
   /** Port acquired by this registered client, if it still uses that allocation. */
   private allocatedPort: number | null = null;

@@ -8,6 +8,9 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 let deps: Partial<StorageToolsDependencies> = {};
 function useStorageToolsDependenciesForTesting(value: Partial<StorageToolsDependencies>): void {

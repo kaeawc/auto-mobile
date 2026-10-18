@@ -1,3 +1,4 @@
+import { FakeOpenSocket } from "../../fakes/FakeOpenSocket";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -87,16 +88,13 @@ function harness(
     },
     cancelScreenshotBackoff: () => {},
     getWebSocket: () =>
-      ({
-        readyState: WebSocket.OPEN,
-        send: (data: string) => {
-          const command: { type: string; requestId: string } = JSON.parse(data);
-          commands.push(command);
-          requestManager.resolve(command.requestId, {
-            hierarchy: timer.now() === raw.updatedAt ? raw : { ...raw, updatedAt: timer.now() },
-          });
-        },
-      }) as unknown as WebSocket,
+      new FakeOpenSocket((data) => {
+        const command: { type: string; requestId: string } = JSON.parse(data);
+        commands.push(command);
+        requestManager.resolve(command.requestId, {
+          hierarchy: timer.now() === raw.updatedAt ? raw : { ...raw, updatedAt: timer.now() },
+        });
+      }),
   };
   const delegate = new CtrlProxyHierarchy(context);
   const client = new FakeIOSCtrlProxy(timer);

@@ -1,3 +1,4 @@
+import type { CtrlSocket } from "../../../src/features/observe/shared/types";
 import {
   afterAll,
   afterEach,
@@ -374,10 +375,10 @@ describe("AndroidCtrlProxyClient", function () {
     // until we trigger `open` ourselves, and the connection timeout never fires.
     const manualTimer = new FakeTimer();
     let socket: FakeWebSocket | null = null;
-    const factory = (url: string): WebSocket => {
+    const factory = (url: string): CtrlSocket => {
       // "timeout" mode keeps the socket CONNECTING (the timer is never advanced).
       socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
-      return socket as unknown as WebSocket;
+      return socket;
     };
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, {
       webSocketFactory: factory,
@@ -425,9 +426,9 @@ describe("AndroidCtrlProxyClient", function () {
     gatedAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
     gatedAdb.setScreenState(true);
     let socket: FakeWebSocket | null = null;
-    const factory = (url: string): WebSocket => {
+    const factory = (url: string): CtrlSocket => {
       socket = new FakeWebSocket(url, "timeout", 60_000, manualTimer);
-      return socket as unknown as WebSocket;
+      return socket;
     };
     const client = AndroidCtrlProxyClient.createForTesting(testDevice, gatedAdb, {
       webSocketFactory: factory,

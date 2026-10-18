@@ -1,4 +1,4 @@
-import { DaemonState } from "../daemon/daemonState";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { SessionManager } from "../daemon/sessionManager";
@@ -39,8 +39,7 @@ const MAX_DEVICE_ACQUISITION_SETUP_ITERATIONS = 5;
 const DEVICE_ACQUISITION_SETUP_DEADLINE_MS = 300_000;
 
 function setupTimingSessionManager(): SessionManager | undefined {
-  const state = DaemonState.getInstance();
-  return state.isInitialized() ? state.getSessionManager() : undefined;
+  return defaultDaemonContext.sessionManager();
 }
 
 /** Session-owned timing never falls back to another session's device timing. */

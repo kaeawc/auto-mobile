@@ -1,4 +1,4 @@
-import { DaemonState } from "../../../daemon/daemonState";
+import { defaultDaemonContext } from "../../../daemon/daemonContext";
 
 /**
  * Whether `sessionUuid` is a live session of the plan `boundSessionUuid` belongs to (#11602). The
@@ -9,9 +9,7 @@ export function namesLiveSessionOfBoundPlan(
   sessionUuid: string,
   boundSessionUuid: string,
 ): boolean {
-  const daemonState = DaemonState.getInstance();
-  return (
-    daemonState.isInitialized() &&
-    daemonState.getSessionManager().isLiveSessionOfSamePlan(sessionUuid, boundSessionUuid)
-  );
+  return !!defaultDaemonContext
+    .sessionManager()
+    ?.isLiveSessionOfSamePlan(sessionUuid, boundSessionUuid);
 }

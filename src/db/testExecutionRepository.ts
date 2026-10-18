@@ -431,7 +431,7 @@ export class TestExecutionRepository {
 
   // `maxRows` is injectable so tests can exercise trimming at a small cap without
   // inserting 10k rows.
-  private async pruneToRowCap(maxRows: number = TEST_EXECUTION_RETENTION_MAX_ROWS): Promise<void> {
+  async pruneToRowCap(maxRows: number = TEST_EXECUTION_RETENTION_MAX_ROWS): Promise<void> {
     try {
       await pruneTableByRowCap(this.getDb(), "test_executions", maxRows);
     } catch (error) {

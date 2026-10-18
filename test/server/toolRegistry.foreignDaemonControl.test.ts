@@ -26,6 +26,9 @@ import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvi
 import { FakeTimer } from "../fakes/FakeTimer";
 import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * #11349 (owner decision 2026-10-10): a sessionless control call on a device another daemon has

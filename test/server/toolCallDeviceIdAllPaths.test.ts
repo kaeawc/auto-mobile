@@ -26,6 +26,9 @@ import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * #11618 follow-up: EVERY path that takes a caller-supplied device id resolves it through the one

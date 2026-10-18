@@ -5,6 +5,9 @@ import {
 } from "../../../src/features/record/ToolCallRecorder";
 import { registerMcpTools } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // Every tool the live registry lists in daemon mode (the superset surface).
 // Tools hidden from listing (startDevice, plan-only barrier/criticalSection) are

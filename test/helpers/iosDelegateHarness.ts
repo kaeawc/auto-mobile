@@ -1,3 +1,4 @@
+import { FakeOpenSocket } from "../fakes/FakeOpenSocket";
 /**
  * iosDelegateHarness - a minimal, socket-free driver for iOS CtrlProxy delegate
  * classes (`CtrlProxyStorage`, `CtrlProxyDatabase`, `CtrlProxyVoiceOver`,
@@ -20,7 +21,7 @@
  * the assertion (not a real hang) proves the timeout path.
  */
 
-import type WebSocket from "ws";
+import type { CtrlSocket } from "../../src/features/observe/shared/types";
 import { RequestManager } from "../../src/utils/RequestManager";
 import type { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 import type {
@@ -88,19 +89,15 @@ export function createIosDelegateHarness(
   let supportedCommands = options.supportedCommands;
   let cache: CtrlProxyCachedHierarchy | null = options.initialCache ?? null;
 
-  const fakeSocket = {
-    readyState: 1,
-    send(data: unknown): void {
-      const text = typeof data === "string" ? data : String(data);
-      try {
-        sentMessages.push(JSON.parse(text) as Record<string, unknown>);
-      } catch {
-        // A delegate should only ever send JSON; a parse failure is a test bug,
-        // surfaced by the missing/wrong entry in sentMessages rather than a throw.
-        sentMessages.push({ raw: text });
-      }
-    },
-  } as unknown as WebSocket;
+  const fakeSocket = new FakeOpenSocket((text) => {
+    try {
+      sentMessages.push(JSON.parse(text) as Record<string, unknown>);
+    } catch {
+      // A delegate should only ever send JSON; a parse failure is a test bug,
+      // surfaced by the missing/wrong entry in sentMessages rather than a throw.
+      sentMessages.push({ raw: text });
+    }
+  });
 
   const harness: IosDelegateHarness = {
     timer,
@@ -129,7 +126,7 @@ export function createIosDelegateHarness(
       timer.advanceTime(ms);
     },
     context: {
-      getWebSocket: (): WebSocket | null => fakeSocket,
+      getWebSocket: (): CtrlSocket | null => fakeSocket,
       requestManager,
       timer,
       ensureConnected: async (_perf?: PerformanceTracker): Promise<boolean> => {

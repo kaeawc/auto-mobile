@@ -1,14 +1,13 @@
 import { Socket } from "node:net";
 import { randomUUID } from "node:crypto";
-import { mock } from "bun:test";
 import {
   SOCKET_REQUEST_DEADLINE_MS,
   connectBounded,
   sendRawSocketRequest,
   sendSocketRequest,
 } from "./socketRequest";
+import { FakeDeviceManager } from "../../fakes/FakeDeviceManager";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
-import { PlatformDeviceManagerFactory } from "../../../src/utils/factories/PlatformDeviceManagerFactory";
 import type { DaemonRequest, DaemonResponse } from "../../../src/daemon/types";
 import type { DeviceLabelMap, Session } from "../../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../../src/models";
@@ -35,13 +34,14 @@ export const iosDevice: BootedDevice = {
 export function createFakeDeviceManager(
   devices: BootedDevice[],
   succeededPlatforms: Set<"android" | "ios"> = new Set(["android", "ios"]),
-) {
-  return {
-    getBootedDevicesDetailed: mock(async () => ({
-      devices,
-      succeededPlatforms,
-    })),
-  } as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>;
+): FakeDeviceManager {
+  const manager = new FakeDeviceManager([], devices);
+  for (const platform of ["android", "ios"] as const) {
+    if (!succeededPlatforms.has(platform)) {
+      manager.failedPlatforms.add(platform);
+    }
+  }
+  return manager;
 }
 
 export function createFakeSession(

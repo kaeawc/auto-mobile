@@ -25,6 +25,9 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
 import { LocationRouteRegistry } from "../../src/features/utility/LocationRoutePlayer";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 // No test in this file may run the installed network-filter-controller.
 const networkFilterBridge = new FakeNetworkFilterBridge();

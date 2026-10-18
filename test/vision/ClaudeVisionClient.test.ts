@@ -1,3 +1,4 @@
+import type Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, test } from "bun:test";
 import {
   calculateClaudeCost,
@@ -6,7 +7,9 @@ import {
 } from "../../src/vision/ClaudeVisionClient";
 import type { ClaudeVisionAnalysis } from "../../src/vision/VisionTypes";
 
-const makeResponse = (text: string) => ({ content: [{ type: "text", text }] }) as any;
+const makeResponse = (text: string): Pick<Anthropic.Message, "content"> => ({
+  content: [{ type: "text", text, citations: null }],
+});
 
 const analysis = (overrides: Partial<ClaudeVisionAnalysis> = {}): ClaudeVisionAnalysis => ({
   elementFound: true,

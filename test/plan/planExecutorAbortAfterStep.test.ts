@@ -40,7 +40,6 @@ describe("PlanExecutor - abort signal checked after each step", () => {
             return { success: true };
           },
         );
-        (ToolRegistry.getTool(toolName) as any).requiresDevice = false;
       },
       async () => {
         const result = await planExecutor.executePlan(
@@ -85,7 +84,6 @@ describe("PlanExecutor - abort signal checked after each step", () => {
             return { success: true };
           },
         );
-        (ToolRegistry.getTool(completionToolName) as any).requiresDevice = false;
       },
       async () => {
         const result = await planExecutor.executePlan(

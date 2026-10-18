@@ -34,7 +34,7 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { INTERNAL_NO_DIFF_PARAM } from "../internalToolCall";
 import { getToolSelectionContext } from "../../features/toolSelection/toolSelectionContext";
 import { nonBlankSessionUuid } from "../planCallerIdentity";
-import { combineAbortSignals, runWithAbortSignal } from "../../utils/AbortContext";
+import { combineAbortSignals, getAbortSignal, runWithAbortSignal } from "../../utils/AbortContext";
 import { executionTracker } from "../executionTracker";
 import type {
   SessionlessDeviceRead,
@@ -484,7 +484,10 @@ export async function admitReadSession(
   try {
     const session = await DaemonState.getInstance()
       .getSessionManager()
-      .admitIssuedSessionForAutomation(sessionUuid, execution, { access: "read-only" });
+      .admitIssuedSessionForAutomation(sessionUuid, execution, {
+        access: "read-only",
+        signal: getAbortSignal(),
+      });
     return session?.assignedDevice ? session : null;
   } catch (error) {
     if (error instanceof UnissuedSessionError) {

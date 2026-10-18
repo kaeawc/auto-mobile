@@ -38,7 +38,7 @@ import {
 } from "../ctrlProxy/RunnerReadinessService";
 import { FileQrPosterWriter } from "../utils/qr/QrPosterWriter";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import type { Timer } from "../utils/SystemTimer";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
@@ -1043,6 +1043,7 @@ async function resumePreparedDeviceSession(
       device.platform,
       undefined,
       true,
+      { signal: getAbortSignal() },
     );
     if (session.assignedDevice !== device.deviceId || session.platform !== device.platform) {
       throw new ActionableError(

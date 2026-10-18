@@ -1,4 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
+import { getAbortSignal } from "../utils/AbortContext";
 import type { SessionAccess, SessionExecutionMetadata } from "./sessionManager";
 import { SessionNoLongerOwnsDeviceError } from "./sessionNoLongerOwnsDevice";
 import {
@@ -234,7 +235,7 @@ interface InputSessionAdmission {
   admitIssuedSessionForAutomation(
     sessionId: string,
     execution?: SessionExecutionMetadata,
-    options?: { access?: SessionAccess },
+    options?: { access?: SessionAccess; signal?: AbortSignal },
   ): Promise<{ assignedDevice: string } | undefined>;
 }
 
@@ -268,7 +269,7 @@ export async function admitInputOnHolderSession(input: {
   const admitted = await sessionManager.admitIssuedSessionForAutomation(
     holderSessionUuid,
     input.execution,
-    { access: "non-owner-control" },
+    { access: "non-owner-control", signal: getAbortSignal() },
   );
   if (admitted?.assignedDevice !== deviceId) {
     // Typed session_no_longer_owns_device (#11351): clients branch on the code, not this wording.

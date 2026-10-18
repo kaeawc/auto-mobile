@@ -733,6 +733,7 @@ export class DeviceAllocation {
             sessionId,
             device,
             recoveryTarget,
+            signal,
           );
           logger.info(`Assigned device ${device.id} to session ${sessionId}`);
           return {
@@ -941,6 +942,7 @@ export class DeviceAllocation {
     sessionId: string,
     device: PooledDevice,
     recoveryTarget?: SessionRecoveryTarget,
+    signal?: AbortSignal,
   ): Promise<{ deviceId: string; session?: Session }> {
     // Recovery deadline cancellation must fence the claim's synchronous field writes.
     if (recoveryTarget) {
@@ -965,6 +967,7 @@ export class DeviceAllocation {
         stableDeviceId: this.port.stableDeviceIdFor(device),
         recoveredLiveness: recoveryTarget?.liveness,
         initialOwnership: recoveryTarget?.initialOwnership,
+        signal,
       }),
     );
     if (session.assignedDevice !== device.id) {

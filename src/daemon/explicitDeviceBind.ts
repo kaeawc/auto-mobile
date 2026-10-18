@@ -1,7 +1,7 @@
 import { bindDevice, unbindDevice, holderOf } from "./deviceBinding";
 import { releasePoolDevice } from "./releaseSessionAndDevice";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
-import { throwIfRequestAborted } from "../utils/AbortContext";
+import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { AmbientExecutionIdReader } from "../utils/interfaces/AmbientExecutionIdReader";
 import { logger } from "../utils/logger";
@@ -800,6 +800,7 @@ export class ExplicitDeviceBind {
             recoveredLiveness: creation.recoveryTarget?.liveness,
             initialOwnership: creation.recoveryTarget?.initialOwnership,
             persistenceSource,
+            signal: getAbortSignal(),
           },
         );
         if (previousSession && platform === "android") {
@@ -830,6 +831,7 @@ export class ExplicitDeviceBind {
       const session = await this.port.sessionManager.rebindSession(sessionId, deviceId, platform, {
         stableDeviceId,
         deferCleanup: creation.deferCleanup,
+        signal: getAbortSignal(),
       });
       if (previousDevice) {
         this.port.autolockManager.clearRebindAutolockLock(
@@ -919,7 +921,10 @@ export class ExplicitDeviceBind {
       undefined,
       undefined,
       false,
-      { callerExecutionId: this.port.ambientExecutionIdReader?.getExecutionId() },
+      {
+        callerExecutionId: this.port.ambientExecutionIdReader?.getExecutionId(),
+        signal: getAbortSignal(),
+      },
     );
     logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);
     return refreshedSession.sessionId;

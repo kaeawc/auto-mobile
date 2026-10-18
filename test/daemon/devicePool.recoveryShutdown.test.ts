@@ -702,7 +702,9 @@ test.each([
         );
     const startupCaller = new AbortController();
     const first = rehydration
-      ? runWithAbortSignal(startupCaller.signal, () => sessions.rehydratePersistedSessions(pool))
+      ? runWithAbortSignal(startupCaller.signal, () =>
+          sessions.rehydratePersistedSessions(pool, { signal: startupCaller.signal }),
+        )
       : acquire(3_500);
     await drainUntilQuiescent(timer);
     expect(reads).toBe(1);
@@ -754,10 +756,11 @@ test.each(["deadline", "abort"] as const)(
     const onUnhandled = (error: unknown) => unhandled.push(error);
     process.on("unhandledRejection", onUnhandled);
     try {
-      const acquire = (requestDeadlineMs: number | undefined) =>
+      const acquire = (requestDeadlineMs: number | undefined, signal?: AbortSignal) =>
         sessions
           .getOrCreateSession("session", pool, "android", undefined, true, {
             requestDeadlineMs,
+            signal,
           })
           .then(
             (session) => session,
@@ -772,7 +775,7 @@ test.each(["deadline", "abort"] as const)(
       const caller = new AbortController();
       let settled = false;
       const second = runWithAbortSignal(caller.signal, () =>
-        acquire(cancellation === "deadline" ? 5_000 : undefined),
+        acquire(cancellation === "deadline" ? 5_000 : undefined, caller.signal),
       ).then((result) => {
         settled = true;
         return result;

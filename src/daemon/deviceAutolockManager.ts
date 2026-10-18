@@ -336,6 +336,7 @@ export class DeviceAutolockManager {
       this.pool.getSessionManager().createSession(sessionId, deviceId, platform, {
         timeoutMs,
         stableDeviceId: this.pool.stableDeviceIdFor(device),
+        signal: getAbortSignal(),
       }),
     );
     // #6227 (round 9): record the achieved readiness BEFORE publishing the
@@ -502,6 +503,7 @@ export class DeviceAutolockManager {
       .getSessionManager()
       .getOrCreateSession(session.sessionId, undefined, undefined, undefined, false, {
         callerExecutionId: getToolSelectionContext()?.execution?.executionId,
+        signal: getAbortSignal(),
       });
     // Release can finish while activity persistence yields, even under the
     // assignment mutex. Do not report success for a retired ownership identity.

@@ -1025,7 +1025,10 @@ interface SessionAcquisitionOptions {
    * It only names the caller; expiry is still judged as for a lookup that carries no execution.
    */
   callerExecutionId?: string;
+  signal?: AbortSignal;
 }
+
+type ResolvedSessionAcquisition = SessionAcquisitionOptions & { access: SessionAccess };
 
 /** Persisted identity required before recovering a session after daemon restart. */
 export interface SessionRecoveryTarget {
@@ -1192,6 +1195,7 @@ export interface CreateSessionOptions {
   initialOwnership?: "owned" | "awaiting-owner";
   /** Persisted `source` recording who created the session; a rehydrated row's own wins. */
   persistenceSource?: string;
+  signal?: AbortSignal;
 }
 
 function withCreateSessionDefaults(
@@ -1208,6 +1212,7 @@ export interface RebindSessionOptions {
   force?: boolean;
   /** Durable identity of the replacement device. */
   stableDeviceId?: string;
+  signal?: AbortSignal;
   /** Internal owner proving that a shutdown reservation authorized this recovery rebind. */
   terminalReleaseReservationOwner?: symbol;
   /** Only receipt-backed acquisitions can decide delivery versus undo. */
@@ -3117,8 +3122,9 @@ export class SessionManager {
       recoveredLiveness,
       initialOwnership,
       persistenceSource,
+      signal,
     } = withCreateSessionDefaults(options);
-    getAbortSignal()?.throwIfAborted();
+    signal?.throwIfAborted();
     if (!this.acceptingSessionCreations) {
       throw new DaemonSessionCreationRejectedError(sessionId);
     }
@@ -3197,6 +3203,7 @@ export class SessionManager {
       session,
       creation,
       this.claimedIncarnation(persistedRecovery),
+      signal,
     );
     settleRecovery(creation.promise);
     this.sessionSlots.setCreation(sessionId, creation);
@@ -3355,9 +3362,10 @@ export class SessionManager {
     session: Session,
     creation?: PendingSessionCreation,
     claimedRow?: ClaimedCreationRow,
+    signal?: AbortSignal,
   ): Promise<Session> {
     try {
-      return await this.publishSessionCreation(session, creation, claimedRow);
+      return await this.publishSessionCreation(session, creation, claimedRow, signal);
     } catch (error) {
       await this.rollBackFailedCreationRow(session, claimedRow);
       throw error;
@@ -3368,6 +3376,7 @@ export class SessionManager {
     session: Session,
     creation?: PendingSessionCreation,
     claimedRow?: ClaimedCreationRow,
+    signal?: AbortSignal,
   ): Promise<Session> {
     // A plan run minting its label writes over the row its previous run left, terminal or not.
     const persistedTerminalRelease = this.planLabels.isMinting(session.sessionId)
@@ -3378,10 +3387,10 @@ export class SessionManager {
       throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);
     }
     this.assertCreationNotAbandoned(session, creation);
-    await this.rejectCreationAfterShutdownFence(session, false, claimedRow);
+    await this.rejectCreationAfterShutdownFence(session, false, claimedRow, signal);
     await this.persistCreatedSession(session, claimedRow);
     await this.retireCreationIfAbandoned(session, creation);
-    await this.rejectCreationAfterShutdownFence(session, true, claimedRow);
+    await this.rejectCreationAfterShutdownFence(session, true, claimedRow, signal);
     this.assertTerminalReleaseAdmission(session.sessionId, session);
     const terminalRelease = this.sessionSlots.getTerminalSnapshot(session.sessionId);
     if (terminalRelease) {
@@ -3527,8 +3536,8 @@ export class SessionManager {
     session: Session,
     rowWritten: boolean,
     claimedRow?: ClaimedCreationRow,
+    cancellation?: AbortSignal,
   ): Promise<void> {
-    const cancellation = getAbortSignal();
     if (this.acceptingSessionCreations && !cancellation?.aborted) {
       return;
     }
@@ -4310,7 +4319,7 @@ export class SessionManager {
     requireIssuedSession = false,
     accessOptions: SessionAccess | SessionAcquisitionOptions = "acquire",
   ): Promise<Session> {
-    const { access, requestDeadlineMs, callerExecutionId } =
+    const { access, requestDeadlineMs, callerExecutionId, signal } =
       this.resolveSessionAcquisitionOptions(accessOptions);
     const pendingRebind = this.sessionSlots.getRebind(sessionId);
     if (pendingRebind) {
@@ -4384,8 +4393,7 @@ export class SessionManager {
       devicePool,
       platform,
       requireIssuedSession,
-      access,
-      requestDeadlineMs,
+      { access, requestDeadlineMs, signal },
     );
   }
 
@@ -4410,6 +4418,7 @@ export class SessionManager {
     access: SessionAccess;
     requestDeadlineMs?: number;
     callerExecutionId?: string;
+    signal?: AbortSignal;
   } {
     return typeof options === "string"
       ? { access: options }
@@ -4417,6 +4426,7 @@ export class SessionManager {
           access: options.access ?? "acquire",
           requestDeadlineMs: options.requestDeadlineMs,
           callerExecutionId: options.callerExecutionId,
+          signal: options.signal,
         };
   }
 
@@ -4430,8 +4440,7 @@ export class SessionManager {
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
     requireIssuedSession: boolean,
-    access: SessionAccess,
-    requestDeadlineMs?: number,
+    acquisition: ResolvedSessionAcquisition,
   ): Promise<Session> {
     try {
       return await this.joinOrStartUnseenAssignment(
@@ -4439,11 +4448,10 @@ export class SessionManager {
         devicePool,
         platform,
         requireIssuedSession,
-        access,
-        requestDeadlineMs,
+        acquisition,
       );
     } catch (error) {
-      this.creditControlCallFailedOnRestartRecovery(sessionId, access);
+      this.creditControlCallFailedOnRestartRecovery(sessionId, acquisition.access);
       throw error;
     }
   }
@@ -4453,9 +4461,9 @@ export class SessionManager {
     devicePool: SessionDeviceAssigner | undefined,
     platform: Platform | undefined,
     requireIssuedSession: boolean,
-    access: SessionAccess,
-    requestDeadlineMs?: number,
+    acquisition: ResolvedSessionAcquisition,
   ): Promise<Session> {
+    const { access, requestDeadlineMs, signal } = acquisition;
     const pendingAssignment = this.sessionSlots.getAssignment(sessionId);
     if (pendingAssignment) {
       // Only a control call joining the recovery is use; a read joins without extending (#11281).
@@ -4464,20 +4472,21 @@ export class SessionManager {
       }
       const shared = this.sessionSlots.getShared(sessionId);
       if (shared?.controller.signal.aborted) {
-        await this.waitForAbortedAssignment(pendingAssignment, shared, requestDeadlineMs);
+        await this.waitForAbortedAssignment(pendingAssignment, shared, requestDeadlineMs, signal);
         return await this.getOrCreateSession(
           sessionId,
           devicePool,
           platform,
           undefined,
           requireIssuedSession,
-          { access, requestDeadlineMs },
+          { access, requestDeadlineMs, signal },
         );
       }
       const joined = await this.waitForSharedAssignment(
         sessionId,
         pendingAssignment,
         requestDeadlineMs,
+        signal,
       );
       // An acquiring client that joined a startup rehydration is the owner returning.
       if (access === "acquire" && joined.ownership === "awaiting-owner") {
@@ -4509,7 +4518,7 @@ export class SessionManager {
     });
     this.sessionSlots.setAssignment(sessionId, assignment);
     this.slotShadowProbe.check(sessionId, "assignment-start");
-    return await this.waitForSharedAssignment(sessionId, assignment, requestDeadlineMs);
+    return await this.waitForSharedAssignment(sessionId, assignment, requestDeadlineMs, signal);
   }
 
   private newSharedAssignment(sessionId: string): SharedSessionAssignment {
@@ -4527,6 +4536,7 @@ export class SessionManager {
     assignment: Promise<Session>,
     shared: SharedSessionAssignment,
     requestDeadlineMs?: number,
+    signal?: AbortSignal,
   ): Promise<void> {
     const settled = assignment.then(
       () => {},
@@ -4549,7 +4559,7 @@ export class SessionManager {
                 this.sessionNow(),
             )
           : undefined,
-      signal: getAbortSignal(),
+      signal,
       label: "Session restart recovery",
       timeoutError: wait?.timeoutError,
     });
@@ -4559,13 +4569,13 @@ export class SessionManager {
     sessionId: string,
     assignment: Promise<Session>,
     requestDeadlineMs?: number,
+    signal?: AbortSignal,
   ): Promise<Session> {
     const shared = this.sessionSlots.getShared(sessionId);
     if (!shared) {
       return await assignment;
     }
     shared.waiters++;
-    const signal = getAbortSignal();
     let waiting = true;
     const leave = () => {
       if (!waiting) {
@@ -4615,7 +4625,7 @@ export class SessionManager {
   async admitIssuedSessionForAutomation(
     sessionId: string,
     execution?: SessionExecutionMetadata,
-    options: { access?: SessionAccess } = {},
+    options: { access?: SessionAccess; signal?: AbortSignal } = {},
   ): Promise<Session | undefined> {
     let unissuedSessionError: UnissuedSessionError | undefined;
     try {
@@ -4640,7 +4650,7 @@ export class SessionManager {
         undefined,
         execution,
         false,
-        options.access,
+        options,
       );
     } catch (error) {
       if (!(error instanceof UnissuedSessionError)) {
@@ -5041,6 +5051,7 @@ export class SessionManager {
     sessionId: string,
     devicePool: SessionDeviceAssigner,
     persisted: DeviceSession,
+    signal?: AbortSignal,
   ): Promise<Session> {
     const shared = this.newSharedAssignment(sessionId);
     const recoveryPromise = this.recoverPersistedSession(
@@ -5058,12 +5069,12 @@ export class SessionManager {
       }
     });
     this.sessionSlots.setAssignment(sessionId, recoveryPromise);
-    return this.waitForSharedAssignment(sessionId, recoveryPromise);
+    return this.waitForSharedAssignment(sessionId, recoveryPromise, undefined, signal);
   }
 
   async rehydratePersistedSessions(
     devicePool: SessionDeviceAssigner,
-    options: { deadlineMs?: number; concurrency?: number } = {},
+    options: { deadlineMs?: number; concurrency?: number; signal?: AbortSignal } = {},
   ): Promise<RehydrationSummary> {
     const deadlineMs = options.deadlineMs ?? SESSION_REHYDRATION_DEADLINE_MS;
     const concurrency = Math.max(1, options.concurrency ?? SESSION_REHYDRATION_CONCURRENCY);
@@ -5088,7 +5099,11 @@ export class SessionManager {
     const worker = async (): Promise<void> => {
       while (!deadlineReached && nextIndex < persistedSessions.length) {
         const index = nextIndex++;
-        const outcome = await this.rehydratePersistedRow(persistedSessions[index], devicePool);
+        const outcome = await this.rehydratePersistedRow(
+          persistedSessions[index],
+          devicePool,
+          options.signal,
+        );
         // However the row ended, its device is no longer held for it: a recovered session holds
         // the device itself, and a failed row gives it back at once (#11294).
         this.releaseRehydrationReservation(persistedSessions[index].session_uuid, devicePool);
@@ -5249,6 +5264,7 @@ export class SessionManager {
   private async rehydratePersistedRow(
     persisted: DeviceSession,
     devicePool: SessionDeviceAssigner,
+    signal?: AbortSignal,
   ): Promise<RehydrationRowOutcome> {
     const sessionId = persisted.session_uuid;
     if (!this.isRecoverablePersistedSession(persisted)) {
@@ -5259,7 +5275,7 @@ export class SessionManager {
       return { kind: "skipped", reason: skipReason };
     }
     try {
-      await this.registerRehydrationRecovery(sessionId, devicePool, persisted);
+      await this.registerRehydrationRecovery(sessionId, devicePool, persisted, signal);
       return { kind: "rehydrated" };
     } catch (error) {
       const terminalRelease = this.getTerminalReleaseSnapshot(sessionId);
@@ -5478,6 +5494,7 @@ export class SessionManager {
     if (!existing) {
       return await this.createSession(sessionId, assignedDevice, platform, {
         stableDeviceId: options.stableDeviceId,
+        signal: options.signal,
       });
     }
     if (existing.assignedDevice === assignedDevice && !options.force) {

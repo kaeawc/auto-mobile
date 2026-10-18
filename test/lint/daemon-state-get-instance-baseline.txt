@@ -1,7 +1,7 @@
 src/daemon/AppearanceSyncScheduler.ts	1
 src/daemon/appearanceSocketServer.ts	3
 src/daemon/daemon.ts	6
-src/daemon/daemonContext.ts	1
+src/daemon/daemonContext.ts	2
 src/daemon/deviceGestureRecordingSocketServer.ts	2
 src/daemon/deviceGestureRecordingStartAdmission.ts	1
 src/daemon/discoveryReconcile.ts	1
@@ -17,10 +17,8 @@ src/features/observe/ObservationReadServiceStart.ts	1
 src/features/observe/ObserveScreenWiring.ts	1
 src/features/observe/TakeScreenshot.ts	1
 src/server/ToolExecutionContext.ts	1
-src/server/accessibilityTools.ts	2
 src/server/activeSessionDevice.ts	1
 src/server/appearanceSessionKey.ts	1
-src/server/biometricTools.ts	2
 src/server/bootedDeviceResources.ts	1
 src/server/brokerConnectionToolGate.ts	1
 src/server/criticalSectionTools.ts	1
@@ -45,7 +43,6 @@ src/server/pipeline/executionTarget.ts	12
 src/server/pipeline/ingress/acquisition.ts	1
 src/server/pipeline/ingress/bindSession.ts	5
 src/server/pipeline/ingress/executeToolCall.ts	3
-src/server/pipeline/ingress/listSessionTools.ts	2
 src/server/pipeline/ingress/namesLiveSessionOfBoundPlan.ts	1
 src/server/pipeline/ingress/routing.ts	11
 src/server/pipeline/ingress/shapeResult.ts	1
@@ -55,7 +52,6 @@ src/server/planDeviceOwnership.ts	1
 src/server/planExecutionOrchestrator.ts	7
 src/server/prototypeTools.ts	2
 src/server/resourceDeviceResolver.ts	1
-src/server/routedSessionEcho.ts	2
 src/server/sdkProviderReadAccess.ts	1
 src/server/sessionBrokerToolGate.ts	1
 src/server/sessionDisplayPin.ts	1

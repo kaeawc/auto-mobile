@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { defaultDaemonContext, type DaemonContext } from "../../src/daemon/daemonContext";
 import { DaemonState } from "../../src/daemon/daemonState";
+import { withAdmittedSessionEcho } from "../../src/server/routedSessionEcho";
 import { sessionRenderedObservation } from "../../src/features/action/TargetDisplayAction";
 import { sessionRenderedDisplayGeneration } from "../../src/features/action/BaseVisualChange";
 
 function contextWith(reads: ReturnType<DaemonContext["renderedDisplaySessions"]>): DaemonContext {
-  return { renderedDisplaySessions: () => reads };
+  return { renderedDisplaySessions: () => reads, sessionManager: () => undefined };
 }
 
 describe("DaemonContext", () => {
@@ -31,5 +32,17 @@ describe("DaemonContext", () => {
     });
     expect(sessionRenderedObservation("other", ctx)).toBeUndefined();
     expect(sessionRenderedDisplayGeneration("d1", ctx)).toBe(3);
+  });
+
+  test("sessionManager is undefined while DaemonState is uninitialized", () => {
+    DaemonState.getInstance().reset();
+    expect(defaultDaemonContext.sessionManager()).toBeUndefined();
+  });
+
+  test("injected context feeds the admitted-session echo without DaemonState", () => {
+    DaemonState.getInstance().reset();
+    const ctx: DaemonContext = { ...contextWith(undefined), sessionManager: () => undefined };
+    const result = { content: [] };
+    expect(withAdmittedSessionEcho(result, "no-such-execution", ctx)).toBeDefined();
   });
 });

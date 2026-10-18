@@ -175,7 +175,7 @@ describe("IOSCtrlProxyManager stopTrackedService cleanup (#11154)", () => {
       });
       PortManager.reserve(UDID, 8101);
       const controller = new AbortController();
-      manager.trackRunnerForTesting({ pid: null, abortController: controller });
+      manager.testHooks.trackRunner({ pid: null, abortController: controller });
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {
         await expect(manager.stop()).rejects.toThrow("tunnel stop exploded");

@@ -214,7 +214,7 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
       expect(connectionState().connected).toBe(true);
       expect(newSocket.destroyed).toBe(false);
       expect(closedCount()).toBe(1);
-      expect(client.hasPendingRequestForTesting(id)).toBe(true);
+      expect(client.testHooks.hasPendingRequest(id)).toBe(true);
       newSocket.emit("data", frame.subarray(split));
       expect(await response).toEqual({ status: "fulfilled", value: "日" });
     });
@@ -225,7 +225,7 @@ describe("DaemonClient connect deduplication and socket ownership", () => {
     const response = observe(client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 }));
     const [{ id }] = newSocket.getWrittenMessages<{ id: string }>();
     oldSocket.emit("data", responseFrame(id, "stale"));
-    expect(client.hasPendingRequestForTesting(id)).toBe(true);
+    expect(client.testHooks.hasPendingRequest(id)).toBe(true);
     const frame = responseFrame(id, "日");
     const split = frame.indexOf(Buffer.from("日")) + 1;
     newSocket.emit("data", frame.subarray(0, split));
